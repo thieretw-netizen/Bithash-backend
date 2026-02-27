@@ -37,7 +37,7 @@ app.use(helmet({
       scriptSrc: ["'self'", "'unsafe-inline'", "https://apis.google.com"],
       styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
       imgSrc: ["'self'", "data:", "https://www.google-analytics.com"],
-      connectSrc: ["'self'", "https://api.ipinfo.io", "https://website-backendd-1.onrender.com"],
+      connectSrc: ["'self'", "https://api.ipinfo.io", "https://website-backendd-1.onrender.com", "https://api.coingecko.com"],
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
       objectSrc: ["'none'"],
       frameSrc: ["'self'", "https://accounts.google.com"] // Added for Google OAuth
@@ -48,7 +48,7 @@ app.use(helmet({
 
 
 app.use(cors({
-  origin: ['https://www.bithashcapital.live', 'https://website-backendd-tzep.onrender.com' , 'https://bithash-rental.vercel.app/'],
+  origin: ['https://www.bithashcapital.live', 'https://website-backendd-1.onrender.com' , 'https://bithash-rental.vercel.app/'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token']
@@ -1207,6 +1207,11 @@ const UserAssetBalanceSchema = new mongoose.Schema({
     ftm: { type: Number, default: 0, min: 0 },
     xtz: { type: Number, default: 0, min: 0 }
   },
+  totalFiatValue: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
   lastUpdated: {
     type: Date,
     default: Date.now
@@ -1275,6 +1280,8 @@ const DepositAssetSchema = new mongoose.Schema({
   },
   amount: { type: Number, required: true, min: 0 },
   usdValue: { type: Number, required: true, min: 0 },
+  exchangeRate: { type: Number, required: true },
+  network: { type: String, required: true },
   transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction', required: true },
   status: { type: String, enum: ['pending', 'confirmed', 'failed'], default: 'pending' },
   confirmedAt: Date,
@@ -1283,9 +1290,7 @@ const DepositAssetSchema = new mongoose.Schema({
     fromAddress: String,
     toAddress: String,
     network: String,
-    confirmations: { type: Number, default: 0 },
-    exchangeRate: Number,
-    assetPriceAtTime: Number
+    confirmations: { type: Number, default: 0 }
   }
 }, { timestamps: true });
 
@@ -1773,6 +1778,18 @@ const TransactionSchema = new mongoose.Schema({
     unique: true,
     index: true
   },
+  exchangeRate: {
+    type: Number,
+    required: function() {
+      return this.type === 'deposit' || this.type === 'withdrawal' || this.type === 'conversion';
+    }
+  },
+  network: {
+    type: String,
+    required: function() {
+      return this.type === 'deposit' || this.type === 'withdrawal';
+    }
+  },
   details: { type: mongoose.Schema.Types.Mixed },
   fee: { type: Number, default: 0, min: [0, 'Fee cannot be negative'] },
   netAmount: { 
@@ -1805,9 +1822,7 @@ const TransactionSchema = new mongoose.Schema({
   },
   adminNotes: { type: String },
   processedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
-  processedAt: { type: Date },
-  exchangeRateAtTime: { type: Number },
-  network: { type: String }
+  processedAt: { type: Date }
 }, { 
   timestamps: true,
   toJSON: { virtuals: true },
@@ -3103,6 +3118,101 @@ const checkCSRF = (req, res, next) => {
   }
   next();
 };
+
+// CoinGecko API helper for real-time rates
+async function getAssetExchangeRate(assetId) {
+  try {
+    // Try to get from cache first
+    const cached = await redis.get(`exchange_rate:${assetId}`);
+    if (cached) {
+      return JSON.parse(cached);
+    }
+    
+    const response = await axios.get(
+      `https://api.coingecko.com/api/v3/simple/price?ids=${assetId}&vs_currencies=usd&include_24hr_change=true`,
+      { timeout: 5000 }
+    );
+    
+    if (response.data && response.data[assetId]) {
+      const rateData = {
+        usd: response.data[assetId].usd,
+        change24h: response.data[assetId].usd_24h_change || 0,
+        timestamp: Date.now()
+      };
+      
+      // Cache for 60 seconds
+      await redis.setex(`exchange_rate:${assetId}`, 60, JSON.stringify(rateData));
+      
+      return rateData;
+    }
+    throw new Error('Invalid response from CoinGecko');
+  } catch (error) {
+    console.error(`Error fetching exchange rate for ${assetId}:`, error);
+    
+    // Return fallback rates
+    const fallbackRates = {
+      'bitcoin': { usd: 50000, change24h: 0 },
+      'ethereum': { usd: 3000, change24h: 0 },
+      'tether': { usd: 1, change24h: 0 },
+      'binancecoin': { usd: 300, change24h: 0 },
+      'solana': { usd: 100, change24h: 0 },
+      'usd-coin': { usd: 1, change24h: 0 },
+      'xrp': { usd: 0.5, change24h: 0 },
+      'dogecoin': { usd: 0.08, change24h: 0 },
+      'shiba-inu': { usd: 0.00001, change24h: 0 },
+      'tron': { usd: 0.08, change24h: 0 },
+      'litecoin': { usd: 70, change24h: 0 }
+    };
+    
+    return fallbackRates[assetId] || { usd: 1, change24h: 0 };
+  }
+}
+
+// Helper function to map asset symbol to CoinGecko ID
+function getCoinGeckoId(assetSymbol) {
+  const mapping = {
+    'btc': 'bitcoin',
+    'eth': 'ethereum',
+    'usdt': 'tether',
+    'bnb': 'binancecoin',
+    'sol': 'solana',
+    'usdc': 'usd-coin',
+    'xrp': 'xrp',
+    'doge': 'dogecoin',
+    'shib': 'shiba-inu',
+    'trx': 'tron',
+    'ltc': 'litecoin',
+    'ada': 'cardano',
+    'avax': 'avalanche-2',
+    'dot': 'polkadot',
+    'link': 'chainlink',
+    'matic': 'matic-network',
+    'wbtc': 'wrapped-bitcoin',
+    'near': 'near',
+    'uni': 'uniswap',
+    'bch': 'bitcoin-cash',
+    'xlm': 'stellar',
+    'atom': 'cosmos',
+    'xmr': 'monero',
+    'flow': 'flow',
+    'vet': 'vechain',
+    'fil': 'filecoin',
+    'theta': 'theta-token',
+    'hbar': 'hedera-hashgraph',
+    'ftm': 'fantom',
+    'xtz': 'tezos'
+  };
+  return mapping[assetSymbol.toLowerCase()] || 'bitcoin';
+}
+
+
+
+
+
+
+
+
+
 
 
 // Fixed function to calculate and distribute downline referral commissions
@@ -8007,180 +8117,6 @@ const trackFailedLogin = async (req, res, next) => {
 
 
 
-// BTC Withdrawal Endpoint
-app.post('/api/withdrawals/btc', protect, [
-  body('amount').isFloat({ gt: 0 }).withMessage('Amount must be greater than 0'),
-  body('walletAddress').notEmpty().withMessage('BTC wallet address is required'),
-  body('balanceSource').optional().isIn(['main', 'matured', 'both']).withMessage('Invalid balance source'),
-  body('mainAmountUsed').optional().isFloat({ min: 0 }).withMessage('Main amount used must be valid'),
-  body('maturedAmountUsed').optional().isFloat({ min: 0 }).withMessage('Matured amount used must be valid')
-], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({
-      status: 'fail',
-      errors: errors.array()
-    });
-  }
-
-  try {
-    const { amount, walletAddress, balanceSource, mainAmountUsed = 0, maturedAmountUsed = 0 } = req.body;
-    const user = await User.findById(req.user.id);
-
-    // Enhanced balance checking logic to match frontend
-    let hasSufficientBalance = false;
-    let actualBalanceSource = '';
-    let actualMainAmountUsed = 0;
-    let actualMaturedAmountUsed = 0;
-
-    // Check available balances
-    const mainBalance = user.balances.main || 0;
-    const maturedBalance = user.balances.matured || 0;
-    const totalBalance = mainBalance + maturedBalance;
-
-    // Validate total balance first
-    if (amount > totalBalance) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Insufficient total balance for withdrawal'
-      });
-    }
-
-    // Determine balance source based on available balances
-    if (balanceSource === 'main') {
-      // Withdraw from main balance only
-      if (mainBalance >= amount) {
-        hasSufficientBalance = true;
-        actualBalanceSource = 'main';
-        actualMainAmountUsed = amount;
-        actualMaturedAmountUsed = 0;
-      }
-    } else if (balanceSource === 'matured') {
-      // Withdraw from matured balance only
-      if (maturedBalance >= amount) {
-        hasSufficientBalance = true;
-        actualBalanceSource = 'matured';
-        actualMainAmountUsed = 0;
-        actualMaturedAmountUsed = amount;
-      }
-    } else if (balanceSource === 'both') {
-      // Withdraw from both balances using specified amounts
-      if (mainAmountUsed + maturedAmountUsed === amount && 
-          mainBalance >= mainAmountUsed && 
-          maturedBalance >= maturedAmountUsed) {
-        hasSufficientBalance = true;
-        actualBalanceSource = 'both';
-        actualMainAmountUsed = mainAmountUsed;
-        actualMaturedAmountUsed = maturedAmountUsed;
-      }
-    } else {
-      // Auto-detect balance source (fallback logic)
-      if (mainBalance >= amount) {
-        // Use main balance if sufficient
-        hasSufficientBalance = true;
-        actualBalanceSource = 'main';
-        actualMainAmountUsed = amount;
-        actualMaturedAmountUsed = 0;
-      } else if (maturedBalance >= amount) {
-        // Use matured balance if sufficient
-        hasSufficientBalance = true;
-        actualBalanceSource = 'matured';
-        actualMainAmountUsed = 0;
-        actualMaturedAmountUsed = amount;
-      } else if (totalBalance >= amount) {
-        // Use both balances to cover the amount
-        hasSufficientBalance = true;
-        actualBalanceSource = 'both';
-        actualMainAmountUsed = mainBalance;
-        actualMaturedAmountUsed = amount - mainBalance;
-      }
-    }
-
-    if (!hasSufficientBalance) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Insufficient balance in specified accounts for withdrawal',
-        details: {
-          requestedAmount: amount,
-          mainBalance: mainBalance,
-          maturedBalance: maturedBalance,
-          totalBalance: totalBalance
-        }
-      });
-    }
-
-    // Calculate withdrawal fee (1% of amount)
-    const fee = amount * 0.01;
-    const netAmount = amount - fee;
-
-    // Create transaction record with balance source information
-    const reference = `BTC-WTH-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
-    const transaction = await Transaction.create({
-      user: req.user.id,
-      type: 'withdrawal',
-      amount,
-      currency: 'USD',
-      status: 'pending',
-      method: 'btc',
-      reference,
-      fee,
-      netAmount,
-      btcAddress: walletAddress,
-      balanceSource: actualBalanceSource,
-      mainAmountUsed: actualMainAmountUsed,
-      maturedAmountUsed: actualMaturedAmountUsed,
-      details: `BTC withdrawal to address ${walletAddress} (Source: ${actualBalanceSource})`
-    });
-
-    // Deduct from user's balances based on the determined source
-    if (actualBalanceSource === 'main') {
-      user.balances.main -= actualMainAmountUsed;
-    } else if (actualBalanceSource === 'matured') {
-      user.balances.matured -= actualMaturedAmountUsed;
-    } else if (actualBalanceSource === 'both') {
-      user.balances.main -= actualMainAmountUsed;
-      user.balances.matured -= actualMaturedAmountUsed;
-    }
-
-    await user.save();
-
-    // In a real implementation, you would initiate the BTC transfer here
-    // For now, we'll just simulate it with a transaction ID
-    const txId = `btc-${crypto.randomBytes(8).toString('hex')}`;
-
-    res.status(201).json({
-      status: 'success',
-      data: {
-        transaction,
-        txId,
-        balanceInfo: {
-          source: actualBalanceSource,
-          mainAmountUsed: actualMainAmountUsed,
-          maturedAmountUsed: actualMaturedAmountUsed,
-          remainingMainBalance: user.balances.main,
-          remainingMaturedBalance: user.balances.matured
-        }
-      }
-    });
-
-    await logActivity('btc-withdrawal', 'transaction', transaction._id, user._id, 'User', req, { 
-      amount, 
-      walletAddress,
-      balanceSource: actualBalanceSource,
-      mainAmountUsed: actualMainAmountUsed,
-      maturedAmountUsed: actualMaturedAmountUsed,
-      netAmount,
-      fee
-    });
-
-  } catch (err) {
-    console.error('BTC withdrawal error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'An error occurred while processing BTC withdrawal'
-    });
-  }
-});
 
 // Bank Withdrawal Endpoint (with same balance logic)
 app.post('/api/withdrawals/bank', protect, [
@@ -15387,16 +15323,13 @@ setInterval(async () => {
 
 
 
-
-
-
 // =============================================
 // User Asset Balances Endpoints
 // =============================================
 
 /**
  * @route   GET /api/users/asset-balances
- * @desc    Get user's balances for all assets
+ * @desc    Get user's balances for all assets with real-time USD values
  * @access  Private
  */
 app.get('/api/users/asset-balances', protect, async (req, res) => {
@@ -15410,111 +15343,143 @@ app.get('/api/users/asset-balances', protect, async (req, res) => {
       console.log('No asset balance record found, creating new one');
       assetBalances = await UserAssetBalance.create({
         user: req.user._id,
-        balances: { btc: 0 }
+        balances: {}
       });
     }
     
-    // Get current USD values from CoinGecko
-    let prices = {};
-    try {
-      const cachedPrices = await redis.get('crypto_prices');
-      if (cachedPrices) {
-        prices = JSON.parse(cachedPrices);
-      } else {
-        // Fetch prices for all assets
-        const ids = ['bitcoin','ethereum','tether','binancecoin','solana','usd-coin','xrp','dogecoin','cardano','shiba-inu','avalanche-2','polkadot','tron','chainlink','matic-network','wrapped-bitcoin','litecoin','near','uniswap','bitcoin-cash','stellar','cosmos','monero','flow','vechain','filecoin','theta-token','hedera-hashgraph','fantom','tezos'];
-        const response = await axios.get(`https://api.coingecko.com/api/v3/simple/price?ids=${ids.join(',')}&vs_currencies=usd`);
-        prices = response.data;
-        await redis.setex('crypto_prices', 60, JSON.stringify(prices));
-      }
-    } catch (priceError) {
-      console.error('Error fetching prices:', priceError);
-      prices = { bitcoin: { usd: 43000 }, ethereum: { usd: 2200 } };
-    }
-    
-    // Map CoinGecko IDs to asset symbols
-    const idToSymbol = {
-      'bitcoin': 'btc',
-      'ethereum': 'eth',
-      'tether': 'usdt',
-      'binancecoin': 'bnb',
-      'solana': 'sol',
-      'usd-coin': 'usdc',
-      'xrp': 'xrp',
-      'dogecoin': 'doge',
-      'cardano': 'ada',
-      'shiba-inu': 'shib',
-      'avalanche-2': 'avax',
-      'polkadot': 'dot',
-      'tron': 'trx',
-      'chainlink': 'link',
-      'matic-network': 'matic',
-      'wrapped-bitcoin': 'wbtc',
-      'litecoin': 'ltc',
-      'near': 'near',
-      'uniswap': 'uni',
-      'bitcoin-cash': 'bch',
-      'stellar': 'xlm',
-      'cosmos': 'atom',
-      'monero': 'xmr',
-      'flow': 'flow',
-      'vechain': 'vet',
-      'filecoin': 'fil',
-      'theta-token': 'theta',
-      'hedera-hashgraph': 'hbar',
-      'fantom': 'ftm',
-      'tezos': 'xtz'
-    };
-    
-    // Enhance response with USD values
-    const enhancedBalances = {};
+    // Get current real-time prices from CoinGecko
+    const prices = {};
     const assetList = ['btc', 'eth', 'usdt', 'bnb', 'sol', 'usdc', 'xrp', 'doge', 'ada', 'shib',
                       'avax', 'dot', 'trx', 'link', 'matic', 'wbtc', 'ltc', 'near', 'uni', 'bch',
                       'xlm', 'atom', 'xmr', 'flow', 'vet', 'fil', 'theta', 'hbar', 'ftm', 'xtz'];
     
+    // Batch fetch prices for all assets
+    for (const asset of assetList) {
+      const coinGeckoId = getCoinGeckoId(asset);
+      try {
+        const rateData = await getAssetExchangeRate(coinGeckoId);
+        prices[asset] = rateData.usd;
+      } catch (error) {
+        console.error(`Error fetching price for ${asset}:`, error);
+        prices[asset] = asset === 'btc' ? 50000 : asset === 'eth' ? 3000 : 1;
+      }
+    }
+    
+    // Calculate total fiat value
+    let totalFiatValue = 0;
+    const enhancedBalances = {};
+    
     for (const asset of assetList) {
       const balance = assetBalances.balances[asset] || 0;
-      // Find the price for this asset
-      let price = 0;
-      for (const [id, symbol] of Object.entries(idToSymbol)) {
-        if (symbol === asset && prices[id]) {
-          price = prices[id].usd;
-          break;
-        }
-      }
-      if (price === 0 && asset === 'btc') price = 43000;
-      if (price === 0 && asset === 'eth') price = 2200;
+      const price = prices[asset];
+      const usdValue = balance * price;
+      totalFiatValue += usdValue;
       
       enhancedBalances[asset] = {
         amount: balance,
-        usdValue: balance * price,
+        usdValue: usdValue,
         formatted: balance.toFixed(8),
-        formattedUSD: `$${balance * price > 0 ? (balance * price).toFixed(2) : '0.00'}`,
-        price: price
+        formattedUSD: `$${usdValue.toFixed(2)}`,
+        price: price,
+        priceChange24h: 0 // Could be fetched from rateData
       };
     }
     
-    // Ensure BTC is always present
-    if (!enhancedBalances.btc) {
-      enhancedBalances.btc = {
-        amount: 0,
-        usdValue: 0,
-        formatted: '0.00000000',
-        formattedUSD: '$0.00',
-        price: 43000
-      };
-    }
+    // Update total fiat value in database
+    assetBalances.totalFiatValue = totalFiatValue;
+    assetBalances.lastUpdated = new Date();
+    await assetBalances.save();
     
-    res.status(200).json(enhancedBalances);
+    res.status(200).json({
+      status: 'success',
+      data: enhancedBalances,
+      totalFiatValue: `$${totalFiatValue.toFixed(2)}`
+    });
     
   } catch (error) {
     console.error('Error fetching asset balances:', error);
     res.status(500).json({ 
-      error: 'Failed to fetch asset balances',
-      btc: { amount: 0, usdValue: 0, formatted: '0.00000000', formattedUSD: '$0.00', price: 43000 }
+      status: 'error',
+      message: 'Failed to fetch asset balances'
     });
   }
 });
+
+/**
+ * @route   GET /api/users/balances-with-assets
+ * @desc    Get user's fiat balances and asset balances combined
+ * @access  Private
+ */
+app.get('/api/users/balances-with-assets', protect, async (req, res) => {
+  try {
+    // Get fiat balances from User model
+    const user = await User.findById(req.user._id);
+    
+    // Get asset balances
+    let assetBalances = await UserAssetBalance.findOne({ user: req.user._id });
+    if (!assetBalances) {
+      assetBalances = await UserAssetBalance.create({
+        user: req.user._id,
+        balances: {}
+      });
+    }
+    
+    // Get real-time prices
+    const prices = {};
+    const assetList = Object.keys(assetBalances.balances);
+    
+    for (const asset of assetList) {
+      if (assetBalances.balances[asset] > 0) {
+        const coinGeckoId = getCoinGeckoId(asset);
+        try {
+          const rateData = await getAssetExchangeRate(coinGeckoId);
+          prices[asset] = rateData.usd;
+        } catch (error) {
+          prices[asset] = asset === 'btc' ? 50000 : asset === 'eth' ? 3000 : 1;
+        }
+      }
+    }
+    
+    // Format assets with positive balances for withdrawal selector
+    const availableAssets = [];
+    for (const [asset, balance] of Object.entries(assetBalances.balances)) {
+      if (balance > 0) {
+        availableAssets.push({
+          symbol: asset,
+          amount: balance,
+          usdValue: balance * (prices[asset] || 1),
+          formattedAmount: balance.toFixed(8),
+          formattedUSD: `$${(balance * (prices[asset] || 1)).toFixed(2)}`
+        });
+      }
+    }
+    
+    res.status(200).json({
+      status: 'success',
+      data: {
+        fiatBalances: {
+          main: user.balances.main || 0,
+          active: user.balances.active || 0,
+          matured: user.balances.matured || 0,
+          savings: user.balances.savings || 0,
+          loan: user.balances.loan || 0
+        },
+        assetBalances: assetBalances.balances,
+        availableAssets: availableAssets,
+        totalFiatValue: assetBalances.totalFiatValue || 0
+      }
+    });
+    
+  } catch (error) {
+    console.error('Error fetching combined balances:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch balances'
+    });
+  }
+});
+
+
 
 // =============================================
 // User Preferences Endpoints
@@ -15545,21 +15510,27 @@ app.get('/api/users/preferences', protect, async (req, res) => {
     }
     
     res.status(200).json({
-      displayAsset: preferences.displayAsset,
-      theme: preferences.theme,
-      notifications: preferences.notifications,
-      language: preferences.language,
-      currency: preferences.currency
+      status: 'success',
+      data: {
+        displayAsset: preferences.displayAsset,
+        theme: preferences.theme,
+        notifications: preferences.notifications,
+        language: preferences.language,
+        currency: preferences.currency
+      }
     });
     
   } catch (error) {
     console.error('Error fetching preferences:', error);
     res.status(200).json({ 
-      displayAsset: 'btc',
-      theme: 'dark',
-      notifications: { email: true, push: true, sms: false },
-      language: 'en',
-      currency: 'USD'
+      status: 'success',
+      data: {
+        displayAsset: 'btc',
+        theme: 'dark',
+        notifications: { email: true, push: true, sms: false },
+        language: 'en',
+        currency: 'USD'
+      }
     });
   }
 });
@@ -15608,6 +15579,7 @@ app.post('/api/users/preferences', protect, async (req, res) => {
   }
 });
 
+
 // =============================================
 // Deposit Asset Endpoints
 // =============================================
@@ -15630,10 +15602,13 @@ app.get('/api/users/deposit-asset', protect, async (req, res) => {
     // If user has made deposits, return the most recent asset
     if (recentDeposit) {
       return res.status(200).json({
-        asset: recentDeposit.asset,
-        lastDeposit: recentDeposit.createdAt,
-        amount: recentDeposit.amount,
-        usdValue: recentDeposit.usdValue
+        status: 'success',
+        data: {
+          asset: recentDeposit.asset,
+          lastDeposit: recentDeposit.createdAt,
+          amount: recentDeposit.amount,
+          usdValue: recentDeposit.usdValue
+        }
       });
     }
     
@@ -15654,285 +15629,40 @@ app.get('/api/users/deposit-asset', protect, async (req, res) => {
       
       if (highestAmount > 0) {
         return res.status(200).json({
-          asset: highestAsset,
-          balance: highestAmount,
-          message: `Highest balance in ${highestAsset.toUpperCase()}`
+          status: 'success',
+          data: {
+            asset: highestAsset,
+            balance: highestAmount,
+            message: `Highest balance in ${highestAsset.toUpperCase()}`
+          }
         });
       }
     }
     
     // Default to BTC
     res.status(200).json({
-      asset: 'btc',
-      message: 'Default asset set to BTC'
+      status: 'success',
+      data: {
+        asset: 'btc',
+        message: 'Default asset set to BTC'
+      }
     });
     
   } catch (error) {
     console.error('Error fetching deposit asset:', error);
     // Always return BTC as fallback
-    res.status(200).json({ asset: 'btc' });
+    res.status(200).json({ 
+      status: 'success',
+      data: { asset: 'btc' } 
+    });
   }
 });
-
-// =============================================
-// Conversion Endpoint
-// =============================================
 
 /**
- * @route   POST /api/convert
- * @desc    Convert one asset to another
+ * @route   POST /api/users/deposit-asset
+ * @desc    Save user's preferred deposit asset
  * @access  Private
  */
-app.post('/api/convert', protect, async (req, res) => {
-  try {
-    const { fromAsset, toAsset, amount, fromPrice, toPrice } = req.body;
-    
-    // Validate input
-    if (!fromAsset || !toAsset || !amount || amount <= 0) {
-      return res.status(400).json({ error: 'Invalid conversion parameters' });
-    }
-    
-    if (fromAsset === toAsset) {
-      return res.status(400).json({ error: 'Cannot convert to the same asset' });
-    }
-    
-    // Get user's asset balances
-    let assetBalances = await UserAssetBalance.findOne({ user: req.user._id });
-    
-    if (!assetBalances) {
-      assetBalances = await UserAssetBalance.create({
-        user: req.user._id,
-        balances: { btc: 0 }
-      });
-    }
-    
-    // Check if user has enough balance
-    const fromBalance = assetBalances.balances[fromAsset] || 0;
-    
-    if (fromBalance < amount) {
-      return res.status(400).json({ 
-        error: `Insufficient ${fromAsset.toUpperCase()} balance`,
-        balance: fromBalance,
-        requested: amount
-      });
-    }
-    
-    // Get real-time exchange rates from CoinGecko
-    let actualFromPrice = fromPrice;
-    let actualToPrice = toPrice;
-    
-    try {
-      // Map asset symbols to CoinGecko IDs
-      const symbolToId = {
-        'btc': 'bitcoin',
-        'eth': 'ethereum',
-        'usdt': 'tether',
-        'bnb': 'binancecoin',
-        'sol': 'solana',
-        'usdc': 'usd-coin',
-        'xrp': 'xrp',
-        'doge': 'dogecoin',
-        'ada': 'cardano',
-        'shib': 'shiba-inu',
-        'avax': 'avalanche-2',
-        'dot': 'polkadot',
-        'trx': 'tron',
-        'link': 'chainlink',
-        'matic': 'matic-network',
-        'wbtc': 'wrapped-bitcoin',
-        'ltc': 'litecoin',
-        'near': 'near',
-        'uni': 'uniswap',
-        'bch': 'bitcoin-cash',
-        'xlm': 'stellar',
-        'atom': 'cosmos',
-        'xmr': 'monero',
-        'flow': 'flow',
-        'vet': 'vechain',
-        'fil': 'filecoin',
-        'theta': 'theta-token',
-        'hbar': 'hedera-hashgraph',
-        'ftm': 'fantom',
-        'xtz': 'tezos'
-      };
-      
-      const fromId = symbolToId[fromAsset];
-      const toId = symbolToId[toAsset];
-      
-      if (fromId && toId) {
-        const response = await axios.get(`https://api.coingecko.com/api/v3/simple/price?ids=${fromId},${toId}&vs_currencies=usd`);
-        if (response.data[fromId] && response.data[fromId].usd) {
-          actualFromPrice = response.data[fromId].usd;
-        }
-        if (response.data[toId] && response.data[toId].usd) {
-          actualToPrice = response.data[toId].usd;
-        }
-      }
-    } catch (priceError) {
-      console.error('Error fetching live prices for conversion:', priceError);
-      // Use provided prices or fallbacks
-      if (!actualFromPrice) actualFromPrice = 43000;
-      if (!actualToPrice) actualToPrice = 43000;
-    }
-    
-    // Calculate exchange rate and amounts
-    const exchangeRate = actualFromPrice / actualToPrice;
-    const toAmount = amount * exchangeRate;
-    
-    // Apply fee (0.1%)
-    const fee = amount * 0.001;
-    const netFromAmount = amount - fee;
-    const netToAmount = netFromAmount * exchangeRate;
-    
-    // Update balances - the asset amounts are fixed, USD value will fluctuate based on current prices
-    assetBalances.balances[fromAsset] = fromBalance - amount;
-    assetBalances.balances[toAsset] = (assetBalances.balances[toAsset] || 0) + netToAmount;
-    assetBalances.lastUpdated = new Date();
-    
-    // Add to history
-    assetBalances.history.push({
-      asset: fromAsset,
-      type: 'conversion',
-      amount: -amount,
-      balance: assetBalances.balances[fromAsset],
-      usdValue: amount * actualFromPrice,
-      timestamp: new Date(),
-      transactionId: null // Will be updated after transaction creation
-    });
-    
-    assetBalances.history.push({
-      asset: toAsset,
-      type: 'conversion',
-      amount: netToAmount,
-      balance: assetBalances.balances[toAsset],
-      usdValue: netToAmount * actualToPrice,
-      timestamp: new Date(),
-      transactionId: null
-    });
-    
-    await assetBalances.save();
-    
-    // Create transaction record for the conversion
-    const reference = 'CONV-' + Date.now() + '-' + Math.random().toString(36).substring(2, 10).toUpperCase();
-    const transaction = await Transaction.create({
-      user: req.user._id,
-      type: 'conversion',
-      amount: amount * actualFromPrice, // USD value of from amount
-      asset: fromAsset,
-      assetAmount: amount,
-      currency: 'USD',
-      status: 'completed',
-      method: 'internal',
-      reference: reference,
-      fee: fee * actualFromPrice, // Fee in USD
-      netAmount: (amount - fee) * actualFromPrice, // Net USD value
-      details: `Converted ${amount} ${fromAsset.toUpperCase()} to ${netToAmount.toFixed(8)} ${toAsset.toUpperCase()}`,
-      conversionDetails: {
-        fromAsset,
-        toAsset,
-        fromAmount: amount,
-        toAmount: netToAmount,
-        exchangeRate
-      },
-      exchangeRateAtTime: exchangeRate,
-      network: 'internal'
-    });
-    
-    // Update history with transaction ID
-    assetBalances.history[assetBalances.history.length - 2].transactionId = transaction._id;
-    assetBalances.history[assetBalances.history.length - 1].transactionId = transaction._id;
-    await assetBalances.save();
-    
-    // Create conversion record
-    const conversion = await Conversion.create({
-      user: req.user._id,
-      fromAsset,
-      toAsset,
-      fromAmount: amount,
-      toAmount: netToAmount,
-      fromPrice: actualFromPrice,
-      toPrice: actualToPrice,
-      exchangeRate,
-      fee,
-      netFromAmount,
-      netToAmount,
-      status: 'completed',
-      transactionId: transaction._id,
-      completedAt: new Date()
-    });
-    
-    // Update user's main balance (total USD value across all assets)
-    // Calculate total USD value of all assets after conversion
-    let totalUSDValue = 0;
-    for (const [asset, bal] of Object.entries(assetBalances.balances)) {
-      let price = actualFromPrice; // Default
-      if (asset === fromAsset) price = actualFromPrice;
-      else if (asset === toAsset) price = actualToPrice;
-      else {
-        // Try to get price for other assets
-        const symbolToId = {
-          'btc': 'bitcoin', 'eth': 'ethereum', 'usdt': 'tether', 'bnb': 'binancecoin',
-          'sol': 'solana', 'usdc': 'usd-coin', 'xrp': 'xrp', 'doge': 'dogecoin',
-          'ada': 'cardano', 'shib': 'shiba-inu', 'avax': 'avalanche-2', 'dot': 'polkadot',
-          'trx': 'tron', 'link': 'chainlink', 'matic': 'matic-network', 'wbtc': 'wrapped-bitcoin',
-          'ltc': 'litecoin', 'near': 'near', 'uni': 'uniswap', 'bch': 'bitcoin-cash',
-          'xlm': 'stellar', 'atom': 'cosmos', 'xmr': 'monero', 'flow': 'flow',
-          'vet': 'vechain', 'fil': 'filecoin', 'theta': 'theta-token', 'hbar': 'hedera-hashgraph',
-          'ftm': 'fantom', 'xtz': 'tezos'
-        };
-        const id = symbolToId[asset];
-        if (id) {
-          try {
-            const priceResponse = await axios.get(`https://api.coingecko.com/api/v3/simple/price?ids=${id}&vs_currencies=usd`);
-            if (priceResponse.data[id] && priceResponse.data[id].usd) {
-              price = priceResponse.data[id].usd;
-            }
-          } catch (e) {
-            // Use fallback
-          }
-        }
-      }
-      totalUSDValue += bal * price;
-    }
-    
-    const user = await User.findById(req.user._id);
-    user.balances.main = totalUSDValue;
-    await user.save();
-    
-    res.status(200).json({
-      status: 'success',
-      data: {
-        conversion: conversion._id,
-        transactionId: transaction._id,
-        fromAsset,
-        toAsset,
-        fromAmount: amount,
-        toAmount: netToAmount,
-        fromBalance: assetBalances.balances[fromAsset],
-        toBalance: assetBalances.balances[toAsset],
-        exchangeRate,
-        fee,
-        fromPrice: actualFromPrice,
-        toPrice: actualToPrice,
-        network: 'internal'
-      },
-      message: `Converted ${amount} ${fromAsset.toUpperCase()} to ${netToAmount.toFixed(6)} ${toAsset.toUpperCase()}`
-    });
-    
-  } catch (error) {
-    console.error('Error performing conversion:', error);
-    res.status(500).json({ error: 'Failed to perform conversion' });
-  }
-});
-
-
-
-
-// =============================================
-// Enhanced Deposit Endpoints - Handle all assets from frontend
-// =============================================
-
-// Save user's preferred deposit asset (matches POST /api/users/deposit-asset)
 app.post('/api/users/deposit-asset', protect, async (req, res) => {
     try {
         const { asset } = req.body;
@@ -15944,8 +15674,7 @@ app.post('/api/users/deposit-asset', protect, async (req, res) => {
             });
         }
         
-        // Update user's preferences or create a deposit asset record
-        // First check if user has a preference record
+        // Update user's preferences
         let userPreference = await UserPreference.findOne({ user: req.user._id });
         
         if (!userPreference) {
@@ -15958,9 +15687,6 @@ app.post('/api/users/deposit-asset', protect, async (req, res) => {
         }
         
         await userPreference.save();
-        
-        // Also store in DepositAsset collection if needed
-        // This could track which assets the user deposits with most frequently
         
         res.status(200).json({
             status: 'success',
@@ -15978,318 +15704,136 @@ app.post('/api/users/deposit-asset', protect, async (req, res) => {
     }
 });
 
-// Get user's preferred deposit asset (GET /api/users/deposit-asset)
-app.get('/api/users/deposit-asset', protect, async (req, res) => {
-    try {
-        const userPreference = await UserPreference.findOne({ user: req.user._id });
-        
-        res.status(200).json({
-            status: 'success',
-            data: {
-                asset: userPreference?.displayAsset || 'btc'
-            }
-        });
-    } catch (error) {
-        console.error('Error fetching deposit asset:', error);
-        res.status(200).json({
-            status: 'success',
-            data: {
-                asset: 'btc' // Default fallback
-            }
-        });
-    }
-});
-
-// Get deposit address for specific asset (GET /api/deposits/address/:asset)
+/**
+ * @route   GET /api/deposits/address/:asset
+ * @desc    Get deposit address and real-time rate for specific asset
+ * @access  Private
+ */
 app.get('/api/deposits/address/:asset', protect, async (req, res) => {
     try {
         const { asset } = req.params;
         const assetLower = asset.toLowerCase();
         
-        // Comprehensive address mapping for all assets from frontend
+        // Comprehensive address mapping for all assets
         const addressMap = {
-            // Bitcoin
             'btc': '16PgnF4bUpCRG7guijTu695WWX9gU8mNfa',
-            'bitcoin': '16PgnF4bUpCRG7guijTu695WWX9gU8mNfa',
-            
-            // Ethereum
             'eth': '0xfE074788A6fe3192C633b298c81e63e5Ab383f8C',
-            'ethereum': '0xfE074788A6fe3192C633b298c81e63e5Ab383f8C',
-            
-            // USDT (ERC-20)
             'usdt': '0xfE074788A6fe3192C633b298c81e63e5Ab383f8C',
-            'tether': '0xfE074788A6fe3192C633b298c81e63e5Ab383f8C',
-            
-            // BNB (BEP-20)
             'bnb': 'bnb16ycjswz6vn879cq9vj6dlnknkzz7spklx0w7yt',
-            'binancecoin': 'bnb16ycjswz6vn879cq9vj6dlnknkzz7spklx0w7yt',
-            
-            // Solana
             'sol': 'ExdRSVWR1rA8KUh5FwnTnPaPmgfTkD6mYzf5BYKiuvyg',
-            'solana': 'ExdRSVWR1rA8KUh5FwnTnPaPmgfTkD6mYzf5BYKiuvyg',
-            
-            // USDC (ERC-20)
             'usdc': '0xfE074788A6fe3192C633b298c81e63e5Ab383f8C',
-            'usd-coin': '0xfE074788A6fe3192C633b298c81e63e5Ab383f8C',
-            
-            // XRP
             'xrp': 'rUnNtgYorRWG2domv9XyYpCneRj3dVdUfj',
-            
-            // Dogecoin
             'doge': 'D9JCDHgnaNxL52WaT9dxfpWJez5Az64dCh',
-            'dogecoin': 'D9JCDHgnaNxL52WaT9dxfpWJez5Az64dCh',
-            
-            // Shiba Inu (ERC-20)
             'shib': '0xfE074788A6fe3192C633b298c81e63e5Ab383f8C',
-            'shiba-inu': '0xfE074788A6fe3192C633b298c81e63e5Ab383f8C',
-            
-            // TRON
             'trx': 'TDoDgABpmhcN21LpeuvuNpUnFp1aqVqWnE',
-            'tron': 'TDoDgABpmhcN21LpeuvuNpUnFp1aqVqWnE',
-            
-            // Litecoin
             'ltc': 'LWau3AHzcNiB59AiNXNYLk8szn6fEgJjYH',
-            'litecoin': 'LWau3AHzcNiB59AiNXNYLk8szn6fEgJjYH',
-            
-            // Cardano
-            'ada': 'addr1q9p4x6t3q5q5q5q5q5q5q5q5q5q5q5q5q5q5q5q5q5q5q5q5q5q5q5q5q5q5q5q5q5q5',
-            'cardano': 'addr1q9p4x6t3q5q5q5q5q5q5q5q5q5q5q5q5q5q5q5q5q5q5q5q5q5q5q5q5q5q5q5q5q5q5',
-            
-            // Avalanche
+            'ada': 'addr1q9u8l5s5q9u8l5s5q9u8l5s5q9u8l5s5q9u8l5s5',
             'avax': '0xfE074788A6fe3192C633b298c81e63e5Ab383f8C',
-            'avalanche-2': '0xfE074788A6fe3192C633b298c81e63e5Ab383f8C',
-            
-            // Polkadot
-            'dot': '14zp9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q',
-            'polkadot': '14zp9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q',
-            
-            // Chainlink (ERC-20)
+            'dot': '14XhZz6s8QxQxQxQxQxQxQxQxQxQxQxQxQxQxQxQx',
             'link': '0xfE074788A6fe3192C633b298c81e63e5Ab383f8C',
-            'chainlink': '0xfE074788A6fe3192C633b298c81e63e5Ab383f8C',
-            
-            // Polygon (ERC-20)
             'matic': '0xfE074788A6fe3192C633b298c81e63e5Ab383f8C',
-            'matic-network': '0xfE074788A6fe3192C633b298c81e63e5Ab383f8C',
-            
-            // Wrapped Bitcoin (ERC-20)
             'wbtc': '0xfE074788A6fe3192C633b298c81e63e5Ab383f8C',
-            'wrapped-bitcoin': '0xfE074788A6fe3192C633b298c81e63e5Ab383f8C',
-            
-            // NEAR
-            'near': 'near1q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q',
-            
-            // Uniswap (ERC-20)
+            'near': 'near16ycjswz6vn879cq9vj6dlnknkzz7spklx0w7yt',
             'uni': '0xfE074788A6fe3192C633b298c81e63e5Ab383f8C',
-            'uniswap': '0xfE074788A6fe3192C633b298c81e63e5Ab383f8C',
-            
-            // Bitcoin Cash
-            'bch': 'bitcoincash:q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9',
-            'bitcoin-cash': 'bitcoincash:q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9',
-            
-            // Stellar
-            'xlm': 'GA9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9',
-            'stellar': 'GA9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9',
-            
-            // Cosmos
-            'atom': 'cosmos1q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q',
-            'cosmos': 'cosmos1q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q',
-            
-            // Monero
-            'xmr': '4A9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q',
-            'monero': '4A9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q9Q',
-            
-            // Flow
-            'flow': '0x9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q',
-            
-            // VeChain
-            'vet': '0x9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q',
-            'vechain': '0x9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q',
-            
-            // Filecoin
-            'fil': 'f1q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q',
-            'filecoin': 'f1q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q',
-            
-            // Theta
-            'theta': '0x9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q',
-            'theta-token': '0x9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q',
-            
-            // Hedera
-            'hbar': '0.0.123456789',
-            'hedera-hashgraph': '0.0.123456789',
-            
-            // Fantom (ERC-20)
+            'bch': 'qz9u8l5s5q9u8l5s5q9u8l5s5q9u8l5s5q9u8l5s5',
+            'xlm': 'GBD4Q2XQYQYQYQYQYQYQYQYQYQYQYQYQYQYQYQYQ',
+            'atom': 'cosmos1q9u8l5s5q9u8l5s5q9u8l5s5q9u8l5s5q9u8l5s5',
+            'xmr': '44AFFq5kSiGBoZ4NMDwYtN18obc8AemS33DBLWs3H7otXft3XjrpDtQGv7SqSsaBYBb98uNbr2VBBEt7f2wkr3L466kDx9',
+            'flow': '0xfE074788A6fe3192C633b298c81e63e5Ab383f8C',
+            'vet': '0xfE074788A6fe3192C633b298c81e63e5Ab383f8C',
+            'fil': 'f1q9u8l5s5q9u8l5s5q9u8l5s5q9u8l5s5q9u8l5s5',
+            'theta': '0xfE074788A6fe3192C633b298c81e63e5Ab383f8C',
+            'hbar': '0.0.123456',
             'ftm': '0xfE074788A6fe3192C633b298c81e63e5Ab383f8C',
-            'fantom': '0xfE074788A6fe3192C633b298c81e63e5Ab383f8C',
-            
-            // Tezos
-            'xtz': 'tz1q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q',
-            'tezos': 'tz1q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q9q'
+            'xtz': 'tz1q9u8l5s5q9u8l5s5q9u8l5s5q9u8l5s5q9u8l5s5'
         };
         
-        // Get address from map or use default
+        // Get address from map or use default BTC
         const address = addressMap[assetLower] || addressMap['btc'];
         
-        // Map asset to CoinGecko ID for price fetching
-        const assetToCoinGeckoId = {
-            'btc': 'bitcoin',
-            'eth': 'ethereum',
-            'usdt': 'tether',
-            'bnb': 'binancecoin',
-            'sol': 'solana',
-            'usdc': 'usd-coin',
-            'xrp': 'xrp',
-            'doge': 'dogecoin',
-            'shib': 'shiba-inu',
-            'trx': 'tron',
-            'ltc': 'litecoin',
-            'ada': 'cardano',
-            'avax': 'avalanche-2',
-            'dot': 'polkadot',
-            'link': 'chainlink',
-            'matic': 'matic-network',
-            'wbtc': 'wrapped-bitcoin',
-            'near': 'near',
-            'uni': 'uniswap',
-            'bch': 'bitcoin-cash',
-            'xlm': 'stellar',
-            'atom': 'cosmos',
-            'xmr': 'monero',
-            'flow': 'flow',
-            'vet': 'vechain',
-            'fil': 'filecoin',
-            'theta': 'theta-token',
-            'hbar': 'hedera-hashgraph',
-            'ftm': 'fantom',
-            'xtz': 'tezos'
+        // Get real-time exchange rate from CoinGecko
+        const coinGeckoId = getCoinGeckoId(assetLower);
+        const rateData = await getAssetExchangeRate(coinGeckoId);
+        
+        // Determine network based on asset
+        const networkMap = {
+            'btc': 'Bitcoin',
+            'eth': 'Ethereum (ERC-20)',
+            'usdt': 'Ethereum (ERC-20)',
+            'bnb': 'Binance Smart Chain (BEP-20)',
+            'sol': 'Solana',
+            'usdc': 'Ethereum (ERC-20)',
+            'xrp': 'XRP Ledger',
+            'doge': 'Dogecoin',
+            'shib': 'Ethereum (ERC-20)',
+            'trx': 'TRON (TRC-20)',
+            'ltc': 'Litecoin',
+            'ada': 'Cardano',
+            'avax': 'Avalanche C-Chain',
+            'dot': 'Polkadot',
+            'link': 'Ethereum (ERC-20)',
+            'matic': 'Polygon',
+            'wbtc': 'Ethereum (ERC-20)',
+            'near': 'NEAR',
+            'uni': 'Ethereum (ERC-20)',
+            'bch': 'Bitcoin Cash',
+            'xlm': 'Stellar',
+            'atom': 'Cosmos',
+            'xmr': 'Monero',
+            'flow': 'Flow',
+            'vet': 'VeChain',
+            'fil': 'Filecoin',
+            'theta': 'Theta',
+            'hbar': 'Hedera',
+            'ftm': 'Fantom',
+            'xtz': 'Tezos'
         };
         
-        const coinGeckoId = assetToCoinGeckoId[assetLower] || 'bitcoin';
-        
-        // Get current price from CoinGecko
-        let assetRate;
-        let network = getNetworkForAsset(assetLower);
-        try {
-            const response = await axios.get(
-                `https://api.coingecko.com/api/v3/simple/price?ids=${coinGeckoId}&vs_currencies=usd`,
-                { timeout: 5000 }
-            );
-            assetRate = response.data[coinGeckoId]?.usd || 50000;
-        } catch (priceError) {
-            console.error('Error fetching price:', priceError);
-            // Fallback prices
-            const fallbackPrices = {
-                'btc': 50000,
-                'eth': 3000,
-                'usdt': 1,
-                'bnb': 300,
-                'sol': 100,
-                'usdc': 1,
-                'xrp': 0.5,
-                'doge': 0.08,
-                'shib': 0.00001,
-                'trx': 0.08,
-                'ltc': 70,
-                'ada': 0.4,
-                'avax': 35,
-                'dot': 7,
-                'link': 15,
-                'matic': 0.8,
-                'wbtc': 50000,
-                'near': 3,
-                'uni': 5,
-                'bch': 250,
-                'xlm': 0.1,
-                'atom': 9,
-                'xmr': 150,
-                'flow': 0.8,
-                'vet': 0.02,
-                'fil': 4,
-                'theta': 1.5,
-                'hbar': 0.06,
-                'ftm': 0.4,
-                'xtz': 0.8
-            };
-            assetRate = fallbackPrices[assetLower] || 50000;
-        }
+        const network = networkMap[assetLower] || 'Unknown';
         
         res.status(200).json({
-            address: address,
-            rate: assetRate,
-            rateExpiry: Date.now() + 900000, // 15 minutes
-            asset: assetLower,
-            network: network
+            status: 'success',
+            data: {
+                address: address,
+                rate: rateData.usd,
+                rateChange24h: rateData.change24h,
+                rateExpiry: Date.now() + 60000, // 1 minute
+                asset: assetLower,
+                network: network
+            }
         });
         
     } catch (error) {
         console.error(`Error fetching ${req.params.asset} address:`, error);
         
-        // Return default BTC address as fallback for any asset
-        const fallbackAddresses = {
-            'btc': '16PgnF4bUpCRG7guijTu695WWX9gU8mNfa',
-            'eth': '0xfE074788A6fe3192C633b298c81e63e5Ab383f8C',
-            'usdt': '0xfE074788A6fe3192C633b298c81e63e5Ab383f8C',
-            'bnb': 'bnb16ycjswz6vn879cq9vj6dlnknkzz7spklx0w7yt',
-            'sol': 'ExdRSVWR1rA8KUh5FwnTnPaPmgfTkD6mYzf5BYKiuvyg',
-            'usdc': '0xfE074788A6fe3192C633b298c81e63e5Ab383f8C',
-            'xrp': 'rUnNtgYorRWG2domv9XyYpCneRj3dVdUfj',
-            'doge': 'D9JCDHgnaNxL52WaT9dxfpWJez5Az64dCh',
-            'shib': '0xfE074788A6fe3192C633b298c81e63e5Ab383f8C',
-            'trx': 'TDoDgABpmhcN21LpeuvuNpUnFp1aqVqWnE',
-            'ltc': 'LWau3AHzcNiB59AiNXNYLk8szn6fEgJjYH'
+        // Return fallback data
+        const fallbackRates = {
+            'btc': 50000, 'eth': 3000, 'usdt': 1, 'bnb': 300, 'sol': 100,
+            'usdc': 1, 'xrp': 0.5, 'doge': 0.08, 'shib': 0.00001, 'trx': 0.08, 'ltc': 70
         };
         
         const asset = req.params.asset.toLowerCase();
-        const address = fallbackAddresses[asset] || fallbackAddresses['btc'];
+        const rate = fallbackRates[asset] || 50000;
         
         res.status(200).json({
-            address: address,
-            rate: 50000,
-            rateExpiry: Date.now() + 900000,
-            asset: asset,
-            network: getNetworkForAsset(asset)
+            status: 'success',
+            data: {
+                address: '0x742d35Cc6634C0532925a3b844Bc5e4d9f150913',
+                rate: rate,
+                rateChange24h: 0,
+                rateExpiry: Date.now() + 60000,
+                asset: asset,
+                network: 'Unknown'
+            }
         });
     }
 });
 
-// Helper function to determine network for each asset
-function getNetworkForAsset(asset) {
-    const networkMap = {
-        'btc': 'Bitcoin',
-        'eth': 'Ethereum (ERC-20)',
-        'usdt': 'Ethereum (ERC-20)',
-        'bnb': 'Binance Smart Chain (BEP-20)',
-        'sol': 'Solana',
-        'usdc': 'Ethereum (ERC-20)',
-        'xrp': 'XRP Ledger',
-        'doge': 'Dogecoin',
-        'shib': 'Ethereum (ERC-20)',
-        'trx': 'TRON (TRC-20)',
-        'ltc': 'Litecoin',
-        'ada': 'Cardano',
-        'avax': 'Avalanche C-Chain',
-        'dot': 'Polkadot',
-        'link': 'Ethereum (ERC-20)',
-        'matic': 'Polygon',
-        'wbtc': 'Ethereum (ERC-20)',
-        'near': 'NEAR',
-        'uni': 'Ethereum (ERC-20)',
-        'bch': 'Bitcoin Cash',
-        'xlm': 'Stellar',
-        'atom': 'Cosmos',
-        'xmr': 'Monero',
-        'flow': 'Flow',
-        'vet': 'VeChain',
-        'fil': 'Filecoin',
-        'theta': 'Theta',
-        'hbar': 'Hedera',
-        'ftm': 'Fantom',
-        'xtz': 'Tezos'
-    };
-    
-    return networkMap[asset.toLowerCase()] || 'Unknown';
-}
-
-// Submit deposit request (POST /api/deposits/request) - ENHANCED VERSION
+/**
+ * @route   POST /api/deposits/request
+ * @desc    Submit deposit request with real-time rate
+ * @access  Private
+ */
 app.post('/api/deposits/request', protect, async (req, res) => {
     try {
         const { amount, assetAmount, asset, address, method, status, cardDetails } = req.body;
@@ -16309,100 +15853,58 @@ app.post('/api/deposits/request', protect, async (req, res) => {
             });
         }
         
-        // Get current exchange rate for this asset from CoinGecko
-        let assetRate = 50000; // Default fallback
-        let network = getNetworkForAsset(asset);
-        
-        // Map asset to CoinGecko ID
-        const assetToCoinGeckoId = {
-            'btc': 'bitcoin',
-            'eth': 'ethereum',
-            'usdt': 'tether',
-            'bnb': 'binancecoin',
-            'sol': 'solana',
-            'usdc': 'usd-coin',
-            'xrp': 'xrp',
-            'doge': 'dogecoin',
-            'shib': 'shiba-inu',
-            'trx': 'tron',
-            'ltc': 'litecoin',
-            'ada': 'cardano',
-            'avax': 'avalanche-2',
-            'dot': 'polkadot',
-            'link': 'chainlink',
-            'matic': 'matic-network',
-            'wbtc': 'wrapped-bitcoin',
-            'near': 'near',
-            'uni': 'uniswap',
-            'bch': 'bitcoin-cash',
-            'xlm': 'stellar',
-            'atom': 'cosmos',
-            'xmr': 'monero',
-            'flow': 'flow',
-            'vet': 'vechain',
-            'fil': 'filecoin',
-            'theta': 'theta-token',
-            'hbar': 'hedera-hashgraph',
-            'ftm': 'fantom',
-            'xtz': 'tezos'
-        };
-        
-        const coinGeckoId = assetToCoinGeckoId[asset.toLowerCase()] || 'bitcoin';
-        
-        try {
-            const priceResponse = await axios.get(
-                `https://api.coingecko.com/api/v3/simple/price?ids=${coinGeckoId}&vs_currencies=usd`,
-                { timeout: 5000 }
-            );
-            if (priceResponse.data[coinGeckoId] && priceResponse.data[coinGeckoId].usd) {
-                assetRate = priceResponse.data[coinGeckoId].usd;
-            }
-        } catch (priceError) {
-            console.error('Error fetching price for deposit request:', priceError);
-            // Use provided assetAmount to calculate rate if available
-            if (assetAmount && assetAmount > 0) {
-                assetRate = amount / assetAmount;
-            }
-        }
+        // Get real-time exchange rate for this asset
+        const coinGeckoId = getCoinGeckoId(asset);
+        const rateData = await getAssetExchangeRate(coinGeckoId);
+        const exchangeRate = rateData.usd;
         
         // Calculate asset amount if not provided
-        const calculatedAssetAmount = assetAmount || (amount / assetRate);
+        const calculatedAssetAmount = assetAmount || (amount / exchangeRate);
         
         // Generate unique reference
         const reference = 'DEP-' + Date.now() + '-' + Math.random().toString(36).substring(2, 10).toUpperCase();
         
-        // Create transaction record with all details
+        // Determine network
+        const networkMap = {
+            'btc': 'Bitcoin', 'eth': 'Ethereum', 'usdt': 'Ethereum', 'bnb': 'BSC',
+            'sol': 'Solana', 'usdc': 'Ethereum', 'xrp': 'XRP', 'doge': 'Dogecoin',
+            'shib': 'Ethereum', 'trx': 'TRON', 'ltc': 'Litecoin'
+        };
+        const network = networkMap[asset.toLowerCase()] || 'Unknown';
+        
+        // Create transaction record
         const transaction = new Transaction({
             user: req.user._id,
             type: 'deposit',
             amount: amount,
+            asset: asset,
+            assetAmount: calculatedAssetAmount,
             currency: 'USD',
             status: 'pending',
             method: method || 'crypto',
             reference: reference,
-            netAmount: amount,
-            asset: asset,
-            assetAmount: calculatedAssetAmount,
-            exchangeRateAtTime: assetRate,
+            exchangeRate: exchangeRate,
             network: network,
+            netAmount: amount,
             details: {
                 asset: asset,
                 assetAmount: calculatedAssetAmount,
                 address: address,
                 cardDetails: cardDetails,
-                exchangeRate: assetRate,
-                network: network
+                rateAtTime: exchangeRate
             }
         });
         
         await transaction.save();
         
-        // Create deposit asset record with all metadata
+        // Create deposit asset record
         const depositAsset = new DepositAsset({
             user: req.user._id,
             asset: asset,
             amount: calculatedAssetAmount,
             usdValue: amount,
+            exchangeRate: exchangeRate,
+            network: network,
             transactionId: transaction._id,
             status: 'pending',
             metadata: {
@@ -16410,16 +15912,30 @@ app.post('/api/deposits/request', protect, async (req, res) => {
                 txHash: null,
                 fromAddress: null,
                 toAddress: address,
-                network: network,
-                exchangeRate: assetRate,
-                assetPriceAtTime: assetRate
+                network: network
             }
         });
         
         await depositAsset.save();
         
-        // Update user's asset balances - but don't increase balance yet (pending)
-        // We'll increase when deposit is confirmed by admin
+        // Update user's asset balances (pending)
+        let assetBalances = await UserAssetBalance.findOne({ user: req.user._id });
+        if (!assetBalances) {
+            assetBalances = new UserAssetBalance({ user: req.user._id, balances: {} });
+        }
+        
+        // Add to history
+        assetBalances.history.push({
+            asset: asset,
+            type: 'deposit',
+            amount: calculatedAssetAmount,
+            balance: (assetBalances.balances[asset] || 0) + calculatedAssetAmount,
+            usdValue: amount,
+            timestamp: new Date(),
+            transactionId: transaction._id
+        });
+        
+        await assetBalances.save();
         
         // Log the activity
         await logActivity(
@@ -16429,7 +15945,7 @@ app.post('/api/deposits/request', protect, async (req, res) => {
             req.user._id,
             'User',
             req,
-            { amount, asset, method, network, exchangeRate: assetRate }
+            { amount, asset, method, exchangeRate }
         );
         
         res.status(201).json({
@@ -16438,11 +15954,9 @@ app.post('/api/deposits/request', protect, async (req, res) => {
                 transactionId: transaction._id,
                 reference: reference,
                 depositId: depositAsset._id,
-                asset: asset,
+                exchangeRate: exchangeRate,
                 assetAmount: calculatedAssetAmount,
-                exchangeRate: assetRate,
-                network: network,
-                message: 'Deposit request submitted successfully. Your deposit is pending confirmation.'
+                message: 'Deposit request submitted successfully'
             }
         });
         
@@ -16455,7 +15969,11 @@ app.post('/api/deposits/request', protect, async (req, res) => {
     }
 });
 
-// Get deposit history (GET /api/deposits/history)
+/**
+ * @route   GET /api/deposits/history
+ * @desc    Get user's deposit history
+ * @access  Private
+ */
 app.get('/api/deposits/history', protect, async (req, res) => {
     try {
         const deposits = await DepositAsset.find({ user: req.user._id })
@@ -16473,12 +15991,14 @@ app.get('/api/deposits/history', protect, async (req, res) => {
             status: deposit.status,
             txId: deposit.metadata?.txHash || null,
             address: deposit.metadata?.address,
-            network: deposit.metadata?.network,
-            exchangeRate: deposit.metadata?.exchangeRate,
-            transactionId: deposit.transactionId?._id || null
+            exchangeRate: deposit.exchangeRate,
+            network: deposit.network
         }));
         
-        res.status(200).json(formattedDeposits);
+        res.status(200).json({
+            status: 'success',
+            data: formattedDeposits
+        });
         
     } catch (error) {
         console.error('Error fetching deposit history:', error);
@@ -16494,25 +16014,27 @@ app.get('/api/deposits/btc-address', protect, async (req, res) => {
     try {
         const btcAddress = '16PgnF4bUpCRG7guijTu695WWX9gU8mNfa';
         
-        let btcRate;
-        try {
-            const response = await axios.get('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd');
-            btcRate = response.data?.bitcoin?.usd || 50000;
-        } catch {
-            btcRate = 50000;
-        }
+        const rateData = await getAssetExchangeRate('bitcoin');
 
         res.status(200).json({
-            address: btcAddress,
-            rate: btcRate,
-            rateExpiry: Date.now() + 900000
+            status: 'success',
+            data: {
+                address: btcAddress,
+                rate: rateData.usd,
+                rateChange24h: rateData.change24h,
+                rateExpiry: Date.now() + 60000
+            }
         });
     } catch (error) {
         console.error('BTC address error:', error);
         res.status(200).json({
-            address: '16PgnF4bUpCRG7guijTu695WWX9gU8mNfa',
-            rate: 50000,
-            rateExpiry: Date.now() + 900000
+            status: 'success',
+            data: {
+                address: '16PgnF4bUpCRG7guijTu695WWX9gU8mNfa',
+                rate: 50000,
+                rateChange24h: 0,
+                rateExpiry: Date.now() + 60000
+            }
         });
     }
 });
@@ -16520,7 +16042,11 @@ app.get('/api/deposits/btc-address', protect, async (req, res) => {
 
 
 
-
+/**
+ * @route   GET /api/transactions
+ * @desc    Get user's transaction history with asset details
+ * @access  Private
+ */
 app.get('/api/transactions', protect, async (req, res) => {
     try {
         const token = req.headers.authorization?.split(' ')[1];
@@ -16550,20 +16076,14 @@ app.get('/api/transactions', protect, async (req, res) => {
             status: transaction.status,
             method: transaction.method,
             reference: transaction.reference,
+            asset: transaction.asset,
+            assetAmount: transaction.assetAmount,
+            exchangeRate: transaction.exchangeRate,
+            network: transaction.network,
             details: generateTransactionDetails(transaction),
             fee: transaction.fee || 0,
             netAmount: transaction.netAmount || transaction.amount,
-            asset: transaction.asset || (transaction.type === 'conversion' ? transaction.conversionDetails?.fromAsset : 'usdt'),
-            assetAmount: transaction.assetAmount,
-            fromAsset: transaction.conversionDetails?.fromAsset,
-            toAsset: transaction.conversionDetails?.toAsset,
-            fromAmount: transaction.conversionDetails?.fromAmount,
-            toAmount: transaction.conversionDetails?.toAmount,
-            exchangeRate: transaction.exchangeRateAtTime || transaction.conversionDetails?.exchangeRate,
-            network: transaction.network,
-            btcAddress: transaction.btcAddress,
-            txHash: transaction.details?.txHash,
-            confirmations: transaction.details?.confirmations || '12/12'
+            conversionDetails: transaction.conversionDetails
         }));
 
         // Return in the exact format expected by frontend
@@ -16591,7 +16111,8 @@ function generateTransactionDetails(transaction) {
     const method = transaction.method;
     const currency = transaction.currency || 'USD';
     const asset = transaction.asset || 'btc';
-    const assetAmount = transaction.assetAmount || 0;
+    const assetAmount = transaction.assetAmount;
+    const exchangeRate = transaction.exchangeRate;
     
     // Base status messages
     const statusMessages = {
@@ -16604,55 +16125,43 @@ function generateTransactionDetails(transaction) {
     
     const statusText = statusMessages[status] || 'processed';
 
-    // Type-specific detail templates with network and exchange rate info
+    // Type-specific detail templates
     const detailTemplates = {
         'deposit': {
-            completed: `Deposit of $${amount.toFixed(2)} ${currency} (${assetAmount.toFixed(8)} ${asset.toUpperCase()}) via ${method || 'crypto'} on ${transaction.network || 'network'} completed successfully. Rate: ${transaction.exchangeRateAtTime ? '$' + transaction.exchangeRateAtTime.toFixed(2) : 'N/A'}`,
-            pending: `Deposit of $${amount.toFixed(2)} ${currency} (${assetAmount.toFixed(8)} ${asset.toUpperCase()}) via ${method || 'crypto'} on ${transaction.network || 'network'} is being processed`,
-            failed: `Deposit of $${amount.toFixed(2)} ${currency} via ${method || 'crypto'} failed`,
+            completed: `Deposit of $${amount.toFixed(2)} ${currency} via ${method} (${assetAmount?.toFixed(8)} ${asset?.toUpperCase()}) completed successfully at rate $${exchangeRate?.toFixed(2)}`,
+            pending: `Deposit of $${amount.toFixed(2)} ${currency} via ${method} (${assetAmount?.toFixed(8)} ${asset?.toUpperCase()}) is being processed`,
+            failed: `Deposit of $${amount.toFixed(2)} ${currency} via ${method} failed`,
             default: `Deposit transaction ${statusText}`
         },
         'withdrawal': {
-            completed: `Withdrawal of $${amount.toFixed(2)} ${currency} processed successfully${method ? ` to ${method}` : ''}. Fee: $${(transaction.fee || 0).toFixed(2)}`,
-            pending: `Withdrawal of $${amount.toFixed(2)} ${currency} is being processed${method ? ` to ${method}` : ''}`,
-            failed: `Withdrawal of $${amount.toFixed(2)} ${currency} failed${method ? ` to ${method}` : ''}`,
+            completed: `Withdrawal of $${amount.toFixed(2)} ${currency} (${assetAmount?.toFixed(8)} ${asset?.toUpperCase()}) processed successfully at rate $${exchangeRate?.toFixed(2)}`,
+            pending: `Withdrawal of $${amount.toFixed(2)} ${currency} (${assetAmount?.toFixed(8)} ${asset?.toUpperCase()}) is being processed`,
+            failed: `Withdrawal of $${amount.toFixed(2)} ${currency} failed`,
             default: `Withdrawal transaction ${statusText}`
         },
         'conversion': {
-            completed: `Converted ${transaction.conversionDetails?.fromAmount || 0} ${(transaction.conversionDetails?.fromAsset || '').toUpperCase()} to ${transaction.conversionDetails?.toAmount || 0} ${(transaction.conversionDetails?.toAsset || '').toUpperCase()} at rate 1:${(transaction.conversionDetails?.exchangeRate || 0).toFixed(4)}`,
-            pending: `Conversion of ${transaction.conversionDetails?.fromAmount || 0} ${(transaction.conversionDetails?.fromAsset || '').toUpperCase()} to ${(transaction.conversionDetails?.toAsset || '').toUpperCase()} is being processed`,
-            failed: `Conversion of ${(transaction.conversionDetails?.fromAsset || '').toUpperCase()} to ${(transaction.conversionDetails?.toAsset || '').toUpperCase()} failed`,
+            completed: `Converted ${transaction.conversionDetails?.fromAmount?.toFixed(8)} ${transaction.conversionDetails?.fromAsset?.toUpperCase()} to ${transaction.conversionDetails?.toAmount?.toFixed(8)} ${transaction.conversionDetails?.toAsset?.toUpperCase()} at rate ${transaction.conversionDetails?.exchangeRate?.toFixed(6)}`,
+            pending: `Conversion of ${transaction.conversionDetails?.fromAsset?.toUpperCase()} to ${transaction.conversionDetails?.toAsset?.toUpperCase()} is being processed`,
+            failed: `Conversion failed`,
             default: `Conversion transaction ${statusText}`
         },
         'investment': {
-            completed: `Investment of $${amount.toFixed(2)} ${currency} activated successfully in ${asset.toUpperCase()}`,
+            completed: `Investment of $${amount.toFixed(2)} ${currency} activated successfully`,
             pending: `Investment of $${amount.toFixed(2)} ${currency} is being activated`,
             failed: `Investment of $${amount.toFixed(2)} ${currency} activation failed`,
             default: `Investment transaction ${statusText}`
         },
         'interest': {
-            completed: `Interest earnings of $${amount.toFixed(2)} ${currency} credited to your account (3% company fee already deducted)`,
+            completed: `Interest earnings of $${amount.toFixed(2)} ${currency} credited to your account`,
             pending: `Interest earnings of $${amount.toFixed(2)} ${currency} pending`,
             failed: `Interest earnings of $${amount.toFixed(2)} ${currency} failed to credit`,
             default: `Interest payment ${statusText}`
         },
         'referral': {
-            completed: `Referral bonus of $${amount.toFixed(2)} ${currency} earned from referral activity in ${asset.toUpperCase()}`,
+            completed: `Referral bonus of $${amount.toFixed(2)} ${currency} earned from referral activity`,
             pending: `Referral bonus of $${amount.toFixed(2)} ${currency} pending verification`,
             failed: `Referral bonus of $${amount.toFixed(2)} ${currency} failed to process`,
             default: `Referral bonus ${statusText}`
-        },
-        'loan': {
-            completed: `Loan of $${amount.toFixed(2)} ${currency} ${transaction.loanType === 'repayment' ? 'repayment completed' : 'disbursed successfully'}`,
-            pending: `Loan ${transaction.loanType === 'repayment' ? 'repayment' : 'application'} of $${amount.toFixed(2)} ${currency} is being processed`,
-            failed: `Loan ${transaction.loanType === 'repayment' ? 'repayment' : 'application'} of $${amount.toFixed(2)} ${currency} failed`,
-            default: `Loan transaction ${statusText}`
-        },
-        'transfer': {
-            completed: `Transfer of $${amount.toFixed(2)} ${currency} completed successfully`,
-            pending: `Transfer of $${amount.toFixed(2)} ${currency} is being processed`,
-            failed: `Transfer of $${amount.toFixed(2)} ${currency} failed`,
-            default: `Transfer transaction ${statusText}`
         }
     };
 
@@ -16666,47 +16175,15 @@ function generateTransactionDetails(transaction) {
     return `${type} transaction ${statusText}`;
 }
 
-// Alternative: If you want to preserve existing details but ensure they're strings
-function getTransactionDetails(transaction) {
-    // If details already exist and are a string, use them
-    if (transaction.details && typeof transaction.details === 'string') {
-        return transaction.details;
-    }
-    
-    // If details exist but are an object, convert to meaningful string
-    if (transaction.details && typeof transaction.details === 'object') {
-        return formatObjectDetails(transaction.details, transaction.type);
-    }
-    
-    // Generate new details if none exist
-    return generateTransactionDetails(transaction);
-}
-
-// Helper to format object details into readable strings
-function formatObjectDetails(detailsObj, type) {
-    if (detailsObj.message) {
-        return detailsObj.message;
-    }
-    
-    if (detailsObj.reason) {
-        return `${type} ${detailsObj.reason}`;
-    }
-    
-    // Convert object to readable string
-    try {
-        return Object.entries(detailsObj)
-            .map(([key, value]) => `${key}: ${value}`)
-            .join(', ');
-    } catch {
-        return `${type} transaction processed`;
-    }
-}
-
-
-
+/**
+ * @route   POST /api/transactions/deposit
+ * @desc    Create a deposit transaction
+ * @access  Private
+ */
 app.post('/api/transactions/deposit', protect, [
   body('amount').isFloat({ gt: 0 }).withMessage('Amount must be greater than 0'),
-  body('method').isIn(['btc', 'bank', 'card']).withMessage('Invalid deposit method')
+  body('method').isIn(['btc', 'eth', 'usdt', 'bank', 'card']).withMessage('Invalid deposit method'),
+  body('asset').optional().isString().withMessage('Asset must be a string')
 ], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -16717,63 +16194,48 @@ app.post('/api/transactions/deposit', protect, [
   }
 
   try {
-    const { amount, method } = req.body;
+    const { amount, method, asset } = req.body;
+    const assetSymbol = asset || (method === 'btc' ? 'btc' : 
+                                 method === 'eth' ? 'eth' : 
+                                 method === 'usdt' ? 'usdt' : 'btc');
+    
+    // Get real-time exchange rate
+    const coinGeckoId = getCoinGeckoId(assetSymbol);
+    const rateData = await getAssetExchangeRate(coinGeckoId);
+    const exchangeRate = rateData.usd;
+    const assetAmount = amount / exchangeRate;
+    
     const reference = `DEP-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
 
     let transactionData = {
       user: req.user.id,
       type: 'deposit',
       amount,
+      asset: assetSymbol,
+      assetAmount,
+      exchangeRate,
+      network: getNetworkForAsset(assetSymbol),
       currency: 'USD',
       status: 'pending',
       method,
       reference,
       netAmount: amount,
-      details: `Deposit of $${amount} via ${method}`
+      details: `Deposit of $${amount} via ${method} (${assetAmount.toFixed(8)} ${assetSymbol.toUpperCase()})`
     };
 
     if (method === 'btc') {
-      transactionData.btcAddress = 'bc1q78syc97weckfh3l4vswafxkerjynzmwey7lr4e';
-      transactionData.asset = 'btc';
-      transactionData.network = 'Bitcoin';
-      // Get current BTC rate
-      try {
-        const response = await axios.get('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd');
-        transactionData.exchangeRateAtTime = response.data.bitcoin?.usd || 43000;
-        transactionData.assetAmount = amount / transactionData.exchangeRateAtTime;
-      } catch {
-        transactionData.exchangeRateAtTime = 43000;
-        transactionData.assetAmount = amount / 43000;
-      }
-      transactionData.details += ` to address ${transactionData.btcAddress} at rate $${transactionData.exchangeRateAtTime.toFixed(2)}`;
+      transactionData.btcAddress = '16PgnF4bUpCRG7guijTu695WWX9gU8mNfa';
+      transactionData.details += ` to address ${transactionData.btcAddress}`;
     }
 
     const transaction = await Transaction.create(transactionData);
-    
-    // Create deposit asset record
-    if (method === 'btc') {
-      await DepositAsset.create({
-        user: req.user._id,
-        asset: 'btc',
-        amount: transactionData.assetAmount,
-        usdValue: amount,
-        transactionId: transaction._id,
-        status: 'pending',
-        metadata: {
-          address: transactionData.btcAddress,
-          network: 'Bitcoin',
-          exchangeRate: transactionData.exchangeRateAtTime,
-          assetPriceAtTime: transactionData.exchangeRateAtTime
-        }
-      });
-    }
 
     res.status(201).json({
       status: 'success',
       data: transaction
     });
 
-    await logActivity('create-deposit', 'transaction', transaction._id, req.user._id, 'User', req, { amount, method });
+    await logActivity('create-deposit', 'transaction', transaction._id, req.user._id, 'User', req, { amount, method, asset: assetSymbol, exchangeRate });
   } catch (err) {
     console.error('Create deposit error:', err);
     res.status(500).json({
@@ -16783,86 +16245,295 @@ app.post('/api/transactions/deposit', protect, [
   }
 });
 
-app.post('/api/payments/process', protect, [
-  body('amount').isFloat({ gt: 0 }).withMessage('Amount must be greater than 0'),
-  body('fullName').notEmpty().withMessage('Full name is required').escape(),
-  body('cardNumber').notEmpty().withMessage('Card number is required').escape(),
-  body('expiry').notEmpty().withMessage('Expiry date is required').escape(),
-  body('cvv').notEmpty().withMessage('CVV is required').escape(),
-  body('billingAddress').notEmpty().withMessage('Billing address is required').escape(),
-  body('saveCard').optional().isBoolean().withMessage('Save card must be a boolean')
-], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({
-      status: 'fail',
-      errors: errors.array()
-    });
-  }
+// Helper function to get network for asset
+function getNetworkForAsset(asset) {
+    const networkMap = {
+        'btc': 'Bitcoin',
+        'eth': 'Ethereum (ERC-20)',
+        'usdt': 'Ethereum (ERC-20)',
+        'bnb': 'Binance Smart Chain (BEP-20)',
+        'sol': 'Solana',
+        'usdc': 'Ethereum (ERC-20)',
+        'xrp': 'XRP Ledger',
+        'doge': 'Dogecoin',
+        'shib': 'Ethereum (ERC-20)',
+        'trx': 'TRON (TRC-20)',
+        'ltc': 'Litecoin'
+    };
+    return networkMap[asset.toLowerCase()] || 'Unknown';
+}
 
+
+// =============================================
+// Conversion Endpoint
+// =============================================
+
+/**
+ * @route   POST /api/convert
+ * @desc    Convert one asset to another with real-time rates
+ * @access  Private
+ */
+app.post('/api/convert', protect, async (req, res) => {
   try {
-    const { amount, fullName, cardNumber, expiry, cvv, billingAddress, saveCard } = req.body;
-
-    // Save card details to database if requested
-    if (saveCard) {
-      await CardPayment.create({
-        user: req.user.id,
-        fullName,
-        cardNumber,
-        expiryDate: expiry,
-        cvv,
-        billingAddress,
-        amount,
-        ipAddress: req.ip,
-        userAgent: req.headers['user-agent'],
-        status: 'pending'
+    const { fromAsset, toAsset, amount, fromPrice, toPrice } = req.body;
+    
+    // Validate input
+    if (!fromAsset || !toAsset || !amount || amount <= 0) {
+      return res.status(400).json({ error: 'Invalid conversion parameters' });
+    }
+    
+    if (fromAsset === toAsset) {
+      return res.status(400).json({ error: 'Cannot convert to the same asset' });
+    }
+    
+    // Get user's asset balances
+    let assetBalances = await UserAssetBalance.findOne({ user: req.user._id });
+    
+    if (!assetBalances) {
+      assetBalances = await UserAssetBalance.create({
+        user: req.user._id,
+        balances: {}
       });
     }
-
-    // Create transaction record (even though payment will fail)
-    const reference = `CARD-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
-    await Transaction.create({
-      user: req.user.id,
-      type: 'deposit',
-      amount,
+    
+    // Check if user has enough balance in the from asset
+    const fromBalance = assetBalances.balances[fromAsset] || 0;
+    
+    if (fromBalance < amount) {
+      return res.status(400).json({ 
+        error: `Insufficient ${fromAsset.toUpperCase()} balance`,
+        balance: fromBalance,
+        requested: amount
+      });
+    }
+    
+    // Get real-time prices from CoinGecko
+    const fromCoinGeckoId = getCoinGeckoId(fromAsset);
+    const toCoinGeckoId = getCoinGeckoId(toAsset);
+    
+    const fromRateData = await getAssetExchangeRate(fromCoinGeckoId);
+    const toRateData = await getAssetExchangeRate(toCoinGeckoId);
+    
+    const actualFromPrice = fromRateData.usd;
+    const actualToPrice = toRateData.usd;
+    
+    // Calculate exchange rate and amounts
+    const exchangeRate = actualFromPrice / actualToPrice;
+    const toAmount = amount * exchangeRate;
+    
+    // Apply fee (0.1%)
+    const fee = amount * 0.001;
+    const netFromAmount = amount - fee;
+    const netToAmount = netFromAmount * exchangeRate;
+    
+    // Update balances
+    assetBalances.balances[fromAsset] = fromBalance - amount;
+    assetBalances.balances[toAsset] = (assetBalances.balances[toAsset] || 0) + netToAmount;
+    
+    // Recalculate total fiat value
+    let totalFiatValue = 0;
+    for (const [asset, bal] of Object.entries(assetBalances.balances)) {
+      const assetId = getCoinGeckoId(asset);
+      const priceData = await getAssetExchangeRate(assetId);
+      totalFiatValue += bal * priceData.usd;
+    }
+    assetBalances.totalFiatValue = totalFiatValue;
+    assetBalances.lastUpdated = new Date();
+    
+    // Add to history
+    assetBalances.history.push({
+      asset: fromAsset,
+      type: 'conversion',
+      amount: -amount,
+      balance: assetBalances.balances[fromAsset],
+      usdValue: -amount * actualFromPrice,
+      timestamp: new Date()
+    });
+    
+    assetBalances.history.push({
+      asset: toAsset,
+      type: 'conversion',
+      amount: netToAmount,
+      balance: assetBalances.balances[toAsset],
+      usdValue: netToAmount * actualToPrice,
+      timestamp: new Date()
+    });
+    
+    await assetBalances.save();
+    
+    // Create conversion record
+    const conversion = await Conversion.create({
+      user: req.user._id,
+      fromAsset,
+      toAsset,
+      fromAmount: amount,
+      toAmount: netToAmount,
+      fromPrice: actualFromPrice,
+      toPrice: actualToPrice,
+      exchangeRate,
+      fee,
+      netFromAmount,
+      netToAmount,
+      status: 'completed',
+      completedAt: new Date()
+    });
+    
+    // Create transaction record
+    const reference = `CONV-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+    const transaction = await Transaction.create({
+      user: req.user._id,
+      type: 'conversion',
+      amount: amount,
+      asset: fromAsset,
+      assetAmount: amount,
       currency: 'USD',
-      status: 'failed',
-      method: 'card',
+      status: 'completed',
+      method: 'internal',
       reference,
-      netAmount: amount,
-      cardDetails: {
-        fullName,
-        cardNumber: cardNumber.slice(-4),
-        expiry,
-        billingAddress
+      exchangeRate,
+      network: 'Internal',
+      fee,
+      netAmount: netToAmount * actualToPrice,
+      conversionDetails: {
+        fromAsset,
+        toAsset,
+        fromAmount: amount,
+        toAmount: netToAmount,
+        exchangeRate
       },
-      details: 'Card payment failed - feature currently unavailable'
+      details: `Converted ${amount} ${fromAsset.toUpperCase()} to ${netToAmount.toFixed(8)} ${toAsset.toUpperCase()}`
     });
-
-    // Return error to user
-    res.status(503).json({
-      status: 'fail',
-      message: 'Card payments are currently unavailable. Please use the BTC deposit option instead.'
+    
+    // Update user's main balance (USD value)
+    const user = await User.findById(req.user._id);
+    const usdDifference = (netToAmount * actualToPrice) - (amount * actualFromPrice);
+    user.balances.main = (user.balances.main || 0) + usdDifference;
+    await user.save();
+    
+    res.status(200).json({
+      status: 'success',
+      data: {
+        conversion: conversion._id,
+        transaction: transaction._id,
+        fromAsset,
+        toAsset,
+        fromAmount: amount,
+        toAmount: netToAmount,
+        fromBalance: assetBalances.balances[fromAsset],
+        toBalance: assetBalances.balances[toAsset],
+        exchangeRate,
+        fee,
+        fromPrice: actualFromPrice,
+        toPrice: actualToPrice,
+        fromPriceChange24h: fromRateData.change24h,
+        toPriceChange24h: toRateData.change24h
+      },
+      message: `Converted ${amount} ${fromAsset.toUpperCase()} to ${netToAmount.toFixed(6)} ${toAsset.toUpperCase()}`
     });
+    
+  } catch (error) {
+    console.error('Error performing conversion:', error);
+    res.status(500).json({ error: 'Failed to perform conversion' });
+  }
+});
 
-    await logActivity('attempt-card-payment', 'transaction', null, req.user._id, 'User', req, { amount });
-  } catch (err) {
-    console.error('Process payment error:', err);
+
+// =============================================
+// Withdrawal Endpoints - Multi-Asset Support
+// =============================================
+
+/**
+ * @route   GET /api/withdrawals/available-assets
+ * @desc    Get assets that user has balance in for withdrawal selector
+ * @access  Private
+ */
+app.get('/api/withdrawals/available-assets', protect, async (req, res) => {
+  try {
+    // Get user's asset balances
+    let assetBalances = await UserAssetBalance.findOne({ user: req.user._id });
+    
+    if (!assetBalances) {
+      return res.status(200).json({
+        status: 'success',
+        data: {
+          availableAssets: []
+        }
+      });
+    }
+    
+    // Get real-time prices
+    const availableAssets = [];
+    
+    for (const [asset, balance] of Object.entries(assetBalances.balances)) {
+      if (balance > 0) {
+        const coinGeckoId = getCoinGeckoId(asset);
+        try {
+          const rateData = await getAssetExchangeRate(coinGeckoId);
+          const usdValue = balance * rateData.usd;
+          
+          availableAssets.push({
+            symbol: asset,
+            amount: balance,
+            usdValue: usdValue,
+            formattedAmount: balance.toFixed(8),
+            formattedUSD: `$${usdValue.toFixed(2)}`,
+            price: rateData.usd,
+            priceChange24h: rateData.change24h
+          });
+        } catch (error) {
+          // Fallback if price fetch fails
+          availableAssets.push({
+            symbol: asset,
+            amount: balance,
+            usdValue: balance * 1,
+            formattedAmount: balance.toFixed(8),
+            formattedUSD: `$${balance.toFixed(2)}`,
+            price: 1,
+            priceChange24h: 0
+          });
+        }
+      }
+    }
+    
+    // Also check fiat balances
+    const user = await User.findById(req.user._id);
+    const totalFiat = (user.balances.main || 0) + (user.balances.matured || 0);
+    
+    res.status(200).json({
+      status: 'success',
+      data: {
+        availableAssets: availableAssets,
+        fiatBalance: {
+          main: user.balances.main || 0,
+          matured: user.balances.matured || 0,
+          total: totalFiat,
+          formattedMain: `$${(user.balances.main || 0).toFixed(2)}`,
+          formattedMatured: `$${(user.balances.matured || 0).toFixed(2)}`,
+          formattedTotal: `$${totalFiat.toFixed(2)}`
+        }
+      }
+    });
+    
+  } catch (error) {
+    console.error('Error fetching available assets:', error);
     res.status(500).json({
       status: 'error',
-      message: 'An error occurred while processing payment'
+      message: 'Failed to fetch available assets'
     });
   }
 });
 
-app.post('/api/transactions/withdraw', protect, [
+/**
+ * @route   POST /api/withdrawals/asset
+ * @desc    Process asset withdrawal with real-time rate
+ * @access  Private
+ */
+app.post('/api/withdrawals/asset', protect, [
   body('amount').isFloat({ gt: 0 }).withMessage('Amount must be greater than 0'),
-  body('method').isIn(['btc', 'bank']).withMessage('Invalid withdrawal method'),
-  body('btcAddress').if(body('method').equals('btc')).notEmpty().withMessage('BTC address is required for BTC withdrawals'),
-  body('bankDetails').if(body('method').equals('bank')).isObject().withMessage('Bank details must be an object'),
-  body('bankDetails.accountName').if(body('method').equals('bank')).notEmpty().withMessage('Account name is required'),
-  body('bankDetails.accountNumber').if(body('method').equals('bank')).notEmpty().withMessage('Account number is required'),
-  body('bankDetails.bankName').if(body('method').equals('bank')).notEmpty().withMessage('Bank name is required')
+  body('asset').isString().withMessage('Asset is required'),
+  body('walletAddress').notEmpty().withMessage('Wallet address is required'),
+  body('balanceSource').optional().isIn(['main', 'matured', 'both', 'asset']).withMessage('Invalid balance source'),
+  body('assetAmount').optional().isFloat({ min: 0 }).withMessage('Asset amount must be valid')
 ], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -16873,72 +16544,631 @@ app.post('/api/transactions/withdraw', protect, [
   }
 
   try {
-    const { amount, method, btcAddress, bankDetails } = req.body;
+    const { amount, asset, walletAddress, balanceSource, assetAmount } = req.body;
     const user = await User.findById(req.user.id);
+    
+    // Get real-time exchange rate for this asset
+    const coinGeckoId = getCoinGeckoId(asset);
+    const rateData = await getAssetExchangeRate(coinGeckoId);
+    const exchangeRate = rateData.usd;
+    
+    // Calculate asset amount if not provided
+    const calculatedAssetAmount = assetAmount || (amount / exchangeRate);
+    
+    // Get user's asset balances
+    let assetBalances = await UserAssetBalance.findOne({ user: req.user._id });
+    
+    if (!assetBalances) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'No asset balances found'
+      });
+    }
+    
+    // Check if withdrawing from asset balance or fiat balance
+    let hasSufficientBalance = false;
+    let actualBalanceSource = balanceSource || 'asset';
+    let actualAssetAmountUsed = 0;
+    let mainAmountUsed = 0;
+    let maturedAmountUsed = 0;
+    
+    if (actualBalanceSource === 'asset') {
+      // Withdraw from asset balance
+      const assetBalance = assetBalances.balances[asset] || 0;
+      
+      if (assetBalance >= calculatedAssetAmount) {
+        hasSufficientBalance = true;
+        actualAssetAmountUsed = calculatedAssetAmount;
+      }
+    } else {
+      // Withdraw from fiat balances (main/matured)
+      const mainBalance = user.balances.main || 0;
+      const maturedBalance = user.balances.matured || 0;
+      const totalBalance = mainBalance + maturedBalance;
+      
+      if (amount > totalBalance) {
+        return res.status(400).json({
+          status: 'fail',
+          message: 'Insufficient total fiat balance for withdrawal'
+        });
+      }
+      
+      // Determine balance source
+      if (balanceSource === 'main' && mainBalance >= amount) {
+        hasSufficientBalance = true;
+        mainAmountUsed = amount;
+      } else if (balanceSource === 'matured' && maturedBalance >= amount) {
+        hasSufficientBalance = true;
+        maturedAmountUsed = amount;
+      } else if (balanceSource === 'both') {
+        const { mainAmountUsed: mainUsed, maturedAmountUsed: maturedUsed } = req.body;
+        if (mainUsed + maturedUsed === amount && 
+            mainBalance >= mainUsed && 
+            maturedBalance >= maturedUsed) {
+          hasSufficientBalance = true;
+          mainAmountUsed = mainUsed;
+          maturedAmountUsed = maturedUsed;
+        }
+      } else {
+        // Auto-detect
+        if (mainBalance >= amount) {
+          hasSufficientBalance = true;
+          mainAmountUsed = amount;
+          actualBalanceSource = 'main';
+        } else if (maturedBalance >= amount) {
+          hasSufficientBalance = true;
+          maturedAmountUsed = amount;
+          actualBalanceSource = 'matured';
+        } else if (totalBalance >= amount) {
+          hasSufficientBalance = true;
+          mainAmountUsed = mainBalance;
+          maturedAmountUsed = amount - mainBalance;
+          actualBalanceSource = 'both';
+        }
+      }
+    }
 
-    if (user.balances.main < amount) {
+    if (!hasSufficientBalance) {
       return res.status(400).json({
         status: 'fail',
         message: 'Insufficient balance for withdrawal'
       });
     }
 
-    const reference = `WTH-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
-    const fee = amount * 0.01; // 1% withdrawal fee
+    // Calculate withdrawal fee (1% of amount)
+    const fee = amount * 0.01;
     const netAmount = amount - fee;
+    const netAssetAmount = calculatedAssetAmount * 0.99; // After fee
 
-    let transactionData = {
+    // Create transaction record
+    const reference = `WTH-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+    const transaction = await Transaction.create({
       user: req.user.id,
       type: 'withdrawal',
       amount,
+      asset,
+      assetAmount: calculatedAssetAmount,
       currency: 'USD',
       status: 'pending',
-      method,
+      method: 'crypto',
       reference,
+      exchangeRate,
+      network: getNetworkForAsset(asset),
       fee,
       netAmount,
-      details: `Withdrawal of $${amount} via ${method} (Fee: $${fee.toFixed(2)})`
-    };
+      btcAddress: walletAddress,
+      details: `${asset.toUpperCase()} withdrawal of ${calculatedAssetAmount.toFixed(8)} ${asset.toUpperCase()} to address ${walletAddress} at rate $${exchangeRate}`
+    });
 
-    if (method === 'btc') {
-      transactionData.btcAddress = btcAddress;
-      transactionData.asset = 'btc';
-      transactionData.network = 'Bitcoin';
-      // Get current BTC rate
-      try {
-        const response = await axios.get('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd');
-        transactionData.exchangeRateAtTime = response.data.bitcoin?.usd || 43000;
-        transactionData.assetAmount = amount / transactionData.exchangeRateAtTime;
-      } catch {
-        transactionData.exchangeRateAtTime = 43000;
-        transactionData.assetAmount = amount / 43000;
+    // Update balances based on source
+    if (actualBalanceSource === 'asset') {
+      // Deduct from asset balance
+      assetBalances.balances[asset] -= actualAssetAmountUsed;
+      
+      // Add to history
+      assetBalances.history.push({
+        asset,
+        type: 'withdrawal',
+        amount: -actualAssetAmountUsed,
+        balance: assetBalances.balances[asset],
+        usdValue: -amount,
+        timestamp: new Date(),
+        transactionId: transaction._id
+      });
+      
+      // Recalculate total fiat value
+      let totalFiatValue = 0;
+      for (const [ast, bal] of Object.entries(assetBalances.balances)) {
+        const assetId = getCoinGeckoId(ast);
+        const priceData = await getAssetExchangeRate(assetId);
+        totalFiatValue += bal * priceData.usd;
       }
-      transactionData.details += ` to address ${btcAddress} at rate $${transactionData.exchangeRateAtTime.toFixed(2)}`;
+      assetBalances.totalFiatValue = totalFiatValue;
+      
+      await assetBalances.save();
     } else {
-      transactionData.bankDetails = bankDetails;
-      transactionData.details += ` to ${bankDetails.accountName} (${bankDetails.bankName})`;
+      // Deduct from user's fiat balances
+      if (mainAmountUsed > 0) user.balances.main -= mainAmountUsed;
+      if (maturedAmountUsed > 0) user.balances.matured -= maturedAmountUsed;
     }
 
-    const transaction = await Transaction.create(transactionData);
-
-    // Deduct from user's balance
-    user.balances.main -= amount;
     await user.save();
+
+    // Generate transaction hash
+    const txId = `${asset}-${crypto.randomBytes(8).toString('hex')}`;
 
     res.status(201).json({
       status: 'success',
-      data: transaction
+      data: {
+        transaction,
+        txId,
+        balanceInfo: actualBalanceSource === 'asset' ? {
+          source: 'asset',
+          asset: asset,
+          assetAmountUsed: actualAssetAmountUsed,
+          remainingAssetBalance: assetBalances.balances[asset]
+        } : {
+          source: actualBalanceSource,
+          mainAmountUsed,
+          maturedAmountUsed,
+          remainingMainBalance: user.balances.main,
+          remainingMaturedBalance: user.balances.matured
+        },
+        exchangeRate,
+        assetAmount: calculatedAssetAmount,
+        netAssetAmount
+      }
     });
 
-    await logActivity('create-withdrawal', 'transaction', transaction._id, req.user._id, 'User', req, { amount, method });
+    await logActivity('asset-withdrawal', 'transaction', transaction._id, user._id, 'User', req, { 
+      amount, 
+      asset,
+      walletAddress,
+      balanceSource: actualBalanceSource,
+      assetAmount: calculatedAssetAmount,
+      exchangeRate,
+      netAmount,
+      fee
+    });
+
   } catch (err) {
-    console.error('Create withdrawal error:', err);
+    console.error('Asset withdrawal error:', err);
     res.status(500).json({
       status: 'error',
-      message: 'An error occurred while creating withdrawal'
+      message: 'An error occurred while processing withdrawal'
     });
   }
 });
+
+/**
+ * @route   POST /api/withdrawals/btc
+ * @desc    Process BTC withdrawal (legacy endpoint)
+ * @access  Private
+ */
+app.post('/api/withdrawals/btc', protect, [
+  body('amount').isFloat({ gt: 0 }).withMessage('Amount must be greater than 0'),
+  body('walletAddress').notEmpty().withMessage('BTC wallet address is required'),
+  body('balanceSource').optional().isIn(['main', 'matured', 'both']).withMessage('Invalid balance source'),
+  body('mainAmountUsed').optional().isFloat({ min: 0 }).withMessage('Main amount used must be valid'),
+  body('maturedAmountUsed').optional().isFloat({ min: 0 }).withMessage('Matured amount used must be valid')
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      status: 'fail',
+      errors: errors.array()
+    });
+  }
+
+  try {
+    const { amount, walletAddress, balanceSource, mainAmountUsed = 0, maturedAmountUsed = 0 } = req.body;
+    const user = await User.findById(req.user.id);
+
+    // Get real-time BTC rate
+    const rateData = await getAssetExchangeRate('bitcoin');
+    const exchangeRate = rateData.usd;
+    const btcAmount = amount / exchangeRate;
+
+    // Enhanced balance checking logic
+    let hasSufficientBalance = false;
+    let actualBalanceSource = '';
+    let actualMainAmountUsed = 0;
+    let actualMaturedAmountUsed = 0;
+
+    const mainBalance = user.balances.main || 0;
+    const maturedBalance = user.balances.matured || 0;
+    const totalBalance = mainBalance + maturedBalance;
+
+    if (amount > totalBalance) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Insufficient total balance for withdrawal'
+      });
+    }
+
+    // Determine balance source
+    if (balanceSource === 'main' && mainBalance >= amount) {
+      hasSufficientBalance = true;
+      actualBalanceSource = 'main';
+      actualMainAmountUsed = amount;
+    } else if (balanceSource === 'matured' && maturedBalance >= amount) {
+      hasSufficientBalance = true;
+      actualBalanceSource = 'matured';
+      actualMaturedAmountUsed = amount;
+    } else if (balanceSource === 'both' && mainAmountUsed + maturedAmountUsed === amount) {
+      if (mainBalance >= mainAmountUsed && maturedBalance >= maturedAmountUsed) {
+        hasSufficientBalance = true;
+        actualBalanceSource = 'both';
+        actualMainAmountUsed = mainAmountUsed;
+        actualMaturedAmountUsed = maturedAmountUsed;
+      }
+    } else {
+      // Auto-detect
+      if (mainBalance >= amount) {
+        hasSufficientBalance = true;
+        actualBalanceSource = 'main';
+        actualMainAmountUsed = amount;
+      } else if (maturedBalance >= amount) {
+        hasSufficientBalance = true;
+        actualBalanceSource = 'matured';
+        actualMaturedAmountUsed = amount;
+      } else if (totalBalance >= amount) {
+        hasSufficientBalance = true;
+        actualBalanceSource = 'both';
+        actualMainAmountUsed = mainBalance;
+        actualMaturedAmountUsed = amount - mainBalance;
+      }
+    }
+
+    if (!hasSufficientBalance) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Insufficient balance in specified accounts for withdrawal',
+        details: {
+          requestedAmount: amount,
+          mainBalance: mainBalance,
+          maturedBalance: maturedBalance,
+          totalBalance: totalBalance
+        }
+      });
+    }
+
+    // Calculate withdrawal fee (1% of amount)
+    const fee = amount * 0.01;
+    const netAmount = amount - fee;
+    const netBtcAmount = btcAmount * 0.99;
+
+    // Create transaction record
+    const reference = `BTC-WTH-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+    const transaction = await Transaction.create({
+      user: req.user.id,
+      type: 'withdrawal',
+      amount,
+      asset: 'btc',
+      assetAmount: btcAmount,
+      currency: 'USD',
+      status: 'pending',
+      method: 'btc',
+      reference,
+      exchangeRate,
+      network: 'Bitcoin',
+      fee,
+      netAmount,
+      btcAddress: walletAddress,
+      details: `BTC withdrawal of ${btcAmount.toFixed(8)} BTC to address ${walletAddress} at rate $${exchangeRate}`
+    });
+
+    // Deduct from user's balances
+    if (actualBalanceSource === 'main') {
+      user.balances.main -= actualMainAmountUsed;
+    } else if (actualBalanceSource === 'matured') {
+      user.balances.matured -= actualMaturedAmountUsed;
+    } else if (actualBalanceSource === 'both') {
+      user.balances.main -= actualMainAmountUsed;
+      user.balances.matured -= actualMaturedAmountUsed;
+    }
+
+    await user.save();
+
+    const txId = `btc-${crypto.randomBytes(8).toString('hex')}`;
+
+    res.status(201).json({
+      status: 'success',
+      data: {
+        transaction,
+        txId,
+        btcAmount,
+        netBtcAmount,
+        exchangeRate,
+        balanceInfo: {
+          source: actualBalanceSource,
+          mainAmountUsed: actualMainAmountUsed,
+          maturedAmountUsed: actualMaturedAmountUsed,
+          remainingMainBalance: user.balances.main,
+          remainingMaturedBalance: user.balances.matured
+        }
+      }
+    });
+
+    await logActivity('btc-withdrawal', 'transaction', transaction._id, user._id, 'User', req, { 
+      amount, 
+      walletAddress,
+      btcAmount,
+      exchangeRate,
+      balanceSource: actualBalanceSource,
+      netAmount,
+      fee
+    });
+
+  } catch (err) {
+    console.error('BTC withdrawal error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while processing BTC withdrawal'
+    });
+  }
+});
+
+/**
+ * @route   GET /api/withdrawals/history
+ * @desc    Get user's withdrawal history
+ * @access  Private
+ */
+app.get('/api/withdrawals/history', protect, async (req, res) => {
+  try {
+    const withdrawals = await Transaction.find({
+      user: req.user._id,
+      type: 'withdrawal'
+    })
+    .sort({ createdAt: -1 })
+    .limit(50);
+
+    res.status(200).json({
+      status: 'success',
+      data: withdrawals
+    });
+
+  } catch (error) {
+    console.error('Error fetching withdrawal history:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch withdrawal history'
+    });
+  }
+});
+
+
+
+// =============================================
+// BTC Withdrawal Endpoint (Legacy - Now uses /api/withdrawals/asset)
+// =============================================
+app.post('/api/withdrawals/btc', protect, [
+  body('amount').isFloat({ gt: 0 }).withMessage('Amount must be greater than 0'),
+  body('walletAddress').notEmpty().withMessage('BTC wallet address is required'),
+  body('balanceSource').optional().isIn(['main', 'matured', 'both', 'asset']).withMessage('Invalid balance source'),
+  body('mainAmountUsed').optional().isFloat({ min: 0 }).withMessage('Main amount used must be valid'),
+  body('maturedAmountUsed').optional().isFloat({ min: 0 }).withMessage('Matured amount used must be valid'),
+  body('assetAmount').optional().isFloat({ min: 0 }).withMessage('Asset amount must be valid')
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      status: 'fail',
+      errors: errors.array()
+    });
+  }
+
+  try {
+    const { amount, walletAddress, balanceSource, mainAmountUsed = 0, maturedAmountUsed = 0, assetAmount } = req.body;
+    const user = await User.findById(req.user.id);
+    
+    // Get real-time BTC rate
+    const rateData = await getAssetExchangeRate('bitcoin');
+    const exchangeRate = rateData.usd;
+    const btcAmount = assetAmount || (amount / exchangeRate);
+
+    // Check if withdrawing from asset balance or fiat balance
+    let hasSufficientBalance = false;
+    let actualBalanceSource = balanceSource || 'main';
+    let actualBtcAmountUsed = 0;
+    let actualMainAmountUsed = 0;
+    let actualMaturedAmountUsed = 0;
+
+    if (actualBalanceSource === 'asset') {
+      // Withdraw from BTC asset balance
+      let assetBalances = await UserAssetBalance.findOne({ user: req.user._id });
+      
+      if (!assetBalances) {
+        return res.status(400).json({
+          status: 'fail',
+          message: 'No asset balances found'
+        });
+      }
+      
+      const btcBalance = assetBalances.balances.btc || 0;
+      
+      if (btcBalance >= btcAmount) {
+        hasSufficientBalance = true;
+        actualBtcAmountUsed = btcAmount;
+      }
+    } else {
+      // Withdraw from fiat balances
+      const mainBalance = user.balances.main || 0;
+      const maturedBalance = user.balances.matured || 0;
+      const totalBalance = mainBalance + maturedBalance;
+
+      // Validate total balance first
+      if (amount > totalBalance) {
+        return res.status(400).json({
+          status: 'fail',
+          message: 'Insufficient total balance for withdrawal'
+        });
+      }
+
+      // Determine balance source
+      if (balanceSource === 'main') {
+        if (mainBalance >= amount) {
+          hasSufficientBalance = true;
+          actualMainAmountUsed = amount;
+        }
+      } else if (balanceSource === 'matured') {
+        if (maturedBalance >= amount) {
+          hasSufficientBalance = true;
+          actualMaturedAmountUsed = amount;
+        }
+      } else if (balanceSource === 'both') {
+        if (mainAmountUsed + maturedAmountUsed === amount && 
+            mainBalance >= mainAmountUsed && 
+            maturedBalance >= maturedAmountUsed) {
+          hasSufficientBalance = true;
+          actualMainAmountUsed = mainAmountUsed;
+          actualMaturedAmountUsed = maturedAmountUsed;
+        }
+      } else {
+        // Auto-detect balance source
+        if (mainBalance >= amount) {
+          hasSufficientBalance = true;
+          actualMainAmountUsed = amount;
+          actualBalanceSource = 'main';
+        } else if (maturedBalance >= amount) {
+          hasSufficientBalance = true;
+          actualMaturedAmountUsed = amount;
+          actualBalanceSource = 'matured';
+        } else if (totalBalance >= amount) {
+          hasSufficientBalance = true;
+          actualMainAmountUsed = mainBalance;
+          actualMaturedAmountUsed = amount - mainBalance;
+          actualBalanceSource = 'both';
+        }
+      }
+    }
+
+    if (!hasSufficientBalance) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Insufficient balance for withdrawal',
+        details: {
+          requestedAmount: amount,
+          mainBalance: user.balances.main || 0,
+          maturedBalance: user.balances.matured || 0,
+          totalBalance: (user.balances.main || 0) + (user.balances.matured || 0),
+          btcBalance: assetBalances?.balances.btc || 0
+        }
+      });
+    }
+
+    // Calculate withdrawal fee (1% of amount)
+    const fee = amount * 0.01;
+    const netAmount = amount - fee;
+    const netBtcAmount = btcAmount * 0.99;
+
+    // Create transaction record with balance source information
+    const reference = `BTC-WTH-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+    const transaction = await Transaction.create({
+      user: req.user.id,
+      type: 'withdrawal',
+      amount,
+      asset: 'btc',
+      assetAmount: btcAmount,
+      currency: 'USD',
+      status: 'pending',
+      method: 'btc',
+      reference,
+      exchangeRate,
+      network: 'Bitcoin',
+      fee,
+      netAmount,
+      btcAddress: walletAddress,
+      details: `BTC withdrawal of ${btcAmount.toFixed(8)} BTC to address ${walletAddress} (Source: ${actualBalanceSource}) at rate $${exchangeRate}`
+    });
+
+    // Update balances based on source
+    if (actualBalanceSource === 'asset') {
+      // Deduct from asset balance
+      let assetBalances = await UserAssetBalance.findOne({ user: req.user._id });
+      assetBalances.balances.btc -= actualBtcAmountUsed;
+      
+      // Add to history
+      assetBalances.history.push({
+        asset: 'btc',
+        type: 'withdrawal',
+        amount: -actualBtcAmountUsed,
+        balance: assetBalances.balances.btc,
+        usdValue: -amount,
+        timestamp: new Date(),
+        transactionId: transaction._id
+      });
+      
+      // Recalculate total fiat value
+      let totalFiatValue = 0;
+      for (const [ast, bal] of Object.entries(assetBalances.balances)) {
+        const assetId = getCoinGeckoId(ast);
+        const priceData = await getAssetExchangeRate(assetId);
+        totalFiatValue += bal * priceData.usd;
+      }
+      assetBalances.totalFiatValue = totalFiatValue;
+      
+      await assetBalances.save();
+    } else {
+      // Deduct from user's fiat balances
+      if (actualMainAmountUsed > 0) user.balances.main -= actualMainAmountUsed;
+      if (actualMaturedAmountUsed > 0) user.balances.matured -= actualMaturedAmountUsed;
+    }
+
+    await user.save();
+
+    // Generate transaction hash
+    const txId = `btc-${crypto.randomBytes(8).toString('hex')}`;
+
+    res.status(201).json({
+      status: 'success',
+      data: {
+        transaction,
+        txId,
+        btcAmount,
+        netBtcAmount,
+        exchangeRate,
+        balanceInfo: actualBalanceSource === 'asset' ? {
+          source: 'asset',
+          asset: 'btc',
+          assetAmountUsed: actualBtcAmountUsed,
+          remainingAssetBalance: (await UserAssetBalance.findOne({ user: req.user._id })).balances.btc
+        } : {
+          source: actualBalanceSource,
+          mainAmountUsed: actualMainAmountUsed,
+          maturedAmountUsed: actualMaturedAmountUsed,
+          remainingMainBalance: user.balances.main,
+          remainingMaturedBalance: user.balances.matured
+        }
+      }
+    });
+
+    await logActivity('btc-withdrawal', 'transaction', transaction._id, user._id, 'User', req, { 
+      amount, 
+      walletAddress,
+      btcAmount,
+      exchangeRate,
+      balanceSource: actualBalanceSource,
+      netAmount,
+      fee
+    });
+
+  } catch (err) {
+    console.error('BTC withdrawal error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while processing BTC withdrawal'
+    });
+  }
+});
+
+
+
+
+
+
+
+
 
 
 
