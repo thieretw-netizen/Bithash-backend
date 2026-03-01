@@ -16092,7 +16092,242 @@ app.post('/api/deposits/request', protect, async (req, res) => {
     });
   }
 });
+// =============================================
+// MISSING ENDPOINTS TO ADD TO server.js
+// =============================================
 
+// 1. Get user's deposit asset preference
+app.get('/api/users/deposit-asset', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    
+    // Check if user has a default deposit asset from preferences
+    const preference = await UserPreference.findOne({ user: userId });
+    
+    res.status(200).json({
+      status: 'success',
+      data: {
+        asset: preference?.displayAsset || 'btc'
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching deposit asset:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch deposit asset'
+    });
+  }
+});
+
+// 2. Get user's asset balances
+app.get('/api/users/asset-balances', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    
+    let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
+    
+    if (!userAssetBalance) {
+      userAssetBalance = {
+        btc: 0,
+        eth: 0,
+        usdt: 0,
+        bnb: 0,
+        sol: 0,
+        usdc: 0,
+        xrp: 0,
+        doge: 0,
+        ada: 0,
+        shib: 0
+      };
+    } else {
+      userAssetBalance = userAssetBalance.balances;
+    }
+    
+    res.status(200).json({
+      status: 'success',
+      data: userAssetBalance
+    });
+  } catch (error) {
+    console.error('Error fetching asset balances:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch asset balances'
+    });
+  }
+});
+
+// 3. Get assets available for withdrawal (assets with balance > 0)
+app.get('/api/withdrawals/available-assets', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    
+    const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
+    
+    const availableAssets = [];
+    
+    if (userAssetBalance && userAssetBalance.balances) {
+      // Get current prices for USD value calculation
+      const assetIds = [];
+      const assetSymbolMap = {};
+      
+      Object.keys(userAssetBalance.balances).forEach(symbol => {
+        if (userAssetBalance.balances[symbol] > 0) {
+          // Map symbol to CoinGecko ID
+          const assetMap = {
+            'btc': 'bitcoin',
+            'eth': 'ethereum',
+            'usdt': 'tether',
+            'bnb': 'binancecoin',
+            'sol': 'solana',
+            'usdc': 'usd-coin',
+            'xrp': 'xrp',
+            'doge': 'dogecoin',
+            'ada': 'cardano',
+            'shib': 'shiba-inu',
+            'avax': 'avalanche-2',
+            'dot': 'polkadot',
+            'trx': 'tron',
+            'link': 'chainlink',
+            'matic': 'polygon',
+            'wbtc': 'wrapped-bitcoin',
+            'ltc': 'litecoin',
+            'near': 'near',
+            'uni': 'uniswap',
+            'bch': 'bitcoin-cash',
+            'xlm': 'stellar',
+            'atom': 'cosmos',
+            'xmr': 'monero',
+            'flow': 'flow',
+            'vet': 'vechain',
+            'fil': 'filecoin',
+            'theta': 'theta-token',
+            'hbar': 'hedera-hashgraph',
+            'ftm': 'fantom',
+            'xtz': 'tezos'
+          };
+          
+          const assetId = assetMap[symbol];
+          if (assetId) {
+            assetIds.push(assetId);
+            assetSymbolMap[assetId] = symbol;
+          }
+        }
+      });
+      
+      // Fetch current prices
+      let prices = {};
+      if (assetIds.length > 0) {
+        try {
+          const response = await axios.get(
+            `https://api.coingecko.com/api/v3/simple/price?ids=${assetIds.join(',')}&vs_currencies=usd`
+          );
+          prices = response.data;
+        } catch (priceError) {
+          console.warn('Could not fetch prices:', priceError);
+        }
+      }
+      
+      // Build available assets list
+      Object.keys(userAssetBalance.balances).forEach(symbol => {
+        const amount = userAssetBalance.balances[symbol];
+        if (amount > 0) {
+          const assetMap = {
+            'btc': 'bitcoin',
+            'eth': 'ethereum',
+            'usdt': 'tether',
+            'bnb': 'binancecoin',
+            'sol': 'solana',
+            'usdc': 'usd-coin',
+            'xrp': 'xrp',
+            'doge': 'dogecoin',
+            'ada': 'cardano',
+            'shib': 'shiba-inu',
+            'avax': 'avalanche-2',
+            'dot': 'polkadot',
+            'trx': 'tron',
+            'link': 'chainlink',
+            'matic': 'polygon',
+            'wbtc': 'wrapped-bitcoin',
+            'ltc': 'litecoin',
+            'near': 'near',
+            'uni': 'uniswap',
+            'bch': 'bitcoin-cash',
+            'xlm': 'stellar',
+            'atom': 'cosmos',
+            'xmr': 'monero',
+            'flow': 'flow',
+            'vet': 'vechain',
+            'fil': 'filecoin',
+            'theta': 'theta-token',
+            'hbar': 'hedera-hashgraph',
+            'ftm': 'fantom',
+            'xtz': 'tezos'
+          };
+          
+          const assetId = assetMap[symbol];
+          const price = prices[assetId]?.usd || 1;
+          const usdValue = amount * price;
+          
+          availableAssets.push({
+            symbol: symbol,
+            amount: amount,
+            usdValue: usdValue,
+            price: price
+          });
+        }
+      });
+    }
+    
+    res.status(200).json({
+      status: 'success',
+      data: {
+        availableAssets: availableAssets
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching available assets:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch available assets'
+    });
+  }
+});
+
+// 4. Get all transactions
+app.get('/api/transactions', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const skip = (page - 1) * limit;
+    
+    const transactions = await Transaction.find({ user: userId })
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+    
+    const total = await Transaction.countDocuments({ user: userId });
+    
+    res.status(200).json({
+      status: 'success',
+      data: {
+        transactions,
+        pagination: {
+          page,
+          limit,
+          total,
+          pages: Math.ceil(total / limit)
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching transactions:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch transactions'
+    });
+  }
+});
 
 
 
