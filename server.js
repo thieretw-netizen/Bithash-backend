@@ -15451,6 +15451,11 @@ setInterval(async () => {
 
 
 
+
+
+
+
+
 // =============================================
 // Buy Endpoint - Only allows using matured balance
 // =============================================
@@ -15504,9 +15509,8 @@ app.post('/api/buy', protect, async (req, res) => {
       });
     }
 
-    // Update user balances - deduct from matured, add to main (since buying converts to asset)
+    // Update user balances - deduct from matured
     user.balances.matured -= amountUSD;
-    // The USD is now converted to asset, so we don't add to main balance
     await user.save();
 
     // Update asset balance
@@ -15523,9 +15527,6 @@ app.post('/api/buy', protect, async (req, res) => {
       transactionId: null // Will be updated after transaction creation
     };
     userAssetBalance.purchaseHistory.push(purchaseRecord);
-    
-    // Update fiat total based on current prices (will be recalculated by a separate function)
-    // We'll let the get endpoint calculate the fiat total dynamically
     
     await userAssetBalance.save();
 
@@ -15701,7 +15702,7 @@ app.post('/api/sell', protect, async (req, res) => {
     userAssetBalance.balances[asset] = currentAssetBalance - assetAmount;
 
     // Add to sell history
-    userAssetBalance.sellHistory.push({
+    const sellRecord = {
       asset,
       amount: assetAmount,
       sellPrice: price,
@@ -15710,7 +15711,8 @@ app.post('/api/sell', protect, async (req, res) => {
       profitLoss: totalProfitLoss,
       profitLossPercentage: profitLossPercentage,
       transactionId: null // Will be updated after transaction creation
-    });
+    };
+    userAssetBalance.sellHistory.push(sellRecord);
 
     await userAssetBalance.save();
 
@@ -15900,11 +15902,20 @@ app.get('/api/users/asset-balances', protect, async (req, res) => {
       }
     }
 
+    // Format balances with proper structure expected by frontend
+    const formattedBalances = {};
+    for (const [asset, amount] of Object.entries(userAssetBalance.balances)) {
+      formattedBalances[asset] = {
+        amount: amount,
+        usdValue: amount * (prices[asset] || 0)
+      };
+    }
+
     // Return in the format expected by frontend
     res.status(200).json({
       status: 'success',
       data: {
-        balances: userAssetBalance.balances,
+        balances: formattedBalances,
         fiatTotal: fiatTotal,
         purchaseHistory: userAssetBalance.purchaseHistory,
         sellHistory: userAssetBalance.sellHistory,
@@ -15917,6 +15928,502 @@ app.get('/api/users/asset-balances', protect, async (req, res) => {
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch asset balances'
+    });
+  }
+});
+
+// =============================================
+// Get User's Deposit Asset (Default Asset)
+// =============================================
+app.get('/api/users/deposit-asset', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    
+    // Check user's preferences or deposit history to determine default asset
+    let preferences = await UserPreference.findOne({ user: userId });
+    let defaultAsset = 'btc';
+    
+    if (preferences && preferences.displayAsset) {
+      defaultAsset = preferences.displayAsset;
+    } else {
+      // Check most recent deposit to determine default
+      const recentDeposit = await Transaction.findOne({ 
+        user: userId, 
+        type: 'deposit',
+        status: 'completed'
+      }).sort({ createdAt: -1 });
+      
+      if (recentDeposit && recentDeposit.asset) {
+        defaultAsset = recentDeposit.asset;
+      }
+    }
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        asset: defaultAsset
+      }
+    });
+
+  } catch (error) {
+    console.error('Error fetching deposit asset:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch deposit asset'
+    });
+  }
+});
+
+// =============================================
+// Get Available Assets for Withdrawal
+// =============================================
+app.get('/api/withdrawals/available-assets', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    // Get user's asset balances
+    const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
+    
+    let availableAssets = [];
+    
+    if (userAssetBalance && userAssetBalance.balances) {
+      // Filter assets with balance > 0
+      availableAssets = Object.entries(userAssetBalance.balances)
+        .filter(([asset, amount]) => amount > 0)
+        .map(([asset, amount]) => ({
+          asset: asset,
+          symbol: asset.toUpperCase(),
+          balance: amount,
+          name: getAssetName(asset)
+        }));
+    }
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        availableAssets: availableAssets
+      }
+    });
+
+  } catch (error) {
+    console.error('Error fetching available assets:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch available assets'
+    });
+  }
+});
+
+// Helper function to get asset name
+function getAssetName(asset) {
+  const assetNames = {
+    'btc': 'Bitcoin',
+    'eth': 'Ethereum',
+    'usdt': 'Tether',
+    'bnb': 'BNB',
+    'sol': 'Solana',
+    'usdc': 'USDC',
+    'xrp': 'XRP',
+    'doge': 'Dogecoin',
+    'ada': 'Cardano',
+    'shib': 'Shiba Inu',
+    'avax': 'Avalanche',
+    'dot': 'Polkadot',
+    'trx': 'TRON',
+    'link': 'Chainlink',
+    'matic': 'Polygon',
+    'wbtc': 'Wrapped Bitcoin',
+    'ltc': 'Litecoin',
+    'near': 'NEAR Protocol',
+    'uni': 'Uniswap',
+    'bch': 'Bitcoin Cash',
+    'xlm': 'Stellar',
+    'atom': 'Cosmos',
+    'xmr': 'Monero',
+    'flow': 'Flow',
+    'vet': 'VeChain',
+    'fil': 'Filecoin',
+    'theta': 'Theta Network',
+    'hbar': 'Hedera',
+    'ftm': 'Fantom',
+    'xtz': 'Tezos'
+  };
+  return assetNames[asset] || asset.toUpperCase();
+}
+
+// =============================================
+// Get Transactions by Type (buy,sell)
+// =============================================
+app.get('/api/transactions', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { type } = req.query;
+
+    let query = { user: userId };
+    
+    // Handle type filtering
+    if (type) {
+      const types = type.split(',');
+      if (types.length > 0) {
+        query.type = { $in: types };
+      }
+    }
+
+    // Get transactions
+    const transactions = await Transaction.find(query)
+      .sort({ createdAt: -1 });
+
+    // Map asset symbols to CoinGecko IDs for price fetching
+    const assetToId = {
+      'btc': 'bitcoin',
+      'eth': 'ethereum',
+      'usdt': 'tether',
+      'bnb': 'binancecoin',
+      'sol': 'solana',
+      'usdc': 'usd-coin',
+      'xrp': 'xrp',
+      'doge': 'dogecoin',
+      'ada': 'cardano',
+      'shib': 'shiba-inu',
+      'avax': 'avalanche-2',
+      'dot': 'polkadot',
+      'trx': 'tron',
+      'link': 'chainlink',
+      'matic': 'matic-network',
+      'wbtc': 'wrapped-bitcoin',
+      'ltc': 'litecoin',
+      'near': 'near',
+      'uni': 'uniswap',
+      'bch': 'bitcoin-cash',
+      'xlm': 'stellar',
+      'atom': 'cosmos',
+      'xmr': 'monero',
+      'flow': 'flow',
+      'vet': 'vechain',
+      'fil': 'filecoin',
+      'theta': 'theta-token',
+      'hbar': 'hedera-hashgraph',
+      'ftm': 'fantom',
+      'xtz': 'tezos'
+    };
+
+    // Get unique assets from transactions
+    const assetsInTransactions = new Set();
+    transactions.forEach(t => {
+      if (t.asset) assetsInTransactions.add(t.asset);
+      if (t.type === 'buy' || t.type === 'sell') {
+        if (t.tradeDetails?.asset) assetsInTransactions.add(t.tradeDetails.asset);
+      }
+    });
+
+    const assets = Array.from(assetsInTransactions);
+    let currentPrices = {};
+
+    if (assets.length > 0) {
+      try {
+        const ids = assets.map(a => assetToId[a] || a).join(',');
+        const response = await axios.get(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`, {
+          timeout: 5000
+        });
+        
+        if (response.data) {
+          for (const asset of assets) {
+            const coinGeckoId = assetToId[asset] || asset;
+            currentPrices[asset] = response.data[coinGeckoId]?.usd || 0;
+          }
+        }
+      } catch (error) {
+        console.warn('Failed to fetch current prices:', error);
+      }
+    }
+
+    // Format transactions for frontend
+    const formattedTransactions = transactions.map(t => {
+      let exchangeRate = 1.00;
+      let assetForRate = t.asset || 'usdt';
+
+      // Get the correct exchange rate for this specific asset
+      if (assetForRate.toLowerCase() === 'usdt' || assetForRate.toLowerCase() === 'usdc') {
+        exchangeRate = 1.00;
+      } else {
+        exchangeRate = currentPrices[assetForRate] || t.exchangeRateAtTime || 1.00;
+      }
+
+      // Base transaction object
+      const transactionObj = {
+        id: t._id,
+        type: t.type,
+        amount: t.amount,
+        asset: t.asset,
+        assetAmount: t.assetAmount,
+        price: t.tradeDetails?.price || t.exchangeRateAtTime,
+        status: t.status,
+        date: t.createdAt,
+        reference: t.reference,
+        exchangeRate: exchangeRate,
+        method: t.method,
+        network: t.network || getDefaultNetwork(t.asset)
+      };
+
+      // Add buy-specific details
+      if (t.type === 'buy' && t.tradeDetails) {
+        transactionObj.buyDetails = {
+          price: t.tradeDetails.price,
+          asset: t.tradeDetails.asset,
+          assetAmount: t.tradeDetails.assetAmount,
+          amountUSD: t.tradeDetails.amount
+        };
+      }
+
+      // Add sell-specific details
+      if (t.type === 'sell' && t.tradeDetails) {
+        transactionObj.sellDetails = {
+          price: t.tradeDetails.price,
+          asset: t.tradeDetails.asset,
+          assetAmount: t.tradeDetails.assetAmount,
+          profitLoss: t.tradeDetails.profitLoss,
+          profitLossPercentage: t.tradeDetails.profitLossPercentage,
+          buyingPrice: t.tradeDetails.purchasePrice
+        };
+        
+        // Add profit/loss to main object for frontend
+        transactionObj.profitLoss = t.tradeDetails.profitLoss;
+        transactionObj.profitLossPercentage = t.tradeDetails.profitLossPercentage;
+      }
+
+      // Add deposit details
+      if (t.type === 'deposit' && t.details) {
+        transactionObj.depositDetails = {
+          address: t.details.address,
+          network: t.details.network || getDefaultNetwork(t.asset)
+        };
+      }
+
+      // Add withdrawal details
+      if (t.type === 'withdrawal' && t.details) {
+        transactionObj.withdrawalDetails = {
+          address: t.details.address,
+          network: t.details.network || getDefaultNetwork(t.asset)
+        };
+      }
+
+      return transactionObj;
+    });
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        transactions: formattedTransactions
+      }
+    });
+
+  } catch (error) {
+    console.error('Error fetching transactions:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch transactions'
+    });
+  }
+});
+
+// Helper function to get default network for asset
+function getDefaultNetwork(asset) {
+  const assetNetworks = {
+    'btc': 'Bitcoin',
+    'eth': 'Ethereum',
+    'usdt': 'Tron (TRC-20)',
+    'bnb': 'BNB Smart Chain (BEP-20)',
+    'sol': 'Solana',
+    'usdc': 'Ethereum (ERC-20)',
+    'xrp': 'XRP Ledger',
+    'doge': 'Dogecoin',
+    'ada': 'Cardano',
+    'shib': 'Ethereum (ERC-20)',
+    'avax': 'Avalanche C-Chain',
+    'dot': 'Polkadot',
+    'trx': 'TRON',
+    'link': 'Ethereum (ERC-20)',
+    'matic': 'Polygon',
+    'wbtc': 'Ethereum (ERC-20)',
+    'ltc': 'Litecoin',
+    'near': 'NEAR',
+    'uni': 'Ethereum (ERC-20)',
+    'bch': 'Bitcoin Cash',
+    'xlm': 'Stellar',
+    'atom': 'Cosmos',
+    'xmr': 'Monero',
+    'flow': 'Flow',
+    'vet': 'VeChain',
+    'fil': 'Filecoin',
+    'theta': 'Theta',
+    'hbar': 'Hedera',
+    'ftm': 'Fantom',
+    'xtz': 'Tezos'
+  };
+  return assetNetworks[asset?.toLowerCase()] || 'Bitcoin';
+}
+
+// =============================================
+// Get Recent Transactions
+// =============================================
+app.get('/api/transactions/recent', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const limit = parseInt(req.query.limit) || 50;
+
+    // Get recent transactions
+    const transactions = await Transaction.find({ user: userId })
+      .sort({ createdAt: -1 })
+      .limit(limit);
+
+    if (!transactions || transactions.length === 0) {
+      return res.status(200).json({
+        status: 'success',
+        data: {
+          transactions: []
+        }
+      });
+    }
+
+    // Map asset symbols to CoinGecko IDs for price fetching
+    const assetToId = {
+      'btc': 'bitcoin',
+      'eth': 'ethereum',
+      'usdt': 'tether',
+      'bnb': 'binancecoin',
+      'sol': 'solana',
+      'usdc': 'usd-coin',
+      'xrp': 'xrp',
+      'doge': 'dogecoin',
+      'ada': 'cardano',
+      'shib': 'shiba-inu',
+      'avax': 'avalanche-2',
+      'dot': 'polkadot',
+      'trx': 'tron',
+      'link': 'chainlink',
+      'matic': 'matic-network',
+      'wbtc': 'wrapped-bitcoin',
+      'ltc': 'litecoin',
+      'near': 'near',
+      'uni': 'uniswap',
+      'bch': 'bitcoin-cash',
+      'xlm': 'stellar',
+      'atom': 'cosmos',
+      'xmr': 'monero',
+      'flow': 'flow',
+      'vet': 'vechain',
+      'fil': 'filecoin',
+      'theta': 'theta-token',
+      'hbar': 'hedera-hashgraph',
+      'ftm': 'fantom',
+      'xtz': 'tezos'
+    };
+
+    // Get unique assets from transactions
+    const assetsInTransactions = new Set();
+    transactions.forEach(t => {
+      if (t.asset) assetsInTransactions.add(t.asset);
+      if (t.type === 'buy' || t.type === 'sell') {
+        if (t.tradeDetails?.asset) assetsInTransactions.add(t.tradeDetails.asset);
+      }
+    });
+
+    const assets = Array.from(assetsInTransactions);
+    let currentPrices = {};
+
+    if (assets.length > 0) {
+      try {
+        const ids = assets.map(a => assetToId[a] || a).join(',');
+        const response = await axios.get(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`, {
+          timeout: 5000
+        });
+        
+        if (response.data) {
+          for (const asset of assets) {
+            const coinGeckoId = assetToId[asset] || asset;
+            currentPrices[asset] = response.data[coinGeckoId]?.usd || 0;
+          }
+        }
+      } catch (error) {
+        console.warn('Failed to fetch current prices for transactions:', error);
+      }
+    }
+
+    // Format transactions for frontend with correct exchange rates
+    const formattedTransactions = transactions.map(t => {
+      let exchangeRate = 1.00;
+      let assetForRate = t.asset || 'usdt';
+
+      // Get the correct exchange rate for this specific asset
+      if (assetForRate.toLowerCase() === 'usdt' || assetForRate.toLowerCase() === 'usdc') {
+        exchangeRate = 1.00;
+      } else {
+        exchangeRate = currentPrices[assetForRate] || t.exchangeRateAtTime || 1.00;
+      }
+
+      // For buy/sell transactions, ensure we use the correct asset
+      let displayAsset = t.asset;
+      let displayAssetAmount = t.assetAmount;
+      let displayPrice = t.tradeDetails?.price || t.exchangeRateAtTime;
+
+      if (t.type === 'buy') {
+        displayAsset = t.tradeDetails?.asset || t.asset;
+        displayAssetAmount = t.tradeDetails?.assetAmount || t.assetAmount;
+        displayPrice = t.tradeDetails?.price || t.exchangeRateAtTime;
+      } else if (t.type === 'sell') {
+        displayAsset = t.tradeDetails?.asset || t.asset;
+        displayAssetAmount = t.tradeDetails?.assetAmount || t.assetAmount;
+        displayPrice = t.tradeDetails?.price || t.exchangeRateAtTime;
+        
+        // Include profit/loss for sells
+        if (t.tradeDetails?.profitLoss) {
+          return {
+            id: t._id,
+            type: t.type,
+            amount: t.amount,
+            asset: displayAsset,
+            assetAmount: displayAssetAmount,
+            price: displayPrice,
+            profitLoss: t.tradeDetails.profitLoss,
+            profitLossPercentage: t.tradeDetails.profitLossPercentage,
+            status: t.status,
+            date: t.createdAt,
+            reference: t.reference,
+            exchangeRate: exchangeRate,
+            method: t.method,
+            network: t.network || getDefaultNetwork(t.asset)
+          };
+        }
+      }
+
+      return {
+        id: t._id,
+        type: t.type,
+        amount: t.amount,
+        asset: displayAsset,
+        assetAmount: displayAssetAmount,
+        price: displayPrice,
+        status: t.status,
+        date: t.createdAt,
+        reference: t.reference,
+        exchangeRate: exchangeRate,
+        method: t.method,
+        network: t.network || getDefaultNetwork(t.asset)
+      };
+    });
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        transactions: formattedTransactions
+      }
+    });
+
+  } catch (error) {
+    console.error('Error fetching recent transactions:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch recent transactions'
     });
   }
 });
@@ -16053,170 +16560,6 @@ app.get('/api/assets/:asset/details', protect, async (req, res) => {
 });
 
 // =============================================
-// Recent Transactions Endpoint - With correct exchange rates per asset
-// =============================================
-app.get('/api/transactions/recent', protect, async (req, res) => {
-  try {
-    const userId = req.user._id;
-    const limit = parseInt(req.query.limit) || 10;
-
-    // Get recent transactions
-    const transactions = await Transaction.find({ user: userId })
-      .sort({ createdAt: -1 })
-      .limit(limit);
-
-    if (!transactions || transactions.length === 0) {
-      return res.status(200).json({
-        status: 'success',
-        data: {
-          transactions: []
-        }
-      });
-    }
-
-    // Map asset symbols to CoinGecko IDs for price fetching
-    const assetToId = {
-      'btc': 'bitcoin',
-      'eth': 'ethereum',
-      'usdt': 'tether',
-      'bnb': 'binancecoin',
-      'sol': 'solana',
-      'usdc': 'usd-coin',
-      'xrp': 'xrp',
-      'doge': 'dogecoin',
-      'ada': 'cardano',
-      'shib': 'shiba-inu',
-      'avax': 'avalanche-2',
-      'dot': 'polkadot',
-      'trx': 'tron',
-      'link': 'chainlink',
-      'matic': 'matic-network',
-      'wbtc': 'wrapped-bitcoin',
-      'ltc': 'litecoin',
-      'near': 'near',
-      'uni': 'uniswap',
-      'bch': 'bitcoin-cash',
-      'xlm': 'stellar',
-      'atom': 'cosmos',
-      'xmr': 'monero',
-      'flow': 'flow',
-      'vet': 'vechain',
-      'fil': 'filecoin',
-      'theta': 'theta-token',
-      'hbar': 'hedera-hashgraph',
-      'ftm': 'fantom',
-      'xtz': 'tezos'
-    };
-
-    // Get unique assets from transactions to fetch their current prices
-    const assetsInTransactions = new Set();
-    transactions.forEach(t => {
-      if (t.asset) assetsInTransactions.add(t.asset);
-      if (t.type === 'buy' || t.type === 'sell') {
-        if (t.tradeDetails?.asset) assetsInTransactions.add(t.tradeDetails.asset);
-      }
-    });
-
-    const assets = Array.from(assetsInTransactions);
-    let currentPrices = {};
-
-    if (assets.length > 0) {
-      try {
-        const ids = assets.map(a => assetToId[a] || a).join(',');
-        const response = await axios.get(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`, {
-          timeout: 5000
-        });
-        
-        if (response.data) {
-          for (const asset of assets) {
-            const coinGeckoId = assetToId[asset] || asset;
-            currentPrices[asset] = response.data[coinGeckoId]?.usd || 0;
-          }
-        }
-      } catch (error) {
-        console.warn('Failed to fetch current prices for transactions:', error);
-      }
-    }
-
-    // Format transactions for frontend with correct exchange rates
-    const formattedTransactions = transactions.map(t => {
-      let exchangeRate = 1.00;
-      let assetForRate = t.asset || 'usdt';
-
-      // Get the correct exchange rate for this specific asset
-      if (assetForRate.toLowerCase() === 'usdt' || assetForRate.toLowerCase() === 'usdc') {
-        exchangeRate = 1.00; // Stablecoins always $1.00
-      } else {
-        // Use current price if available, otherwise fall back to the price at transaction time
-        exchangeRate = currentPrices[assetForRate] || t.exchangeRateAtTime || 1.00;
-      }
-
-      // For buy/sell transactions, ensure we use the correct asset
-      let displayAsset = t.asset;
-      let displayAssetAmount = t.assetAmount;
-      let displayPrice = t.tradeDetails?.price || t.exchangeRateAtTime;
-
-      if (t.type === 'buy') {
-        displayAsset = t.tradeDetails?.asset || t.asset;
-        displayAssetAmount = t.tradeDetails?.assetAmount || t.assetAmount;
-        displayPrice = t.tradeDetails?.price || t.exchangeRateAtTime;
-      } else if (t.type === 'sell') {
-        displayAsset = t.tradeDetails?.asset || t.asset;
-        displayAssetAmount = t.tradeDetails?.assetAmount || t.assetAmount;
-        displayPrice = t.tradeDetails?.price || t.exchangeRateAtTime;
-        
-        // Include profit/loss for sells
-        if (t.tradeDetails?.profitLoss) {
-          return {
-            id: t._id,
-            type: t.type,
-            amount: t.amount,
-            asset: displayAsset,
-            assetAmount: displayAssetAmount,
-            price: displayPrice,
-            profitLoss: t.tradeDetails.profitLoss,
-            profitLossPercentage: t.tradeDetails.profitLossPercentage,
-            status: t.status,
-            date: t.createdAt,
-            reference: t.reference,
-            exchangeRate: exchangeRate,
-            method: t.method
-          };
-        }
-      }
-
-      return {
-        id: t._id,
-        type: t.type,
-        amount: t.amount,
-        asset: displayAsset,
-        assetAmount: displayAssetAmount,
-        price: displayPrice,
-        status: t.status,
-        date: t.createdAt,
-        reference: t.reference,
-        exchangeRate: exchangeRate,
-        method: t.method
-      };
-    });
-
-    res.status(200).json({
-      status: 'success',
-      data: {
-        transactions: formattedTransactions
-      }
-    });
-
-  } catch (error) {
-    console.error('Error fetching recent transactions:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch recent transactions'
-    });
-  }
-});
-
-// =============================================
 // User Preferences Endpoint
 // =============================================
 app.get('/api/users/preferences', protect, async (req, res) => {
@@ -16346,7 +16689,7 @@ app.post('/api/deposits/request', protect, async (req, res) => {
       fee: 0,
       netAmount: amount,
       exchangeRateAtTime: exchangeRate,
-      network: network
+      network: network || getDefaultNetwork(asset)
     });
 
     // Create deposit asset record
@@ -16359,7 +16702,7 @@ app.post('/api/deposits/request', protect, async (req, res) => {
       status: 'pending',
       metadata: {
         toAddress: address,
-        network: network,
+        network: network || getDefaultNetwork(asset),
         exchangeRate: exchangeRate,
         assetPriceAtTime: exchangeRate
       }
@@ -16388,7 +16731,7 @@ app.post('/api/deposits/request', protect, async (req, res) => {
         deposit: {
           id: depositAsset._id,
           address: address,
-          network: network
+          network: network || getDefaultNetwork(asset)
         }
       }
     });
@@ -16464,16 +16807,7 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
         rate: currentPrice,
         rateChange24h: priceChange24h,
         rateExpiry: Date.now() + 60000, // 1 minute expiry
-        network: asset === 'btc' ? 'Bitcoin' :
-                 asset === 'eth' ? 'Ethereum (ERC20)' :
-                 asset === 'usdt' ? 'Ethereum (ERC20)' :
-                 asset === 'bnb' ? 'BSC (BEP20)' :
-                 asset === 'sol' ? 'Solana' :
-                 asset === 'usdc' ? 'Ethereum (ERC20)' :
-                 asset === 'xrp' ? 'Ripple' :
-                 asset === 'doge' ? 'Dogecoin' :
-                 asset === 'shib' ? 'Ethereum (ERC20)' :
-                 asset === 'trx' ? 'TRON (TRC20)' : 'Unknown'
+        network: getDefaultNetwork(asset)
       }
     });
 
@@ -16485,7 +16819,6 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
     });
   }
 });
-
 
 
 
@@ -16622,8 +16955,4 @@ processMaturedInvestments();
 httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
-
-
-
-
 
