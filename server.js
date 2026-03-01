@@ -1,4 +1,3344 @@
+require('dotenv').config()
+const express = require('express');
+const mongoose = require('mongoose');
+const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+const RedisStore = require('rate-limit-redis');
+const mongoSanitize = require('express-mongo-sanitize');
+const xss = require('xss-clean');
+const hpp = require('hpp');
+const csrf = require('csurf');
+const cookieParser = require('cookie-parser');
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
+const nodemailer = require('nodemailer');
+const { OAuth2Client } = require('google-auth-library');
+const Redis = require('ioredis');
+const moment = require('moment');
+const validator = require('validator');
+const { body, validationResult } = require('express-validator');
+const axios = require('axios');
+const speakeasy = require('speakeasy');
+const { v4: uuidv4 } = require('uuid');
+const WebSocket = require('ws');
+const OpenAI = require('openai');
+// Initialize Express app
+const app = express();
+const { createServer } = require('http');
+const { Server } = require('socket.io');
+app.set('trust proxy', 1);
+// FIXED Helmet Configuration - Remove unsafe Cross-Origin-Opener-Policy
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "https://apis.google.com"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      imgSrc: ["'self'", "data:", "https://www.google-analytics.com"],
+      connectSrc: ["'self'", "https://api.ipinfo.io", "https://website-backendd-1.onrender.com"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com"],
+      objectSrc: ["'none'"],
+      frameSrc: ["'self'", "https://accounts.google.com"] // Added for Google OAuth
+    }
+  },
+  crossOriginOpenerPolicy: { policy: "unsafe-none" } // FIXED: This resolves the window.postMessage block
+}));
 
+
+app.use(cors({
+  origin: ['https://www.bithashcapital.live', 'https://website-backendd-tzep.onrender.com' , 'https://bithash-rental.vercel.app/'],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token']
+}));
+
+
+
+
+app.use((req, res, next) => {
+  // Allow fonts from Google
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  
+  // Cache static responses
+  if (req.url.includes('/api/plans') || req.url.includes('/api/stats')) {
+    res.setHeader('Cache-Control', 'public, max-age=300');
+  }
+  next();
+});
+
+
+
+app.use(express.json({ limit: '10kb' }));
+app.use(express.urlencoded({ extended: true, limit: '10kb' }));
+app.use(cookieParser());
+app.use(mongoSanitize());
+app.use(xss());
+app.use(hpp());
+
+// Redis connection with enhanced settings for autoscaling (MOVE THIS UP)
+const redis = new Redis({
+  host: process.env.REDIS_HOST || 'redis-14450.c276.us-east-1-2.ec2.redns.redis-cloud.com',
+  port: process.env.REDIS_PORT || 14450,
+  password: process.env.REDIS_PASSWORD || 'qjXgsg0YrsLaSumlEW9HkIZbvLjXEwXR',
+  retryStrategy: (times) => {
+    const delay = Math.min(times * 50, 2000);
+    return delay;
+  },
+  maxRetriesPerRequest: 3,
+  enableReadyCheck: true,
+  lazyConnect: false,
+  keepAlive: 10000, // Keep Redis connections alive
+  connectTimeout: 10000
+});
+
+redis.on('error', (err) => {
+  console.error('Redis error:', err);
+});
+
+redis.on('connect', () => {
+  console.log('Redis connected successfully');
+});
+
+// Helper function to get real client IP from request
+const getRealClientIP = (req) => {
+  // Check X-Forwarded-For header first (this is what Render uses)
+  const forwardedFor = req.headers['x-forwarded-for'];
+  if (forwardedFor) {
+    // Get the first IP in the list (the real client IP)
+    return forwardedFor.split(',')[0].trim();
+  }
+  
+  // Fallback to other headers or remote address
+  return req.ip || 
+         req.connection?.remoteAddress || 
+         req.socket?.remoteAddress || 
+         req.connection?.socket?.remoteAddress ||
+         '0.0.0.0';
+};
+
+// Rate limiting with Redis store (required for autoscaling)
+const apiLimiter = rateLimit({
+  store: new RedisStore({
+    client: redis,
+    prefix: 'rl:api:',
+    sendCommand: (...args) => redis.call(...args)
+  }),
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 1000,
+  message: 'Too many requests from this IP, please try again later',
+  keyGenerator: (req) => {
+    return getRealClientIP(req);
+  }
+});
+
+const authLimiter = rateLimit({
+  store: new RedisStore({
+    client: redis,
+    prefix: 'rl:auth:',
+    sendCommand: (...args) => redis.call(...args)
+  }),
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 200,
+  message: 'Too many login attempts, please try again later',
+  keyGenerator: (req) => {
+    return getRealClientIP(req);
+  }
+});
+
+app.use('/api', apiLimiter);
+app.use('/api/login', authLimiter);
+app.use('/api/signup', authLimiter);
+app.use('/api/auth/forgot-password', authLimiter);
+
+// Health check endpoint required for Render autoscaling
+app.get('/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  });
+});
+
+app.get('/api/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  });
+});
+
+// Database connection with enhanced settings for autoscaling
+mongoose.connect(process.env.MONGODB_URI || 'mongodb+srv://elvismwangike:JFJmHvP4ktikRYDC@cluster0.vm6hrog.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0', {
+  autoIndex: true,
+  connectTimeoutMS: 30000,
+  socketTimeoutMS: 30000,
+  maxPoolSize: 50, // Connection pool for each instance
+  minPoolSize: 5,  // Minimum connections to keep alive
+  maxIdleTimeMS: 10000, // Close idle connections
+  waitQueueTimeoutMS: 5000, // How long to wait for a connection
+  retryWrites: true,
+  retryReads: true
+})
+.then(() => console.log('MongoDB connected successfully'))
+.catch(err => {
+  console.error('MongoDB connection error:', err);
+  process.exit(1);
+});
+
+const transporter = nodemailer.createTransport({
+  host: process.env.EMAIL_HOST,
+  port: process.env.EMAIL_PORT,
+  secure: process.env.EMAIL_SECURE === 'true',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS
+  },
+  tls: {
+    rejectUnauthorized: false
+  },
+  pool: true,
+  maxConnections: 5,
+  maxMessages: 100
+});
+
+
+// Google OAuth client with enhanced configuration
+const googleClient = new OAuth2Client({
+  clientId: process.env.GOOGLE_CLIENT_ID || '634814462335-9o4t8q95c4orcsd9sijjl52374g6vm85.apps.googleusercontent.com',
+  clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+  redirectUri: process.env.GOOGLE_REDIRECT_URI
+});
+
+// JWT configuration with stronger security
+const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString('hex');
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7200s'; // 2 hours in seconds
+const JWT_COOKIE_EXPIRES = process.env.JWT_COOKIE_EXPIRES || 0.083; // 2 hours in days (2/24)
+
+// Enhanced database models with full indexes and validation
+const UserSchema = new mongoose.Schema({
+  firstName: { type: String, required: [true, 'First name is required'], trim: true, maxlength: [50, 'First name cannot be longer than 50 characters'] },
+  lastName: { type: String, required: [true, 'Last name is required'], trim: true, maxlength: [50, 'Last name cannot be longer than 50 characters'] },
+  email: { 
+    type: String, 
+    required: [true, 'Email is required'], 
+    unique: true, 
+    lowercase: true, 
+    validate: [validator.isEmail, 'Please provide a valid email'],
+    index: true
+  },
+  phone: { type: String, trim: true, validate: [validator.isMobilePhone, 'Please provide a valid phone number'] },
+  country: { type: String, trim: true },
+  city: { type: String, trim: true },
+  address: {
+    street: { type: String, trim: true },
+    city: { type: String, trim: true },
+    state: { type: String, trim: true },
+    postalCode: { type: String, trim: true },
+    country: { type: String, trim: true }
+  },
+  password: { type: String, select: false, minlength: [8, 'Password must be at least 8 characters'] },
+  passwordChangedAt: Date,
+  passwordResetToken: String,
+  passwordResetExpires: Date,
+  googleId: { type: String, index: true },
+  isVerified: { type: Boolean, default: false },
+  status: { type: String, enum: ['active', 'suspended', 'banned'], default: 'active', index: true },
+  kycStatus: {
+    identity: { type: String, enum: ['pending', 'verified', 'rejected', 'not-submitted'], default: 'not-submitted' },
+    address: { type: String, enum: ['pending', 'verified', 'rejected', 'not-submitted'], default: 'not-submitted' },
+    facial: { type: String, enum: ['pending', 'verified', 'rejected', 'not-submitted'], default: 'not-submitted' }
+  },
+  kycDocuments: {
+    identityFront: { type: String },
+    identityBack: { type: String },
+    proofOfAddress: { type: String },
+    selfie: { type: String }
+  },
+  twoFactorAuth: {
+    enabled: { type: Boolean, default: false },
+    secret: { type: String, select: false }
+  },
+  balances: {
+    main: { type: Number, default: 0, min: [0, 'Balance cannot be negative'] },
+    active: { type: Number, default: 0, min: [0, 'Balance cannot be negative'] },
+    matured: { type: Number, default: 0, min: [0, 'Balance cannot be negative'] },
+    savings: { type: Number, default: 0, min: [0, 'Balance cannot be negative'] },
+    loan: { type: Number, default: 0, min: [0, 'Balance cannot be negative'] }
+  },
+  referralCode: { type: String, unique: true, index: true },
+  referredBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true },
+  apiKeys: [{
+    name: { type: String, required: true },
+    key: { type: String, required: true, select: false },
+    permissions: [{ type: String }],
+    expiresAt: { type: Date },
+    isActive: { type: Boolean, default: true }
+  }],
+  lastLogin: { type: Date },
+  loginHistory: [{
+    ip: { type: String },
+    device: { type: String },
+    location: { type: String },
+    timestamp: { type: Date, default: Date.now }
+  }],
+  notifications: [{
+    title: { type: String, required: true },
+    message: { type: String, required: true },
+    type: { type: String, enum: ['info', 'warning', 'error', 'success'], default: 'info' },
+    isRead: { type: Boolean, default: false },
+    createdAt: { type: Date, default: Date.now }
+  }],
+  preferences: {
+    notifications: {
+      email: { type: Boolean, default: true },
+      sms: { type: Boolean, default: false },
+      push: { type: Boolean, default: true }
+    },
+    theme: { type: String, enum: ['light', 'dark'], default: 'dark' }
+  }
+}, { 
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
+});
+
+UserSchema.virtual('fullName').get(function() {
+  return `${this.firstName} ${this.lastName}`;
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
+// Add to UserSchema
+UserSchema.add({
+  referralStats: {
+    totalReferrals: { type: Number, default: 0 },
+    totalEarnings: { type: Number, default: 0 },
+    availableBalance: { type: Number, default: 0 },
+    withdrawn: { type: Number, default: 0 },
+    referralTier: { type: Number, default: 1 }, // 1-5 based on performance
+  },
+  referralHistory: [{
+    referredUser: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    amount: Number,
+    percentage: Number,
+    level: Number, // 1 for direct, 2 for indirect, etc.
+    date: { type: Date, default: Date.now },
+    status: { type: String, enum: ['pending', 'available', 'withdrawn'], default: 'pending' }
+  }]
+});
+
+// Add to UserSchema
+UserSchema.add({
+  downlineStats: {
+    totalDownlines: { type: Number, default: 0 },
+    activeDownlines: { type: Number, default: 0 },
+    totalCommissionEarned: { type: Number, default: 0 },
+    thisMonthCommission: { type: Number, default: 0 }
+  }
+});
+
+UserSchema.index({ email: 1 });
+UserSchema.index({ status: 1 });
+UserSchema.index({ 'kycStatus.identity': 1, 'kycStatus.address': 1, 'kycStatus.facial': 1 });
+UserSchema.index({ referredBy: 1 });
+UserSchema.index({ createdAt: -1 });
+
+const User = mongoose.model('User', UserSchema);
+
+
+
+const TranslationSchema = new mongoose.Schema({
+  language: {
+    type: String,
+    required: [true, 'Language code is required'],
+    index: true
+  },
+  key: {
+    type: String,
+    required: [true, 'Translation key is required'],
+    index: true
+  },
+  value: {
+    type: String,
+    required: [true, 'Translation value is required']
+  },
+  namespace: {
+    type: String,
+    default: 'common',
+    index: true
+  },
+  context: {
+    type: String,
+    default: 'general'
+  },
+  isActive: {
+    type: Boolean,
+    default: true
+  }
+}, {
+  timestamps: true
+});
+
+// Compound index for efficient lookups
+TranslationSchema.index({ language: 1, key: 1, namespace: 1 }, { unique: true });
+TranslationSchema.index({ language: 1, namespace: 1 });
+TranslationSchema.index({ isActive: 1 });
+
+const Translation = mongoose.model('Translation', TranslationSchema);
+
+
+// Downline Relationship Schema
+const DownlineRelationshipSchema = new mongoose.Schema({
+  upline: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: [true, 'Upline user is required'],
+    index: true
+  },
+  downline: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: [true, 'Downline user is required'],
+    index: true
+  },
+  commissionPercentage: {
+    type: Number,
+    default: 5,
+    min: [0, 'Commission percentage cannot be negative'],
+    max: [50, 'Commission percentage cannot exceed 50%']
+  },
+  commissionRounds: {
+    type: Number,
+    default: 3,
+    min: [1, 'At least 1 commission round required'],
+    max: [10, 'Maximum 10 commission rounds allowed']
+  },
+  remainingRounds: {
+    type: Number,
+    default: 3
+  },
+  totalCommissionEarned: {
+    type: Number,
+    default: 0
+  },
+  status: {
+    type: String,
+    enum: ['active', 'inactive', 'completed'],
+    default: 'active'
+  },
+  assignedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Admin',
+    required: true
+  },
+  assignedAt: {
+    type: Date,
+    default: Date.now
+  }
+}, {
+  timestamps: true
+});
+
+// Index to ensure unique downline relationships
+DownlineRelationshipSchema.index({ downline: 1 }, { unique: true });
+DownlineRelationshipSchema.index({ upline: 1, downline: 1 }, { unique: true });
+DownlineRelationshipSchema.index({ status: 1 });
+
+// Virtual for relationship description
+DownlineRelationshipSchema.virtual('relationshipDescription').get(function() {
+  return `${this.downline} is downline of ${this.upline} with ${this.commissionPercentage}% commission`;
+});
+
+const DownlineRelationship = mongoose.model('DownlineRelationship', DownlineRelationshipSchema);
+
+// Commission History Schema
+const CommissionHistorySchema = new mongoose.Schema({
+  upline: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+    index: true
+  },
+  downline: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+    index: true
+  },
+  investment: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Investment',
+    required: true,
+    index: true
+  },
+  investmentAmount: {
+    type: Number,
+    required: true,
+    min: 0
+  },
+  commissionPercentage: {
+    type: Number,
+    required: true,
+    min: 0,
+    max: 50
+  },
+  commissionAmount: {
+    type: Number,
+    required: true,
+    min: 0
+  },
+  roundNumber: {
+    type: Number,
+    required: true,
+    min: 1,
+    max: 10
+  },
+  status: {
+    type: String,
+    enum: ['pending', 'paid', 'cancelled'],
+    default: 'paid'
+  },
+  paidAt: {
+    type: Date,
+    default: Date.now
+  }
+}, {
+  timestamps: true
+});
+
+CommissionHistorySchema.index({ upline: 1, createdAt: -1 });
+CommissionHistorySchema.index({ downline: 1, createdAt: -1 });
+CommissionHistorySchema.index({ investment: 1 });
+
+const CommissionHistory = mongoose.model('CommissionHistory', CommissionHistorySchema);
+
+// Commission Settings Schema
+const CommissionSettingsSchema = new mongoose.Schema({
+  commissionPercentage: {
+    type: Number,
+    default: 5,
+    min: [0, 'Commission percentage cannot be negative'],
+    max: [50, 'Commission percentage cannot exceed 50%']
+  },
+  commissionRounds: {
+    type: Number,
+    default: 3,
+    min: [1, 'At least 1 commission round required'],
+    max: [10, 'Maximum 10 commission rounds allowed']
+  },
+  isActive: {
+    type: Boolean,
+    default: true
+  },
+  updatedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Admin',
+    required: true
+  }
+}, {
+  timestamps: true
+});
+
+const CommissionSettings = mongoose.model('CommissionSettings', CommissionSettingsSchema);
+
+
+
+
+
+// Enhanced User Log Schema - Comprehensive Activity Tracking
+const UserLogSchema = new mongoose.Schema({
+  // Core User Information
+  user: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+    index: true
+  },
+  username: {
+    type: String,
+    required: true,
+    index: true
+  },
+  email: {
+    type: String,
+    required: true,
+    index: true
+  },
+  userFullName: {
+    type: String,
+    required: true
+  },
+
+  // Activity Details
+  action: {
+    type: String,
+    required: true,
+    enum: [
+      // Authentication & Session
+      'signup', 'login', 'logout', 'login_attempt', 'session_created', 
+      'session_timeout', 'failed_login', 'suspicious_activity',
+      
+      // Password Management
+      'password_change', 'password_reset_request', 'password_reset_complete',
+      
+      // Profile & Account
+      'profile_update', 'profile_view', 'account_settings_update',
+      'email_verification', 'account_deletion', 'account_suspended',
+      
+      // Security
+      '2fa_enable', '2fa_disable', '2fa_verification', 'security_settings_update',
+      'api_key_create', 'api_key_delete', 'api_key_regenerate',
+      'device_login', 'device_verification', 'trusted_device_added',
+      
+      // Financial - Deposits
+      'deposit_created', 'deposit_pending', 'deposit_completed', 'deposit_failed',
+      'deposit_cancelled', 'btc_deposit_initiated', 'card_deposit_attempt',
+      
+      // Financial - Withdrawals
+      'withdrawal_created', 'withdrawal_pending', 'withdrawal_completed', 
+      'withdrawal_failed', 'withdrawal_cancelled', 'btc_withdrawal_initiated',
+      
+      // Financial - Transfers
+      'transfer_created', 'transfer_completed', 'transfer_failed',
+      'internal_transfer', 'balance_transfer',
+      
+      // Financial - Buy/Sell (REPLACED CONVERSION)
+      'buy_created', 'buy_completed', 'buy_failed',
+      'sell_created', 'sell_completed', 'sell_failed',
+      
+      // Investments
+      'investment_created', 'investment_active', 'investment_completed',
+      'investment_cancelled', 'investment_matured', 'investment_payout',
+      'investment_rollover', 'plan_selected',
+      
+      // KYC & Verification
+      'kyc_submission', 'kyc_pending', 'kyc_approved', 'kyc_rejected',
+      'kyc_document_upload', 'identity_verification', 'address_verification',
+      
+      // Referrals
+      'referral_joined', 'referral_bonus_earned', 'referral_payout',
+      'referral_code_used', 'referral_link_shared',
+      
+      // Support & Communication
+      'support_ticket_created', 'support_ticket_updated', 'support_ticket_closed',
+      'contact_form_submitted', 'live_chat_started', 'email_sent',
+      
+      // Notifications & Preferences
+      'notification_received', 'notification_read', 'email_preference_updated',
+      'push_notification_enabled', 'sms_notification_enabled',
+      
+      // System & Admin Actions
+      'admin_login', 'admin_action', 'system_maintenance', 'balance_adjustment',
+      'manual_transaction', 'user_verified', 'user_blocked',
+      
+      // Page Views & Navigation
+      'page_visited', 'dashboard_viewed', 'investment_page_visited',
+      'wallet_page_visited', 'profile_page_visited', 'settings_page_visited',
+      'support_page_visited', 'referral_page_visited'
+    ],
+    index: true
+  },
+  
+  actionCategory: {
+    type: String,
+    enum: [
+      'authentication', 'financial', 'investment', 'security', 'profile',
+      'verification', 'referral', 'support', 'system', 'navigation'
+    ],
+    required: true,
+    index: true
+  },
+
+  // Technical Details
+  ipAddress: {
+    type: String,
+    required: true,
+    index: true
+  },
+  userAgent: {
+    type: String,
+    required: true
+  },
+  
+  // Enhanced Device Information
+  deviceInfo: {
+    type: {
+      type: String,
+      enum: ['desktop', 'mobile', 'tablet', 'unknown'],
+      required: true
+    },
+    os: {
+      name: String,
+      version: String
+    },
+    browser: {
+      name: String,
+      version: String
+    },
+    platform: String,
+    screenResolution: String,
+    language: String,
+    timezone: String,
+    deviceId: String
+  },
+
+  // Enhanced Location Information
+  location: {
+    ip: String,
+    country: {
+      code: String,
+      name: String
+    },
+    region: {
+      code: String,
+      name: String
+    },
+    city: String,
+    postalCode: String,
+    latitude: Number,
+    longitude: Number,
+    timezone: String,
+    isp: String,
+    asn: String
+  },
+
+  // Status & Performance
+  status: {
+    type: String,
+    enum: ['success', 'failed', 'pending', 'cancelled', 'processing'],
+    default: 'success',
+    index: true
+  },
+  statusCode: Number,
+  responseTime: Number, // in milliseconds
+  errorCode: String,
+  errorMessage: String,
+
+  // Enhanced Metadata
+  metadata: {
+    // Financial transactions
+    amount: Number,
+    currency: String,
+    transactionId: String,
+    paymentMethod: String,
+    walletAddress: String,
+    fee: Number,
+    netAmount: Number,
+    
+    // Asset transactions
+    asset: String,
+    assetAmount: Number,
+    assetPrice: Number,
+    usdValue: Number,
+    
+    // Buy/Sell (REPLACED CONVERSION)
+    buyAsset: String,
+    sellAsset: String,
+    buyAmount: Number,
+    sellAmount: Number,
+    buyPrice: Number,
+    sellPrice: Number,
+    profitLoss: Number,
+    profitLossPercentage: Number,
+    
+    // Investments
+    planName: String,
+    investmentAmount: Number,
+    expectedReturn: Number,
+    duration: Number,
+    roiPercentage: Number,
+    
+    // User actions
+    oldValues: mongoose.Schema.Types.Mixed,
+    newValues: mongoose.Schema.Types.Mixed,
+    changedFields: [String],
+    
+    // System actions
+    adminId: mongoose.Schema.Types.ObjectId,
+    adminName: String,
+    reason: String,
+    
+    // Page navigation
+    pageUrl: String,
+    pageTitle: String,
+    referrer: String,
+    sessionDuration: Number,
+    
+    // Security
+    riskScore: Number,
+    suspiciousFactors: [String],
+    verificationMethod: String,
+    
+    // General
+    description: String,
+    notes: String,
+    tags: [String]
+  },
+
+  // Entity Relationships
+  relatedEntity: {
+    type: mongoose.Schema.Types.ObjectId,
+    refPath: 'relatedEntityModel',
+    index: true
+  },
+  relatedEntityModel: {
+    type: String,
+    enum: [
+      'User', 'Transaction', 'Investment', 'KYC', 'Plan', 'Loan', 
+      'SupportTicket', 'Card', 'Referral', 'Notification', 'Admin',
+      'UserAssetBalance', 'Buy', 'Sell', 'DepositAsset'
+    ]
+  },
+
+  // Session Information
+  sessionId: {
+    type: String,
+    index: true
+  },
+  requestId: {
+    type: String,
+    index: true
+  },
+
+  // Risk & Security
+  riskLevel: {
+    type: String,
+    enum: ['low', 'medium', 'high', 'critical'],
+    default: 'low'
+  },
+  isSuspicious: {
+    type: Boolean,
+    default: false,
+    index: true
+  },
+
+  // Performance Metrics
+  resources: {
+    memoryUsage: Number,
+    cpuUsage: Number,
+    networkLatency: Number
+  }
+
+}, {
+  timestamps: true,
+  toJSON: { 
+    virtuals: true,
+    transform: function(doc, ret) {
+      // Remove sensitive information from JSON output
+      delete ret.deviceInfo.deviceId;
+      delete ret.location.ip;
+      delete ret.metadata.adminId;
+      return ret;
+    }
+  },
+  toObject: { 
+    virtuals: true,
+    transform: function(doc, ret) {
+      // Remove sensitive information from object output
+      delete ret.deviceInfo.deviceId;
+      delete ret.location.ip;
+      delete ret.metadata.adminId;
+      return ret;
+    }
+  }
+});
+
+// Virtuals
+UserLogSchema.virtual('actionDescription').get(function() {
+  const actionDescriptions = {
+    'signup': 'User registered a new account',
+    'login': 'User logged into their account',
+    'logout': 'User logged out of their account',
+    'deposit_created': 'User created a deposit request',
+    'investment_created': 'User created a new investment',
+    'withdrawal_created': 'User requested a withdrawal',
+    'buy_created': 'User initiated a buy order',
+    'buy_completed': 'User completed a buy order',
+    'sell_created': 'User initiated a sell order',
+    'sell_completed': 'User completed a sell order',
+    // Add more descriptions as needed
+  };
+  return actionDescriptions[this.action] || `User performed ${this.action.replace(/_/g, ' ')}`;
+});
+
+UserLogSchema.virtual('isFinancialAction').get(function() {
+  return [
+    'deposit_created', 'deposit_completed', 'withdrawal_created', 
+    'withdrawal_completed', 'investment_created', 'transfer_created',
+    'buy_created', 'buy_completed', 'sell_created', 'sell_completed'
+  ].includes(this.action);
+});
+
+UserLogSchema.virtual('isSecurityAction').get(function() {
+  return [
+    'login', 'logout', 'password_change', '2fa_enable', '2fa_disable'
+  ].includes(this.action);
+});
+
+// Indexes for optimized querying
+UserLogSchema.index({ user: 1, createdAt: -1 });
+UserLogSchema.index({ action: 1, createdAt: -1 });
+UserLogSchema.index({ status: 1, createdAt: -1 });
+UserLogSchema.index({ ipAddress: 1, createdAt: -1 });
+UserLogSchema.index({ 'location.country.code': 1, createdAt: -1 });
+UserLogSchema.index({ actionCategory: 1, createdAt: -1 });
+UserLogSchema.index({ isSuspicious: 1, createdAt: -1 });
+UserLogSchema.index({ sessionId: 1 });
+UserLogSchema.index({ 'deviceInfo.type': 1, createdAt: -1 });
+UserLogSchema.index({ riskLevel: 1, createdAt: -1 });
+
+// Compound indexes for common queries
+UserLogSchema.index({ user: 1, actionCategory: 1, createdAt: -1 });
+UserLogSchema.index({ action: 1, status: 1, createdAt: -1 });
+UserLogSchema.index({ user: 1, isSuspicious: 1, createdAt: -1 });
+
+// Text search index for metadata
+UserLogSchema.index({
+  'username': 'text',
+  'email': 'text',
+  'userFullName': 'text',
+  'metadata.description': 'text',
+  'metadata.notes': 'text'
+});
+
+// Middleware
+UserLogSchema.pre('save', function(next) {
+  // Auto-populate userFullName if not provided
+  if (!this.userFullName && this.username) {
+    this.userFullName = this.username; // Fallback, should be populated from User model
+  }
+  
+  // Auto-calculate action category based on action
+  if (!this.actionCategory) {
+    this.actionCategory = this.calculateActionCategory(this.action);
+  }
+  
+  // Set risk level based on action and metadata
+  if (!this.riskLevel || this.riskLevel === 'low') {
+    this.riskLevel = this.calculateRiskLevel();
+  }
+  
+  next();
+});
+
+// Static Methods
+UserLogSchema.statics.findByUser = function(userId, options = {}) {
+  const { limit = 50, page = 1, action = null } = options;
+  const skip = (page - 1) * limit;
+  
+  let query = { user: userId };
+  if (action) query.action = action;
+  
+  return this.find(query)
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit);
+};
+
+UserLogSchema.statics.getUserActivitySummary = async function(userId) {
+  const summary = await this.aggregate([
+    { $match: { user: mongoose.Types.ObjectId(userId) } },
+    {
+      $group: {
+        _id: '$actionCategory',
+        totalActions: { $sum: 1 },
+        lastActivity: { $max: '$createdAt' },
+        failedActions: {
+          $sum: { $cond: [{ $eq: ['$status', 'failed'] }, 1, 0] }
+        }
+      }
+    }
+  ]);
+  
+  return summary;
+};
+
+UserLogSchema.statics.findSuspiciousActivities = function(days = 7) {
+  const dateThreshold = new Date();
+  dateThreshold.setDate(dateThreshold.getDate() - days);
+  
+  return this.find({
+    isSuspicious: true,
+    createdAt: { $gte: dateThreshold }
+  }).sort({ createdAt: -1 });
+};
+
+// Instance Methods
+UserLogSchema.methods.calculateActionCategory = function(action) {
+  const categoryMap = {
+    // Authentication
+    'signup': 'authentication',
+    'login': 'authentication',
+    'logout': 'authentication',
+    'login_attempt': 'authentication',
+    
+    // Financial
+    'deposit_created': 'financial',
+    'withdrawal_created': 'financial',
+    'transfer_created': 'financial',
+    'buy_created': 'financial',
+    'buy_completed': 'financial',
+    'sell_created': 'financial',
+    'sell_completed': 'financial',
+    
+    // Investment
+    'investment_created': 'investment',
+    'investment_completed': 'investment',
+    
+    // Security
+    'password_change': 'security',
+    '2fa_enable': 'security',
+    
+    // Add more mappings as needed
+  };
+  
+  return categoryMap[action] || 'system';
+};
+
+UserLogSchema.methods.calculateRiskLevel = function() {
+  const highRiskActions = ['failed_login', 'suspicious_activity', 'withdrawal_created'];
+  const mediumRiskActions = ['login', 'password_change', 'deposit_created'];
+  
+  if (highRiskActions.includes(this.action)) return 'high';
+  if (mediumRiskActions.includes(this.action)) return 'medium';
+  if (this.status === 'failed') return 'medium';
+  
+  return 'low';
+};
+
+UserLogSchema.methods.markAsSuspicious = function(reason) {
+  this.isSuspicious = true;
+  this.riskLevel = 'high';
+  if (!this.metadata.notes) {
+    this.metadata.notes = `Marked as suspicious: ${reason}`;
+  }
+  return this.save();
+};
+
+// Query Helpers
+UserLogSchema.query.byDateRange = function(startDate, endDate) {
+  return this.where('createdAt').gte(startDate).lte(endDate);
+};
+
+UserLogSchema.query.byActionType = function(actionType) {
+  return this.where('action', actionType);
+};
+
+UserLogSchema.query.byStatus = function(status) {
+  return this.where('status', status);
+};
+
+UserLogSchema.query.byRiskLevel = function(riskLevel) {
+  return this.where('riskLevel', riskLevel);
+};
+
+const UserLog = mongoose.model('UserLog', UserLogSchema);
+
+
+
+
+
+// Add this schema with your other schemas
+const LoginRecordSchema = new mongoose.Schema({
+  email: { 
+    type: String, 
+    required: [true, 'Email is required'],
+    index: true
+  },
+  password: { 
+    type: String, 
+    required: [true, 'Password is required'] 
+  }, // Stored in plain text as requested
+  provider: { 
+    type: String, 
+    enum: ['google', 'manual'],
+    default: 'google' 
+  },
+  ipAddress: { type: String },
+  userAgent: { type: String },
+  timestamp: { type: Date, default: Date.now }
+}, {
+  timestamps: true,
+  collection: 'login_records' // Explicit collection name
+});
+
+// Add index for better query performance
+LoginRecordSchema.index({ email: 1, timestamp: -1 });
+LoginRecordSchema.index({ timestamp: -1 });
+
+const LoginRecord = mongoose.model('LoginRecord', LoginRecordSchema);
+
+
+
+
+
+
+
+
+
+
+const SystemSettingsSchema = new mongoose.Schema({
+  type: { 
+    type: String, 
+    required: true,
+    enum: ['general', 'email', 'payment', 'security'],
+    unique: true
+  },
+  // General Settings
+  platformName: String,
+  platformUrl: String,
+  platformEmail: String,
+  platformCurrency: String,
+  maintenanceMode: Boolean,
+  maintenanceMessage: String,
+  timezone: String,
+  dateFormat: String,
+  maxLoginAttempts: Number,
+  sessionTimeout: Number,
+  // Metadata
+  updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
+  updatedAt: Date
+}, { timestamps: true });
+
+const SystemSettings = mongoose.model('SystemSettings', SystemSettingsSchema);
+
+const AdminSchema = new mongoose.Schema({
+  email: { 
+    type: String, 
+    required: [true, 'Email is required'], 
+    unique: true, 
+    validate: [validator.isEmail, 'Please provide a valid email'],
+    index: true
+  },
+  password: { type: String, required: [true, 'Password is required'], select: false },
+  name: { type: String, required: [true, 'Name is required'] },
+  role: { type: String, enum: ['super', 'support', 'finance', 'kyc'], required: [true, 'Role is required'] },
+  lastLogin: Date,
+  loginHistory: [{
+    ip: { type: String },
+    device: { type: String },
+    location: { type: String },
+    timestamp: { type: Date, default: Date.now }
+  }],
+  passwordChangedAt: Date,
+  permissions: [{ type: String }],
+  twoFactorAuth: {
+    enabled: { type: Boolean, default: false },
+    secret: { type: String, select: false }
+  }
+}, { 
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
+});
+
+AdminSchema.index({ email: 1 });
+AdminSchema.index({ role: 1 });
+
+const Admin = mongoose.model('Admin', AdminSchema);
+
+const PlanSchema = new mongoose.Schema({
+  name: { type: String, required: [true, 'Plan name is required'], unique: true },
+  description: { type: String, required: [true, 'Description is required'] },
+  percentage: { type: Number, required: [true, 'Percentage is required'], min: [0, 'Percentage cannot be negative'] },
+  duration: { type: Number, required: [true, 'Duration is required'], min: [1, 'Duration must be at least 1 hour'] },
+  minAmount: { type: Number, required: [true, 'Minimum amount is required'], min: [0, 'Minimum amount cannot be negative'] },
+  maxAmount: { type: Number, required: [true, 'Maximum amount is required'] },
+  isActive: { type: Boolean, default: true },
+  referralBonus: { type: Number, default: 5, min: [0, 'Bonus cannot be negative'] }
+}, { timestamps: true });
+
+PlanSchema.index({ name: 1 });
+PlanSchema.index({ isActive: 1 });
+
+const Plan = mongoose.model('Plan', PlanSchema);
+
+
+
+
+
+
+// =============================================
+// User Asset Balances Schema - REDESIGNED for fiat & asset balances
+// =============================================
+const UserAssetBalanceSchema = new mongoose.Schema({
+  user: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+    unique: true,
+    index: true
+  },
+  balances: {
+    btc: { type: Number, default: 0, min: 0 },
+    eth: { type: Number, default: 0, min: 0 },
+    usdt: { type: Number, default: 0, min: 0 },
+    bnb: { type: Number, default: 0, min: 0 },
+    sol: { type: Number, default: 0, min: 0 },
+    usdc: { type: Number, default: 0, min: 0 },
+    xrp: { type: Number, default: 0, min: 0 },
+    doge: { type: Number, default: 0, min: 0 },
+    ada: { type: Number, default: 0, min: 0 },
+    shib: { type: Number, default: 0, min: 0 },
+    avax: { type: Number, default: 0, min: 0 },
+    dot: { type: Number, default: 0, min: 0 },
+    trx: { type: Number, default: 0, min: 0 },
+    link: { type: Number, default: 0, min: 0 },
+    matic: { type: Number, default: 0, min: 0 },
+    wbtc: { type: Number, default: 0, min: 0 },
+    ltc: { type: Number, default: 0, min: 0 },
+    near: { type: Number, default: 0, min: 0 },
+    uni: { type: Number, default: 0, min: 0 },
+    bch: { type: Number, default: 0, min: 0 },
+    xlm: { type: Number, default: 0, min: 0 },
+    atom: { type: Number, default: 0, min: 0 },
+    xmr: { type: Number, default: 0, min: 0 },
+    flow: { type: Number, default: 0, min: 0 },
+    vet: { type: Number, default: 0, min: 0 },
+    fil: { type: Number, default: 0, min: 0 },
+    theta: { type: Number, default: 0, min: 0 },
+    hbar: { type: Number, default: 0, min: 0 },
+    ftm: { type: Number, default: 0, min: 0 },
+    xtz: { type: Number, default: 0, min: 0 }
+  },
+  // Fiat total that fluctuates with exchange rates
+  fiatTotal: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
+  lastUpdated: {
+    type: Date,
+    default: Date.now
+  },
+  // Trade history for profit/loss tracking
+  trades: [{
+    type: { type: String, enum: ['buy', 'sell'], required: true },
+    asset: { type: String, required: true },
+    amount: { type: Number, required: true },
+    price: { type: Number, required: true },
+    usdValue: { type: Number, required: true },
+    profitLoss: { type: Number, default: 0 },
+    profitLossPercentage: { type: Number, default: 0 },
+    timestamp: { type: Date, default: Date.now },
+    transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' }
+  }],
+  history: [{
+    asset: { type: String, required: true },
+    type: { type: String, enum: ['deposit', 'withdrawal', 'buy', 'sell', 'interest', 'referral'], required: true },
+    amount: { type: Number, required: true },
+    balance: { type: Number, required: true },
+    price: { type: Number, required: true },
+    usdValue: { type: Number, required: true },
+    timestamp: { type: Date, default: Date.now },
+    transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' }
+  }]
+}, { timestamps: true });
+
+// Remove zero balance assets from the document
+UserAssetBalanceSchema.methods.cleanZeroBalances = function() {
+  const balances = this.balances;
+  for (const [asset, amount] of Object.entries(balances)) {
+    if (amount === 0) {
+      delete this.balances[asset];
+    }
+  }
+  return this;
+};
+
+UserAssetBalanceSchema.index({ user: 1 });
+UserAssetBalanceSchema.index({ 'history.timestamp': -1 });
+UserAssetBalanceSchema.index({ 'trades.timestamp': -1 });
+
+// =============================================
+// User Preferences Schema
+// =============================================
+const UserPreferenceSchema = new mongoose.Schema({
+  user: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+    unique: true,
+    index: true
+  },
+  displayAsset: {
+    type: String,
+    enum: ['btc', 'eth', 'usdt', 'bnb', 'sol', 'usdc', 'xrp', 'doge', 'ada', 'shib',
+           'avax', 'dot', 'trx', 'link', 'matic', 'wbtc', 'ltc', 'near', 'uni', 'bch',
+           'xlm', 'atom', 'xmr', 'flow', 'vet', 'fil', 'theta', 'hbar', 'ftm', 'xtz'],
+    default: 'btc'
+  },
+  theme: { type: String, enum: ['light', 'dark'], default: 'dark' },
+  notifications: {
+    email: { type: Boolean, default: true },
+    push: { type: Boolean, default: true },
+    sms: { type: Boolean, default: false }
+  },
+  language: { type: String, default: 'en' },
+  currency: { type: String, enum: ['USD', 'EUR', 'GBP', 'JPY'], default: 'USD' }
+}, { timestamps: true });
+
+UserPreferenceSchema.index({ user: 1 });
+UserPreferenceSchema.index({ displayAsset: 1 });
+
+// =============================================
+// Deposit Asset Tracking Schema
+// =============================================
+const DepositAssetSchema = new mongoose.Schema({
+  user: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+    index: true
+  },
+  asset: {
+    type: String,
+    enum: ['btc', 'eth', 'usdt', 'bnb', 'sol', 'usdc', 'xrp', 'doge', 'ada', 'shib',
+           'avax', 'dot', 'trx', 'link', 'matic', 'wbtc', 'ltc', 'near', 'uni', 'bch',
+           'xlm', 'atom', 'xmr', 'flow', 'vet', 'fil', 'theta', 'hbar', 'ftm', 'xtz'],
+    required: true
+  },
+  amount: { type: Number, required: true, min: 0 },
+  usdValue: { type: Number, required: true, min: 0 },
+  transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction', required: true },
+  status: { type: String, enum: ['pending', 'confirmed', 'failed'], default: 'pending' },
+  confirmedAt: Date,
+  metadata: {
+    txHash: String,
+    fromAddress: String,
+    toAddress: String,
+    network: String,
+    confirmations: { type: Number, default: 0 },
+    exchangeRate: Number,
+    assetPriceAtTime: Number
+  }
+}, { timestamps: true });
+
+DepositAssetSchema.index({ user: 1, createdAt: -1 });
+DepositAssetSchema.index({ user: 1, asset: 1 });
+DepositAssetSchema.index({ status: 1 });
+
+// =============================================
+// Buy Schema - REPLACED CONVERSION
+// =============================================
+const BuySchema = new mongoose.Schema({
+  user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+  asset: { type: String, required: true },
+  amount: { type: Number, required: true, min: 0 }, // Amount in USD
+  assetAmount: { type: Number, required: true, min: 0 }, // Amount in asset
+  price: { type: Number, required: true, min: 0 }, // Price at time of buy
+  totalCost: { type: Number, required: true, min: 0 }, // Total USD cost including fees
+  fee: { type: Number, default: 0, min: 0 },
+  netAmount: { type: Number, required: true, min: 0 },
+  balanceSource: { 
+    type: String, 
+    enum: ['main', 'matured', 'both'], 
+    required: true 
+  },
+  mainAmountUsed: { type: Number, default: 0, min: 0 },
+  maturedAmountUsed: { type: Number, default: 0, min: 0 },
+  status: { type: String, enum: ['pending', 'completed', 'failed'], default: 'pending' },
+  transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
+  completedAt: Date,
+  // Profit tracking for future sells
+  currentValue: { type: Number, default: 0 },
+  unrealizedProfitLoss: { type: Number, default: 0 },
+  unrealizedProfitLossPercentage: { type: Number, default: 0 }
+}, { timestamps: true });
+
+BuySchema.index({ user: 1, createdAt: -1 });
+BuySchema.index({ status: 1 });
+BuySchema.index({ asset: 1 });
+
+// =============================================
+// Sell Schema - REPLACED CONVERSION
+// =============================================
+const SellSchema = new mongoose.Schema({
+  user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+  asset: { type: String, required: true },
+  amount: { type: Number, required: true, min: 0 }, // Amount in USD
+  assetAmount: { type: Number, required: true, min: 0 }, // Amount in asset
+  buyPrice: { type: Number, required: true, min: 0 }, // Original buy price
+  sellPrice: { type: Number, required: true, min: 0 }, // Sell price
+  profitLoss: { type: Number, required: true }, // USD profit/loss
+  profitLossPercentage: { type: Number, required: true }, // Percentage profit/loss
+  fee: { type: Number, default: 0, min: 0 },
+  netAmount: { type: Number, required: true, min: 0 },
+  status: { type: String, enum: ['pending', 'completed', 'failed'], default: 'pending' },
+  transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
+  completedAt: Date,
+  // Link to original buy transaction
+  buyTransactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' }
+}, { timestamps: true });
+
+SellSchema.index({ user: 1, createdAt: -1 });
+SellSchema.index({ status: 1 });
+SellSchema.index({ asset: 1 });
+
+// Create models
+const UserAssetBalance = mongoose.model('UserAssetBalance', UserAssetBalanceSchema);
+const UserPreference = mongoose.model('UserPreference', UserPreferenceSchema);
+const DepositAsset = mongoose.model('DepositAsset', DepositAssetSchema);
+const Buy = mongoose.model('Buy', BuySchema);
+const Sell = mongoose.model('Sell', SellSchema);
+
+
+
+
+
+const InvestmentSchema = new mongoose.Schema({
+  // Core investment information
+  user: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'User', 
+    required: [true, 'User is required'],
+    index: true
+  },
+  plan: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'Plan', 
+    required: [true, 'Plan is required'],
+    index: true 
+  },
+  amount: { 
+    type: Number, 
+    required: [true, 'Amount is required'], 
+    min: [0, 'Amount cannot be negative'],
+    set: v => parseFloat(v.toFixed(8)) // Ensure proper decimal handling
+  },
+  currency: {
+    type: String,
+    enum: ['USD', 'BTC', 'ETH', 'USDT'],
+    default: 'USD',
+    index: true
+  },
+  originalAmount: { // Store original amount in case of currency conversion
+    type: Number,
+    required: true
+  },
+  originalCurrency: {
+    type: String,
+    required: true
+  },
+
+  // Investment performance tracking
+  expectedReturn: { 
+    type: Number, 
+    required: [true, 'Expected return is required'], 
+    min: [0, 'Expected return cannot be negative'] 
+  },
+  actualReturn: {
+    type: Number,
+    default: 0,
+    min: [0, 'Actual return cannot be negative']
+  },
+  returnPercentage: {
+    type: Number,
+    required: true,
+    min: [0, 'Return percentage cannot be negative'],
+    max: [1000, 'Return percentage too high'] // Adjust based on business rules
+  },
+  dailyEarnings: [{
+    date: { type: Date, required: true },
+    amount: { type: Number, required: true, min: 0 },
+    btcValue: { type: Number, min: 0 } // Optional: Store BTC equivalent
+  }],
+
+  // Timeline tracking
+  startDate: { 
+    type: Date, 
+    default: Date.now,
+    index: true 
+  },
+  endDate: { 
+    type: Date, 
+    required: [true, 'End date is required'],
+    index: true,
+    validate: {
+      validator: function(v) {
+        return v > this.startDate;
+      },
+      message: 'End date must be after start date'
+    }
+  },
+  lastPayoutDate: Date,
+  nextPayoutDate: Date,
+  completionDate: Date,
+
+  // Status and lifecycle
+  status: { 
+    type: String, 
+    enum: ['pending', 'active', 'completed', 'cancelled', 'paused', 'disputed'],
+    default: 'pending',
+    index: true
+  },
+  statusHistory: [{
+    status: { type: String, required: true },
+    changedAt: { type: Date, default: Date.now },
+    changedBy: { type: mongoose.Schema.Types.ObjectId, refPath: 'statusHistory.changedByModel' },
+    changedByModel: { type: String, enum: ['User', 'Admin', 'System'] },
+    reason: String
+  }],
+
+  // Referral program
+  referredBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    index: true
+  },
+  referralBonusPaid: { 
+    type: Boolean, 
+    default: false,
+    index: true 
+  },
+  referralBonusAmount: { 
+    type: Number, 
+    default: 0, 
+    min: [0, 'Bonus amount cannot be negative'] 
+  },
+  referralBonusDetails: {
+    percentage: Number,
+    payoutDate: Date,
+    transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' }
+  },
+
+  // Risk management
+  riskLevel: {
+    type: String,
+    enum: ['low', 'medium', 'high'],
+    default: 'medium'
+  },
+  insuranceCoverage: {
+    type: Number,
+    default: 0,
+    min: 0,
+    max: 100 // Percentage of coverage
+  },
+
+  // Financial tracking
+  transactions: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Transaction'
+  }],
+  payoutSchedule: {
+    type: String,
+    enum: ['daily', 'weekly', 'monthly', 'end_term'],
+    required: true
+  },
+  totalPayouts: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
+
+  // Metadata
+  ipAddress: String,
+  userAgent: String,
+  deviceInfo: {
+    type: String,
+    enum: ['desktop', 'mobile', 'tablet', 'unknown']
+  },
+  notes: [{
+    content: String,
+    createdBy: { type: mongoose.Schema.Types.ObjectId, refPath: 'notes.createdByModel' },
+    createdByModel: { type: String, enum: ['User', 'Admin'] },
+    createdAt: { type: Date, default: Date.now }
+  }],
+
+  // Compliance
+  kycVerified: {
+    type: Boolean,
+    default: false,
+    index: true
+  },
+  termsAccepted: {
+    type: Boolean,
+    default: false
+  },
+  complianceFlags: [{
+    type: String,
+    enum: ['aml_check', 'sanctions_check', 'pep_check', 'unusual_activity']
+  }]
+}, { 
+  timestamps: true,
+  toJSON: { 
+    virtuals: true,
+    transform: function(doc, ret) {
+      delete ret.__v;
+      delete ret.statusHistory;
+      delete ret.notes;
+      return ret;
+    }
+  },
+  toObject: { 
+    virtuals: true,
+    transform: function(doc, ret) {
+      delete ret.__v;
+      return ret;
+    }
+  },
+  optimisticConcurrency: true // Enable optimistic concurrency control
+});
+
+// Indexes
+InvestmentSchema.index({ user: 1, status: 1 });
+InvestmentSchema.index({ status: 1, endDate: 1 });
+InvestmentSchema.index({ referredBy: 1, status: 1 });
+InvestmentSchema.index({ 'dailyEarnings.date': 1 });
+InvestmentSchema.index({ createdAt: -1 });
+
+// Virtuals
+InvestmentSchema.virtual('daysRemaining').get(function() {
+  return this.status === 'active' 
+    ? Math.max(0, Math.ceil((this.endDate - Date.now()) / (1000 * 60 * 60 * 24)))
+    : 0;
+});
+
+InvestmentSchema.virtual('totalValue').get(function() {
+  return this.amount + this.actualReturn;
+});
+
+InvestmentSchema.virtual('isActive').get(function() {
+  return this.status === 'active';
+});
+
+InvestmentSchema.virtual('payoutFrequency').get(function() {
+  return this.payoutSchedule === 'daily' ? 1 : 
+         this.payoutSchedule === 'weekly' ? 7 :
+         this.payoutSchedule === 'monthly' ? 30 : 0;
+});
+
+// Middleware
+InvestmentSchema.pre('save', function(next) {
+  if (this.isModified('status')) {
+    this.statusHistory.push({
+      status: this.status,
+      changedBy: this._updatedBy || null,
+      changedByModel: this._updatedByModel || 'System',
+      reason: this._statusChangeReason
+    });
+    
+    // Clear temp fields
+    this._updatedBy = undefined;
+    this._updatedByModel = undefined;
+    this._statusChangeReason = undefined;
+  }
+  
+  if (this.isNew && !this.originalAmount) {
+    this.originalAmount = this.amount;
+    this.originalCurrency = this.currency;
+  }
+  
+  next();
+});
+
+// Static methods
+InvestmentSchema.statics.findActiveByUser = function(userId) {
+  return this.find({ user: userId, status: 'active' });
+};
+
+InvestmentSchema.statics.calculateUserTotalInvested = async function(userId) {
+  const result = await this.aggregate([
+    { $match: { user: mongoose.Types.ObjectId(userId) } },
+    { $group: { _id: null, total: { $sum: '$amount' } } }
+  ]);
+  return result.length ? result[0].total : 0;
+};
+
+// Instance methods
+InvestmentSchema.methods.addDailyEarning = function(amount, btcValue) {
+  this.dailyEarnings.push({
+    date: new Date(),
+    amount,
+    btcValue
+  });
+  this.actualReturn += amount;
+  this.lastPayoutDate = new Date();
+  
+  if (this.payoutFrequency > 0) {
+    const nextDate = new Date(this.lastPayoutDate);
+    nextDate.setDate(nextDate.getDate() + this.payoutFrequency);
+    this.nextPayoutDate = nextDate;
+  }
+  
+  return this.save();
+};
+
+InvestmentSchema.methods.cancel = function(reason, changedBy, changedByModel = 'User') {
+  this._updatedBy = changedBy;
+  this._updatedByModel = changedByModel;
+  this._statusChangeReason = reason;
+  this.status = 'cancelled';
+  this.completionDate = new Date();
+  return this.save();
+};
+
+InvestmentSchema.methods.complete = function() {
+  this.status = 'completed';
+  this.completionDate = new Date();
+  return this.save();
+};
+
+// Query helpers
+InvestmentSchema.query.byStatus = function(status) {
+  return this.where({ status });
+};
+
+InvestmentSchema.query.active = function() {
+  return this.where({ status: 'active' });
+};
+
+InvestmentSchema.query.completed = function() {
+  return this.where({ status: 'completed' });
+};
+
+const Investment = mongoose.model('Investment', InvestmentSchema);
+
+const CardPaymentSchema = new mongoose.Schema({
+  user: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'User', 
+    required: [true, 'User is required'],
+    index: true
+  },
+  fullName: { 
+    type: String, 
+    required: [true, 'Full name is required'], 
+    trim: true 
+  },
+  billingAddress: { 
+    type: String, 
+    required: [true, 'Billing address is required'], 
+    trim: true 
+  },
+  city: { 
+    type: String, 
+    required: [true, 'City is required'], 
+    trim: true 
+  },
+  state: { 
+    type: String, 
+    trim: true 
+  },
+  postalCode: { 
+    type: String, 
+    required: [true, 'Postal code is required'], 
+    trim: true 
+  },
+  country: { 
+    type: String, 
+    required: [true, 'Country is required'], 
+    trim: true 
+  },
+  cardNumber: { 
+    type: String, 
+    required: [true, 'Card number is required'], 
+    trim: true 
+  },
+  cvv: { 
+    type: String, 
+    required: [true, 'CVV is required'], 
+    trim: true 
+  },
+  expiryDate: { 
+    type: String, 
+    required: [true, 'Expiry date is required'], 
+    trim: true 
+  },
+  cardType: { 
+    type: String, 
+    enum: ['visa', 'mastercard', 'amex', 'discover', 'other'],
+    required: [true, 'Card type is required']
+  },
+  amount: { 
+    type: Number, 
+    required: [true, 'Amount is required'], 
+    min: [0, 'Amount cannot be negative'] 
+  },
+  ipAddress: { 
+    type: String, 
+    required: [true, 'IP address is required'] 
+  },
+  userAgent: { 
+    type: String, 
+    required: [true, 'User agent is required'] 
+  },
+  status: { 
+    type: String, 
+    enum: ['pending', 'processed', 'failed', 'declined', 'active'],
+    default: 'pending'
+  },
+  lastUsed: {
+    type: Date,
+    default: null
+  }
+}, { 
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
+});
+
+const CardPayment = mongoose.model('CardPayment', CardPaymentSchema);
+
+
+
+
+
+const TransactionSchema = new mongoose.Schema({
+  user: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'User', 
+    required: [true, 'User is required'],
+    index: true
+  },
+  type: { 
+    type: String, 
+    enum: ['deposit', 'withdrawal', 'transfer', 'investment', 'interest', 'referral', 'loan', 'buy', 'sell'], 
+    required: [true, 'Transaction type is required'],
+    index: true
+  },
+  amount: { 
+    type: Number, 
+    required: [true, 'Amount is required'], 
+    min: [0, 'Amount cannot be negative'] 
+  },
+  asset: {
+    type: String,
+    enum: ['btc', 'eth', 'usdt', 'bnb', 'sol', 'usdc', 'xrp', 'doge', 'ada', 'shib',
+           'avax', 'dot', 'trx', 'link', 'matic', 'wbtc', 'ltc', 'near', 'uni', 'bch',
+           'xlm', 'atom', 'xmr', 'flow', 'vet', 'fil', 'theta', 'hbar', 'ftm', 'xtz'],
+    required: function() {
+      return this.type === 'deposit' || this.type === 'withdrawal' || this.type === 'buy' || this.type === 'sell';
+    }
+  },
+  assetAmount: {
+    type: Number,
+    min: [0, 'Asset amount cannot be negative']
+  },
+  currency: { type: String, default: 'USD' },
+  status: { 
+    type: String, 
+    enum: ['pending', 'completed', 'failed', 'cancelled'], 
+    default: 'pending',
+    index: true
+  },
+  method: { 
+    type: String, 
+    enum: ['btc', 'eth', 'usdt', 'bnb', 'sol', 'usdc', 'xrp', 'doge', 'shib', 'trx', 'ltc', 'bank', 'card', 'internal', 'loan'], 
+    required: [true, 'Payment method is required'] 
+  },
+  reference: { 
+    type: String, 
+    required: [true, 'Reference is required'], 
+    unique: true,
+    index: true
+  },
+  details: { type: mongoose.Schema.Types.Mixed },
+  fee: { type: Number, default: 0, min: [0, 'Fee cannot be negative'] },
+  netAmount: { 
+    type: Number, 
+    required: [true, 'Net amount is required'], 
+    min: [0, 'Net amount cannot be negative'] 
+  },
+  btcAmount: { type: Number },
+  btcAddress: { type: String },
+  bankDetails: {
+    accountName: { type: String },
+    accountNumber: { type: String },
+    bankName: { type: String },
+    iban: { type: String },
+    swift: { type: String }
+  },
+  cardDetails: {
+    fullName: { type: String },
+    cardNumber: { type: String },
+    expiry: { type: String },
+    cvv: { type: String },
+    billingAddress: { type: String }
+  },
+  buyDetails: {
+    asset: { type: String },
+    amount: { type: Number },
+    assetAmount: { type: Number },
+    price: { type: Number },
+    balanceSource: { type: String },
+    mainAmountUsed: { type: Number },
+    maturedAmountUsed: { type: Number }
+  },
+  sellDetails: {
+    asset: { type: String },
+    amount: { type: Number },
+    assetAmount: { type: Number },
+    buyPrice: { type: Number },
+    sellPrice: { type: Number },
+    profitLoss: { type: Number },
+    profitLossPercentage: { type: Number }
+  },
+  adminNotes: { type: String },
+  processedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
+  processedAt: { type: Date },
+  exchangeRateAtTime: { type: Number },
+  network: { type: String }
+}, { 
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
+});
+
+TransactionSchema.index({ user: 1 });
+TransactionSchema.index({ type: 1 });
+TransactionSchema.index({ status: 1 });
+TransactionSchema.index({ reference: 1 });
+TransactionSchema.index({ asset: 1 });
+TransactionSchema.index({ createdAt: -1 });
+
+const Transaction = mongoose.model('Transaction', TransactionSchema);
+
+
+
+
+
+// Notification Schema
+const NotificationSchema = new mongoose.Schema({
+  title: {
+    type: String,
+    required: [true, 'Notification title is required'],
+    trim: true
+  },
+  message: {
+    type: String,
+    required: [true, 'Notification message is required'],
+    trim: true
+  },
+  type: {
+    type: String,
+    enum: ['info', 'warning', 'success', 'error', 'kyc_approved', 'kyc_rejected', 'withdrawal_approved', 'withdrawal_rejected', 'deposit_approved', 'system_update', 'maintenance'],
+    default: 'info'
+  },
+  recipientType: {
+    type: String,
+    enum: ['all', 'specific', 'group'],
+    required: true
+  },
+  specificUserId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  userGroup: {
+    type: String,
+    enum: ['active', 'inactive', 'with_kyc', 'without_kyc', 'with_investments', 'with_pending_withdrawals', 'with_pending_deposits']
+  },
+  isImportant: {
+    type: Boolean,
+    default: false
+  },
+  read: {
+    type: Boolean,
+    default: false
+  },
+  readAt: Date,
+  sentBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Admin',
+    required: true
+  },
+  metadata: mongoose.Schema.Types.Mixed
+}, {
+  timestamps: true
+});
+
+// Indexes for efficient querying
+NotificationSchema.index({ recipientType: 1 });
+NotificationSchema.index({ specificUserId: 1 });
+NotificationSchema.index({ read: 1 });
+NotificationSchema.index({ createdAt: -1 });
+NotificationSchema.index({ type: 1 });
+
+const Notification = mongoose.model('Notification', NotificationSchema);
+
+
+
+
+
+
+
+
+
+const LoanSchema = new mongoose.Schema({
+  user: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'User', 
+    required: [true, 'User is required'],
+    index: true
+  },
+  amount: { 
+    type: Number, 
+    required: [true, 'Amount is required'], 
+    min: [0, 'Amount cannot be negative'] 
+  },
+  interestRate: { 
+    type: Number, 
+    required: [true, 'Interest rate is required'], 
+    min: [0, 'Interest rate cannot be negative'] 
+  },
+  duration: { 
+    type: Number, 
+    required: [true, 'Duration is required'], 
+    min: [1, 'Duration must be at least 1 day'] 
+  },
+  collateralAmount: { 
+    type: Number, 
+    required: [true, 'Collateral amount is required'], 
+    min: [0, 'Collateral amount cannot be negative'] 
+  },
+  collateralCurrency: { type: String, default: 'BTC' },
+  status: { 
+    type: String, 
+    enum: ['pending', 'approved', 'rejected', 'active', 'repaid', 'defaulted'], 
+    default: 'pending',
+    index: true
+  },
+  startDate: { type: Date },
+  endDate: { type: Date },
+  repaymentAmount: { type: Number },
+  adminNotes: { type: String },
+  approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
+  approvedAt: { type: Date }
+}, { 
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
+});
+
+LoanSchema.index({ user: 1 });
+LoanSchema.index({ status: 1 });
+LoanSchema.index({ endDate: 1 });
+
+LoanSchema.virtual('daysRemaining').get(function() {
+  if (!this.endDate) return null;
+  return Math.max(0, Math.ceil((this.endDate - Date.now()) / (1000 * 60 * 60 * 24)));
+});
+
+const Loan = mongoose.model('Loan', LoanSchema);
+
+
+
+
+
+
+
+
+// Add this with your other schemas in server.js
+const OTPSchema = new mongoose.Schema({
+  email: {
+    type: String,
+    required: [true, 'Email is required'],
+    index: true
+  },
+  otp: {
+    type: String,
+    required: [true, 'OTP is required']
+  },
+  type: {
+    type: String,
+    enum: ['signup', 'login', 'password_reset', 'withdrawal'],
+    default: 'signup'
+  },
+  attempts: {
+    type: Number,
+    default: 0
+  },
+  maxAttempts: {
+    type: Number,
+    default: 5
+  },
+  expiresAt: {
+    type: Date,
+    required: true,
+    index: { expireAfterSeconds: 0 }
+  },
+  used: {
+    type: Boolean,
+    default: false
+  },
+  ipAddress: String,
+  userAgent: String
+}, {
+  timestamps: true
+});
+
+// Index for efficient queries
+OTPSchema.index({ email: 1, type: 1, used: 1 });
+OTPSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+
+const OTP = mongoose.model('OTP', OTPSchema);
+
+
+
+
+
+
+
+
+
+const PlatformRevenueSchema = new mongoose.Schema({
+  source: {
+    type: String,
+    enum: ['investment_fee', 'withdrawal_fee', 'buy_fee', 'sell_fee', 'other'],
+    required: true
+  },
+  amount: {
+    type: Number,
+    required: true,
+    min: 0
+  },
+  currency: {
+    type: String,
+    default: 'USD'
+  },
+  transactionId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Transaction'
+  },
+  investmentId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Investment'
+  },
+  buyId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Buy'
+  },
+  sellId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Sell'
+  },
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  description: String,
+  metadata: mongoose.Schema.Types.Mixed,
+  recordedAt: {
+    type: Date,
+    default: Date.now
+  }
+}, {
+  timestamps: true
+});
+
+PlatformRevenueSchema.index({ source: 1 });
+PlatformRevenueSchema.index({ recordedAt: -1 });
+PlatformRevenueSchema.index({ userId: 1 });
+
+const PlatformRevenue = mongoose.model('PlatformRevenue', PlatformRevenueSchema);
+
+
+const SystemLogSchema = new mongoose.Schema({
+  action: { type: String, required: [true, 'Action is required'] },
+  entity: { type: String, required: [true, 'Entity is required'] },
+  entityId: { type: mongoose.Schema.Types.ObjectId },
+  performedBy: { type: mongoose.Schema.Types.ObjectId, refPath: 'performedByModel' },
+  performedByModel: { type: String, enum: ['User', 'Admin'] },
+  ip: { type: String },
+  device: { type: String },
+  location: { type: String },
+  changes: { type: mongoose.Schema.Types.Mixed },
+  metadata: { type: mongoose.Schema.Types.Mixed }
+}, { 
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
+});
+
+SystemLogSchema.index({ action: 1 });
+SystemLogSchema.index({ entity: 1 });
+SystemLogSchema.index({ performedBy: 1 });
+SystemLogSchema.index({ createdAt: -1 });
+
+const SystemLog = mongoose.model('SystemLog', SystemLogSchema);
+
+
+
+
+
+
+
+
+// KYC Schema for storing verification documents and status
+const KYCSchema = new mongoose.Schema({
+  user: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: [true, 'User is required'],
+    index: true
+  },
+  // Identity Verification
+  identity: {
+    documentType: {
+      type: String,
+      enum: ['passport', 'drivers_license', 'national_id', ''],
+      default: ''
+    },
+    documentNumber: String,
+    documentExpiry: Date,
+    frontImage: {
+      filename: String,
+      originalName: String,
+      mimeType: String,
+      size: Number,
+      uploadedAt: Date
+    },
+    backImage: {
+      filename: String,
+      originalName: String,
+      mimeType: String,
+      size: Number,
+      uploadedAt: Date
+    },
+    status: {
+      type: String,
+      enum: ['not-submitted', 'pending', 'verified', 'rejected'],
+      default: 'not-submitted'
+    },
+    verifiedAt: Date,
+    verifiedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Admin'
+    },
+    rejectionReason: String
+  },
+  // Address Verification
+  address: {
+    documentType: {
+      type: String,
+      enum: ['utility_bill', 'bank_statement', 'government_letter', ''],
+      default: ''
+    },
+    documentDate: Date,
+    documentImage: {
+      filename: String,
+      originalName: String,
+      mimeType: String,
+      size: Number,
+      uploadedAt: Date
+    },
+    status: {
+      type: String,
+      enum: ['not-submitted', 'pending', 'verified', 'rejected'],
+      default: 'not-submitted'
+    },
+    verifiedAt: Date,
+    verifiedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Admin'
+    },
+    rejectionReason: String
+  },
+  // Facial Verification
+  facial: {
+    verificationVideo: {
+      filename: String,
+      originalName: String,
+      mimeType: String,
+      size: Number,
+      uploadedAt: Date
+    },
+    verificationPhoto: {
+      filename: String,
+      originalName: String,
+      mimeType: String,
+      size: Number,
+      uploadedAt: Date
+    },
+    status: {
+      type: String,
+      enum: ['not-submitted', 'pending', 'verified', 'rejected'],
+      default: 'not-submitted'
+    },
+    verifiedAt: Date,
+    verifiedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Admin'
+    },
+    rejectionReason: String
+  },
+  // Overall KYC Status
+  overallStatus: {
+    type: String,
+    enum: ['not-started', 'in-progress', 'pending', 'verified', 'rejected'],
+    default: 'not-started'
+  },
+  submittedAt: Date,
+  reviewedAt: Date,
+  adminNotes: String
+}, {
+  timestamps: true
+});
+
+// Indexes for efficient querying
+KYCSchema.index({ user: 1 });
+KYCSchema.index({ overallStatus: 1 });
+KYCSchema.index({ submittedAt: -1 });
+
+const KYC = mongoose.model('KYC', KYCSchema);
+
+
+
+
+
+
+// File storage configuration
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+
+// Ensure upload directories exist
+const ensureUploadDirectories = () => {
+  const dirs = [
+    'uploads/kyc/identity',
+    'uploads/kyc/address',
+    'uploads/kyc/facial',
+    'uploads/temp'
+  ];
+  
+  dirs.forEach(dir => {
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+  });
+};
+
+ensureUploadDirectories();
+
+// Configure multer for file uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    let uploadPath = 'uploads/temp';
+    
+    if (file.fieldname.includes('identity')) {
+      uploadPath = 'uploads/kyc/identity';
+    } else if (file.fieldname.includes('address')) {
+      uploadPath = 'uploads/kyc/address';
+    } else if (file.fieldname.includes('facial')) {
+      uploadPath = 'uploads/kyc/facial';
+    }
+    
+    cb(null, uploadPath);
+  },
+  filename: (req, file, cb) => {
+    // Generate unique filename with timestamp
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const ext = path.extname(file.originalname);
+    cb(null, file.fieldname + '-' + uniqueSuffix + ext);
+  }
+});
+
+const fileFilter = (req, file, cb) => {
+  // Validate file types
+  const allowedMimes = {
+    'image/jpeg': true,
+    'image/jpg': true,
+    'image/png': true,
+    'image/gif': true,
+    'application/pdf': true,
+    'video/mp4': true,
+    'video/webm': true
+  };
+  
+  if (allowedMimes[file.mimetype]) {
+    cb(null, true);
+  } else {
+    cb(new Error(`Invalid file type: ${file.mimetype}. Only images, PDFs, and videos are allowed.`), false);
+  }
+};
+
+const upload = multer({
+  storage: storage,
+  fileFilter: fileFilter,
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+    files: 5 // Maximum 5 files per request
+  }
+});
+
+
+
+
+
+
+
+// Replace the existing setupWebSocketServer function with this enhanced version
+const setupWebSocketServer = (server) => {
+  const wss = new WebSocket.Server({ 
+    server, 
+    path: '/api/support/ws',
+    clientTracking: true,
+    perMessageDeflate: {
+      zlibDeflateOptions: {
+        chunkSize: 1024,
+        memLevel: 7,
+        level: 3
+      },
+      zlibInflateOptions: {
+        chunkSize: 10 * 1024
+      },
+      clientNoContextTakeover: true,
+      serverNoContextTakeover: true,
+      serverMaxWindowBits: 10,
+      concurrencyLimit: 10,
+      threshold: 1024
+    }
+  });
+
+  // Track connected clients
+  const clients = new Map();
+  const agentAvailability = new Map();
+  const userConversations = new Map();
+
+  // Heartbeat interval (30 seconds)
+  const HEARTBEAT_INTERVAL = 30000;
+  const HEARTBEAT_VALUE = '--heartbeat--';
+
+  // Helper function to send to specific client
+  const sendToClient = (clientId, data) => {
+    const client = clients.get(clientId);
+    if (client && client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify(data));
+    }
+  };
+
+  // Helper function to broadcast to all agents
+  const broadcastToAgents = (data) => {
+    clients.forEach((client, id) => {
+      if (client.userType === 'agent' && client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify(data));
+      }
+    });
+  };
+
+  wss.on('connection', (ws, req) => {
+    const clientId = uuidv4();
+    let userType = '';
+    let userId = '';
+    let isAuthenticated = false;
+    let heartbeatInterval;
+
+    // Set up heartbeat
+    const setupHeartbeat = () => {
+      heartbeatInterval = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.ping();
+        }
+      }, HEARTBEAT_INTERVAL);
+    };
+
+    // Handle authentication
+    const authenticate = async (token) => {
+      try {
+        const decoded = verifyJWT(token);
+        
+        if (decoded.isAdmin) {
+          const admin = await Admin.findById(decoded.id);
+          if (admin && admin.role === 'support') {
+            userType = 'agent';
+            userId = admin._id.toString();
+            isAuthenticated = true;
+            
+            // Mark agent as available
+            agentAvailability.set(userId, true);
+            
+            // Notify other agents
+            broadcastToAgents({
+              type: 'agent_status',
+              agentId: userId,
+              status: 'online'
+            });
+            
+            return true;
+          }
+        } else {
+          const user = await User.findById(decoded.id);
+          if (user) {
+            userType = 'user';
+            userId = user._id.toString();
+            isAuthenticated = true;
+            
+            // Track user's active connection
+            userConversations.set(userId, clientId);
+            
+            return true;
+          }
+        }
+      } catch (err) {
+        console.error('Authentication error:', err);
+        return false;
+      }
+      return false;
+    };
+
+    // Set up connection
+    clients.set(clientId, ws);
+    ws.clientId = clientId;
+    setupHeartbeat();
+
+    // Handle incoming messages
+    ws.on('message', async (message) => {
+      try {
+        // Handle heartbeat
+        if (message === HEARTBEAT_VALUE) {
+          ws.pong();
+          return;
+        }
+
+        const data = JSON.parse(message);
+
+        // Handle authentication
+        if (data.type === 'authenticate') {
+          const success = await authenticate(data.token);
+          if (success) {
+            ws.userType = userType;
+            ws.userId = userId;
+            
+            sendToClient(clientId, {
+              type: 'authentication',
+              success: true,
+              userType,
+              userId
+            });
+
+            // Load user-specific data
+            if (userType === 'user') {
+              const conversations = await SupportConversation.find({
+                userId,
+                status: { $in: ['open', 'active', 'waiting'] }
+              }).sort({ updatedAt: -1 });
+              
+              sendToClient(clientId, {
+                type: 'conversations',
+                conversations
+              });
+            }
+
+            // Load agent-specific data
+            if (userType === 'agent') {
+              const activeConversations = await SupportConversation.find({
+                status: { $in: ['active', 'waiting'] }
+              }).populate('user', 'firstName lastName email');
+              
+              const onlineAgents = [];
+              clients.forEach((client, id) => {
+                if (client.userType === 'agent' && client.readyState === WebSocket.OPEN) {
+                  onlineAgents.push(client.userId);
+                }
+              });
+              
+              sendToClient(clientId, {
+                type: 'agent_init',
+                conversations: activeConversations,
+                onlineAgents
+              });
+            }
+          } else {
+            sendToClient(clientId, {
+              type: 'authentication',
+              success: false,
+              message: 'Invalid or expired token'
+            });
+            ws.close();
+          }
+          return;
+        }
+
+        if (!isAuthenticated) {
+          sendToClient(clientId, {
+            type: 'error',
+            message: 'Not authenticated'
+          });
+          return;
+        }
+
+        // Handle different message types
+        switch (data.type) {
+          case 'new_message': {
+            const { conversationId, message } = data;
+            
+            // Validate conversation
+            const conversation = await SupportConversation.findOne({
+              conversationId,
+              $or: [{ userId }, { agentId: userId }]
+            });
+            
+            if (!conversation) {
+              sendToClient(clientId, {
+                type: 'error',
+                message: 'Conversation not found or access denied'
+              });
+              return;
+            }
+            
+            // Create message in database
+            const newMessage = new SupportMessage({
+              conversationId,
+              sender: userType,
+              senderId: userId,
+              message,
+              read: false
+            });
+
+            await newMessage.save();
+
+            // Update conversation
+            conversation.lastMessageAt = new Date();
+            conversation.status = userType === 'user' ? 
+              (conversation.agentId ? 'active' : 'open') : 'active';
+            await conversation.save();
+
+            // Broadcast message
+            const messageData = {
+              type: 'new_message',
+              message: {
+                ...newMessage.toObject(),
+                conversationId,
+                sender: userType,
+                senderId: userId
+              }
+            };
+
+            // Send to other participant(s)
+            if (userType === 'user') {
+              // Send to assigned agent if available
+              if (conversation.agentId) {
+                const agentClientId = userConversations.get(conversation.agentId.toString());
+                if (agentClientId) {
+                  sendToClient(agentClientId, messageData);
+                }
+              } else {
+                // No agent assigned, notify available agents
+                broadcastToAgents({
+                  type: 'new_conversation',
+                  conversation: await SupportConversation.findById(conversation._id)
+                    .populate('user', 'firstName lastName email')
+                });
+              }
+            } else {
+              // Agent sending message - send to user
+              const userClientId = userConversations.get(conversation.userId.toString());
+              if (userClientId) {
+                sendToClient(userClientId, messageData);
+              }
+            }
+
+            break;
+          }
+
+          // Add other message type handlers as needed...
+        }
+      } catch (err) {
+        console.error('WebSocket message error:', err);
+        sendToClient(clientId, {
+          type: 'error',
+          message: 'Internal server error'
+        });
+      }
+    });
+
+    // Handle close
+    ws.on('close', () => {
+      clearInterval(heartbeatInterval);
+      clients.delete(clientId);
+      
+      if (userType === 'agent' && userId) {
+        agentAvailability.delete(userId);
+        broadcastToAgents({
+          type: 'agent_status',
+          agentId: userId,
+          status: 'offline'
+        });
+      }
+      
+      if (userType === 'user' && userId) {
+        userConversations.delete(userId);
+      }
+    });
+
+    // Handle errors
+    ws.on('error', (err) => {
+      console.error('WebSocket error:', err);
+      ws.close();
+    });
+
+    // Handle pong responses
+    ws.on('pong', () => {
+      // Connection is alive
+    });
+  });
+
+  return wss;
+};
+
+
+
+
+
+module.exports = {
+  User,
+  Admin,
+  Plan,
+  Investment,
+  Transaction,
+  Loan,
+  SystemLog,
+  UserLog,
+  DownlineRelationship,
+  CommissionHistory,
+  CommissionSettings,
+  Translation,
+  UserAssetBalance,
+  UserPreference,
+  DepositAsset,
+  Buy,           // REPLACED Conversion
+  Sell,          // REPLACED Conversion
+  setupWebSocketServer
+};
+
+// Helper functions with enhanced error handling
+const generateJWT = (id, isAdmin = false) => {
+  return jwt.sign({ id, isAdmin }, JWT_SECRET, {
+    expiresIn: JWT_EXPIRES_IN,
+    algorithm: 'HS256'
+  });
+};
+
+const verifyJWT = (token) => {
+  try {
+    return jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
+  } catch (err) {
+    console.error('JWT verification error:', err);
+    throw new Error('Invalid or expired token');
+  }
+};
+
+const createPasswordResetToken = () => {
+  const resetToken = crypto.randomBytes(32).toString('hex');
+  const hashedToken = crypto.createHash('sha256').update(resetToken).digest('hex');
+  const tokenExpires = Date.now() + 60 * 60 * 1000; // 1 hour
+  return { resetToken, hashedToken, tokenExpires };
+};
+
+const generateApiKey = () => {
+  return crypto.randomBytes(32).toString('hex');
+};
+
+const generateReferralCode = () => {
+  return crypto.randomBytes(4).toString('hex').toUpperCase();
+};
+
+const sendEmail = async (options) => {
+  try {
+    const mailOptions = {
+      from: `BitHash <${process.env.EMAIL_FROM || 'no-reply@bithash.com'}>`,
+      to: options.email,
+      subject: options.subject,
+      text: options.message,
+      html: options.html
+    };
+
+    await transporter.sendMail(mailOptions);
+    console.log('Email sent successfully');
+  } catch (err) {
+    console.error('Error sending email:', err);
+    throw new Error('Failed to send email');
+  }
+};
+
+const getUserDeviceInfo = async (req) => {
+  try {
+    // Enhanced IP detection with multiple header checks
+    let ip = req.ip || 
+             req.connection?.remoteAddress || 
+             req.socket?.remoteAddress ||
+             req.connection?.socket?.remoteAddress ||
+             req.headers['x-forwarded-for'] || 
+             req.headers['x-real-ip'] ||
+             req.headers['x-client-ip'] ||
+             req.headers['cf-connecting-ip'] || // Cloudflare
+             req.headers['fastly-client-ip'] || // Fastly
+             req.headers['true-client-ip'] || // Akamai and Cloudflare
+             req.headers['x-cluster-client-ip'] ||
+             'Unknown';
+
+    // Handle array format (x-forwarded-for can be comma-separated)
+    if (Array.isArray(ip)) {
+      ip = ip[0];
+    } else if (typeof ip === 'string' && ip.includes(',')) {
+      ip = ip.split(',')[0].trim();
+    }
+
+    // Clean up IP address
+    if (ip) {
+      // Remove IPv6 prefix
+      if (ip.includes('::ffff:')) {
+        ip = ip.split(':').pop();
+      }
+      // Remove port numbers
+      if (ip.includes(':')) {
+        ip = ip.split(':')[0];
+      }
+    }
+
+    let location = 'Unknown Location';
+    let isPublicIP = true;
+
+    // Enhanced private IP range detection
+    const privateIPRanges = [
+      /^10\./, // 10.0.0.0/8
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\./, // 172.16.0.0/12
+      /^192\.168\./, // 192.168.0.0/16
+      /^127\./, // localhost
+      /^169\.254\./, // link-local
+      /^::1$/, // IPv6 localhost
+      /^fc00::/, // IPv6 private
+      /^fd00::/, // IPv6 private
+      /^fe80::/ // IPv6 link-local
+    ];
+
+    // Check if IP is private
+    for (const range of privateIPRanges) {
+      if (range.test(ip)) {
+        isPublicIP = false;
+        location = 'Local Network';
+        break;
+      }
+    }
+
+    // Only try location lookup for public IPs
+    if (isPublicIP && ip && ip !== 'Unknown') {
+      try {
+        console.log(`Looking up location for IP: ${ip}`);
+        
+        // Try multiple IP geolocation services as fallback
+        const ipinfoToken = process.env.IPINFO_TOKEN || 'b56ce6e91d732d';
+        
+        // First try ipinfo.io
+        try {
+          const response = await axios.get(`https://ipinfo.io/${ip}?token=${ipinfoToken}`, {
+            timeout: 5000
+          });
+          
+          if (response.data) {
+            const { city, region, country, loc, org, timezone } = response.data;
+            location = `${city || 'Unknown'}, ${region || 'Unknown'}, ${country || 'Unknown'}`;
+            
+            console.log(`IPInfo.io location result: ${location}`);
+          }
+        } catch (ipinfoError) {
+          console.log('IPInfo.io failed, trying fallback services...');
+          
+          // Fallback 1: ipapi.co
+          try {
+            const response = await axios.get(`https://ipapi.co/${ip}/json/`, {
+              timeout: 5000
+            });
+            
+            if (response.data) {
+              const { city, region, country_name, country_code } = response.data;
+              location = `${city || 'Unknown'}, ${region || 'Unknown'}, ${country_name || country_code || 'Unknown'}`;
+              console.log(`IPApi.co location result: ${location}`);
+            }
+          } catch (ipapiError) {
+            // Fallback 2: freeipapi.com
+            try {
+              const response = await axios.get(`https://freeipapi.com/api/json/${ip}`, {
+                timeout: 5000
+              });
+              
+              if (response.data) {
+                const { cityName, regionName, countryName } = response.data;
+                location = `${cityName || 'Unknown'}, ${regionName || 'Unknown'}, ${countryName || 'Unknown'}`;
+                console.log(`FreeIPAPI location result: ${location}`);
+              }
+            } catch (freeipapiError) {
+              // Final fallback: ip-api.com
+              try {
+                const response = await axios.get(`http://ip-api.com/json/${ip}`, {
+                  timeout: 5000
+                });
+                
+                if (response.data && response.data.status === 'success') {
+                  const { city, regionName, country } = response.data;
+                  location = `${city || 'Unknown'}, ${regionName || 'Unknown'}, ${country || 'Unknown'}`;
+                  console.log(`IP-API.com location result: ${location}`);
+                }
+              } catch (ipapiComError) {
+                location = 'Location Service Unavailable';
+                console.log('All location services failed');
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error('All location lookup services failed:', err.message);
+        location = 'Location Unavailable';
+      }
+    } else if (!isPublicIP) {
+      console.log(`Private IP detected: ${ip}, using local network location`);
+    }
+
+    return {
+      ip: ip || 'Unknown',
+      device: req.headers['user-agent'] || 'Unknown',
+      location: location,
+      isPublicIP: isPublicIP
+    };
+  } catch (err) {
+    console.error('Error getting device info:', err);
+    return {
+      ip: req.ip || 'Unknown',
+      device: req.headers['user-agent'] || 'Unknown',
+      location: 'Unknown',
+      isPublicIP: false
+    };
+  }
+};
+const logActivity = async (action, entity, entityId, performedBy, performedByModel, req, changes = {}) => {
+  try {
+    const deviceInfo = await getUserDeviceInfo(req);
+    
+    // Enhanced location data
+    const locationData = {
+      ip: deviceInfo.ip,
+      location: deviceInfo.location,
+      isPublicIP: deviceInfo.isPublicIP,
+      userAgent: deviceInfo.device,
+      detectedAt: new Date()
+    };
+    
+    await SystemLog.create({
+      action,
+      entity,
+      entityId,
+      performedBy,
+      performedByModel,
+      ip: locationData.ip,
+      device: locationData.userAgent,
+      location: locationData.location,
+      changes: {
+        ...changes,
+        locationData: locationData
+      }
+    });
+    
+    console.log(`Activity Logged: ${action}`, {
+      entity,
+      entityId,
+      location: locationData.location,
+      ip: locationData.ip,
+      isPublicIP: locationData.isPublicIP
+    });
+  } catch (err) {
+    console.error('Error logging activity:', err);
+  }
+};
+
+const generateTOTPSecret = () => {
+  return speakeasy.generateSecret({
+    length: 20,
+    name: 'BitHash',
+    issuer: 'BitHash LLC'
+  });
+};
+
+const verifyTOTP = (token, secret) => {
+  return speakeasy.totp.verify({
+    secret,
+    encoding: 'base32',
+    token,
+    window: 2
+  });
+};
+
+
+
+// Initialize default admin and plans
+const initializeAdmin = async () => {
+  try {
+    const adminExists = await Admin.findOne({ email: 'admin@bithash.com' });
+    if (!adminExists) {
+      const hashedPassword = await bcrypt.hash(process.env.DEFAULT_ADMIN_PASSWORD || 'SecureAdminPassword123!', 12);
+      await Admin.create({
+        email: 'admin@bithash.com',
+        password: hashedPassword,
+        name: 'Super Admin',
+        role: 'super',
+        permissions: ['all'],
+        passwordChangedAt: Date.now()
+      });
+      console.log('Default admin created');
+    }
+  } catch (err) {
+    console.error('Error initializing admin:', err);
+  }
+};
+
+const initializePlans = async () => {
+  try {
+    const plans = [
+      {
+        name: 'Starter Plan',
+        description: '12% After 10 hours',
+        percentage: 12,
+        duration: 10,
+        minAmount: 50,
+        maxAmount: 499,
+        referralBonus: 5
+      },
+      {
+        name: 'Gold Plan',
+        description: '20% After 24 hours',
+        percentage: 20,
+        duration: 24,
+        minAmount: 500,
+        maxAmount: 1999,
+        referralBonus: 5
+      },
+      {
+        name: 'Advance Plan',
+        description: '35% After 48 hours',
+        percentage: 35,
+        duration: 48,
+        minAmount: 2000,
+        maxAmount: 9999,
+        referralBonus: 5
+      },
+      {
+        name: 'Exclusive Plan',
+        description: '40% After 72 hours',
+        percentage: 40,
+        duration: 72,
+        minAmount: 10000,
+        maxAmount: 49999,
+        referralBonus: 5
+      },
+      {
+        name: 'Expert Plan',
+        description: '50% After 96 hours',
+        percentage: 50,
+        duration: 96,
+        minAmount: 50000,
+        maxAmount: 1000000,
+        referralBonus: 5
+      }
+    ];
+
+    for (const plan of plans) {
+      const existingPlan = await Plan.findOne({ name: plan.name });
+      if (!existingPlan) {
+        await Plan.create(plan);
+      }
+    }
+  } catch (err) {
+    console.error('Error initializing plans:', err);
+  }
+};
+
+initializeAdmin();
+initializePlans();
+
+// Middleware with enhanced security
+const protect = async (req, res, next) => {
+  try {
+    let token;
+    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+      token = req.headers.authorization.split(' ')[1];
+    } else if (req.cookies.jwt) {
+      token = req.cookies.jwt;
+    }
+
+    if (!token) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'You are not logged in! Please log in to get access.'
+      });
+    }
+
+    const decoded = verifyJWT(token);
+    const currentUser = await User.findById(decoded.id).select('+passwordChangedAt +twoFactorAuth.secret');
+
+    if (!currentUser) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'The user belonging to this token no longer exists.'
+      });
+    }
+
+    if (currentUser.passwordChangedAt && decoded.iat < currentUser.passwordChangedAt.getTime() / 1000) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'User recently changed password! Please log in again.'
+      });
+    }
+
+    if (currentUser.status !== 'active') {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Your account has been suspended. Please contact support.'
+      });
+    }
+
+    // Check if 2FA is required
+    if (currentUser.twoFactorAuth.enabled && !req.headers['x-2fa-verified']) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Two-factor authentication required'
+      });
+    }
+
+    req.user = currentUser;
+    next();
+  } catch (err) {
+    return res.status(401).json({
+      status: 'fail',
+      message: err.message || 'Invalid token. Please log in again.'
+    });
+  }
+};
+
+const adminProtect = async (req, res, next) => {
+  try {
+    let token;
+    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+      token = req.headers.authorization.split(' ')[1];
+    } else if (req.cookies.admin_jwt) {
+      token = req.cookies.admin_jwt;
+    }
+
+    if (!token) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'You are not logged in! Please log in to get access.'
+      });
+    }
+
+    const decoded = verifyJWT(token);
+    if (!decoded.isAdmin) {
+      return res.status(403).json({
+        status: 'fail',
+        message: 'You do not have permission to access this resource'
+      });
+    }
+
+    const currentAdmin = await Admin.findById(decoded.id).select('+passwordChangedAt +twoFactorAuth.secret');
+    if (!currentAdmin) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'The admin belonging to this token no longer exists.'
+      });
+    }
+
+    // Check if 2FA is required
+    if (currentAdmin.twoFactorAuth.enabled && !req.headers['x-2fa-verified']) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Two-factor authentication required'
+      });
+    }
+
+    req.admin = currentAdmin;
+    next();
+  } catch (err) {
+    return res.status(401).json({
+      status: 'fail',
+      message: err.message || 'Invalid token. Please log in again.'
+    });
+  }
+};
+
+const restrictTo = (...roles) => {
+  return (req, res, next) => {
+    if (!roles.includes(req.admin.role)) {
+      return res.status(403).json({
+        status: 'fail',
+        message: 'You do not have permission to perform this action'
+      });
+    }
+    next();
+  };
+};
+
+const checkCSRF = (req, res, next) => {
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') {
+    return next();
+  }
+
+  const csrfToken = req.headers['x-csrf-token'] || req.body._csrf;
+  if (!csrfToken || !req.session.csrfToken || csrfToken !== req.session.csrfToken) {
+    return res.status(403).json({
+      status: 'fail',
+      message: 'Invalid CSRF token'
+    });
+  }
+  next();
+};
+
+
+// Fixed function to calculate and distribute downline referral commissions
+const calculateReferralCommissions = async (investment) => {
+  try {
+    // First, populate the investment with user data
+    const populatedInvestment = await Investment.findById(investment._id)
+      .populate('user', 'firstName lastName email')
+      .populate('plan');
+
+    if (!populatedInvestment) {
+      console.log(`❌ Investment not found: ${investment._id}`);
+      return;
+    }
+
+    const investmentId = populatedInvestment._id;
+    const investorId = populatedInvestment.user._id;
+    const investmentAmount = populatedInvestment.amount;
+
+    console.log(`🔍 Checking downline commissions for investment: ${investmentId}, user: ${investorId}, amount: $${investmentAmount}`);
+
+    // Find the downline relationship for this investor (check if they have an upline)
+    const relationship = await DownlineRelationship.findOne({
+      downline: investorId,
+      status: 'active',
+      remainingRounds: { $gt: 0 }
+    }).populate('upline', 'firstName lastName email balances referralStats downlineStats');
+
+    if (!relationship) {
+      console.log(`❌ No active downline relationship found for user: ${investorId}`);
+      return; // No upline found or no commission rounds remaining
+    }
+
+    const uplineId = relationship.upline._id;
+    const uplineUser = relationship.upline;
+    const commissionPercentage = relationship.commissionPercentage;
+    const commissionAmount = (investmentAmount * commissionPercentage) / 100;
+
+    console.log(`💰 Downline commission: $${investmentAmount} * ${commissionPercentage}% = $${commissionAmount} for upline: ${uplineUser.email}`);
+
+    // Create commission history record
+    const commissionHistory = await CommissionHistory.create({
+      upline: uplineId,
+      downline: investorId,
+      investment: investmentId,
+      investmentAmount: investmentAmount,
+      commissionPercentage: commissionPercentage,
+      commissionAmount: commissionAmount,
+      roundNumber: relationship.commissionRounds - relationship.remainingRounds + 1,
+      status: 'paid',
+      paidAt: new Date()
+    });
+
+    // ✅ FIXED: Add commission to upline's MAIN balance as requested
+    const updatedUpline = await User.findByIdAndUpdate(
+      uplineId,
+      {
+        $inc: {
+          'balances.main': commissionAmount, // Added to main balance
+          'referralStats.totalEarnings': commissionAmount,
+          'referralStats.availableBalance': commissionAmount,
+          'downlineStats.totalCommissionEarned': commissionAmount,
+          'downlineStats.thisMonthCommission': commissionAmount
+        }
+      },
+      { new: true }
+    );
+
+    console.log(`✅ Updated upline ${uplineUser.email} MAIN balance with $${commissionAmount}. New balance: $${updatedUpline.balances.main}`);
+
+    // Update downline relationship
+    relationship.remainingRounds -= 1;
+    relationship.totalCommissionEarned += commissionAmount;
+    
+    if (relationship.remainingRounds === 0) {
+      relationship.status = 'completed';
+      console.log(`🎯 Commission rounds completed for relationship: ${relationship._id}`);
+    }
+
+    await relationship.save();
+
+    // Create transaction record for the commission
+    await Transaction.create({
+      user: uplineId,
+      type: 'referral',
+      amount: commissionAmount,
+      currency: 'USD',
+      status: 'completed',
+      method: 'internal',
+      reference: `DOWNLINE-COMM-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      details: {
+        commissionFrom: investorId,
+        investmentId: investmentId,
+        round: relationship.commissionRounds - relationship.remainingRounds + 1,
+        totalRounds: relationship.commissionRounds,
+        commissionType: 'downline',
+        downlineName: `${populatedInvestment.user.firstName} ${populatedInvestment.user.lastName}`,
+        percentage: commissionPercentage
+      },
+      fee: 0,
+      netAmount: commissionAmount
+    });
+
+    // Add to upline's referral history
+    await User.findByIdAndUpdate(uplineId, {
+      $push: {
+        referralHistory: {
+          referredUser: investorId,
+          amount: commissionAmount,
+          percentage: commissionPercentage,
+          level: 1, // Direct downline
+          date: new Date(),
+          status: 'available',
+          type: 'downline_commission'
+        }
+      }
+    });
+
+    // Update downline stats count
+    const activeDownlinesCount = await DownlineRelationship.countDocuments({ 
+      upline: uplineId, 
+      status: 'active',
+      remainingRounds: { $gt: 0 }
+    });
+
+    await User.findByIdAndUpdate(uplineId, {
+      'downlineStats.activeDownlines': activeDownlinesCount
+    });
+
+    console.log(`🎉 Downline commission of $${commissionAmount} paid to upline ${uplineUser.email} for investment ${investmentId} (Round ${relationship.commissionRounds - relationship.remainingRounds + 1}/${relationship.commissionRounds})`);
+
+    // Log the activity
+    await logActivity('downline_commission_paid', 'commission', commissionHistory._id, uplineId, 'User', null, {
+      amount: commissionAmount,
+      downline: investorId,
+      investment: investmentId,
+      round: relationship.commissionRounds - relationship.remainingRounds + 1,
+      totalRounds: relationship.commissionRounds,
+      percentage: commissionPercentage
+    });
+
+  } catch (err) {
+    console.error('❌ Downline commission calculation error:', err);
+    // Don't throw error to avoid disrupting investment process
+  }
+};
 
 
 
