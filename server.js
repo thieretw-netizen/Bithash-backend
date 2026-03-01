@@ -15612,6 +15612,9 @@ app.post('/api/buy', protect, async (req, res) => {
   }
 });
 
+
+
+
 // =============================================
 // Sell Endpoint - Only allows using matured balance assets
 // =============================================
@@ -15697,33 +15700,15 @@ app.post('/api/sell', protect, async (req, res) => {
     }
 
     const profitLossPercentage = totalCost > 0 ? (totalProfitLoss / totalCost) * 100 : 0;
+    const avgPurchasePrice = totalCost / assetAmount;
 
     // Update asset balance
     userAssetBalance.balances[asset] = currentAssetBalance - assetAmount;
 
-    // Add to sell history
-    const sellRecord = {
-      asset,
-      amount: assetAmount,
-      sellPrice: price,
-      sellDate: new Date(),
-      purchasePrice: totalCost / assetAmount, // Average purchase price
-      profitLoss: totalProfitLoss,
-      profitLossPercentage: profitLossPercentage,
-      transactionId: null // Will be updated after transaction creation
-    };
-    userAssetBalance.sellHistory.push(sellRecord);
-
-    await userAssetBalance.save();
-
-    // Update user balances - add proceeds to main balance (sell proceeds go to main wallet)
-    user.balances.main += amountUSD;
-    await user.save();
-
     // Generate unique reference
     const reference = `SELL-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
 
-    // Create transaction record
+    // Create transaction record with structure matching frontend expectations
     const transaction = await Transaction.create({
       user: userId,
       type: 'sell',
@@ -15734,36 +15719,43 @@ app.post('/api/sell', protect, async (req, res) => {
       status: 'completed',
       method: asset,
       reference: reference,
-      details: {
-        action: 'sell',
-        asset: asset,
-        amountUSD: amountUSD,
-        assetAmount: assetAmount,
-        price: price,
-        profitLoss: totalProfitLoss,
-        profitLossPercentage: profitLossPercentage,
-        balanceSource: 'asset'
-      },
-      tradeDetails: {
+      // Structure sellDetails exactly as frontend expects in openTransactionDetails()
+      sellDetails: {
         asset: asset,
         amount: amountUSD,
         assetAmount: assetAmount,
         price: price,
-        purchasePrice: totalCost / assetAmount,
+        buyingPrice: avgPurchasePrice,
         profitLoss: totalProfitLoss,
         profitLossPercentage: profitLossPercentage
       },
       fee: 0,
       netAmount: amountUSD,
-      exchangeRateAtTime: price
+      exchangeRateAtTime: price,
+      // Add these for compatibility with frontend display
+      createdAt: new Date(),
+      description: `Sold ${assetAmount.toFixed(8)} ${asset.toUpperCase()} at $${price.toFixed(2)}`,
+      network: getNetworkForAsset(asset) // Helper function to set correct network
     });
 
-    // Update sell history with transaction ID
-    if (userAssetBalance.sellHistory.length > 0) {
-      const lastSell = userAssetBalance.sellHistory[userAssetBalance.sellHistory.length - 1];
-      lastSell.transactionId = transaction._id;
-      await userAssetBalance.save();
-    }
+    // Add to sell history with transaction ID
+    const sellRecord = {
+      asset,
+      amount: assetAmount,
+      sellPrice: price,
+      sellDate: new Date(),
+      purchasePrice: avgPurchasePrice,
+      profitLoss: totalProfitLoss,
+      profitLossPercentage: profitLossPercentage,
+      transactionId: transaction._id
+    };
+    userAssetBalance.sellHistory.push(sellRecord);
+
+    await userAssetBalance.save();
+
+    // Update user balances - add proceeds to main balance
+    user.balances.main += amountUSD;
+    await user.save();
 
     // Log activity
     await logActivity('sell_completed', 'transaction', transaction._id, userId, 'User', req, {
@@ -15775,22 +15767,36 @@ app.post('/api/sell', protect, async (req, res) => {
       profitLossPercentage: profitLossPercentage
     });
 
-    // Return success response with correct structure expected by frontend
+    // Return success response with structure matching frontend expectations
     res.status(200).json({
       status: 'success',
       data: {
         transaction: {
           id: transaction._id,
+          _id: transaction._id, // Include both for compatibility
           type: 'sell',
           amount: amountUSD,
           asset: asset,
           assetAmount: assetAmount,
           price: price,
+          // Include sellDetails as the frontend expects in openTransactionDetails()
+          sellDetails: {
+            asset: asset,
+            amount: amountUSD,
+            assetAmount: assetAmount,
+            price: price,
+            buyingPrice: avgPurchasePrice,
+            profitLoss: totalProfitLoss,
+            profitLossPercentage: profitLossPercentage
+          },
           profitLoss: totalProfitLoss,
           profitLossPercentage: profitLossPercentage,
           status: 'completed',
           date: transaction.createdAt,
-          reference: reference
+          createdAt: transaction.createdAt,
+          reference: reference,
+          description: `Sold ${assetAmount.toFixed(8)} ${asset.toUpperCase()} at $${price.toFixed(2)}`,
+          network: getNetworkForAsset(asset)
         },
         balances: {
           main: user.balances.main,
@@ -15810,6 +15816,45 @@ app.post('/api/sell', protect, async (req, res) => {
     });
   }
 });
+
+// Helper function to get network for asset (matches assetNetworks in frontend)
+function getNetworkForAsset(asset) {
+  const networks = {
+    'btc': 'Bitcoin',
+    'eth': 'Ethereum',
+    'usdt': 'Tron (TRC-20)',
+    'bnb': 'BNB Smart Chain (BEP-20)',
+    'sol': 'Solana',
+    'usdc': 'Ethereum (ERC-20)',
+    'xrp': 'XRP Ledger',
+    'doge': 'Dogecoin',
+    'ada': 'Cardano',
+    'shib': 'Ethereum (ERC-20)',
+    'avax': 'Avalanche C-Chain',
+    'dot': 'Polkadot',
+    'trx': 'TRON',
+    'link': 'Ethereum (ERC-20)',
+    'matic': 'Polygon',
+    'wbtc': 'Ethereum (ERC-20)',
+    'ltc': 'Litecoin',
+    'near': 'NEAR',
+    'uni': 'Ethereum (ERC-20)',
+    'bch': 'Bitcoin Cash',
+    'xlm': 'Stellar',
+    'atom': 'Cosmos',
+    'xmr': 'Monero',
+    'flow': 'Flow',
+    'vet': 'VeChain',
+    'fil': 'Filecoin',
+    'theta': 'Theta',
+    'hbar': 'Hedera',
+    'ftm': 'Fantom',
+    'xtz': 'Tezos'
+  };
+  return networks[asset.toLowerCase()] || 'Bitcoin';
+}
+
+
 
 
 
