@@ -15811,6 +15811,9 @@ app.post('/api/sell', protect, async (req, res) => {
   }
 });
 
+
+
+
 // =============================================
 // Get User's Asset Balances with Fiat Total (Real-time)
 // =============================================
@@ -15872,6 +15875,7 @@ app.get('/api/users/asset-balances', protect, async (req, res) => {
 
     let fiatTotal = 0;
     const prices = {};
+    const formattedBalances = {};
 
     if (assets.length > 0) {
       try {
@@ -15887,38 +15891,47 @@ app.get('/api/users/asset-balances', protect, async (req, res) => {
               const coinGeckoId = assetToId[asset] || asset;
               const price = response.data[coinGeckoId]?.usd || 0;
               prices[asset] = price;
-              fiatTotal += amount * price;
+              const usdValue = amount * price;
+              fiatTotal += usdValue;
+              
+              // Format each balance as a simple number, not an object
+              formattedBalances[asset] = amount;
+            } else {
+              formattedBalances[asset] = 0;
             }
           }
         }
       } catch (error) {
         console.warn('Failed to fetch real-time prices:', error);
         // Use last known prices from purchase history as fallback
-        for (const purchase of userAssetBalance.purchaseHistory) {
-          if (purchase.remainingAmount > 0) {
-            fiatTotal += purchase.remainingAmount * purchase.purchasePrice;
+        for (const [asset, amount] of Object.entries(userAssetBalance.balances)) {
+          formattedBalances[asset] = amount;
+          
+          // Try to estimate fiat total from purchase history
+          let assetFiatTotal = 0;
+          for (const purchase of userAssetBalance.purchaseHistory) {
+            if (purchase.asset === asset && purchase.remainingAmount > 0) {
+              assetFiatTotal += purchase.remainingAmount * purchase.purchasePrice;
+            }
           }
+          fiatTotal += assetFiatTotal;
         }
+      }
+    } else {
+      // If no assets, just copy the balances as numbers
+      for (const [asset, amount] of Object.entries(userAssetBalance.balances)) {
+        formattedBalances[asset] = amount;
       }
     }
 
-    // Format balances with proper structure expected by frontend
-    const formattedBalances = {};
-    for (const [asset, amount] of Object.entries(userAssetBalance.balances)) {
-      formattedBalances[asset] = {
-        amount: amount,
-        usdValue: amount * (prices[asset] || 0)
-      };
-    }
-
-    // Return in the format expected by frontend
+    // Return in the format expected by frontend - balances as simple key-value pairs with numbers
     res.status(200).json({
       status: 'success',
       data: {
         balances: formattedBalances,
         fiatTotal: fiatTotal,
-        purchaseHistory: userAssetBalance.purchaseHistory,
-        sellHistory: userAssetBalance.sellHistory,
+        purchaseHistory: userAssetBalance.purchaseHistory || [],
+        sellHistory: userAssetBalance.sellHistory || [],
         prices: prices
       }
     });
@@ -15927,11 +15940,13 @@ app.get('/api/users/asset-balances', protect, async (req, res) => {
     console.error('Error fetching asset balances:', error);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to fetch asset balances'
+      message: 'Failed to fetch asset balances',
+      error: error.message
     });
   }
 });
 
+  
 // =============================================
 // Get User's Deposit Asset (Default Asset)
 // =============================================
