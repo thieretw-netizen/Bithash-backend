@@ -15456,169 +15456,6 @@ setInterval(async () => {
 
 
 
-// =============================================
-// Buy Endpoint - Only allows using matured balance
-// =============================================
-app.post('/api/buy', protect, async (req, res) => {
-  try {
-    const { asset, amountUSD, assetAmount, price } = req.body;
-    const userId = req.user._id;
-
-    // Validate input
-    if (!asset || !amountUSD || !assetAmount || !price) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Missing required fields: asset, amountUSD, assetAmount, price'
-      });
-    }
-
-    if (amountUSD <= 0 || assetAmount <= 0) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Amount must be greater than 0'
-      });
-    }
-
-    // Check if user has sufficient matured balance (ONLY matured balance can be used for buying)
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found'
-      });
-    }
-
-    const maturedBalance = user.balances.matured || 0;
-    if (maturedBalance < amountUSD) {
-      return res.status(400).json({
-        status: 'fail',
-        message: `Insufficient matured balance. You have $${maturedBalance.toFixed(2)} matured, but need $${amountUSD.toFixed(2)}. Only matured balance can be used for buying.`
-      });
-    }
-
-    // Get user asset balances
-    let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
-    if (!userAssetBalance) {
-      // Create new asset balance document if it doesn't exist
-      userAssetBalance = await UserAssetBalance.create({
-        user: userId,
-        balances: {},
-        fiatTotal: 0,
-        purchaseHistory: [],
-        sellHistory: []
-      });
-    }
-
-    // Update user balances - deduct from matured
-    user.balances.matured -= amountUSD;
-    await user.save();
-
-    // Update asset balance
-    const currentAssetBalance = parseFloat(userAssetBalance.balances[asset] || 0);
-    userAssetBalance.balances[asset] = currentAssetBalance + assetAmount;
-    
-    // Add to purchase history for profit/loss tracking
-    const purchaseRecord = {
-      asset,
-      amount: assetAmount,
-      purchasePrice: price,
-      purchaseDate: new Date(),
-      remainingAmount: assetAmount,
-      transactionId: null // Will be updated after transaction creation
-    };
-    userAssetBalance.purchaseHistory.push(purchaseRecord);
-    
-    await userAssetBalance.save();
-
-    // Generate unique reference
-    const reference = `BUY-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
-
-    // Create transaction record
-    const transaction = await Transaction.create({
-      user: userId,
-      type: 'buy',
-      amount: amountUSD,
-      asset: asset,
-      assetAmount: assetAmount,
-      currency: 'USD',
-      status: 'completed',
-      method: asset,
-      reference: reference,
-      details: {
-        action: 'buy',
-        asset: asset,
-        amountUSD: amountUSD,
-        assetAmount: assetAmount,
-        price: price,
-        balanceSource: 'matured'
-      },
-      tradeDetails: {
-        asset: asset,
-        amount: amountUSD,
-        assetAmount: assetAmount,
-        price: price
-      },
-      fee: 0,
-      netAmount: amountUSD,
-      exchangeRateAtTime: price
-    });
-
-    // Update purchase record with transaction ID
-    if (userAssetBalance.purchaseHistory.length > 0) {
-      const lastPurchase = userAssetBalance.purchaseHistory[userAssetBalance.purchaseHistory.length - 1];
-      lastPurchase.transactionId = transaction._id;
-      await userAssetBalance.save();
-    }
-
-    // Log activity
-    await logActivity('buy_completed', 'transaction', transaction._id, userId, 'User', req, {
-      amount: amountUSD,
-      asset: asset,
-      assetAmount: assetAmount,
-      price: price
-    });
-
-    // Return success response with correct structure expected by frontend
-    res.status(200).json({
-      status: 'success',
-      data: {
-        transaction: {
-          id: transaction._id,
-          type: 'buy',
-          amount: amountUSD,
-          asset: asset,
-          assetAmount: assetAmount,
-          price: price,
-          status: 'completed',
-          date: transaction.createdAt,
-          reference: reference
-        },
-        balances: {
-          main: user.balances.main,
-          active: user.balances.active,
-          matured: user.balances.matured
-        },
-        assetBalances: userAssetBalance.balances
-      }
-    });
-
-  } catch (error) {
-    console.error('Buy error:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to process buy order',
-      error: error.message
-    });
-  }
-});
-
-
-
-
-
-
-
-
 
 // =============================================
 // Get User's Asset Balances with Fiat Total (Real-time) - FIXED VERSION
@@ -16668,6 +16505,203 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
 
 
 
+
+
+
+
+
+
+
+
+
+
+// =============================================
+// Buy Endpoint - Only allows using matured balance
+// =============================================
+app.post('/api/buy', protect, async (req, res) => {
+  try {
+    const { asset, amountUSD, assetAmount, price } = req.body;
+    const userId = req.user._id;
+
+    // Validate input
+    if (!asset || !amountUSD || !assetAmount || !price) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Missing required fields: asset, amountUSD, assetAmount, price'
+      });
+    }
+
+    if (amountUSD <= 0 || assetAmount <= 0) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Amount must be greater than 0'
+      });
+    }
+
+    // Check if user has sufficient matured balance (ONLY matured balance can be used for buying)
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+
+    const maturedBalance = parseFloat(user.balances.matured) || 0;
+    if (maturedBalance < amountUSD) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Insufficient matured balance. You have $${maturedBalance.toFixed(2)} matured, but need $${amountUSD.toFixed(2)}. Only matured balance can be used for buying.`
+      });
+    }
+
+    // Get user asset balances
+    let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
+    if (!userAssetBalance) {
+      // Create new asset balance document if it doesn't exist
+      userAssetBalance = await UserAssetBalance.create({
+        user: userId,
+        balances: {},
+        fiatTotal: 0,
+        purchaseHistory: [],
+        sellHistory: []
+      });
+    }
+
+    // Ensure balances object exists
+    if (!userAssetBalance.balances) {
+      userAssetBalance.balances = {};
+    }
+
+    // Update user balances - deduct from matured
+    user.balances.matured = (parseFloat(user.balances.matured) || 0) - amountUSD;
+    await user.save();
+
+    // Update asset balance
+    const currentAssetBalance = parseFloat(userAssetBalance.balances[asset] || 0);
+    userAssetBalance.balances[asset] = (currentAssetBalance + assetAmount).toFixed(8);
+    
+    // Add to purchase history for profit/loss tracking
+    const purchaseRecord = {
+      asset,
+      amount: assetAmount,
+      purchasePrice: price,
+      purchaseDate: new Date(),
+      remainingAmount: assetAmount,
+      transactionId: null // Will be updated after transaction creation
+    };
+    
+    if (!userAssetBalance.purchaseHistory) {
+      userAssetBalance.purchaseHistory = [];
+    }
+    userAssetBalance.purchaseHistory.push(purchaseRecord);
+    
+    await userAssetBalance.save();
+
+    // Generate unique reference
+    const reference = `BUY-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+
+    // Create transaction record with structure matching frontend expectations
+    const transactionData = {
+      user: userId,
+      type: 'buy',
+      amount: amountUSD,
+      asset: asset,
+      assetAmount: assetAmount,
+      currency: 'USD',
+      status: 'completed',
+      method: asset,
+      reference: reference,
+      // Buy details for frontend
+      buyDetails: {
+        asset: asset,
+        amountUSD: amountUSD,
+        assetAmount: assetAmount,
+        price: price
+      },
+      details: {
+        action: 'buy',
+        asset: asset,
+        amountUSD: amountUSD,
+        assetAmount: assetAmount,
+        price: price,
+        balanceSource: 'matured'
+      },
+      tradeDetails: {
+        asset: asset,
+        amount: amountUSD,
+        assetAmount: assetAmount,
+        price: price
+      },
+      fee: 0,
+      netAmount: amountUSD,
+      exchangeRateAtTime: price,
+      createdAt: new Date(),
+      description: `Bought ${assetAmount.toFixed(8)} ${asset.toUpperCase()} at $${price.toFixed(2)}`,
+      network: getNetworkForAsset(asset)
+    };
+
+    const transaction = await Transaction.create(transactionData);
+
+    // Update purchase record with transaction ID
+    if (userAssetBalance.purchaseHistory && userAssetBalance.purchaseHistory.length > 0) {
+      const lastPurchase = userAssetBalance.purchaseHistory[userAssetBalance.purchaseHistory.length - 1];
+      lastPurchase.transactionId = transaction._id;
+      await userAssetBalance.save();
+    }
+
+    // Log activity
+    await logActivity('buy_completed', 'transaction', transaction._id, userId, 'User', req, {
+      amount: amountUSD,
+      asset: asset,
+      assetAmount: assetAmount,
+      price: price
+    });
+
+    // Return success response with structure matching frontend expectations
+    res.status(200).json({
+      status: 'success',
+      data: {
+        transaction: {
+          id: transaction._id,
+          _id: transaction._id,
+          type: 'buy',
+          amount: amountUSD,
+          asset: asset,
+          assetAmount: assetAmount,
+          price: price,
+          buyDetails: {
+            asset: asset,
+            amountUSD: amountUSD,
+            assetAmount: assetAmount,
+            price: price
+          },
+          status: 'completed',
+          date: transaction.createdAt,
+          createdAt: transaction.createdAt,
+          reference: reference,
+          description: `Bought ${assetAmount.toFixed(8)} ${asset.toUpperCase()} at $${price.toFixed(2)}`,
+          network: getNetworkForAsset(asset)
+        },
+        balances: {
+          main: parseFloat(user.balances.main) || 0,
+          active: parseFloat(user.balances.active) || 0,
+          matured: parseFloat(user.balances.matured) || 0
+        },
+        assetBalances: userAssetBalance.balances || {}
+      }
+    });
+
+  } catch (error) {
+    console.error('Buy error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to process buy order',
+      error: error.message
+    });
+  }
+});
+
 // =============================================
 // Sell Endpoint - Only allows using matured balance assets
 // =============================================
@@ -16709,6 +16743,11 @@ app.post('/api/sell', protect, async (req, res) => {
       });
     }
 
+    // Ensure balances object exists
+    if (!userAssetBalance.balances) {
+      userAssetBalance.balances = {};
+    }
+
     // Check if user has sufficient asset balance
     const currentAssetBalance = parseFloat(userAssetBalance.balances[asset] || 0);
     if (currentAssetBalance < assetAmount) {
@@ -16726,14 +16765,14 @@ app.post('/api/sell', protect, async (req, res) => {
 
     // Sort purchase history by date (oldest first) for FIFO
     const sortedPurchases = [...(userAssetBalance.purchaseHistory || [])]
-      .filter(p => p.asset === asset && p.remainingAmount > 0)
+      .filter(p => p && p.asset === asset && p.remainingAmount > 0)
       .sort((a, b) => new Date(a.purchaseDate) - new Date(b.purchaseDate));
 
     for (const purchase of sortedPurchases) {
       if (remainingToSell <= 0) break;
 
       const amountFromThisPurchase = Math.min(purchase.remainingAmount, remainingToSell);
-      const costBasis = amountFromThisPurchase * purchase.purchasePrice;
+      const costBasis = amountFromThisPurchase * (parseFloat(purchase.purchasePrice) || 0);
       const saleValue = amountFromThisPurchase * price;
       const profitLoss = saleValue - costBasis;
       
@@ -16743,20 +16782,20 @@ app.post('/api/sell', protect, async (req, res) => {
       soldFromPurchases.push({
         purchaseId: purchase._id,
         amount: amountFromThisPurchase,
-        purchasePrice: purchase.purchasePrice,
+        purchasePrice: parseFloat(purchase.purchasePrice) || 0,
         profitLoss: profitLoss
       });
 
       // Update remaining amounts
-      purchase.remainingAmount -= amountFromThisPurchase;
+      purchase.remainingAmount = (parseFloat(purchase.remainingAmount) || 0) - amountFromThisPurchase;
       remainingToSell -= amountFromThisPurchase;
     }
 
     const profitLossPercentage = totalCost > 0 ? (totalProfitLoss / totalCost) * 100 : 0;
-    const avgPurchasePrice = totalCost / assetAmount;
+    const avgPurchasePrice = assetAmount > 0 ? totalCost / assetAmount : 0;
 
     // Update asset balance
-    userAssetBalance.balances[asset] = currentAssetBalance - assetAmount;
+    userAssetBalance.balances[asset] = (currentAssetBalance - assetAmount).toFixed(8);
 
     // Generate unique reference
     const reference = `SELL-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
@@ -16772,10 +16811,10 @@ app.post('/api/sell', protect, async (req, res) => {
       status: 'completed',
       method: asset,
       reference: reference,
-      // This is what the frontend expects in openTransactionDetails()
+      // Sell details for frontend
       sellDetails: {
         asset: asset,
-        amount: amountUSD,
+        amountUSD: amountUSD,
         assetAmount: assetAmount,
         price: price,
         buyingPrice: avgPurchasePrice,
@@ -16806,7 +16845,8 @@ app.post('/api/sell', protect, async (req, res) => {
       exchangeRateAtTime: price,
       createdAt: new Date(),
       description: `Sold ${assetAmount.toFixed(8)} ${asset.toUpperCase()} at $${price.toFixed(2)}`,
-      // Set network based on asset
+      profitLoss: totalProfitLoss,
+      profitLossPercentage: profitLossPercentage,
       network: getNetworkForAsset(asset)
     };
 
@@ -16857,10 +16897,9 @@ app.post('/api/sell', protect, async (req, res) => {
           asset: asset,
           assetAmount: assetAmount,
           price: price,
-          // Include sellDetails as the frontend expects
           sellDetails: {
             asset: asset,
-            amount: amountUSD,
+            amountUSD: amountUSD,
             assetAmount: assetAmount,
             price: price,
             buyingPrice: avgPurchasePrice,
@@ -16877,11 +16916,11 @@ app.post('/api/sell', protect, async (req, res) => {
           network: getNetworkForAsset(asset)
         },
         balances: {
-          main: user.balances.main,
-          active: user.balances.active || 0,
-          matured: user.balances.matured || 0
+          main: parseFloat(user.balances.main) || 0,
+          active: parseFloat(user.balances.active) || 0,
+          matured: parseFloat(user.balances.matured) || 0
         },
-        assetBalances: userAssetBalance.balances
+        assetBalances: userAssetBalance.balances || {}
       }
     });
 
@@ -16929,8 +16968,16 @@ function getNetworkForAsset(asset) {
     'ftm': 'Fantom',
     'xtz': 'Tezos'
   };
-  return networks[asset.toLowerCase()] || 'Bitcoin';
+  const assetLower = (asset || 'btc').toLowerCase();
+  return networks[assetLower] || (assetLower === 'btc' ? 'Bitcoin' : 'Bitcoin');
 }
+
+
+
+
+
+
+
 
 
 
