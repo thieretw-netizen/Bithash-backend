@@ -616,9 +616,10 @@ const UserLogSchema = new mongoose.Schema({
       'transfer_created', 'transfer_completed', 'transfer_failed',
       'internal_transfer', 'balance_transfer',
       
-      // Financial - Buy/Sell (REPLACED CONVERSION)
-      'buy_created', 'buy_completed', 'buy_failed',
-      'sell_created', 'sell_completed', 'sell_failed',
+      // Buy/Sell Activities
+      'buy_order_created', 'buy_order_completed', 'buy_order_failed',
+      'sell_order_created', 'sell_order_completed', 'sell_order_failed',
+      'trade_executed', 'profit_realized', 'loss_realized',
       
       // Investments
       'investment_created', 'investment_active', 'investment_completed',
@@ -657,7 +658,7 @@ const UserLogSchema = new mongoose.Schema({
     type: String,
     enum: [
       'authentication', 'financial', 'investment', 'security', 'profile',
-      'verification', 'referral', 'support', 'system', 'navigation'
+      'verification', 'referral', 'support', 'system', 'navigation', 'trading'
     ],
     required: true,
     index: true
@@ -745,15 +746,26 @@ const UserLogSchema = new mongoose.Schema({
     assetPrice: Number,
     usdValue: Number,
     
-    // Buy/Sell (REPLACED CONVERSION)
-    buyAsset: String,
-    sellAsset: String,
-    buyAmount: Number,
-    sellAmount: Number,
-    buyPrice: Number,
-    sellPrice: Number,
-    profitLoss: Number,
-    profitLossPercentage: Number,
+    // Buy/Sell specific metadata
+    orderId: String,
+    orderType: { type: String, enum: ['buy', 'sell'] },
+    buyingPrice: Number,
+    sellingPrice: Number,
+    profitAmount: Number,
+    lossAmount: Number,
+    profitPercentage: Number,
+    lossPercentage: Number,
+    fromBalance: { type: String, enum: ['main', 'matured', 'both'] },
+    mainAmountUsed: Number,
+    maturedAmountUsed: Number,
+    tradeExecutedAt: Date,
+    
+    // Conversions
+    fromAsset: String,
+    toAsset: String,
+    fromAmount: Number,
+    toAmount: Number,
+    exchangeRate: Number,
     
     // Investments
     planName: String,
@@ -800,7 +812,7 @@ const UserLogSchema = new mongoose.Schema({
     enum: [
       'User', 'Transaction', 'Investment', 'KYC', 'Plan', 'Loan', 
       'SupportTicket', 'Card', 'Referral', 'Notification', 'Admin',
-      'UserAssetBalance', 'Buy', 'Sell', 'DepositAsset'
+      'UserAssetBalance', 'Conversion', 'DepositAsset', 'Trade'
     ]
   },
 
@@ -866,10 +878,13 @@ UserLogSchema.virtual('actionDescription').get(function() {
     'deposit_created': 'User created a deposit request',
     'investment_created': 'User created a new investment',
     'withdrawal_created': 'User requested a withdrawal',
-    'buy_created': 'User initiated a buy order',
-    'buy_completed': 'User completed a buy order',
-    'sell_created': 'User initiated a sell order',
-    'sell_completed': 'User completed a sell order',
+    'buy_order_created': 'User created a buy order',
+    'buy_order_completed': 'User completed a buy order',
+    'sell_order_created': 'User created a sell order',
+    'sell_order_completed': 'User completed a sell order',
+    'trade_executed': 'Trade executed successfully',
+    'profit_realized': 'Profit realized from trade',
+    'loss_realized': 'Loss incurred from trade',
     // Add more descriptions as needed
   };
   return actionDescriptions[this.action] || `User performed ${this.action.replace(/_/g, ' ')}`;
@@ -879,7 +894,8 @@ UserLogSchema.virtual('isFinancialAction').get(function() {
   return [
     'deposit_created', 'deposit_completed', 'withdrawal_created', 
     'withdrawal_completed', 'investment_created', 'transfer_created',
-    'buy_created', 'buy_completed', 'sell_created', 'sell_completed'
+    'buy_order_created', 'buy_order_completed', 'sell_order_created',
+    'sell_order_completed', 'trade_executed', 'profit_realized', 'loss_realized'
   ].includes(this.action);
 });
 
@@ -990,10 +1006,13 @@ UserLogSchema.methods.calculateActionCategory = function(action) {
     'deposit_created': 'financial',
     'withdrawal_created': 'financial',
     'transfer_created': 'financial',
-    'buy_created': 'financial',
-    'buy_completed': 'financial',
-    'sell_created': 'financial',
-    'sell_completed': 'financial',
+    'buy_order_created': 'trading',
+    'buy_order_completed': 'trading',
+    'sell_order_created': 'trading',
+    'sell_order_completed': 'trading',
+    'trade_executed': 'trading',
+    'profit_realized': 'trading',
+    'loss_realized': 'trading',
     
     // Investment
     'investment_created': 'investment',
@@ -1010,8 +1029,8 @@ UserLogSchema.methods.calculateActionCategory = function(action) {
 };
 
 UserLogSchema.methods.calculateRiskLevel = function() {
-  const highRiskActions = ['failed_login', 'suspicious_activity', 'withdrawal_created'];
-  const mediumRiskActions = ['login', 'password_change', 'deposit_created'];
+  const highRiskActions = ['failed_login', 'suspicious_activity', 'withdrawal_created', 'sell_order_created'];
+  const mediumRiskActions = ['login', 'password_change', 'deposit_created', 'buy_order_created'];
   
   if (highRiskActions.includes(this.action)) return 'high';
   if (mediumRiskActions.includes(this.action)) return 'medium';
@@ -1173,7 +1192,7 @@ const Plan = mongoose.model('Plan', PlanSchema);
 
 
 // =============================================
-// User Asset Balances Schema - REDESIGNED for fiat & asset balances
+// User Asset Balances Schema (Redesigned with Fiat and Asset Tracking)
 // =============================================
 const UserAssetBalanceSchema = new mongoose.Schema({
   user: {
@@ -1182,6 +1201,12 @@ const UserAssetBalanceSchema = new mongoose.Schema({
     required: true,
     unique: true,
     index: true
+  },
+  fiatTotal: {
+    type: Number,
+    default: 0,
+    min: 0,
+    required: true
   },
   balances: {
     btc: { type: Number, default: 0, min: 0 },
@@ -1215,54 +1240,147 @@ const UserAssetBalanceSchema = new mongoose.Schema({
     ftm: { type: Number, default: 0, min: 0 },
     xtz: { type: Number, default: 0, min: 0 }
   },
-  // Fiat total that fluctuates with exchange rates
-  fiatTotal: {
-    type: Number,
-    default: 0,
-    min: 0
-  },
   lastUpdated: {
     type: Date,
     default: Date.now
   },
-  // Trade history for profit/loss tracking
-  trades: [{
-    type: { type: String, enum: ['buy', 'sell'], required: true },
-    asset: { type: String, required: true },
-    amount: { type: Number, required: true },
-    price: { type: Number, required: true },
-    usdValue: { type: Number, required: true },
-    profitLoss: { type: Number, default: 0 },
-    profitLossPercentage: { type: Number, default: 0 },
-    timestamp: { type: Date, default: Date.now },
-    transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' }
-  }],
   history: [{
     asset: { type: String, required: true },
     type: { type: String, enum: ['deposit', 'withdrawal', 'buy', 'sell', 'interest', 'referral'], required: true },
     amount: { type: Number, required: true },
     balance: { type: Number, required: true },
-    price: { type: Number, required: true },
     usdValue: { type: Number, required: true },
+    priceAtTime: { type: Number, required: true },
     timestamp: { type: Date, default: Date.now },
     transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' }
   }]
 }, { timestamps: true });
 
-// Remove zero balance assets from the document
-UserAssetBalanceSchema.methods.cleanZeroBalances = function() {
-  const balances = this.balances;
-  for (const [asset, amount] of Object.entries(balances)) {
-    if (amount === 0) {
-      delete this.balances[asset];
-    }
-  }
-  return this;
-};
-
 UserAssetBalanceSchema.index({ user: 1 });
 UserAssetBalanceSchema.index({ 'history.timestamp': -1 });
-UserAssetBalanceSchema.index({ 'trades.timestamp': -1 });
+
+// =============================================
+// Trade Schema (Buy/Sell Orders with Profit/Loss Tracking)
+// =============================================
+const TradeSchema = new mongoose.Schema({
+  user: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+    index: true
+  },
+  orderId: {
+    type: String,
+    required: true,
+    unique: true,
+    index: true
+  },
+  orderType: {
+    type: String,
+    enum: ['buy', 'sell'],
+    required: true,
+    index: true
+  },
+  asset: {
+    type: String,
+    enum: ['btc', 'eth', 'usdt', 'bnb', 'sol', 'usdc', 'xrp', 'doge', 'ada', 'shib',
+           'avax', 'dot', 'trx', 'link', 'matic', 'wbtc', 'ltc', 'near', 'uni', 'bch',
+           'xlm', 'atom', 'xmr', 'flow', 'vet', 'fil', 'theta', 'hbar', 'ftm', 'xtz'],
+    required: true,
+    index: true
+  },
+  amountUSD: {
+    type: Number,
+    required: true,
+    min: 0
+  },
+  assetAmount: {
+    type: Number,
+    required: true,
+    min: 0
+  },
+  price: {
+    type: Number,
+    required: true,
+    min: 0
+  },
+  totalValue: {
+    type: Number,
+    required: true,
+    min: 0
+  },
+  // For sell orders - track profit/loss
+  buyingPrice: {
+    type: Number,
+    min: 0
+  },
+  sellingPrice: {
+    type: Number,
+    min: 0
+  },
+  profitAmount: {
+    type: Number,
+    default: 0
+  },
+  lossAmount: {
+    type: Number,
+    default: 0
+  },
+  profitPercentage: {
+    type: Number,
+    default: 0
+  },
+  lossPercentage: {
+    type: Number,
+    default: 0
+  },
+  // Balance source tracking
+  balanceSource: {
+    type: String,
+    enum: ['main', 'matured', 'both'],
+    required: true
+  },
+  mainAmountUsed: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
+  maturedAmountUsed: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
+  // Status tracking
+  status: {
+    type: String,
+    enum: ['pending', 'completed', 'failed', 'cancelled'],
+    default: 'completed',
+    index: true
+  },
+  // Metadata
+  metadata: {
+    exchangeRate: Number,
+    fee: { type: Number, default: 0 },
+    netAmount: Number,
+    ipAddress: String,
+    userAgent: String
+  },
+  // Related transactions
+  transactionId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Transaction'
+  },
+  executedAt: {
+    type: Date,
+    default: Date.now,
+    index: true
+  }
+}, { timestamps: true });
+
+TradeSchema.index({ user: 1, createdAt: -1 });
+TradeSchema.index({ user: 1, asset: 1, createdAt: -1 });
+TradeSchema.index({ user: 1, orderType: 1, createdAt: -1 });
+TradeSchema.index({ orderId: 1 });
 
 // =============================================
 // User Preferences Schema
@@ -1333,68 +1451,15 @@ DepositAssetSchema.index({ user: 1, asset: 1 });
 DepositAssetSchema.index({ status: 1 });
 
 // =============================================
-// Buy Schema - REPLACED CONVERSION
+// Conversion Schema (Removed - replaced by Buy/Sell)
 // =============================================
-const BuySchema = new mongoose.Schema({
-  user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-  asset: { type: String, required: true },
-  amount: { type: Number, required: true, min: 0 }, // Amount in USD
-  assetAmount: { type: Number, required: true, min: 0 }, // Amount in asset
-  price: { type: Number, required: true, min: 0 }, // Price at time of buy
-  totalCost: { type: Number, required: true, min: 0 }, // Total USD cost including fees
-  fee: { type: Number, default: 0, min: 0 },
-  netAmount: { type: Number, required: true, min: 0 },
-  balanceSource: { 
-    type: String, 
-    enum: ['main', 'matured', 'both'], 
-    required: true 
-  },
-  mainAmountUsed: { type: Number, default: 0, min: 0 },
-  maturedAmountUsed: { type: Number, default: 0, min: 0 },
-  status: { type: String, enum: ['pending', 'completed', 'failed'], default: 'pending' },
-  transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
-  completedAt: Date,
-  // Profit tracking for future sells
-  currentValue: { type: Number, default: 0 },
-  unrealizedProfitLoss: { type: Number, default: 0 },
-  unrealizedProfitLossPercentage: { type: Number, default: 0 }
-}, { timestamps: true });
-
-BuySchema.index({ user: 1, createdAt: -1 });
-BuySchema.index({ status: 1 });
-BuySchema.index({ asset: 1 });
-
-// =============================================
-// Sell Schema - REPLACED CONVERSION
-// =============================================
-const SellSchema = new mongoose.Schema({
-  user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-  asset: { type: String, required: true },
-  amount: { type: Number, required: true, min: 0 }, // Amount in USD
-  assetAmount: { type: Number, required: true, min: 0 }, // Amount in asset
-  buyPrice: { type: Number, required: true, min: 0 }, // Original buy price
-  sellPrice: { type: Number, required: true, min: 0 }, // Sell price
-  profitLoss: { type: Number, required: true }, // USD profit/loss
-  profitLossPercentage: { type: Number, required: true }, // Percentage profit/loss
-  fee: { type: Number, default: 0, min: 0 },
-  netAmount: { type: Number, required: true, min: 0 },
-  status: { type: String, enum: ['pending', 'completed', 'failed'], default: 'pending' },
-  transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
-  completedAt: Date,
-  // Link to original buy transaction
-  buyTransactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' }
-}, { timestamps: true });
-
-SellSchema.index({ user: 1, createdAt: -1 });
-SellSchema.index({ status: 1 });
-SellSchema.index({ asset: 1 });
+// Conversion Schema removed as requested - buy/sell feature replaces conversion functionality
 
 // Create models
 const UserAssetBalance = mongoose.model('UserAssetBalance', UserAssetBalanceSchema);
+const Trade = mongoose.model('Trade', TradeSchema);
 const UserPreference = mongoose.model('UserPreference', UserPreferenceSchema);
 const DepositAsset = mongoose.model('DepositAsset', DepositAssetSchema);
-const Buy = mongoose.model('Buy', BuySchema);
-const Sell = mongoose.model('Sell', SellSchema);
 
 
 
@@ -1838,7 +1903,7 @@ const TransactionSchema = new mongoose.Schema({
   },
   method: { 
     type: String, 
-    enum: ['btc', 'eth', 'usdt', 'bnb', 'sol', 'usdc', 'xrp', 'doge', 'shib', 'trx', 'ltc', 'bank', 'card', 'internal', 'loan'], 
+    enum: ['btc', 'eth', 'usdt', 'bnb', 'sol', 'usdc', 'xrp', 'doge', 'shib', 'trx', 'ltc', 'bank', 'card', 'internal', 'loan', 'buy', 'sell'], 
     required: [true, 'Payment method is required'] 
   },
   reference: { 
@@ -1870,23 +1935,18 @@ const TransactionSchema = new mongoose.Schema({
     cvv: { type: String },
     billingAddress: { type: String }
   },
-  buyDetails: {
-    asset: { type: String },
-    amount: { type: Number },
-    assetAmount: { type: Number },
-    price: { type: Number },
-    balanceSource: { type: String },
+  tradeDetails: {
+    orderId: { type: String },
+    orderType: { type: String, enum: ['buy', 'sell'] },
+    buyingPrice: { type: Number },
+    sellingPrice: { type: Number },
+    profitAmount: { type: Number },
+    lossAmount: { type: Number },
+    profitPercentage: { type: Number },
+    lossPercentage: { type: Number },
+    balanceSource: { type: String, enum: ['main', 'matured', 'both'] },
     mainAmountUsed: { type: Number },
     maturedAmountUsed: { type: Number }
-  },
-  sellDetails: {
-    asset: { type: String },
-    amount: { type: Number },
-    assetAmount: { type: Number },
-    buyPrice: { type: Number },
-    sellPrice: { type: Number },
-    profitLoss: { type: Number },
-    profitLossPercentage: { type: Number }
   },
   adminNotes: { type: String },
   processedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
@@ -2098,7 +2158,7 @@ const OTP = mongoose.model('OTP', OTPSchema);
 const PlatformRevenueSchema = new mongoose.Schema({
   source: {
     type: String,
-    enum: ['investment_fee', 'withdrawal_fee', 'buy_fee', 'sell_fee', 'other'],
+    enum: ['investment_fee', 'withdrawal_fee', 'trading_fee', 'other'],
     required: true
   },
   amount: {
@@ -2118,13 +2178,9 @@ const PlatformRevenueSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Investment'
   },
-  buyId: {
+  tradeId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Buy'
-  },
-  sellId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Sell'
+    ref: 'Trade'
   },
   userId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -2708,10 +2764,9 @@ module.exports = {
   CommissionSettings,
   Translation,
   UserAssetBalance,
+  Trade,
   UserPreference,
   DepositAsset,
-  Buy,           // REPLACED Conversion
-  Sell,          // REPLACED Conversion
   setupWebSocketServer
 };
 
@@ -3339,7 +3394,6 @@ const calculateReferralCommissions = async (investment) => {
     // Don't throw error to avoid disrupting investment process
   }
 };
-
 
 
 
