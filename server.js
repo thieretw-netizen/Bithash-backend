@@ -1173,7 +1173,7 @@ const Plan = mongoose.model('Plan', PlanSchema);
 
 
 // =============================================
-// User Asset Balances Schema
+// User Asset Balances Schema - REDESIGNED to have both fiat and asset balances
 // =============================================
 const UserAssetBalanceSchema = new mongoose.Schema({
   user: {
@@ -1183,6 +1183,7 @@ const UserAssetBalanceSchema = new mongoose.Schema({
     unique: true,
     index: true
   },
+  // Asset balances (amount of each coin)
   balances: {
     btc: { type: Number, default: 0, min: 0 },
     eth: { type: Number, default: 0, min: 0 },
@@ -1215,6 +1216,35 @@ const UserAssetBalanceSchema = new mongoose.Schema({
     ftm: { type: Number, default: 0, min: 0 },
     xtz: { type: Number, default: 0, min: 0 }
   },
+  // Fiat total (calculated from asset balances using real-time exchange rates)
+  fiatTotal: { type: Number, default: 0, min: 0 },
+  // Last time fiat total was updated
+  fiatTotalUpdated: { type: Date, default: Date.now },
+  // Detailed purchase history for each asset (tracks each buy)
+  purchaseHistory: [{
+    asset: { type: String, required: true },
+    amount: { type: Number, required: true },
+    purchasePrice: { type: Number, required: true }, // Price at time of purchase
+    purchaseDate: { type: Date, default: Date.now },
+    remainingAmount: { type: Number, required: true }, // Amount still held (after sells)
+    transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
+    // For partial sells tracking
+    originalAmount: { type: Number, required: true },
+    originalPurchasePrice: { type: Number, required: true },
+    originalPurchaseDate: { type: Date, default: Date.now }
+  }],
+  // Detailed sell history for each asset (tracks each sell)
+  sellHistory: [{
+    asset: { type: String, required: true },
+    amount: { type: Number, required: true },
+    sellPrice: { type: Number, required: true }, // Price at time of sale
+    sellDate: { type: Date, default: Date.now },
+    purchasePrice: { type: Number, required: true }, // Average purchase price for sold amount
+    profitLoss: { type: Number, required: true },
+    profitLossPercentage: { type: Number, required: true },
+    transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' }
+  }],
+  // When asset was last updated
   lastUpdated: {
     type: Date,
     default: Date.now
@@ -1235,6 +1265,8 @@ const UserAssetBalanceSchema = new mongoose.Schema({
 
 UserAssetBalanceSchema.index({ user: 1 });
 UserAssetBalanceSchema.index({ 'history.timestamp': -1 });
+UserAssetBalanceSchema.index({ 'purchaseHistory.asset': 1, 'purchaseHistory.purchaseDate': -1 });
+UserAssetBalanceSchema.index({ 'sellHistory.asset': 1, 'sellHistory.sellDate': -1 });
 
 // =============================================
 // User Preferences Schema
@@ -1305,7 +1337,7 @@ DepositAssetSchema.index({ user: 1, asset: 1 });
 DepositAssetSchema.index({ status: 1 });
 
 // =============================================
-// Buy Schema (replacing Conversion)
+// Buy Schema - Enhanced with purchase tracking
 // =============================================
 const BuySchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
@@ -1329,7 +1361,7 @@ BuySchema.index({ user: 1, createdAt: -1 });
 BuySchema.index({ status: 1 });
 
 // =============================================
-// Sell Schema (replacing Conversion)
+// Sell Schema - Enhanced with profit/loss tracking
 // =============================================
 const SellSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
@@ -1349,7 +1381,14 @@ const SellSchema = new mongoose.Schema({
     originalPrice: Number,
     priceChange: Number,
     buyingPrice: Number,
-    holdingPeriod: Number
+    holdingPeriod: Number,
+    // Track which purchase records were used (for FIFO)
+    purchasesSold: [{
+      purchaseId: { type: mongoose.Schema.Types.ObjectId },
+      amount: Number,
+      purchasePrice: Number,
+      profitLoss: Number
+    }]
   }
 }, { timestamps: true });
 
@@ -3303,7 +3342,6 @@ const calculateReferralCommissions = async (investment) => {
     // Don't throw error to avoid disrupting investment process
   }
 };
-
 
 
 
