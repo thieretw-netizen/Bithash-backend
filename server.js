@@ -616,8 +616,9 @@ const UserLogSchema = new mongoose.Schema({
       'transfer_created', 'transfer_completed', 'transfer_failed',
       'internal_transfer', 'balance_transfer',
       
-      // Financial - Conversions
-      'conversion_created', 'conversion_completed', 'conversion_failed',
+      // Financial - Buy/Sell
+      'buy_created', 'buy_completed', 'buy_failed',
+      'sell_created', 'sell_completed', 'sell_failed',
       
       // Investments
       'investment_created', 'investment_active', 'investment_completed',
@@ -744,12 +745,11 @@ const UserLogSchema = new mongoose.Schema({
     assetPrice: Number,
     usdValue: Number,
     
-    // Conversions
-    fromAsset: String,
-    toAsset: String,
-    fromAmount: Number,
-    toAmount: Number,
-    exchangeRate: Number,
+    // Buy/Sell
+    buyingPrice: Number,
+    sellingPrice: Number,
+    profitLoss: Number,
+    profitLossPercentage: Number,
     
     // Investments
     planName: String,
@@ -796,7 +796,7 @@ const UserLogSchema = new mongoose.Schema({
     enum: [
       'User', 'Transaction', 'Investment', 'KYC', 'Plan', 'Loan', 
       'SupportTicket', 'Card', 'Referral', 'Notification', 'Admin',
-      'UserAssetBalance', 'Conversion', 'DepositAsset'
+      'UserAssetBalance', 'Trade', 'DepositAsset'
     ]
   },
 
@@ -862,8 +862,10 @@ UserLogSchema.virtual('actionDescription').get(function() {
     'deposit_created': 'User created a deposit request',
     'investment_created': 'User created a new investment',
     'withdrawal_created': 'User requested a withdrawal',
-    'conversion_created': 'User initiated an asset conversion',
-    'conversion_completed': 'User completed an asset conversion',
+    'buy_created': 'User initiated a buy order',
+    'buy_completed': 'User completed a buy order',
+    'sell_created': 'User initiated a sell order',
+    'sell_completed': 'User completed a sell order',
     // Add more descriptions as needed
   };
   return actionDescriptions[this.action] || `User performed ${this.action.replace(/_/g, ' ')}`;
@@ -873,7 +875,7 @@ UserLogSchema.virtual('isFinancialAction').get(function() {
   return [
     'deposit_created', 'deposit_completed', 'withdrawal_created', 
     'withdrawal_completed', 'investment_created', 'transfer_created',
-    'conversion_created', 'conversion_completed'
+    'buy_created', 'buy_completed', 'sell_created', 'sell_completed'
   ].includes(this.action);
 });
 
@@ -984,8 +986,10 @@ UserLogSchema.methods.calculateActionCategory = function(action) {
     'deposit_created': 'financial',
     'withdrawal_created': 'financial',
     'transfer_created': 'financial',
-    'conversion_created': 'financial',
-    'conversion_completed': 'financial',
+    'buy_created': 'financial',
+    'buy_completed': 'financial',
+    'sell_created': 'financial',
+    'sell_completed': 'financial',
     
     // Investment
     'investment_created': 'investment',
@@ -3267,7 +3271,6 @@ const calculateReferralCommissions = async (investment) => {
     // Don't throw error to avoid disrupting investment process
   }
 };
-
 
 
 
