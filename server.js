@@ -15455,11 +15455,8 @@ setInterval(async () => {
 
 
 
-
-
 // =============================================
 // ENHANCED ENDPOINTS - BUY/SELL FUNCTIONALITY
-// WITH PROPER FRONTEND COMMUNICATION
 // =============================================
 
 // =============================================
@@ -15521,11 +15518,9 @@ app.get('/api/users/asset-balances', protect, async (req, res) => {
     
     res.status(200).json({
       status: 'success',
-      data: {
-        balances: balancesWithValues,
-        totalUsdValue: totalUsdValue,
-        lastUpdated: assetBalances.lastUpdated
-      }
+      data: balancesWithValues,
+      totalUsdValue: totalUsdValue,
+      lastUpdated: assetBalances.lastUpdated
     });
   } catch (error) {
     console.error('Error fetching asset balances:', error);
@@ -15590,40 +15585,48 @@ app.get('/api/assets/portfolio', protect, async (req, res) => {
     const costBasis = {};
     const totalSpent = {};
     const totalSold = {};
+    const realizedProfit = {};
+    const realizedLoss = {};
     
     transactions.forEach(tx => {
       const asset = tx.asset || tx.tradeDetails?.asset;
       if (!asset) return;
       
+      if (!holdings[asset]) holdings[asset] = 0;
+      if (!totalSpent[asset]) totalSpent[asset] = 0;
+      if (!totalSold[asset]) totalSold[asset] = 0;
+      if (!realizedProfit[asset]) realizedProfit[asset] = 0;
+      if (!realizedLoss[asset]) realizedLoss[asset] = 0;
+      
       if (tx.type === 'buy') {
-        if (!holdings[asset]) holdings[asset] = 0;
-        if (!totalSpent[asset]) totalSpent[asset] = 0;
-        
         holdings[asset] += tx.assetAmount || 0;
         totalSpent[asset] += tx.amount || 0;
       } else if (tx.type === 'sell') {
-        if (!holdings[asset]) holdings[asset] = 0;
-        if (!totalSold[asset]) totalSold[asset] = 0;
-        if (!totalSpent[asset]) totalSpent[asset] = 0;
-        
         const soldAmount = tx.assetAmount || 0;
         const soldValue = tx.amount || 0;
         
-        // Calculate cost basis for sold portion
+        // Calculate cost basis for sold portion using FIFO
         if (holdings[asset] > 0) {
           const averageCost = totalSpent[asset] / holdings[asset];
           const costBasisForSold = soldAmount * averageCost;
+          const profitLoss = soldValue - costBasisForSold;
+          
+          if (profitLoss > 0) {
+            realizedProfit[asset] += profitLoss;
+          } else {
+            realizedLoss[asset] += Math.abs(profitLoss);
+          }
+          
           totalSpent[asset] -= costBasisForSold;
+          holdings[asset] -= soldAmount;
+          totalSold[asset] += soldValue;
         }
-        
-        holdings[asset] -= soldAmount;
-        totalSold[asset] += soldValue;
       }
     });
     
     // Build portfolio items
     const assets = [];
-    let totalPortfolioValue = fiatBalances.main + fiatBalances.matured; // Start with fiat
+    let totalPortfolioValue = fiatBalances.main + fiatBalances.matured;
     
     for (const [symbol, amount] of Object.entries(assetBalances.balances)) {
       if (amount > 0) {
@@ -15634,8 +15637,8 @@ app.get('/api/assets/portfolio', protect, async (req, res) => {
         
         // Calculate profit/loss
         const avgBuyPrice = holdings[symbol] > 0 ? totalSpent[symbol] / holdings[symbol] : 0;
-        const profitLoss = avgBuyPrice > 0 ? (currentPrice - avgBuyPrice) * amount : 0;
-        const profitLossPercentage = avgBuyPrice > 0 ? ((currentPrice - avgBuyPrice) / avgBuyPrice) * 100 : 0;
+        const unrealizedProfitLoss = avgBuyPrice > 0 ? (currentPrice - avgBuyPrice) * amount : 0;
+        const unrealizedPercentage = avgBuyPrice > 0 ? ((currentPrice - avgBuyPrice) / avgBuyPrice) * 100 : 0;
         
         // Get asset metadata
         const assetMeta = {
@@ -15672,34 +15675,45 @@ app.get('/api/assets/portfolio', protect, async (req, res) => {
         };
         
         assets.push({
+          asset: symbol,
           symbol: symbol.toUpperCase(),
           name: assetMeta[symbol]?.name || symbol.toUpperCase(),
           logo: assetMeta[symbol]?.logo || '',
-          amount: amount,
+          totalAmount: amount,
           currentPrice: currentPrice,
           currentValue: currentValue,
           change24h: change24h,
-          avgBuyPrice: avgBuyPrice,
-          profitLoss: profitLoss,
-          profitLossPercentage: profitLossPercentage,
-          allocation: ((currentValue / (totalPortfolioValue + currentValue)) * 100) || 0
+          averageBuyingPrice: avgBuyPrice,
+          unrealizedProfitLoss: unrealizedProfitLoss,
+          unrealizedPercentage: unrealizedPercentage,
+          totalSpent: totalSpent[symbol] || 0,
+          totalSold: totalSold[symbol] || 0,
+          realizedProfit: realizedProfit[symbol] || 0,
+          realizedLoss: realizedLoss[symbol] || 0,
+          allocation: totalPortfolioValue > 0 ? (currentValue / totalPortfolioValue) * 100 : 0,
+          transactions: transactions.filter(tx => (tx.asset || tx.tradeDetails?.asset) === symbol)
         });
         
         totalPortfolioValue += currentValue;
       }
     }
     
-    // Sort by value descending
-    assets.sort((a, b) => b.currentValue - a.currentValue);
+    // Calculate summary
+    const totalProfitLoss = assets.reduce((sum, a) => sum + a.unrealizedProfitLoss, 0);
+    const totalProfitLossPercentage = (totalPortfolioValue - fiatBalances.main - fiatBalances.matured) > 0 ? 
+      (totalProfitLoss / (totalPortfolioValue - fiatBalances.main - fiatBalances.matured)) * 100 : 0;
     
     res.status(200).json({
       status: 'success',
       data: {
-        portfolio: {
-          assets: assets,
+        portfolio: assets,
+        summary: {
           totalValue: totalPortfolioValue,
           fiatValue: fiatBalances.main + fiatBalances.matured,
           assetValue: totalPortfolioValue - (fiatBalances.main + fiatBalances.matured),
+          totalProfitLoss: totalProfitLoss,
+          totalProfitLossPercentage: totalProfitLossPercentage,
+          assetsCount: assets.length,
           lastUpdated: new Date()
         },
         fiatBalances: {
@@ -15791,10 +15805,37 @@ app.get('/api/transactions', protect, async (req, res) => {
         assetAmount = tx.amount / exchangeRate;
       }
       
+      // Create description for transaction
+      let description = '';
+      if (tx.type === 'buy') {
+        description = `Bought ${assetAmount.toFixed(8)} ${asset.toUpperCase()} at $${exchangeRate.toFixed(2)}`;
+        if (tx.tradeDetails?.profit) {
+          description += ` (Profit: $${tx.tradeDetails.profit.toFixed(2)})`;
+        }
+      } else if (tx.type === 'sell') {
+        description = `Sold ${assetAmount.toFixed(8)} ${asset.toUpperCase()} at $${exchangeRate.toFixed(2)}`;
+        if (tx.tradeDetails?.profit) {
+          description += ` (Profit: $${tx.tradeDetails.profit.toFixed(2)})`;
+        } else if (tx.tradeDetails?.loss) {
+          description += ` (Loss: $${tx.tradeDetails.loss.toFixed(2)})`;
+        }
+      } else if (tx.type === 'deposit') {
+        description = `Deposit of ${assetAmount.toFixed(8)} ${asset.toUpperCase()}`;
+      } else if (tx.type === 'withdrawal') {
+        description = `Withdrawal of ${assetAmount.toFixed(8)} ${asset.toUpperCase()}`;
+      } else {
+        description = `${tx.type} transaction`;
+      }
+      
       return {
         ...txObj,
+        id: tx._id,
         exchangeRate: exchangeRate,
         assetAmount: assetAmount,
+        description: description,
+        details: tx.details || {},
+        buyDetails: tx.type === 'buy' ? tx.tradeDetails || tx.details : null,
+        sellDetails: tx.type === 'sell' ? tx.tradeDetails || tx.details : null,
         network: tx.network || getNetworkForAsset(asset.toLowerCase())
       };
     });
@@ -15918,8 +15959,8 @@ app.post('/api/buy', protect, async (req, res) => {
     }
     
     // Update user balances
-    user.balances.main -= mainAmountUsed;
-    user.balances.matured -= maturedAmountUsed;
+    user.balances.main = Math.max(0, (user.balances.main || 0) - mainAmountUsed);
+    user.balances.matured = Math.max(0, (user.balances.matured || 0) - maturedAmountUsed);
     await user.save({ session });
     
     // Get or create user asset balance
@@ -15968,19 +16009,21 @@ app.post('/api/buy', protect, async (req, res) => {
         usdValue: amountUSD,
         mainAmountUsed: mainAmountUsed,
         maturedAmountUsed: maturedAmountUsed,
-        fromWallet: mainAmountUsed > maturedAmountUsed ? 'main' : maturedAmountUsed > 0 ? 'mixed' : 'main'
+        fromWallet: mainAmountUsed > 0 && maturedAmountUsed > 0 ? 'both' : (mainAmountUsed > 0 ? 'main' : 'matured')
       },
       tradeDetails: {
         asset: asset,
         assetAmount: assetAmount,
         price: price,
-        usdValue: amountUSD
+        usdValue: amountUSD,
+        fromWallet: mainAmountUsed > 0 && maturedAmountUsed > 0 ? 'both' : (mainAmountUsed > 0 ? 'main' : 'matured'),
+        mainAmountUsed: mainAmountUsed,
+        maturedAmountUsed: maturedAmountUsed
       },
       fee: 0,
       netAmount: amountUSD,
       exchangeRateAtTime: price,
-      network: getNetworkForAsset(asset.toLowerCase()),
-      description: `Bought ${assetAmount.toFixed(8)} ${asset.toUpperCase()} at $${price.toFixed(2)}`
+      network: getNetworkForAsset(asset.toLowerCase())
     });
     
     await transaction.save({ session });
@@ -16019,30 +16062,11 @@ app.post('/api/buy', protect, async (req, res) => {
     await session.commitTransaction();
     session.endSession();
     
-    // Return the updated balances for frontend
-    const updatedUser = await User.findById(user._id);
-    const updatedAssetBalance = await UserAssetBalance.findOne({ user: user._id });
-    
     res.status(200).json({
       status: 'success',
       data: {
-        transaction: {
-          id: transaction._id,
-          type: transaction.type,
-          amount: transaction.amount,
-          asset: transaction.asset,
-          assetAmount: transaction.assetAmount,
-          status: transaction.status,
-          createdAt: transaction.createdAt,
-          description: transaction.description
-        },
+        transaction: transaction,
         buy: buyRecord,
-        balances: {
-          main: updatedUser.balances.main,
-          matured: updatedUser.balances.matured,
-          active: updatedUser.balances.active
-        },
-        assetBalances: updatedAssetBalance ? updatedAssetBalance.balances : {},
         message: `Successfully bought ${assetAmount.toFixed(8)} ${asset.toUpperCase()} for $${amountUSD.toFixed(2)}`
       }
     });
@@ -16053,7 +16077,8 @@ app.post('/api/buy', protect, async (req, res) => {
     console.error('Error processing buy:', error);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to process buy order: ' + error.message
+      message: 'Failed to process buy order',
+      error: error.message
     });
   }
 });
@@ -16123,14 +16148,6 @@ app.post('/api/sell', protect, async (req, res) => {
       status: 'completed'
     }).sort({ createdAt: 1 }).session(session);
     
-    // Get previous sell transactions
-    const sellTransactions = await Transaction.find({
-      user: user._id,
-      type: 'sell',
-      asset: asset,
-      status: 'completed'
-    }).sort({ createdAt: 1 }).session(session);
-    
     // Calculate total bought and total spent
     let totalBought = 0;
     let totalSpent = 0;
@@ -16140,13 +16157,7 @@ app.post('/api/sell', protect, async (req, res) => {
       totalSpent += tx.amount || 0;
     });
     
-    // Subtract previously sold amounts
-    sellTransactions.forEach(tx => {
-      totalBought -= tx.assetAmount || 0;
-      // We don't subtract from totalSpent because that's the cost basis
-    });
-    
-    const avgBuyPrice = totalBought > 0 ? totalSpent / totalBought : 0;
+    const avgBuyPrice = totalBought > 0 ? totalSpent / totalBought : price;
     const costBasis = avgBuyPrice * assetAmount;
     const profitLoss = amountUSD - costBasis;
     const profitLossPercentage = costBasis > 0 ? (profitLoss / costBasis) * 100 : 0;
@@ -16190,7 +16201,8 @@ app.post('/api/sell', protect, async (req, res) => {
         usdValue: amountUSD,
         avgBuyPrice: avgBuyPrice,
         costBasis: costBasis,
-        profitLoss: profitLoss,
+        profitLoss: profitLoss > 0 ? profitLoss : 0,
+        loss: profitLoss < 0 ? Math.abs(profitLoss) : 0,
         profitLossPercentage: profitLossPercentage
       },
       tradeDetails: {
@@ -16198,7 +16210,8 @@ app.post('/api/sell', protect, async (req, res) => {
         assetAmount: assetAmount,
         price: price,
         usdValue: amountUSD,
-        profitLoss: profitLoss,
+        profit: profitLoss > 0 ? profitLoss : 0,
+        loss: profitLoss < 0 ? Math.abs(profitLoss) : 0,
         profitLossPercentage: profitLossPercentage,
         avgBuyPrice: avgBuyPrice,
         costBasis: costBasis,
@@ -16207,10 +16220,7 @@ app.post('/api/sell', protect, async (req, res) => {
       fee: 0,
       netAmount: amountUSD,
       exchangeRateAtTime: price,
-      network: getNetworkForAsset(asset.toLowerCase()),
-      description: profitLoss >= 0 ? 
-        `Sold ${assetAmount.toFixed(8)} ${asset.toUpperCase()} with +$${profitLoss.toFixed(2)} profit (${profitLossPercentage.toFixed(2)}%)` : 
-        `Sold ${assetAmount.toFixed(8)} ${asset.toUpperCase()} with -$${Math.abs(profitLoss).toFixed(2)} loss (${Math.abs(profitLossPercentage).toFixed(2)}%)`
+      network: getNetworkForAsset(asset.toLowerCase())
     });
     
     await transaction.save({ session });
@@ -16229,7 +16239,8 @@ app.post('/api/sell', protect, async (req, res) => {
       status: 'completed',
       transactionId: transaction._id,
       completedAt: new Date(),
-      profitLoss: profitLoss,
+      profit: profitLoss > 0 ? profitLoss : 0,
+      loss: profitLoss < 0 ? Math.abs(profitLoss) : 0,
       profitLossPercentage: profitLossPercentage,
       avgBuyPrice: avgBuyPrice,
       costBasis: costBasis,
@@ -16251,32 +16262,14 @@ app.post('/api/sell', protect, async (req, res) => {
     await session.commitTransaction();
     session.endSession();
     
-    // Return the updated balances for frontend
-    const updatedUser = await User.findById(user._id);
-    const updatedAssetBalance = await UserAssetBalance.findOne({ user: user._id });
-    
     res.status(200).json({
       status: 'success',
       data: {
-        transaction: {
-          id: transaction._id,
-          type: transaction.type,
-          amount: transaction.amount,
-          asset: transaction.asset,
-          assetAmount: transaction.assetAmount,
-          status: transaction.status,
-          createdAt: transaction.createdAt,
-          description: transaction.description
-        },
+        transaction: transaction,
         sell: sellRecord,
-        profitLoss: profitLoss,
+        profit: profitLoss > 0 ? profitLoss : 0,
+        loss: profitLoss < 0 ? Math.abs(profitLoss) : 0,
         profitLossPercentage: profitLossPercentage,
-        balances: {
-          main: updatedUser.balances.main,
-          matured: updatedUser.balances.matured,
-          active: updatedUser.balances.active
-        },
-        assetBalances: updatedAssetBalance ? updatedAssetBalance.balances : {},
         message: `Successfully sold ${assetAmount.toFixed(8)} ${asset.toUpperCase()} for $${amountUSD.toFixed(2)}`,
         profitLossMessage: profitLoss >= 0 ? 
           `You gained $${profitLoss.toFixed(2)} (${profitLossPercentage.toFixed(2)}%)` : 
@@ -16290,7 +16283,8 @@ app.post('/api/sell', protect, async (req, res) => {
     console.error('Error processing sell:', error);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to process sell order: ' + error.message
+      message: 'Failed to process sell order',
+      error: error.message
     });
   }
 });
@@ -16398,8 +16392,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
       netAmount: amount - (gasFee || 0),
       exchangeRateAtTime: exchangeRate,
       network: getNetworkForAsset(asset.toLowerCase()),
-      btcAddress: walletAddress,
-      description: `Withdrawal request for ${amount.toFixed(2)} USD in ${asset.toUpperCase()}`
+      btcAddress: walletAddress
     });
     
     await transaction.save({ session });
@@ -16418,15 +16411,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
     res.status(200).json({
       status: 'success',
       data: {
-        transaction: {
-          id: transaction._id,
-          type: transaction.type,
-          amount: transaction.amount,
-          asset: transaction.asset,
-          status: transaction.status,
-          createdAt: transaction.createdAt,
-          description: transaction.description
-        },
+        transaction: transaction,
         message: 'Withdrawal request submitted successfully'
       }
     });
@@ -16437,7 +16422,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
     console.error('Error processing withdrawal:', error);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to process withdrawal: ' + error.message
+      message: 'Failed to process withdrawal'
     });
   }
 });
@@ -16449,13 +16434,6 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
 app.get('/api/users/deposit-asset', protect, async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
-    
-    if (!user) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'User not found'
-      });
-    }
     
     const depositAsset = user.preferences?.depositAsset || 'btc';
     
@@ -16476,10 +16454,10 @@ app.get('/api/users/deposit-asset', protect, async (req, res) => {
 });
 
 // =============================================
-// POST /api/users/deposit-asset
+// POST /deposit-asset
 // Save user's preferred deposit asset
 // =============================================
-app.post('/api/users/deposit-asset', protect, async (req, res) => {
+app.post('/deposit-asset', protect, async (req, res) => {
   try {
     const { asset } = req.body;
     
@@ -16490,7 +16468,6 @@ app.post('/api/users/deposit-asset', protect, async (req, res) => {
       });
     }
     
-    // Store in user preferences
     await User.findByIdAndUpdate(req.user._id, {
       $set: { 'preferences.depositAsset': asset }
     });
@@ -16498,9 +16475,9 @@ app.post('/api/users/deposit-asset', protect, async (req, res) => {
     res.status(200).json({
       status: 'success',
       data: {
-        asset: asset
-      },
-      message: 'Deposit asset preference saved'
+        asset: asset,
+        message: 'Deposit asset preference saved'
+      }
     });
     
   } catch (error) {
@@ -16513,10 +16490,10 @@ app.post('/api/users/deposit-asset', protect, async (req, res) => {
 });
 
 // =============================================
-// GET /api/users/preferences
+// GET /preferences
 // Get user preferences
 // =============================================
-app.get('/api/users/preferences', protect, async (req, res) => {
+app.get('/preferences', protect, async (req, res) => {
   try {
     let preferences = await UserPreference.findOne({ user: req.user._id });
     
@@ -16551,10 +16528,10 @@ app.get('/api/users/preferences', protect, async (req, res) => {
 });
 
 // =============================================
-// POST /api/users/preferences
+// POST /preferences
 // Update user preferences
 // =============================================
-app.post('/api/users/preferences', protect, async (req, res) => {
+app.post('/preferences', protect, async (req, res) => {
   try {
     const { displayAsset, theme, notifications, language, currency } = req.body;
     
@@ -16680,7 +16657,82 @@ app.get('/api/withdrawals/available-assets', protect, async (req, res) => {
   }
 });
 
+// =============================================
+// GET /api/users/preferences
+// Get user preferences (alias for /preferences to match frontend)
+// =============================================
+app.get('/api/users/preferences', protect, async (req, res) => {
+  try {
+    let preferences = await UserPreference.findOne({ user: req.user._id });
+    
+    if (!preferences) {
+      // Create default preferences
+      preferences = await UserPreference.create({
+        user: req.user._id,
+        displayAsset: 'btc',
+        theme: 'dark',
+        notifications: {
+          email: true,
+          push: true,
+          sms: false
+        },
+        language: 'en',
+        currency: 'USD'
+      });
+    }
+    
+    res.status(200).json({
+      status: 'success',
+      data: preferences
+    });
+    
+  } catch (error) {
+    console.error('Error fetching preferences:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch preferences'
+    });
+  }
+});
 
+// =============================================
+// POST /api/users/preferences
+// Update user preferences (alias for /preferences to match frontend)
+// =============================================
+app.post('/api/users/preferences', protect, async (req, res) => {
+  try {
+    const { displayAsset, theme, notifications, language, currency } = req.body;
+    
+    let preferences = await UserPreference.findOne({ user: req.user._id });
+    
+    if (!preferences) {
+      preferences = new UserPreference({
+        user: req.user._id
+      });
+    }
+    
+    if (displayAsset) preferences.displayAsset = displayAsset;
+    if (theme) preferences.theme = theme;
+    if (notifications) preferences.notifications = { ...preferences.notifications, ...notifications };
+    if (language) preferences.language = language;
+    if (currency) preferences.currency = currency;
+    
+    await preferences.save();
+    
+    res.status(200).json({
+      status: 'success',
+      data: preferences,
+      message: 'Preferences updated successfully'
+    });
+    
+  } catch (error) {
+    console.error('Error updating preferences:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to update preferences'
+    });
+  }
+});
 
 
 
