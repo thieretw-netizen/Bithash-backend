@@ -15457,15 +15457,9 @@ setInterval(async () => {
 
 
 
-
-
-
-
-
-
-
 // =============================================
 // ENHANCED ENDPOINTS - BUY/SELL FUNCTIONALITY
+// WITH PROPER FRONTEND COMMUNICATION
 // =============================================
 
 // =============================================
@@ -15873,9 +15867,9 @@ app.post('/api/buy', protect, async (req, res) => {
   session.startTransaction();
   
   try {
-    const { asset, usdAmount, assetAmount, price } = req.body;
+    const { asset, amountUSD, assetAmount, price } = req.body;
     
-    if (!asset || !usdAmount || !assetAmount || !price) {
+    if (!asset || !amountUSD || !assetAmount || !price) {
       await session.abortTransaction();
       session.endSession();
       return res.status(400).json({
@@ -15901,7 +15895,7 @@ app.post('/api/buy', protect, async (req, res) => {
     const totalAvailable = mainBalance + maturedBalance;
     
     // Check if user has sufficient balance from combined wallets
-    if (usdAmount > totalAvailable) {
+    if (amountUSD > totalAvailable) {
       await session.abortTransaction();
       session.endSession();
       return res.status(400).json({
@@ -15914,13 +15908,13 @@ app.post('/api/buy', protect, async (req, res) => {
     let mainAmountUsed = 0;
     let maturedAmountUsed = 0;
     
-    if (mainBalance >= usdAmount) {
+    if (mainBalance >= amountUSD) {
       // Take all from main
-      mainAmountUsed = usdAmount;
+      mainAmountUsed = amountUSD;
     } else {
       // Take all from main, rest from matured
       mainAmountUsed = mainBalance;
-      maturedAmountUsed = usdAmount - mainBalance;
+      maturedAmountUsed = amountUSD - mainBalance;
     }
     
     // Update user balances
@@ -15949,7 +15943,7 @@ app.post('/api/buy', protect, async (req, res) => {
       type: 'buy',
       amount: assetAmount,
       balance: assetBalance.balances[asset],
-      usdValue: usdAmount,
+      usdValue: amountUSD,
       price: price,
       timestamp: new Date()
     });
@@ -15961,7 +15955,7 @@ app.post('/api/buy', protect, async (req, res) => {
     const transaction = new Transaction({
       user: user._id,
       type: 'buy',
-      amount: usdAmount,
+      amount: amountUSD,
       asset: asset,
       assetAmount: assetAmount,
       currency: 'USD',
@@ -15971,20 +15965,22 @@ app.post('/api/buy', protect, async (req, res) => {
       details: {
         price: price,
         assetAmount: assetAmount,
-        usdValue: usdAmount,
+        usdValue: amountUSD,
         mainAmountUsed: mainAmountUsed,
-        maturedAmountUsed: maturedAmountUsed
+        maturedAmountUsed: maturedAmountUsed,
+        fromWallet: mainAmountUsed > maturedAmountUsed ? 'main' : maturedAmountUsed > 0 ? 'mixed' : 'main'
       },
       tradeDetails: {
         asset: asset,
         assetAmount: assetAmount,
         price: price,
-        usdValue: usdAmount
+        usdValue: amountUSD
       },
       fee: 0,
-      netAmount: usdAmount,
+      netAmount: amountUSD,
       exchangeRateAtTime: price,
-      network: getNetworkForAsset(asset.toLowerCase())
+      network: getNetworkForAsset(asset.toLowerCase()),
+      description: `Bought ${assetAmount.toFixed(8)} ${asset.toUpperCase()} at $${price.toFixed(2)}`
     });
     
     await transaction.save({ session });
@@ -15993,12 +15989,12 @@ app.post('/api/buy', protect, async (req, res) => {
     const buyRecord = new Buy({
       user: user._id,
       asset: asset,
-      usdAmount: usdAmount,
+      usdAmount: amountUSD,
       assetAmount: assetAmount,
       price: price,
-      totalValue: usdAmount,
+      totalValue: amountUSD,
       fee: 0,
-      netUsdAmount: usdAmount,
+      netUsdAmount: amountUSD,
       netAssetAmount: assetAmount,
       status: 'completed',
       transactionId: transaction._id,
@@ -16013,7 +16009,7 @@ app.post('/api/buy', protect, async (req, res) => {
     // Log activity
     await logActivity('buy_completed', 'Buy', buyRecord._id, user._id, 'User', req, {
       asset: asset,
-      usdAmount: usdAmount,
+      usdAmount: amountUSD,
       assetAmount: assetAmount,
       price: price,
       mainAmountUsed: mainAmountUsed,
@@ -16023,12 +16019,31 @@ app.post('/api/buy', protect, async (req, res) => {
     await session.commitTransaction();
     session.endSession();
     
+    // Return the updated balances for frontend
+    const updatedUser = await User.findById(user._id);
+    const updatedAssetBalance = await UserAssetBalance.findOne({ user: user._id });
+    
     res.status(200).json({
       status: 'success',
       data: {
-        transaction: transaction,
+        transaction: {
+          id: transaction._id,
+          type: transaction.type,
+          amount: transaction.amount,
+          asset: transaction.asset,
+          assetAmount: transaction.assetAmount,
+          status: transaction.status,
+          createdAt: transaction.createdAt,
+          description: transaction.description
+        },
         buy: buyRecord,
-        message: `Successfully bought ${assetAmount.toFixed(8)} ${asset.toUpperCase()} for $${usdAmount.toFixed(2)}`
+        balances: {
+          main: updatedUser.balances.main,
+          matured: updatedUser.balances.matured,
+          active: updatedUser.balances.active
+        },
+        assetBalances: updatedAssetBalance ? updatedAssetBalance.balances : {},
+        message: `Successfully bought ${assetAmount.toFixed(8)} ${asset.toUpperCase()} for $${amountUSD.toFixed(2)}`
       }
     });
     
@@ -16038,7 +16053,7 @@ app.post('/api/buy', protect, async (req, res) => {
     console.error('Error processing buy:', error);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to process buy order'
+      message: 'Failed to process buy order: ' + error.message
     });
   }
 });
@@ -16053,9 +16068,9 @@ app.post('/api/sell', protect, async (req, res) => {
   session.startTransaction();
   
   try {
-    const { asset, usdAmount, assetAmount, price } = req.body;
+    const { asset, amountUSD, assetAmount, price } = req.body;
     
-    if (!asset || !usdAmount || !assetAmount || !price) {
+    if (!asset || !amountUSD || !assetAmount || !price) {
       await session.abortTransaction();
       session.endSession();
       return res.status(400).json({
@@ -16133,7 +16148,7 @@ app.post('/api/sell', protect, async (req, res) => {
     
     const avgBuyPrice = totalBought > 0 ? totalSpent / totalBought : 0;
     const costBasis = avgBuyPrice * assetAmount;
-    const profitLoss = usdAmount - costBasis;
+    const profitLoss = amountUSD - costBasis;
     const profitLossPercentage = costBasis > 0 ? (profitLoss / costBasis) * 100 : 0;
     
     // Update asset balance (decrease)
@@ -16146,7 +16161,7 @@ app.post('/api/sell', protect, async (req, res) => {
       type: 'sell',
       amount: -assetAmount,
       balance: assetBalance.balances[asset],
-      usdValue: usdAmount,
+      usdValue: amountUSD,
       price: price,
       timestamp: new Date()
     });
@@ -16155,14 +16170,14 @@ app.post('/api/sell', protect, async (req, res) => {
     await assetBalance.save({ session });
     
     // Add proceeds to user's MATURED balance ONLY (as per requirement)
-    user.balances.matured = (user.balances.matured || 0) + usdAmount;
+    user.balances.matured = (user.balances.matured || 0) + amountUSD;
     await user.save({ session });
     
     // Create transaction record
     const transaction = new Transaction({
       user: user._id,
       type: 'sell',
-      amount: usdAmount,
+      amount: amountUSD,
       asset: asset,
       assetAmount: assetAmount,
       currency: 'USD',
@@ -16172,7 +16187,7 @@ app.post('/api/sell', protect, async (req, res) => {
       details: {
         price: price,
         assetAmount: assetAmount,
-        usdValue: usdAmount,
+        usdValue: amountUSD,
         avgBuyPrice: avgBuyPrice,
         costBasis: costBasis,
         profitLoss: profitLoss,
@@ -16182,7 +16197,7 @@ app.post('/api/sell', protect, async (req, res) => {
         asset: asset,
         assetAmount: assetAmount,
         price: price,
-        usdValue: usdAmount,
+        usdValue: amountUSD,
         profitLoss: profitLoss,
         profitLossPercentage: profitLossPercentage,
         avgBuyPrice: avgBuyPrice,
@@ -16190,9 +16205,12 @@ app.post('/api/sell', protect, async (req, res) => {
         realizedGain: profitLoss
       },
       fee: 0,
-      netAmount: usdAmount,
+      netAmount: amountUSD,
       exchangeRateAtTime: price,
-      network: getNetworkForAsset(asset.toLowerCase())
+      network: getNetworkForAsset(asset.toLowerCase()),
+      description: profitLoss >= 0 ? 
+        `Sold ${assetAmount.toFixed(8)} ${asset.toUpperCase()} with +$${profitLoss.toFixed(2)} profit (${profitLossPercentage.toFixed(2)}%)` : 
+        `Sold ${assetAmount.toFixed(8)} ${asset.toUpperCase()} with -$${Math.abs(profitLoss).toFixed(2)} loss (${Math.abs(profitLossPercentage).toFixed(2)}%)`
     });
     
     await transaction.save({ session });
@@ -16201,12 +16219,12 @@ app.post('/api/sell', protect, async (req, res) => {
     const sellRecord = new Sell({
       user: user._id,
       asset: asset,
-      usdAmount: usdAmount,
+      usdAmount: amountUSD,
       assetAmount: assetAmount,
       price: price,
-      totalValue: usdAmount,
+      totalValue: amountUSD,
       fee: 0,
-      netUsdAmount: usdAmount,
+      netUsdAmount: amountUSD,
       netAssetAmount: assetAmount,
       status: 'completed',
       transactionId: transaction._id,
@@ -16223,7 +16241,7 @@ app.post('/api/sell', protect, async (req, res) => {
     // Log activity
     await logActivity('sell_completed', 'Sell', sellRecord._id, user._id, 'User', req, {
       asset: asset,
-      usdAmount: usdAmount,
+      usdAmount: amountUSD,
       assetAmount: assetAmount,
       price: price,
       profitLoss: profitLoss,
@@ -16233,14 +16251,33 @@ app.post('/api/sell', protect, async (req, res) => {
     await session.commitTransaction();
     session.endSession();
     
+    // Return the updated balances for frontend
+    const updatedUser = await User.findById(user._id);
+    const updatedAssetBalance = await UserAssetBalance.findOne({ user: user._id });
+    
     res.status(200).json({
       status: 'success',
       data: {
-        transaction: transaction,
+        transaction: {
+          id: transaction._id,
+          type: transaction.type,
+          amount: transaction.amount,
+          asset: transaction.asset,
+          assetAmount: transaction.assetAmount,
+          status: transaction.status,
+          createdAt: transaction.createdAt,
+          description: transaction.description
+        },
         sell: sellRecord,
         profitLoss: profitLoss,
         profitLossPercentage: profitLossPercentage,
-        message: `Successfully sold ${assetAmount.toFixed(8)} ${asset.toUpperCase()} for $${usdAmount.toFixed(2)}`,
+        balances: {
+          main: updatedUser.balances.main,
+          matured: updatedUser.balances.matured,
+          active: updatedUser.balances.active
+        },
+        assetBalances: updatedAssetBalance ? updatedAssetBalance.balances : {},
+        message: `Successfully sold ${assetAmount.toFixed(8)} ${asset.toUpperCase()} for $${amountUSD.toFixed(2)}`,
         profitLossMessage: profitLoss >= 0 ? 
           `You gained $${profitLoss.toFixed(2)} (${profitLossPercentage.toFixed(2)}%)` : 
           `You lost $${Math.abs(profitLoss).toFixed(2)} (${Math.abs(profitLossPercentage).toFixed(2)}%)`
@@ -16253,7 +16290,7 @@ app.post('/api/sell', protect, async (req, res) => {
     console.error('Error processing sell:', error);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to process sell order'
+      message: 'Failed to process sell order: ' + error.message
     });
   }
 });
@@ -16361,7 +16398,8 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
       netAmount: amount - (gasFee || 0),
       exchangeRateAtTime: exchangeRate,
       network: getNetworkForAsset(asset.toLowerCase()),
-      btcAddress: walletAddress
+      btcAddress: walletAddress,
+      description: `Withdrawal request for ${amount.toFixed(2)} USD in ${asset.toUpperCase()}`
     });
     
     await transaction.save({ session });
@@ -16380,7 +16418,15 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
     res.status(200).json({
       status: 'success',
       data: {
-        transaction: transaction,
+        transaction: {
+          id: transaction._id,
+          type: transaction.type,
+          amount: transaction.amount,
+          asset: transaction.asset,
+          status: transaction.status,
+          createdAt: transaction.createdAt,
+          description: transaction.description
+        },
         message: 'Withdrawal request submitted successfully'
       }
     });
@@ -16391,56 +16437,25 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
     console.error('Error processing withdrawal:', error);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to process withdrawal'
+      message: 'Failed to process withdrawal: ' + error.message
     });
   }
 });
 
 // =============================================
-// POST /deposit-asset
-// Save user's preferred deposit asset
-// =============================================
-app.post('/deposit-asset', protect, async (req, res) => {
-  try {
-    const { asset } = req.body;
-    
-    if (!asset) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Asset is required'
-      });
-    }
-    
-    // You can store this in user preferences or a separate collection
-    // For now, we'll store in user's metadata or preferences
-    await User.findByIdAndUpdate(req.user._id, {
-      $set: { 'preferences.depositAsset': asset }
-    });
-    
-    res.status(200).json({
-      status: 'success',
-      data: {
-        asset: asset,
-        message: 'Deposit asset preference saved'
-      }
-    });
-    
-  } catch (error) {
-    console.error('Error saving deposit asset:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to save deposit asset preference'
-    });
-  }
-});
-
-// =============================================
-// GET /deposit-asset
+// GET /api/users/deposit-asset
 // Get user's preferred deposit asset
 // =============================================
-app.get('/deposit-asset', protect, async (req, res) => {
+app.get('/api/users/deposit-asset', protect, async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
+    
+    if (!user) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'User not found'
+      });
+    }
     
     const depositAsset = user.preferences?.depositAsset || 'btc';
     
@@ -16461,10 +16476,47 @@ app.get('/deposit-asset', protect, async (req, res) => {
 });
 
 // =============================================
-// GET /preferences
+// POST /api/users/deposit-asset
+// Save user's preferred deposit asset
+// =============================================
+app.post('/api/users/deposit-asset', protect, async (req, res) => {
+  try {
+    const { asset } = req.body;
+    
+    if (!asset) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Asset is required'
+      });
+    }
+    
+    // Store in user preferences
+    await User.findByIdAndUpdate(req.user._id, {
+      $set: { 'preferences.depositAsset': asset }
+    });
+    
+    res.status(200).json({
+      status: 'success',
+      data: {
+        asset: asset
+      },
+      message: 'Deposit asset preference saved'
+    });
+    
+  } catch (error) {
+    console.error('Error saving deposit asset:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to save deposit asset preference'
+    });
+  }
+});
+
+// =============================================
+// GET /api/users/preferences
 // Get user preferences
 // =============================================
-app.get('/preferences', protect, async (req, res) => {
+app.get('/api/users/preferences', protect, async (req, res) => {
   try {
     let preferences = await UserPreference.findOne({ user: req.user._id });
     
@@ -16499,10 +16551,10 @@ app.get('/preferences', protect, async (req, res) => {
 });
 
 // =============================================
-// POST /preferences
+// POST /api/users/preferences
 // Update user preferences
 // =============================================
-app.post('/preferences', protect, async (req, res) => {
+app.post('/api/users/preferences', protect, async (req, res) => {
   try {
     const { displayAsset, theme, notifications, language, currency } = req.body;
     
@@ -16631,84 +16683,6 @@ app.get('/api/withdrawals/available-assets', protect, async (req, res) => {
 
 
 
-
-
-// =============================================
-// GET /api/users/preferences
-// Get user preferences (alias for /preferences to match frontend)
-// =============================================
-app.get('/api/users/preferences', protect, async (req, res) => {
-  try {
-    let preferences = await UserPreference.findOne({ user: req.user._id });
-    
-    if (!preferences) {
-      // Create default preferences
-      preferences = await UserPreference.create({
-        user: req.user._id,
-        displayAsset: 'btc',
-        theme: 'dark',
-        notifications: {
-          email: true,
-          push: true,
-          sms: false
-        },
-        language: 'en',
-        currency: 'USD'
-      });
-    }
-    
-    res.status(200).json({
-      status: 'success',
-      data: preferences
-    });
-    
-  } catch (error) {
-    console.error('Error fetching preferences:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch preferences'
-    });
-  }
-});
-
-// =============================================
-// POST /api/users/preferences
-// Update user preferences (alias for /preferences to match frontend)
-// =============================================
-app.post('/api/users/preferences', protect, async (req, res) => {
-  try {
-    const { displayAsset, theme, notifications, language, currency } = req.body;
-    
-    let preferences = await UserPreference.findOne({ user: req.user._id });
-    
-    if (!preferences) {
-      preferences = new UserPreference({
-        user: req.user._id
-      });
-    }
-    
-    if (displayAsset) preferences.displayAsset = displayAsset;
-    if (theme) preferences.theme = theme;
-    if (notifications) preferences.notifications = { ...preferences.notifications, ...notifications };
-    if (language) preferences.language = language;
-    if (currency) preferences.currency = currency;
-    
-    await preferences.save();
-    
-    res.status(200).json({
-      status: 'success',
-      data: preferences,
-      message: 'Preferences updated successfully'
-    });
-    
-  } catch (error) {
-    console.error('Error updating preferences:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to update preferences'
-    });
-  }
-});
 
 
 
