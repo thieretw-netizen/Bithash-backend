@@ -16633,7 +16633,82 @@ app.get('/api/withdrawals/available-assets', protect, async (req, res) => {
 
 
 
+// =============================================
+// GET /api/users/preferences
+// Get user preferences (alias for /preferences to match frontend)
+// =============================================
+app.get('/api/users/preferences', protect, async (req, res) => {
+  try {
+    let preferences = await UserPreference.findOne({ user: req.user._id });
+    
+    if (!preferences) {
+      // Create default preferences
+      preferences = await UserPreference.create({
+        user: req.user._id,
+        displayAsset: 'btc',
+        theme: 'dark',
+        notifications: {
+          email: true,
+          push: true,
+          sms: false
+        },
+        language: 'en',
+        currency: 'USD'
+      });
+    }
+    
+    res.status(200).json({
+      status: 'success',
+      data: preferences
+    });
+    
+  } catch (error) {
+    console.error('Error fetching preferences:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch preferences'
+    });
+  }
+});
 
+// =============================================
+// POST /api/users/preferences
+// Update user preferences (alias for /preferences to match frontend)
+// =============================================
+app.post('/api/users/preferences', protect, async (req, res) => {
+  try {
+    const { displayAsset, theme, notifications, language, currency } = req.body;
+    
+    let preferences = await UserPreference.findOne({ user: req.user._id });
+    
+    if (!preferences) {
+      preferences = new UserPreference({
+        user: req.user._id
+      });
+    }
+    
+    if (displayAsset) preferences.displayAsset = displayAsset;
+    if (theme) preferences.theme = theme;
+    if (notifications) preferences.notifications = { ...preferences.notifications, ...notifications };
+    if (language) preferences.language = language;
+    if (currency) preferences.currency = currency;
+    
+    await preferences.save();
+    
+    res.status(200).json({
+      status: 'success',
+      data: preferences,
+      message: 'Preferences updated successfully'
+    });
+    
+  } catch (error) {
+    console.error('Error updating preferences:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to update preferences'
+    });
+  }
+});
 
 
 
