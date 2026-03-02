@@ -15440,6 +15440,8 @@ setInterval(async () => {
 
 
 
+
+
 // =============================================
 // ENHANCED ENDPOINTS - BUY/SELL FUNCTIONALITY
 // =============================================
@@ -16373,10 +16375,10 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
 });
 
 // =============================================
-// POST /deposit-asset
+// POST /api/users/deposit-asset
 // Save user's preferred deposit asset
 // =============================================
-app.post('/deposit-asset', protect, async (req, res) => {
+app.post('/api/users/deposit-asset', protect, async (req, res) => {
   try {
     const { asset } = req.body;
     
@@ -16387,8 +16389,7 @@ app.post('/deposit-asset', protect, async (req, res) => {
       });
     }
     
-    // You can store this in user preferences or a separate collection
-    // For now, we'll store in user's metadata or preferences
+    // Store in user preferences
     await User.findByIdAndUpdate(req.user._id, {
       $set: { 'preferences.depositAsset': asset }
     });
@@ -16411,10 +16412,10 @@ app.post('/deposit-asset', protect, async (req, res) => {
 });
 
 // =============================================
-// GET /deposit-asset
+// GET /api/users/deposit-asset
 // Get user's preferred deposit asset
 // =============================================
-app.get('/deposit-asset', protect, async (req, res) => {
+app.get('/api/users/deposit-asset', protect, async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
     
@@ -16437,10 +16438,10 @@ app.get('/deposit-asset', protect, async (req, res) => {
 });
 
 // =============================================
-// GET /preferences
+// GET /api/users/preferences
 // Get user preferences
 // =============================================
-app.get('/preferences', protect, async (req, res) => {
+app.get('/api/users/preferences', protect, async (req, res) => {
   try {
     let preferences = await UserPreference.findOne({ user: req.user._id });
     
@@ -16475,10 +16476,10 @@ app.get('/preferences', protect, async (req, res) => {
 });
 
 // =============================================
-// POST /preferences
+// POST /api/users/preferences
 // Update user preferences
 // =============================================
-app.post('/preferences', protect, async (req, res) => {
+app.post('/api/users/preferences', protect, async (req, res) => {
   try {
     const { displayAsset, theme, notifications, language, currency } = req.body;
     
@@ -16603,6 +16604,13 @@ app.get('/api/withdrawals/available-assets', protect, async (req, res) => {
     });
   }
 });
+
+
+
+
+
+
+
 
 
 
