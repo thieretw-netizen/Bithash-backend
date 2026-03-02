@@ -15455,152 +15455,58 @@ setInterval(async () => {
 
 
 
-
+// =============================================
+// STRICT ENDPOINT IMPLEMENTATION
+// All endpoints exactly as required
+// No additional endpoints
+// =============================================
 
 // =============================================
-// ENHANCED ENDPOINTS FOR EXCHANGE-LEVEL EXPERIENCE
+// GET ENDPOINTS
 // =============================================
 
 /**
  * GET /api/users/deposit-asset
- * Returns the user's preferred deposit asset
- * Used by dashboard.html and deposit.html to determine which asset to display by default
+ * Returns the user's default deposit asset
+ * Response: { status: 'success', data: { asset: string } }
  */
 app.get('/api/users/deposit-asset', protect, async (req, res) => {
     try {
         const user = await User.findById(req.user._id).select('preferences.depositAsset');
+        const asset = user?.preferences?.depositAsset || 'btc';
         
-        if (!user) {
-            return res.status(404).json({
-                status: 'error',
-                message: 'User not found'
-            });
-        }
-
-        // Get the user's preferred deposit asset or default to 'btc'
-        const depositAsset = user.preferences?.depositAsset || 'btc';
-
         res.status(200).json({
             status: 'success',
-            data: {
-                asset: depositAsset,
-                updatedAt: new Date()
-            }
+            data: { asset }
         });
     } catch (error) {
         console.error('Error fetching deposit asset:', error);
         res.status(500).json({
             status: 'error',
-            message: 'Failed to fetch deposit asset preference'
+            message: 'Failed to fetch deposit asset'
         });
     }
 });
 
 /**
  * GET /api/users/asset-balances
- * Returns the user's balances for all assets (both fiat and asset amounts)
- * Used by dashboard.html to display asset holdings with real-time fiat values
+ * Returns user's balances in asset form (not fiat)
+ * Response: { status: 'success', data: { btc: number, eth: number, ... } }
  */
 app.get('/api/users/asset-balances', protect, async (req, res) => {
     try {
-        const userAssetBalance = await UserAssetBalance.findOne({ user: req.user._id });
+        let assetBalances = await UserAssetBalance.findOne({ user: req.user._id });
         
-        if (!userAssetBalance) {
-            // Create a new asset balance document if none exists
-            const newAssetBalance = await UserAssetBalance.create({
+        if (!assetBalances) {
+            assetBalances = await UserAssetBalance.create({
                 user: req.user._id,
                 balances: {}
             });
-            
-            return res.status(200).json({
-                status: 'success',
-                data: newAssetBalance.balances
-            });
         }
-
-        // Fetch current prices from CoinGecko to calculate fiat values
-        const assetIds = Object.keys(userAssetBalance.balances).map(symbol => {
-            const assetMap = {
-                'btc': 'bitcoin',
-                'eth': 'ethereum',
-                'usdt': 'tether',
-                'bnb': 'binancecoin',
-                'sol': 'solana',
-                'usdc': 'usd-coin',
-                'xrp': 'xrp',
-                'doge': 'dogecoin',
-                'ada': 'cardano',
-                'shib': 'shiba-inu',
-                'avax': 'avalanche-2',
-                'dot': 'polkadot',
-                'trx': 'tron',
-                'link': 'chainlink',
-                'matic': 'polygon',
-                'wbtc': 'wrapped-bitcoin',
-                'ltc': 'litecoin',
-                'near': 'near',
-                'uni': 'uniswap',
-                'bch': 'bitcoin-cash',
-                'xlm': 'stellar',
-                'atom': 'cosmos',
-                'xmr': 'monero',
-                'flow': 'flow',
-                'vet': 'vechain',
-                'fil': 'filecoin',
-                'theta': 'theta-token',
-                'hbar': 'hedera-hashgraph',
-                'ftm': 'fantom',
-                'xtz': 'tezos'
-            };
-            return assetMap[symbol];
-        }).filter(id => id); // Remove any undefined
-
-        let prices = {};
         
-        if (assetIds.length > 0) {
-            try {
-                const priceResponse = await axios.get(
-                    `https://api.coingecko.com/api/v3/simple/price?ids=${assetIds.join(',')}&vs_currencies=usd&include_24hr_change=true`,
-                    { timeout: 5000 }
-                );
-                prices = priceResponse.data;
-            } catch (priceError) {
-                console.warn('Could not fetch live prices:', priceError);
-                // Continue with zero prices, frontend will handle fallback
-            }
-        }
-
-        // Build response with both asset amounts and fiat values
-        const assetBalances = {};
-        const symbolToId = {
-            'btc': 'bitcoin', 'eth': 'ethereum', 'usdt': 'tether', 'bnb': 'binancecoin',
-            'sol': 'solana', 'usdc': 'usd-coin', 'xrp': 'xrp', 'doge': 'dogecoin',
-            'ada': 'cardano', 'shib': 'shiba-inu', 'avax': 'avalanche-2', 'dot': 'polkadot',
-            'trx': 'tron', 'link': 'chainlink', 'matic': 'polygon', 'wbtc': 'wrapped-bitcoin',
-            'ltc': 'litecoin', 'near': 'near', 'uni': 'uniswap', 'bch': 'bitcoin-cash',
-            'xlm': 'stellar', 'atom': 'cosmos', 'xmr': 'monero', 'flow': 'flow',
-            'vet': 'vechain', 'fil': 'filecoin', 'theta': 'theta-token', 'hbar': 'hedera-hashgraph',
-            'ftm': 'fantom', 'xtz': 'tezos'
-        };
-
-        for (const [symbol, amount] of Object.entries(userAssetBalance.balances)) {
-            if (amount > 0) {
-                const assetId = symbolToId[symbol];
-                const price = prices[assetId]?.usd || 0;
-                const change24h = prices[assetId]?.usd_24h_change || 0;
-                
-                assetBalances[symbol] = {
-                    amount: amount,
-                    usdValue: amount * price,
-                    price: price,
-                    change24h: change24h
-                };
-            }
-        }
-
         res.status(200).json({
             status: 'success',
-            data: assetBalances
+            data: assetBalances.balances || {}
         });
     } catch (error) {
         console.error('Error fetching asset balances:', error);
@@ -15613,29 +15519,31 @@ app.get('/api/users/asset-balances', protect, async (req, res) => {
 
 /**
  * GET /api/assets/portfolio
- * Returns comprehensive portfolio data including profit/loss per asset
- * Used by dashboard.html to display clickable assets with P/L information
+ * Returns user's portfolio with profit/loss calculations
+ * Response: { 
+ *   status: 'success', 
+ *   data: { 
+ *     portfolio: Array<{
+ *       asset: string,
+ *       totalAmount: number,
+ *       currentPrice: number,
+ *       currentValue: number,
+ *       averageBuyingPrice: number,
+ *       unrealizedProfitLoss: number,
+ *       unrealizedPercentage: number,
+ *       realizedProfit: number,
+ *       realizedLoss: number,
+ *       transactions: Array
+ *     }>,
+ *     summary: { totalValue, totalProfitLoss, totalProfitLossPercentage, assetsCount }
+ *   }
+ * }
  */
 app.get('/api/assets/portfolio', protect, async (req, res) => {
     try {
-        const user = req.user;
+        const assetBalances = await UserAssetBalance.findOne({ user: req.user._id });
         
-        // Get all buy orders for this user
-        const buys = await Buy.find({ 
-            user: user._id, 
-            status: 'completed' 
-        }).sort({ createdAt: -1 });
-        
-        // Get all sell orders for this user
-        const sells = await Sell.find({ 
-            user: user._id, 
-            status: 'completed' 
-        }).sort({ createdAt: -1 });
-        
-        // Get current asset balances
-        const userAssetBalance = await UserAssetBalance.findOne({ user: user._id });
-        
-        if (!userAssetBalance) {
+        if (!assetBalances) {
             return res.status(200).json({
                 status: 'success',
                 data: {
@@ -15649,9 +15557,16 @@ app.get('/api/assets/portfolio', protect, async (req, res) => {
                 }
             });
         }
-
-        // Fetch current prices from CoinGecko
-        const symbolToId = {
+        
+        // Get buys and sells for profit/loss calculation
+        const buys = await Buy.find({ user: req.user._id, status: 'completed' });
+        const sells = await Sell.find({ user: req.user._id, status: 'completed' });
+        
+        // Fetch current prices
+        const priceResponse = await axios.get('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,tether,binancecoin,solana,usd-coin,xrp,dogecoin,cardano,shiba-inu,avalanche-2,polkadot,tron,chainlink,polygon,wrapped-bitcoin,litecoin,near,uniswap,bitcoin-cash,stellar,cosmos,monero,flow,vechain,filecoin,theta-token,hedera-hashgraph,fantom,tezos&vs_currencies=usd&include_24hr_change=true');
+        const prices = priceResponse.data;
+        
+        const assetIdMap = {
             'btc': 'bitcoin', 'eth': 'ethereum', 'usdt': 'tether', 'bnb': 'binancecoin',
             'sol': 'solana', 'usdc': 'usd-coin', 'xrp': 'xrp', 'doge': 'dogecoin',
             'ada': 'cardano', 'shib': 'shiba-inu', 'avax': 'avalanche-2', 'dot': 'polkadot',
@@ -15661,125 +15576,76 @@ app.get('/api/assets/portfolio', protect, async (req, res) => {
             'vet': 'vechain', 'fil': 'filecoin', 'theta': 'theta-token', 'hbar': 'hedera-hashgraph',
             'ftm': 'fantom', 'xtz': 'tezos'
         };
-
-        const assetIds = Object.keys(userAssetBalance.balances)
-            .map(symbol => symbolToId[symbol])
-            .filter(id => id);
-
-        let prices = {};
         
-        if (assetIds.length > 0) {
-            try {
-                const priceResponse = await axios.get(
-                    `https://api.coingecko.com/api/v3/simple/price?ids=${assetIds.join(',')}&vs_currencies=usd&include_24hr_change=true`,
-                    { timeout: 5000 }
-                );
-                prices = priceResponse.data;
-            } catch (priceError) {
-                console.warn('Could not fetch live prices:', priceError);
-            }
-        }
-
         const portfolio = [];
-        let totalPortfolioValue = 0;
-        let totalProfitLoss = 0;
-
-        // Process each asset the user holds
-        for (const [symbol, amount] of Object.entries(userAssetBalance.balances)) {
-            if (amount <= 0) continue;
-
-            const assetId = symbolToId[symbol];
+        let totalValue = 0;
+        let totalCost = 0;
+        
+        for (const [assetSymbol, balance] of Object.entries(assetBalances.balances)) {
+            if (balance <= 0) continue;
+            
+            const assetId = assetIdMap[assetSymbol] || 'bitcoin';
             const currentPrice = prices[assetId]?.usd || 0;
             const change24h = prices[assetId]?.usd_24h_change || 0;
-            const currentValue = amount * currentPrice;
+            const currentValue = balance * currentPrice;
             
-            // Get all buy transactions for this asset
-            const assetBuys = buys.filter(b => b.asset === symbol);
-            
-            // Calculate average buying price (weighted average)
+            // Calculate average buy price
+            const assetBuys = buys.filter(b => b.asset === assetSymbol);
             let totalSpent = 0;
-            let totalBought = 0;
-            const buyTransactions = [];
+            let totalAmountBought = 0;
             
             assetBuys.forEach(buy => {
                 totalSpent += buy.usdAmount;
-                totalBought += buy.assetAmount;
-                
-                buyTransactions.push({
-                    type: 'buy',
-                    date: buy.createdAt,
-                    amount: buy.assetAmount,
-                    price: buy.price,
-                    usdValue: buy.usdAmount,
-                    transactionId: buy.transactionId
-                });
+                totalAmountBought += buy.assetAmount;
             });
-
-            // Get all sell transactions for this asset
-            const assetSells = sells.filter(s => s.asset === symbol);
+            
+            const avgBuyPrice = totalAmountBought > 0 ? totalSpent / totalAmountBought : currentPrice;
+            const costBasis = balance * avgBuyPrice;
+            const unrealizedProfitLoss = currentValue - costBasis;
+            const unrealizedPercentage = costBasis > 0 ? (unrealizedProfitLoss / costBasis) * 100 : 0;
+            
+            // Calculate realized profit/loss
+            const assetSells = sells.filter(s => s.asset === assetSymbol);
             let realizedProfit = 0;
             let realizedLoss = 0;
-            const sellTransactions = [];
-
+            
             assetSells.forEach(sell => {
                 if (sell.profitLoss > 0) {
                     realizedProfit += sell.profitLoss;
                 } else {
                     realizedLoss += Math.abs(sell.profitLoss);
                 }
-                
-                sellTransactions.push({
-                    type: 'sell',
-                    date: sell.createdAt,
-                    amount: sell.assetAmount,
-                    price: sell.price,
-                    usdValue: sell.usdAmount,
-                    profitLoss: sell.profitLoss,
-                    profitLossPercentage: sell.profitLossPercentage,
-                    transactionId: sell.transactionId
-                });
             });
-
-            const averageBuyPrice = totalBought > 0 ? totalSpent / totalBought : 0;
-            const unrealizedProfitLoss = currentValue - totalSpent;
-            const unrealizedPercentage = totalSpent > 0 ? (unrealizedProfitLoss / totalSpent) * 100 : 0;
-
-            // Combine and sort all transactions
-            const allTransactions = [...buyTransactions, ...sellTransactions].sort((a, b) => 
-                new Date(b.date) - new Date(a.date)
-            );
-
+            
+            totalValue += currentValue;
+            totalCost += costBasis;
+            
             portfolio.push({
-                asset: symbol,
-                totalAmount: amount,
-                currentPrice: currentPrice,
-                currentValue: currentValue,
-                averageBuyingPrice: averageBuyPrice,
-                totalSpent: totalSpent,
-                totalSold: realizedProfit + realizedLoss,
-                unrealizedProfitLoss: unrealizedProfitLoss,
-                unrealizedPercentage: unrealizedPercentage,
-                realizedProfit: realizedProfit,
-                realizedLoss: realizedLoss,
-                change24h: change24h,
-                transactions: allTransactions
+                asset: assetSymbol,
+                totalAmount: balance,
+                currentPrice,
+                currentValue,
+                averageBuyingPrice: avgBuyPrice,
+                totalSpent,
+                unrealizedProfitLoss,
+                unrealizedPercentage,
+                realizedProfit,
+                realizedLoss,
+                change24h
             });
-
-            totalPortfolioValue += currentValue;
-            totalProfitLoss += unrealizedProfitLoss;
         }
-
-        // Sort portfolio by current value (highest first)
-        portfolio.sort((a, b) => b.currentValue - a.currentValue);
-
+        
+        const totalProfitLoss = totalValue - totalCost;
+        const totalProfitLossPercentage = totalCost > 0 ? (totalProfitLoss / totalCost) * 100 : 0;
+        
         res.status(200).json({
             status: 'success',
             data: {
-                portfolio: portfolio,
+                portfolio,
                 summary: {
-                    totalValue: totalPortfolioValue,
-                    totalProfitLoss: totalProfitLoss,
-                    totalProfitLossPercentage: totalPortfolioValue > 0 ? (totalProfitLoss / (totalPortfolioValue - totalProfitLoss)) * 100 : 0,
+                    totalValue,
+                    totalProfitLoss,
+                    totalProfitLossPercentage,
                     assetsCount: portfolio.length
                 }
             }
@@ -15788,81 +15654,64 @@ app.get('/api/assets/portfolio', protect, async (req, res) => {
         console.error('Error fetching portfolio:', error);
         res.status(500).json({
             status: 'error',
-            message: 'Failed to fetch portfolio data'
+            message: 'Failed to fetch portfolio'
         });
     }
 });
 
 /**
  * GET /api/withdrawals/available-assets
- * Returns assets that the user has balance in (for withdrawal selection)
- * Used by withdrawal.html to populate the asset selector with only assets that have balance
+ * Returns assets that user has balance in for withdrawal
+ * Response: { status: 'success', data: { availableAssets: Array<{ symbol: string, amount: number, usdValue: number }> } }
  */
 app.get('/api/withdrawals/available-assets', protect, async (req, res) => {
     try {
-        const userAssetBalance = await UserAssetBalance.findOne({ user: req.user._id });
+        const assetBalances = await UserAssetBalance.findOne({ user: req.user._id });
         
-        if (!userAssetBalance) {
+        if (!assetBalances) {
             return res.status(200).json({
                 status: 'success',
-                data: {
-                    availableAssets: []
-                }
+                data: { availableAssets: [] }
             });
         }
-
-        // Fetch current prices to calculate USD values
-        const symbolToId = {
-            'btc': 'bitcoin', 'eth': 'ethereum', 'usdt': 'tether', 'bnb': 'binancecoin',
-            'sol': 'solana', 'usdc': 'usd-coin', 'xrp': 'xrp', 'doge': 'dogecoin',
-            'ada': 'cardano', 'shib': 'shiba-inu', 'avax': 'avalanche-2', 'dot': 'polkadot',
-            'trx': 'tron', 'link': 'chainlink', 'matic': 'polygon', 'wbtc': 'wrapped-bitcoin',
-            'ltc': 'litecoin', 'near': 'near', 'uni': 'uniswap', 'bch': 'bitcoin-cash',
-            'xlm': 'stellar', 'atom': 'cosmos', 'xmr': 'monero', 'flow': 'flow',
-            'vet': 'vechain', 'fil': 'filecoin', 'theta': 'theta-token', 'hbar': 'hedera-hashgraph',
-            'ftm': 'fantom', 'xtz': 'tezos'
-        };
-
-        const assetIds = Object.keys(userAssetBalance.balances)
-            .map(symbol => symbolToId[symbol])
-            .filter(id => id);
-
-        let prices = {};
         
-        if (assetIds.length > 0) {
-            try {
-                const priceResponse = await axios.get(
-                    `https://api.coingecko.com/api/v3/simple/price?ids=${assetIds.join(',')}&vs_currencies=usd`,
-                    { timeout: 5000 }
-                );
-                prices = priceResponse.data;
-            } catch (priceError) {
-                console.warn('Could not fetch live prices:', priceError);
-            }
-        }
-
         const availableAssets = [];
-
-        for (const [symbol, amount] of Object.entries(userAssetBalance.balances)) {
+        
+        for (const [asset, amount] of Object.entries(assetBalances.balances)) {
             if (amount > 0) {
-                const assetId = symbolToId[symbol];
-                const price = prices[assetId]?.usd || 0;
+                const assetIdMap = {
+                    'btc': 'bitcoin', 'eth': 'ethereum', 'usdt': 'tether', 'bnb': 'binancecoin',
+                    'sol': 'solana', 'usdc': 'usd-coin', 'xrp': 'xrp', 'doge': 'dogecoin',
+                    'ada': 'cardano', 'shib': 'shiba-inu', 'avax': 'avalanche-2', 'dot': 'polkadot',
+                    'trx': 'tron', 'link': 'chainlink', 'matic': 'polygon', 'wbtc': 'wrapped-bitcoin',
+                    'ltc': 'litecoin', 'near': 'near', 'uni': 'uniswap', 'bch': 'bitcoin-cash',
+                    'xlm': 'stellar', 'atom': 'cosmos', 'xmr': 'monero', 'flow': 'flow',
+                    'vet': 'vechain', 'fil': 'filecoin', 'theta': 'theta-token', 'hbar': 'hedera-hashgraph',
+                    'ftm': 'fantom', 'xtz': 'tezos'
+                };
+                
+                const assetId = assetIdMap[asset] || 'bitcoin';
+                let usdValue = 0;
+                
+                try {
+                    const priceResponse = await axios.get(`https://api.coingecko.com/api/v3/simple/price?ids=${assetId}&vs_currencies=usd`);
+                    const price = priceResponse.data[assetId]?.usd || 0;
+                    usdValue = amount * price;
+                } catch (error) {
+                    usdValue = 0;
+                }
                 
                 availableAssets.push({
-                    symbol: symbol,
-                    amount: amount,
-                    usdValue: amount * price,
-                    price: price
+                    symbol: asset,
+                    amount,
+                    usdValue
                 });
             }
         }
-
+        
         res.status(200).json({
             status: 'success',
-            data: {
-                availableAssets: availableAssets,
-                count: availableAssets.length
-            }
+            data: { availableAssets }
         });
     } catch (error) {
         console.error('Error fetching available assets:', error);
@@ -15875,106 +15724,86 @@ app.get('/api/withdrawals/available-assets', protect, async (req, res) => {
 
 /**
  * GET /api/transactions
- * Returns all transactions for the user with proper formatting for Binance-style tables
- * Used by dashboard.html to display transaction history
+ * Returns user's transaction history (buys, sells, deposits, withdrawals)
+ * Response: { status: 'success', data: { transactions: Array } }
  */
 app.get('/api/transactions', protect, async (req, res) => {
     try {
-        const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 50;
-        const skip = (page - 1) * limit;
-
-        // Get all transactions for this user
-        const transactions = await Transaction.find({ user: req.user._id })
-            .sort({ createdAt: -1 })
-            .skip(skip)
-            .limit(limit)
-            .lean();
-
-        // Get total count for pagination
-        const totalCount = await Transaction.countDocuments({ user: req.user._id });
-
-        // Enhance transactions with additional details for frontend display
-        const enhancedTransactions = await Promise.all(transactions.map(async (tx) => {
-            const enhanced = { ...tx };
-            
-            // Add network information based on asset
-            const assetNetworks = {
-                'btc': 'Bitcoin',
-                'eth': 'Ethereum (ERC-20)',
-                'usdt': 'Tron (TRC-20)',
-                'bnb': 'BNB Smart Chain (BEP-20)',
-                'sol': 'Solana',
-                'usdc': 'Ethereum (ERC-20)',
-                'xrp': 'XRP Ledger',
-                'doge': 'Dogecoin',
-                'ada': 'Cardano',
-                'shib': 'Ethereum (ERC-20)',
-                'avax': 'Avalanche C-Chain',
-                'dot': 'Polkadot',
-                'trx': 'TRON',
-                'link': 'Ethereum (ERC-20)',
-                'matic': 'Polygon',
-                'wbtc': 'Ethereum (ERC-20)',
-                'ltc': 'Litecoin',
-                'near': 'NEAR',
-                'uni': 'Ethereum (ERC-20)',
-                'bch': 'Bitcoin Cash',
-                'xlm': 'Stellar',
-                'atom': 'Cosmos',
-                'xmr': 'Monero',
-                'flow': 'Flow',
-                'vet': 'VeChain',
-                'fil': 'Filecoin',
-                'theta': 'Theta',
-                'hbar': 'Hedera',
-                'ftm': 'Fantom',
-                'xtz': 'Tezos'
-            };
-            
-            enhanced.network = tx.network || assetNetworks[tx.asset?.toLowerCase()] || 'Bitcoin';
-            
-            // For buy/sell transactions, fetch additional details
-            if (tx.type === 'buy' && tx.reference) {
-                const buyDetails = await Buy.findOne({ transactionId: tx._id }).lean();
-                if (buyDetails) {
-                    enhanced.buyDetails = {
-                        price: buyDetails.price,
-                        assetAmount: buyDetails.assetAmount,
-                        fromWallet: buyDetails.balanceSource,
-                        mainAmountUsed: buyDetails.mainAmountUsed,
-                        maturedAmountUsed: buyDetails.maturedAmountUsed
-                    };
-                }
-            } else if (tx.type === 'sell' && tx.reference) {
-                const sellDetails = await Sell.findOne({ transactionId: tx._id }).lean();
-                if (sellDetails) {
-                    enhanced.sellDetails = {
-                        price: sellDetails.price,
-                        assetAmount: sellDetails.assetAmount,
-                        profit: sellDetails.profitLoss > 0 ? sellDetails.profitLoss : 0,
-                        loss: sellDetails.profitLoss < 0 ? Math.abs(sellDetails.profitLoss) : 0,
-                        profitLossPercentage: sellDetails.profitLossPercentage,
-                        avgBuyPrice: sellDetails.averageBuyPrice
-                    };
-                }
+        const buys = await Buy.find({ user: req.user._id }).sort({ createdAt: -1 }).lean();
+        const sells = await Sell.find({ user: req.user._id }).sort({ createdAt: -1 }).lean();
+        const deposits = await DepositAsset.find({ user: req.user._id }).sort({ createdAt: -1 }).lean();
+        const withdrawals = await Transaction.find({ 
+            user: req.user._id, 
+            type: 'withdrawal' 
+        }).sort({ createdAt: -1 }).lean();
+        
+        const formattedBuys = buys.map(buy => ({
+            id: buy._id,
+            type: 'buy',
+            amount: buy.usdAmount,
+            asset: buy.asset,
+            assetAmount: buy.assetAmount,
+            status: buy.status,
+            createdAt: buy.createdAt,
+            buyDetails: {
+                fromWallet: buy.balanceSource,
+                mainAmountUsed: buy.mainAmountUsed,
+                maturedAmountUsed: buy.maturedAmountUsed,
+                price: buy.price
             }
-            
-            return enhanced;
         }));
-
+        
+        const formattedSells = sells.map(sell => ({
+            id: sell._id,
+            type: 'sell',
+            amount: sell.usdAmount,
+            asset: sell.asset,
+            assetAmount: sell.assetAmount,
+            status: sell.status,
+            createdAt: sell.createdAt,
+            sellDetails: {
+                profit: sell.profitLoss > 0 ? sell.profitLoss : 0,
+                loss: sell.profitLoss < 0 ? Math.abs(sell.profitLoss) : 0,
+                profitLossPercentage: sell.profitLossPercentage,
+                avgBuyPrice: sell.averageBuyPrice,
+                price: sell.price
+            }
+        }));
+        
+        const formattedDeposits = deposits.map(deposit => ({
+            id: deposit._id,
+            type: 'deposit',
+            amount: deposit.usdValue,
+            asset: deposit.asset,
+            assetAmount: deposit.amount,
+            status: deposit.status === 'confirmed' ? 'completed' : deposit.status,
+            createdAt: deposit.createdAt,
+            exchangeRateAtTime: deposit.metadata?.exchangeRate,
+            network: deposit.metadata?.network
+        }));
+        
+        const formattedWithdrawals = withdrawals.map(withdrawal => ({
+            id: withdrawal._id,
+            type: 'withdrawal',
+            amount: withdrawal.amount,
+            asset: withdrawal.asset || 'usd',
+            assetAmount: withdrawal.assetAmount,
+            status: withdrawal.status,
+            createdAt: withdrawal.createdAt,
+            exchangeRateAtTime: withdrawal.exchangeRateAtTime,
+            network: withdrawal.network
+        }));
+        
+        const allTransactions = [
+            ...formattedBuys,
+            ...formattedSells,
+            ...formattedDeposits,
+            ...formattedWithdrawals
+        ].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        
         res.status(200).json({
             status: 'success',
-            data: {
-                transactions: enhancedTransactions,
-                pagination: {
-                    currentPage: page,
-                    totalPages: Math.ceil(totalCount / limit),
-                    totalCount: totalCount,
-                    hasNext: skip + limit < totalCount,
-                    hasPrev: page > 1
-                }
-            }
+            data: { transactions: allTransactions }
         });
     } catch (error) {
         console.error('Error fetching transactions:', error);
@@ -15987,29 +15816,21 @@ app.get('/api/transactions', protect, async (req, res) => {
 
 /**
  * GET /api/users/preferences
- * Returns user preferences including display asset
- * Used by all pages to maintain consistent asset display
+ * Returns user preferences (display asset, theme, etc.)
+ * Response: { status: 'success', data: { displayAsset: string, theme: string, ... } }
  */
 app.get('/api/users/preferences', protect, async (req, res) => {
     try {
         let preferences = await UserPreference.findOne({ user: req.user._id });
         
         if (!preferences) {
-            // Create default preferences if none exist
             preferences = await UserPreference.create({
                 user: req.user._id,
                 displayAsset: 'btc',
-                theme: 'dark',
-                notifications: {
-                    email: true,
-                    push: true,
-                    sms: false
-                },
-                language: 'en',
-                currency: 'USD'
+                theme: 'dark'
             });
         }
-
+        
         res.status(200).json({
             status: 'success',
             data: preferences
@@ -16018,62 +15839,35 @@ app.get('/api/users/preferences', protect, async (req, res) => {
         console.error('Error fetching preferences:', error);
         res.status(500).json({
             status: 'error',
-            message: 'Failed to fetch user preferences'
+            message: 'Failed to fetch preferences'
         });
     }
 });
 
 /**
  * GET /api/users/kyc-status
- * Returns KYC verification status for withdrawal limits
- * Used by withdrawal.html to display KYC status message
+ * Returns user's KYC verification status
+ * Response: { status: 'success', data: { status: string, dailyLimit: number } }
  */
 app.get('/api/users/kyc-status', protect, async (req, res) => {
     try {
         const kyc = await KYC.findOne({ user: req.user._id });
         
-        if (!kyc) {
-            return res.status(200).json({
-                status: 'success',
-                data: {
-                    status: 'not-submitted',
-                    dailyLimit: 1000,
-                    message: 'KYC verification not submitted'
-                }
-            });
+        let status = 'not-verified';
+        let dailyLimit = 1000;
+        
+        if (kyc) {
+            if (kyc.identity.status === 'verified' && kyc.address.status === 'verified') {
+                status = 'verified';
+                dailyLimit = 10000;
+            } else if (kyc.identity.status === 'pending' || kyc.address.status === 'pending') {
+                status = 'pending';
+            }
         }
-
-        // Determine overall status
-        let overallStatus = 'not-started';
-        if (kyc.identity.status === 'verified' && kyc.address.status === 'verified' && kyc.facial.status === 'verified') {
-            overallStatus = 'verified';
-        } else if (kyc.identity.status === 'pending' || kyc.address.status === 'pending' || kyc.facial.status === 'pending') {
-            overallStatus = 'pending';
-        } else if (kyc.identity.status === 'rejected' || kyc.address.status === 'rejected' || kyc.facial.status === 'rejected') {
-            overallStatus = 'rejected';
-        } else if (kyc.identity.status !== 'not-submitted' || kyc.address.status !== 'not-submitted' || kyc.facial.status !== 'not-submitted') {
-            overallStatus = 'in-progress';
-        }
-
-        // Set daily limit based on verification level
-        let dailyLimit = 1000; // Default for unverified
-        if (overallStatus === 'verified') {
-            dailyLimit = 10000; // Verified users
-        } else if (overallStatus === 'pending') {
-            dailyLimit = 5000; // Pending verification
-        }
-
+        
         res.status(200).json({
             status: 'success',
-            data: {
-                status: overallStatus,
-                dailyLimit: dailyLimit,
-                identityStatus: kyc.identity.status,
-                addressStatus: kyc.address.status,
-                facialStatus: kyc.facial.status,
-                submittedAt: kyc.submittedAt,
-                reviewedAt: kyc.reviewedAt
-            }
+            data: { status, dailyLimit }
         });
     } catch (error) {
         console.error('Error fetching KYC status:', error);
@@ -16086,101 +15880,60 @@ app.get('/api/users/kyc-status', protect, async (req, res) => {
 
 /**
  * GET /api/deposits/address/:asset
- * Returns deposit address and current exchange rate for the specified asset
- * Used by deposit.html to show address and real-time rate
+ * Returns deposit address for the specified asset with current rate
+ * Response: { status: 'success', data: { address: string, asset: string, rate: number, rateChange24h: number, rateExpiry: number } }
  */
 app.get('/api/deposits/address/:asset', protect, async (req, res) => {
     try {
         const { asset } = req.params;
         
-        // Validate asset
-        const validAssets = ['btc', 'eth', 'usdt', 'bnb', 'sol', 'usdc', 'xrp', 'doge', 'ada', 'shib',
-                            'avax', 'dot', 'trx', 'link', 'matic', 'wbtc', 'ltc', 'near', 'uni', 'bch',
-                            'xlm', 'atom', 'xmr', 'flow', 'vet', 'fil', 'theta', 'hbar', 'ftm', 'xtz'];
-        
-        if (!validAssets.includes(asset.toLowerCase())) {
-            return res.status(400).json({
-                status: 'error',
-                message: 'Invalid asset'
-            });
-        }
-
-        // In production, this would fetch from a wallet management system
-        // For now, we'll return demo addresses with rate
         const addresses = {
-            'btc': 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh',
-            'eth': '0x742d35Cc6634C0532925a3b844Bc5e4d9f150913',
-            'usdt': 'TXYZ1234567890abcdefghijklmnopqrstuvw',
-            'bnb': 'bnb1tq4x4q2tq4x4q2tq4x4q2tq4x4q2tq4x4q2t',
-            'sol': 'Sol1234567890abcdefghijklmnopqrstuvwxyz',
-            'usdc': '0x742d35Cc6634C0532925a3b844Bc5e4d9f150914',
-            'xrp': 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh',
-            'doge': 'D8k5iC5jK5jK5jK5jK5jK5jK5jK5jK5jK5',
-            'shib': '0x742d35Cc6634C0532925a3b844Bc5e4d9f150915',
-            'trx': 'TXYZ1234567890abcdefghijklmnopqrstuvx'
+            btc: '1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa',
+            eth: '0x742d35Cc6634C0532925a3b844Bc5e4d9f150913',
+            usdt: '0x742d35Cc6634C0532925a3b844Bc5e4d9f150913',
+            bnb: 'bnb1d4p8z7y8z9x9z8y7x6z5y4x3z2y1x0z9y8x7',
+            sol: '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZJJosHAsKz',
+            usdc: '0x742d35Cc6634C0532925a3b844Bc5e4d9f150913',
+            xrp: 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh',
+            doge: 'DDogepartyXXXXXXXXXXXXXXWnTcT1',
+            shib: '0x742d35Cc6634C0532925a3b844Bc5e4d9f150913',
+            trx: 'TXYZ1234567890abcdefghijklmnopqrstuvw',
+            ltc: 'LbTjMGN7gELw4KbeyQf6cTCq859hD18guE',
+            ada: 'addr1qxyzlk3k3k3k3k3k3k3k3k3k3k3k3k3k3k3k3',
+            avax: '0x742d35Cc6634C0532925a3b844Bc5e4d9f150913',
+            dot: '1x8o23k3k3k3k3k3k3k3k3k3k3k3k3k3k3k3k3k3'
         };
-
-        // Fetch current price from CoinGecko
-        const assetId = {
-            'btc': 'bitcoin', 'eth': 'ethereum', 'usdt': 'tether', 'bnb': 'binancecoin',
-            'sol': 'solana', 'usdc': 'usd-coin', 'xrp': 'xrp', 'doge': 'dogecoin',
-            'ada': 'cardano', 'shib': 'shiba-inu', 'avax': 'avalanche-2', 'dot': 'polkadot',
-            'trx': 'tron', 'link': 'chainlink', 'matic': 'polygon', 'wbtc': 'wrapped-bitcoin',
-            'ltc': 'litecoin', 'near': 'near', 'uni': 'uniswap', 'bch': 'bitcoin-cash',
-            'xlm': 'stellar', 'atom': 'cosmos', 'xmr': 'monero', 'flow': 'flow',
-            'vet': 'vechain', 'fil': 'filecoin', 'theta': 'theta-token', 'hbar': 'hedera-hashgraph',
-            'ftm': 'fantom', 'xtz': 'tezos'
-        }[asset.toLowerCase()] || 'bitcoin';
-
-        let price = 0;
-        let change24h = 0;
+        
+        const assetIdMap = {
+            btc: 'bitcoin', eth: 'ethereum', usdt: 'tether', bnb: 'binancecoin',
+            sol: 'solana', usdc: 'usd-coin', xrp: 'xrp', doge: 'dogecoin',
+            shib: 'shiba-inu', trx: 'tron', ltc: 'litecoin', ada: 'cardano',
+            avax: 'avalanche-2', dot: 'polkadot'
+        };
+        
+        const assetId = assetIdMap[asset] || 'bitcoin';
+        
+        let rate = 0;
+        let rateChange24h = 0;
         
         try {
-            const priceResponse = await axios.get(
-                `https://api.coingecko.com/api/v3/simple/price?ids=${assetId}&vs_currencies=usd&include_24hr_change=true`,
-                { timeout: 5000 }
-            );
-            price = priceResponse.data[assetId]?.usd || 0;
-            change24h = priceResponse.data[assetId]?.usd_24h_change || 0;
-        } catch (priceError) {
-            console.warn('Could not fetch live price:', priceError);
-            // Fallback prices
-            const fallbackPrices = {
-                'bitcoin': 50000,
-                'ethereum': 3000,
-                'tether': 1,
-                'binancecoin': 300,
-                'solana': 100,
-                'usd-coin': 1,
-                'xrp': 0.5,
-                'dogecoin': 0.08,
-                'shiba-inu': 0.00001,
-                'tron': 0.08
-            };
-            price = fallbackPrices[assetId] || 1;
+            const priceResponse = await axios.get(`https://api.coingecko.com/api/v3/simple/price?ids=${assetId}&vs_currencies=usd&include_24hr_change=true`);
+            rate = priceResponse.data[assetId]?.usd || 0;
+            rateChange24h = priceResponse.data[assetId]?.usd_24h_change || 0;
+        } catch (error) {
+            rate = asset === 'btc' ? 43000 : 1;
         }
-
-        // Set rate expiry (5 minutes from now)
-        const rateExpiry = Date.now() + (5 * 60 * 1000);
-
+        
+        const address = addresses[asset] || addresses.btc;
+        
         res.status(200).json({
             status: 'success',
             data: {
-                address: addresses[asset.toLowerCase()] || addresses.btc,
-                asset: asset.toLowerCase(),
-                rate: price,
-                rateChange24h: change24h,
-                rateExpiry: rateExpiry,
-                network: asset.toLowerCase() === 'btc' ? 'Bitcoin' :
-                        asset.toLowerCase() === 'eth' ? 'Ethereum (ERC-20)' :
-                        asset.toLowerCase() === 'usdt' ? 'Tron (TRC-20)' :
-                        asset.toLowerCase() === 'bnb' ? 'BNB Smart Chain (BEP-20)' :
-                        asset.toLowerCase() === 'sol' ? 'Solana' :
-                        asset.toLowerCase() === 'usdc' ? 'Ethereum (ERC-20)' :
-                        asset.toLowerCase() === 'xrp' ? 'XRP Ledger' :
-                        asset.toLowerCase() === 'doge' ? 'Dogecoin' :
-                        asset.toLowerCase() === 'shib' ? 'Ethereum (ERC-20)' :
-                        asset.toLowerCase() === 'trx' ? 'TRON (TRC-20)' : 'Bitcoin'
+                address,
+                asset,
+                rate,
+                rateChange24h,
+                rateExpiry: Date.now() + 60000
             }
         });
     } catch (error) {
@@ -16192,50 +15945,43 @@ app.get('/api/deposits/address/:asset', protect, async (req, res) => {
     }
 });
 
+// =============================================
+// POST ENDPOINTS
+// =============================================
+
 /**
  * POST /api/buy
- * Processes a buy order, updates balances, and creates transaction records
- * Used by dashboard.html when user clicks Buy button
+ * Buy assets using combined main and matured wallets
+ * Request: { asset: string, amountUSD: number, assetAmount: number, price: number }
+ * Response: { status: 'success', data: { message: string, buy: object, transaction: object } }
  */
 app.post('/api/buy', protect, async (req, res) => {
     try {
         const { asset, amountUSD, assetAmount, price } = req.body;
         
-        // Validate input
         if (!asset || !amountUSD || !assetAmount || !price) {
             return res.status(400).json({
                 status: 'error',
                 message: 'Missing required fields'
             });
         }
-
-        if (amountUSD <= 0 || assetAmount <= 0 || price <= 0) {
-            return res.status(400).json({
-                status: 'error',
-                message: 'Amounts must be positive'
-            });
-        }
-
-        // Get user balances
-        const user = await User.findById(req.user._id);
         
+        const user = await User.findById(req.user._id);
         const mainBalance = user.balances.main || 0;
         const maturedBalance = user.balances.matured || 0;
         const totalAvailable = mainBalance + maturedBalance;
-
-        // Check if user has sufficient balance
+        
         if (amountUSD > totalAvailable) {
             return res.status(400).json({
                 status: 'error',
                 message: 'Insufficient balance'
             });
         }
-
-        // Determine which wallet(s) to use
+        
         let mainAmountUsed = 0;
         let maturedAmountUsed = 0;
-        let balanceSource = '';
-
+        let balanceSource = 'both';
+        
         if (mainBalance >= amountUSD) {
             mainAmountUsed = amountUSD;
             maturedAmountUsed = 0;
@@ -16249,108 +15995,85 @@ app.post('/api/buy', protect, async (req, res) => {
             maturedAmountUsed = amountUSD - mainBalance;
             balanceSource = 'both';
         }
-
-        // Create transaction record
-        const transaction = await Transaction.create({
-            user: user._id,
-            type: 'buy',
-            amount: amountUSD,
-            asset: asset,
-            assetAmount: assetAmount,
-            currency: 'USD',
-            status: 'completed',
-            method: asset,
-            reference: `BUY-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-            details: {
-                price: price,
-                fromWallet: balanceSource,
-                mainAmountUsed: mainAmountUsed,
-                maturedAmountUsed: maturedAmountUsed
-            },
-            fee: 0,
-            netAmount: amountUSD,
-            exchangeRateAtTime: price,
-            completedAt: new Date()
+        
+        await User.findByIdAndUpdate(req.user._id, {
+            $inc: {
+                'balances.main': -mainAmountUsed,
+                'balances.matured': -maturedAmountUsed
+            }
         });
-
-        // Create buy record
-        await Buy.create({
-            user: user._id,
-            asset: asset,
+        
+        let assetBalance = await UserAssetBalance.findOne({ user: req.user._id });
+        
+        if (!assetBalance) {
+            assetBalance = new UserAssetBalance({
+                user: req.user._id,
+                balances: {}
+            });
+        }
+        
+        const currentAssetAmount = assetBalance.balances[asset] || 0;
+        assetBalance.balances[asset] = currentAssetAmount + assetAmount;
+        assetBalance.lastUpdated = new Date();
+        
+        assetBalance.history.push({
+            asset,
+            type: 'buy',
+            amount: assetAmount,
+            balance: assetBalance.balances[asset],
+            usdValue: amountUSD,
+            price,
+            timestamp: new Date()
+        });
+        
+        await assetBalance.save();
+        
+        const buy = await Buy.create({
+            user: req.user._id,
+            asset,
             usdAmount: amountUSD,
-            assetAmount: assetAmount,
-            price: price,
+            assetAmount,
+            price,
             totalValue: amountUSD,
             fee: 0,
             netUsdAmount: amountUSD,
             netAssetAmount: assetAmount,
             status: 'completed',
-            transactionId: transaction._id,
             completedAt: new Date(),
-            balanceSource: balanceSource,
-            mainAmountUsed: mainAmountUsed,
-            maturedAmountUsed: maturedAmountUsed
+            balanceSource,
+            mainAmountUsed,
+            maturedAmountUsed
         });
-
-        // Update user balances
-        if (mainAmountUsed > 0) {
-            user.balances.main -= mainAmountUsed;
-        }
-        if (maturedAmountUsed > 0) {
-            user.balances.matured -= maturedAmountUsed;
-        }
-        await user.save();
-
-        // Update asset balance
-        let userAssetBalance = await UserAssetBalance.findOne({ user: user._id });
         
-        if (!userAssetBalance) {
-            userAssetBalance = new UserAssetBalance({
-                user: user._id,
-                balances: {}
-            });
-        }
-
-        // Initialize asset balance if not exists
-        if (!userAssetBalance.balances[asset]) {
-            userAssetBalance.balances[asset] = 0;
-        }
-
-        // Add purchased amount to asset balance
-        userAssetBalance.balances[asset] += assetAmount;
-
-        // Add to history
-        userAssetBalance.history.push({
-            asset: asset,
+        const transaction = await Transaction.create({
+            user: req.user._id,
             type: 'buy',
-            amount: assetAmount,
-            balance: userAssetBalance.balances[asset],
-            usdValue: amountUSD,
-            price: price,
-            transactionId: transaction._id
+            amount: amountUSD,
+            asset,
+            assetAmount,
+            status: 'completed',
+            method: asset,
+            reference: `BUY-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+            details: {
+                buyId: buy._id,
+                fromWallet: balanceSource,
+                mainAmountUsed,
+                maturedAmountUsed
+            },
+            fee: 0,
+            netAmount: amountUSD,
+            exchangeRateAtTime: price
         });
-
-        userAssetBalance.lastUpdated = new Date();
-        await userAssetBalance.save();
-
-        // Log activity
-        await logActivity('buy_completed', 'Buy', transaction._id, user._id, 'User', req, {
-            asset: asset,
-            amount: assetAmount,
-            usdValue: amountUSD,
-            price: price,
-            balanceSource: balanceSource
-        });
-
+        
+        buy.transactionId = transaction._id;
+        await buy.save();
+        
         res.status(200).json({
             status: 'success',
             data: {
                 message: `Successfully bought ${assetAmount.toFixed(8)} ${asset.toUpperCase()}`,
-                transaction: transaction,
-                newBalances: {
-                    main: user.balances.main,
-                    matured: user.balances.matured
-                }
+                buy,
+                transaction
             }
         });
     } catch (error) {
@@ -16364,160 +16087,136 @@ app.post('/api/buy', protect, async (req, res) => {
 
 /**
  * POST /api/sell
- * Processes a sell order, updates balances (adds to matured only), and creates transaction records
- * Used by dashboard.html when user clicks Sell button
+ * Sell assets, proceeds added to matured balance only
+ * Request: { asset: string, amountUSD: number, assetAmount: number, price: number }
+ * Response: { status: 'success', data: { message: string, profit: number, loss: number, profitLossPercentage: number, sell: object, transaction: object } }
  */
 app.post('/api/sell', protect, async (req, res) => {
     try {
         const { asset, amountUSD, assetAmount, price } = req.body;
         
-        // Validate input
         if (!asset || !amountUSD || !assetAmount || !price) {
             return res.status(400).json({
                 status: 'error',
                 message: 'Missing required fields'
             });
         }
-
-        if (amountUSD <= 0 || assetAmount <= 0 || price <= 0) {
-            return res.status(400).json({
-                status: 'error',
-                message: 'Amounts must be positive'
-            });
-        }
-
-        // Get user asset balance
-        let userAssetBalance = await UserAssetBalance.findOne({ user: req.user._id });
         
-        if (!userAssetBalance || !userAssetBalance.balances[asset] || userAssetBalance.balances[asset] < assetAmount) {
+        let assetBalance = await UserAssetBalance.findOne({ user: req.user._id });
+        
+        if (!assetBalance) {
             return res.status(400).json({
                 status: 'error',
-                message: `Insufficient ${asset.toUpperCase()} balance`
+                message: 'No asset balance found'
             });
         }
-
-        // Calculate average buy price for this asset
+        
+        const currentAssetAmount = assetBalance.balances[asset] || 0;
+        
+        if (assetAmount > currentAssetAmount) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Insufficient asset balance'
+            });
+        }
+        
         const buys = await Buy.find({ 
             user: req.user._id, 
-            asset: asset,
-            status: 'completed'
+            asset, 
+            status: 'completed' 
         }).sort({ createdAt: 1 });
-
-        let totalSpent = 0;
-        let totalBought = 0;
         
-        // Calculate using FIFO method for the amount being sold
-        let remainingToSell = assetAmount;
-        let costBasis = 0;
+        let totalCost = 0;
+        let totalAmount = 0;
         
-        for (const buy of buys) {
-            if (remainingToSell <= 0) break;
-            
-            const buyAmount = buy.assetAmount;
-            const amountToUse = Math.min(buyAmount, remainingToSell);
-            
-            costBasis += amountToUse * buy.price;
-            remainingToSell -= amountToUse;
-        }
-
-        const averageBuyPrice = costBasis / assetAmount;
-        const profitLoss = (price - averageBuyPrice) * assetAmount;
-        const profitLossPercentage = ((price - averageBuyPrice) / averageBuyPrice) * 100;
-
-        // Create transaction record
-        const transaction = await Transaction.create({
-            user: req.user._id,
-            type: 'sell',
-            amount: amountUSD,
-            asset: asset,
-            assetAmount: assetAmount,
-            currency: 'USD',
-            status: 'completed',
-            method: asset,
-            reference: `SELL-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-            details: {
-                price: price,
-                profitLoss: profitLoss,
-                profitLossPercentage: profitLossPercentage,
-                averageBuyPrice: averageBuyPrice,
-                costBasis: costBasis
-            },
-            fee: 0,
-            netAmount: amountUSD,
-            exchangeRateAtTime: price,
-            completedAt: new Date()
+        buys.forEach(buy => {
+            totalCost += buy.usdAmount;
+            totalAmount += buy.assetAmount;
         });
-
-        // Create sell record
-        await Sell.create({
+        
+        const avgBuyPrice = totalAmount > 0 ? totalCost / totalAmount : price;
+        const costBasis = assetAmount * avgBuyPrice;
+        const profitLoss = amountUSD - costBasis;
+        const profitLossPercentage = costBasis > 0 ? (profitLoss / costBasis) * 100 : 0;
+        
+        const newAssetAmount = currentAssetAmount - assetAmount;
+        assetBalance.balances[asset] = newAssetAmount;
+        
+        if (newAssetAmount === 0) {
+            delete assetBalance.balances[asset];
+        }
+        
+        assetBalance.lastUpdated = new Date();
+        
+        assetBalance.history.push({
+            asset,
+            type: 'sell',
+            amount: -assetAmount,
+            balance: newAssetAmount,
+            usdValue: amountUSD,
+            price,
+            timestamp: new Date()
+        });
+        
+        await assetBalance.save();
+        
+        await User.findByIdAndUpdate(req.user._id, {
+            $inc: {
+                'balances.matured': amountUSD
+            }
+        });
+        
+        const sell = await Sell.create({
             user: req.user._id,
-            asset: asset,
+            asset,
             usdAmount: amountUSD,
-            assetAmount: assetAmount,
-            price: price,
+            assetAmount,
+            price,
             totalValue: amountUSD,
             fee: 0,
             netUsdAmount: amountUSD,
             netAssetAmount: assetAmount,
             status: 'completed',
-            transactionId: transaction._id,
-            completedAt: Date.now(),
-            profitLoss: profitLoss,
-            profitLossPercentage: profitLossPercentage,
-            averageBuyPrice: averageBuyPrice,
-            costBasis: costBasis,
+            completedAt: new Date(),
+            profitLoss,
+            profitLossPercentage,
+            averageBuyPrice: avgBuyPrice,
+            costBasis,
             realizedGain: profitLoss > 0 ? profitLoss : 0
         });
-
-        // Update asset balance
-        userAssetBalance.balances[asset] -= assetAmount;
         
-        // If asset balance becomes zero, remove it from the balances object
-        if (userAssetBalance.balances[asset] <= 0) {
-            delete userAssetBalance.balances[asset];
-        }
-
-        // Add to history
-        userAssetBalance.history.push({
-            asset: asset,
+        const transaction = await Transaction.create({
+            user: req.user._id,
             type: 'sell',
-            amount: -assetAmount,
-            balance: userAssetBalance.balances[asset] || 0,
-            usdValue: amountUSD,
-            price: price,
-            transactionId: transaction._id
+            amount: amountUSD,
+            asset,
+            assetAmount,
+            status: 'completed',
+            method: asset,
+            reference: `SELL-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+            details: {
+                sellId: sell._id,
+                profitLoss,
+                profitLossPercentage,
+                avgBuyPrice
+            },
+            fee: 0,
+            netAmount: amountUSD,
+            exchangeRateAtTime: price
         });
-
-        userAssetBalance.lastUpdated = new Date();
-        await userAssetBalance.save();
-
-        // Update user balance - ADD TO MATURED ONLY (as per requirements)
-        const user = await User.findById(req.user._id);
-        user.balances.matured += amountUSD;
-        await user.save();
-
-        // Log activity
-        await logActivity('sell_completed', 'Sell', transaction._id, user._id, 'User', req, {
-            asset: asset,
-            amount: assetAmount,
-            usdValue: amountUSD,
-            price: price,
-            profitLoss: profitLoss,
-            profitLossPercentage: profitLossPercentage
-        });
-
+        
+        sell.transactionId = transaction._id;
+        await sell.save();
+        
         res.status(200).json({
             status: 'success',
             data: {
                 message: `Successfully sold ${assetAmount.toFixed(8)} ${asset.toUpperCase()}`,
                 profit: profitLoss > 0 ? profitLoss : 0,
                 loss: profitLoss < 0 ? Math.abs(profitLoss) : 0,
-                profitLossPercentage: profitLossPercentage,
-                transaction: transaction,
-                newBalances: {
-                    main: user.balances.main,
-                    matured: user.balances.matured
-                }
+                profitLossPercentage,
+                sell,
+                transaction
             }
         });
     } catch (error) {
@@ -16531,171 +16230,119 @@ app.post('/api/sell', protect, async (req, res) => {
 
 /**
  * POST /api/withdrawals/asset
- * Processes an asset withdrawal request
- * Used by withdrawal.html when user submits asset withdrawal
+ * Process asset withdrawal
+ * Request: { 
+ *   amount: number, 
+ *   asset: string, 
+ *   walletAddress: string, 
+ *   gasFee: number, 
+ *   exchangeRate: number,
+ *   balanceSource: string,
+ *   mainAmountUsed: number,
+ *   maturedAmountUsed: number
+ * }
+ * Response: { status: 'success', data: { message: string, withdrawal: object } }
  */
 app.post('/api/withdrawals/asset', protect, async (req, res) => {
     try {
         const { amount, asset, walletAddress, gasFee, exchangeRate, balanceSource, mainAmountUsed, maturedAmountUsed } = req.body;
         
-        // Validate input
         if (!amount || !asset || !walletAddress) {
             return res.status(400).json({
                 status: 'error',
                 message: 'Missing required fields'
             });
         }
-
-        if (amount <= 0) {
-            return res.status(400).json({
-                status: 'error',
-                message: 'Amount must be positive'
-            });
-        }
-
-        // Validate wallet address based on asset
-        if (asset === 'usdt' && !walletAddress.startsWith('T') && !walletAddress.startsWith('0x')) {
-            return res.status(400).json({
-                status: 'error',
-                message: 'Invalid USDT address. TRC-20 addresses start with "T", ERC-20 addresses start with "0x"'
-            });
-        }
-
-        // Get user and check balance
-        const user = await User.findById(req.user._id);
         
-        const mainBalance = user.balances.main || 0;
-        const maturedBalance = user.balances.matured || 0;
-        const totalBalance = mainBalance + maturedBalance;
-
-        if (amount > totalBalance) {
-            return res.status(400).json({
-                status: 'error',
-                message: 'Insufficient balance'
-            });
-        }
-
-        // Check if user has the asset balance (for the asset being withdrawn)
-        let userAssetBalance = await UserAssetBalance.findOne({ user: user._id });
+        const assetBalance = await UserAssetBalance.findOne({ user: req.user._id });
         
-        if (!userAssetBalance || !userAssetBalance.balances[asset] || userAssetBalance.balances[asset] <= 0) {
+        if (!assetBalance) {
             return res.status(400).json({
                 status: 'error',
-                message: `You don't have any ${asset.toUpperCase()} to withdraw`
+                message: 'No asset balance found'
             });
         }
-
-        // Calculate asset amount based on exchange rate
+        
         const assetAmount = amount / exchangeRate;
+        const currentAssetAmount = assetBalance.balances[asset] || 0;
         
-        // Check if user has enough of this specific asset
-        if (assetAmount > userAssetBalance.balances[asset]) {
+        if (assetAmount > currentAssetAmount) {
             return res.status(400).json({
                 status: 'error',
-                message: `Insufficient ${asset.toUpperCase()} balance`
+                message: 'Insufficient asset balance for withdrawal'
             });
         }
-
-        // Create transaction record
-        const transaction = await Transaction.create({
-            user: user._id,
-            type: 'withdrawal',
-            amount: amount,
-            asset: asset,
-            assetAmount: assetAmount,
-            currency: 'USD',
-            status: 'pending',
-            method: asset,
-            reference: `WITHDRAW-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-            details: {
-                walletAddress: walletAddress,
-                gasFee: gasFee,
-                balanceSource: balanceSource,
-                mainAmountUsed: mainAmountUsed,
-                maturedAmountUsed: maturedAmountUsed
-            },
-            fee: gasFee * exchangeRate, // Gas fee in USD
-            netAmount: amount,
-            btcAddress: walletAddress,
-            exchangeRateAtTime: exchangeRate,
-            network: asset === 'btc' ? 'Bitcoin' :
-                     asset === 'eth' ? 'Ethereum (ERC-20)' :
-                     asset === 'usdt' ? 'Tron (TRC-20)' :
-                     asset === 'bnb' ? 'BNB Smart Chain (BEP-20)' :
-                     asset === 'sol' ? 'Solana' :
-                     asset === 'usdc' ? 'Ethereum (ERC-20)' :
-                     asset === 'xrp' ? 'XRP Ledger' :
-                     asset === 'doge' ? 'Dogecoin' :
-                     asset === 'shib' ? 'Ethereum (ERC-20)' :
-                     asset === 'trx' ? 'TRON (TRC-20)' : 'Bitcoin'
-        });
-
-        // Update asset balance
-        userAssetBalance.balances[asset] -= assetAmount;
         
-        // If asset balance becomes zero, remove it
-        if (userAssetBalance.balances[asset] <= 0) {
-            delete userAssetBalance.balances[asset];
+        if (gasFee > 0) {
+            const gasFeeUsd = gasFee * exchangeRate;
+            await User.findByIdAndUpdate(req.user._id, {
+                $inc: {
+                    'balances.main': -gasFeeUsd
+                }
+            });
         }
-
-        userAssetBalance.history.push({
-            asset: asset,
+        
+        const newAssetAmount = currentAssetAmount - assetAmount;
+        assetBalance.balances[asset] = newAssetAmount;
+        
+        if (newAssetAmount === 0) {
+            delete assetBalance.balances[asset];
+        }
+        
+        assetBalance.lastUpdated = new Date();
+        
+        assetBalance.history.push({
+            asset,
             type: 'withdrawal',
             amount: -assetAmount,
-            balance: userAssetBalance.balances[asset] || 0,
+            balance: newAssetAmount,
             usdValue: amount,
             price: exchangeRate,
-            transactionId: transaction._id
+            timestamp: new Date()
         });
-
-        userAssetBalance.lastUpdated = new Date();
-        await userAssetBalance.save();
-
-        // Update user USD balances (main/matured) based on source
-        if (balanceSource === 'main') {
-            user.balances.main -= amount;
-        } else if (balanceSource === 'matured') {
-            user.balances.matured -= amount;
-        } else if (balanceSource === 'both') {
-            user.balances.main -= mainAmountUsed;
-            user.balances.matured -= maturedAmountUsed;
-        }
         
-        // Deduct gas fee from main balance
-        const gasFeeUsd = gasFee * exchangeRate;
-        user.balances.main -= gasFeeUsd;
+        await assetBalance.save();
         
-        await user.save();
-
-        // Log activity
-        await logActivity('withdrawal_created', 'Withdrawal', transaction._id, user._id, 'User', req, {
-            asset: asset,
-            amount: assetAmount,
-            usdValue: amount,
-            walletAddress: walletAddress,
-            balanceSource: balanceSource
+        const withdrawal = await Transaction.create({
+            user: req.user._id,
+            type: 'withdrawal',
+            amount: amount,
+            asset,
+            assetAmount,
+            status: 'pending',
+            method: asset,
+            reference: `WD-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+            details: {
+                walletAddress,
+                balanceSource,
+                mainAmountUsed,
+                maturedAmountUsed,
+                gasFee
+            },
+            fee: gasFee * exchangeRate,
+            netAmount: amount,
+            exchangeRateAtTime: exchangeRate,
+            network: asset === 'btc' ? 'Bitcoin' : 
+                     asset === 'eth' ? 'Ethereum' : 
+                     asset === 'usdt' ? 'Tron (TRC-20)' : 
+                     'Unknown'
         });
-
+        
         res.status(200).json({
             status: 'success',
             data: {
                 message: 'Withdrawal request submitted successfully',
-                transaction: transaction,
-                newBalances: {
-                    main: user.balances.main,
-                    matured: user.balances.matured
-                }
+                withdrawal
             }
         });
     } catch (error) {
         console.error('Error processing withdrawal:', error);
         res.status(500).json({
             status: 'error',
-            message: 'Failed to process withdrawal request'
+            message: 'Failed to process withdrawal'
         });
     }
 });
-
 
 
 
