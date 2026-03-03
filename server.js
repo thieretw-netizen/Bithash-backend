@@ -15939,314 +15939,6 @@ app.post('/api/users/preferences', protect, async (req, res) => {
     }
 });
 
-// =============================================
-// POST ENDPOINTS
-// =============================================
-
-/**
- * POST /api/buy
- * Buy assets using combined main and matured wallets
- * Request: { asset: string, amountUSD: number, assetAmount: number, price: number }
- * Response: { status: 'success', data: { message: string, buy: object, transaction: object } }
- */
-app.post('/api/buy', protect, async (req, res) => {
-    try {
-        const { asset, amountUSD, assetAmount, price } = req.body;
-        
-        console.log(`Buy request: user=${req.user._id}, asset=${asset}, amountUSD=${amountUSD}, assetAmount=${assetAmount}, price=${price}`);
-        
-        if (!asset || !amountUSD || !assetAmount || !price) {
-            return res.status(400).json({
-                status: 'error',
-                message: 'Missing required fields'
-            });
-        }
-        
-        const user = await User.findById(req.user._id);
-        const mainBalance = user.balances.main || 0;
-        const maturedBalance = user.balances.matured || 0;
-        const totalAvailable = mainBalance + maturedBalance;
-        
-        console.log(`User balances: main=${mainBalance}, matured=${maturedBalance}, total=${totalAvailable}`);
-        
-        if (amountUSD > totalAvailable) {
-            return res.status(400).json({
-                status: 'error',
-                message: 'Insufficient balance'
-            });
-        }
-        
-        let mainAmountUsed = 0;
-        let maturedAmountUsed = 0;
-        let balanceSource = 'both';
-        
-        if (mainBalance >= amountUSD) {
-            mainAmountUsed = amountUSD;
-            maturedAmountUsed = 0;
-            balanceSource = 'main';
-        } else if (maturedBalance >= amountUSD) {
-            mainAmountUsed = 0;
-            maturedAmountUsed = amountUSD;
-            balanceSource = 'matured';
-        } else {
-            mainAmountUsed = mainBalance;
-            maturedAmountUsed = amountUSD - mainBalance;
-            balanceSource = 'both';
-        }
-        
-        // Update user balances
-        await User.findByIdAndUpdate(req.user._id, {
-            $inc: {
-                'balances.main': -mainAmountUsed,
-                'balances.matured': -maturedAmountUsed
-            }
-        });
-        
-        // Update asset balances
-        let assetBalance = await UserAssetBalance.findOne({ user: req.user._id });
-        
-        if (!assetBalance) {
-            assetBalance = new UserAssetBalance({
-                user: req.user._id,
-                balances: {}
-            });
-        }
-        
-        const currentAssetAmount = assetBalance.balances[asset] || 0;
-        assetBalance.balances[asset] = currentAssetAmount + assetAmount;
-        assetBalance.lastUpdated = new Date();
-        
-        if (!assetBalance.history) assetBalance.history = [];
-        assetBalance.history.push({
-            asset,
-            type: 'buy',
-            amount: assetAmount,
-            balance: assetBalance.balances[asset],
-            usdValue: amountUSD,
-            price,
-            timestamp: new Date()
-        });
-        
-        await assetBalance.save();
-        
-        // Create buy record
-        const buy = await Buy.create({
-            user: req.user._id,
-            asset,
-            usdAmount: amountUSD,
-            assetAmount,
-            price,
-            totalValue: amountUSD,
-            fee: 0,
-            netUsdAmount: amountUSD,
-            netAssetAmount: assetAmount,
-            status: 'completed',
-            completedAt: new Date(),
-            balanceSource,
-            mainAmountUsed,
-            maturedAmountUsed
-        });
-        
-        // Create transaction record
-        const transaction = await Transaction.create({
-            user: req.user._id,
-            type: 'buy',
-            amount: amountUSD,
-            asset,
-            assetAmount,
-            status: 'completed',
-            method: asset,
-            reference: `BUY-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-            details: {
-                buyId: buy._id,
-                fromWallet: balanceSource,
-                mainAmountUsed,
-                maturedAmountUsed,
-                price
-            },
-            fee: 0,
-            netAmount: amountUSD,
-            exchangeRateAtTime: price
-        });
-        
-        buy.transactionId = transaction._id;
-        await buy.save();
-        
-        console.log(`Buy completed successfully: ${buy._id}`);
-        
-        res.status(200).json({
-            status: 'success',
-            data: {
-                message: `Successfully bought ${assetAmount.toFixed(8)} ${asset.toUpperCase()}`,
-                buy,
-                transaction
-            }
-        });
-    } catch (error) {
-        console.error('Error processing buy:', error);
-        res.status(500).json({
-            status: 'error',
-            message: 'Failed to process buy order: ' + error.message
-        });
-    }
-});
-
-/**
- * POST /api/sell
- * Sell assets, proceeds added to matured balance only
- * Request: { asset: string, amountUSD: number, assetAmount: number, price: number }
- * Response: { status: 'success', data: { message: string, profit: number, loss: number, profitLossPercentage: number, sell: object, transaction: object } }
- */
-app.post('/api/sell', protect, async (req, res) => {
-    try {
-        const { asset, amountUSD, assetAmount, price } = req.body;
-        
-        console.log(`Sell request: user=${req.user._id}, asset=${asset}, amountUSD=${amountUSD}, assetAmount=${assetAmount}, price=${price}`);
-        
-        if (!asset || !amountUSD || !assetAmount || !price) {
-            return res.status(400).json({
-                status: 'error',
-                message: 'Missing required fields'
-            });
-        }
-        
-        let assetBalance = await UserAssetBalance.findOne({ user: req.user._id });
-        
-        if (!assetBalance) {
-            return res.status(400).json({
-                status: 'error',
-                message: 'No asset balance found'
-            });
-        }
-        
-        const currentAssetAmount = assetBalance.balances[asset] || 0;
-        
-        if (assetAmount > currentAssetAmount) {
-            return res.status(400).json({
-                status: 'error',
-                message: 'Insufficient asset balance'
-            });
-        }
-        
-        // Calculate average buy price for profit/loss
-        const buys = await Buy.find({ 
-            user: req.user._id, 
-            asset, 
-            status: 'completed' 
-        }).sort({ createdAt: 1 }).lean();
-        
-        let totalCost = 0;
-        let totalAmount = 0;
-        
-        buys.forEach(buy => {
-            totalCost += buy.usdAmount || 0;
-            totalAmount += buy.assetAmount || 0;
-        });
-        
-        const avgBuyPrice = totalAmount > 0 ? totalCost / totalAmount : price;
-        const costBasis = assetAmount * avgBuyPrice;
-        const profitLoss = amountUSD - costBasis;
-        const profitLossPercentage = costBasis > 0 ? (profitLoss / costBasis) * 100 : 0;
-        
-        console.log(`Profit/Loss calculation: avgBuyPrice=${avgBuyPrice}, costBasis=${costBasis}, profitLoss=${profitLoss}`);
-        
-        // Update asset balance
-        const newAssetAmount = currentAssetAmount - assetAmount;
-        assetBalance.balances[asset] = newAssetAmount;
-        
-        if (newAssetAmount === 0) {
-            delete assetBalance.balances[asset];
-        }
-        
-        assetBalance.lastUpdated = new Date();
-        
-        if (!assetBalance.history) assetBalance.history = [];
-        assetBalance.history.push({
-            asset,
-            type: 'sell',
-            amount: -assetAmount,
-            balance: newAssetAmount,
-            usdValue: amountUSD,
-            price,
-            timestamp: new Date()
-        });
-        
-        await assetBalance.save();
-        
-        // Add proceeds to matured balance
-        await User.findByIdAndUpdate(req.user._id, {
-            $inc: {
-                'balances.matured': amountUSD
-            }
-        });
-        
-        // Create sell record
-        const sell = await Sell.create({
-            user: req.user._id,
-            asset,
-            usdAmount: amountUSD,
-            assetAmount,
-            price,
-            totalValue: amountUSD,
-            fee: 0,
-            netUsdAmount: amountUSD,
-            netAssetAmount: assetAmount,
-            status: 'completed',
-            completedAt: new Date(),
-            profitLoss,
-            profitLossPercentage,
-            averageBuyPrice: avgBuyPrice,
-            costBasis,
-            realizedGain: profitLoss > 0 ? profitLoss : 0
-        });
-        
-        // Create transaction record
-        const transaction = await Transaction.create({
-            user: req.user._id,
-            type: 'sell',
-            amount: amountUSD,
-            asset,
-            assetAmount,
-            status: 'completed',
-            method: asset,
-            reference: `SELL-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-            details: {
-                sellId: sell._id,
-                profitLoss,
-                profitLossPercentage,
-                avgBuyPrice,
-                price
-            },
-            fee: 0,
-            netAmount: amountUSD,
-            exchangeRateAtTime: price
-        });
-        
-        sell.transactionId = transaction._id;
-        await sell.save();
-        
-        console.log(`Sell completed successfully: ${sell._id}, profitLoss=${profitLoss}`);
-        
-        res.status(200).json({
-            status: 'success',
-            data: {
-                message: `Successfully sold ${assetAmount.toFixed(8)} ${asset.toUpperCase()}`,
-                profit: profitLoss > 0 ? profitLoss : 0,
-                loss: profitLoss < 0 ? Math.abs(profitLoss) : 0,
-                profitLossPercentage,
-                sell,
-                transaction
-            }
-        });
-    } catch (error) {
-        console.error('Error processing sell:', error);
-        res.status(500).json({
-            status: 'error',
-            message: 'Failed to process sell order: ' + error.message
-        });
-    }
-});
-
 /**
  * POST /api/withdrawals/asset
  * Process asset withdrawal
@@ -16376,7 +16068,386 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
 
 
 
+/**
+ * POST /api/buy
+ * Buy assets using combined main and matured wallets
+ * Request: { asset: string, amountUSD: number, assetAmount: number, price: number }
+ * Response: { status: 'success', data: { message: string, buy: object, transaction: object } }
+ */
+app.post('/api/buy', protect, async (req, res) => {
+    try {
+        const { asset, amountUSD, assetAmount, price } = req.body;
+        
+        console.log(`Buy request: User ${req.user._id}, Asset ${asset}, USD $${amountUSD}, Amount ${assetAmount}, Price $${price}`);
+        
+        if (!asset || !amountUSD || !assetAmount || !price) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Missing required fields'
+            });
+        }
 
+        // Validate amounts
+        if (amountUSD <= 0 || assetAmount <= 0 || price <= 0) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Amounts must be greater than zero'
+            });
+        }
+
+        // Check user balances
+        const user = await User.findById(req.user._id);
+        const mainBalance = user.balances.main || 0;
+        const maturedBalance = user.balances.matured || 0;
+        const totalAvailable = mainBalance + maturedBalance;
+        
+        if (amountUSD > totalAvailable) {
+            return res.status(400).json({
+                status: 'error',
+                message: `Insufficient balance. You have $${totalAvailable.toFixed(2)} available (main + matured combined)`
+            });
+        }
+
+        // Determine balance source
+        let mainAmountUsed = 0;
+        let maturedAmountUsed = 0;
+        let balanceSource = 'both';
+        
+        if (mainBalance >= amountUSD) {
+            mainAmountUsed = amountUSD;
+            maturedAmountUsed = 0;
+            balanceSource = 'main';
+        } else if (maturedBalance >= amountUSD) {
+            mainAmountUsed = 0;
+            maturedAmountUsed = amountUSD;
+            balanceSource = 'matured';
+        } else {
+            mainAmountUsed = mainBalance;
+            maturedAmountUsed = amountUSD - mainBalance;
+            balanceSource = 'both';
+        }
+
+        // Start a session for transaction
+        const session = await mongoose.startSession();
+        session.startTransaction();
+
+        try {
+            // Update user balances
+            await User.findByIdAndUpdate(req.user._id, {
+                $inc: {
+                    'balances.main': -mainAmountUsed,
+                    'balances.matured': -maturedAmountUsed
+                }
+            }, { session });
+
+            // Get or create asset balance record
+            let assetBalance = await UserAssetBalance.findOne({ user: req.user._id }).session(session);
+            
+            if (!assetBalance) {
+                assetBalance = new UserAssetBalance({
+                    user: req.user._id,
+                    balances: {}
+                });
+            }
+
+            // Update asset balance
+            const currentAssetAmount = assetBalance.balances[asset] || 0;
+            assetBalance.balances[asset] = currentAssetAmount + assetAmount;
+            assetBalance.lastUpdated = new Date();
+            
+            // Add to history
+            if (!assetBalance.history) assetBalance.history = [];
+            assetBalance.history.push({
+                asset,
+                type: 'buy',
+                amount: assetAmount,
+                balance: assetBalance.balances[asset],
+                usdValue: amountUSD,
+                price,
+                timestamp: new Date()
+            });
+            
+            await assetBalance.save({ session });
+
+            // Create buy record
+            const buy = new Buy({
+                user: req.user._id,
+                asset,
+                usdAmount: amountUSD,
+                assetAmount,
+                price,
+                totalValue: amountUSD,
+                fee: 0,
+                netUsdAmount: amountUSD,
+                netAssetAmount: assetAmount,
+                status: 'completed',
+                completedAt: new Date(),
+                balanceSource,
+                mainAmountUsed,
+                maturedAmountUsed
+            });
+            await buy.save({ session });
+
+            // Create transaction record
+            const transaction = new Transaction({
+                user: req.user._id,
+                type: 'buy',
+                amount: amountUSD,
+                asset,
+                assetAmount,
+                status: 'completed',
+                method: asset,
+                reference: `BUY-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+                details: {
+                    buyId: buy._id,
+                    fromWallet: balanceSource,
+                    mainAmountUsed,
+                    maturedAmountUsed
+                },
+                fee: 0,
+                netAmount: amountUSD,
+                exchangeRateAtTime: price
+            });
+            await transaction.save({ session });
+
+            // Update buy with transaction ID
+            buy.transactionId = transaction._id;
+            await buy.save({ session });
+
+            // Commit transaction
+            await session.commitTransaction();
+            session.endSession();
+
+            console.log(`Buy completed: ${assetAmount} ${asset} for $${amountUSD}`);
+
+            // Log activity
+            await logActivity('buy_completed', 'buy', buy._id, req.user._id, 'User', req, {
+                asset,
+                amountUSD,
+                assetAmount,
+                price,
+                balanceSource
+            });
+
+            res.status(200).json({
+                status: 'success',
+                data: {
+                    message: `Successfully bought ${assetAmount.toFixed(8)} ${asset.toUpperCase()}`,
+                    buy: buy.toObject(),
+                    transaction: transaction.toObject()
+                }
+            });
+
+        } catch (txError) {
+            // Rollback transaction
+            await session.abortTransaction();
+            session.endSession();
+            throw txError;
+        }
+
+    } catch (error) {
+        console.error('Error processing buy:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to process buy order',
+            error: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/sell
+ * Sell assets, proceeds added to matured balance only
+ * Request: { asset: string, amountUSD: number, assetAmount: number, price: number }
+ * Response: { status: 'success', data: { message: string, profit: number, loss: number, profitLossPercentage: number, sell: object, transaction: object } }
+ */
+app.post('/api/sell', protect, async (req, res) => {
+    try {
+        const { asset, amountUSD, assetAmount, price } = req.body;
+        
+        console.log(`Sell request: User ${req.user._id}, Asset ${asset}, USD $${amountUSD}, Amount ${assetAmount}, Price $${price}`);
+        
+        if (!asset || !amountUSD || !assetAmount || !price) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Missing required fields'
+            });
+        }
+
+        // Validate amounts
+        if (amountUSD <= 0 || assetAmount <= 0 || price <= 0) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Amounts must be greater than zero'
+            });
+        }
+
+        // Check asset balance
+        let assetBalance = await UserAssetBalance.findOne({ user: req.user._id });
+        
+        if (!assetBalance) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'No asset balance found'
+            });
+        }
+        
+        const currentAssetAmount = assetBalance.balances[asset] || 0;
+        
+        if (assetAmount > currentAssetAmount) {
+            return res.status(400).json({
+                status: 'error',
+                message: `Insufficient ${asset.toUpperCase()} balance. You have ${currentAssetAmount.toFixed(8)} available`
+            });
+        }
+
+        // Calculate profit/loss based on average buy price
+        const buys = await Buy.find({ 
+            user: req.user._id, 
+            asset, 
+            status: 'completed' 
+        }).sort({ createdAt: 1 });
+        
+        let totalCost = 0;
+        let totalAmount = 0;
+        
+        buys.forEach(buy => {
+            totalCost += buy.usdAmount || 0;
+            totalAmount += buy.assetAmount || 0;
+        });
+        
+        const avgBuyPrice = totalAmount > 0 ? totalCost / totalAmount : price;
+        const costBasis = assetAmount * avgBuyPrice;
+        const profitLoss = amountUSD - costBasis;
+        const profitLossPercentage = costBasis > 0 ? (profitLoss / costBasis) * 100 : 0;
+
+        // Start a session for transaction
+        const session = await mongoose.startSession();
+        session.startTransaction();
+
+        try {
+            // Update asset balance
+            const newAssetAmount = currentAssetAmount - assetAmount;
+            assetBalance.balances[asset] = newAssetAmount;
+            
+            if (newAssetAmount === 0) {
+                delete assetBalance.balances[asset];
+            }
+            
+            assetBalance.lastUpdated = new Date();
+            
+            // Add to history
+            if (!assetBalance.history) assetBalance.history = [];
+            assetBalance.history.push({
+                asset,
+                type: 'sell',
+                amount: -assetAmount,
+                balance: newAssetAmount,
+                usdValue: amountUSD,
+                price,
+                timestamp: new Date()
+            });
+            
+            await assetBalance.save({ session });
+
+            // Update user matured balance
+            await User.findByIdAndUpdate(req.user._id, {
+                $inc: {
+                    'balances.matured': amountUSD
+                }
+            }, { session });
+
+            // Create sell record
+            const sell = new Sell({
+                user: req.user._id,
+                asset,
+                usdAmount: amountUSD,
+                assetAmount,
+                price,
+                totalValue: amountUSD,
+                fee: 0,
+                netUsdAmount: amountUSD,
+                netAssetAmount: assetAmount,
+                status: 'completed',
+                completedAt: new Date(),
+                profitLoss,
+                profitLossPercentage,
+                averageBuyPrice: avgBuyPrice,
+                costBasis,
+                realizedGain: profitLoss > 0 ? profitLoss : 0
+            });
+            await sell.save({ session });
+
+            // Create transaction record
+            const transaction = new Transaction({
+                user: req.user._id,
+                type: 'sell',
+                amount: amountUSD,
+                asset,
+                assetAmount,
+                status: 'completed',
+                method: asset,
+                reference: `SELL-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+                details: {
+                    sellId: sell._id,
+                    profitLoss,
+                    profitLossPercentage,
+                    avgBuyPrice
+                },
+                fee: 0,
+                netAmount: amountUSD,
+                exchangeRateAtTime: price
+            });
+            await transaction.save({ session });
+
+            // Update sell with transaction ID
+            sell.transactionId = transaction._id;
+            await sell.save({ session });
+
+            // Commit transaction
+            await session.commitTransaction();
+            session.endSession();
+
+            console.log(`Sell completed: ${assetAmount} ${asset} for $${amountUSD}, P/L: $${profitLoss}`);
+
+            // Log activity
+            await logActivity('sell_completed', 'sell', sell._id, req.user._id, 'User', req, {
+                asset,
+                amountUSD,
+                assetAmount,
+                price,
+                profitLoss,
+                profitLossPercentage
+            });
+
+            res.status(200).json({
+                status: 'success',
+                data: {
+                    message: `Successfully sold ${assetAmount.toFixed(8)} ${asset.toUpperCase()}`,
+                    profit: profitLoss > 0 ? profitLoss : 0,
+                    loss: profitLoss < 0 ? Math.abs(profitLoss) : 0,
+                    profitLossPercentage,
+                    sell: sell.toObject(),
+                    transaction: transaction.toObject()
+                }
+            });
+
+        } catch (txError) {
+            // Rollback transaction
+            await session.abortTransaction();
+            session.endSession();
+            throw txError;
+        }
+
+    } catch (error) {
+        console.error('Error processing sell:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to process sell order',
+            error: error.message
+        });
+    }
+});
 
 
 
