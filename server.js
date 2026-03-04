@@ -1999,6 +1999,7 @@ const Loan = mongoose.model('Loan', LoanSchema);
 
 
 
+
 // Add this with your other schemas in server.js
 const OTPSchema = new mongoose.Schema({
   email: {
@@ -2043,7 +2044,6 @@ OTPSchema.index({ email: 1, type: 1, used: 1 });
 OTPSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 const OTP = mongoose.model('OTP', OTPSchema);
-
 
 
 
