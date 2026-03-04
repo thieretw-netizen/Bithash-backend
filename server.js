@@ -2711,7 +2711,7 @@ const sendEmail = async (options) => {
       to: options.email,
       subject: options.subject,
       text: options.message,
-      html: options.html
+      html: options
     };
 
     await transporter.sendMail(mailOptions);
@@ -3419,7 +3419,7 @@ const sendProfessionalEmail = async (options) => {
                       </div>
                       
                       <div style="text-align: center;">
-                          <a href="https://www.bithashcapital.live/dashboard.html" class="cta-button">Start Mining Now</a>
+                          <a href="https://www.bithashcapital.live/dashboard" class="cta-button">Start Mining Now</a>
                       </div>
                       
                       <div class="security-note">
@@ -3716,7 +3716,7 @@ const sendProfessionalEmail = async (options) => {
                       <p>You can monitor your investment performance in real-time through your dashboard.</p>
                       
                       <div style="text-align: center;">
-                          <a href="https://www.bithashcapital.live/dashboard.html" class="cta-button">View Dashboard</a>
+                          <a href="https://www.bithashcapital.live/dashboard" class="cta-button">View Dashboard</a>
                       </div>
                       
                       <p>Best regards,<br><strong>BitHash Capital Investment Team</strong></p>
@@ -3880,7 +3880,7 @@ const sendProfessionalEmail = async (options) => {
                       </div>
                       
                       <div style="text-align: center;">
-                          <a href="https://www.bithashcapital.live/dashboard.html" class="cta-button">Access Your Account</a>
+                          <a href="https://www.bithashcapital.live/dashboard" class="cta-button">Access Your Account</a>
                       </div>
                       
                       <p>Thank you for completing the verification process and helping us maintain a secure platform.</p>
@@ -3964,7 +3964,7 @@ const sendProfessionalEmail = async (options) => {
                       <p>Your funds are now available for mining investments and other platform activities.</p>
                       
                       <div style="text-align: center;">
-                          <a href="https://www.bithashcapital.live/investment.html" class="cta-button">Start Mining</a>
+                          <a href="https://www.bithashcapital.live/investment" class="cta-button">Start Mining</a>
                       </div>
                       
                       <p>Best regards,<br><strong>BitHash Capital Finance Team</strong></p>
@@ -4034,7 +4034,7 @@ const sendProfessionalEmail = async (options) => {
                       <p>Keep sharing your referral link to earn more bonuses as your referrals continue their mining journey.</p>
                       
                       <div style="text-align: center;">
-                          <a href="https://www.bithashcapital.live/referral.html" class="cta-button">View Referral Program</a>
+                          <a href="https://www.bithashcapital.live/referral" class="cta-button">View Referral Program</a>
                       </div>
                       
                       <p>Thank you for being a valuable member of the BitHash Capital community.</p>
@@ -4136,7 +4136,7 @@ const sendProfessionalEmail = async (options) => {
       from: `"BitHash Capital" <info@bithashcapital.live>`,
       to: email,
       subject: templateData.subject,
-      html: templateData.html
+      html: templateData
     };
 
     await transporter.sendMail(mailOptions);
@@ -7287,7 +7287,7 @@ app.get('/api/deposits/history', protect, async (req, res) => {
 
         // Transform to match EXACT frontend table structure
         const formattedDeposits = deposits.map(deposit => ({
-            // Matches the <table> structure in deposit.html
+            // Matches the <table> structure in deposit
             Date: deposit.createdAt.toLocaleDateString('en-US', {
                 year: 'numeric',
                 month: 'short',
@@ -11392,8 +11392,8 @@ app.get('/api/referrals', protect, async (req, res) => {
         }
 
         // Generate referral link using user's first name and unique code
-        const referralLink = `https://www.bithashcapital.live/signup.html?ref=${user.referralCode}`;
-        const referralLinkWithName = `https://www.bithashcapital.live/signup.html?ref=${encodeURIComponent(user.firstName)}-${user.referralCode}`;
+        const referralLink = `https://www.bithashcapital.live/signup?ref=${user.referralCode}`;
+        const referralLinkWithName = `https://www.bithashcapital.live/signup?ref=${encodeURIComponent(user.firstName)}-${user.referralCode}`;
 
         // Get all downline relationships where this user is the upline
         const downlineRelationships = await DownlineRelationship.find({ 
@@ -16593,5 +16593,4 @@ processMaturedInvestments();
 httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
-
 
