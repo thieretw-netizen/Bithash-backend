@@ -16070,124 +16070,499 @@ function mapSymbolToCoinGeckoId(symbol) {
 
 
 
-
-
 // =============================================
-// SINGLE ENDPOINT: /api/market/prices
+// COMPLETE MARKET ENDPOINT WITH USER BALANCES
 // =============================================
 
-// GET /api/market/prices - Real market prices with Redis caching
+// GET /api/market/prices - Market data + user balances for trading
 app.get('/api/market/prices', async (req, res) => {
   try {
-    // 1. Check Redis cache first (30 seconds TTL for cross-device consistency)
-    const cachedPrices = await redis.get('market:prices');
+    // Get auth token from header
+    const token = req.headers.authorization?.split(' ')[1];
+    let userId = null;
+    let user = null;
     
-    if (cachedPrices) {
-      console.log('✅ Serving cached market prices');
-      return res.status(200).json({
-        status: 'success',
-        data: JSON.parse(cachedPrices)
-      });
+    // 1. If user is logged in, fetch their real balances from database
+    if (token) {
+      try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        userId = decoded.id;
+        user = await User.findById(userId)
+          .select('balances preferences currency language');
+        
+        console.log(`👤 User ${userId} fetching market data with balances`);
+      } catch (authError) {
+        console.log('User not authenticated or invalid token');
+      }
     }
 
-    // 2. Fetch fresh data from CoinGecko API
-    console.log('🔄 Fetching fresh market prices from CoinGecko');
+    // 2. Check Redis cache for market prices (30 seconds TTL)
+    const CACHE_KEY = 'market:live:prices';
+    const cachedData = await redis.get(CACHE_KEY);
     
-    const response = await axios.get(
-      'https://api.coingecko.com/api/v3/simple/price?' +
-      'ids=bitcoin,ethereum,tether,binancecoin,solana,usd-coin,xrp,dogecoin,cardano,' +
-      'shiba-inu,avalanche-2,polkadot,tron,chainlink,matic-network,wrapped-bitcoin,' +
-      'litecoin,near,uniswap,bitcoin-cash,stellar,cosmos,monero,flow,vechain,filecoin,' +
-      'theta-token,hedera-hashgraph,fantom,tezos' +
-      '&vs_currencies=usd&include_24hr_change=true&include_24hr_vol=true&include_market_cap=true',
-      { timeout: 5000 }
-    );
+    let marketPrices;
+    
+    if (cachedData) {
+      console.log('✅ Serving cached market prices');
+      marketPrices = JSON.parse(cachedData);
+    } else {
+      // 3. Fetch fresh prices from CoinGecko
+      console.log('🔄 Fetching fresh market prices');
+      
+      const geckoResponse = await axios.get(
+        'https://api.coingecko.com/api/v3/simple/price?' +
+        'ids=bitcoin,ethereum,tether,binancecoin,solana,usd-coin,xrp,dogecoin,cardano,' +
+        'shiba-inu,avalanche-2,polkadot,tron,chainlink,matic-network,wrapped-bitcoin,' +
+        'litecoin,near,uniswap,bitcoin-cash,stellar,cosmos,monero,flow,vechain,filecoin,' +
+        'theta-token,hedera-hashgraph,fantom,tezos' +
+        '&vs_currencies=usd&include_24hr_change=true&include_24hr_vol=true&include_market_cap=true',
+        { timeout: 8000 }
+      );
 
-    // 3. Transform data to match your frontend's expected format
-    const prices = {};
-    
-    // Map CoinGecko IDs to your asset IDs
-    const assetMap = {
-      'bitcoin': 'bitcoin',
-      'ethereum': 'ethereum',
-      'tether': 'tether',
-      'binancecoin': 'binancecoin',
-      'solana': 'solana',
-      'usd-coin': 'usd-coin',
-      'xrp': 'xrp',
-      'dogecoin': 'dogecoin',
-      'cardano': 'cardano',
-      'shiba-inu': 'shiba-inu',
-      'avalanche-2': 'avalanche-2',
-      'polkadot': 'polkadot',
-      'tron': 'tron',
-      'chainlink': 'chainlink',
-      'matic-network': 'matic-network',
-      'wrapped-bitcoin': 'wrapped-bitcoin',
-      'litecoin': 'litecoin',
-      'near': 'near',
-      'uniswap': 'uniswap',
-      'bitcoin-cash': 'bitcoin-cash',
-      'stellar': 'stellar',
-      'cosmos': 'cosmos',
-      'monero': 'monero',
-      'flow': 'flow',
-      'vechain': 'vechain',
-      'filecoin': 'filecoin',
-      'theta-token': 'theta-token',
-      'hedera-hashgraph': 'hedera-hashgraph',
-      'fantom': 'fantom',
-      'tezos': 'tezos'
+      // Transform to frontend format
+      marketPrices = {};
+      const assetMap = {
+        'bitcoin': 'bitcoin', 'ethereum': 'ethereum', 'tether': 'tether',
+        'binancecoin': 'binancecoin', 'solana': 'solana', 'usd-coin': 'usd-coin',
+        'xrp': 'xrp', 'dogecoin': 'doge', 'cardano': 'ada',
+        'shiba-inu': 'shib', 'avalanche-2': 'avax', 'polkadot': 'dot',
+        'tron': 'trx', 'chainlink': 'link', 'matic-network': 'matic',
+        'wrapped-bitcoin': 'wbtc', 'litecoin': 'ltc', 'near': 'near',
+        'uniswap': 'uni', 'bitcoin-cash': 'bch', 'stellar': 'xlm',
+        'cosmos': 'atom', 'monero': 'xmr', 'flow': 'flow',
+        'vechain': 'vet', 'filecoin': 'fil', 'theta-token': 'theta',
+        'hedera-hashgraph': 'hbar', 'fantom': 'ftm', 'tezos': 'xtz'
+      };
+
+      Object.keys(assetMap).forEach(geckoId => {
+        if (geckoResponse.data[geckoId]) {
+          const symbol = assetMap[geckoId];
+          marketPrices[symbol] = {
+            usd: geckoResponse.data[geckoId].usd,
+            usd_24h_change: geckoResponse.data[geckoId].usd_24h_change || 0,
+            usd_24h_vol: geckoResponse.data[geckoId].usd_24h_vol || 0,
+            usd_market_cap: geckoResponse.data[geckoId].usd_market_cap || 0
+          };
+        }
+      });
+
+      // Store in Redis for 30 seconds
+      await redis.setex(CACHE_KEY, 30, JSON.stringify(marketPrices));
+    }
+
+    // 4. Build response with user data if authenticated
+    const response = {
+      status: 'success',
+      data: marketPrices,
+      timestamp: new Date().toISOString()
     };
 
-    // Build the response object
-    Object.keys(assetMap).forEach(geckoId => {
-      if (response.data[geckoId]) {
-        const assetId = assetMap[geckoId];
-        prices[assetId] = {
-          usd: response.data[geckoId].usd,
-          usd_24h_change: response.data[geckoId].usd_24h_change || 0,
-          usd_24h_vol: response.data[geckoId].usd_24h_vol || 0,
-          usd_market_cap: response.data[geckoId].usd_market_cap || 0
+    // 5. Add user balances for trading if authenticated
+    if (user) {
+      // Get user's preferred display asset
+      const displayAsset = user.preferences?.displayAsset || 'btc';
+      
+      // Fetch user's asset balances from UserAssetBalance collection
+      const assetBalances = await UserAssetBalance.findOne({ user: userId });
+      
+      // Calculate USD values of all balances
+      const fiatBalances = {
+        main: user.balances.main || 0,
+        matured: user.balances.matured || 0,
+        active: user.balances.active || 0,
+        savings: user.balances.savings || 0,
+        loan: user.balances.loan || 0
+      };
+
+      // Calculate asset balances in USD for trading
+      const assetValues = {};
+      const assets = ['btc', 'eth', 'usdt', 'bnb', 'sol', 'usdc', 'xrp', 'doge', 'ada', 'shib',
+                     'avax', 'dot', 'trx', 'link', 'matic', 'wbtc', 'ltc', 'near', 'uni', 'bch',
+                     'xlm', 'atom', 'xmr', 'flow', 'vet', 'fil', 'theta', 'hbar', 'ftm', 'xtz'];
+
+      assets.forEach(asset => {
+        const assetAmount = assetBalances?.balances?.[asset] || 0;
+        const assetPrice = marketPrices[asset]?.usd || 0;
+        assetValues[asset] = {
+          amount: assetAmount,
+          usdValue: assetAmount * assetPrice,
+          price: assetPrice
         };
-      }
-    });
+      });
 
-    // 4. Store in Redis with 30-second TTL (ensures all users see same prices)
-    await redis.setex('market:prices', 30, JSON.stringify(prices));
+      // Calculate total portfolio value
+      const totalPortfolioValue = Object.values(assetValues).reduce((sum, val) => sum + val.usdValue, 0) +
+                                 fiatBalances.main + fiatBalances.matured;
 
-    // 5. Send response
-    res.status(200).json({
-      status: 'success',
-      data: prices
-    });
+      // Add trading data to response
+      response.user = {
+        id: user._id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        balances: {
+          fiat: fiatBalances,
+          assets: assetValues,
+          total_usd: totalPortfolioValue,
+          display_asset: displayAsset,
+          display_asset_price: marketPrices[displayAsset]?.usd || 0
+        },
+        can_trade: {
+          buy: fiatBalances.main > 0 || fiatBalances.matured > 0,
+          sell: Object.values(assetValues).some(asset => asset.amount > 0)
+        }
+      };
 
-  } catch (error) {
-    console.error('❌ Market prices error:', error.message);
-    
-    // Try to serve stale cache if available (better than 404)
-    try {
-      const staleCache = await redis.get('market:prices');
-      if (staleCache) {
-        console.log('⚠️ Serving stale cache due to API error');
-        return res.status(200).json({
-          status: 'success',
-          data: JSON.parse(staleCache),
-          warning: 'Using cached data'
-        });
-      }
-    } catch (cacheError) {
-      console.error('Redis error:', cacheError);
+      // Log trading capability
+      console.log(`💰 User ${user.email} - Main: $${fiatBalances.main}, Matured: $${fiatBalances.matured}, Assets: ${totalPortfolioValue - fiatBalances.main - fiatBalances.matured}`);
     }
 
-    // If all fails, return error
-    res.status(503).json({
+    // 6. Generate realistic order book data for major pairs
+    const majorPairs = ['btc', 'eth', 'bnb', 'sol', 'xrp'];
+    response.orderbooks = {};
+
+    for (const symbol of majorPairs) {
+      if (marketPrices[symbol]) {
+        const currentPrice = marketPrices[symbol].usd;
+        response.orderbooks[`${symbol}usdt`] = generateOrderBook(currentPrice);
+      }
+    }
+
+    // 7. Generate recent trades
+    response.recent_trades = generateRecentTrades(marketPrices);
+
+    res.status(200).json(response);
+
+  } catch (error) {
+    console.error('❌ Market endpoint error:', error);
+    
+    res.status(500).json({
       status: 'error',
-      message: 'Market data temporarily unavailable'
+      message: 'Failed to fetch market data',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });
 
+// =============================================
+// Helper: Generate realistic order book
+// =============================================
+function generateOrderBook(currentPrice) {
+  const bids = [];
+  const asks = [];
+  
+  // Generate 15 bid orders (buy orders)
+  for (let i = 0; i < 15; i++) {
+    const price = currentPrice * (1 - (0.001 * (i + 1)) - (Math.random() * 0.002));
+    const amount = 0.1 + Math.random() * 3;
+    bids.push({
+      price: Number(price.toFixed(2)),
+      amount: Number(amount.toFixed(4)),
+      total: Number((price * amount).toFixed(2))
+    });
+  }
+  
+  // Generate 15 ask orders (sell orders)
+  for (let i = 0; i < 15; i++) {
+    const price = currentPrice * (1 + (0.001 * (i + 1)) + (Math.random() * 0.002));
+    const amount = 0.1 + Math.random() * 3;
+    asks.push({
+      price: Number(price.toFixed(2)),
+      amount: Number(amount.toFixed(4)),
+      total: Number((price * amount).toFixed(2))
+    });
+  }
+  
+  // Sort and return
+  bids.sort((a, b) => b.price - a.price);
+  asks.sort((a, b) => a.price - b.price);
+  
+  return { bids, asks };
+}
+
+// =============================================
+// Helper: Generate recent trades
+// =============================================
+function generateRecentTrades(prices) {
+  const trades = [];
+  const now = Date.now();
+  const symbols = ['btc', 'eth', 'bnb', 'sol', 'xrp'];
+  
+  for (let i = 0; i < 20; i++) {
+    const symbol = symbols[Math.floor(Math.random() * symbols.length)];
+    const basePrice = prices[symbol]?.usd || 50000;
+    const side = Math.random() > 0.5 ? 'buy' : 'sell';
+    const price = side === 'buy' 
+      ? basePrice * (1 - Math.random() * 0.002)
+      : basePrice * (1 + Math.random() * 0.002);
+    
+    trades.push({
+      id: `trade_${now - i * 3000}`,
+      symbol: `${symbol}/USDT`,
+      side: side,
+      price: Number(price.toFixed(2)),
+      amount: Number((0.01 + Math.random() * 1.5).toFixed(4)),
+      time: now - i * 3000 - Math.floor(Math.random() * 2000)
+    });
+  }
+  
+  return trades.sort((a, b) => b.time - a.time);
+}
+
+// =============================================
+// BUY ENDPOINT - Process buy orders
+// =============================================
+app.post('/api/market/buy', protect, async (req, res) => {
+  try {
+    const { symbol, amount, price, orderType = 'market' } = req.body;
+    const userId = req.user._id;
+    
+    // Validate inputs
+    if (!symbol || !amount || amount <= 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid buy parameters'
+      });
+    }
+
+    // Get current market price
+    const prices = await redis.get('market:live:prices');
+    const marketPrices = JSON.parse(prices);
+    const currentPrice = marketPrices[symbol]?.usd;
+    
+    if (!currentPrice) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid symbol'
+      });
+    }
+
+    // Calculate total cost
+    const totalCost = amount * (orderType === 'market' ? currentPrice : price);
+    
+    // Check user's fiat balance (main + matured)
+    const user = await User.findById(userId);
+    const availableBalance = user.balances.main + user.balances.matured;
+    
+    if (availableBalance < totalCost) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Insufficient balance',
+        required: totalCost,
+        available: availableBalance
+      });
+    }
+
+    // Deduct from main balance first, then matured
+    let remainingDeduction = totalCost;
+    let mainDeduction = Math.min(user.balances.main, remainingDeduction);
+    remainingDeduction -= mainDeduction;
+    let maturedDeduction = Math.min(user.balances.matured, remainingDeduction);
+    
+    // Update user balances
+    user.balances.main -= mainDeduction;
+    user.balances.matured -= maturedDeduction;
+    
+    // Update asset balance
+    let assetBalance = await UserAssetBalance.findOne({ user: userId });
+    if (!assetBalance) {
+      assetBalance = new UserAssetBalance({ user: userId, balances: {} });
+    }
+    
+    assetBalance.balances[symbol] = (assetBalance.balances[symbol] || 0) + amount;
+    assetBalance.lastUpdated = new Date();
+    
+    // Create transaction record
+    const transaction = new Transaction({
+      user: userId,
+      type: 'buy',
+      amount: totalCost,
+      asset: symbol,
+      assetAmount: amount,
+      status: 'completed',
+      method: 'internal',
+      reference: `BUY-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      details: {
+        price: currentPrice,
+        orderType,
+        balanceSource: mainDeduction > 0 ? (maturedDeduction > 0 ? 'both' : 'main') : 'matured'
+      },
+      fee: totalCost * 0.001, // 0.1% fee
+      netAmount: totalCost
+    });
+
+    // Save all changes
+    await Promise.all([
+      user.save(),
+      assetBalance.save(),
+      transaction.save()
+    ]);
+
+    // Log activity
+    await logActivity('buy_created', 'Buy', transaction._id, userId, 'User', req, {
+      symbol,
+      amount,
+      totalCost,
+      price: currentPrice
+    });
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Buy order executed successfully',
+      data: {
+        transaction: {
+          id: transaction._id,
+          symbol,
+          amount,
+          price: currentPrice,
+          total: totalCost,
+          timestamp: transaction.createdAt
+        },
+        new_balances: {
+          fiat: {
+            main: user.balances.main,
+            matured: user.balances.matured
+          },
+          asset: {
+            [symbol]: assetBalance.balances[symbol]
+          }
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Buy error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to process buy order'
+    });
+  }
+});
+
+// =============================================
+// SELL ENDPOINT - Process sell orders
+// =============================================
+app.post('/api/market/sell', protect, async (req, res) => {
+  try {
+    const { symbol, amount, price, orderType = 'market' } = req.body;
+    const userId = req.user._id;
+    
+    // Validate inputs
+    if (!symbol || !amount || amount <= 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid sell parameters'
+      });
+    }
+
+    // Get current market price
+    const prices = await redis.get('market:live:prices');
+    const marketPrices = JSON.parse(prices);
+    const currentPrice = marketPrices[symbol]?.usd;
+    
+    if (!currentPrice) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid symbol'
+      });
+    }
+
+    // Check user's asset balance
+    let assetBalance = await UserAssetBalance.findOne({ user: userId });
+    const currentAssetAmount = assetBalance?.balances?.[symbol] || 0;
+    
+    if (currentAssetAmount < amount) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Insufficient asset balance',
+        required: amount,
+        available: currentAssetAmount
+      });
+    }
+
+    // Calculate total proceeds
+    const totalProceeds = amount * (orderType === 'market' ? currentPrice : price);
+    const fee = totalProceeds * 0.001; // 0.1% fee
+    const netProceeds = totalProceeds - fee;
+
+    // Update asset balance
+    assetBalance.balances[symbol] = currentAssetAmount - amount;
+    assetBalance.lastUpdated = new Date();
+    
+    // Add proceeds to matured balance
+    const user = await User.findById(userId);
+    user.balances.matured += netProceeds;
+    
+    // Create transaction record
+    const transaction = new Transaction({
+      user: userId,
+      type: 'sell',
+      amount: totalProceeds,
+      asset: symbol,
+      assetAmount: amount,
+      status: 'completed',
+      method: 'internal',
+      reference: `SELL-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      details: {
+        price: currentPrice,
+        orderType,
+        fee,
+        netProceeds
+      },
+      fee: fee,
+      netAmount: netProceeds
+    });
+
+    // Save all changes
+    await Promise.all([
+      user.save(),
+      assetBalance.save(),
+      transaction.save()
+    ]);
+
+    // Log activity
+    await logActivity('sell_created', 'Sell', transaction._id, userId, 'User', req, {
+      symbol,
+      amount,
+      totalProceeds,
+      netProceeds,
+      price: currentPrice
+    });
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Sell order executed successfully',
+      data: {
+        transaction: {
+          id: transaction._id,
+          symbol,
+          amount,
+          price: currentPrice,
+          total: totalProceeds,
+          net: netProceeds,
+          fee,
+          timestamp: transaction.createdAt
+        },
+        new_balances: {
+          fiat: {
+            main: user.balances.main,
+            matured: user.balances.matured
+          },
+          asset: {
+            [symbol]: assetBalance.balances[symbol]
+          }
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Sell error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to process sell order'
+    });
+  }
+});
 
 
 
