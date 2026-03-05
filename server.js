@@ -16072,7 +16072,121 @@ function mapSymbolToCoinGeckoId(symbol) {
 
 
 
+// =============================================
+// SINGLE ENDPOINT: /api/market/prices
+// =============================================
 
+// GET /api/market/prices - Real market prices with Redis caching
+app.get('/api/market/prices', async (req, res) => {
+  try {
+    // 1. Check Redis cache first (30 seconds TTL for cross-device consistency)
+    const cachedPrices = await redis.get('market:prices');
+    
+    if (cachedPrices) {
+      console.log('✅ Serving cached market prices');
+      return res.status(200).json({
+        status: 'success',
+        data: JSON.parse(cachedPrices)
+      });
+    }
+
+    // 2. Fetch fresh data from CoinGecko API
+    console.log('🔄 Fetching fresh market prices from CoinGecko');
+    
+    const response = await axios.get(
+      'https://api.coingecko.com/api/v3/simple/price?' +
+      'ids=bitcoin,ethereum,tether,binancecoin,solana,usd-coin,xrp,dogecoin,cardano,' +
+      'shiba-inu,avalanche-2,polkadot,tron,chainlink,matic-network,wrapped-bitcoin,' +
+      'litecoin,near,uniswap,bitcoin-cash,stellar,cosmos,monero,flow,vechain,filecoin,' +
+      'theta-token,hedera-hashgraph,fantom,tezos' +
+      '&vs_currencies=usd&include_24hr_change=true&include_24hr_vol=true&include_market_cap=true',
+      { timeout: 5000 }
+    );
+
+    // 3. Transform data to match your frontend's expected format
+    const prices = {};
+    
+    // Map CoinGecko IDs to your asset IDs
+    const assetMap = {
+      'bitcoin': 'bitcoin',
+      'ethereum': 'ethereum',
+      'tether': 'tether',
+      'binancecoin': 'binancecoin',
+      'solana': 'solana',
+      'usd-coin': 'usd-coin',
+      'xrp': 'xrp',
+      'dogecoin': 'dogecoin',
+      'cardano': 'cardano',
+      'shiba-inu': 'shiba-inu',
+      'avalanche-2': 'avalanche-2',
+      'polkadot': 'polkadot',
+      'tron': 'tron',
+      'chainlink': 'chainlink',
+      'matic-network': 'matic-network',
+      'wrapped-bitcoin': 'wrapped-bitcoin',
+      'litecoin': 'litecoin',
+      'near': 'near',
+      'uniswap': 'uniswap',
+      'bitcoin-cash': 'bitcoin-cash',
+      'stellar': 'stellar',
+      'cosmos': 'cosmos',
+      'monero': 'monero',
+      'flow': 'flow',
+      'vechain': 'vechain',
+      'filecoin': 'filecoin',
+      'theta-token': 'theta-token',
+      'hedera-hashgraph': 'hedera-hashgraph',
+      'fantom': 'fantom',
+      'tezos': 'tezos'
+    };
+
+    // Build the response object
+    Object.keys(assetMap).forEach(geckoId => {
+      if (response.data[geckoId]) {
+        const assetId = assetMap[geckoId];
+        prices[assetId] = {
+          usd: response.data[geckoId].usd,
+          usd_24h_change: response.data[geckoId].usd_24h_change || 0,
+          usd_24h_vol: response.data[geckoId].usd_24h_vol || 0,
+          usd_market_cap: response.data[geckoId].usd_market_cap || 0
+        };
+      }
+    });
+
+    // 4. Store in Redis with 30-second TTL (ensures all users see same prices)
+    await redis.setex('market:prices', 30, JSON.stringify(prices));
+
+    // 5. Send response
+    res.status(200).json({
+      status: 'success',
+      data: prices
+    });
+
+  } catch (error) {
+    console.error('❌ Market prices error:', error.message);
+    
+    // Try to serve stale cache if available (better than 404)
+    try {
+      const staleCache = await redis.get('market:prices');
+      if (staleCache) {
+        console.log('⚠️ Serving stale cache due to API error');
+        return res.status(200).json({
+          status: 'success',
+          data: JSON.parse(staleCache),
+          warning: 'Using cached data'
+        });
+      }
+    } catch (cacheError) {
+      console.error('Redis error:', cacheError);
+    }
+
+    // If all fails, return error
+    res.status(503).json({
+      status: 'error',
+      message: 'Market data temporarily unavailable'
+    });
+  }
+});
 
 
 
