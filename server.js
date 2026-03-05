@@ -15488,7 +15488,41 @@ app.get('/api/users/preferences', protect, async (req, res) => {
   }
 });
 
-
+// GET /api/users/asset-balances - Fetch user's cryptocurrency asset balances
+app.get('/api/users/asset-balances', protect, async (req, res) => {
+  try {
+    // Try to find existing asset balances for the user
+    let assetBalances = await UserAssetBalance.findOne({ user: req.user._id });
+    
+    // If none exist, create default balances (all zeros)
+    if (!assetBalances) {
+      assetBalances = await UserAssetBalance.create({
+        user: req.user._id,
+        balances: {
+          btc: 0, eth: 0, usdt: 0, bnb: 0, sol: 0,
+          usdc: 0, xrp: 0, doge: 0, ada: 0, shib: 0,
+          avax: 0, dot: 0, trx: 0, link: 0, matic: 0,
+          wbtc: 0, ltc: 0, near: 0, uni: 0, bch: 0,
+          xlm: 0, atom: 0, xmr: 0, flow: 0, vet: 0,
+          fil: 0, theta: 0, hbar: 0, ftm: 0, xtz: 0
+        }
+      });
+    }
+    
+    // Return the balances in the format expected by the frontend
+    res.status(200).json({
+      status: 'success',
+      data: assetBalances.balances || {}
+    });
+    
+  } catch (err) {
+    console.error('Error fetching asset balances:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch asset balances'
+    });
+  }
+});
 
 
 
