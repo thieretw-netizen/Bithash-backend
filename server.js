@@ -2136,6 +2136,143 @@ const SystemLog = mongoose.model('SystemLog', SystemLogSchema);
 
 
 
+
+// Add this with your other schemas in server.js
+const OrderBookSchema = new mongoose.Schema({
+  symbol: { 
+    type: String, 
+    required: true,
+    index: true,
+    uppercase: true
+  },
+  bids: [{
+    price: { type: Number, required: true, min: 0 },
+    amount: { type: Number, required: true, min: 0 },
+    total: { type: Number },
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    orderId: { type: String, required: true, unique: true },
+    timestamp: { type: Date, default: Date.now }
+  }],
+  asks: [{
+    price: { type: Number, required: true, min: 0 },
+    amount: { type: Number, required: true, min: 0 },
+    total: { type: Number },
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    orderId: { type: String, required: true, unique: true },
+    timestamp: { type: Date, default: Date.now }
+  }],
+  lastPrice: { type: Number, required: true },
+  bidCount: { type: Number, default: 0 },
+  askCount: { type: Number, default: 0 },
+  spread: { type: Number },
+  spreadPercentage: { type: Number },
+  updatedAt: { type: Date, default: Date.now }
+}, { 
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
+});
+
+OrderBookSchema.index({ symbol: 1, updatedAt: -1 });
+OrderBookSchema.index({ 'bids.price': -1 });
+OrderBookSchema.index({ 'asks.price': 1 });
+
+const OrderBook = mongoose.model('OrderBook', OrderBookSchema);
+
+// Add this with your other schemas
+const RecentTradeSchema = new mongoose.Schema({
+  symbol: { 
+    type: String, 
+    required: true,
+    index: true,
+    uppercase: true
+  },
+  price: { type: Number, required: true, min: 0 },
+  amount: { type: Number, required: true, min: 0 },
+  total: { type: Number, required: true },
+  side: { type: String, enum: ['buy', 'sell'], required: true },
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  orderId: { type: String, required: true },
+  timestamp: { type: Date, default: Date.now, index: true }
+}, { 
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
+});
+
+RecentTradeSchema.index({ symbol: 1, timestamp: -1 });
+RecentTradeSchema.index({ userId: 1, timestamp: -1 });
+
+const RecentTrade = mongoose.model('RecentTrade', RecentTradeSchema);
+
+// Add this with your other schemas
+const UserOrderSchema = new mongoose.Schema({
+  user: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'User', 
+    required: true,
+    index: true 
+  },
+  symbol: { 
+    type: String, 
+    required: true,
+    index: true,
+    uppercase: true
+  },
+  type: { 
+    type: String, 
+    enum: ['buy', 'sell'], 
+    required: true 
+  },
+  orderType: { 
+    type: String, 
+    enum: ['market', 'limit'], 
+    default: 'market' 
+  },
+  price: { type: Number, min: 0 },
+  amount: { type: Number, required: true, min: 10 },
+  filledAmount: { type: Number, default: 0, min: 0 },
+  remainingAmount: { type: Number },
+  total: { type: Number, required: true },
+  status: { 
+    type: String, 
+    enum: ['pending', 'partial', 'completed', 'cancelled', 'failed'], 
+    default: 'pending',
+    index: true
+  },
+  orderId: { type: String, required: true, unique: true },
+  filledAt: Date,
+  cancelledAt: Date,
+  failureReason: String,
+  metadata: mongoose.Schema.Types.Mixed
+}, { 
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
+});
+
+UserOrderSchema.index({ user: 1, status: 1, createdAt: -1 });
+UserOrderSchema.index({ symbol: 1, status: 1, createdAt: -1 });
+UserOrderSchema.index({ orderId: 1 });
+
+UserOrderSchema.pre('save', function(next) {
+  if (this.isNew) {
+    this.remainingAmount = this.amount - this.filledAmount;
+  }
+  next();
+});
+
+const UserOrder = mongoose.model('UserOrder', UserOrderSchema);
+
+
+
+
+
+
+
+
+
+
 // KYC Schema for storing verification documents and status
 const KYCSchema = new mongoose.Schema({
   user: {
@@ -16064,6 +16201,714 @@ function mapSymbolToCoinGeckoId(symbol) {
   };
   return mapping[symbol.toLowerCase()] || 'bitcoin';
 }
+
+
+
+
+
+
+// =============================================
+// ORDER BOOK & TRADING ENDPOINTS
+// =============================================
+
+// Helper function to get real-time BTC price from CoinGecko with Redis caching
+const getBTCPrice = async () => {
+  try {
+    // Check Redis cache first
+    const cachedPrice = await redis.get('btc:price');
+    if (cachedPrice) {
+      return JSON.parse(cachedPrice);
+    }
+
+    // Fetch from CoinGecko
+    const response = await axios.get(
+      'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true',
+      { timeout: 5000 }
+    );
+
+    const priceData = {
+      price: response.data.bitcoin.usd,
+      change24h: response.data.bitcoin.usd_24h_change || 0,
+      timestamp: Date.now()
+    };
+
+    // Cache for 10 seconds (reduces API calls but keeps data fresh)
+    await redis.setex('btc:price', 10, JSON.stringify(priceData));
+
+    return priceData;
+  } catch (error) {
+    console.error('Error fetching BTC price:', error);
+    
+    // Try fallback API
+    try {
+      const fallbackResponse = await axios.get(
+        'https://api.coincap.io/v2/assets/bitcoin',
+        { timeout: 5000 }
+      );
+      
+      const priceData = {
+        price: parseFloat(fallbackResponse.data.data.priceUsd),
+        change24h: parseFloat(fallbackResponse.data.data.changePercent24Hr) || 0,
+        timestamp: Date.now()
+      };
+
+      await redis.setex('btc:price', 10, JSON.stringify(priceData));
+      return priceData;
+    } catch (fallbackError) {
+      console.error('Fallback API also failed:', fallbackError);
+      
+      // If all APIs fail, return last known price from Redis or default
+      const lastPrice = await redis.get('btc:price:last');
+      if (lastPrice) {
+        return JSON.parse(lastPrice);
+      }
+      
+      // Ultimate fallback
+      return { price: 43000, change24h: 0, timestamp: Date.now() };
+    }
+  }
+};
+
+// Generate random orders at random intervals
+const generateRandomOrders = async () => {
+  try {
+    const symbols = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT']; // Add more as needed
+    
+    for (const symbol of symbols) {
+      // Get current price from CoinGecko
+      let currentPrice;
+      if (symbol === 'BTCUSDT') {
+        const priceData = await getBTCPrice();
+        currentPrice = priceData.price;
+      } else {
+        // For other symbols, you'd fetch their prices too
+        // For now, use BTC price as base with some variation
+        const btcPrice = await getBTCPrice();
+        currentPrice = btcPrice.price * (0.9 + Math.random() * 0.2);
+      }
+
+      // Generate random number of orders (5-15 bids and asks)
+      const numBids = Math.floor(Math.random() * 10) + 5;
+      const numAsks = Math.floor(Math.random() * 10) + 5;
+
+      const bids = [];
+      const asks = [];
+
+      // Generate buy orders (bids) - slightly below market price
+      for (let i = 0; i < numBids; i++) {
+        const priceOffset = (Math.random() * 0.02) + 0.005; // 0.5% to 2.5% below
+        const price = currentPrice * (1 - priceOffset);
+        const amount = Math.random() * 2 + 0.1; // 0.1 to 2.1 BTC
+        const total = price * amount;
+        
+        bids.push({
+          price: parseFloat(price.toFixed(2)),
+          amount: parseFloat(amount.toFixed(4)),
+          total: parseFloat(total.toFixed(2)),
+          orderId: `bid_${Date.now()}_${i}_${Math.random().toString(36).substr(2, 9)}`,
+          timestamp: new Date()
+        });
+      }
+
+      // Generate sell orders (asks) - slightly above market price
+      for (let i = 0; i < numAsks; i++) {
+        const priceOffset = (Math.random() * 0.02) + 0.005; // 0.5% to 2.5% above
+        const price = currentPrice * (1 + priceOffset);
+        const amount = Math.random() * 2 + 0.1; // 0.1 to 2.1 BTC
+        const total = price * amount;
+        
+        asks.push({
+          price: parseFloat(price.toFixed(2)),
+          amount: parseFloat(amount.toFixed(4)),
+          total: parseFloat(total.toFixed(2)),
+          orderId: `ask_${Date.now()}_${i}_${Math.random().toString(36).substr(2, 9)}`,
+          timestamp: new Date()
+        });
+      }
+
+      // Sort bids descending (highest price first)
+      bids.sort((a, b) => b.price - a.price);
+      
+      // Sort asks ascending (lowest price first)
+      asks.sort((a, b) => a.price - b.price);
+
+      // Calculate spread
+      const bestBid = bids.length > 0 ? bids[0].price : 0;
+      const bestAsk = asks.length > 0 ? asks[0].price : 0;
+      const spread = bestAsk - bestBid;
+      const spreadPercentage = bestBid > 0 ? (spread / bestBid * 100) : 0;
+
+      // Update or create order book
+      await OrderBook.findOneAndUpdate(
+        { symbol },
+        {
+          symbol,
+          bids,
+          asks,
+          lastPrice: currentPrice,
+          bidCount: bids.length,
+          askCount: asks.length,
+          spread: parseFloat(spread.toFixed(2)),
+          spreadPercentage: parseFloat(spreadPercentage.toFixed(2)),
+          updatedAt: new Date()
+        },
+        { upsert: true, new: true }
+      );
+
+      // Cache in Redis for 1 second (all devices see same data)
+      const orderBookData = {
+        symbol,
+        bids: bids.slice(0, 15), // Keep top 15 for performance
+        asks: asks.slice(0, 15),
+        lastPrice: currentPrice,
+        spread: parseFloat(spread.toFixed(2)),
+        spreadPercentage: parseFloat(spreadPercentage.toFixed(2)),
+        updatedAt: new Date()
+      };
+
+      await redis.setex(`orderbook:${symbol}`, 1, JSON.stringify(orderBookData));
+
+      console.log(`Generated random orders for ${symbol}: ${bids.length} bids, ${asks.length} asks at $${currentPrice}`);
+    }
+  } catch (error) {
+    console.error('Error generating random orders:', error);
+  }
+};
+
+// Start the random order generator
+const startRandomOrderGenerator = () => {
+  const generateWithRandomInterval = async () => {
+    await generateRandomOrders();
+    
+    // Random interval between 1 and 30 seconds
+    const nextInterval = Math.floor(Math.random() * 29000) + 1000; // 1-30 seconds
+    setTimeout(generateWithRandomInterval, nextInterval);
+  };
+
+  generateWithRandomInterval();
+};
+
+// Call this after database connection
+setTimeout(startRandomOrderGenerator, 5000);
+
+// =============================================
+// API ENDPOINTS
+// =============================================
+
+/**
+ * GET /api/market/orderbook
+ * Get order book for a specific symbol
+ * Query params: symbol (default: BTCUSDT)
+ */
+app.get('/api/market/orderbook', async (req, res) => {
+  try {
+    const symbol = (req.query.symbol || 'BTCUSDT').toUpperCase();
+
+    // Try Redis cache first (uniform data for all devices)
+    const cachedData = await redis.get(`orderbook:${symbol}`);
+    if (cachedData) {
+      return res.status(200).json({
+        status: 'success',
+        data: JSON.parse(cachedData)
+      });
+    }
+
+    // Fallback to database
+    const orderBook = await OrderBook.findOne({ symbol });
+    
+    if (!orderBook) {
+      // Generate initial order book if none exists
+      await generateRandomOrders();
+      const newOrderBook = await OrderBook.findOne({ symbol });
+      
+      return res.status(200).json({
+        status: 'success',
+        data: newOrderBook || {
+          symbol,
+          bids: [],
+          asks: [],
+          lastPrice: 43000,
+          spread: 0,
+          spreadPercentage: 0
+        }
+      });
+    }
+
+    res.status(200).json({
+      status: 'success',
+      data: orderBook
+    });
+  } catch (error) {
+    console.error('Error fetching order book:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch order book'
+    });
+  }
+});
+
+/**
+ * GET /api/market/trades
+ * Get recent trades for a specific symbol
+ * Query params: symbol (default: BTCUSDT), limit (default: 20)
+ */
+app.get('/api/market/trades', async (req, res) => {
+  try {
+    const symbol = (req.query.symbol || 'BTCUSDT').toUpperCase();
+    const limit = parseInt(req.query.limit) || 20;
+
+    // Try Redis cache first
+    const cachedTrades = await redis.get(`trades:${symbol}:${limit}`);
+    if (cachedTrades) {
+      return res.status(200).json({
+        status: 'success',
+        data: JSON.parse(cachedTrades)
+      });
+    }
+
+    // Fetch from database
+    const trades = await RecentTrade.find({ symbol })
+      .sort({ timestamp: -1 })
+      .limit(limit)
+      .populate('userId', 'firstName lastName')
+      .lean();
+
+    // If no trades, generate some from order book fills
+    if (trades.length === 0) {
+      const orderBook = await OrderBook.findOne({ symbol });
+      
+      if (orderBook) {
+        // Generate a few sample trades
+        const sampleTrades = [];
+        const now = Date.now();
+        
+        for (let i = 0; i < 10; i++) {
+          const isBuy = Math.random() > 0.5;
+          const price = orderBook.lastPrice * (1 + (Math.random() * 0.004 - 0.002));
+          const amount = Math.random() * 0.5 + 0.1;
+          
+          sampleTrades.push({
+            symbol,
+            price: parseFloat(price.toFixed(2)),
+            amount: parseFloat(amount.toFixed(4)),
+            total: parseFloat((price * amount).toFixed(2)),
+            side: isBuy ? 'buy' : 'sell',
+            timestamp: new Date(now - i * 30000) // spaced 30 seconds apart
+          });
+        }
+
+        // Cache the sample trades
+        await redis.setex(`trades:${symbol}:${limit}`, 2, JSON.stringify(sampleTrades));
+        
+        return res.status(200).json({
+          status: 'success',
+          data: sampleTrades
+        });
+      }
+    }
+
+    // Cache the trades
+    await redis.setex(`trades:${symbol}:${limit}`, 2, JSON.stringify(trades));
+
+    res.status(200).json({
+      status: 'success',
+      data: trades
+    });
+  } catch (error) {
+    console.error('Error fetching recent trades:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch recent trades'
+    });
+  }
+});
+
+/**
+ * POST /api/trade/order
+ * Place a buy or sell order
+ * Requires authentication
+ */
+app.post('/api/trade/order', protect, async (req, res) => {
+  try {
+    const { symbol, side, type, amount, price } = req.body;
+    const userId = req.user._id;
+
+    // Validate required fields
+    if (!symbol || !side || !amount) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Symbol, side, and amount are required'
+      });
+    }
+
+    // Validate side
+    if (!['buy', 'sell'].includes(side)) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Side must be either "buy" or "sell"'
+      });
+    }
+
+    // Validate amount
+    if (amount < 10) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Minimum order amount is $10'
+      });
+    }
+
+    // Get user balance
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'User not found'
+      });
+    }
+
+    // Get current price
+    const priceData = await getBTCPrice();
+    const currentPrice = priceData.price;
+
+    // Calculate total
+    const total = amount;
+
+    // Check balance for buy orders
+    if (side === 'buy') {
+      if (user.balances.main < total) {
+        return res.status(400).json({
+          status: 'error',
+          message: `Insufficient balance. Available: $${user.balances.main.toFixed(2)}`
+        });
+      }
+    }
+
+    // Generate unique order ID
+    const orderId = `order_${Date.now()}_${userId.toString().substr(-6)}_${Math.random().toString(36).substr(2, 9)}`;
+
+    // Create order in database
+    const order = await UserOrder.create({
+      user: userId,
+      symbol: symbol.toUpperCase(),
+      type: side,
+      orderType: type || 'market',
+      price: currentPrice,
+      amount: total,
+      total,
+      status: 'pending',
+      orderId,
+      metadata: {
+        requestedPrice: price || null,
+        executedAt: currentPrice
+      }
+    });
+
+    // Deduct balance for buy orders immediately (market orders)
+    if (side === 'buy') {
+      await User.findByIdAndUpdate(userId, {
+        $inc: { 'balances.main': -total }
+      });
+    }
+
+    // Simulate order execution (in real system, this would match with order book)
+    setTimeout(async () => {
+      try {
+        // Update order status
+        await UserOrder.findByIdAndUpdate(order._id, {
+          status: 'completed',
+          filledAmount: total,
+          remainingAmount: 0,
+          filledAt: new Date()
+        });
+
+        // Calculate asset amount based on price
+        const assetAmount = total / currentPrice;
+
+        // Update user asset balance for buy orders
+        if (side === 'buy') {
+          // Determine asset from symbol (BTCUSDT -> btc)
+          const asset = symbol.replace('USDT', '').toLowerCase();
+          
+          // Update or create user asset balance
+          const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
+          if (userAssetBalance) {
+            const updateField = `balances.${asset}`;
+            await UserAssetBalance.findByIdAndUpdate(userAssetBalance._id, {
+              $inc: { [updateField]: assetAmount },
+              $push: {
+                history: {
+                  asset,
+                  type: 'buy',
+                  amount: assetAmount,
+                  balance: (userAssetBalance.balances[asset] || 0) + assetAmount,
+                  usdValue: total,
+                  price: currentPrice,
+                  timestamp: new Date(),
+                  transactionId: order._id
+                }
+              }
+            });
+          } else {
+            const newBalance = { user: userId, balances: {} };
+            newBalance.balances[asset] = assetAmount;
+            await UserAssetBalance.create({
+              ...newBalance,
+              history: [{
+                asset,
+                type: 'buy',
+                amount: assetAmount,
+                balance: assetAmount,
+                usdValue: total,
+                price: currentPrice,
+                timestamp: new Date(),
+                transactionId: order._id
+              }]
+            });
+          }
+        }
+
+        // For sell orders, update asset balance and add to main balance
+        if (side === 'sell') {
+          const asset = symbol.replace('USDT', '').toLowerCase();
+          
+          // Check if user has enough of the asset
+          const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
+          const assetBalance = userAssetBalance?.balances[asset] || 0;
+          
+          if (assetBalance >= assetAmount) {
+            // Deduct asset balance
+            const updateField = `balances.${asset}`;
+            await UserAssetBalance.findByIdAndUpdate(userAssetBalance._id, {
+              $inc: { [updateField]: -assetAmount },
+              $push: {
+                history: {
+                  asset,
+                  type: 'sell',
+                  amount: -assetAmount,
+                  balance: assetBalance - assetAmount,
+                  usdValue: total,
+                  price: currentPrice,
+                  timestamp: new Date(),
+                  transactionId: order._id
+                }
+              }
+            });
+
+            // Add USD to main balance
+            await User.findByIdAndUpdate(userId, {
+              $inc: { 'balances.main': total }
+            });
+          } else {
+            // Not enough asset, mark order as failed
+            await UserOrder.findByIdAndUpdate(order._id, {
+              status: 'failed',
+              failureReason: 'Insufficient asset balance'
+            });
+          }
+        }
+
+        // Add to recent trades
+        await RecentTrade.create({
+          symbol: symbol.toUpperCase(),
+          price: currentPrice,
+          amount: assetAmount || total / currentPrice,
+          total,
+          side,
+          userId,
+          orderId,
+          timestamp: new Date()
+        });
+
+        // Update Redis cache for recent trades
+        const trades = await RecentTrade.find({ symbol: symbol.toUpperCase() })
+          .sort({ timestamp: -1 })
+          .limit(20)
+          .lean();
+        
+        await redis.setex(`trades:${symbol.toUpperCase()}:20`, 2, JSON.stringify(trades));
+
+        // Trigger random order generation for updated order book
+        setTimeout(generateRandomOrders, 100);
+
+      } catch (execError) {
+        console.error('Error executing order:', execError);
+      }
+    }, 2000); // Simulate 2 second execution time
+
+    // Create transaction record
+    await Transaction.create({
+      user: userId,
+      type: side,
+      amount: total,
+      currency: 'USD',
+      status: 'pending',
+      method: 'internal',
+      reference: `TRADE-${orderId}`,
+      details: {
+        symbol: symbol.toUpperCase(),
+        orderType: type || 'market',
+        price: currentPrice,
+        orderId
+      },
+      fee: 0,
+      netAmount: total
+    });
+
+    res.status(201).json({
+      status: 'success',
+      message: `Order placed successfully. Your ${side} order for $${total} is being processed.`,
+      data: {
+        orderId,
+        symbol: symbol.toUpperCase(),
+        side,
+        amount: total,
+        price: currentPrice,
+        status: 'pending',
+        estimatedAsset: total / currentPrice
+      }
+    });
+
+  } catch (error) {
+    console.error('Error placing order:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to place order'
+    });
+  }
+});
+
+/**
+ * GET /api/trade/orders
+ * Get user's orders
+ * Requires authentication
+ */
+app.get('/api/trade/orders', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { status, limit = 50, page = 1 } = req.query;
+
+    const query = { user: userId };
+    if (status) {
+      query.status = status;
+    }
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const orders = await UserOrder.find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit))
+      .lean();
+
+    const total = await UserOrder.countDocuments(query);
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        orders,
+        pagination: {
+          total,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          pages: Math.ceil(total / parseInt(limit))
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching user orders:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch orders'
+    });
+  }
+});
+
+/**
+ * GET /api/trade/orders/:orderId
+ * Get specific order details
+ * Requires authentication
+ */
+app.get('/api/trade/orders/:orderId', protect, async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const userId = req.user._id;
+
+    const order = await UserOrder.findOne({ 
+      orderId,
+      user: userId 
+    }).lean();
+
+    if (!order) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Order not found'
+      });
+    }
+
+    res.status(200).json({
+      status: 'success',
+      data: order
+    });
+  } catch (error) {
+    console.error('Error fetching order:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch order'
+    });
+  }
+});
+
+/**
+ * DELETE /api/trade/orders/:orderId
+ * Cancel a pending order
+ * Requires authentication
+ */
+app.delete('/api/trade/orders/:orderId', protect, async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const userId = req.user._id;
+
+    const order = await UserOrder.findOne({ 
+      orderId,
+      user: userId,
+      status: 'pending'
+    });
+
+    if (!order) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Pending order not found'
+      });
+    }
+
+    // If it was a buy order, refund the balance
+    if (order.type === 'buy') {
+      await User.findByIdAndUpdate(userId, {
+        $inc: { 'balances.main': order.amount }
+      });
+    }
+
+    // Update order status
+    order.status = 'cancelled';
+    order.cancelledAt = new Date();
+    await order.save();
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Order cancelled successfully'
+    });
+  } catch (error) {
+    console.error('Error cancelling order:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to cancel order'
+    });
+  }
+});
+
+
+
+
 
 
 
