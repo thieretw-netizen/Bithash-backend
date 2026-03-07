@@ -16390,7 +16390,7 @@ app.get('/api/transactions', protect, async (req, res) => {
       .limit(limit)
       .lean();
 
-    // Asset logo mapping (for frontend reference)
+    // Asset logo mapping
     const assetLogos = {
       btc: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png',
       eth: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png',
@@ -16479,53 +16479,126 @@ app.get('/api/transactions', protect, async (req, res) => {
         network = assetNetworks[assetSymbol] || 'Bitcoin';
       }
 
-      // Create description - ensure it's always a string
+      // Create detailed description based on transaction type
       let description = '';
+      const amount = parseFloat(t.amount) || 0;
+      const assetAmount = parseFloat(t.assetAmount) || 0;
+      const formattedAmount = amount.toFixed(2);
+      const formattedAssetAmount = assetAmount.toFixed(8);
       
-      if (t.details && typeof t.details === 'string') {
-        description = t.details;
-      } else if (t.details && typeof t.details === 'object') {
-        description = JSON.stringify(t.details);
-      } else {
-        const amount = parseFloat(t.amount) || 0;
-        const assetAmount = parseFloat(t.assetAmount) || 0;
-        
-        if (t.type === 'deposit') {
-          description = `Deposit of ${assetSymbol.toUpperCase()} via ${t.method || 'crypto'}`;
-        } else if (t.type === 'withdrawal') {
-          const address = t.btcAddress || 'wallet';
-          description = `Withdrawal of ${assetSymbol.toUpperCase()} to ${address.substring(0, 10)}...`;
-        } else if (t.type === 'buy') {
-          description = `Bought ${assetSymbol.toUpperCase()} for $${amount.toFixed(2)}`;
-          if (t.buyDetails && t.buyDetails.price) {
-            description += ` at $${parseFloat(t.buyDetails.price).toFixed(2)}`;
-          }
-        } else if (t.type === 'sell') {
-          description = `Sold ${assetSymbol.toUpperCase()} for $${amount.toFixed(2)}`;
-          if (t.sellDetails) {
-            const profit = parseFloat(t.sellDetails.profit) || 0;
-            const loss = parseFloat(t.sellDetails.loss) || 0;
-            const percentage = parseFloat(t.sellDetails.profitLossPercentage) || 0;
-            if (profit > 0) {
-              description += ` with +$${profit.toFixed(2)} profit (${percentage.toFixed(2)}%)`;
-            } else if (loss > 0) {
-              description += ` with -$${loss.toFixed(2)} loss (${percentage.toFixed(2)}%)`;
-            }
-          }
-        } else if (t.type === 'interest') {
-          description = `Interest earned on ${assetSymbol.toUpperCase()} investment`;
-        } else if (t.type === 'referral') {
-          description = `Referral bonus from downline investment`;
-        } else if (t.type === 'transfer') {
-          description = `Transfer of ${assetSymbol.toUpperCase()}`;
+      // Format date for description
+      const txDate = new Date(t.createdAt || new Date());
+      const timeAgo = getTimeAgo(txDate);
+      
+      if (t.type === 'deposit') {
+        if (t.method === 'btc' || t.method === 'bitcoin') {
+          description = `📥 Received ${formattedAssetAmount} BTC ($${formattedAmount}) via Bitcoin network. Transaction confirmed on ${network}.`;
+        } else if (t.method === 'eth' || t.method === 'ethereum') {
+          description = `📥 Received ${formattedAssetAmount} ETH ($${formattedAmount}) via Ethereum network. Transaction confirmed on ${network}.`;
+        } else if (t.method === 'usdt') {
+          description = `📥 Received ${formattedAssetAmount} USDT ($${formattedAmount}) via ${network}. Deposit completed successfully.`;
+        } else if (t.method === 'card') {
+          description = `💳 Deposited $${formattedAmount} to your account via Credit/Debit Card. Funds are available in your main balance.`;
+        } else if (t.method === 'bank') {
+          description = `🏦 Bank transfer of $${formattedAmount} completed. Funds credited to your main balance.`;
         } else {
-          description = 'Transaction processed';
+          description = `📥 Deposit of $${formattedAmount} (${formattedAssetAmount} ${assetSymbol.toUpperCase()}) completed via ${t.method || 'cryptocurrency'}.`;
+        }
+      } 
+      else if (t.type === 'withdrawal') {
+        const address = t.btcAddress ? t.btcAddress.substring(0, 10) + '...' : 'your wallet';
+        if (t.method === 'btc' || t.method === 'bitcoin') {
+          description = `📤 Sent ${formattedAssetAmount} BTC ($${formattedAmount}) to ${address} on Bitcoin network. Withdrawal processed.`;
+        } else if (t.method === 'eth' || t.method === 'ethereum') {
+          description = `📤 Sent ${formattedAssetAmount} ETH ($${formattedAmount}) to ${address} on Ethereum network. Withdrawal completed.`;
+        } else if (t.method === 'usdt') {
+          description = `📤 Withdrawn ${formattedAssetAmount} USDT ($${formattedAmount}) to ${address} via ${network}. Transaction broadcasted.`;
+        } else {
+          description = `📤 Withdrawal of $${formattedAmount} (${formattedAssetAmount} ${assetSymbol.toUpperCase()}) to external wallet. Transaction ID: ${t.reference?.substring(0, 8) || 'N/A'}...`;
         }
       }
+      else if (t.type === 'buy') {
+        if (t.buyDetails) {
+          const price = parseFloat(t.buyDetails.price) || 0;
+          const fromWallet = t.buyDetails.fromWallet || 'both';
+          let walletSource = '';
+          
+          if (fromWallet === 'main') {
+            walletSource = 'using your main balance';
+          } else if (fromWallet === 'matured') {
+            walletSource = 'using your matured earnings';
+          } else {
+            walletSource = 'using both main and matured balances';
+          }
+          
+          description = `💰 Purchased ${formattedAssetAmount} ${assetSymbol.toUpperCase()} for $${formattedAmount} at $${price.toFixed(2)} per coin, ${walletSource}.`;
+        } else {
+          description = `💰 Bought ${formattedAssetAmount} ${assetSymbol.toUpperCase()} for $${formattedAmount}. Added to your asset portfolio.`;
+        }
+      }
+      else if (t.type === 'sell') {
+        if (t.sellDetails) {
+          const price = parseFloat(t.sellDetails.price) || 0;
+          const profit = parseFloat(t.sellDetails.profit) || 0;
+          const loss = parseFloat(t.sellDetails.loss) || 0;
+          const percentage = parseFloat(t.sellDetails.profitLossPercentage) || 0;
+          
+          if (profit > 0) {
+            description = `📈 Sold ${formattedAssetAmount} ${assetSymbol.toUpperCase()} for $${formattedAmount} at $${price.toFixed(2)}. Profit: +$${profit.toFixed(2)} (${percentage.toFixed(2)}%). Funds added to your matured balance.`;
+          } else if (loss > 0) {
+            description = `📉 Sold ${formattedAssetAmount} ${assetSymbol.toUpperCase()} for $${formattedAmount} at $${price.toFixed(2)}. Loss: -$${loss.toFixed(2)} (${percentage.toFixed(2)}%). Funds added to your matured balance.`;
+          } else {
+            description = `💱 Sold ${formattedAssetAmount} ${assetSymbol.toUpperCase()} for $${formattedAmount} at $${price.toFixed(2)}. Funds added to your matured balance.`;
+          }
+        } else {
+          description = `💱 Sold ${formattedAssetAmount} ${assetSymbol.toUpperCase()} for $${formattedAmount}. Proceeds added to your matured balance.`;
+        }
+      }
+      else if (t.type === 'interest') {
+        if (t.details && t.details.planName) {
+          description = `💎 Mining reward of $${formattedAmount} earned from ${t.details.planName} cloud mining contract. ${formattedAssetAmount} ${assetSymbol.toUpperCase()} credited to your matured balance.`;
+        } else {
+          description = `💎 Interest payment of $${formattedAmount} (${formattedAssetAmount} ${assetSymbol.toUpperCase()}) from your cloud mining investments.`;
+        }
+      }
+      else if (t.type === 'referral') {
+        if (t.details) {
+          const downlineName = t.details.downlineName || 'a referred user';
+          const round = t.details.round || 1;
+          const totalRounds = t.details.totalRounds || 3;
+          description = `🤝 Referral bonus of $${formattedAmount} (${formattedAssetAmount} ${assetSymbol.toUpperCase()}) earned from ${downlineName}'s investment (Round ${round}/${totalRounds}). 5% commission credited.`;
+        } else {
+          description = `🤝 Received referral bonus of $${formattedAmount} from your downline's mining activity.`;
+        }
+      }
+      else if (t.type === 'transfer') {
+        if (t.details && t.details.from) {
+          description = `🔄 Transferred $${formattedAmount} from ${t.details.from} balance to ${t.details.to} balance.`;
+        } else {
+          description = `🔄 Internal transfer of $${formattedAmount} completed.`;
+        }
+      }
+      else if (t.type === 'investment') {
+        if (t.details && t.details.planName) {
+          description = `⛏️ Started cloud mining contract: ${t.details.planName} with $${formattedAmount}. Expected return: ${t.details.expectedReturn || 'calculating...'}. Duration: ${t.details.duration || 'N/A'} hours.`;
+        } else {
+          description = `⛏️ New cloud mining investment of $${formattedAmount} activated.`;
+        }
+      }
+      else {
+        // Fallback description
+        const action = t.type ? t.type.charAt(0).toUpperCase() + t.type.slice(1) : 'Transaction';
+        description = `${action} of $${formattedAmount} (${formattedAssetAmount} ${assetSymbol.toUpperCase()}) processed. Status: ${t.status || 'completed'}.`;
+      }
 
-      // Ensure description is a string
+      // Ensure description is a string and not too long
       if (typeof description !== 'string') {
         description = String(description || 'Transaction processed');
+      }
+
+      // Truncate if too long but keep it readable
+      if (description.length > 200) {
+        description = description.substring(0, 197) + '...';
       }
 
       // Format dates
@@ -16565,7 +16638,9 @@ app.get('/api/transactions', protect, async (req, res) => {
         date: createdAt,
         timestamp: createdAt,
         // Add logo URL for frontend convenience
-        logo: assetLogos[assetSymbol] || 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png'
+        logo: assetLogos[assetSymbol] || 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png',
+        // Add emoji indicator for transaction type
+        typeEmoji: getTransactionEmoji(t.type)
       };
     });
 
@@ -16603,6 +16678,46 @@ app.get('/api/transactions', protect, async (req, res) => {
     });
   }
 });
+
+// Helper function to get time ago string
+function getTimeAgo(date) {
+  const seconds = Math.floor((new Date() - date) / 1000);
+  
+  let interval = seconds / 31536000;
+  if (interval > 1) return Math.floor(interval) + ' years ago';
+  
+  interval = seconds / 2592000;
+  if (interval > 1) return Math.floor(interval) + ' months ago';
+  
+  interval = seconds / 86400;
+  if (interval > 1) return Math.floor(interval) + ' days ago';
+  
+  interval = seconds / 3600;
+  if (interval > 1) return Math.floor(interval) + ' hours ago';
+  
+  interval = seconds / 60;
+  if (interval > 1) return Math.floor(interval) + ' minutes ago';
+  
+  return Math.floor(seconds) + ' seconds ago';
+}
+
+// Helper function to get emoji for transaction type
+function getTransactionEmoji(type) {
+  const emojis = {
+    deposit: '📥',
+    withdrawal: '📤',
+    buy: '💰',
+    sell: '💱',
+    interest: '💎',
+    referral: '🤝',
+    transfer: '🔄',
+    investment: '⛏️',
+    loan: '🏦',
+    default: '💳'
+  };
+  
+  return emojis[type] || emojis.default;
+}
 
 
 
