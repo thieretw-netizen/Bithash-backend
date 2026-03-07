@@ -2132,6 +2132,16 @@ const SystemLog = mongoose.model('SystemLog', SystemLogSchema);
 
 
 
+
+
+
+
+
+
+
+
+
+
 // =============================================
 // Order Book Schema
 // =============================================
@@ -2459,8 +2469,6 @@ const Trade = mongoose.model('Trade', TradeSchema);
 const Position = mongoose.model('Position', PositionSchema);
 const PriceCache = mongoose.model('PriceCache', PriceCacheSchema);
 const MarketData = mongoose.model('MarketData', MarketDataSchema);
-
-
 
 
 
@@ -16401,8 +16409,6 @@ function mapSymbolToCoinGeckoId(symbol) {
 
 
 
-
-
 // =============================================
 // PRICE FEED FUNCTIONS - Multiple Sources
 // =============================================
@@ -17179,9 +17185,647 @@ app.get('/api/orders/open', protect, async (req, res) => {
         type: order.type,
         orderType: order.orderType,
         price: order.price,
-        amount:
+        amount: order.amount,
+        filled: order.filled,
+        remaining: order.remaining,
+        total: order.total,
+        status: order.status,
+        timestamp: order.timestamp
+      })),
+      count: orders.length
+    });
 
+  } catch (err) {
+    console.error('Error fetching open orders:', err);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch open orders',
+      error: err.message
+    });
+  }
+});
 
+// =============================================
+// ENDPOINT 5: CANCEL ORDER
+// DELETE /api/orders/:orderId
+// =============================================
+app.delete('/api/orders/:orderId', protect, async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const userId = req.user._id;
+
+    const order = await Order.findOne({ orderId, userId });
+    
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found'
+      });
+    }
+
+    if (order.status !== 'open' && order.status !== 'partial') {
+      return res.status(400).json({
+        success: false,
+        message: `Order cannot be cancelled. Current status: ${order.status}`
+      });
+    }
+
+    // Remove from order book
+    const orderBook = await OrderBook.findOne({ symbol: order.symbol });
+    if (orderBook) {
+      if (order.type === 'sell') {
+        orderBook.asks = orderBook.asks.filter(a => a.orderId !== orderId);
+      } else {
+        orderBook.bids = orderBook.bids.filter(b => b.orderId !== orderId);
+      }
+      orderBook.lastUpdated = new Date();
+      await orderBook.save();
+
+      // Invalidate Redis cache
+      await redis.del(`orderbook:${order.symbol}`);
+    }
+
+    // Update order status
+    order.status = 'cancelled';
+    order.cancelledAt = new Date();
+    await order.save();
+
+    // Log activity
+    await logActivity(
+      'order_cancelled',
+      'Order',
+      order._id,
+      userId,
+      'User',
+      req,
+      {
+        orderId,
+        symbol: order.symbol,
+        type: order.type,
+        amount: order.remaining
+      }
+    );
+
+    res.json({
+      success: true,
+      message: 'Order cancelled successfully',
+      data: {
+        orderId: order.orderId,
+        status: order.status,
+        cancelledAt: order.cancelledAt
+      }
+    });
+
+  } catch (err) {
+    console.error('Error cancelling order:', err);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to cancel order',
+      error: err.message
+    });
+  }
+});
+
+// =============================================
+// ENDPOINT 6: GET USER'S POSITIONS
+// GET /api/positions
+// =============================================
+app.get('/api/positions', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { symbol } = req.query;
+
+    const query = { userId };
+    if (symbol) {
+      query.symbol = symbol.toLowerCase();
+    }
+
+    const positions = await Position.find(query).lean();
+
+    // Get current prices for all positions
+    const positionsWithValues = await Promise.all(positions.map(async (position) => {
+      const priceData = await getRealtimeExchangeRate(position.symbol);
+      const currentPrice = priceData.price;
+      
+      const currentValue = position.amount * currentPrice;
+      const pnl = currentValue - position.totalInvested;
+      const pnlPercentage = position.totalInvested > 0 
+        ? (pnl / position.totalInvested) * 100 
+        : 0;
+
+      return {
+        symbol: position.symbol,
+        amount: position.amount,
+        averageBuyPrice: position.averageBuyPrice,
+        totalInvested: position.totalInvested,
+        currentPrice,
+        currentValue,
+        pnl,
+        pnlPercentage,
+        lastUpdated: position.lastUpdated
+      };
+    }));
+
+    res.json({
+      success: true,
+      data: positionsWithValues,
+      count: positionsWithValues.length
+    });
+
+  } catch (err) {
+    console.error('Error fetching positions:', err);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch positions',
+      error: err.message
+    });
+  }
+});
+
+// =============================================
+// ENDPOINT 7: GET USER'S TRADE HISTORY
+// GET /api/trades/history
+// =============================================
+app.get('/api/trades/history', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { symbol, limit = 20, page = 1 } = req.query;
+    const normalizedSymbol = symbol?.toLowerCase();
+
+    const query = { userId };
+    if (normalizedSymbol) {
+      query.symbol = normalizedSymbol;
+    }
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const [trades, total] = await Promise.all([
+      Trade.find(query)
+        .sort({ timestamp: -1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .lean(),
+      Trade.countDocuments(query)
+    ]);
+
+    res.json({
+      success: true,
+      data: trades.map(trade => ({
+        tradeId: trade.tradeId,
+        symbol: trade.symbol,
+        type: trade.type,
+        price: trade.price,
+        amount: trade.amount,
+        total: trade.total,
+        fee: trade.fee,
+        netAmount: trade.netAmount,
+        timestamp: trade.timestamp
+      })),
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / parseInt(limit))
+      }
+    });
+
+  } catch (err) {
+    console.error('Error fetching trade history:', err);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch trade history',
+      error: err.message
+    });
+  }
+});
+
+// =============================================
+// ENDPOINT 8: GET MARKET PRICES
+// GET /api/market/prices
+// =============================================
+app.get('/api/market/prices', async (req, res) => {
+  try {
+    const { symbols = 'btc,eth,bnb,sol,xrp,ada,doge,dot,link,matic' } = req.query;
+    const symbolList = symbols.split(',').map(s => s.trim().toLowerCase());
+
+    // Try to get from Redis first
+    const cachedPrices = await redis.get('market:prices:all');
+    if (cachedPrices) {
+      const prices = JSON.parse(cachedPrices);
+      // Filter by requested symbols
+      const filteredPrices = prices.filter(p => symbolList.includes(p.symbol));
+      return res.json({
+        success: true,
+        data: filteredPrices,
+        source: 'cache'
+      });
+    }
+
+    // Get from multiple sources
+    const prices = await Promise.all(symbolList.map(async (symbol) => {
+      try {
+        const priceData = await getRealtimeExchangeRate(symbol);
+        return {
+          symbol,
+          current_price: priceData.price,
+          price_change_percentage_24h: priceData.change24h,
+          total_volume: priceData.volume24h,
+          last_updated: priceData.timestamp,
+          source: priceData.source
+        };
+      } catch (err) {
+        console.error(`Failed to get price for ${symbol}:`, err);
+        return {
+          symbol,
+          current_price: 0,
+          price_change_percentage_24h: 0,
+          total_volume: 0,
+          last_updated: Date.now(),
+          source: 'error'
+        };
+      }
+    }));
+
+    // Cache in Redis for 10 seconds
+    await redis.setex('market:prices:all', 10, JSON.stringify(prices));
+
+    res.json({
+      success: true,
+      data: prices,
+      source: 'live'
+    });
+
+  } catch (err) {
+    console.error('Error fetching market prices:', err);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch market prices',
+      error: err.message
+    });
+  }
+});
+
+// =============================================
+// ENDPOINT 9: GET SINGLE ASSET PRICE
+// GET /api/market/price/:symbol
+// =============================================
+app.get('/api/market/price/:symbol', async (req, res) => {
+  try {
+    const { symbol } = req.params;
+    const normalizedSymbol = symbol.toLowerCase();
+
+    const priceData = await getRealtimeExchangeRate(normalizedSymbol);
+
+    res.json({
+      success: true,
+      data: {
+        symbol: normalizedSymbol,
+        price: priceData.price,
+        change24h: priceData.change24h,
+        volume24h: priceData.volume24h,
+        timestamp: priceData.timestamp,
+        source: priceData.source
+      }
+    });
+
+  } catch (err) {
+    console.error('Error fetching price:', err);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch price',
+      error: err.message
+    });
+  }
+});
+
+// =============================================
+// ENDPOINT 10: GET USER'S BALANCES FOR TRADING
+// GET /api/users/trading-balances
+// =============================================
+app.get('/api/users/trading-balances', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    const user = await User.findById(userId).select('balances');
+    
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    // Get current prices for all balances
+    const symbols = ['btc', 'eth', 'usdt', 'bnb', 'sol', 'xrp', 'ada', 'doge', 'dot', 'link', 'matic'];
+    
+    const balances = [];
+    for (const symbol of symbols) {
+      const amount = user.balances[symbol] || 0;
+      if (amount > 0) {
+        const priceData = await getRealtimeExchangeRate(symbol);
+        balances.push({
+          symbol,
+          amount,
+          usdValue: amount * priceData.price,
+          price: priceData.price
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      data: {
+        mainBalance: user.balances.main,
+        maturedBalance: user.balances.matured,
+        assets: balances
+      }
+    });
+
+  } catch (err) {
+    console.error('Error fetching trading balances:', err);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch trading balances',
+      error: err.message
+    });
+  }
+});
+
+// =============================================
+// ENDPOINT 11: GET ORDER BOOK STATS
+// GET /api/market/orderbook/stats/:symbol
+// =============================================
+app.get('/api/market/orderbook/stats/:symbol', async (req, res) => {
+  try {
+    const { symbol } = req.params;
+    const normalizedSymbol = symbol.toLowerCase();
+
+    const orderBook = await OrderBook.findOne({ symbol: normalizedSymbol });
+
+    if (!orderBook) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order book not found'
+      });
+    }
+
+    // Calculate statistics
+    const stats = {
+      totalAsks: orderBook.asks.length,
+      totalBids: orderBook.bids.length,
+      totalAskVolume: orderBook.asks.reduce((sum, ask) => sum + ask.amount, 0),
+      totalBidVolume: orderBook.bids.reduce((sum, bid) => sum + bid.amount, 0),
+      totalAskValue: orderBook.asks.reduce((sum, ask) => sum + (ask.price * ask.amount), 0),
+      totalBidValue: orderBook.bids.reduce((sum, bid) => sum + (bid.price * bid.amount), 0),
+      bestAsk: orderBook.asks.length > 0 ? orderBook.asks.sort((a, b) => a.price - b.price)[0] : null,
+      bestBid: orderBook.bids.length > 0 ? orderBook.bids.sort((a, b) => b.price - a.price)[0] : null,
+      spread: orderBook.asks.length > 0 && orderBook.bids.length > 0 
+        ? orderBook.asks.sort((a, b) => a.price - b.price)[0].price - orderBook.bids.sort((a, b) => b.price - a.price)[0].price
+        : null,
+      spreadPercentage: orderBook.asks.length > 0 && orderBook.bids.length > 0 
+        ? ((orderBook.asks.sort((a, b) => a.price - b.price)[0].price - orderBook.bids.sort((a, b) => b.price - a.price)[0].price) / orderBook.bids.sort((a, b) => b.price - a.price)[0].price) * 100
+        : null,
+      lastUpdated: orderBook.lastUpdated
+    };
+
+    res.json({
+      success: true,
+      data: stats
+    });
+
+  } catch (err) {
+    console.error('Error fetching order book stats:', err);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch order book stats',
+      error: err.message
+    });
+  }
+});
+
+// =============================================
+// ENDPOINT 12: GET RECENT TRADES (GLOBAL)
+// GET /api/market/recent-trades/:symbol
+// =============================================
+app.get('/api/market/recent-trades/:symbol', async (req, res) => {
+  try {
+    const { symbol } = req.params;
+    const { limit = 20 } = req.query;
+    const normalizedSymbol = symbol.toLowerCase();
+
+    const trades = await Trade.find({ symbol: normalizedSymbol })
+      .sort({ timestamp: -1 })
+      .limit(parseInt(limit))
+      .lean();
+
+    res.json({
+      success: true,
+      data: trades.map(trade => ({
+        price: trade.price,
+        amount: trade.amount,
+        total: trade.total,
+        type: trade.type,
+        timestamp: trade.timestamp
+      }))
+    });
+
+  } catch (err) {
+    console.error('Error fetching recent trades:', err);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch recent trades',
+      error: err.message
+    });
+  }
+});
+
+// =============================================
+// ENDPOINT 13: GET ORDER DETAILS
+// GET /api/orders/:orderId
+// =============================================
+app.get('/api/orders/:orderId', protect, async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const userId = req.user._id;
+
+    const order = await Order.findOne({ orderId, userId }).lean();
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: order
+    });
+
+  } catch (err) {
+    console.error('Error fetching order:', err);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch order',
+      error: err.message
+    });
+  }
+});
+
+// =============================================
+// ENDPOINT 14: GET ALL USER ORDERS
+// GET /api/orders
+// =============================================
+app.get('/api/orders', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { status, symbol, limit = 50, page = 1 } = req.query;
+
+    const query = { userId };
+    if (status) query.status = status;
+    if (symbol) query.symbol = symbol.toLowerCase();
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const [orders, total] = await Promise.all([
+      Order.find(query)
+        .sort({ timestamp: -1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .lean(),
+      Order.countDocuments(query)
+    ]);
+
+    res.json({
+      success: true,
+      data: orders,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / parseInt(limit))
+      }
+    });
+
+  } catch (err) {
+    console.error('Error fetching orders:', err);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch orders',
+      error: err.message
+    });
+  }
+});
+
+// =============================================
+// ENDPOINT 15: UPDATE ORDER (PARTIAL FILL)
+// PATCH /api/orders/:orderId
+// =============================================
+app.patch('/api/orders/:orderId', protect, async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const userId = req.user._id;
+    const { filledAmount, price } = req.body;
+
+    const order = await Order.findOne({ orderId, userId });
+    
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found'
+      });
+    }
+
+    if (order.status !== 'open' && order.status !== 'partial') {
+      return res.status(400).json({
+        success: false,
+        message: `Order cannot be updated. Current status: ${order.status}`
+      });
+    }
+
+    if (filledAmount > order.remaining) {
+      return res.status(400).json({
+        success: false,
+        message: 'Filled amount exceeds remaining amount'
+      });
+    }
+
+    // Update order
+    order.filled += filledAmount;
+    order.remaining -= filledAmount;
+    
+    if (order.remaining <= 0.000001) {
+      order.status = 'filled';
+      order.filledAt = new Date();
+    } else {
+      order.status = 'partial';
+    }
+
+    await order.save();
+
+    // Create trade record
+    const trade = new Trade({
+      tradeId: `trade_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`,
+      buyOrderId: order.type === 'buy' ? orderId : null,
+      sellOrderId: order.type === 'sell' ? orderId : null,
+      userId,
+      symbol: order.symbol,
+      type: order.type,
+      price: price || order.price,
+      amount: filledAmount,
+      total: (price || order.price) * filledAmount,
+      fee: ((price || order.price) * filledAmount) * 0.001,
+      timestamp: new Date()
+    });
+    await trade.save();
+
+    // Update position
+    const position = await Position.findOne({ userId, symbol: order.symbol });
+    if (position) {
+      if (order.type === 'buy') {
+        position.amount += filledAmount;
+        position.totalInvested += (price || order.price) * filledAmount;
+        position.averageBuyPrice = position.totalInvested / position.amount;
+      } else {
+        position.amount = Math.max(0, position.amount - filledAmount);
+      }
+      
+      const priceData = await getRealtimeExchangeRate(order.symbol);
+      position.currentValue = position.amount * priceData.price;
+      position.pnl = position.currentValue - position.totalInvested;
+      position.pnlPercentage = position.totalInvested > 0 
+        ? (position.pnl / position.totalInvested) * 100 
+        : 0;
+      
+      position.history.push({
+        type: order.type,
+        amount: filledAmount,
+        price: price || order.price,
+        total: (price || order.price) * filledAmount,
+        timestamp: new Date()
+      });
+      
+      await position.save();
+    }
+
+    res.json({
+      success: true,
+      message: 'Order updated successfully',
+      data: {
+        orderId: order.orderId,
+        filled: order.filled,
+        remaining: order.remaining,
+        status: order.status,
+        tradeId: trade.tradeId
+      }
+    });
+
+  } catch (err) {
+    console.error('Error updating order:', err);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update order',
+      error: err.message
+    });
+  }
+});
 
 
 
