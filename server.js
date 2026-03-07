@@ -16275,389 +16275,6 @@ app.get('/api/assets/portfolio', protect, async (req, res) => {
 
 
 
-// =============================================
-// GET /api/transactions - User Transaction History
-// =============================================
-app.get('/api/transactions', protect, async (req, res) => {
-  try {
-    const userId = req.user._id;
-    
-    // Pagination parameters
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 50;
-    const skip = (page - 1) * limit;
-
-    // Filter parameters
-    const type = req.query.type;
-    const asset = req.query.asset;
-    const status = req.query.status;
-    const startDate = req.query.startDate;
-    const endDate = req.query.endDate;
-
-    // Build query
-    const query = { user: userId };
-    
-    if (type && type !== 'all') {
-      query.type = type;
-    }
-    
-    if (asset) {
-      query.asset = asset.toLowerCase();
-    }
-    
-    if (status && status !== 'all') {
-      query.status = status;
-    }
-    
-    if (startDate || endDate) {
-      query.createdAt = {};
-      if (startDate) query.createdAt.$gte = new Date(startDate);
-      if (endDate) query.createdAt.$lte = new Date(endDate);
-    }
-
-    // Get total count for pagination
-    const total = await Transaction.countDocuments(query);
-
-    // Get transactions
-    const transactions = await Transaction.find(query)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean();
-
-    // Asset logo mapping
-    const assetLogos = {
-      btc: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png',
-      eth: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png',
-      usdt: 'https://assets.coingecko.com/coins/images/325/large/Tether.png',
-      bnb: 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png',
-      sol: 'https://assets.coingecko.com/coins/images/4128/large/solana.png',
-      usdc: 'https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png',
-      xrp: 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png',
-      doge: 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png',
-      ada: 'https://assets.coingecko.com/coins/images/975/large/cardano.png',
-      shib: 'https://assets.coingecko.com/coins/images/11939/large/shiba.png',
-      avax: 'https://assets.coingecko.com/coins/images/12559/large/Avalanche_Circle_RedWhite.png',
-      dot: 'https://assets.coingecko.com/coins/images/12171/large/polkadot.png',
-      trx: 'https://assets.coingecko.com/coins/images/1094/large/tron-logo.png',
-      link: 'https://assets.coingecko.com/coins/images/877/large/chainlink-new-logo.png',
-      matic: 'https://assets.coingecko.com/coins/images/4713/large/matic-token-icon.png',
-      wbtc: 'https://assets.coingecko.com/coins/images/7598/large/wrapped_bitcoin_wbtc.png',
-      ltc: 'https://assets.coingecko.com/coins/images/2/large/litecoin.png',
-      near: 'https://assets.coingecko.com/coins/images/10365/large/near_icon.png',
-      uni: 'https://assets.coingecko.com/coins/images/12504/large/uni.jpg',
-      bch: 'https://assets.coingecko.com/coins/images/780/large/bitcoin-cash-circle.png',
-      xlm: 'https://assets.coingecko.com/coins/images/100/large/Stellar_symbol_black_RGB.png',
-      atom: 'https://assets.coingecko.com/coins/images/1481/large/cosmos_hub.png',
-      xmr: 'https://assets.coingecko.com/coins/images/69/large/monero_logo.png',
-      flow: 'https://assets.coingecko.com/coins/images/13446/large/5f6294c0c7a8cda55cb1.png',
-      vet: 'https://assets.coingecko.com/coins/images/1167/large/VET_Token_Icon.png',
-      fil: 'https://assets.coingecko.com/coins/images/12817/large/filecoin.png',
-      theta: 'https://assets.coingecko.com/coins/images/2538/large/theta-token-logo.png',
-      hbar: 'https://assets.coingecko.com/coins/images/3688/large/hbar.png',
-      ftm: 'https://assets.coingecko.com/coins/images/4001/large/Fantom_round.png',
-      xtz: 'https://assets.coingecko.com/coins/images/976/large/Tezos-logo.png'
-    };
-
-    // Asset network mapping
-    const assetNetworks = {
-      btc: 'Bitcoin',
-      eth: 'Ethereum',
-      usdt: 'Tron (TRC-20)',
-      bnb: 'BNB Smart Chain (BEP-20)',
-      sol: 'Solana',
-      usdc: 'Ethereum (ERC-20)',
-      xrp: 'XRP Ledger',
-      doge: 'Dogecoin',
-      ada: 'Cardano',
-      shib: 'Ethereum (ERC-20)',
-      avax: 'Avalanche C-Chain',
-      dot: 'Polkadot',
-      trx: 'TRON',
-      link: 'Ethereum (ERC-20)',
-      matic: 'Polygon',
-      wbtc: 'Ethereum (ERC-20)',
-      ltc: 'Litecoin',
-      near: 'NEAR',
-      uni: 'Ethereum (ERC-20)',
-      bch: 'Bitcoin Cash',
-      xlm: 'Stellar',
-      atom: 'Cosmos',
-      xmr: 'Monero',
-      flow: 'Flow',
-      vet: 'VeChain',
-      fil: 'Filecoin',
-      theta: 'Theta',
-      hbar: 'Hedera',
-      ftm: 'Fantom',
-      xtz: 'Tezos'
-    };
-
-    // Format transactions for frontend
-    const formattedTransactions = transactions.map(t => {
-      // Determine asset symbol
-      let assetSymbol = t.asset || 
-                       (t.type === 'buy' ? t.buyDetails?.asset : 
-                        t.type === 'sell' ? t.sellDetails?.asset : 
-                        t.method) || 'btc';
-      
-      // Ensure asset symbol is lowercase string
-      if (assetSymbol && typeof assetSymbol === 'string') {
-        assetSymbol = assetSymbol.toLowerCase();
-      } else {
-        assetSymbol = 'btc';
-      }
-
-      // Get network information - ensure it's a string
-      let network = t.network;
-      if (!network || network === 'Unknown' || typeof network !== 'string') {
-        network = assetNetworks[assetSymbol] || 'Bitcoin';
-      }
-
-      // Create detailed description based on transaction type
-      let description = '';
-      const amount = parseFloat(t.amount) || 0;
-      const assetAmount = parseFloat(t.assetAmount) || 0;
-      const formattedAmount = amount.toFixed(2);
-      const formattedAssetAmount = assetAmount.toFixed(8);
-      
-      // Format date for description
-      const txDate = new Date(t.createdAt || new Date());
-      const timeAgo = getTimeAgo(txDate);
-      
-      if (t.type === 'deposit') {
-        if (t.method === 'btc' || t.method === 'bitcoin') {
-          description = `📥 Received ${formattedAssetAmount} BTC ($${formattedAmount}) via Bitcoin network. Transaction confirmed on ${network}.`;
-        } else if (t.method === 'eth' || t.method === 'ethereum') {
-          description = `📥 Received ${formattedAssetAmount} ETH ($${formattedAmount}) via Ethereum network. Transaction confirmed on ${network}.`;
-        } else if (t.method === 'usdt') {
-          description = `📥 Received ${formattedAssetAmount} USDT ($${formattedAmount}) via ${network}. Deposit completed successfully.`;
-        } else if (t.method === 'card') {
-          description = `💳 Deposited $${formattedAmount} to your account via Credit/Debit Card. Funds are available in your main balance.`;
-        } else if (t.method === 'bank') {
-          description = `🏦 Bank transfer of $${formattedAmount} completed. Funds credited to your main balance.`;
-        } else {
-          description = `📥 Deposit of $${formattedAmount} (${formattedAssetAmount} ${assetSymbol.toUpperCase()}) completed via ${t.method || 'cryptocurrency'}.`;
-        }
-      } 
-      else if (t.type === 'withdrawal') {
-        const address = t.btcAddress ? t.btcAddress.substring(0, 10) + '...' : 'your wallet';
-        if (t.method === 'btc' || t.method === 'bitcoin') {
-          description = `📤 Sent ${formattedAssetAmount} BTC ($${formattedAmount}) to ${address} on Bitcoin network. Withdrawal processed.`;
-        } else if (t.method === 'eth' || t.method === 'ethereum') {
-          description = `📤 Sent ${formattedAssetAmount} ETH ($${formattedAmount}) to ${address} on Ethereum network. Withdrawal completed.`;
-        } else if (t.method === 'usdt') {
-          description = `📤 Withdrawn ${formattedAssetAmount} USDT ($${formattedAmount}) to ${address} via ${network}. Transaction broadcasted.`;
-        } else {
-          description = `📤 Withdrawal of $${formattedAmount} (${formattedAssetAmount} ${assetSymbol.toUpperCase()}) to external wallet. Transaction ID: ${t.reference?.substring(0, 8) || 'N/A'}...`;
-        }
-      }
-      else if (t.type === 'buy') {
-        if (t.buyDetails) {
-          const price = parseFloat(t.buyDetails.price) || 0;
-          const fromWallet = t.buyDetails.fromWallet || 'both';
-          let walletSource = '';
-          
-          if (fromWallet === 'main') {
-            walletSource = 'using your main balance';
-          } else if (fromWallet === 'matured') {
-            walletSource = 'using your matured earnings';
-          } else {
-            walletSource = 'using both main and matured balances';
-          }
-          
-          description = `💰 Purchased ${formattedAssetAmount} ${assetSymbol.toUpperCase()} for $${formattedAmount} at $${price.toFixed(2)} per coin, ${walletSource}.`;
-        } else {
-          description = `💰 Bought ${formattedAssetAmount} ${assetSymbol.toUpperCase()} for $${formattedAmount}. Added to your asset portfolio.`;
-        }
-      }
-      else if (t.type === 'sell') {
-        if (t.sellDetails) {
-          const price = parseFloat(t.sellDetails.price) || 0;
-          const profit = parseFloat(t.sellDetails.profit) || 0;
-          const loss = parseFloat(t.sellDetails.loss) || 0;
-          const percentage = parseFloat(t.sellDetails.profitLossPercentage) || 0;
-          
-          if (profit > 0) {
-            description = `📈 Sold ${formattedAssetAmount} ${assetSymbol.toUpperCase()} for $${formattedAmount} at $${price.toFixed(2)}. Profit: +$${profit.toFixed(2)} (${percentage.toFixed(2)}%). Funds added to your matured balance.`;
-          } else if (loss > 0) {
-            description = `📉 Sold ${formattedAssetAmount} ${assetSymbol.toUpperCase()} for $${formattedAmount} at $${price.toFixed(2)}. Loss: -$${loss.toFixed(2)} (${percentage.toFixed(2)}%). Funds added to your matured balance.`;
-          } else {
-            description = `💱 Sold ${formattedAssetAmount} ${assetSymbol.toUpperCase()} for $${formattedAmount} at $${price.toFixed(2)}. Funds added to your matured balance.`;
-          }
-        } else {
-          description = `💱 Sold ${formattedAssetAmount} ${assetSymbol.toUpperCase()} for $${formattedAmount}. Proceeds added to your matured balance.`;
-        }
-      }
-      else if (t.type === 'interest') {
-        if (t.details && t.details.planName) {
-          description = `💎 Mining reward of $${formattedAmount} earned from ${t.details.planName} cloud mining contract. ${formattedAssetAmount} ${assetSymbol.toUpperCase()} credited to your matured balance.`;
-        } else {
-          description = `💎 Interest payment of $${formattedAmount} (${formattedAssetAmount} ${assetSymbol.toUpperCase()}) from your cloud mining investments.`;
-        }
-      }
-      else if (t.type === 'referral') {
-        if (t.details) {
-          const downlineName = t.details.downlineName || 'a referred user';
-          const round = t.details.round || 1;
-          const totalRounds = t.details.totalRounds || 3;
-          description = `🤝 Referral bonus of $${formattedAmount} (${formattedAssetAmount} ${assetSymbol.toUpperCase()}) earned from ${downlineName}'s investment (Round ${round}/${totalRounds}). 5% commission credited.`;
-        } else {
-          description = `🤝 Received referral bonus of $${formattedAmount} from your downline's mining activity.`;
-        }
-      }
-      else if (t.type === 'transfer') {
-        if (t.details && t.details.from) {
-          description = `🔄 Transferred $${formattedAmount} from ${t.details.from} balance to ${t.details.to} balance.`;
-        } else {
-          description = `🔄 Internal transfer of $${formattedAmount} completed.`;
-        }
-      }
-      else if (t.type === 'investment') {
-        if (t.details && t.details.planName) {
-          description = `⛏️ Started cloud mining contract: ${t.details.planName} with $${formattedAmount}. Expected return: ${t.details.expectedReturn || 'calculating...'}. Duration: ${t.details.duration || 'N/A'} hours.`;
-        } else {
-          description = `⛏️ New cloud mining investment of $${formattedAmount} activated.`;
-        }
-      }
-      else {
-        // Fallback description
-        const action = t.type ? t.type.charAt(0).toUpperCase() + t.type.slice(1) : 'Transaction';
-        description = `${action} of $${formattedAmount} (${formattedAssetAmount} ${assetSymbol.toUpperCase()}) processed. Status: ${t.status || 'completed'}.`;
-      }
-
-      // Ensure description is a string and not too long
-      if (typeof description !== 'string') {
-        description = String(description || 'Transaction processed');
-      }
-
-      // Truncate if too long but keep it readable
-      if (description.length > 200) {
-        description = description.substring(0, 197) + '...';
-      }
-
-      // Format dates
-      const createdAt = t.createdAt || new Date();
-      const formattedDate = createdAt;
-
-      // Calculate exchange rate for display
-      let exchangeRate = 1;
-      if (t.type === 'buy' && t.buyDetails?.price) {
-        exchangeRate = parseFloat(t.buyDetails.price);
-      } else if (t.type === 'sell' && t.sellDetails?.price) {
-        exchangeRate = parseFloat(t.sellDetails.price);
-      } else if (t.exchangeRateAtTime) {
-        exchangeRate = parseFloat(t.exchangeRateAtTime);
-      }
-
-      return {
-        id: t._id.toString(),
-        _id: t._id.toString(),
-        type: String(t.type || 'transaction'),
-        amount: parseFloat(t.amount) || 0,
-        asset: assetSymbol,
-        assetAmount: parseFloat(t.assetAmount) || 0,
-        status: String(t.status || 'pending'),
-        method: String(t.method || 'crypto'),
-        reference: String(t.reference || ''),
-        fee: parseFloat(t.fee) || 0,
-        netAmount: parseFloat(t.netAmount) || (parseFloat(t.amount) || 0),
-        btcAddress: t.btcAddress ? String(t.btcAddress) : '',
-        network: String(network),
-        exchangeRateAtTime: exchangeRate,
-        description: description,
-        details: description,
-        buyDetails: t.buyDetails || null,
-        sellDetails: t.sellDetails || null,
-        createdAt: createdAt,
-        date: createdAt,
-        timestamp: createdAt,
-        // Add logo URL for frontend convenience
-        logo: assetLogos[assetSymbol] || 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png',
-        // Add emoji indicator for transaction type
-        typeEmoji: getTransactionEmoji(t.type)
-      };
-    });
-
-    res.status(200).json({
-      status: 'success',
-      data: {
-        transactions: formattedTransactions,
-        pagination: {
-          page,
-          limit,
-          total,
-          pages: Math.ceil(total / limit),
-          hasNext: skip + limit < total,
-          hasPrev: page > 1
-        }
-      }
-    });
-
-  } catch (err) {
-    console.error('Transactions error:', err);
-    // Return empty array with proper structure
-    res.status(200).json({
-      status: 'success',
-      data: {
-        transactions: [],
-        pagination: {
-          page: 1,
-          limit: 50,
-          total: 0,
-          pages: 1,
-          hasNext: false,
-          hasPrev: false
-        }
-      }
-    });
-  }
-});
-
-// Helper function to get time ago string
-function getTimeAgo(date) {
-  const seconds = Math.floor((new Date() - date) / 1000);
-  
-  let interval = seconds / 31536000;
-  if (interval > 1) return Math.floor(interval) + ' years ago';
-  
-  interval = seconds / 2592000;
-  if (interval > 1) return Math.floor(interval) + ' months ago';
-  
-  interval = seconds / 86400;
-  if (interval > 1) return Math.floor(interval) + ' days ago';
-  
-  interval = seconds / 3600;
-  if (interval > 1) return Math.floor(interval) + ' hours ago';
-  
-  interval = seconds / 60;
-  if (interval > 1) return Math.floor(interval) + ' minutes ago';
-  
-  return Math.floor(seconds) + ' seconds ago';
-}
-
-// Helper function to get emoji for transaction type
-function getTransactionEmoji(type) {
-  const emojis = {
-    deposit: '📥',
-    withdrawal: '📤',
-    buy: '💰',
-    sell: '💱',
-    interest: '💎',
-    referral: '🤝',
-    transfer: '🔄',
-    investment: '⛏️',
-    loan: '🏦',
-    default: '💳'
-  };
-  
-  return emojis[type] || emojis.default;
-}
-
-
-
-
-
 
 
 
@@ -17055,7 +16672,395 @@ function getCoinGeckoId(asset) {
 
 
 
+// =============================================
+// GET /api/transactions - User Transaction History with Proper Descriptions
+// =============================================
+app.get('/api/transactions', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    
+    // Pagination parameters
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 50;
+    const skip = (page - 1) * limit;
 
+    // Filter parameters
+    const type = req.query.type;
+    const asset = req.query.asset;
+    const status = req.query.status;
+    const startDate = req.query.startDate;
+    const endDate = req.query.endDate;
+
+    // Build query
+    const query = { user: userId };
+    
+    if (type && type !== 'all') {
+      query.type = type;
+    }
+    
+    if (asset) {
+      query.asset = asset.toLowerCase();
+    }
+    
+    if (status && status !== 'all') {
+      query.status = status;
+    }
+    
+    if (startDate || endDate) {
+      query.createdAt = {};
+      if (startDate) query.createdAt.$gte = new Date(startDate);
+      if (endDate) query.createdAt.$lte = new Date(endDate);
+    }
+
+    // Get total count for pagination
+    const total = await Transaction.countDocuments(query);
+
+    // Get transactions with populated references
+    const transactions = await Transaction.find(query)
+      .populate('user', 'firstName lastName email')
+      .populate('processedBy', 'name')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    // Asset logo mapping
+    const assetLogos = {
+      btc: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png',
+      eth: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png',
+      usdt: 'https://assets.coingecko.com/coins/images/325/large/Tether.png',
+      bnb: 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png',
+      sol: 'https://assets.coingecko.com/coins/images/4128/large/solana.png',
+      usdc: 'https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png',
+      xrp: 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png',
+      doge: 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png',
+      ada: 'https://assets.coingecko.com/coins/images/975/large/cardano.png',
+      shib: 'https://assets.coingecko.com/coins/images/11939/large/shiba.png',
+      avax: 'https://assets.coingecko.com/coins/images/12559/large/Avalanche_Circle_RedWhite.png',
+      dot: 'https://assets.coingecko.com/coins/images/12171/large/polkadot.png',
+      trx: 'https://assets.coingecko.com/coins/images/1094/large/tron-logo.png',
+      link: 'https://assets.coingecko.com/coins/images/877/large/chainlink-new-logo.png',
+      matic: 'https://assets.coingecko.com/coins/images/4713/large/matic-token-icon.png',
+      wbtc: 'https://assets.coingecko.com/coins/images/7598/large/wrapped_bitcoin_wbtc.png',
+      ltc: 'https://assets.coingecko.com/coins/images/2/large/litecoin.png',
+      near: 'https://assets.coingecko.com/coins/images/10365/large/near_icon.png',
+      uni: 'https://assets.coingecko.com/coins/images/12504/large/uni.jpg',
+      bch: 'https://assets.coingecko.com/coins/images/780/large/bitcoin-cash-circle.png',
+      xlm: 'https://assets.coingecko.com/coins/images/100/large/Stellar_symbol_black_RGB.png',
+      atom: 'https://assets.coingecko.com/coins/images/1481/large/cosmos_hub.png',
+      xmr: 'https://assets.coingecko.com/coins/images/69/large/monero_logo.png',
+      flow: 'https://assets.coingecko.com/coins/images/13446/large/5f6294c0c7a8cda55cb1.png',
+      vet: 'https://assets.coingecko.com/coins/images/1167/large/VET_Token_Icon.png',
+      fil: 'https://assets.coingecko.com/coins/images/12817/large/filecoin.png',
+      theta: 'https://assets.coingecko.com/coins/images/2538/large/theta-token-logo.png',
+      hbar: 'https://assets.coingecko.com/coins/images/3688/large/hbar.png',
+      ftm: 'https://assets.coingecko.com/coins/images/4001/large/Fantom_round.png',
+      xtz: 'https://assets.coingecko.com/coins/images/976/large/Tezos-logo.png'
+    };
+
+    // Asset network mapping
+    const assetNetworks = {
+      btc: 'Bitcoin',
+      eth: 'Ethereum (ERC-20)',
+      usdt: 'Tron (TRC-20)',
+      bnb: 'BNB Smart Chain (BEP-20)',
+      sol: 'Solana',
+      usdc: 'Ethereum (ERC-20)',
+      xrp: 'XRP Ledger',
+      doge: 'Dogecoin',
+      ada: 'Cardano',
+      shib: 'Ethereum (ERC-20)',
+      avax: 'Avalanche C-Chain',
+      dot: 'Polkadot',
+      trx: 'TRON',
+      link: 'Ethereum (ERC-20)',
+      matic: 'Polygon',
+      wbtc: 'Ethereum (ERC-20)',
+      ltc: 'Litecoin',
+      near: 'NEAR',
+      uni: 'Ethereum (ERC-20)',
+      bch: 'Bitcoin Cash',
+      xlm: 'Stellar',
+      atom: 'Cosmos',
+      xmr: 'Monero',
+      flow: 'Flow',
+      vet: 'VeChain',
+      fil: 'Filecoin',
+      theta: 'Theta',
+      hbar: 'Hedera',
+      ftm: 'Fantom',
+      xtz: 'Tezos'
+    };
+
+    // Format transactions for frontend
+    const formattedTransactions = transactions.map(t => {
+      // Safely determine asset symbol - ensure it's a string
+      let assetSymbol = 'btc'; // Default
+      
+      if (t.asset && typeof t.asset === 'string') {
+        assetSymbol = t.asset.toLowerCase();
+      } else if (t.type === 'buy' && t.buyDetails?.asset && typeof t.buyDetails.asset === 'string') {
+        assetSymbol = t.buyDetails.asset.toLowerCase();
+      } else if (t.type === 'sell' && t.sellDetails?.asset && typeof t.sellDetails.asset === 'string') {
+        assetSymbol = t.sellDetails.asset.toLowerCase();
+      } else if (t.method && typeof t.method === 'string') {
+        assetSymbol = t.method.toLowerCase();
+      }
+
+      // Get network information - ensure it's a string
+      let network = 'Blockchain';
+      if (t.network && typeof t.network === 'string' && t.network !== 'Unknown') {
+        network = t.network;
+      } else {
+        network = assetNetworks[assetSymbol] || 'Blockchain';
+      }
+
+      // Safely parse amounts
+      const amount = t.amount ? parseFloat(t.amount) : 0;
+      const assetAmount = t.assetAmount ? parseFloat(t.assetAmount) : 0;
+      const fee = t.fee ? parseFloat(t.fee) : 0;
+      const netAmount = t.netAmount ? parseFloat(t.netAmount) : amount;
+
+      // Format amounts for display in description
+      const formattedAmount = amount.toFixed(2);
+      const formattedAssetAmount = assetAmount.toFixed(8);
+      
+      // Get transaction status with proper string
+      const status = t.status && typeof t.status === 'string' ? t.status.toLowerCase() : 'pending';
+      
+      // Get transaction type with proper string
+      const type = t.type && typeof t.type === 'string' ? t.type.toLowerCase() : 'transaction';
+
+      // Generate detailed description based on transaction type
+      let description = '';
+
+      try {
+        if (type === 'deposit') {
+          const method = t.method && typeof t.method === 'string' ? t.method.toLowerCase() : 'crypto';
+          
+          if (method === 'btc' || method === 'bitcoin') {
+            description = `📥 Received ${formattedAssetAmount} BTC ($${formattedAmount}) via Bitcoin network. Transaction confirmed on ${network}.`;
+          } else if (method === 'eth' || method === 'ethereum') {
+            description = `📥 Received ${formattedAssetAmount} ETH ($${formattedAmount}) via Ethereum network. Transaction confirmed on ${network}.`;
+          } else if (method === 'usdt') {
+            description = `📥 Received ${formattedAssetAmount} USDT ($${formattedAmount}) via ${network}. Deposit completed successfully.`;
+          } else if (method === 'card' || method === 'credit card' || method === 'debit card') {
+            description = `💳 Deposited $${formattedAmount} to your account via Credit/Debit Card. Funds are now available in your main balance.`;
+          } else if (method === 'bank' || method === 'wire') {
+            description = `🏦 Bank transfer of $${formattedAmount} completed. Funds have been credited to your main balance.`;
+          } else {
+            description = `📥 Deposit of $${formattedAmount} (${formattedAssetAmount} ${assetSymbol.toUpperCase()}) completed via ${method}.`;
+          }
+        } 
+        else if (type === 'withdrawal') {
+          const method = t.method && typeof t.method === 'string' ? t.method.toLowerCase() : 'crypto';
+          let address = '';
+          
+          if (t.btcAddress && typeof t.btcAddress === 'string') {
+            address = t.btcAddress.substring(0, 10) + '...' + t.btcAddress.substring(t.btcAddress.length - 6);
+          } else {
+            address = 'your external wallet';
+          }
+          
+          if (method === 'btc' || method === 'bitcoin') {
+            description = `📤 Sent ${formattedAssetAmount} BTC ($${formattedAmount}) to ${address} on Bitcoin network. Withdrawal has been processed.`;
+          } else if (method === 'eth' || method === 'ethereum') {
+            description = `📤 Sent ${formattedAssetAmount} ETH ($${formattedAmount}) to ${address} on Ethereum network. Withdrawal completed.`;
+          } else if (method === 'usdt') {
+            description = `📤 Withdrawn ${formattedAssetAmount} USDT ($${formattedAmount}) to ${address} via ${network}. Transaction has been broadcasted.`;
+          } else if (method === 'bank') {
+            description = `🏦 Withdrawn $${formattedAmount} to your bank account. Funds should arrive in 1-3 business days.`;
+          } else {
+            description = `📤 Withdrawal of $${formattedAmount} (${formattedAssetAmount} ${assetSymbol.toUpperCase()}) to external wallet. Transaction ID: ${t.reference ? t.reference.substring(0, 8) : 'N/A'}...`;
+          }
+        } 
+        else if (type === 'buy') {
+          if (t.buyDetails) {
+            const price = t.buyDetails.price ? parseFloat(t.buyDetails.price) : 0;
+            const fromWallet = t.buyDetails.fromWallet || 'both';
+            let walletSource = '';
+            
+            if (fromWallet === 'main') {
+              walletSource = 'using your main balance';
+            } else if (fromWallet === 'matured') {
+              walletSource = 'using your matured earnings';
+            } else {
+              walletSource = 'using both main and matured balances';
+            }
+            
+            description = `💰 Purchased ${formattedAssetAmount} ${assetSymbol.toUpperCase()} for $${formattedAmount} at $${price.toFixed(2)} per coin, ${walletSource}. The assets have been added to your portfolio.`;
+          } else {
+            description = `💰 Bought ${formattedAssetAmount} ${assetSymbol.toUpperCase()} for $${formattedAmount}. The assets have been added to your portfolio.`;
+          }
+        } 
+        else if (type === 'sell') {
+          if (t.sellDetails) {
+            const price = t.sellDetails.price ? parseFloat(t.sellDetails.price) : 0;
+            const profit = t.sellDetails.profit ? parseFloat(t.sellDetails.profit) : 0;
+            const loss = t.sellDetails.loss ? parseFloat(t.sellDetails.loss) : 0;
+            const percentage = t.sellDetails.profitLossPercentage ? parseFloat(t.sellDetails.profitLossPercentage) : 0;
+            
+            if (profit > 0) {
+              description = `📈 Sold ${formattedAssetAmount} ${assetSymbol.toUpperCase()} for $${formattedAmount} at $${price.toFixed(2)}. Profit: +$${profit.toFixed(2)} (${percentage.toFixed(2)}%). Funds have been added to your matured balance.`;
+            } else if (loss > 0) {
+              description = `📉 Sold ${formattedAssetAmount} ${assetSymbol.toUpperCase()} for $${formattedAmount} at $${price.toFixed(2)}. Loss: -$${loss.toFixed(2)} (${percentage.toFixed(2)}%). Funds have been added to your matured balance.`;
+            } else {
+              description = `💱 Sold ${formattedAssetAmount} ${assetSymbol.toUpperCase()} for $${formattedAmount} at $${price.toFixed(2)}. Funds have been added to your matured balance.`;
+            }
+          } else {
+            description = `💱 Sold ${formattedAssetAmount} ${assetSymbol.toUpperCase()} for $${formattedAmount}. Proceeds added to your matured balance.`;
+          }
+        } 
+        else if (type === 'interest') {
+          if (t.details && typeof t.details === 'object') {
+            const planName = t.details.planName || 'Cloud Mining';
+            description = `💎 Mining reward of $${formattedAmount} earned from ${planName} contract. ${formattedAssetAmount} ${assetSymbol.toUpperCase()} has been credited to your matured balance.`;
+          } else {
+            description = `💎 Interest payment of $${formattedAmount} (${formattedAssetAmount} ${assetSymbol.toUpperCase()}) from your cloud mining investments.`;
+          }
+        } 
+        else if (type === 'referral') {
+          if (t.details && typeof t.details === 'object') {
+            const downlineName = t.details.downlineName || 'a referred user';
+            const round = t.details.round || 1;
+            const totalRounds = t.details.totalRounds || 3;
+            description = `🤝 Referral bonus of $${formattedAmount} earned from ${downlineName}'s investment (Round ${round}/${totalRounds}). 5% commission has been credited to your main balance.`;
+          } else {
+            description = `🤝 Received referral bonus of $${formattedAmount} from your downline's mining activity.`;
+          }
+        } 
+        else if (type === 'transfer') {
+          if (t.details && typeof t.details === 'object') {
+            const fromWallet = t.details.from || 'one wallet';
+            const toWallet = t.details.to || 'another wallet';
+            description = `🔄 Transferred $${formattedAmount} from ${fromWallet} balance to ${toWallet} balance.`;
+          } else {
+            description = `🔄 Internal transfer of $${formattedAmount} completed successfully.`;
+          }
+        } 
+        else if (type === 'investment') {
+          if (t.details && typeof t.details === 'object') {
+            const planName = t.details.planName || 'Mining Plan';
+            const expectedReturn = t.details.expectedReturn ? parseFloat(t.details.expectedReturn).toFixed(2) : 'calculating';
+            const duration = t.details.duration || 'N/A';
+            description = `⛏️ Started cloud mining contract: ${planName} with $${formattedAmount}. Expected return: $${expectedReturn}. Duration: ${duration} hours.`;
+          } else {
+            description = `⛏️ New cloud mining investment of $${formattedAmount} has been activated.`;
+          }
+        } 
+        else {
+          // Fallback description for unknown transaction types
+          description = `💳 Transaction of $${formattedAmount} (${formattedAssetAmount} ${assetSymbol.toUpperCase()}) processed. Status: ${status}.`;
+        }
+      } catch (descError) {
+        console.error('Error generating description:', descError);
+        description = `💳 Transaction of $${formattedAmount} processed on ${new Date(t.createdAt).toLocaleDateString()}.`;
+      }
+
+      // Ensure description is ALWAYS a string, never undefined/null
+      if (!description || typeof description !== 'string') {
+        description = `💳 Transaction of $${formattedAmount} processed.`;
+      }
+
+      // Trim and ensure it's not too long
+      description = description.trim();
+      if (description.length > 200) {
+        description = description.substring(0, 197) + '...';
+      }
+
+      // Format date
+      const createdAt = t.createdAt || new Date();
+      
+      // Get reference as string
+      const reference = t.reference && typeof t.reference === 'string' ? t.reference : '';
+
+      return {
+        id: t._id ? t._id.toString() : `tx-${Date.now()}`,
+        _id: t._id ? t._id.toString() : `tx-${Date.now()}`,
+        type: type,
+        amount: amount,
+        asset: assetSymbol,
+        assetAmount: assetAmount,
+        status: status,
+        method: t.method && typeof t.method === 'string' ? t.method : 'crypto',
+        reference: reference,
+        fee: fee,
+        netAmount: netAmount,
+        btcAddress: t.btcAddress && typeof t.btcAddress === 'string' ? t.btcAddress : '',
+        network: network,
+        exchangeRateAtTime: t.exchangeRateAtTime ? parseFloat(t.exchangeRateAtTime) : 1,
+        description: description, // This is guaranteed to be a string
+        details: description, // Same guaranteed string for details field
+        buyDetails: t.buyDetails || null,
+        sellDetails: t.sellDetails || null,
+        createdAt: createdAt,
+        date: createdAt,
+        timestamp: createdAt,
+        // Add logo URL for frontend convenience
+        logo: assetLogos[assetSymbol] || 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png',
+        // Add emoji indicator for transaction type
+        typeEmoji: getTransactionEmoji(type),
+        // Add status color hint
+        statusColor: status === 'completed' ? 'success' : status === 'pending' ? 'warning' : 'danger'
+      };
+    });
+
+    // Calculate pagination info
+    const totalPages = Math.ceil(total / limit);
+    
+    res.status(200).json({
+      status: 'success',
+      data: {
+        transactions: formattedTransactions,
+        pagination: {
+          page,
+          limit,
+          total,
+          pages: totalPages,
+          hasNext: skip + limit < total,
+          hasPrev: page > 1
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Transactions error:', err);
+    
+    // Return empty array with proper structure on error
+    res.status(200).json({
+      status: 'success',
+      data: {
+        transactions: [],
+        pagination: {
+          page: 1,
+          limit: 50,
+          total: 0,
+          pages: 1,
+          hasNext: false,
+          hasPrev: false
+        }
+      }
+    });
+  }
+});
+
+// Helper function to get emoji for transaction type
+function getTransactionEmoji(type) {
+  const emojis = {
+    deposit: '📥',
+    withdrawal: '📤',
+    buy: '💰',
+    sell: '💱',
+    interest: '💎',
+    referral: '🤝',
+    transfer: '🔄',
+    investment: '⛏️',
+    loan: '🏦',
+    default: '💳'
+  };
+  
+  return emojis[type] || emojis.default;
+}
 
 
 
