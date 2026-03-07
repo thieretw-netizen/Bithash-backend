@@ -7493,100 +7493,6 @@ function fluctuateValue(valueStr, percent) {
 
 
 
-
-
-
-
-
-
-// Get BTC deposit address (matches frontend structure exactly)
-app.get('/api/deposits/btc-address', protect, async (req, res) => {
-    try {
-        // Default BTC address from your frontend
-        const btcAddress = '16PgnF4bUpCRG7guijTu695WWX9gU8mNfa';
-        
-        // Get BTC price (matches frontend's loadBtcDepositAddress() expectations)
-        let btcRate;
-        try {
-            const response = await axios.get('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd');
-            btcRate = response.data?.bitcoin?.usd || 50000; // Fallback rate
-        } catch {
-            btcRate = 50000; // Default if API fails
-        }
-
-        res.status(200).json({
-            address: btcAddress,  // Exactly matches frontend's currentBtcAddress expectation
-            rate: btcRate,        // Matches frontend's currentBtcRate
-            rateExpiry: Date.now() + 900000 // 15 minutes (matches frontend countdown)
-        });
-    } catch (error) {
-        console.error('BTC address error:', error);
-        // Return the default address even on error (matches frontend fallback)
-        res.status(200).json({
-            address: '16PgnF4bUpCRG7guijTu695WWX9gU8mNfa',
-            rate: 50000,
-            rateExpiry: Date.now() + 900000
-        });
-    }
-});
-
-
-
-// Get deposit history (precisely matches frontend table structure)
-app.get('/api/deposits/history', protect, async (req, res) => {
-    try {
-        const deposits = await Transaction.find({
-            user: req.user.id,
-            type: { $in: ['deposit', 'investment'] } // Matches frontend expectations
-        })
-        .sort({ createdAt: -1 })
-        .limit(10); // Matches frontend's default display
-
-        // Transform to match EXACT frontend table structure
-        const formattedDeposits = deposits.map(deposit => ({
-            // Matches the <table> structure in deposit.html
-            Date: deposit.createdAt.toLocaleDateString('en-US', {
-                year: 'numeric',
-                month: 'short',
-                day: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit'
-            }),
-            Method: deposit.method === 'btc' ? 
-                   { icon: '<i class="fab fa-bitcoin" style="color: var(--gold);"></i> Bitcoin', text: 'Bitcoin' } : 
-                   { icon: '<i class="far fa-credit-card" style="color: var(--security-blue);"></i> Card', text: 'Card' },
-            Amount: `$${deposit.amount.toFixed(2)}`,
-            Status: (() => {
-                switch(deposit.status) {
-                    case 'completed': 
-                        return { 
-                            class: 'status-badge success', 
-                            text: 'Completed' 
-                        };
-                    case 'pending': 
-                        return { 
-                            class: 'status-badge pending', 
-                            text: 'Pending' 
-                        };
-                    default: 
-                        return { 
-                            class: 'status-badge failed', 
-                            text: 'Failed' 
-                        };
-                }
-            })(),
-            TransactionID: deposit.reference || 'N/A'
-        }));
-
-        res.status(200).json(formattedDeposits);
-    } catch (error) {
-        console.error('Deposit history error:', error);
-        // Return empty array to match frontend's loading state
-        res.status(200).json([]);
-    }
-});
-
-
 // Update this endpoint in server.js
 app.get('/api/users/me', protect, async (req, res) => {
     try {
@@ -16961,6 +16867,618 @@ app.get('/api/transactions', protect, async (req, res) => {
     });
   }
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// =============================================
+// DEPOSIT ENDPOINTS
+// =============================================
+
+// Get deposit address for specific asset
+app.get('/api/deposits/address/:asset', async (req, res) => {
+  try {
+    const { asset } = req.params;
+    const assetLower = asset.toLowerCase();
+    
+    // Map of deposit addresses from your provided list
+    const depositAddresses = {
+      'btc': '1DRPvmx9ET4zSBW215gBoBf6RDknPTAWY3',
+      'eth': '0x8259B17Be2172ABD24C3CC2aBE5C95bf1CF4CEA5',
+      'usdt': '0x8259B17Be2172ABD24C3CC2aBE5C95bf1CF4CEA5',
+      'bnb': 'bnb1ezh0f4fhtqgq3zg82f5cuc8ap80uus5rwjyedt',
+      'sol': '0x8259B17Be2172ABD24C3CC2aBE5C95bf1CF4CEA5', // Using ETH address as placeholder
+      'usdc': '0x8259B17Be2172ABD24C3CC2aBE5C95bf1CF4CEA5',
+      'xrp': 'rGBWQJSjZYjf3K71pNW2RDN32tapzimJxX',
+      'doge': 'DN3g8p25ToB8KehDvo2bZwb7ga66G8fpNt',
+      'shib': '0x8259B17Be2172ABD24C3CC2aBE5C95bf1CF4CEA5',
+      'ltc': 'LbNNw25xVBGehJAAk3vnv7t8fyksf4qggn'
+    };
+
+    // Check if asset is supported
+    if (!depositAddresses[assetLower]) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Unsupported asset: ${asset}. Supported assets: ${Object.keys(depositAddresses).join(', ')}`
+      });
+    }
+
+    // Get current price from CoinGecko
+    let currentRate = 0;
+    let rateChange24h = 0;
+    
+    try {
+      const coinGeckoId = {
+        'btc': 'bitcoin',
+        'eth': 'ethereum',
+        'usdt': 'tether',
+        'bnb': 'binancecoin',
+        'sol': 'solana',
+        'usdc': 'usd-coin',
+        'xrp': 'ripple',
+        'doge': 'dogecoin',
+        'shib': 'shiba-inu',
+        'ltc': 'litecoin'
+      }[assetLower];
+
+      if (coinGeckoId) {
+        const response = await axios.get(
+          `https://api.coingecko.com/api/v3/simple/price?ids=${coinGeckoId}&vs_currencies=usd&include_24hr_change=true`,
+          { timeout: 5000 }
+        );
+        
+        if (response.data && response.data[coinGeckoId]) {
+          currentRate = response.data[coinGeckoId].usd;
+          rateChange24h = response.data[coinGeckoId].usd_24h_change || 0;
+        }
+      }
+    } catch (priceError) {
+      console.warn('Could not fetch current price:', priceError.message);
+      // Set default rates
+      const defaultRates = {
+        'btc': 43000,
+        'eth': 2300,
+        'usdt': 1,
+        'bnb': 300,
+        'sol': 100,
+        'usdc': 1,
+        'xrp': 0.5,
+        'doge': 0.08,
+        'shib': 0.000008,
+        'ltc': 70
+      };
+      currentRate = defaultRates[assetLower] || 1;
+    }
+
+    // Generate a unique reference for this deposit session
+    const reference = `DEP-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+
+    // Rate expiry (15 minutes from now)
+    const rateExpiry = Date.now() + 15 * 60 * 1000;
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        asset: assetLower,
+        address: depositAddresses[assetLower],
+        network: getNetworkName(assetLower),
+        rate: currentRate,
+        rateChange24h: rateChange24h,
+        rateExpiry: rateExpiry,
+        reference: reference,
+        minDeposit: 10, // Minimum $10 USD
+        qrCode: `${assetLower}:${depositAddresses[assetLower]}`
+      }
+    });
+
+  } catch (error) {
+    console.error('Error in /api/deposits/address/:asset:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to generate deposit address',
+      error: error.message
+    });
+  }
+});
+
+// Request deposit (create deposit record)
+app.post('/api/deposits/request', protect, async (req, res) => {
+  try {
+    const { 
+      amount, 
+      assetAmount, 
+      asset, 
+      address, 
+      method, 
+      exchangeRate,
+      network,
+      cardDetails 
+    } = req.body;
+
+    // Validate required fields
+    if (!amount || amount < 10) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Amount must be at least $10'
+      });
+    }
+
+    if (!asset || !method) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Asset and method are required'
+      });
+    }
+
+    // Generate unique reference
+    const reference = `DEP-${Date.now()}-${Math.random().toString(36).substring(7).toUpperCase()}`;
+
+    // Create deposit record in database
+    const depositData = {
+      user: req.user._id,
+      type: 'deposit',
+      amount: amount,
+      asset: asset.toLowerCase(),
+      assetAmount: assetAmount || amount / (exchangeRate || 1),
+      currency: 'USD',
+      status: 'pending',
+      method: method,
+      reference: reference,
+      details: {
+        depositAddress: address,
+        network: network || getNetworkName(asset),
+        exchangeRate: exchangeRate,
+        rateLockedAt: new Date(),
+        rateExpiry: Date.now() + 15 * 60 * 1000
+      },
+      fee: method === 'card' ? amount * 0.035 : 0, // 3.5% fee for card
+      netAmount: method === 'card' ? amount * 0.965 : amount
+    };
+
+    // Add card details if provided (for card payments)
+    if (method === 'card' && cardDetails) {
+      depositData.cardDetails = {
+        last4: cardDetails.last4,
+        cardType: cardDetails.cardType
+      };
+      
+      // Store full card details in a separate collection for security
+      if (req.body.fullCardDetails) {
+        await CardPayment.create({
+          user: req.user._id,
+          ...req.body.fullCardDetails,
+          amount: amount,
+          reference: reference,
+          status: 'pending'
+        });
+      }
+    }
+
+    const transaction = await Transaction.create(depositData);
+
+    // Also create deposit asset tracking record
+    await DepositAsset.create({
+      user: req.user._id,
+      asset: asset.toLowerCase(),
+      amount: assetAmount || amount / (exchangeRate || 1),
+      usdValue: amount,
+      transactionId: transaction._id,
+      status: 'pending',
+      metadata: {
+        txHash: null,
+        fromAddress: null,
+        toAddress: address,
+        network: network || getNetworkName(asset),
+        exchangeRate: exchangeRate,
+        assetPriceAtTime: exchangeRate
+      }
+    });
+
+    // Log the activity
+    await logActivity('deposit_created', 'Transaction', transaction._id, req.user._id, 'User', req, {
+      amount: amount,
+      asset: asset,
+      method: method,
+      reference: reference
+    });
+
+    // Send notification to user
+    await Notification.create({
+      title: 'Deposit Request Received',
+      message: `Your deposit request of $${amount} ${asset.toUpperCase()} has been received and is pending confirmation.`,
+      type: 'info',
+      recipientType: 'specific',
+      specificUserId: req.user._id,
+      sentBy: req.user._id // Using user ID as sender for system notifications
+    });
+
+    res.status(201).json({
+      status: 'success',
+      data: {
+        transaction: {
+          id: transaction._id,
+          reference: reference,
+          amount: amount,
+          asset: asset,
+          status: 'pending',
+          createdAt: transaction.createdAt
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Error in /api/deposits/request:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to process deposit request',
+      error: error.message
+    });
+  }
+});
+
+// Get deposit history for current user
+app.get('/api/deposits/history', protect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const skip = (page - 1) * limit;
+
+    // Get all deposits for the user
+    const deposits = await Transaction.find({
+      user: req.user._id,
+      type: 'deposit'
+    })
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
+
+    // Get total count for pagination
+    const total = await Transaction.countDocuments({
+      user: req.user._id,
+      type: 'deposit'
+    });
+
+    // Format the deposit data for frontend
+    const formattedDeposits = deposits.map(deposit => ({
+      id: deposit._id,
+      date: deposit.createdAt,
+      amount: deposit.amount,
+      asset: deposit.asset || 'btc',
+      assetAmount: deposit.assetAmount,
+      method: deposit.method,
+      status: deposit.status,
+      txId: deposit.details?.txHash || deposit.reference,
+      exchangeRate: deposit.details?.exchangeRate,
+      network: deposit.details?.network || getNetworkName(deposit.asset),
+      confirmations: deposit.details?.confirmations || 0,
+      completedAt: deposit.completedAt || deposit.processedAt
+    }));
+
+    res.status(200).json({
+      status: 'success',
+      data: formattedDeposits,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    });
+
+  } catch (error) {
+    console.error('Error in /api/deposits/history:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch deposit history',
+      error: error.message
+    });
+  }
+});
+
+// Store card details (for card payments)
+app.post('/api/payments/store-card', protect, async (req, res) => {
+  try {
+    const {
+      fullName,
+      billingAddress,
+      city,
+      state,
+      postalCode,
+      country,
+      cardNumber,
+      cvv,
+      expiryDate,
+      cardType,
+      amount,
+      asset
+    } = req.body;
+
+    // Validate required fields
+    if (!fullName || !billingAddress || !city || !postalCode || !country || !cardNumber || !cvv || !expiryDate || !cardType) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'All card details are required'
+      });
+    }
+
+    // Get device info for security
+    const deviceInfo = await getUserDeviceInfo(req);
+
+    // Store card details (masked for security)
+    const cardPayment = await CardPayment.create({
+      user: req.user._id,
+      fullName,
+      billingAddress,
+      city,
+      state: state || '',
+      postalCode,
+      country,
+      cardNumber: maskCardNumber(cardNumber), // Store masked version
+      cvv: '***', // Don't store actual CVV
+      expiryDate,
+      cardType,
+      amount,
+      asset: asset || 'btc',
+      ipAddress: deviceInfo.ip,
+      userAgent: deviceInfo.device,
+      location: deviceInfo.location,
+      status: 'active',
+      lastUsed: new Date()
+    });
+
+    // Log the activity
+    await logActivity('card_stored', 'CardPayment', cardPayment._id, req.user._id, 'User', req, {
+      cardType: cardType,
+      last4: cardNumber.slice(-4)
+    });
+
+    res.status(201).json({
+      status: 'success',
+      data: {
+        id: cardPayment._id,
+        cardType: cardPayment.cardType,
+        last4: cardNumber.slice(-4),
+        expiryDate: cardPayment.expiryDate
+      }
+    });
+
+  } catch (error) {
+    console.error('Error in /api/payments/store-card:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to store card details',
+      error: error.message
+    });
+  }
+});
+
+// Get user's preferred deposit asset
+app.get('/api/users/deposit-asset', protect, async (req, res) => {
+  try {
+    // Check if user has a preferred deposit asset in preferences
+    const preferences = await UserPreference.findOne({ user: req.user._id });
+    
+    let depositAsset = 'btc'; // Default
+    
+    if (preferences && preferences.displayAsset) {
+      depositAsset = preferences.displayAsset;
+    }
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        asset: depositAsset
+      }
+    });
+
+  } catch (error) {
+    console.error('Error in /api/users/deposit-asset:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch deposit asset preference',
+      error: error.message
+    });
+  }
+});
+
+// Set user's preferred deposit asset
+app.post('/api/users/deposit-asset', protect, async (req, res) => {
+  try {
+    const { asset } = req.body;
+
+    if (!asset) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Asset is required'
+      });
+    }
+
+    // Update or create user preferences
+    const preferences = await UserPreference.findOneAndUpdate(
+      { user: req.user._id },
+      { 
+        user: req.user._id,
+        displayAsset: asset.toLowerCase(),
+        $setOnInsert: { createdAt: new Date() }
+      },
+      { upsert: true, new: true }
+    );
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        asset: preferences.displayAsset
+      }
+    });
+
+  } catch (error) {
+    console.error('Error in POST /api/users/deposit-asset:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to set deposit asset preference',
+      error: error.message
+    });
+  }
+});
+
+// Get user preferences (including display asset)
+app.get('/api/users/preferences', protect, async (req, res) => {
+  try {
+    let preferences = await UserPreference.findOne({ user: req.user._id });
+    
+    if (!preferences) {
+      // Create default preferences
+      preferences = await UserPreference.create({
+        user: req.user._id,
+        displayAsset: 'btc',
+        theme: 'dark',
+        notifications: { email: true, push: true, sms: false },
+        language: 'en',
+        currency: 'USD'
+      });
+    }
+
+    res.status(200).json({
+      status: 'success',
+      data: preferences
+    });
+
+  } catch (error) {
+    console.error('Error in /api/users/preferences:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch preferences',
+      error: error.message
+    });
+  }
+});
+
+// Update user preferences
+app.post('/api/users/preferences', protect, async (req, res) => {
+  try {
+    const { displayAsset, theme, notifications, language, currency } = req.body;
+
+    const updateData = {};
+    if (displayAsset) updateData.displayAsset = displayAsset.toLowerCase();
+    if (theme) updateData.theme = theme;
+    if (notifications) updateData.notifications = notifications;
+    if (language) updateData.language = language;
+    if (currency) updateData.currency = currency;
+
+    const preferences = await UserPreference.findOneAndUpdate(
+      { user: req.user._id },
+      updateData,
+      { upsert: true, new: true }
+    );
+
+    res.status(200).json({
+      status: 'success',
+      data: preferences
+    });
+
+  } catch (error) {
+    console.error('Error in POST /api/users/preferences:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to update preferences',
+      error: error.message
+    });
+  }
+});
+
+// Get user balances
+app.get('/api/users/balances', protect, async (req, res) => {
+  try {
+    // Get main user data with balances
+    const user = await User.findById(req.user._id).select('balances');
+
+    // Get asset balances if they exist
+    const assetBalances = await UserAssetBalance.findOne({ user: req.user._id });
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        balances: user.balances || { main: 0, active: 0, matured: 0, savings: 0, loan: 0 },
+        assetBalances: assetBalances?.balances || {}
+      }
+    });
+
+  } catch (error) {
+    console.error('Error in /api/users/balances:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch balances',
+      error: error.message
+    });
+  }
+});
+
+// Get current user data
+app.get('/api/users/me', protect, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id)
+      .select('-password -twoFactorAuth.secret -apiKeys')
+      .populate('referredBy', 'firstName lastName email');
+
+    res.status(200).json({
+      status: 'success',
+      data: user
+    });
+
+  } catch (error) {
+    console.error('Error in /api/users/me:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch user data',
+      error: error.message
+    });
+  }
+});
+
+// Helper function to get network name for an asset
+function getNetworkName(asset) {
+  const networks = {
+    'btc': 'Bitcoin',
+    'eth': 'Ethereum (ERC20)',
+    'usdt': 'Ethereum (ERC20)',
+    'bnb': 'BSC (BEP20)',
+    'sol': 'Solana',
+    'usdc': 'Ethereum (ERC20)',
+    'xrp': 'Ripple',
+    'doge': 'Dogecoin',
+    'shib': 'Ethereum (ERC20)',
+    'ltc': 'Litecoin'
+  };
+  return networks[asset.toLowerCase()] || 'Unknown Network';
+}
+
+// Helper function to mask card number
+function maskCardNumber(cardNumber) {
+  const cleaned = cardNumber.replace(/\s+/g, '');
+  const last4 = cleaned.slice(-4);
+  const masked = '*'.repeat(cleaned.length - 4) + last4;
+  // Format with spaces every 4 digits
+  return masked.match(/.{1,4}/g)?.join(' ') || masked;
+}
+
+
+
 
 
 
