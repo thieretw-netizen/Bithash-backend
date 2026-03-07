@@ -16676,7 +16676,6 @@ function getCoinGeckoId(asset) {
 
 
 
-
 // =============================================
 // GET /api/transactions - User Transaction History
 // =============================================
@@ -16763,16 +16762,32 @@ app.get('/api/transactions', protect, async (req, res) => {
 
     // Format transactions for frontend
     const formattedTransactions = transactions.map(t => {
-      // Safely determine asset symbol
-      let assetSymbol = 'btc';
-      if (t.asset && typeof t.asset === 'string') {
+      // Determine asset symbol - PRIORITIZE actual asset field, NOT method
+      let assetSymbol = 'btc'; // Default
+      
+      // First priority: asset field
+      if (t.asset && typeof t.asset === 'string' && t.asset !== 'internal') {
         assetSymbol = t.asset.toLowerCase();
-      } else if (t.type === 'buy' && t.buyDetails?.asset && typeof t.buyDetails.asset === 'string') {
+      }
+      // Second priority: buyDetails.asset
+      else if (t.type === 'buy' && t.buyDetails?.asset && typeof t.buyDetails.asset === 'string' && t.buyDetails.asset !== 'internal') {
         assetSymbol = t.buyDetails.asset.toLowerCase();
-      } else if (t.type === 'sell' && t.sellDetails?.asset && typeof t.sellDetails.asset === 'string') {
+      }
+      // Third priority: sellDetails.asset
+      else if (t.type === 'sell' && t.sellDetails?.asset && typeof t.sellDetails.asset === 'string' && t.sellDetails.asset !== 'internal') {
         assetSymbol = t.sellDetails.asset.toLowerCase();
-      } else if (t.method && typeof t.method === 'string') {
-        assetSymbol = t.method.toLowerCase();
+      }
+      // Fourth priority: check if method is a valid crypto asset (not 'internal' or 'bank' or 'card')
+      else if (t.method && typeof t.method === 'string') {
+        const method = t.method.toLowerCase();
+        // Only use method if it's a valid crypto symbol
+        const validCryptoAssets = ['btc', 'eth', 'usdt', 'bnb', 'sol', 'usdc', 'xrp', 'doge', 'ada', 'shib', 
+                                   'avax', 'dot', 'trx', 'link', 'matic', 'wbtc', 'ltc', 'near', 'uni', 'bch',
+                                   'xlm', 'atom', 'xmr', 'flow', 'vet', 'fil', 'theta', 'hbar', 'ftm', 'xtz'];
+        
+        if (validCryptoAssets.includes(method)) {
+          assetSymbol = method;
+        }
       }
 
       // Safely parse amounts
@@ -16785,12 +16800,13 @@ app.get('/api/transactions', protect, async (req, res) => {
       // Get transaction type
       const type = t.type && typeof t.type === 'string' ? t.type.toLowerCase() : 'transaction';
 
+      // Get method (for display purposes only, not as asset)
+      const method = t.method && typeof t.method === 'string' ? t.method.toLowerCase() : 'crypto';
+
       // Generate accurate description based on transaction type
       let description = '';
 
       if (type === 'deposit') {
-        const method = t.method && typeof t.method === 'string' ? t.method.toLowerCase() : 'crypto';
-        
         if (method === 'btc' || method === 'bitcoin') {
           description = `Deposit of ${assetAmount.toFixed(8)} BTC ($${amount.toFixed(2)}) via Bitcoin network.`;
         } else if (method === 'eth' || method === 'ethereum') {
@@ -16806,8 +16822,6 @@ app.get('/api/transactions', protect, async (req, res) => {
         }
       } 
       else if (type === 'withdrawal') {
-        const method = t.method && typeof t.method === 'string' ? t.method.toLowerCase() : 'crypto';
-        
         if (method === 'btc' || method === 'bitcoin') {
           description = `Withdrawal of ${assetAmount.toFixed(8)} BTC ($${amount.toFixed(2)}) to external wallet.`;
         } else if (method === 'eth' || method === 'ethereum') {
@@ -16885,15 +16899,18 @@ app.get('/api/transactions', protect, async (req, res) => {
       // Trim and ensure it's not too long
       description = description.trim();
 
+      // Determine correct logo
+      const logo = assetLogos[assetSymbol] || 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png';
+
       return {
         id: t._id ? t._id.toString() : `tx-${Date.now()}`,
         _id: t._id ? t._id.toString() : `tx-${Date.now()}`,
         type: type,
         amount: amount,
-        asset: assetSymbol,
+        asset: assetSymbol, // This will NEVER be 'internal' now
         assetAmount: assetAmount,
         status: status,
-        method: t.method && typeof t.method === 'string' ? t.method : 'crypto',
+        method: method, // Keep method separate for reference
         reference: t.reference && typeof t.reference === 'string' ? t.reference : '',
         fee: t.fee ? parseFloat(t.fee) : 0,
         netAmount: t.netAmount ? parseFloat(t.netAmount) : amount,
@@ -16907,7 +16924,7 @@ app.get('/api/transactions', protect, async (req, res) => {
         createdAt: t.createdAt || new Date(),
         date: t.createdAt || new Date(),
         timestamp: t.createdAt || new Date(),
-        logo: assetLogos[assetSymbol] || 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png'
+        logo: logo
       };
     });
 
