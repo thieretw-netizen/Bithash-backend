@@ -17487,6 +17487,467 @@ function maskCardNumber(cardNumber) {
 
 
 
+/**
+ * GET /api/withdrawals/asset - Get available assets for withdrawal
+ */
+app.get('/api/withdrawals/asset', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+
+        // Get user's asset balances
+        const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
+        
+        if (!userAssetBalance) {
+            return res.status(200).json({
+                status: 'success',
+                data: {
+                    assets: []
+                }
+            });
+        }
+
+        // Filter assets with balance > 0
+        const balances = userAssetBalance.balances || {};
+        const assets = [];
+
+        for (const [symbol, amount] of Object.entries(balances)) {
+            if (amount > 0) {
+                // Get current price for USD value
+                let usdValue = 0;
+                let currentPrice = 0;
+                try {
+                    const assetPrice = await AssetPrice.findOne({ symbol: symbol });
+                    if (assetPrice) {
+                        currentPrice = assetPrice.currentPrice;
+                        usdValue = amount * currentPrice;
+                    }
+                } catch (err) {
+                    console.warn(`Could not fetch price for ${symbol}`);
+                }
+
+                assets.push({
+                    symbol: symbol,
+                    amount: amount,
+                    usdValue: usdValue,
+                    currentPrice: currentPrice
+                });
+            }
+        }
+
+        // Sort by USD value descending
+        assets.sort((a, b) => b.usdValue - a.usdValue);
+
+        return res.status(200).json({
+            status: 'success',
+            data: {
+                assets: assets
+            }
+        });
+
+    } catch (err) {
+        console.error('Error fetching assets:', err);
+        return res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch assets'
+        });
+    }
+});
+
+/**
+ * POST /api/withdrawals/asset - Process asset withdrawal
+ */
+app.post('/api/withdrawals/asset', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const {
+            amount,
+            asset,
+            walletAddress,
+            gasFee,
+            exchangeRate,
+            balanceSource,
+            mainAmountUsed,
+            maturedAmountUsed
+        } = req.body;
+
+        // Validation
+        if (!amount || amount < 100) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Minimum withdrawal amount is $100'
+            });
+        }
+
+        if (!asset) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Asset is required'
+            });
+        }
+
+        if (!walletAddress || walletAddress.length < 26) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Valid wallet address is required'
+            });
+        }
+
+        // Get user to check balances
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'User not found'
+            });
+        }
+
+        // Calculate total available balance
+        const mainBalance = user.balances.main || 0;
+        const maturedBalance = user.balances.matured || 0;
+        const totalAvailable = mainBalance + maturedBalance;
+
+        if (amount > totalAvailable) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Insufficient balance'
+            });
+        }
+
+        // Generate unique reference
+        const reference = `WDR-${asset.toUpperCase()}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+
+        // Calculate asset amount
+        const assetAmount = amount / exchangeRate;
+
+        // Create transaction record
+        const transaction = await Transaction.create({
+            user: userId,
+            type: 'withdrawal',
+            amount: amount,
+            asset: asset,
+            assetAmount: assetAmount,
+            currency: 'USD',
+            status: 'pending',
+            method: asset,
+            reference: reference,
+            details: {
+                walletAddress: walletAddress,
+                exchangeRate: exchangeRate,
+                gasFee: gasFee,
+                balanceSource: balanceSource,
+                mainAmountUsed: mainAmountUsed || 0,
+                maturedAmountUsed: maturedAmountUsed || 0,
+                assetAmount: assetAmount
+            },
+            fee: 0,
+            netAmount: amount
+        });
+
+        // Deduct from user balances (immediate hold)
+        const updateQuery = {};
+        
+        if (balanceSource === 'main' || (mainAmountUsed > 0 && maturedAmountUsed === 0)) {
+            updateQuery['balances.main'] = -amount;
+        } else if (balanceSource === 'matured' || (maturedAmountUsed > 0 && mainAmountUsed === 0)) {
+            updateQuery['balances.matured'] = -amount;
+        } else if (balanceSource === 'both') {
+            if (mainAmountUsed > 0) {
+                updateQuery['balances.main'] = -mainAmountUsed;
+            }
+            if (maturedAmountUsed > 0) {
+                updateQuery['balances.matured'] = -maturedAmountUsed;
+            }
+        }
+
+        await User.findByIdAndUpdate(userId, {
+            $inc: updateQuery
+        });
+
+        // Log activity
+        await logActivity(
+            'withdrawal_created',
+            'Transaction',
+            transaction._id,
+            userId,
+            'User',
+            req,
+            {
+                amount: amount,
+                asset: asset,
+                reference: reference,
+                walletAddress: walletAddress,
+                balanceSource: balanceSource
+            }
+        );
+
+        return res.status(201).json({
+            status: 'success',
+            data: {
+                transaction: {
+                    id: transaction._id,
+                    reference: reference,
+                    amount: amount,
+                    asset: asset,
+                    status: 'pending',
+                    createdAt: transaction.createdAt
+                }
+            },
+            message: 'Withdrawal request submitted successfully'
+        });
+
+    } catch (err) {
+        console.error('Asset withdrawal error:', err);
+        return res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to process withdrawal request'
+        });
+    }
+});
+
+/**
+ * POST /api/withdrawals/bank - Process bank withdrawal
+ */
+app.post('/api/withdrawals/bank', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const {
+            amount,
+            bankName,
+            accountHolder,
+            accountNumber,
+            routingNumber,
+            balanceSource,
+            mainAmountUsed,
+            maturedAmountUsed,
+            gasFee,
+            asset,
+            exchangeRate
+        } = req.body;
+
+        // Validation
+        if (!amount || amount < 100) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Minimum bank withdrawal is $100'
+            });
+        }
+
+        if (!bankName || !accountHolder || !accountNumber || !routingNumber) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'All bank details are required'
+            });
+        }
+
+        // Get user to check balances
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'User not found'
+            });
+        }
+
+        // Calculate total available balance
+        const mainBalance = user.balances.main || 0;
+        const maturedBalance = user.balances.matured || 0;
+        const totalAvailable = mainBalance + maturedBalance;
+
+        if (amount > totalAvailable) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Insufficient balance'
+            });
+        }
+
+        // Generate unique reference
+        const reference = `WDR-BANK-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+
+        // Create transaction record
+        const transaction = await Transaction.create({
+            user: userId,
+            type: 'withdrawal',
+            amount: amount,
+            currency: 'USD',
+            status: 'pending',
+            method: 'bank',
+            reference: reference,
+            details: {
+                bankName: bankName,
+                accountHolder: accountHolder,
+                accountNumber: accountNumber,
+                routingNumber: routingNumber,
+                balanceSource: balanceSource,
+                mainAmountUsed: mainAmountUsed || 0,
+                maturedAmountUsed: maturedAmountUsed || 0,
+                gasFee: gasFee,
+                asset: asset,
+                exchangeRate: exchangeRate
+            },
+            bankDetails: {
+                accountName: accountHolder,
+                accountNumber: accountNumber,
+                bankName: bankName,
+                routingNumber: routingNumber
+            },
+            fee: 0,
+            netAmount: amount
+        });
+
+        // Deduct from user balances (immediate hold)
+        const updateQuery = {};
+        
+        if (balanceSource === 'main' || (mainAmountUsed > 0 && maturedAmountUsed === 0)) {
+            updateQuery['balances.main'] = -amount;
+        } else if (balanceSource === 'matured' || (maturedAmountUsed > 0 && mainAmountUsed === 0)) {
+            updateQuery['balances.matured'] = -amount;
+        } else if (balanceSource === 'both') {
+            if (mainAmountUsed > 0) {
+                updateQuery['balances.main'] = -mainAmountUsed;
+            }
+            if (maturedAmountUsed > 0) {
+                updateQuery['balances.matured'] = -maturedAmountUsed;
+            }
+        }
+
+        await User.findByIdAndUpdate(userId, {
+            $inc: updateQuery
+        });
+
+        // Log activity
+        await logActivity(
+            'withdrawal_created',
+            'Transaction',
+            transaction._id,
+            userId,
+            'User',
+            req,
+            {
+                amount: amount,
+                method: 'bank',
+                bankName: bankName,
+                reference: reference,
+                balanceSource: balanceSource
+            }
+        );
+
+        return res.status(201).json({
+            status: 'success',
+            data: {
+                transaction: {
+                    id: transaction._id,
+                    reference: reference,
+                    amount: amount,
+                    method: 'bank',
+                    status: 'pending',
+                    createdAt: transaction.createdAt
+                }
+            },
+            message: 'Bank withdrawal request submitted successfully'
+        });
+
+    } catch (err) {
+        console.error('Bank withdrawal error:', err);
+        return res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to process bank withdrawal request'
+        });
+    }
+});
+
+/**
+ * GET /api/withdrawals/history - Get withdrawal history
+ */
+app.get('/api/withdrawals/history', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+
+        // Get withdrawal transactions
+        const withdrawals = await Transaction.find({
+            user: userId,
+            type: 'withdrawal'
+        })
+        .sort({ createdAt: -1 })
+        .limit(50)
+        .lean();
+
+        // Format withdrawals for frontend
+        const formattedWithdrawals = withdrawals.map(w => ({
+            id: w._id,
+            date: w.createdAt,
+            method: w.method === 'bank' ? 'bank' : w.asset || 'crypto',
+            amount: w.amount,
+            asset: w.asset || 'USD',
+            status: w.status,
+            reference: w.reference,
+            txId: w.reference,
+            exchangeRate: w.details?.exchangeRate
+        }));
+
+        return res.status(200).json({
+            status: 'success',
+            data: formattedWithdrawals
+        });
+
+    } catch (err) {
+        console.error('Error fetching withdrawal history:', err);
+        return res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch withdrawal history'
+        });
+    }
+});
+
+/**
+ * POST /api/withdrawals/confirm-gas-payment - Confirm gas fee payment
+ */
+app.post('/api/withdrawals/confirm-gas-payment', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const {
+            asset,
+            amount,
+            address,
+            withdrawalData
+        } = req.body;
+
+        // Create a deposit record for the gas fee
+        const gasFeeDeposit = await DepositAsset.create({
+            user: userId,
+            asset: asset,
+            amount: amount,
+            usdValue: amount * (withdrawalData?.exchangeRate || 1),
+            status: 'pending',
+            metadata: {
+                type: 'gas_fee',
+                withdrawalReference: withdrawalData?.reference,
+                destinationAddress: address,
+                submittedAt: new Date()
+            }
+        });
+
+        return res.status(200).json({
+            status: 'success',
+            data: {
+                depositId: gasFeeDeposit._id,
+                message: 'Gas fee payment recorded, awaiting confirmation'
+            }
+        });
+
+    } catch (err) {
+        console.error('Error confirming gas payment:', err);
+        return res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to confirm gas payment'
+        });
+    }
+});
+
+
+
+
+
+
 
 
 // Error handling middleware
