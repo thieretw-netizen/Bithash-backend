@@ -16357,9 +16357,8 @@ function mapSymbolToCoinGeckoId(symbol) {
 
 
 
-
 // =============================================
-// ORDER BOOK ENDPOINT - REAL DATA FROM DATABASE
+// ORDER BOOK ENDPOINT - /api/market/orderbook/:symbol
 // =============================================
 app.get('/api/market/orderbook/:symbol', async (req, res) => {
   try {
@@ -16375,7 +16374,7 @@ app.get('/api/market/orderbook/:symbol', async (req, res) => {
     let orderBook = await OrderBook.findOne({ symbol });
     
     if (!orderBook) {
-      // If no order book exists, create initial one with real price
+      // Get real price from CoinGecko via your price update job
       const assetPrice = await AssetPrice.findOne({ symbol });
       const basePrice = assetPrice ? assetPrice.currentPrice : 50000;
       
@@ -16388,7 +16387,7 @@ app.get('/api/market/orderbook/:symbol', async (req, res) => {
       });
     }
 
-    // Format exactly as frontend expects: array of [price, amount]
+    // Format EXACTLY as frontend expects: array of [price, amount]
     const asks = orderBook.asks.map(a => [a.price, a.amount]);
     const bids = orderBook.bids.map(b => [b.price, b.amount]);
 
@@ -16406,12 +16405,12 @@ app.get('/api/market/orderbook/:symbol', async (req, res) => {
 
   } catch (err) {
     console.error('Order book error:', err);
-    res.status(500).json({ asks: [], bids: [], lastPrice: 0, volume24h: 0 });
+    res.json({ asks: [], bids: [], lastPrice: 0, volume24h: 0 });
   }
 });
 
 // =============================================
-// RECENT TRADES ENDPOINT - REAL DATA FROM DATABASE
+// RECENT TRADES ENDPOINT - /api/market/trades/:symbol
 // =============================================
 app.get('/api/market/trades/:symbol', async (req, res) => {
   try {
@@ -16424,11 +16423,11 @@ app.get('/api/market/trades/:symbol', async (req, res) => {
       .limit(limit)
       .lean();
 
-    // Format exactly as frontend expects
+    // Format EXACTLY as frontend expects
     const formattedTrades = trades.map(trade => ({
       price: trade.price,
       amount: trade.amount,
-      side: trade.type, // 'buy' or 'sell'
+      side: trade.type,  // 'buy' or 'sell'
       timestamp: trade.timestamp
     }));
 
@@ -16441,7 +16440,7 @@ app.get('/api/market/trades/:symbol', async (req, res) => {
 });
 
 // =============================================
-// USER ORDERS ENDPOINT - REAL DATA FROM DATABASE
+// USER ORDERS ENDPOINT - /api/trading/orders
 // =============================================
 app.get('/api/trading/orders', protect, async (req, res) => {
   try {
@@ -16455,7 +16454,7 @@ app.get('/api/trading/orders', protect, async (req, res) => {
       .sort({ createdAt: -1 })
       .lean();
 
-    // Format exactly as frontend expects with ALL required fields
+    // Format EXACTLY as frontend expects
     const formattedOrders = orders.map(order => ({
       symbol: order.symbol,
       side: order.type,
@@ -16475,7 +16474,7 @@ app.get('/api/trading/orders', protect, async (req, res) => {
 });
 
 // =============================================
-// TRADE HISTORY ENDPOINT - REAL DATA FROM DATABASE
+// TRADE HISTORY ENDPOINT - /api/trading/history
 // =============================================
 app.get('/api/trading/history', protect, async (req, res) => {
   try {
@@ -16487,9 +16486,9 @@ app.get('/api/trading/history', protect, async (req, res) => {
       .limit(50)
       .lean();
 
-    // Format exactly as frontend expects with ALL required fields
+    // Format EXACTLY as frontend expects
     const formattedTrades = trades.map(trade => ({
-      symbol: trade.symbol, // This must exist for toUpperCase()
+      symbol: trade.symbol,
       side: trade.type,
       price: trade.price,
       amount: trade.amount,
@@ -16505,51 +16504,34 @@ app.get('/api/trading/history', protect, async (req, res) => {
 });
 
 // =============================================
-// USER POSITIONS ENDPOINT - REAL DATA FROM DATABASE
+// USER POSITIONS ENDPOINT - /api/trading/positions
 // =============================================
 app.get('/api/trading/positions', protect, async (req, res) => {
   try {
     const userId = req.user._id;
 
-    // Get REAL asset balances from database
+    // Get REAL asset balances
     const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
     
     if (!userAssetBalance || !userAssetBalance.balances) {
       return res.json([]);
     }
 
-    // Get current prices from database
+    // Get current prices
     const positions = [];
     
     for (const [symbol, amount] of Object.entries(userAssetBalance.balances)) {
       if (amount > 0) {
-        // Get current price from AssetPrice collection
         const assetPrice = await AssetPrice.findOne({ symbol });
         const currentPrice = assetPrice ? assetPrice.currentPrice : 0;
-        
-        // Get average buy price from trade history (optional)
-        const trades = await RecentTrade.find({ 
-          userId, 
-          symbol, 
-          type: 'buy' 
-        }).sort({ timestamp: -1 }).limit(10);
-        
-        let avgBuyPrice = currentPrice;
-        if (trades.length > 0) {
-          const totalSpent = trades.reduce((sum, t) => sum + t.total, 0);
-          const totalBought = trades.reduce((sum, t) => sum + t.amount, 0);
-          avgBuyPrice = totalBought > 0 ? totalSpent / totalBought : currentPrice;
-        }
-        
         const usdValue = amount * currentPrice;
-        const pnl = ((currentPrice - avgBuyPrice) / avgBuyPrice) * 100;
-
+        
         positions.push({
           symbol,
           amount,
           currentPrice,
           usdValue,
-          pnl: parseFloat(pnl.toFixed(2))
+          pnl: 0
         });
       }
     }
@@ -16563,7 +16545,7 @@ app.get('/api/trading/positions', protect, async (req, res) => {
 });
 
 // =============================================
-// PLACE ORDER ENDPOINT - SAVES TO DATABASE
+// PLACE ORDER ENDPOINT - /api/trading/orders (POST)
 // =============================================
 app.post('/api/trading/orders', protect, async (req, res) => {
   try {
@@ -16578,7 +16560,7 @@ app.post('/api/trading/orders', protect, async (req, res) => {
       });
     }
 
-    // Get current price from database
+    // Get current price
     let currentPrice = 0;
     const orderBook = await OrderBook.findOne({ symbol });
     if (orderBook) {
@@ -16617,7 +16599,7 @@ app.post('/api/trading/orders', protect, async (req, res) => {
       }
     }
 
-    // Create order in database
+    // Create order
     const order = await UserOrder.create({
       user: userId,
       symbol,
@@ -16628,11 +16610,7 @@ app.post('/api/trading/orders', protect, async (req, res) => {
       total: amount,
       filled: 0,
       remaining: amount,
-      status: 'pending',
-      metadata: {
-        ipAddress: getRealClientIP(req),
-        userAgent: req.headers['user-agent']
-      }
+      status: type === 'market' ? 'completed' : 'pending'
     });
 
     // If market order, execute immediately
@@ -16647,7 +16625,7 @@ app.post('/api/trading/orders', protect, async (req, res) => {
         currency: 'USD',
         status: 'completed',
         method: 'internal',
-        reference: `ORDER-${order._id}-${Date.now()}`,
+        reference: `ORDER-${order._id}`,
         details: { orderId: order._id },
         fee: amount * 0.001,
         netAmount: amount * 0.999
@@ -16670,8 +16648,7 @@ app.post('/api/trading/orders', protect, async (req, res) => {
                 amount: assetAmount,
                 usdValue: amount,
                 price: orderPrice,
-                timestamp: new Date(),
-                transactionId: transaction._id
+                timestamp: new Date()
               }
             }
           },
@@ -16693,8 +16670,7 @@ app.post('/api/trading/orders', protect, async (req, res) => {
                 amount: -assetAmount,
                 usdValue: amount,
                 price: orderPrice,
-                timestamp: new Date(),
-                transactionId: transaction._id
+                timestamp: new Date()
               }
             }
           }
@@ -16713,173 +16689,24 @@ app.post('/api/trading/orders', protect, async (req, res) => {
         timestamp: new Date()
       });
 
-      // Update order
-      order.status = 'completed';
-      order.filled = amount;
-      order.remaining = 0;
       order.transactionId = transaction._id;
       order.executedAt = new Date();
       await order.save();
-
-      // Update order book (remove matched orders)
-      await updateOrderBookAfterTrade(symbol, side, orderPrice, assetAmount);
     }
 
     res.status(201).json({
       status: 'success',
-      data: order,
-      message: type === 'market' ? 'Order executed' : 'Order placed'
+      data: order
     });
 
   } catch (err) {
     console.error('Order creation error:', err);
     res.status(500).json({
       status: 'error',
-      message: err.message || 'Failed to place order'
+      message: err.message
     });
   }
 });
-
-// Helper to update order book after trade
-async function updateOrderBookAfterTrade(symbol, side, price, amount) {
-  try {
-    const orderBook = await OrderBook.findOne({ symbol });
-    if (!orderBook) return;
-
-    if (side === 'buy') {
-      // Remove matched asks
-      orderBook.asks = orderBook.asks.filter(ask => ask.price > price);
-    } else {
-      // Remove matched bids
-      orderBook.bids = orderBook.bids.filter(bid => bid.price < price);
-    }
-
-    orderBook.volume24h += amount;
-    orderBook.updatedAt = new Date();
-    await orderBook.save();
-
-    // Update Redis
-    await redis.setex(`orderbook:${symbol}`, 2, JSON.stringify({
-      asks: orderBook.asks.map(a => [a.price, a.amount]),
-      bids: orderBook.bids.map(b => [b.price, b.amount]),
-      lastPrice: orderBook.lastPrice,
-      volume24h: orderBook.volume24h
-    }));
-
-  } catch (err) {
-    console.error('Error updating order book:', err);
-  }
-}
-
-// =============================================
-// BACKGROUND JOB FOR RANDOM ORDERS (1-30 SECONDS)
-// =============================================
-async function startRandomOrderGenerator() {
-  console.log('🚀 Starting random order generator with real exchange rates...');
-  
-  const generateRandomOrders = async () => {
-    try {
-      // Get all symbols from database
-      const assetPrices = await AssetPrice.find({});
-      const symbols = assetPrices.map(ap => ap.symbol);
-      
-      if (symbols.length === 0) {
-        // Default symbols if none in database
-        symbols = ['btc', 'eth', 'sol', 'xrp', 'ada'];
-      }
-      
-      for (const symbol of symbols) {
-        // Get current price from database (this comes from CoinGecko via your price update job)
-        const assetPrice = await AssetPrice.findOne({ symbol });
-        const currentPrice = assetPrice ? assetPrice.currentPrice : 50000;
-        
-        // Get or create order book
-        let orderBook = await OrderBook.findOne({ symbol });
-        
-        if (!orderBook) {
-          orderBook = await OrderBook.create({
-            symbol,
-            asks: [],
-            bids: [],
-            lastPrice: currentPrice,
-            volume24h: 0
-          });
-        }
-
-        // Randomly add new orders (20% chance)
-        if (Math.random() < 0.2) {
-          const isAsk = Math.random() > 0.5;
-          const spread = isAsk ? 1 + Math.random() * 0.01 : 1 - Math.random() * 0.01;
-          const price = currentPrice * spread;
-          const amount = parseFloat((Math.random() * 2 + 0.1).toFixed(4));
-          
-          const newOrder = {
-            price,
-            amount,
-            total: price * amount,
-            orderId: `${isAsk ? 'ask' : 'bid'}_${symbol}_${Date.now()}_${Math.random().toString(36).substring(7)}`,
-            createdAt: new Date()
-          };
-
-          if (isAsk) {
-            orderBook.asks.push(newOrder);
-            orderBook.asks.sort((a, b) => a.price - b.price);
-            if (orderBook.asks.length > 20) orderBook.asks = orderBook.asks.slice(0, 20);
-          } else {
-            orderBook.bids.push(newOrder);
-            orderBook.bids.sort((a, b) => b.price - a.price);
-            if (orderBook.bids.length > 20) orderBook.bids = orderBook.bids.slice(0, 20);
-          }
-
-          // Randomly remove some orders
-          if (Math.random() < 0.1 && orderBook.asks.length > 5) {
-            orderBook.asks.splice(Math.floor(Math.random() * orderBook.asks.length), 1);
-          }
-          if (Math.random() < 0.1 && orderBook.bids.length > 5) {
-            orderBook.bids.splice(Math.floor(Math.random() * orderBook.bids.length), 1);
-          }
-
-          // Update last price with small random movement
-          const priceChange = (Math.random() - 0.5) * currentPrice * 0.001;
-          orderBook.lastPrice = Math.max(0.000001, currentPrice + priceChange);
-          orderBook.updatedAt = new Date();
-
-          await orderBook.save();
-          
-          // Update Redis cache
-          await redis.setex(`orderbook:${symbol}`, 2, JSON.stringify({
-            asks: orderBook.asks.map(a => [a.price, a.amount]),
-            bids: orderBook.bids.map(b => [b.price, b.amount]),
-            lastPrice: orderBook.lastPrice,
-            volume24h: orderBook.volume24h
-          }));
-        }
-      }
-      
-      console.log(`✅ Order books updated at ${new Date().toISOString()}`);
-    } catch (err) {
-      console.error('Error generating random orders:', err);
-    }
-  };
-
-  // Run immediately
-  await generateRandomOrders();
-
-  // Schedule next run at random interval (1-30 seconds)
-  const scheduleNext = () => {
-    const nextInterval = Math.floor(Math.random() * 29000) + 1000; // 1-30 seconds
-    setTimeout(async () => {
-      await generateRandomOrders();
-      scheduleNext();
-    }, nextInterval);
-  };
-
-  scheduleNext();
-}
-
-// Start the generator
-startRandomOrderGenerator();
-
 
 
 
