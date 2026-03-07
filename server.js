@@ -16116,675 +16116,436 @@ app.get('/api/withdrawals/available-assets', protect, async (req, res) => {
   }
 });
 
+
+
+
 // =============================================
-// PORTFOLIO DETAILS ENDPOINT - Clickable portfolio with full asset details
+// GET /api/assets/portfolio - User Asset Portfolio with Profit/Loss Tracking
 // =============================================
-app.get('/api/portfolio/details', protect, async (req, res) => {
+app.get('/api/assets/portfolio', protect, async (req, res) => {
   try {
     const userId = req.user._id;
-    const { asset } = req.query; // Optional: get details for specific asset
 
+    // Get user's asset balances
     const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
-
+    
     if (!userAssetBalance) {
       return res.status(200).json({
         status: 'success',
         data: {
-          assets: [],
-          totalValue: 0,
-          totalProfitLoss: 0,
-          totalProfitLossPercentage: 0
+          portfolio: [],
+          summary: {
+            totalValue: 0,
+            totalProfitLoss: 0,
+            totalProfitLossPercentage: 0,
+            assetsCount: 0
+          }
         }
       });
     }
 
-    // Get all buy and sell transactions for history
+    // Get current prices from CoinGecko for all assets
+    const assets = Object.keys(userAssetBalance.balances).filter(asset => 
+      userAssetBalance.balances[asset] > 0
+    );
+
+    if (assets.length === 0) {
+      return res.status(200).json({
+        status: 'success',
+        data: {
+          portfolio: [],
+          summary: {
+            totalValue: 0,
+            totalProfitLoss: 0,
+            totalProfitLossPercentage: 0,
+            assetsCount: 0
+          }
+        }
+      });
+    }
+
+    // Map asset symbols to CoinGecko IDs
+    const assetToCoinGeckoId = {
+      btc: 'bitcoin',
+      eth: 'ethereum',
+      usdt: 'tether',
+      bnb: 'binancecoin',
+      sol: 'solana',
+      usdc: 'usd-coin',
+      xrp: 'xrp',
+      doge: 'dogecoin',
+      ada: 'cardano',
+      shib: 'shiba-inu',
+      avax: 'avalanche-2',
+      dot: 'polkadot',
+      trx: 'tron',
+      link: 'chainlink',
+      matic: 'polygon',
+      wbtc: 'wrapped-bitcoin',
+      ltc: 'litecoin',
+      near: 'near',
+      uni: 'uniswap',
+      bch: 'bitcoin-cash',
+      xlm: 'stellar',
+      atom: 'cosmos',
+      xmr: 'monero',
+      flow: 'flow',
+      vet: 'vechain',
+      fil: 'filecoin',
+      theta: 'theta-token',
+      hbar: 'hedera-hashgraph',
+      ftm: 'fantom',
+      xtz: 'tezos'
+    };
+
+    // Get current prices from CoinGecko
+    let currentPrices = {};
+    try {
+      const coinGeckoIds = assets.map(asset => assetToCoinGeckoId[asset] || asset).filter(Boolean);
+      const response = await axios.get(
+        `https://api.coingecko.com/api/v3/simple/price?ids=${coinGeckoIds.join(',')}&vs_currencies=usd&include_24hr_change=true`
+      );
+      
+      if (response.data) {
+        currentPrices = response.data;
+      }
+    } catch (priceError) {
+      console.error('Error fetching CoinGecko prices:', priceError.message);
+      // Continue with empty prices, will use fallback values
+    }
+
+    // Get transaction history for profit/loss calculation
     const transactions = await Transaction.find({
       user: userId,
       type: { $in: ['buy', 'sell'] },
       status: 'completed'
     }).sort({ createdAt: -1 });
 
-    // Get current prices
-    const assetsToProcess = asset ? [asset] : Object.keys(userAssetBalance.balances).filter(a => userAssetBalance.balances[a] > 0);
-    
-    const portfolioDetails = [];
-    let totalValue = 0;
-    let totalCost = 0;
+    // Build portfolio for each asset
+    const portfolio = [];
+    let totalPortfolioValue = 0;
+    let totalPortfolioProfitLoss = 0;
 
-    for (const assetSymbol of assetsToProcess) {
-      const currentAmount = userAssetBalance.balances[assetSymbol] || 0;
-      if (currentAmount <= 0) continue;
+    for (const asset of assets) {
+      const assetBalance = userAssetBalance.balances[asset];
+      if (assetBalance <= 0) continue;
 
-      // Get current price
-      let currentPrice = 0;
-      try {
-        const coinGeckoId = mapSymbolToCoinGeckoId(assetSymbol);
-        const response = await axios.get(`https://api.coingecko.com/api/v3/simple/price?ids=${coinGeckoId}&vs_currencies=usd`);
-        currentPrice = response.data[coinGeckoId]?.usd || 0;
-      } catch (error) {
-        console.warn(`Failed to fetch price for ${assetSymbol}:`, error.message);
-        currentPrice = assetSymbol === 'usdt' || assetSymbol === 'usdc' ? 1.00 : 0;
-      }
-
-      const currentValue = currentAmount * currentPrice;
-      totalValue += currentValue;
-
-      // Calculate average buying price from transaction history
-      const assetBuys = transactions.filter(tx => 
-        tx.type === 'buy' && 
-        tx.asset === assetSymbol
+      const coinGeckoId = assetToCoinGeckoId[asset] || asset;
+      const currentPrice = currentPrices[coinGeckoId]?.usd || 0;
+      const change24h = currentPrices[coinGeckoId]?.usd_24h_change || 0;
+      
+      // Get all transactions for this asset
+      const assetTransactions = transactions.filter(t => 
+        t.asset === asset || t.asset === asset.toUpperCase()
       );
 
-      let totalBuyCost = 0;
-      let totalBuyAmount = 0;
+      // Calculate average buying price
+      let totalSpent = 0;
+      let totalBought = 0;
+      let totalSold = 0;
+      let realizedProfit = 0;
+      let realizedLoss = 0;
 
-      assetBuys.forEach(buy => {
-        if (buy.buyDetails) {
-          totalBuyCost += (buy.buyDetails.amountUSD || 0);
-          totalBuyAmount += (buy.buyDetails.assetAmount || 0);
+      assetTransactions.forEach(t => {
+        const assetAmount = t.assetAmount || 0;
+        const price = t.buyDetails?.price || t.sellDetails?.price || 0;
+        
+        if (t.type === 'buy') {
+          totalSpent += t.amount || 0;
+          totalBought += assetAmount;
+        } else if (t.type === 'sell') {
+          totalSold += assetAmount;
+          if (t.sellDetails) {
+            realizedProfit += t.sellDetails.profit || 0;
+            realizedLoss += t.sellDetails.loss || 0;
+          }
         }
       });
 
-      const avgBuyPrice = totalBuyAmount > 0 ? totalBuyCost / totalBuyAmount : currentPrice;
-      const totalCostForAsset = avgBuyPrice * currentAmount;
-      totalCost += totalCostForAsset;
+      const averageBuyingPrice = totalBought > 0 ? totalSpent / totalBought : 0;
+      const currentValue = assetBalance * currentPrice;
+      const unrealizedProfitLoss = (currentPrice - averageBuyingPrice) * assetBalance;
+      const unrealizedPercentage = averageBuyingPrice > 0 
+        ? ((currentPrice - averageBuyingPrice) / averageBuyingPrice) * 100 
+        : 0;
 
-      const profitLoss = currentValue - totalCostForAsset;
-      const profitLossPercentage = totalCostForAsset > 0 ? (profitLoss / totalCostForAsset) * 100 : 0;
+      totalPortfolioValue += currentValue;
+      totalPortfolioProfitLoss += unrealizedProfitLoss;
 
-      // Get recent transactions for this asset
-      const assetTransactions = transactions.filter(tx => 
-        tx.asset === assetSymbol || 
-        (tx.buyDetails && tx.buyDetails.asset === assetSymbol) ||
-        (tx.sellDetails && tx.sellDetails.asset === assetSymbol)
-      ).slice(0, 5);
-
-      portfolioDetails.push({
-        asset: assetSymbol,
-        name: getAssetName(assetSymbol),
-        logo: getAssetLogo(assetSymbol),
-        amount: currentAmount,
-        currentPrice: currentPrice,
-        currentValue: currentValue,
-        avgBuyPrice: avgBuyPrice,
-        totalCost: totalCostForAsset,
-        profitLoss: profitLoss,
-        profitLossPercentage: profitLossPercentage,
-        network: getNetworkForAsset(assetSymbol),
-        transactions: assetTransactions.map(tx => ({
-          type: tx.type,
-          amount: tx.type === 'buy' ? tx.buyDetails?.assetAmount : tx.sellDetails?.assetAmount,
-          usdValue: tx.type === 'buy' ? tx.buyDetails?.amountUSD : tx.sellDetails?.amountUSD,
-          price: tx.type === 'buy' ? tx.buyDetails?.buyingPrice : tx.sellDetails?.sellingPrice,
-          profitLoss: tx.type === 'sell' ? tx.sellDetails?.profitLoss : null,
-          profitLossPercentage: tx.type === 'sell' ? tx.sellDetails?.profitLossPercentage : null,
-          date: tx.createdAt
+      portfolio.push({
+        asset,
+        totalAmount: assetBalance,
+        currentPrice,
+        currentValue,
+        averageBuyingPrice,
+        totalSpent,
+        totalBought,
+        totalSold,
+        realizedProfit,
+        realizedLoss,
+        unrealizedProfitLoss,
+        unrealizedPercentage,
+        change24h,
+        transactions: assetTransactions.slice(0, 10).map(t => ({
+          type: t.type,
+          amount: t.assetAmount || 0,
+          price: t.type === 'buy' ? t.buyDetails?.price : t.sellDetails?.price,
+          profit: t.sellDetails?.profit || 0,
+          loss: t.sellDetails?.loss || 0,
+          date: t.createdAt,
+          transactionId: t._id
         }))
       });
     }
 
-    const totalProfitLoss = totalValue - totalCost;
-    const totalProfitLossPercentage = totalCost > 0 ? (totalProfitLoss / totalCost) * 100 : 0;
+    // Calculate summary
+    const totalPortfolioPercentage = totalPortfolioValue > 0 
+      ? (totalPortfolioProfitLoss / totalPortfolioValue) * 100 
+      : 0;
 
-    return res.status(200).json({
+    res.status(200).json({
       status: 'success',
       data: {
-        assets: portfolioDetails,
-        totalValue: totalValue,
-        totalCost: totalCost,
-        totalProfitLoss: totalProfitLoss,
-        totalProfitLossPercentage: totalProfitLossPercentage,
-        lastUpdated: new Date()
+        portfolio: portfolio.sort((a, b) => b.currentValue - a.currentValue),
+        summary: {
+          totalValue: totalPortfolioValue,
+          totalProfitLoss: totalPortfolioProfitLoss,
+          totalProfitLossPercentage: totalPortfolioPercentage,
+          assetsCount: portfolio.length
+        }
       }
     });
-
-  } catch (error) {
-    console.error('Portfolio details error:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: error.message || 'Failed to fetch portfolio details'
-    });
-  }
-});
-
-// =============================================
-// Helper functions for endpoints
-// =============================================
-
-function getNetworkForAsset(asset) {
-  const networks = {
-    'btc': 'Bitcoin',
-    'eth': 'Ethereum (ERC-20)',
-    'usdt': 'Tron (TRC-20)',
-    'bnb': 'BNB Smart Chain (BEP-20)',
-    'sol': 'Solana',
-    'usdc': 'Ethereum (ERC-20)',
-    'xrp': 'XRP Ledger',
-    'doge': 'Dogecoin',
-    'shib': 'Ethereum (ERC-20)',
-    'trx': 'TRON',
-    'ltc': 'Litecoin',
-    'ada': 'Cardano',
-    'avax': 'Avalanche C-Chain',
-    'dot': 'Polkadot'
-  };
-  return networks[asset.toLowerCase()] || 'Unknown';
-}
-
-function getAssetName(asset) {
-  const names = {
-    'btc': 'Bitcoin',
-    'eth': 'Ethereum',
-    'usdt': 'Tether',
-    'bnb': 'BNB',
-    'sol': 'Solana',
-    'usdc': 'USD Coin',
-    'xrp': 'XRP',
-    'doge': 'Dogecoin',
-    'shib': 'Shiba Inu',
-    'trx': 'TRON',
-    'ltc': 'Litecoin',
-    'ada': 'Cardano',
-    'avax': 'Avalanche',
-    'dot': 'Polkadot'
-  };
-  return names[asset.toLowerCase()] || asset.toUpperCase();
-}
-
-function getAssetLogo(asset) {
-  const logos = {
-    'btc': 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png',
-    'eth': 'https://assets.coingecko.com/coins/images/279/large/ethereum.png',
-    'usdt': 'https://assets.coingecko.com/coins/images/325/large/Tether.png',
-    'bnb': 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png',
-    'sol': 'https://assets.coingecko.com/coins/images/4128/large/solana.png',
-    'usdc': 'https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png',
-    'xrp': 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png',
-    'doge': 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png',
-    'shib': 'https://assets.coingecko.com/coins/images/11939/large/shiba.png',
-    'trx': 'https://assets.coingecko.com/coins/images/1094/large/tron-logo.png',
-    'ltc': 'https://assets.coingecko.com/coins/images/2/large/litecoin.png',
-    'ada': 'https://assets.coingecko.com/coins/images/975/large/cardano.png',
-    'avax': 'https://assets.coingecko.com/coins/images/12559/large/Avalanche_Circle_RedWhite.png',
-    'dot': 'https://assets.coingecko.com/coins/images/12171/large/polkadot.png'
-  };
-  return logos[asset.toLowerCase()] || 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png';
-}
-
-function mapSymbolToCoinGeckoId(symbol) {
-  const mapping = {
-    'btc': 'bitcoin',
-    'eth': 'ethereum',
-    'usdt': 'tether',
-    'bnb': 'binancecoin',
-    'sol': 'solana',
-    'usdc': 'usd-coin',
-    'xrp': 'xrp',
-    'doge': 'dogecoin',
-    'shib': 'shiba-inu',
-    'trx': 'tron',
-    'ltc': 'litecoin',
-    'ada': 'cardano',
-    'avax': 'avalanche-2',
-    'dot': 'polkadot'
-  };
-  return mapping[symbol.toLowerCase()] || 'bitcoin';
-}
-
-
-
-
-
-
-;// =============================================
-// RECENT TRANSACTIONS ENDPOINT - With correct exchange rates per asset
-// =============================================
-app.get('/api/transactions/recent', protect, async (req, res) => {
-  try {
-    const userId = req.user._id;
-    const limit = parseInt(req.query.limit) || 10;
-
-    // Get recent transactions for user
-    const transactions = await Transaction.find({ user: userId })
-      .sort({ createdAt: -1 })
-      .limit(limit);
-
-    // Fetch current prices for all assets involved
-    const assetSymbols = new Set();
-    transactions.forEach(tx => {
-      if (tx.asset) assetSymbols.add(tx.asset.toLowerCase());
-      if (tx.buyDetails?.asset) assetSymbols.add(tx.buyDetails.asset.toLowerCase());
-      if (tx.sellDetails?.asset) assetSymbols.add(tx.sellDetails.asset.toLowerCase());
-    });
-
-    // Get current prices from CoinGecko (simplified - in production you'd have a price service)
-    const prices = {};
-    for (const symbol of assetSymbols) {
-      try {
-        // Map symbol to CoinGecko ID (simplified mapping)
-        const coinGeckoId = mapSymbolToCoinGeckoId(symbol);
-        const response = await axios.get(`https://api.coingecko.com/api/v3/simple/price?ids=${coinGeckoId}&vs_currencies=usd`);
-        prices[symbol] = response.data[coinGeckoId]?.usd || 0;
-      } catch (error) {
-        console.warn(`Failed to fetch price for ${symbol}:`, error.message);
-        prices[symbol] = symbol === 'usdt' || symbol === 'usdc' ? 1.00 : 0;
-      }
-    }
-
-    // Enhance transactions with current exchange rates
-    const enhancedTransactions = transactions.map(tx => {
-      const txObj = tx.toObject();
-      
-      // Add current exchange rate based on transaction type and asset
-      if (tx.type === 'buy' && tx.asset) {
-        txObj.currentExchangeRate = prices[tx.asset.toLowerCase()] || tx.exchangeRateAtTime || 0;
-        txObj.profitLoss = tx.buyDetails?.profitLoss || 0;
-        txObj.profitLossPercentage = tx.buyDetails?.profitLossPercentage || 0;
-      } else if (tx.type === 'sell' && tx.asset) {
-        txObj.currentExchangeRate = prices[tx.asset.toLowerCase()] || tx.exchangeRateAtTime || 0;
-        txObj.profitLoss = tx.sellDetails?.profitLoss || 0;
-        txObj.profitLossPercentage = tx.sellDetails?.profitLossPercentage || 0;
-      } else if (tx.type === 'deposit' && tx.asset) {
-        txObj.currentExchangeRate = prices[tx.asset.toLowerCase()] || tx.exchangeRateAtTime || 1.00;
-      } else if (tx.type === 'withdrawal' && tx.asset) {
-        txObj.currentExchangeRate = prices[tx.asset.toLowerCase()] || tx.exchangeRateAtTime || 0;
-      } else {
-        txObj.currentExchangeRate = tx.exchangeRateAtTime || 0;
-      }
-
-      return txObj;
-    });
-
-    return res.status(200).json({
-      status: 'success',
-      data: {
-        transactions: enhancedTransactions,
-        count: enhancedTransactions.length
-      }
-    });
-
-  } catch (error) {
-    console.error('Recent transactions error:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: error.message || 'Failed to fetch recent transactions'
-    });
-  }
-})
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// =============================================
-// ORDER BOOK ENDPOINT - /api/market/orderbook/:symbol
-// =============================================
-app.get('/api/market/orderbook/:symbol', async (req, res) => {
-  try {
-    const { symbol } = req.params;
-    
-    // Check Redis cache first
-    const cachedData = await redis.get(`orderbook:${symbol}`);
-    if (cachedData) {
-      return res.json(JSON.parse(cachedData));
-    }
-
-    // Get from database
-    let orderBook = await OrderBook.findOne({ symbol });
-    
-    if (!orderBook) {
-      // Get real price from CoinGecko via your price update job
-      const assetPrice = await AssetPrice.findOne({ symbol });
-      const basePrice = assetPrice ? assetPrice.currentPrice : 50000;
-      
-      orderBook = await OrderBook.create({
-        symbol,
-        asks: [],
-        bids: [],
-        lastPrice: basePrice,
-        volume24h: 0
-      });
-    }
-
-    // Format EXACTLY as frontend expects: array of [price, amount]
-    const asks = orderBook.asks.map(a => [a.price, a.amount]);
-    const bids = orderBook.bids.map(b => [b.price, b.amount]);
-
-    const responseData = {
-      asks,
-      bids,
-      lastPrice: orderBook.lastPrice,
-      volume24h: orderBook.volume24h
-    };
-
-    // Cache for 2 seconds
-    await redis.setex(`orderbook:${symbol}`, 2, JSON.stringify(responseData));
-
-    res.json(responseData);
 
   } catch (err) {
-    console.error('Order book error:', err);
-    res.json({ asks: [], bids: [], lastPrice: 0, volume24h: 0 });
+    console.error('Portfolio error:', err);
+    // Return empty portfolio instead of error to prevent UI breakage
+    res.status(200).json({
+      status: 'success',
+      data: {
+        portfolio: [],
+        summary: {
+          totalValue: 0,
+          totalProfitLoss: 0,
+          totalProfitLossPercentage: 0,
+          assetsCount: 0
+        }
+      }
+    });
   }
 });
 
 // =============================================
-// RECENT TRADES ENDPOINT - /api/market/trades/:symbol
+// GET /api/transactions - User Transaction History
 // =============================================
-app.get('/api/market/trades/:symbol', async (req, res) => {
+app.get('/api/transactions', protect, async (req, res) => {
   try {
-    const { symbol } = req.params;
-    const limit = parseInt(req.query.limit) || 20;
+    const userId = req.user._id;
     
-    // Get REAL trades from database
-    const trades = await RecentTrade.find({ symbol })
-      .sort({ timestamp: -1 })
+    // Pagination parameters
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 50;
+    const skip = (page - 1) * limit;
+
+    // Filter parameters
+    const type = req.query.type;
+    const asset = req.query.asset;
+    const status = req.query.status;
+    const startDate = req.query.startDate;
+    const endDate = req.query.endDate;
+
+    // Build query
+    const query = { user: userId };
+    
+    if (type && type !== 'all') {
+      query.type = type;
+    }
+    
+    if (asset) {
+      query.asset = asset.toLowerCase();
+    }
+    
+    if (status && status !== 'all') {
+      query.status = status;
+    }
+    
+    if (startDate || endDate) {
+      query.createdAt = {};
+      if (startDate) query.createdAt.$gte = new Date(startDate);
+      if (endDate) query.createdAt.$lte = new Date(endDate);
+    }
+
+    // Get total count for pagination
+    const total = await Transaction.countDocuments(query);
+
+    // Get transactions
+    const transactions = await Transaction.find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
       .limit(limit)
       .lean();
 
-    // Format EXACTLY as frontend expects
-    const formattedTrades = trades.map(trade => ({
-      price: trade.price,
-      amount: trade.amount,
-      side: trade.type,  // 'buy' or 'sell'
-      timestamp: trade.timestamp
-    }));
+    // Format transactions for frontend
+    const formattedTransactions = transactions.map(t => {
+      // Determine asset symbol
+      let assetSymbol = t.asset || 
+                       (t.type === 'buy' ? t.buyDetails?.asset : 
+                        t.type === 'sell' ? t.sellDetails?.asset : 
+                        t.method) || 'btc';
+      
+      // Ensure asset symbol is lowercase
+      if (assetSymbol) assetSymbol = assetSymbol.toLowerCase();
 
-    res.json(formattedTrades);
+      // Get network information
+      let network = t.network;
+      if (!network || network === 'Unknown') {
+        const assetNetworks = {
+          btc: 'Bitcoin',
+          eth: 'Ethereum',
+          usdt: 'Tron (TRC-20)',
+          bnb: 'BNB Smart Chain (BEP-20)',
+          sol: 'Solana',
+          usdc: 'Ethereum (ERC-20)',
+          xrp: 'XRP Ledger',
+          doge: 'Dogecoin',
+          ada: 'Cardano',
+          shib: 'Ethereum (ERC-20)',
+          avax: 'Avalanche C-Chain',
+          dot: 'Polkadot',
+          trx: 'TRON',
+          link: 'Ethereum (ERC-20)',
+          matic: 'Polygon',
+          wbtc: 'Ethereum (ERC-20)',
+          ltc: 'Litecoin',
+          near: 'NEAR',
+          uni: 'Ethereum (ERC-20)',
+          bch: 'Bitcoin Cash',
+          xlm: 'Stellar',
+          atom: 'Cosmos',
+          xmr: 'Monero',
+          flow: 'Flow',
+          vet: 'VeChain',
+          fil: 'Filecoin',
+          theta: 'Theta',
+          hbar: 'Hedera',
+          ftm: 'Fantom',
+          xtz: 'Tezos'
+        };
+        network = assetNetworks[assetSymbol] || 'Bitcoin';
+      }
 
-  } catch (err) {
-    console.error('Recent trades error:', err);
-    res.json([]);
-  }
-});
-
-// =============================================
-// USER ORDERS ENDPOINT - /api/trading/orders
-// =============================================
-app.get('/api/trading/orders', protect, async (req, res) => {
-  try {
-    const userId = req.user._id;
-
-    // Get REAL orders from database
-    const orders = await UserOrder.find({ 
-      user: userId, 
-      status: { $in: ['pending', 'partial'] } 
-    })
-      .sort({ createdAt: -1 })
-      .lean();
-
-    // Format EXACTLY as frontend expects
-    const formattedOrders = orders.map(order => ({
-      symbol: order.symbol,
-      side: order.type,
-      price: order.price,
-      amount: order.amount,
-      total: order.total,
-      status: order.status,
-      createdAt: order.createdAt
-    }));
-
-    res.json(formattedOrders);
-
-  } catch (err) {
-    console.error('Fetch orders error:', err);
-    res.json([]);
-  }
-});
-
-// =============================================
-// TRADE HISTORY ENDPOINT - /api/trading/history
-// =============================================
-app.get('/api/trading/history', protect, async (req, res) => {
-  try {
-    const userId = req.user._id;
-
-    // Get REAL completed trades from database
-    const trades = await RecentTrade.find({ userId })
-      .sort({ timestamp: -1 })
-      .limit(50)
-      .lean();
-
-    // Format EXACTLY as frontend expects
-    const formattedTrades = trades.map(trade => ({
-      symbol: trade.symbol,
-      side: trade.type,
-      price: trade.price,
-      amount: trade.amount,
-      timestamp: trade.timestamp
-    }));
-
-    res.json(formattedTrades);
-
-  } catch (err) {
-    console.error('Fetch trade history error:', err);
-    res.json([]);
-  }
-});
-
-// =============================================
-// USER POSITIONS ENDPOINT - /api/trading/positions
-// =============================================
-app.get('/api/trading/positions', protect, async (req, res) => {
-  try {
-    const userId = req.user._id;
-
-    // Get REAL asset balances
-    const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
-    
-    if (!userAssetBalance || !userAssetBalance.balances) {
-      return res.json([]);
-    }
-
-    // Get current prices
-    const positions = [];
-    
-    for (const [symbol, amount] of Object.entries(userAssetBalance.balances)) {
-      if (amount > 0) {
-        const assetPrice = await AssetPrice.findOne({ symbol });
-        const currentPrice = assetPrice ? assetPrice.currentPrice : 0;
-        const usdValue = amount * currentPrice;
+      // Create description
+      let description = t.details || '';
+      if (!description) {
+        const amount = t.amount || 0;
+        const assetAmount = t.assetAmount || 0;
         
-        positions.push({
-          symbol,
-          amount,
-          currentPrice,
-          usdValue,
-          pnl: 0
-        });
-      }
-    }
-
-    res.json(positions);
-
-  } catch (err) {
-    console.error('Fetch positions error:', err);
-    res.json([]);
-  }
-});
-
-// =============================================
-// PLACE ORDER ENDPOINT - /api/trading/orders (POST)
-// =============================================
-app.post('/api/trading/orders', protect, async (req, res) => {
-  try {
-    const { symbol, side, type, amount, price } = req.body;
-    const userId = req.user._id;
-
-    // Validation
-    if (!symbol || !side || !type || !amount) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Missing required fields'
-      });
-    }
-
-    // Get current price
-    let currentPrice = 0;
-    const orderBook = await OrderBook.findOne({ symbol });
-    if (orderBook) {
-      currentPrice = orderBook.lastPrice;
-    } else {
-      const assetPrice = await AssetPrice.findOne({ symbol });
-      currentPrice = assetPrice ? assetPrice.currentPrice : 0;
-    }
-
-    if (currentPrice === 0) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Unable to determine current price'
-      });
-    }
-
-    const orderPrice = type === 'market' ? currentPrice : (price || currentPrice);
-    const assetAmount = amount / orderPrice;
-
-    // Check balance
-    if (side === 'buy') {
-      if (req.user.balances.main < amount) {
-        return res.status(400).json({
-          status: 'fail',
-          message: 'Insufficient balance'
-        });
-      }
-    } else if (side === 'sell') {
-      const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
-      const assetBalance = userAssetBalance?.balances?.[symbol] || 0;
-      if (assetBalance < assetAmount) {
-        return res.status(400).json({
-          status: 'fail',
-          message: 'Insufficient asset balance'
-        });
-      }
-    }
-
-    // Create order
-    const order = await UserOrder.create({
-      user: userId,
-      symbol,
-      type: side,
-      orderType: type,
-      price: orderPrice,
-      amount: assetAmount,
-      total: amount,
-      filled: 0,
-      remaining: amount,
-      status: type === 'market' ? 'completed' : 'pending'
-    });
-
-    // If market order, execute immediately
-    if (type === 'market') {
-      // Create transaction
-      const transaction = await Transaction.create({
-        user: userId,
-        type: side,
-        amount: amount,
-        asset: symbol,
-        assetAmount: assetAmount,
-        currency: 'USD',
-        status: 'completed',
-        method: 'internal',
-        reference: `ORDER-${order._id}`,
-        details: { orderId: order._id },
-        fee: amount * 0.001,
-        netAmount: amount * 0.999
-      });
-
-      // Update balances
-      if (side === 'buy') {
-        await User.findByIdAndUpdate(userId, {
-          $inc: { 'balances.main': -amount }
-        });
-
-        await UserAssetBalance.findOneAndUpdate(
-          { user: userId },
-          {
-            $inc: { [`balances.${symbol}`]: assetAmount },
-            $push: {
-              history: {
-                asset: symbol,
-                type: 'buy',
-                amount: assetAmount,
-                usdValue: amount,
-                price: orderPrice,
-                timestamp: new Date()
-              }
-            }
-          },
-          { upsert: true }
-        );
-      } else {
-        await User.findByIdAndUpdate(userId, {
-          $inc: { 'balances.main': amount }
-        });
-
-        await UserAssetBalance.findOneAndUpdate(
-          { user: userId },
-          {
-            $inc: { [`balances.${symbol}`]: -assetAmount },
-            $push: {
-              history: {
-                asset: symbol,
-                type: 'sell',
-                amount: -assetAmount,
-                usdValue: amount,
-                price: orderPrice,
-                timestamp: new Date()
-              }
+        if (t.type === 'deposit') {
+          description = `Deposit of ${assetSymbol.toUpperCase()} via ${t.method || 'crypto'}`;
+        } else if (t.type === 'withdrawal') {
+          description = `Withdrawal of ${assetSymbol.toUpperCase()} to ${t.btcAddress || 'wallet'}`;
+        } else if (t.type === 'buy') {
+          description = `Bought ${assetSymbol.toUpperCase()} for ${formatUSD(amount)}`;
+          if (t.buyDetails) {
+            description += ` at $${t.buyDetails.price?.toFixed(2) || '0.00'}`;
+          }
+        } else if (t.type === 'sell') {
+          description = `Sold ${assetSymbol.toUpperCase()} for ${formatUSD(amount)}`;
+          if (t.sellDetails) {
+            const profit = t.sellDetails.profit || 0;
+            const loss = t.sellDetails.loss || 0;
+            if (profit > 0) {
+              description += ` with +$${profit.toFixed(2)} profit (${t.sellDetails.profitLossPercentage?.toFixed(2)}%)`;
+            } else if (loss > 0) {
+              description += ` with -$${loss.toFixed(2)} loss (${t.sellDetails.profitLossPercentage?.toFixed(2)}%)`;
             }
           }
-        );
+        } else if (t.type === 'interest') {
+          description = `Interest earned on ${assetSymbol.toUpperCase()} investment`;
+        } else if (t.type === 'referral') {
+          description = `Referral bonus from downline investment`;
+        } else {
+          description = 'Transaction processed';
+        }
       }
 
-      // Add to recent trades
-      await RecentTrade.create({
-        symbol,
-        type: side,
-        price: orderPrice,
-        amount: assetAmount,
-        total: amount,
-        userId,
-        orderId: order._id,
-        timestamp: new Date()
-      });
+      return {
+        id: t._id,
+        _id: t._id,
+        type: t.type,
+        amount: t.amount,
+        asset: assetSymbol,
+        assetAmount: t.assetAmount || 0,
+        status: t.status,
+        method: t.method,
+        reference: t.reference,
+        fee: t.fee || 0,
+        netAmount: t.netAmount || t.amount,
+        btcAddress: t.btcAddress,
+        network: network,
+        exchangeRateAtTime: t.exchangeRateAtTime,
+        description: description,
+        details: description,
+        buyDetails: t.buyDetails,
+        sellDetails: t.sellDetails,
+        createdAt: t.createdAt,
+        date: t.createdAt,
+        timestamp: t.createdAt
+      };
+    });
 
-      order.transactionId = transaction._id;
-      order.executedAt = new Date();
-      await order.save();
-    }
-
-    res.status(201).json({
+    res.status(200).json({
       status: 'success',
-      data: order
+      data: {
+        transactions: formattedTransactions,
+        pagination: {
+          page,
+          limit,
+          total,
+          pages: Math.ceil(total / limit),
+          hasNext: skip + limit < total,
+          hasPrev: page > 1
+        }
+      }
     });
 
   } catch (err) {
-    console.error('Order creation error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: err.message
+    console.error('Transactions error:', err);
+    res.status(200).json({
+      status: 'success',
+      data: {
+        transactions: [],
+        pagination: {
+          page: 1,
+          limit: 50,
+          total: 0,
+          pages: 1,
+          hasNext: false,
+          hasPrev: false
+        }
+      }
     });
   }
 });
 
-
+// Helper function for USD formatting
+function formatUSD(amount) {
+  if (!amount && amount !== 0) return '$0.00';
+  const num = parseFloat(amount);
+  if (isNaN(num)) return '$0.00';
+  
+  if (num >= 1e9) {
+    return '$' + (num / 1e9).toFixed(2) + 'B';
+  } else if (num >= 1e6) {
+    return '$' + (num / 1e6).toFixed(2) + 'M';
+  } else if (num >= 1e3) {
+    return '$' + (num / 1e3).toFixed(2) + 'K';
+  }
+  
+  return '$' + num.toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+}
 
 
 
