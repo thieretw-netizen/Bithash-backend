@@ -16337,6 +16337,82 @@ function mapSymbolToCoinGeckoId(symbol) {
 
 
 
+;// =============================================
+// RECENT TRANSACTIONS ENDPOINT - With correct exchange rates per asset
+// =============================================
+app.get('/api/transactions/recent', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const limit = parseInt(req.query.limit) || 10;
+
+    // Get recent transactions for user
+    const transactions = await Transaction.find({ user: userId })
+      .sort({ createdAt: -1 })
+      .limit(limit);
+
+    // Fetch current prices for all assets involved
+    const assetSymbols = new Set();
+    transactions.forEach(tx => {
+      if (tx.asset) assetSymbols.add(tx.asset.toLowerCase());
+      if (tx.buyDetails?.asset) assetSymbols.add(tx.buyDetails.asset.toLowerCase());
+      if (tx.sellDetails?.asset) assetSymbols.add(tx.sellDetails.asset.toLowerCase());
+    });
+
+    // Get current prices from CoinGecko (simplified - in production you'd have a price service)
+    const prices = {};
+    for (const symbol of assetSymbols) {
+      try {
+        // Map symbol to CoinGecko ID (simplified mapping)
+        const coinGeckoId = mapSymbolToCoinGeckoId(symbol);
+        const response = await axios.get(`https://api.coingecko.com/api/v3/simple/price?ids=${coinGeckoId}&vs_currencies=usd`);
+        prices[symbol] = response.data[coinGeckoId]?.usd || 0;
+      } catch (error) {
+        console.warn(`Failed to fetch price for ${symbol}:`, error.message);
+        prices[symbol] = symbol === 'usdt' || symbol === 'usdc' ? 1.00 : 0;
+      }
+    }
+
+    // Enhance transactions with current exchange rates
+    const enhancedTransactions = transactions.map(tx => {
+      const txObj = tx.toObject();
+      
+      // Add current exchange rate based on transaction type and asset
+      if (tx.type === 'buy' && tx.asset) {
+        txObj.currentExchangeRate = prices[tx.asset.toLowerCase()] || tx.exchangeRateAtTime || 0;
+        txObj.profitLoss = tx.buyDetails?.profitLoss || 0;
+        txObj.profitLossPercentage = tx.buyDetails?.profitLossPercentage || 0;
+      } else if (tx.type === 'sell' && tx.asset) {
+        txObj.currentExchangeRate = prices[tx.asset.toLowerCase()] || tx.exchangeRateAtTime || 0;
+        txObj.profitLoss = tx.sellDetails?.profitLoss || 0;
+        txObj.profitLossPercentage = tx.sellDetails?.profitLossPercentage || 0;
+      } else if (tx.type === 'deposit' && tx.asset) {
+        txObj.currentExchangeRate = prices[tx.asset.toLowerCase()] || tx.exchangeRateAtTime || 1.00;
+      } else if (tx.type === 'withdrawal' && tx.asset) {
+        txObj.currentExchangeRate = prices[tx.asset.toLowerCase()] || tx.exchangeRateAtTime || 0;
+      } else {
+        txObj.currentExchangeRate = tx.exchangeRateAtTime || 0;
+      }
+
+      return txObj;
+    });
+
+    return res.status(200).json({
+      status: 'success',
+      data: {
+        transactions: enhancedTransactions,
+        count: enhancedTransactions.length
+      }
+    });
+
+  } catch (error) {
+    console.error('Recent transactions error:', error);
+    return res.status(500).json({
+      status: 'error',
+      message: error.message || 'Failed to fetch recent transactions'
+    });
+  }
+})
+
 
 
 
