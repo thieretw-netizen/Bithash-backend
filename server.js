@@ -16051,71 +16051,6 @@ app.get('/api/users/asset-balances', protect, async (req, res) => {
   }
 });
 
-// =============================================
-// WITHDRAWAL AVAILABLE ASSETS ENDPOINT - Get assets user has balance in
-// =============================================
-app.get('/api/withdrawals/available-assets', protect, async (req, res) => {
-  try {
-    const userId = req.user._id;
-
-    const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
-
-    if (!userAssetBalance) {
-      return res.status(200).json({
-        status: 'success',
-        data: {
-          availableAssets: [],
-          message: 'No assets with balance found'
-        }
-      });
-    }
-
-    // Get current prices
-    const assetsWithBalance = [];
-    for (const [asset, amount] of Object.entries(userAssetBalance.balances)) {
-      if (amount > 0) {
-        try {
-          const coinGeckoId = mapSymbolToCoinGeckoId(asset);
-          const response = await axios.get(`https://api.coingecko.com/api/v3/simple/price?ids=${coinGeckoId}&vs_currencies=usd`);
-          const price = response.data[coinGeckoId]?.usd || 0;
-          
-          assetsWithBalance.push({
-            symbol: asset,
-            amount: amount,
-            usdValue: amount * price,
-            price: price,
-            network: getNetworkForAsset(asset)
-          });
-        } catch (error) {
-          // If price fetch fails, still include the asset with estimated value
-          assetsWithBalance.push({
-            symbol: asset,
-            amount: amount,
-            usdValue: amount * (asset === 'usdt' || asset === 'usdc' ? 1 : 0),
-            price: asset === 'usdt' || asset === 'usdc' ? 1 : 0,
-            network: getNetworkForAsset(asset)
-          });
-        }
-      }
-    }
-
-    return res.status(200).json({
-      status: 'success',
-      data: {
-        availableAssets: assetsWithBalance,
-        count: assetsWithBalance.length
-      }
-    });
-
-  } catch (error) {
-    console.error('Get available assets error:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: error.message || 'Failed to fetch available assets'
-    });
-  }
-});
-
 
 
 
@@ -16718,6 +16653,334 @@ function getTransactionEmoji(type) {
   
   return emojis[type] || emojis.default;
 }
+
+
+
+
+// =============================================
+// GET /api/withdrawals/available-assets - Get assets available for withdrawal
+// =============================================
+app.get('/api/withdrawals/available-assets', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    // Get user's asset balances
+    const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
+    
+    if (!userAssetBalance) {
+      return res.status(200).json({
+        status: 'success',
+        data: {
+          availableAssets: []
+        }
+      });
+    }
+
+    // Get user's main balance for USD withdrawals
+    const user = await User.findById(userId).select('balances');
+    
+    // Filter assets with balance > 0
+    const assetsWithBalance = [];
+    
+    // Check each asset in the balances object
+    if (userAssetBalance.balances) {
+      for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
+        if (balance > 0) {
+          // Get asset logo and network information
+          const assetInfo = getAssetInfo(asset);
+          
+          assetsWithBalance.push({
+            asset: asset,
+            symbol: asset.toUpperCase(),
+            name: assetInfo.name,
+            balance: balance,
+            network: assetInfo.network,
+            logo: assetInfo.logo,
+            minWithdrawal: getMinWithdrawal(asset),
+            withdrawalFee: getWithdrawalFee(asset),
+            estimatedValue: 0 // Will be calculated if we have price data
+          });
+        }
+      }
+    }
+
+    // Also check if user has USD balance for fiat withdrawals
+    if (user && user.balances && user.balances.main > 0) {
+      assetsWithBalance.push({
+        asset: 'usd',
+        symbol: 'USD',
+        name: 'US Dollar',
+        balance: user.balances.main,
+        network: 'Bank Transfer',
+        logo: 'https://cdn.jsdelivr.net/npm/cryptocurrency-icons@0.18.1/svg/color/usd.svg',
+        minWithdrawal: 50,
+        withdrawalFee: 2.99,
+        estimatedValue: user.balances.main
+      });
+    }
+
+    // Try to get current prices for estimation (optional)
+    try {
+      const assetSymbols = assetsWithBalance
+        .filter(a => a.asset !== 'usd')
+        .map(a => a.asset);
+      
+      if (assetSymbols.length > 0) {
+        const coinGeckoIds = assetSymbols.map(symbol => {
+          const mapping = {
+            btc: 'bitcoin',
+            eth: 'ethereum',
+            usdt: 'tether',
+            bnb: 'binancecoin',
+            sol: 'solana',
+            usdc: 'usd-coin',
+            xrp: 'xrp',
+            doge: 'dogecoin',
+            ada: 'cardano',
+            shib: 'shiba-inu',
+            avax: 'avalanche-2',
+            dot: 'polkadot',
+            trx: 'tron',
+            link: 'chainlink',
+            matic: 'polygon',
+            wbtc: 'wrapped-bitcoin',
+            ltc: 'litecoin',
+            near: 'near',
+            uni: 'uniswap',
+            bch: 'bitcoin-cash',
+            xlm: 'stellar',
+            atom: 'cosmos',
+            xmr: 'monero',
+            flow: 'flow',
+            vet: 'vechain',
+            fil: 'filecoin',
+            theta: 'theta-token',
+            hbar: 'hedera-hashgraph',
+            ftm: 'fantom',
+            xtz: 'tezos'
+          };
+          return mapping[symbol];
+        }).filter(Boolean);
+
+        if (coinGeckoIds.length > 0) {
+          const priceResponse = await axios.get(
+            `https://api.coingecko.com/api/v3/simple/price?ids=${coinGeckoIds.join(',')}&vs_currencies=usd`,
+            { timeout: 5000 }
+          );
+
+          if (priceResponse.data) {
+            // Update estimated values
+            assetsWithBalance.forEach(asset => {
+              if (asset.asset !== 'usd') {
+                const coinGeckoId = getCoinGeckoId(asset.asset);
+                const price = priceResponse.data[coinGeckoId]?.usd || 0;
+                asset.estimatedValue = asset.balance * price;
+              }
+            });
+          }
+        }
+      }
+    } catch (priceError) {
+      console.warn('Could not fetch current prices:', priceError.message);
+      // Continue without prices
+    }
+
+    // Sort by estimated value (highest first)
+    assetsWithBalance.sort((a, b) => (b.estimatedValue || 0) - (a.estimatedValue || 0));
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        availableAssets: assetsWithBalance,
+        totalWithdrawable: assetsWithBalance.length
+      }
+    });
+
+  } catch (err) {
+    console.error('Available assets error:', err);
+    // Return empty array on error to prevent UI breakage
+    res.status(200).json({
+      status: 'success',
+      data: {
+        availableAssets: [],
+        totalWithdrawable: 0
+      }
+    });
+  }
+});
+
+// Helper function to get asset information
+function getAssetInfo(asset) {
+  const assetMap = {
+    btc: { name: 'Bitcoin', network: 'Bitcoin', logo: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png' },
+    eth: { name: 'Ethereum', network: 'Ethereum (ERC-20)', logo: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png' },
+    usdt: { name: 'Tether', network: 'Multiple networks', logo: 'https://assets.coingecko.com/coins/images/325/large/Tether.png' },
+    bnb: { name: 'BNB', network: 'BNB Smart Chain (BEP-20)', logo: 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png' },
+    sol: { name: 'Solana', network: 'Solana', logo: 'https://assets.coingecko.com/coins/images/4128/large/solana.png' },
+    usdc: { name: 'USD Coin', network: 'Multiple networks', logo: 'https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png' },
+    xrp: { name: 'XRP', network: 'XRP Ledger', logo: 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png' },
+    doge: { name: 'Dogecoin', network: 'Dogecoin', logo: 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png' },
+    ada: { name: 'Cardano', network: 'Cardano', logo: 'https://assets.coingecko.com/coins/images/975/large/cardano.png' },
+    shib: { name: 'Shiba Inu', network: 'Ethereum (ERC-20)', logo: 'https://assets.coingecko.com/coins/images/11939/large/shiba.png' },
+    avax: { name: 'Avalanche', network: 'Avalanche C-Chain', logo: 'https://assets.coingecko.com/coins/images/12559/large/Avalanche_Circle_RedWhite.png' },
+    dot: { name: 'Polkadot', network: 'Polkadot', logo: 'https://assets.coingecko.com/coins/images/12171/large/polkadot.png' },
+    trx: { name: 'TRON', network: 'TRON', logo: 'https://assets.coingecko.com/coins/images/1094/large/tron-logo.png' },
+    link: { name: 'Chainlink', network: 'Ethereum (ERC-20)', logo: 'https://assets.coingecko.com/coins/images/877/large/chainlink-new-logo.png' },
+    matic: { name: 'Polygon', network: 'Polygon', logo: 'https://assets.coingecko.com/coins/images/4713/large/matic-token-icon.png' },
+    wbtc: { name: 'Wrapped Bitcoin', network: 'Ethereum (ERC-20)', logo: 'https://assets.coingecko.com/coins/images/7598/large/wrapped_bitcoin_wbtc.png' },
+    ltc: { name: 'Litecoin', network: 'Litecoin', logo: 'https://assets.coingecko.com/coins/images/2/large/litecoin.png' },
+    near: { name: 'NEAR Protocol', network: 'NEAR', logo: 'https://assets.coingecko.com/coins/images/10365/large/near_icon.png' },
+    uni: { name: 'Uniswap', network: 'Ethereum (ERC-20)', logo: 'https://assets.coingecko.com/coins/images/12504/large/uni.jpg' },
+    bch: { name: 'Bitcoin Cash', network: 'Bitcoin Cash', logo: 'https://assets.coingecko.com/coins/images/780/large/bitcoin-cash-circle.png' },
+    xlm: { name: 'Stellar', network: 'Stellar', logo: 'https://assets.coingecko.com/coins/images/100/large/Stellar_symbol_black_RGB.png' },
+    atom: { name: 'Cosmos', network: 'Cosmos', logo: 'https://assets.coingecko.com/coins/images/1481/large/cosmos_hub.png' },
+    xmr: { name: 'Monero', network: 'Monero', logo: 'https://assets.coingecko.com/coins/images/69/large/monero_logo.png' },
+    flow: { name: 'Flow', network: 'Flow', logo: 'https://assets.coingecko.com/coins/images/13446/large/5f6294c0c7a8cda55cb1.png' },
+    vet: { name: 'VeChain', network: 'VeChain', logo: 'https://assets.coingecko.com/coins/images/1167/large/VET_Token_Icon.png' },
+    fil: { name: 'Filecoin', network: 'Filecoin', logo: 'https://assets.coingecko.com/coins/images/12817/large/filecoin.png' },
+    theta: { name: 'Theta Network', network: 'Theta', logo: 'https://assets.coingecko.com/coins/images/2538/large/theta-token-logo.png' },
+    hbar: { name: 'Hedera', network: 'Hedera', logo: 'https://assets.coingecko.com/coins/images/3688/large/hbar.png' },
+    ftm: { name: 'Fantom', network: 'Fantom', logo: 'https://assets.coingecko.com/coins/images/4001/large/Fantom_round.png' },
+    xtz: { name: 'Tezos', network: 'Tezos', logo: 'https://assets.coingecko.com/coins/images/976/large/Tezos-logo.png' }
+  };
+  
+  return assetMap[asset] || { 
+    name: asset.toUpperCase(), 
+    network: 'Unknown', 
+    logo: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png' 
+  };
+}
+
+// Helper function to get minimum withdrawal amount
+function getMinWithdrawal(asset) {
+  const minAmounts = {
+    btc: 0.001,
+    eth: 0.01,
+    usdt: 10,
+    bnb: 0.1,
+    sol: 0.1,
+    usdc: 10,
+    xrp: 10,
+    doge: 50,
+    ada: 20,
+    shib: 100000,
+    avax: 0.1,
+    dot: 1,
+    trx: 100,
+    link: 5,
+    matic: 10,
+    wbtc: 0.0005,
+    ltc: 0.01,
+    near: 1,
+    uni: 5,
+    bch: 0.001,
+    xlm: 10,
+    atom: 1,
+    xmr: 0.01,
+    flow: 1,
+    vet: 100,
+    fil: 0.1,
+    theta: 1,
+    hbar: 10,
+    ftm: 10,
+    xtz: 1
+  };
+  
+  return minAmounts[asset] || 0.001;
+}
+
+// Helper function to get withdrawal fee
+function getWithdrawalFee(asset) {
+  const fees = {
+    btc: 0.0005,
+    eth: 0.005,
+    usdt: 1,
+    bnb: 0.01,
+    sol: 0.01,
+    usdc: 1,
+    xrp: 0.1,
+    doge: 1,
+    ada: 0.5,
+    shib: 10000,
+    avax: 0.01,
+    dot: 0.1,
+    trx: 1,
+    link: 0.1,
+    matic: 0.5,
+    wbtc: 0.0001,
+    ltc: 0.001,
+    near: 0.01,
+    uni: 0.1,
+    bch: 0.0005,
+    xlm: 0.1,
+    atom: 0.01,
+    xmr: 0.005,
+    flow: 0.01,
+    vet: 1,
+    fil: 0.001,
+    theta: 0.01,
+    hbar: 0.1,
+    ftm: 0.1,
+    xtz: 0.01
+  };
+  
+  return fees[asset] || 0.001;
+}
+
+// Helper function to get CoinGecko ID
+function getCoinGeckoId(asset) {
+  const mapping = {
+    btc: 'bitcoin',
+    eth: 'ethereum',
+    usdt: 'tether',
+    bnb: 'binancecoin',
+    sol: 'solana',
+    usdc: 'usd-coin',
+    xrp: 'xrp',
+    doge: 'dogecoin',
+    ada: 'cardano',
+    shib: 'shiba-inu',
+    avax: 'avalanche-2',
+    dot: 'polkadot',
+    trx: 'tron',
+    link: 'chainlink',
+    matic: 'polygon',
+    wbtc: 'wrapped-bitcoin',
+    ltc: 'litecoin',
+    near: 'near',
+    uni: 'uniswap',
+    bch: 'bitcoin-cash',
+    xlm: 'stellar',
+    atom: 'cosmos',
+    xmr: 'monero',
+    flow: 'flow',
+    vet: 'vechain',
+    fil: 'filecoin',
+    theta: 'theta-token',
+    hbar: 'hedera-hashgraph',
+    ftm: 'fantom',
+    xtz: 'tezos'
+  };
+  
+  return mapping[asset] || asset;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
