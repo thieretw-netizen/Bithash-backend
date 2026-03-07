@@ -16334,6 +16334,12 @@ app.get('/api/assets/portfolio', protect, async (req, res) => {
   }
 });
 
+
+
+
+
+
+
 // =============================================
 // GET /api/transactions - User Transaction History
 // =============================================
@@ -16384,6 +16390,74 @@ app.get('/api/transactions', protect, async (req, res) => {
       .limit(limit)
       .lean();
 
+    // Asset logo mapping (for frontend reference)
+    const assetLogos = {
+      btc: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png',
+      eth: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png',
+      usdt: 'https://assets.coingecko.com/coins/images/325/large/Tether.png',
+      bnb: 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png',
+      sol: 'https://assets.coingecko.com/coins/images/4128/large/solana.png',
+      usdc: 'https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png',
+      xrp: 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png',
+      doge: 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png',
+      ada: 'https://assets.coingecko.com/coins/images/975/large/cardano.png',
+      shib: 'https://assets.coingecko.com/coins/images/11939/large/shiba.png',
+      avax: 'https://assets.coingecko.com/coins/images/12559/large/Avalanche_Circle_RedWhite.png',
+      dot: 'https://assets.coingecko.com/coins/images/12171/large/polkadot.png',
+      trx: 'https://assets.coingecko.com/coins/images/1094/large/tron-logo.png',
+      link: 'https://assets.coingecko.com/coins/images/877/large/chainlink-new-logo.png',
+      matic: 'https://assets.coingecko.com/coins/images/4713/large/matic-token-icon.png',
+      wbtc: 'https://assets.coingecko.com/coins/images/7598/large/wrapped_bitcoin_wbtc.png',
+      ltc: 'https://assets.coingecko.com/coins/images/2/large/litecoin.png',
+      near: 'https://assets.coingecko.com/coins/images/10365/large/near_icon.png',
+      uni: 'https://assets.coingecko.com/coins/images/12504/large/uni.jpg',
+      bch: 'https://assets.coingecko.com/coins/images/780/large/bitcoin-cash-circle.png',
+      xlm: 'https://assets.coingecko.com/coins/images/100/large/Stellar_symbol_black_RGB.png',
+      atom: 'https://assets.coingecko.com/coins/images/1481/large/cosmos_hub.png',
+      xmr: 'https://assets.coingecko.com/coins/images/69/large/monero_logo.png',
+      flow: 'https://assets.coingecko.com/coins/images/13446/large/5f6294c0c7a8cda55cb1.png',
+      vet: 'https://assets.coingecko.com/coins/images/1167/large/VET_Token_Icon.png',
+      fil: 'https://assets.coingecko.com/coins/images/12817/large/filecoin.png',
+      theta: 'https://assets.coingecko.com/coins/images/2538/large/theta-token-logo.png',
+      hbar: 'https://assets.coingecko.com/coins/images/3688/large/hbar.png',
+      ftm: 'https://assets.coingecko.com/coins/images/4001/large/Fantom_round.png',
+      xtz: 'https://assets.coingecko.com/coins/images/976/large/Tezos-logo.png'
+    };
+
+    // Asset network mapping
+    const assetNetworks = {
+      btc: 'Bitcoin',
+      eth: 'Ethereum',
+      usdt: 'Tron (TRC-20)',
+      bnb: 'BNB Smart Chain (BEP-20)',
+      sol: 'Solana',
+      usdc: 'Ethereum (ERC-20)',
+      xrp: 'XRP Ledger',
+      doge: 'Dogecoin',
+      ada: 'Cardano',
+      shib: 'Ethereum (ERC-20)',
+      avax: 'Avalanche C-Chain',
+      dot: 'Polkadot',
+      trx: 'TRON',
+      link: 'Ethereum (ERC-20)',
+      matic: 'Polygon',
+      wbtc: 'Ethereum (ERC-20)',
+      ltc: 'Litecoin',
+      near: 'NEAR',
+      uni: 'Ethereum (ERC-20)',
+      bch: 'Bitcoin Cash',
+      xlm: 'Stellar',
+      atom: 'Cosmos',
+      xmr: 'Monero',
+      flow: 'Flow',
+      vet: 'VeChain',
+      fil: 'Filecoin',
+      theta: 'Theta',
+      hbar: 'Hedera',
+      ftm: 'Fantom',
+      xtz: 'Tezos'
+    };
+
     // Format transactions for frontend
     const formattedTransactions = transactions.map(t => {
       // Determine asset symbol
@@ -16392,104 +16466,106 @@ app.get('/api/transactions', protect, async (req, res) => {
                         t.type === 'sell' ? t.sellDetails?.asset : 
                         t.method) || 'btc';
       
-      // Ensure asset symbol is lowercase
-      if (assetSymbol) assetSymbol = assetSymbol.toLowerCase();
+      // Ensure asset symbol is lowercase string
+      if (assetSymbol && typeof assetSymbol === 'string') {
+        assetSymbol = assetSymbol.toLowerCase();
+      } else {
+        assetSymbol = 'btc';
+      }
 
-      // Get network information
+      // Get network information - ensure it's a string
       let network = t.network;
-      if (!network || network === 'Unknown') {
-        const assetNetworks = {
-          btc: 'Bitcoin',
-          eth: 'Ethereum',
-          usdt: 'Tron (TRC-20)',
-          bnb: 'BNB Smart Chain (BEP-20)',
-          sol: 'Solana',
-          usdc: 'Ethereum (ERC-20)',
-          xrp: 'XRP Ledger',
-          doge: 'Dogecoin',
-          ada: 'Cardano',
-          shib: 'Ethereum (ERC-20)',
-          avax: 'Avalanche C-Chain',
-          dot: 'Polkadot',
-          trx: 'TRON',
-          link: 'Ethereum (ERC-20)',
-          matic: 'Polygon',
-          wbtc: 'Ethereum (ERC-20)',
-          ltc: 'Litecoin',
-          near: 'NEAR',
-          uni: 'Ethereum (ERC-20)',
-          bch: 'Bitcoin Cash',
-          xlm: 'Stellar',
-          atom: 'Cosmos',
-          xmr: 'Monero',
-          flow: 'Flow',
-          vet: 'VeChain',
-          fil: 'Filecoin',
-          theta: 'Theta',
-          hbar: 'Hedera',
-          ftm: 'Fantom',
-          xtz: 'Tezos'
-        };
+      if (!network || network === 'Unknown' || typeof network !== 'string') {
         network = assetNetworks[assetSymbol] || 'Bitcoin';
       }
 
-      // Create description
-      let description = t.details || '';
-      if (!description) {
-        const amount = t.amount || 0;
-        const assetAmount = t.assetAmount || 0;
+      // Create description - ensure it's always a string
+      let description = '';
+      
+      if (t.details && typeof t.details === 'string') {
+        description = t.details;
+      } else if (t.details && typeof t.details === 'object') {
+        description = JSON.stringify(t.details);
+      } else {
+        const amount = parseFloat(t.amount) || 0;
+        const assetAmount = parseFloat(t.assetAmount) || 0;
         
         if (t.type === 'deposit') {
           description = `Deposit of ${assetSymbol.toUpperCase()} via ${t.method || 'crypto'}`;
         } else if (t.type === 'withdrawal') {
-          description = `Withdrawal of ${assetSymbol.toUpperCase()} to ${t.btcAddress || 'wallet'}`;
+          const address = t.btcAddress || 'wallet';
+          description = `Withdrawal of ${assetSymbol.toUpperCase()} to ${address.substring(0, 10)}...`;
         } else if (t.type === 'buy') {
-          description = `Bought ${assetSymbol.toUpperCase()} for ${formatUSD(amount)}`;
-          if (t.buyDetails) {
-            description += ` at $${t.buyDetails.price?.toFixed(2) || '0.00'}`;
+          description = `Bought ${assetSymbol.toUpperCase()} for $${amount.toFixed(2)}`;
+          if (t.buyDetails && t.buyDetails.price) {
+            description += ` at $${parseFloat(t.buyDetails.price).toFixed(2)}`;
           }
         } else if (t.type === 'sell') {
-          description = `Sold ${assetSymbol.toUpperCase()} for ${formatUSD(amount)}`;
+          description = `Sold ${assetSymbol.toUpperCase()} for $${amount.toFixed(2)}`;
           if (t.sellDetails) {
-            const profit = t.sellDetails.profit || 0;
-            const loss = t.sellDetails.loss || 0;
+            const profit = parseFloat(t.sellDetails.profit) || 0;
+            const loss = parseFloat(t.sellDetails.loss) || 0;
+            const percentage = parseFloat(t.sellDetails.profitLossPercentage) || 0;
             if (profit > 0) {
-              description += ` with +$${profit.toFixed(2)} profit (${t.sellDetails.profitLossPercentage?.toFixed(2)}%)`;
+              description += ` with +$${profit.toFixed(2)} profit (${percentage.toFixed(2)}%)`;
             } else if (loss > 0) {
-              description += ` with -$${loss.toFixed(2)} loss (${t.sellDetails.profitLossPercentage?.toFixed(2)}%)`;
+              description += ` with -$${loss.toFixed(2)} loss (${percentage.toFixed(2)}%)`;
             }
           }
         } else if (t.type === 'interest') {
           description = `Interest earned on ${assetSymbol.toUpperCase()} investment`;
         } else if (t.type === 'referral') {
           description = `Referral bonus from downline investment`;
+        } else if (t.type === 'transfer') {
+          description = `Transfer of ${assetSymbol.toUpperCase()}`;
         } else {
           description = 'Transaction processed';
         }
       }
 
+      // Ensure description is a string
+      if (typeof description !== 'string') {
+        description = String(description || 'Transaction processed');
+      }
+
+      // Format dates
+      const createdAt = t.createdAt || new Date();
+      const formattedDate = createdAt;
+
+      // Calculate exchange rate for display
+      let exchangeRate = 1;
+      if (t.type === 'buy' && t.buyDetails?.price) {
+        exchangeRate = parseFloat(t.buyDetails.price);
+      } else if (t.type === 'sell' && t.sellDetails?.price) {
+        exchangeRate = parseFloat(t.sellDetails.price);
+      } else if (t.exchangeRateAtTime) {
+        exchangeRate = parseFloat(t.exchangeRateAtTime);
+      }
+
       return {
-        id: t._id,
-        _id: t._id,
-        type: t.type,
-        amount: t.amount,
+        id: t._id.toString(),
+        _id: t._id.toString(),
+        type: String(t.type || 'transaction'),
+        amount: parseFloat(t.amount) || 0,
         asset: assetSymbol,
-        assetAmount: t.assetAmount || 0,
-        status: t.status,
-        method: t.method,
-        reference: t.reference,
-        fee: t.fee || 0,
-        netAmount: t.netAmount || t.amount,
-        btcAddress: t.btcAddress,
-        network: network,
-        exchangeRateAtTime: t.exchangeRateAtTime,
+        assetAmount: parseFloat(t.assetAmount) || 0,
+        status: String(t.status || 'pending'),
+        method: String(t.method || 'crypto'),
+        reference: String(t.reference || ''),
+        fee: parseFloat(t.fee) || 0,
+        netAmount: parseFloat(t.netAmount) || (parseFloat(t.amount) || 0),
+        btcAddress: t.btcAddress ? String(t.btcAddress) : '',
+        network: String(network),
+        exchangeRateAtTime: exchangeRate,
         description: description,
         details: description,
-        buyDetails: t.buyDetails,
-        sellDetails: t.sellDetails,
-        createdAt: t.createdAt,
-        date: t.createdAt,
-        timestamp: t.createdAt
+        buyDetails: t.buyDetails || null,
+        sellDetails: t.sellDetails || null,
+        createdAt: createdAt,
+        date: createdAt,
+        timestamp: createdAt,
+        // Add logo URL for frontend convenience
+        logo: assetLogos[assetSymbol] || 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png'
       };
     });
 
@@ -16510,6 +16586,7 @@ app.get('/api/transactions', protect, async (req, res) => {
 
   } catch (err) {
     console.error('Transactions error:', err);
+    // Return empty array with proper structure
     res.status(200).json({
       status: 'success',
       data: {
@@ -16526,33 +16603,6 @@ app.get('/api/transactions', protect, async (req, res) => {
     });
   }
 });
-
-// Helper function for USD formatting
-function formatUSD(amount) {
-  if (!amount && amount !== 0) return '$0.00';
-  const num = parseFloat(amount);
-  if (isNaN(num)) return '$0.00';
-  
-  if (num >= 1e9) {
-    return '$' + (num / 1e9).toFixed(2) + 'B';
-  } else if (num >= 1e6) {
-    return '$' + (num / 1e6).toFixed(2) + 'M';
-  } else if (num >= 1e3) {
-    return '$' + (num / 1e3).toFixed(2) + 'K';
-  }
-  
-  return '$' + num.toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  });
-}
-
-
-
-
-
-
-
 
 
 
