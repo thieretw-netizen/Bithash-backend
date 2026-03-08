@@ -17949,343 +17949,17 @@ app.post('/api/withdrawals/confirm-gas-payment', protect, async (req, res) => {
 
 
 
-// =============================================
-// TRADING ENDPOINTS - Complete Functional Implementation
-// =============================================
 
-// Initialize order book simulation for all assets
-const initializeOrderBookSimulation = async () => {
-  try {
-    console.log('Initializing order book simulation for all assets...');
-    
-    // Get all supported assets
-    const assets = [
-      'btc', 'eth', 'usdt', 'bnb', 'sol', 'usdc', 'xrp', 'doge', 'ada', 'shib',
-      'avax', 'dot', 'trx', 'link', 'matic', 'wbtc', 'ltc', 'near', 'uni', 'bch',
-      'xlm', 'atom', 'xmr', 'flow', 'vet', 'fil', 'theta', 'hbar', 'ftm', 'xtz'
-    ];
 
-    // Fetch current prices from CoinGecko via Redis cache
-    const prices = await fetchAllAssetPrices();
 
-    for (const symbol of assets) {
-      const basePrice = prices[symbol] || await getDefaultPrice(symbol);
-      
-      // Check if order book exists in Redis
-      const orderBookKey = `orderbook:${symbol}`;
-      const exists = await redis.exists(orderBookKey);
-      
-      if (!exists) {
-        // Generate initial order book
-        const orderBook = generateOrderBook(basePrice, symbol);
-        await redis.setex(orderBookKey, 300, JSON.stringify(orderBook)); // 5 minutes cache
-        
-        // Store in MongoDB for persistence
-        await OrderBook.findOneAndUpdate(
-          { symbol },
-          {
-            symbol,
-            asks: orderBook.asks,
-            bids: orderBook.bids,
-            lastPrice: basePrice,
-            volume24h: Math.random() * 1000000 + 100000,
-            updatedAt: new Date()
-          },
-          { upsert: true, new: true }
-        );
-      }
-    }
-    
-    console.log('Order book simulation initialized successfully');
-  } catch (error) {
-    console.error('Error initializing order book simulation:', error);
-  }
-};
 
-// Fetch all asset prices with Redis caching
-const fetchAllAssetPrices = async () => {
-  try {
-    // Try to get from Redis cache first
-    const cachedPrices = await redis.get('asset:prices:all');
-    if (cachedPrices) {
-      return JSON.parse(cachedPrices);
-    }
 
-    // Fetch from CoinGecko
-    const response = await axios.get(
-      'https://api.coingecko.com/api/v3/simple/price?ids=' +
-      'bitcoin,ethereum,tether,binancecoin,solana,usd-coin,xrp,dogecoin,cardano,shiba-inu,' +
-      'avalanche-2,polkadot,tron,chainlink,matic-network,wrapped-bitcoin,litecoin,near,uniswap,' +
-      'bitcoin-cash,stellar,cosmos,monero,flow,vechain,filecoin,theta-token,hedera-hashgraph,' +
-      'fantom,tezos&vs_currencies=usd&include_24hr_change=true',
-      { timeout: 5000 }
-    );
 
-    const prices = {};
-    const symbolMap = {
-      bitcoin: 'btc',
-      ethereum: 'eth',
-      tether: 'usdt',
-      binancecoin: 'bnb',
-      solana: 'sol',
-      'usd-coin': 'usdc',
-      xrp: 'xrp',
-      dogecoin: 'doge',
-      cardano: 'ada',
-      'shiba-inu': 'shib',
-      'avalanche-2': 'avax',
-      polkadot: 'dot',
-      tron: 'trx',
-      chainlink: 'link',
-      'matic-network': 'matic',
-      'wrapped-bitcoin': 'wbtc',
-      litecoin: 'ltc',
-      near: 'near',
-      uniswap: 'uni',
-      'bitcoin-cash': 'bch',
-      stellar: 'xlm',
-      cosmos: 'atom',
-      monero: 'xmr',
-      flow: 'flow',
-      vechain: 'vet',
-      filecoin: 'fil',
-      'theta-token': 'theta',
-      'hedera-hashgraph': 'hbar',
-      fantom: 'ftm',
-      tezos: 'xtz'
-    };
 
-    for (const [id, data] of Object.entries(response.data)) {
-      const symbol = symbolMap[id];
-      if (symbol) {
-        prices[symbol] = {
-          usd: data.usd,
-          change24h: data.usd_24h_change || 0
-        };
-      }
-    }
 
-    // Cache for 30 seconds
-    await redis.setex('asset:prices:all', 30, JSON.stringify(prices));
-    return prices;
-  } catch (error) {
-    console.error('Error fetching asset prices:', error);
-    return {};
-  }
-};
-
-// Get default price for asset if API fails
-const getDefaultPrice = async (symbol) => {
-  const defaultPrices = {
-    btc: 43000,
-    eth: 2300,
-    usdt: 1,
-    bnb: 310,
-    sol: 100,
-    usdc: 1,
-    xrp: 0.5,
-    doge: 0.08,
-    ada: 0.35,
-    shib: 0.000008,
-    avax: 35,
-    dot: 7,
-    trx: 0.1,
-    link: 15,
-    matic: 0.8,
-    wbtc: 43000,
-    ltc: 70,
-    near: 3,
-    uni: 6,
-    bch: 240,
-    xlm: 0.1,
-    atom: 9,
-    xmr: 150,
-    flow: 0.8,
-    vet: 0.02,
-    fil: 4.5,
-    theta: 1.2,
-    hbar: 0.07,
-    ftm: 0.4,
-    xtz: 0.8
-  };
-  return defaultPrices[symbol] || 100;
-};
-
-// Generate realistic order book with spreads
-const generateOrderBook = (basePrice, symbol) => {
-  const asks = [];
-  const bids = [];
-  const spread = basePrice * 0.001; // 0.1% spread
-  
-  // Generate asks (sell orders) - higher prices
-  for (let i = 1; i <= 15; i++) {
-    const price = basePrice + (spread * i * (Math.random() * 0.5 + 0.75));
-    const amount = Math.random() * 2 + 0.1;
-    const total = price * amount;
-    asks.push({
-      price: parseFloat(price.toFixed(2)),
-      amount: parseFloat(amount.toFixed(4)),
-      total: parseFloat(total.toFixed(2)),
-      orderId: uuidv4(),
-      createdAt: new Date()
-    });
-  }
-  
-  // Generate bids (buy orders) - lower prices
-  for (let i = 1; i <= 15; i++) {
-    const price = basePrice - (spread * i * (Math.random() * 0.5 + 0.75));
-    const amount = Math.random() * 2 + 0.1;
-    const total = price * amount;
-    bids.push({
-      price: parseFloat(price.toFixed(2)),
-      amount: parseFloat(amount.toFixed(4)),
-      total: parseFloat(total.toFixed(2)),
-      orderId: uuidv4(),
-      createdAt: new Date()
-    });
-  }
-  
-  // Sort asks ascending, bids descending
-  asks.sort((a, b) => a.price - b.price);
-  bids.sort((a, b) => b.price - a.price);
-  
-  return { asks, bids };
-};
-
-// Simulate random trades to make order book dynamic
-const simulateOrderBookActivity = async () => {
-  try {
-    const assets = [
-      'btc', 'eth', 'usdt', 'bnb', 'sol', 'usdc', 'xrp', 'doge', 'ada', 'shib',
-      'avax', 'dot', 'trx', 'link', 'matic', 'wbtc', 'ltc', 'near', 'uni', 'bch',
-      'xlm', 'atom', 'xmr', 'flow', 'vet', 'fil', 'theta', 'hbar', 'ftm', 'xtz'
-    ];
-
-    // Randomly select 3-5 assets to update
-    const numToUpdate = Math.floor(Math.random() * 3) + 3;
-    const shuffled = assets.sort(() => 0.5 - Math.random());
-    const selected = shuffled.slice(0, numToUpdate);
-
-    for (const symbol of selected) {
-      const orderBookKey = `orderbook:${symbol}`;
-      const orderBookData = await redis.get(orderBookKey);
-      
-      if (!orderBookData) continue;
-
-      const orderBook = JSON.parse(orderBookData);
-      
-      // Simulate price movement
-      const priceChange = (Math.random() * 0.002) - 0.001; // -0.1% to +0.1%
-      const newBasePrice = orderBook.lastPrice * (1 + priceChange);
-      
-      // Simulate random trades (1-3 trades)
-      const numTrades = Math.floor(Math.random() * 3) + 1;
-      
-      for (let i = 0; i < numTrades; i++) {
-        const tradeType = Math.random() > 0.5 ? 'buy' : 'sell';
-        const tradePrice = tradeType === 'buy' 
-          ? orderBook.asks[0]?.price || newBasePrice
-          : orderBook.bids[0]?.price || newBasePrice;
-        const tradeAmount = Math.random() * 0.5 + 0.1;
-        
-        // Create recent trade
-        const recentTrade = {
-          symbol,
-          type: tradeType,
-          price: tradePrice,
-          amount: parseFloat(tradeAmount.toFixed(4)),
-          total: parseFloat((tradePrice * tradeAmount).toFixed(2)),
-          timestamp: new Date(),
-          orderId: uuidv4()
-        };
-
-        // Store in Redis recent trades list
-        const tradesKey = `trades:${symbol}`;
-        await redis.lpush(tradesKey, JSON.stringify(recentTrade));
-        await redis.ltrim(tradesKey, 0, 49); // Keep last 50 trades
-
-        // Also store in MongoDB
-        await RecentTrade.create(recentTrade);
-
-        // Update order book based on trade
-        if (tradeType === 'buy') {
-          // Buy order consumes from asks
-          if (orderBook.asks.length > 0) {
-            orderBook.asks[0].amount -= tradeAmount;
-            if (orderBook.asks[0].amount <= 0) {
-              orderBook.asks.shift();
-            } else {
-              orderBook.asks[0].total = orderBook.asks[0].price * orderBook.asks[0].amount;
-            }
-          }
-        } else {
-          // Sell order consumes from bids
-          if (orderBook.bids.length > 0) {
-            orderBook.bids[0].amount -= tradeAmount;
-            if (orderBook.bids[0].amount <= 0) {
-              orderBook.bids.shift();
-            } else {
-              orderBook.bids[0].total = orderBook.bids[0].price * orderBook.bids[0].amount;
-            }
-          }
-        }
-      }
-
-      // Regenerate orders if order book gets too thin
-      if (orderBook.asks.length < 5) {
-        const newAsks = generateOrderBook(newBasePrice, symbol).asks;
-        orderBook.asks = [...orderBook.asks, ...newAsks].slice(0, 15);
-        orderBook.asks.sort((a, b) => a.price - b.price);
-      }
-      
-      if (orderBook.bids.length < 5) {
-        const newBids = generateOrderBook(newBasePrice, symbol).bids;
-        orderBook.bids = [...orderBook.bids, ...newBids].slice(0, 15);
-        orderBook.bids.sort((a, b) => b.price - a.price);
-      }
-
-      orderBook.lastPrice = newBasePrice;
-      orderBook.updatedAt = new Date();
-
-      // Update Redis cache
-      await redis.setex(orderBookKey, 300, JSON.stringify(orderBook));
-
-      // Update MongoDB
-      await OrderBook.findOneAndUpdate(
-        { symbol },
-        {
-          symbol,
-          asks: orderBook.asks,
-          bids: orderBook.bids,
-          lastPrice: newBasePrice,
-          volume24h: await calculate24hVolume(symbol),
-          updatedAt: new Date()
-        },
-        { upsert: true }
-      );
-    }
-  } catch (error) {
-    console.error('Error simulating order book activity:', error);
-  }
-};
-
-// Calculate 24h trading volume
-const calculate24hVolume = async (symbol) => {
-  try {
-    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const trades = await RecentTrade.find({
-      symbol,
-      timestamp: { $gte: oneDayAgo }
-    });
-    
-    return trades.reduce((sum, trade) => sum + trade.total, 0);
-  } catch (error) {
-    return 0;
-  }
-};
 
 // =============================================
-// API ENDPOINTS
+// FIXED TRADING ENDPOINTS - Correct Response Format
 // =============================================
 
 /**
@@ -18411,7 +18085,7 @@ app.get('/api/market/orderbook/:symbol', async (req, res) => {
 
 /**
  * GET /api/market/trades/:symbol
- * Get recent trades for a specific asset
+ * Get recent trades for a specific asset - RETURNS ARRAY DIRECTLY
  */
 app.get('/api/market/trades/:symbol', async (req, res) => {
   try {
@@ -18426,10 +18100,7 @@ app.get('/api/market/trades/:symbol', async (req, res) => {
     ];
     
     if (!validSymbols.includes(symbol.toLowerCase())) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Invalid symbol'
-      });
+      return res.status(400).json([]); // Return empty array for invalid symbol
     }
 
     // Try to get from Redis first (faster for recent trades)
@@ -18438,38 +18109,44 @@ app.get('/api/market/trades/:symbol', async (req, res) => {
     
     if (cachedTrades && cachedTrades.length > 0) {
       const trades = cachedTrades.map(trade => JSON.parse(trade));
-      return res.json({
-        status: 'success',
-        data: trades
-      });
+      // Format for frontend - ensure it's an array of objects with the right structure
+      const formattedTrades = trades.map(trade => ({
+        id: trade.orderId || trade.id,
+        side: trade.type,
+        price: trade.price,
+        amount: trade.amount,
+        total: trade.total,
+        timestamp: trade.timestamp
+      }));
+      return res.json(formattedTrades); // Return array directly, not wrapped in data
     }
 
     // If not in Redis, get from MongoDB
     const trades = await RecentTrade.find({ symbol: symbol.toLowerCase() })
       .sort({ timestamp: -1 })
-      .limit(parseInt(limit))
-      .populate('userId', 'firstName lastName');
+      .limit(parseInt(limit));
 
-    // Format trades for frontend
+    // Format trades for frontend - ensure it's an array
     const formattedTrades = trades.map(trade => ({
       id: trade._id,
       side: trade.type,
       price: trade.price,
       amount: trade.amount,
       total: trade.total,
-      timestamp: trade.timestamp,
-      user: trade.userId ? `${trade.userId.firstName} ${trade.userId.lastName}`.trim() : null
+      timestamp: trade.timestamp
     }));
 
-    res.json({
-      status: 'success',
-      data: formattedTrades
-    });
+    // If no trades, return empty array
+    if (formattedTrades.length === 0) {
+      return res.json([]);
+    }
+
+    res.json(formattedTrades); // Return array directly
 
   } catch (error) {
     console.error('Error fetching recent trades:', error);
     
-    // Return mock data if database fails
+    // Return mock data as array if database fails
     const mockTrades = [];
     const basePrice = 43000;
     for (let i = 0; i < 10; i++) {
@@ -18477,22 +18154,19 @@ app.get('/api/market/trades/:symbol', async (req, res) => {
         id: `mock-${i}`,
         side: Math.random() > 0.5 ? 'buy' : 'sell',
         price: basePrice * (1 + (Math.random() * 0.002 - 0.001)),
-        amount: Math.random() * 0.5 + 0.1,
+        amount: parseFloat((Math.random() * 0.5 + 0.1).toFixed(4)),
         total: 0,
         timestamp: new Date(Date.now() - i * 60000)
       });
     }
     
-    res.json({
-      status: 'success',
-      data: mockTrades
-    });
+    res.json(mockTrades); // Return array directly
   }
 });
 
 /**
  * GET /api/trading/orders
- * Get user's open orders
+ * Get user's open orders - RETURNS ARRAY DIRECTLY
  */
 app.get('/api/trading/orders', protect, async (req, res) => {
   try {
@@ -18516,7 +18190,7 @@ app.get('/api/trading/orders', protect, async (req, res) => {
       .sort({ createdAt: -1 })
       .limit(50);
 
-    // Format orders for frontend
+    // Format orders for frontend - ensure it's an array
     const formattedOrders = orders.map(order => ({
       id: order._id,
       symbol: order.symbol,
@@ -18533,17 +18207,11 @@ app.get('/api/trading/orders', protect, async (req, res) => {
       profitLossPercentage: order.profitLossPercentage
     }));
 
-    res.json({
-      status: 'success',
-      data: formattedOrders
-    });
+    res.json(formattedOrders); // Return array directly
 
   } catch (error) {
     console.error('Error fetching user orders:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch orders'
-    });
+    res.json([]); // Return empty array on error
   }
 });
 
@@ -18554,7 +18222,7 @@ app.get('/api/trading/orders', protect, async (req, res) => {
 app.post('/api/trading/orders', protect, async (req, res) => {
   try {
     const userId = req.user._id;
-    const { symbol, side, type, amount, price, orderType = 'market' } = req.body;
+    const { symbol, side, amount, price, orderType = 'market' } = req.body;
 
     // Validation
     if (!symbol || !side || !amount) {
@@ -18614,12 +18282,12 @@ app.post('/api/trading/orders', protect, async (req, res) => {
     // For market orders, execute immediately
     if (orderType === 'market') {
       await executeMarketOrder(order, currentPrice);
+    } else {
+      // For limit orders, just deduct balance and keep pending
+      await User.findByIdAndUpdate(userId, {
+        $inc: { 'balances.main': -amount }
+      });
     }
-
-    // Deduct from user balance
-    await User.findByIdAndUpdate(userId, {
-      $inc: { 'balances.main': -amount }
-    });
 
     // Create transaction record
     const transaction = new Transaction({
@@ -18629,7 +18297,7 @@ app.post('/api/trading/orders', protect, async (req, res) => {
       asset: symbol.toLowerCase(),
       assetAmount: orderAmount,
       currency: 'USD',
-      status: 'completed',
+      status: orderType === 'market' ? 'completed' : 'pending',
       method: 'internal',
       reference: `ORDER-${order._id}`,
       details: {
@@ -18673,7 +18341,7 @@ app.post('/api/trading/orders', protect, async (req, res) => {
 // Execute market order
 const executeMarketOrder = async (order, marketPrice) => {
   try {
-    // Simulate order execution
+    // Simulate order execution with slight price slippage
     const executionPrice = marketPrice * (1 + (Math.random() * 0.002 - 0.001));
     
     // Update order
@@ -18703,7 +18371,7 @@ const executeMarketOrder = async (order, marketPrice) => {
     await order.save();
 
     // Create recent trade record
-    await RecentTrade.create({
+    const recentTrade = await RecentTrade.create({
       symbol: order.symbol,
       type: order.type,
       price: executionPrice,
@@ -18726,15 +18394,17 @@ const executeMarketOrder = async (order, marketPrice) => {
 
     if (order.type === 'buy') {
       userAssetBalance.balances[assetKey] = currentBalance + order.amount;
-      userAssetBalance.trades.totalBuyVolume += order.total;
+      userAssetBalance.trades.totalBuyVolume = (userAssetBalance.trades.totalBuyVolume || 0) + order.total;
+      if (!userAssetBalance.trades.buys) userAssetBalance.trades.buys = [];
       userAssetBalance.trades.buys.push(order._id);
     } else {
       userAssetBalance.balances[assetKey] = Math.max(0, currentBalance - order.amount);
-      userAssetBalance.trades.totalSellVolume += order.total;
+      userAssetBalance.trades.totalSellVolume = (userAssetBalance.trades.totalSellVolume || 0) + order.total;
+      if (!userAssetBalance.trades.sells) userAssetBalance.trades.sells = [];
       userAssetBalance.trades.sells.push(order._id);
       
       if (order.profitLoss) {
-        userAssetBalance.trades.totalProfitLoss += order.profitLoss;
+        userAssetBalance.trades.totalProfitLoss = (userAssetBalance.trades.totalProfitLoss || 0) + order.profitLoss;
       }
     }
 
@@ -18743,17 +18413,17 @@ const executeMarketOrder = async (order, marketPrice) => {
 
     // Update Redis caches
     const tradesKey = `trades:${order.symbol}`;
-    const recentTrade = {
-      symbol: order.symbol,
+    const tradeData = {
+      id: recentTrade._id,
+      orderId: order._id,
       type: order.type,
       price: executionPrice,
       amount: order.amount,
       total: order.total,
-      timestamp: new Date(),
-      orderId: order._id
+      timestamp: new Date()
     };
     
-    await redis.lpush(tradesKey, JSON.stringify(recentTrade));
+    await redis.lpush(tradesKey, JSON.stringify(tradeData));
     await redis.ltrim(tradesKey, 0, 49);
 
   } catch (error) {
@@ -18764,7 +18434,7 @@ const executeMarketOrder = async (order, marketPrice) => {
 
 /**
  * GET /api/trading/history
- * Get user's trade history
+ * Get user's trade history - RETURNS ARRAY DIRECTLY
  */
 app.get('/api/trading/history', protect, async (req, res) => {
   try {
@@ -18774,27 +18444,19 @@ app.get('/api/trading/history', protect, async (req, res) => {
     const skip = (parseInt(page) - 1) * parseInt(limit);
     
     // Build query
-    const query = { user: userId };
+    const query = { user: userId, status: 'completed' };
     
     if (symbol) {
       query.symbol = symbol.toLowerCase();
     }
 
     // Get completed orders
-    const orders = await UserOrder.find({
-      ...query,
-      status: 'completed'
-    })
+    const orders = await UserOrder.find(query)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit));
 
-    const total = await UserOrder.countDocuments({
-      ...query,
-      status: 'completed'
-    });
-
-    // Format orders for frontend
+    // Format orders for frontend - ensure it's an array
     const formattedOrders = orders.map(order => ({
       id: order._id,
       symbol: order.symbol,
@@ -18810,29 +18472,17 @@ app.get('/api/trading/history', protect, async (req, res) => {
       transactionId: order.transactionId
     }));
 
-    res.json({
-      status: 'success',
-      data: formattedOrders,
-      pagination: {
-        total,
-        page: parseInt(page),
-        limit: parseInt(limit),
-        pages: Math.ceil(total / parseInt(limit))
-      }
-    });
+    res.json(formattedOrders); // Return array directly
 
   } catch (error) {
     console.error('Error fetching trade history:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch trade history'
-    });
+    res.json([]); // Return empty array on error
   }
 });
 
 /**
  * GET /api/trading/positions
- * Get user's current positions (asset balances)
+ * Get user's current positions (asset balances) - RETURNS ARRAY DIRECTLY
  */
 app.get('/api/trading/positions', protect, async (req, res) => {
   try {
@@ -18901,21 +18551,12 @@ app.get('/api/trading/positions', protect, async (req, res) => {
     // Sort by value descending
     positions.sort((a, b) => b.usdValue - a.usdValue);
 
-    res.json({
-      status: 'success',
-      data: {
-        positions,
-        totalValue,
-        lastUpdated: userAssetBalance.lastUpdated
-      }
-    });
+    // Return as array directly - frontend expects array
+    res.json(positions);
 
   } catch (error) {
     console.error('Error fetching positions:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch positions'
-    });
+    res.json([]); // Return empty array on error
   }
 });
 
@@ -18968,42 +18609,6 @@ app.delete('/api/trading/orders/:orderId', protect, async (req, res) => {
     });
   }
 });
-
-// =============================================
-// START SIMULATION ENGINE
-// =============================================
-
-// Initialize order book simulation on server start
-setTimeout(async () => {
-  await initializeOrderBookSimulation();
-  
-  // Start simulation interval (random between 2-5 seconds)
-  setInterval(async () => {
-    await simulateOrderBookActivity();
-  }, Math.floor(Math.random() * 3000) + 2000); // 2-5 seconds
-  
-}, 5000);
-
-// Also update prices from CoinGecko every 30 seconds
-setInterval(async () => {
-  try {
-    await fetchAllAssetPrices();
-  } catch (error) {
-    console.error('Error updating prices:', error);
-  }
-}, 30000);
-
-// Add to module exports
-module.exports = {
-  // ... existing exports ...
-  OrderBook,
-  UserOrder,
-  RecentTrade,
-  AssetPrice
-};
-
-
-
 
 
 
