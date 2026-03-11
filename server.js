@@ -17900,7 +17900,312 @@ app.post('/api/withdrawals/confirm-gas-payment', protect, async (req, res) => {
 
 
 
+// =============================================
+// BUY CRYPTO ENDPOINT - /api/trading/orders/buy
+// Maps exactly to frontend expectations from trading.html
+// =============================================
+app.post('/api/trading/orders/buy', protect, async (req, res) => {
+  try {
+    const {
+      symbol,
+      baseAsset,
+      quoteAsset,
+      side,
+      type,
+      price,
+      amount,
+      total,
+      useMaturedBalance,
+      timestamp
+    } = req.body;
 
+    // Validate required fields
+    if (!symbol || !baseAsset || !quoteAsset || !side || !type || !price || !amount || !total) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Missing required fields',
+        required: ['symbol', 'baseAsset', 'quoteAsset', 'side', 'type', 'price', 'amount', 'total']
+      });
+    }
+
+    // Validate side is 'buy'
+    if (side !== 'buy') {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid side. Expected "buy"'
+      });
+    }
+
+    // Validate minimum trade amount ($10 worth of asset)
+    if (total < 10) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Minimum trade amount is $10 worth of ${baseAsset}`,
+        minAmount: 10,
+        currentTotal: total
+      });
+    }
+
+    // Get user with balances
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+
+    // Calculate available balance (main + matured if allowed)
+    let availableBalance = user.balances.main;
+    if (useMaturedBalance) {
+      availableBalance += user.balances.matured;
+    }
+
+    // Check sufficient balance
+    if (total > availableBalance) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Insufficient balance',
+        required: total,
+        available: availableBalance,
+        mainBalance: user.balances.main,
+        maturedBalance: user.balances.matured
+      });
+    }
+
+    // Start a session for transaction atomicity
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+      // Deduct from balances (main first, then matured if needed)
+      let remainingToDeduct = total;
+      let mainDeducted = 0;
+      let maturedDeducted = 0;
+
+      // Deduct from main balance first
+      if (user.balances.main > 0) {
+        mainDeducted = Math.min(user.balances.main, remainingToDeduct);
+        user.balances.main -= mainDeducted;
+        remainingToDeduct -= mainDeducted;
+      }
+
+      // Deduct from matured balance if needed
+      if (remainingToDeduct > 0 && useMaturedBalance) {
+        maturedDeducted = Math.min(user.balances.matured, remainingToDeduct);
+        user.balances.matured -= maturedDeducted;
+        remainingToDeduct -= maturedDeducted;
+      }
+
+      // This should never happen due to earlier check, but just in case
+      if (remainingToDeduct > 0) {
+        throw new Error('Insufficient balance after deduction');
+      }
+
+      await user.save({ session });
+
+      // Create unique order ID
+      const orderId = `ORD-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`.toUpperCase();
+
+      // Create transaction record
+      const transaction = new Transaction({
+        user: user._id,
+        type: 'buy',
+        amount: total,
+        asset: baseAsset.toLowerCase(),
+        assetAmount: amount,
+        currency: quoteAsset,
+        status: 'completed',
+        method: 'internal',
+        reference: `BUY-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`.toUpperCase(),
+        details: {
+          symbol,
+          baseAsset,
+          quoteAsset,
+          side,
+          type,
+          price,
+          amount,
+          total,
+          useMaturedBalance,
+          mainBalanceUsed: mainDeducted,
+          maturedBalanceUsed: maturedDeducted,
+          timestamp
+        },
+        fee: 0,
+        netAmount: total,
+        buyDetails: {
+          asset: baseAsset.toLowerCase(),
+          amountUSD: total,
+          assetAmount: amount,
+          buyingPrice: price,
+          currentPrice: price,
+          profitLoss: 0,
+          profitLossPercentage: 0
+        }
+      });
+
+      await transaction.save({ session });
+
+      // Update or create user asset balance
+      let userAssetBalance = await UserAssetBalance.findOne({ user: user._id }).session(session);
+      
+      if (!userAssetBalance) {
+        userAssetBalance = new UserAssetBalance({
+          user: user._id,
+          balances: {}
+        });
+      }
+
+      // Update asset balance
+      const assetKey = baseAsset.toLowerCase();
+      userAssetBalance.balances[assetKey] = (userAssetBalance.balances[assetKey] || 0) + amount;
+      
+      // Add to history
+      if (!userAssetBalance.history) userAssetBalance.history = [];
+      userAssetBalance.history.push({
+        asset: assetKey,
+        type: 'buy',
+        amount: amount,
+        balance: userAssetBalance.balances[assetKey],
+        usdValue: total,
+        price: price,
+        profitLoss: 0,
+        profitLossPercentage: 0,
+        timestamp: new Date(),
+        transactionId: transaction._id
+      });
+
+      await userAssetBalance.save({ session });
+
+      // Create user order record
+      const userOrder = new UserOrder({
+        user: user._id,
+        symbol: symbol,
+        type: 'buy',
+        orderType: type || 'limit',
+        price: price,
+        amount: amount,
+        total: total,
+        filled: amount,
+        remaining: 0,
+        status: 'completed',
+        assetBalanceSource: useMaturedBalance ? 'both' : 'main',
+        assetBalanceUsed: true,
+        profitLoss: 0,
+        profitLossPercentage: 0,
+        executedAt: new Date(),
+        transactionId: transaction._id,
+        metadata: {
+          ipAddress: req.ip,
+          userAgent: req.headers['user-agent'],
+          deviceInfo: req.headers['sec-ch-ua-platform'] || 'unknown'
+        }
+      });
+
+      await userOrder.save({ session });
+
+      // Create recent trade record
+      const recentTrade = new RecentTrade({
+        symbol: symbol,
+        type: 'buy',
+        price: price,
+        amount: amount,
+        total: total,
+        userId: user._id,
+        orderId: userOrder._id,
+        timestamp: new Date()
+      });
+
+      await recentTrade.save({ session });
+
+      // Log the activity
+      await logActivity(
+        'buy_completed',
+        'Transaction',
+        transaction._id,
+        user._id,
+        'User',
+        req,
+        {
+          amount: total,
+          asset: baseAsset,
+          assetAmount: amount,
+          price: price,
+          mainBalanceUsed: mainDeducted,
+          maturedBalanceUsed: maturedDeducted
+        }
+      );
+
+      // Commit the transaction
+      await session.commitTransaction();
+      session.endSession();
+
+      // Prepare response exactly as frontend expects
+      res.status(200).json({
+        status: 'success',
+        message: 'Buy order completed successfully',
+        data: {
+          orderId: userOrder._id,
+          transactionId: transaction._id,
+          symbol,
+          baseAsset,
+          quoteAsset,
+          side: 'buy',
+          type: type || 'limit',
+          price,
+          amount,
+          total,
+          filled: amount,
+          remaining: 0,
+          status: 'completed',
+          executedAt: userOrder.executedAt,
+          balances: {
+            main: user.balances.main,
+            matured: user.balances.matured,
+            [baseAsset.toLowerCase()]: userAssetBalance.balances[baseAsset.toLowerCase()] || 0
+          },
+          balanceUsed: {
+            main: mainDeducted,
+            matured: maturedDeducted
+          },
+          timestamp: new Date().toISOString()
+        }
+      });
+
+    } catch (error) {
+      // Rollback transaction on error
+      await session.abortTransaction();
+      session.endSession();
+      throw error;
+    }
+
+  } catch (error) {
+    console.error('Buy order error:', error);
+    
+    // Check for specific error types
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Validation error',
+        errors: Object.values(error.errors).map(e => e.message)
+      });
+    }
+
+    if (error.code === 11000) {
+      return res.status(409).json({
+        status: 'fail',
+        message: 'Duplicate transaction reference'
+      });
+    }
+
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to process buy order',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
 
 
 
