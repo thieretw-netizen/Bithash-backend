@@ -3531,7 +3531,6 @@ const calculateReferralCommissions = async (investment) => {
 
 
 
-
 // Enhanced email service with professional Bitcoin mining templates
 const sendProfessionalEmail = async (options) => {
   try {
@@ -18505,636 +18504,698 @@ UserOrderSchema.index({ symbol: 1, status: 1, createdAt: -1 });
 
 
 
-
-
 // =============================================
-// TRADING ENDPOINTS
+// TRADING ENDPOINTS IMPLEMENTATION
 // =============================================
 
-/**
- * @route   POST /api/trading/orders/buy
- * @desc    Place a buy order
- * @access  Private
- */
+// Helper function to fetch current price from Binance
+const fetchCurrentPrice = async (symbol) => {
+  try {
+    const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}USDT`);
+    return parseFloat(response.data.price);
+  } catch (error) {
+    console.error('Error fetching price from Binance:', error);
+    // Fallback to mock price if Binance fails
+    const mockPrices = {
+      'BTC': 43000, 'ETH': 2300, 'BNB': 300, 'SOL': 100, 'XRP': 0.5,
+      'ADA': 0.35, 'DOGE': 0.08, 'AVAX': 35, 'DOT': 7, 'LINK': 15,
+      'MATIC': 0.8, 'SHIB': 0.000008, 'TRX': 0.1, 'UNI': 6, 'ATOM': 9,
+      'XLM': 0.1, 'FIL': 4, 'VET': 0.02, 'ALGO': 0.2, 'MANA': 0.4,
+      'SAND': 0.4, 'AXS': 7, 'AAVE': 80, 'EOS': 0.7, 'MKR': 1500,
+      'DASH': 30, 'XTZ': 0.8, 'FTM': 0.3, 'NEAR': 3, 'GRT': 0.2,
+      'HBAR': 0.07, 'QNT': 100, 'THETA': 1, 'ICP': 5, 'FLOW': 0.7,
+      'BCH': 250, 'WBTC': 43000, 'LTC': 70, 'XMR': 150, 'ETC': 20,
+      'ZEC': 30, 'NEO': 10, 'IOTA': 0.2
+    };
+    return mockPrices[symbol] || 100;
+  }
+};
+
+// Helper function to get or create user asset balance
+const getUserAssetBalance = async (userId) => {
+  let assetBalance = await UserAssetBalance.findOne({ user: userId });
+  if (!assetBalance) {
+    assetBalance = await UserAssetBalance.create({ user: userId });
+  }
+  return assetBalance;
+};
+
+// =============================================
+// BUY ORDER ENDPOINT
+// =============================================
 app.post('/api/trading/orders/buy', protect, async (req, res) => {
   try {
-    const { symbol, side, type, price, amount, total, useMaturedBalance } = req.body;
+    const { symbol, price, amount, total, useMaturedBalance = true } = req.body;
     const userId = req.user._id;
-
-    // Validate minimum trading amount ($20 worth)
-    if (total < 20) {
+    
+    // Validate required fields
+    if (!symbol || !amount || amount <= 0) {
       return res.status(400).json({
-        status: 'fail',
-        message: `Minimum trade amount is $20 worth of ${symbol.replace('USDT', '')}`
+        status: 'error',
+        message: 'Invalid amount. Please provide a valid amount.'
       });
     }
+
+    // Validate minimum trade amount ($20)
+    if (total < 20) {
+      return res.status(400).json({
+        status: 'error',
+        message: `Minimum trade amount is $20 worth of ${symbol}`
+      });
+    }
+
+    // Fetch current market price
+    const currentPrice = await fetchCurrentPrice(symbol);
+    
+    // Calculate total in USD
+    const totalUSD = amount * currentPrice;
 
     // Get user with balances
     const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found'
-      });
-    }
-
-    // Calculate available balance (main + matured if allowed)
     const availableBalance = user.balances.main + (useMaturedBalance ? user.balances.matured : 0);
 
     // Check if user has sufficient balance
-    if (total > availableBalance) {
+    if (availableBalance < totalUSD) {
       return res.status(400).json({
-        status: 'fail',
-        message: 'Insufficient balance'
+        status: 'error',
+        message: `Insufficient balance. You need $${totalUSD.toFixed(2)} USDT to complete this purchase. Available: $${availableBalance.toFixed(2)}`
       });
     }
 
-    // Generate unique order ID
-    const orderId = uuidv4();
+    // Determine which balance to deduct from
+    let mainDeduction = 0;
+    let maturedDeduction = 0;
 
-    // Create the order
-    const order = await UserOrder.create({
-      user: userId,
-      symbol: symbol.toLowerCase().replace('usdt', ''),
-      type: side,
-      orderType: type,
-      price,
-      amount,
-      total,
-      filled: 0,
-      remaining: amount,
-      status: 'pending',
-      assetBalanceSource: useMaturedBalance ? 'matured' : 'main',
-      assetBalanceUsed: false,
-      metadata: {
-        ipAddress: req.ip,
-        userAgent: req.headers['user-agent']
-      }
-    });
-
-    // For limit orders, we keep them pending
-    // For market orders, we would execute immediately (simplified for now)
-    if (type === 'market') {
-      // Execute market order immediately
-      order.status = 'completed';
-      order.filled = amount;
-      order.remaining = 0;
-      order.executedAt = new Date();
-      
-      // Deduct from balance
-      const updateQuery = {};
-      if (useMaturedBalance) {
-        if (user.balances.matured >= total) {
-          updateQuery['balances.matured'] = user.balances.matured - total;
-        } else {
-          // Use matured first, then main
-          const remainingAfterMatured = total - user.balances.matured;
-          updateQuery['balances.matured'] = 0;
-          updateQuery['balances.main'] = user.balances.main - remainingAfterMatured;
-        }
+    if (useMaturedBalance) {
+      // First deduct from matured balance, then from main
+      if (user.balances.matured >= totalUSD) {
+        maturedDeduction = totalUSD;
       } else {
-        updateQuery['balances.main'] = user.balances.main - total;
+        maturedDeduction = user.balances.matured;
+        mainDeduction = totalUSD - maturedDeduction;
       }
-      
-      await User.findByIdAndUpdate(userId, updateQuery);
-      
-      // Create transaction record
-      const transaction = await Transaction.create({
-        user: userId,
-        type: 'buy',
-        amount: total,
-        asset: symbol.toLowerCase().replace('usdt', ''),
-        assetAmount: amount,
-        currency: 'USD',
-        status: 'completed',
-        method: 'internal',
-        reference: `BUY-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-        details: {
-          price,
-          amount,
-          total,
-          orderId: order._id
-        },
-        fee: 0,
-        netAmount: total
-      });
-      
-      order.transactionId = transaction._id;
-      
-      // Add to recent trades
-      await RecentTrade.create({
-        symbol: symbol.toLowerCase().replace('usdt', ''),
-        type: 'buy',
-        price,
-        amount,
-        total,
-        userId,
-        orderId: order._id,
-        timestamp: new Date()
-      });
+    } else {
+      mainDeduction = totalUSD;
     }
 
-    await order.save();
-
-    // Log activity
-    await logActivity(
-      'buy_created',
-      'UserOrder',
-      order._id,
-      userId,
-      'User',
-      req,
-      { amount, price, total, symbol }
-    );
-
-    res.status(201).json({
-      status: 'success',
-      data: {
-        order: {
-          id: order._id,
-          symbol: order.symbol,
-          side: order.type,
-          type: order.orderType,
-          price: order.price,
-          amount: order.amount,
-          total: order.total,
-          status: order.status,
-          createdAt: order.createdAt
-        }
+    // Update user balances
+    await User.findByIdAndUpdate(userId, {
+      $inc: {
+        'balances.main': -mainDeduction,
+        'balances.matured': -maturedDeduction
       }
     });
-
-  } catch (err) {
-    console.error('Buy order error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to place buy order'
-    });
-  }
-});
-
-/**
- * @route   POST /api/trading/orders/sell
- * @desc    Place a sell order
- * @access  Private
- */
-app.post('/api/trading/orders/sell', protect, async (req, res) => {
-  try {
-    const { symbol, side, type, price, amount, total, useMaturedBalance } = req.body;
-    const userId = req.user._id;
-
-    // Validate minimum trading amount ($20 worth)
-    if (total < 20) {
-      return res.status(400).json({
-        status: 'fail',
-        message: `Minimum trade amount is $20 worth of ${symbol.replace('USDT', '')}`
-      });
-    }
-
-    // Get user and check asset balance
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found'
-      });
-    }
 
     // Get or create user asset balance
-    let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
-    if (!userAssetBalance) {
-      userAssetBalance = await UserAssetBalance.create({ user: userId });
-    }
+    const assetBalance = await getUserAssetBalance(userId);
+    
+    // Update asset balance
+    const assetKey = symbol.toLowerCase();
+    const currentAssetAmount = assetBalance.balances[assetKey] || 0;
+    const newAssetAmount = currentAssetAmount + amount;
+    
+    await UserAssetBalance.findByIdAndUpdate(assetBalance._id, {
+      $set: {
+        [`balances.${assetKey}`]: newAssetAmount,
+        lastUpdated: new Date()
+      },
+      $push: {
+        history: {
+          asset: assetKey,
+          type: 'buy',
+          amount: amount,
+          balance: newAssetAmount,
+          usdValue: totalUSD,
+          price: currentPrice,
+          timestamp: new Date()
+        }
+      }
+    });
 
-    const assetSymbol = symbol.toLowerCase().replace('usdt', '');
-    const assetBalance = userAssetBalance.balances[assetSymbol] || 0;
+    // Create transaction record
+    const transaction = await Transaction.create({
+      user: userId,
+      type: 'buy',
+      amount: totalUSD,
+      asset: assetKey,
+      assetAmount: amount,
+      currency: 'USD',
+      status: 'completed',
+      method: 'internal',
+      reference: `BUY-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      details: {
+        symbol: symbol,
+        price: currentPrice,
+        amount: amount,
+        total: totalUSD,
+        balanceSource: useMaturedBalance ? 'main+matured' : 'main',
+        mainDeduction,
+        maturedDeduction
+      },
+      fee: 0,
+      netAmount: totalUSD,
+      buyDetails: {
+        asset: assetKey,
+        amountUSD: totalUSD,
+        assetAmount: amount,
+        buyingPrice: currentPrice,
+        currentPrice: currentPrice,
+        profitLoss: 0,
+        profitLossPercentage: 0
+      }
+    });
 
-    // Check if user has sufficient asset balance
-    if (amount > assetBalance) {
-      return res.status(400).json({
-        status: 'fail',
-        message: `Insufficient ${assetSymbol.toUpperCase()} balance. Available: ${assetBalance}`
-      });
-    }
-
-    // Generate unique order ID
-    const orderId = uuidv4();
-
-    // Create the order
+    // Create order record
     const order = await UserOrder.create({
       user: userId,
-      symbol: assetSymbol,
-      type: side,
-      orderType: type,
-      price,
-      amount,
-      total,
-      filled: 0,
-      remaining: amount,
-      status: 'pending',
-      assetBalanceSource: 'asset_balance',
-      assetBalanceUsed: false,
+      symbol: assetKey,
+      type: 'buy',
+      orderType: 'market',
+      price: currentPrice,
+      amount: amount,
+      total: totalUSD,
+      filled: amount,
+      remaining: 0,
+      status: 'completed',
+      assetBalanceSource: useMaturedBalance ? 'main+matured' : 'main',
+      assetBalanceUsed: true,
+      profitLoss: 0,
+      profitLossPercentage: 0,
+      executedAt: new Date(),
+      transactionId: transaction._id,
       metadata: {
         ipAddress: req.ip,
         userAgent: req.headers['user-agent']
       }
     });
 
-    // For market orders, execute immediately
-    if (type === 'market') {
-      // Execute market order immediately
-      order.status = 'completed';
-      order.filled = amount;
-      order.remaining = 0;
-      order.executedAt = new Date();
-      
-      // Deduct from asset balance
-      await UserAssetBalance.updateOne(
-        { user: userId },
-        { $inc: { [`balances.${assetSymbol}`]: -amount } }
-      );
-      
-      // Add to main balance
-      await User.findByIdAndUpdate(userId, {
-        $inc: { 'balances.main': total }
-      });
-      
-      // Create transaction record
-      const transaction = await Transaction.create({
-        user: userId,
-        type: 'sell',
-        amount: total,
-        asset: assetSymbol,
-        assetAmount: amount,
-        currency: 'USD',
-        status: 'completed',
-        method: 'internal',
-        reference: `SELL-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-        details: {
-          price,
-          amount,
-          total,
-          orderId: order._id
-        },
-        fee: 0,
-        netAmount: total
-      });
-      
-      order.transactionId = transaction._id;
-      
-      // Add to recent trades
-      await RecentTrade.create({
-        symbol: assetSymbol,
-        type: 'sell',
-        price,
-        amount,
-        total,
-        userId,
-        orderId: order._id,
-        timestamp: new Date()
-      });
-      
-      // Calculate profit/loss if we have buy history (simplified)
-      // In a real system, you'd track average buy price
-      const avgBuyPrice = total / amount; // Simplified
-      const profitLoss = (price - avgBuyPrice) * amount;
-      const profitLossPercentage = avgBuyPrice > 0 ? ((price - avgBuyPrice) / avgBuyPrice) * 100 : 0;
-      
-      order.profitLoss = profitLoss;
-      order.profitLossPercentage = profitLossPercentage;
-    }
-
-    await order.save();
+    // Create recent trade record
+    await RecentTrade.create({
+      symbol: assetKey,
+      type: 'buy',
+      price: currentPrice,
+      amount: amount,
+      total: totalUSD,
+      userId: userId,
+      orderId: order._id,
+      timestamp: new Date()
+    });
 
     // Log activity
-    await logActivity(
-      'sell_created',
-      'UserOrder',
-      order._id,
-      userId,
-      'User',
-      req,
-      { amount, price, total, symbol }
-    );
+    await logActivity('buy_completed', 'UserOrder', order._id, userId, 'User', req, {
+      symbol: assetKey,
+      amount: amount,
+      price: currentPrice,
+      total: totalUSD,
+      balanceSource: useMaturedBalance ? 'main+matured' : 'main'
+    });
 
-    res.status(201).json({
+    // Return success response with exact structure frontend expects
+    res.status(200).json({
       status: 'success',
+      message: 'Buy order completed successfully',
       data: {
         order: {
           id: order._id,
           symbol: order.symbol,
-          side: order.type,
-          type: order.orderType,
+          type: order.type,
           price: order.price,
           amount: order.amount,
           total: order.total,
           status: order.status,
-          createdAt: order.createdAt
-        }
+          createdAt: order.createdAt,
+          executedAt: order.executedAt
+        },
+        transaction: {
+          id: transaction._id,
+          reference: transaction.reference,
+          amount: transaction.amount,
+          asset: transaction.asset,
+          assetAmount: transaction.assetAmount,
+          status: transaction.status
+        },
+        balances: {
+          main: user.balances.main - mainDeduction,
+          matured: user.balances.matured - maturedDeduction,
+          asset: newAssetAmount
+        },
+        currentPrice: currentPrice
       }
     });
 
-  } catch (err) {
-    console.error('Sell order error:', err);
+  } catch (error) {
+    console.error('Buy order error:', error);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to place sell order'
+      message: 'Failed to process buy order',
+      error: error.message
     });
   }
 });
 
-/**
- * @route   GET /api/trading/orders
- * @desc    Get user orders
- * @access  Private
- */
+// =============================================
+// SELL ORDER ENDPOINT
+// =============================================
+app.post('/api/trading/orders/sell', protect, async (req, res) => {
+  try {
+    const { symbol, amount } = req.body;
+    const userId = req.user._id;
+    
+    // Validate required fields
+    if (!symbol || !amount || amount <= 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid amount. Please provide a valid amount.'
+      });
+    }
+
+    // Fetch current market price
+    const currentPrice = await fetchCurrentPrice(symbol);
+    
+    // Calculate total in USD
+    const totalUSD = amount * currentPrice;
+
+    // Validate minimum trade amount ($20)
+    if (totalUSD < 20) {
+      return res.status(400).json({
+        status: 'error',
+        message: `Minimum trade amount is $20 worth of ${symbol}`
+      });
+    }
+
+    // Get user asset balance
+    const assetBalance = await getUserAssetBalance(userId);
+    const assetKey = symbol.toLowerCase();
+    const currentAssetAmount = assetBalance.balances[assetKey] || 0;
+
+    // Check if user has sufficient asset balance
+    if (currentAssetAmount < amount) {
+      return res.status(400).json({
+        status: 'error',
+        message: `Insufficient ${symbol} balance. You have ${currentAssetAmount} ${symbol}, but trying to sell ${amount} ${symbol}`
+      });
+    }
+
+    // Calculate profit/loss (if we have buying price from history)
+    let profitLoss = 0;
+    let profitLossPercentage = 0;
+    
+    // Find average buying price from history
+    const buyHistory = assetBalance.history.filter(h => h.type === 'buy' && h.asset === assetKey);
+    if (buyHistory.length > 0) {
+      const totalBuyValue = buyHistory.reduce((sum, h) => sum + (h.usdValue || 0), 0);
+      const totalBuyAmount = buyHistory.reduce((sum, h) => sum + h.amount, 0);
+      const avgBuyPrice = totalBuyValue / totalBuyAmount;
+      
+      profitLoss = (currentPrice - avgBuyPrice) * amount;
+      profitLossPercentage = ((currentPrice - avgBuyPrice) / avgBuyPrice) * 100;
+    }
+
+    // Update asset balance (deduct sold amount)
+    const newAssetAmount = currentAssetAmount - amount;
+    
+    await UserAssetBalance.findByIdAndUpdate(assetBalance._id, {
+      $set: {
+        [`balances.${assetKey}`]: newAssetAmount,
+        lastUpdated: new Date()
+      },
+      $push: {
+        history: {
+          asset: assetKey,
+          type: 'sell',
+          amount: -amount,
+          balance: newAssetAmount,
+          usdValue: totalUSD,
+          price: currentPrice,
+          profitLoss: profitLoss,
+          profitLossPercentage: profitLossPercentage,
+          timestamp: new Date()
+        }
+      }
+    });
+
+    // Update user main balance (sell proceeds go to MAIN balance only)
+    await User.findByIdAndUpdate(userId, {
+      $inc: {
+        'balances.main': totalUSD
+      }
+    });
+
+    // Get updated user for response
+    const updatedUser = await User.findById(userId);
+
+    // Create transaction record
+    const transaction = await Transaction.create({
+      user: userId,
+      type: 'sell',
+      amount: totalUSD,
+      asset: assetKey,
+      assetAmount: amount,
+      currency: 'USD',
+      status: 'completed',
+      method: 'internal',
+      reference: `SELL-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      details: {
+        symbol: symbol,
+        price: currentPrice,
+        amount: amount,
+        total: totalUSD,
+        profitLoss,
+        profitLossPercentage
+      },
+      fee: 0,
+      netAmount: totalUSD,
+      sellDetails: {
+        asset: assetKey,
+        amountUSD: totalUSD,
+        assetAmount: amount,
+        sellingPrice: currentPrice,
+        buyingPrice: profitLoss > 0 ? currentPrice - (profitLoss/amount) : currentPrice + (Math.abs(profitLoss)/amount),
+        profitLoss: profitLoss,
+        profitLossPercentage: profitLossPercentage
+      }
+    });
+
+    // Create order record
+    const order = await UserOrder.create({
+      user: userId,
+      symbol: assetKey,
+      type: 'sell',
+      orderType: 'market',
+      price: currentPrice,
+      amount: amount,
+      total: totalUSD,
+      filled: amount,
+      remaining: 0,
+      status: 'completed',
+      assetBalanceSource: 'asset_balance',
+      assetBalanceUsed: true,
+      profitLoss: profitLoss,
+      profitLossPercentage: profitLossPercentage,
+      executedAt: new Date(),
+      transactionId: transaction._id,
+      metadata: {
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent']
+      }
+    });
+
+    // Create recent trade record
+    await RecentTrade.create({
+      symbol: assetKey,
+      type: 'sell',
+      price: currentPrice,
+      amount: amount,
+      total: totalUSD,
+      userId: userId,
+      orderId: order._id,
+      timestamp: new Date()
+    });
+
+    // Log activity
+    await logActivity('sell_completed', 'UserOrder', order._id, userId, 'User', req, {
+      symbol: assetKey,
+      amount: amount,
+      price: currentPrice,
+      total: totalUSD,
+      profitLoss,
+      profitLossPercentage
+    });
+
+    // Return success response with exact structure frontend expects
+    res.status(200).json({
+      status: 'success',
+      message: 'Sell order completed successfully',
+      data: {
+        order: {
+          id: order._id,
+          symbol: order.symbol,
+          type: order.type,
+          price: order.price,
+          amount: order.amount,
+          total: order.total,
+          status: order.status,
+          createdAt: order.createdAt,
+          executedAt: order.executedAt,
+          profitLoss: profitLoss,
+          profitLossPercentage: profitLossPercentage
+        },
+        transaction: {
+          id: transaction._id,
+          reference: transaction.reference,
+          amount: transaction.amount,
+          asset: transaction.asset,
+          assetAmount: transaction.assetAmount,
+          status: transaction.status
+        },
+        balances: {
+          main: updatedUser.balances.main,
+          matured: updatedUser.balances.matured,
+          asset: newAssetAmount
+        },
+        currentPrice: currentPrice,
+        profitLoss: profitLoss,
+        profitLossPercentage: profitLossPercentage
+      }
+    });
+
+  } catch (error) {
+    console.error('Sell order error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to process sell order',
+      error: error.message
+    });
+  }
+});
+
+// =============================================
+// GET USER ORDERS ENDPOINT
+// =============================================
 app.get('/api/trading/orders', protect, async (req, res) => {
   try {
     const userId = req.user._id;
-    const { status, limit = 50, page = 1 } = req.query;
+    const { status, symbol, limit = 50, page = 1 } = req.query;
     
     const query = { user: userId };
-    if (status) {
-      query.status = status;
-    }
+    if (status) query.status = status;
+    if (symbol) query.symbol = symbol.toLowerCase();
     
     const skip = (parseInt(page) - 1) * parseInt(limit);
     
     const orders = await UserOrder.find(query)
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(parseInt(limit));
+      .limit(parseInt(limit))
+      .populate('transactionId');
     
     const total = await UserOrder.countDocuments(query);
     
     res.status(200).json({
       status: 'success',
-      data: orders.map(order => ({
-        id: order._id,
-        symbol: order.symbol,
-        side: order.type,
-        type: order.orderType,
-        price: order.price,
-        amount: order.amount,
-        filled: order.filled,
-        remaining: order.remaining,
-        total: order.total,
-        status: order.status,
-        profitLoss: order.profitLoss,
-        profitLossPercentage: order.profitLossPercentage,
-        createdAt: order.createdAt,
-        executedAt: order.executedAt
-      })),
+      data: orders,
       pagination: {
+        total,
         page: parseInt(page),
         limit: parseInt(limit),
-        total,
         pages: Math.ceil(total / parseInt(limit))
       }
     });
-
-  } catch (err) {
-    console.error('Get orders error:', err);
+    
+  } catch (error) {
+    console.error('Get orders error:', error);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to fetch orders'
+      message: 'Failed to fetch orders',
+      error: error.message
     });
   }
 });
 
-/**
- * @route   GET /api/trading/trades
- * @desc    Get user trades (completed orders)
- * @access  Private
- */
+// =============================================
+// GET USER TRADES ENDPOINT
+// =============================================
 app.get('/api/trading/trades', protect, async (req, res) => {
   try {
     const userId = req.user._id;
     const { symbol, limit = 50, page = 1 } = req.query;
     
-    const query = { 
-      user: userId,
-      status: 'completed' 
-    };
-    
-    if (symbol) {
-      query.symbol = symbol.toLowerCase().replace('usdt', '');
-    }
+    const query = { userId };
+    if (symbol) query.symbol = symbol.toLowerCase();
     
     const skip = (parseInt(page) - 1) * parseInt(limit);
     
-    // Get completed orders as trades
-    const trades = await UserOrder.find(query)
-      .sort({ executedAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit));
-    
-    // Also get from RecentTrade for a more complete history
-    const recentTrades = await RecentTrade.find({ userId })
+    const trades = await RecentTrade.find(query)
       .sort({ timestamp: -1 })
-      .limit(parseInt(limit));
+      .skip(skip)
+      .limit(parseInt(limit))
+      .populate('orderId');
     
-    // Combine and deduplicate
-    const allTrades = [
-      ...trades.map(order => ({
-        id: order._id,
-        symbol: order.symbol,
-        side: order.type,
-        price: order.price,
-        amount: order.amount,
-        total: order.total,
-        profitLoss: order.profitLoss,
-        profitLossPercentage: order.profitLossPercentage,
-        timestamp: order.executedAt || order.createdAt
-      })),
-      ...recentTrades.map(trade => ({
-        id: trade.orderId,
-        symbol: trade.symbol,
-        side: trade.type,
-        price: trade.price,
-        amount: trade.amount,
-        total: trade.total,
-        profitLoss: null,
-        profitLossPercentage: null,
-        timestamp: trade.timestamp
-      }))
-    ];
-    
-    // Sort by timestamp descending and remove duplicates
-    const uniqueTrades = Array.from(
-      new Map(allTrades.map(trade => [trade.id.toString(), trade])).values()
-    ).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-    
-    const paginatedTrades = uniqueTrades.slice(skip, skip + parseInt(limit));
+    const total = await RecentTrade.countDocuments(query);
     
     res.status(200).json({
       status: 'success',
-      data: paginatedTrades,
+      data: trades,
       pagination: {
+        total,
         page: parseInt(page),
         limit: parseInt(limit),
-        total: uniqueTrades.length,
-        pages: Math.ceil(uniqueTrades.length / parseInt(limit))
+        pages: Math.ceil(total / parseInt(limit))
       }
     });
-
-  } catch (err) {
-    console.error('Get trades error:', err);
+    
+  } catch (error) {
+    console.error('Get trades error:', error);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to fetch trades'
+      message: 'Failed to fetch trades',
+      error: error.message
     });
   }
 });
 
-/**
- * @route   DELETE /api/trading/orders/:orderId
- * @desc    Cancel an order
- * @access  Private
- */
-app.delete('/api/trading/orders/:orderId', protect, async (req, res) => {
+// =============================================
+// GET USER BALANCES ENDPOINT
+// =============================================
+app.get('/api/users/balances', protect, async (req, res) => {
   try {
     const userId = req.user._id;
-    const { orderId } = req.params;
     
-    const order = await UserOrder.findOne({
-      _id: orderId,
-      user: userId,
-      status: { $in: ['pending', 'partial'] }
+    const user = await User.findById(userId).select('balances');
+    const assetBalance = await getUserAssetBalance(userId);
+    
+    res.status(200).json({
+      status: 'success',
+      data: {
+        balances: user.balances,
+        assetBalances: assetBalance.balances,
+        lastUpdated: assetBalance.lastUpdated
+      }
     });
+    
+  } catch (error) {
+    console.error('Get balances error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch balances',
+      error: error.message
+    });
+  }
+});
+
+// =============================================
+// CANCEL ORDER ENDPOINT
+// =============================================
+app.delete('/api/trading/orders/:orderId', protect, async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const userId = req.user._id;
+    
+    const order = await UserOrder.findOne({ _id: orderId, user: userId });
     
     if (!order) {
       return res.status(404).json({
-        status: 'fail',
-        message: 'Order not found or cannot be cancelled'
+        status: 'error',
+        message: 'Order not found'
+      });
+    }
+    
+    if (order.status !== 'pending' && order.status !== 'partial') {
+      return res.status(400).json({
+        status: 'error',
+        message: `Cannot cancel order with status: ${order.status}`
       });
     }
     
     order.status = 'cancelled';
     await order.save();
     
-    // Log activity
-    await logActivity(
-      'order_cancelled',
-      'UserOrder',
-      order._id,
-      userId,
-      'User',
-      req,
-      { orderId }
-    );
+    await logActivity('order_cancelled', 'UserOrder', order._id, userId, 'User', req, {
+      orderId: order._id,
+      symbol: order.symbol,
+      type: order.type
+    });
     
     res.status(200).json({
       status: 'success',
-      message: 'Order cancelled successfully'
+      message: 'Order cancelled successfully',
+      data: order
     });
-
-  } catch (err) {
-    console.error('Cancel order error:', err);
+    
+  } catch (error) {
+    console.error('Cancel order error:', error);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to cancel order'
+      message: 'Failed to cancel order',
+      error: error.message
     });
   }
 });
 
-/**
- * @route   POST /api/trading/orders/cancel-all
- * @desc    Cancel all open orders
- * @access  Private
- */
+// =============================================
+// CANCEL ALL ORDERS ENDPOINT
+// =============================================
 app.post('/api/trading/orders/cancel-all', protect, async (req, res) => {
   try {
     const userId = req.user._id;
     
     const result = await UserOrder.updateMany(
-      {
-        user: userId,
-        status: { $in: ['pending', 'partial'] }
-      },
-      {
-        $set: { status: 'cancelled' }
-      }
+      { user: userId, status: { $in: ['pending', 'partial'] } },
+      { $set: { status: 'cancelled' } }
     );
     
-    // Log activity
-    await logActivity(
-      'all_orders_cancelled',
-      'User',
-      userId,
-      userId,
-      'User',
-      req,
-      { count: result.modifiedCount }
-    );
+    await logActivity('all_orders_cancelled', 'User', userId, userId, 'User', req, {
+      count: result.modifiedCount
+    });
     
     res.status(200).json({
       status: 'success',
-      message: `Cancelled ${result.modifiedCount} orders`
+      message: `Successfully cancelled ${result.modifiedCount} orders`,
+      data: { cancelledCount: result.modifiedCount }
     });
-
-  } catch (err) {
-    console.error('Cancel all orders error:', err);
+    
+  } catch (error) {
+    console.error('Cancel all orders error:', error);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to cancel orders'
+      message: 'Failed to cancel orders',
+      error: error.message
     });
   }
 });
 
-/**
- * @route   GET /api/users/balances
- * @desc    Get user balances
- * @access  Private
- */
-app.get('/api/users/balances', protect, async (req, res) => {
+// =============================================
+// GET SINGLE ORDER ENDPOINT
+// =============================================
+app.get('/api/trading/orders/:orderId', protect, async (req, res) => {
   try {
+    const { orderId } = req.params;
     const userId = req.user._id;
     
-    const user = await User.findById(userId).select('balances');
+    const order = await UserOrder.findOne({ _id: orderId, user: userId })
+      .populate('transactionId');
     
-    // Get asset balances
-    const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
+    if (!order) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Order not found'
+      });
+    }
     
     res.status(200).json({
       status: 'success',
-      data: {
-        balances: user.balances,
-        assets: userAssetBalance ? userAssetBalance.balances : {}
-      }
+      data: order
     });
-
-  } catch (err) {
-    console.error('Get balances error:', err);
+    
+  } catch (error) {
+    console.error('Get order error:', error);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to fetch balances'
+      message: 'Failed to fetch order',
+      error: error.message
     });
   }
 });
-
-/**
- * @route   GET /api/users/me
- * @desc    Get current user
- * @access  Private
- */
-app.get('/api/users/me', protect, async (req, res) => {
-  try {
-    res.status(200).json({
-      status: 'success',
-      data: req.user
-    });
-  } catch (err) {
-    console.error('Get user error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch user'
-    });
-  }
-});
-
-
-
 
 
 
