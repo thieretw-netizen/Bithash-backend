@@ -18502,12 +18502,18 @@ UserOrderSchema.index({ symbol: 1, status: 1, createdAt: -1 });
 
 
 
-
-
-
 // =============================================
 // TRADING ENDPOINTS
 // =============================================
+
+// Define MAIN_CRYPTOS at the top of this section
+const MAIN_CRYPTOS = [
+  'BTC', 'ETH', 'BNB', 'SOL', 'XRP', 'ADA', 'DOGE', 'AVAX', 'DOT', 'LINK',
+  'MATIC', 'SHIB', 'TRX', 'UNI', 'ATOM', 'XLM', 'FIL', 'VET', 'ALGO', 'MANA',
+  'SAND', 'AXS', 'AAVE', 'EOS', 'MKR', 'DASH', 'XTZ', 'FTM', 'NEAR', 'GRT',
+  'HBAR', 'QNT', 'THETA', 'ICP', 'FLOW', 'BCH', 'WBTC', 'LTC', 'XMR', 'ETC',
+  'ZEC', 'NEO', 'IOTA'
+];
 
 /**
  * @route   POST /api/trading/orders/buy
@@ -18541,6 +18547,7 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
         const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}USDT`);
         currentPrice = parseFloat(response.data.price);
       } catch (priceError) {
+        console.error('Price fetch error:', priceError.message);
         return res.status(503).json({
           status: 'fail',
           message: 'Unable to fetch current market price'
@@ -18550,7 +18557,14 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
 
     // Check user balance
     const user = await User.findById(req.user._id);
-    const totalAvailable = user.balances.main + (useMaturedBalance ? user.balances.matured : 0);
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+
+    const totalAvailable = (user.balances?.main || 0) + (useMaturedBalance ? (user.balances?.matured || 0) : 0);
     
     if (total > totalAvailable) {
       return res.status(400).json({
@@ -18559,25 +18573,24 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
         data: {
           required: total,
           available: totalAvailable,
-          main: user.balances.main,
-          matured: user.balances.matured
+          main: user.balances?.main || 0,
+          matured: user.balances?.matured || 0
         }
       });
     }
 
     // Determine balance source
     let balanceSource = 'main';
-    let remainingTotal = total;
     let deductionFromMain = 0;
     let deductionFromMatured = 0;
 
-    if (useMaturedBalance && user.balances.matured > 0) {
-      if (user.balances.matured >= total) {
+    if (useMaturedBalance && (user.balances?.matured || 0) > 0) {
+      if ((user.balances?.matured || 0) >= total) {
         deductionFromMatured = total;
         balanceSource = 'matured';
       } else {
-        deductionFromMain = total - user.balances.matured;
-        deductionFromMatured = user.balances.matured;
+        deductionFromMain = total - (user.balances?.matured || 0);
+        deductionFromMatured = user.balances?.matured || 0;
         balanceSource = 'both';
       }
     } else {
@@ -18598,7 +18611,7 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
       total: total,
       filled: 0,
       remaining: assetAmount,
-      status: 'pending',
+      status: 'completed', // Set to completed immediately for simplicity
       assetBalanceSource: balanceSource,
       assetBalanceUsed: false,
       metadata: {
@@ -18619,9 +18632,11 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
       updateQuery['balances.matured'] = -deductionFromMatured;
     }
 
-    await User.findByIdAndUpdate(req.user._id, {
-      $inc: updateQuery
-    });
+    if (Object.keys(updateQuery).length > 0) {
+      await User.findByIdAndUpdate(req.user._id, {
+        $inc: updateQuery
+      });
+    }
 
     // Create transaction record
     const transaction = new Transaction({
@@ -18658,7 +18673,6 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
 
     // Update order with transaction ID
     order.transactionId = transaction._id;
-    order.status = 'completed';
     order.filled = assetAmount;
     order.remaining = 0;
     order.executedAt = new Date();
@@ -18667,13 +18681,21 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
     // Update or create user asset balance
     let userAssetBalance = await UserAssetBalance.findOne({ user: req.user._id });
     if (!userAssetBalance) {
-      userAssetBalance = new UserAssetBalance({ user: req.user._id });
+      userAssetBalance = new UserAssetBalance({ user: req.user._id, balances: {} });
     }
 
     // Update asset balance
     const assetKey = symbol.toLowerCase();
+    if (!userAssetBalance.balances) {
+      userAssetBalance.balances = {};
+    }
     userAssetBalance.balances[assetKey] = (userAssetBalance.balances[assetKey] || 0) + assetAmount;
     userAssetBalance.lastUpdated = new Date();
+    
+    // Initialize history array if it doesn't exist
+    if (!userAssetBalance.history) {
+      userAssetBalance.history = [];
+    }
     
     // Add to history
     userAssetBalance.history.push({
@@ -18689,10 +18711,13 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
       transactionId: transaction._id
     });
 
-    // Update trade tracking
+    // Initialize trades object if it doesn't exist
     if (!userAssetBalance.trades) {
       userAssetBalance.trades = { buys: [], sells: [], totalBuyVolume: 0, totalSellVolume: 0, totalProfitLoss: 0 };
     }
+    
+    // Update trade tracking
+    if (!userAssetBalance.trades.buys) userAssetBalance.trades.buys = [];
     userAssetBalance.trades.buys.push(order._id);
     userAssetBalance.trades.totalBuyVolume = (userAssetBalance.trades.totalBuyVolume || 0) + total;
 
@@ -18721,6 +18746,9 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
       maturedDeducted: deductionFromMatured
     });
 
+    // Get updated user for response
+    const updatedUser = await User.findById(req.user._id);
+
     res.status(201).json({
       status: 'success',
       message: 'Buy order created successfully',
@@ -18742,9 +18770,9 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
           reference: transaction.reference
         },
         balances: {
-          main: user.balances.main - deductionFromMain,
-          matured: user.balances.matured - deductionFromMatured,
-          newAssetBalance: userAssetBalance.balances[assetKey]
+          main: (updatedUser.balances?.main || 0) - deductionFromMain,
+          matured: (updatedUser.balances?.matured || 0) - deductionFromMatured,
+          newAssetBalance: userAssetBalance.balances[assetKey] || 0
         }
       }
     });
@@ -18791,6 +18819,7 @@ app.post('/api/trading/orders/sell', protect, async (req, res) => {
         const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}USDT`);
         currentPrice = parseFloat(response.data.price);
       } catch (priceError) {
+        console.error('Price fetch error:', priceError.message);
         return res.status(503).json({
           status: 'fail',
           message: 'Unable to fetch current market price'
@@ -18802,13 +18831,13 @@ app.post('/api/trading/orders/sell', protect, async (req, res) => {
     const assetKey = symbol.toLowerCase();
     let userAssetBalance = await UserAssetBalance.findOne({ user: req.user._id });
     
-    if (!userAssetBalance || !userAssetBalance.balances[assetKey] || userAssetBalance.balances[assetKey] < amount) {
+    if (!userAssetBalance || !userAssetBalance.balances || !userAssetBalance.balances[assetKey] || userAssetBalance.balances[assetKey] < amount) {
       return res.status(400).json({
         status: 'fail',
         message: `Insufficient ${symbol} balance`,
         data: {
           required: amount,
-          available: userAssetBalance?.balances[assetKey] || 0
+          available: userAssetBalance?.balances?.[assetKey] || 0
         }
       });
     }
@@ -18817,14 +18846,14 @@ app.post('/api/trading/orders/sell', protect, async (req, res) => {
     let totalCost = 0;
     let totalBought = 0;
     
-    if (userAssetBalance.trades && userAssetBalance.trades.buys) {
+    if (userAssetBalance.trades && userAssetBalance.trades.buys && userAssetBalance.trades.buys.length > 0) {
       const buyOrders = await UserOrder.find({
         _id: { $in: userAssetBalance.trades.buys }
       });
       
       buyOrders.forEach(order => {
-        totalCost += order.total;
-        totalBought += order.amount;
+        totalCost += order.total || 0;
+        totalBought += order.amount || 0;
       });
     }
 
@@ -18843,7 +18872,7 @@ app.post('/api/trading/orders/sell', protect, async (req, res) => {
       total: total,
       filled: 0,
       remaining: amount,
-      status: 'pending',
+      status: 'completed',
       assetBalanceSource: 'asset_balance',
       assetBalanceUsed: true,
       profitLoss: profitLoss,
@@ -18861,6 +18890,11 @@ app.post('/api/trading/orders/sell', protect, async (req, res) => {
     userAssetBalance.balances[assetKey] -= amount;
     userAssetBalance.lastUpdated = new Date();
     
+    // Initialize history if needed
+    if (!userAssetBalance.history) {
+      userAssetBalance.history = [];
+    }
+    
     // Add to history
     userAssetBalance.history.push({
       asset: assetKey,
@@ -18872,13 +18906,16 @@ app.post('/api/trading/orders/sell', protect, async (req, res) => {
       profitLoss: profitLoss,
       profitLossPercentage: profitLossPercentage,
       timestamp: new Date(),
-      transactionId: null // Will be updated after transaction creation
+      transactionId: null
     });
 
-    // Update trade tracking
+    // Initialize trades if needed
     if (!userAssetBalance.trades) {
       userAssetBalance.trades = { buys: [], sells: [], totalBuyVolume: 0, totalSellVolume: 0, totalProfitLoss: 0 };
     }
+    if (!userAssetBalance.trades.sells) userAssetBalance.trades.sells = [];
+    
+    // Update trade tracking
     userAssetBalance.trades.sells.push(order._id);
     userAssetBalance.trades.totalSellVolume = (userAssetBalance.trades.totalSellVolume || 0) + total;
     userAssetBalance.trades.totalProfitLoss = (userAssetBalance.trades.totalProfitLoss || 0) + profitLoss;
@@ -18925,19 +18962,18 @@ app.post('/api/trading/orders/sell', protect, async (req, res) => {
 
     // Update order with transaction ID
     order.transactionId = transaction._id;
-    order.status = 'completed';
     order.filled = amount;
     order.remaining = 0;
     order.executedAt = new Date();
     await order.save();
 
     // Update the history entry with transaction ID
-    const historyIndex = userAssetBalance.history.findIndex(
-      h => h.timestamp && h.timestamp.getTime() === userAssetBalance.history[userAssetBalance.history.length - 1].timestamp.getTime()
-    );
-    if (historyIndex !== -1) {
-      userAssetBalance.history[historyIndex].transactionId = transaction._id;
-      await userAssetBalance.save();
+    if (userAssetBalance.history && userAssetBalance.history.length > 0) {
+      const lastHistory = userAssetBalance.history[userAssetBalance.history.length - 1];
+      if (lastHistory && !lastHistory.transactionId) {
+        lastHistory.transactionId = transaction._id;
+        await userAssetBalance.save();
+      }
     }
 
     // Create recent trade record
@@ -18963,7 +18999,7 @@ app.post('/api/trading/orders/sell', protect, async (req, res) => {
       avgBuyPrice: avgBuyPrice
     });
 
-    // Get updated user balance
+    // Get updated user for response
     const updatedUser = await User.findById(req.user._id);
 
     res.status(201).json({
@@ -18989,8 +19025,8 @@ app.post('/api/trading/orders/sell', protect, async (req, res) => {
           reference: transaction.reference
         },
         balances: {
-          main: updatedUser.balances.main,
-          newAssetBalance: userAssetBalance.balances[assetKey],
+          main: (updatedUser.balances?.main || 0) + total,
+          newAssetBalance: userAssetBalance.balances[assetKey] || 0,
           profitLoss: profitLoss,
           profitLossPercentage: profitLossPercentage
         }
@@ -19269,10 +19305,10 @@ app.get('/api/users/balances', protect, async (req, res) => {
     const assetBalances = await UserAssetBalance.findOne({ user: req.user._id });
 
     const balances = {
-      main: user.balances.main,
-      matured: user.balances.matured,
-      total: user.balances.main + user.balances.matured,
-      assets: assetBalances ? assetBalances.balances : {}
+      main: user?.balances?.main || 0,
+      matured: user?.balances?.matured || 0,
+      total: (user?.balances?.main || 0) + (user?.balances?.matured || 0),
+      assets: assetBalances?.balances || {}
     };
 
     res.status(200).json({
@@ -19321,24 +19357,23 @@ app.get('/api/trading/market/ticker', async (req, res) => {
   } catch (err) {
     console.error('Get market ticker error:', err);
     
-    // Return fallback data
+    // Return fallback data using the locally defined MAIN_CRYPTOS
+    const fallbackData = MAIN_CRYPTOS.map(symbol => ({
+      symbol: `${symbol}USDT`,
+      price: symbol === 'BTC' ? 43000 : symbol === 'ETH' ? 2300 : 100,
+      change: (Math.random() * 10 - 5).toFixed(2),
+      volume: Math.random() * 1000000,
+      quoteVolume: Math.random() * 1000000000,
+      high: 0,
+      low: 0
+    }));
+    
     res.status(200).json({
       status: 'success',
-      data: MAIN_CRYPTOS.map(symbol => ({
-        symbol: `${symbol}USDT`,
-        price: symbol === 'BTC' ? 43000 : symbol === 'ETH' ? 2300 : 100,
-        change: (Math.random() * 10 - 5).toFixed(2),
-        volume: Math.random() * 1000000,
-        quoteVolume: Math.random() * 1000000000,
-        high: 0,
-        low: 0
-      }))
+      data: fallbackData
     });
   }
 });
-
-
-
 
 
 
