@@ -17906,49 +17906,19 @@ app.post('/api/withdrawals/confirm-gas-payment', protect, async (req, res) => {
 
 
 
-// =============================================
-// TRADING ENDPOINTS IMPLEMENTATION
-// =============================================
-
-// Helper function to fetch current price from Binance
-const fetchCurrentPrice = async (symbol) => {
-  try {
-    const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}USDT`);
-    return parseFloat(response.data.price);
-  } catch (error) {
-    console.error('Error fetching price from Binance:', error);
-    // Fallback to mock price if Binance fails
-    const mockPrices = {
-      'BTC': 43000, 'ETH': 2300, 'BNB': 300, 'SOL': 100, 'XRP': 0.5,
-      'ADA': 0.35, 'DOGE': 0.08, 'AVAX': 35, 'DOT': 7, 'LINK': 15,
-      'MATIC': 0.8, 'SHIB': 0.000008, 'TRX': 0.1, 'UNI': 6, 'ATOM': 9,
-      'XLM': 0.1, 'FIL': 4, 'VET': 0.02, 'ALGO': 0.2, 'MANA': 0.4,
-      'SAND': 0.4, 'AXS': 7, 'AAVE': 80, 'EOS': 0.7, 'MKR': 1500,
-      'DASH': 30, 'XTZ': 0.8, 'FTM': 0.3, 'NEAR': 3, 'GRT': 0.2,
-      'HBAR': 0.07, 'QNT': 100, 'THETA': 1, 'ICP': 5, 'FLOW': 0.7,
-      'BCH': 250, 'WBTC': 43000, 'LTC': 70, 'XMR': 150, 'ETC': 20,
-      'ZEC': 30, 'NEO': 10, 'IOTA': 0.2
-    };
-    return mockPrices[symbol] || 100;
-  }
-};
-
-// Helper function to get or create user asset balance
-const getUserAssetBalance = async (userId) => {
-  let assetBalance = await UserAssetBalance.findOne({ user: userId });
-  if (!assetBalance) {
-    assetBalance = await UserAssetBalance.create({ user: userId });
-  }
-  return assetBalance;
-};
 
 // =============================================
-// BUY ORDER ENDPOINT
+// BUY ORDER ENDPOINT - FIXED
 // =============================================
 app.post('/api/trading/orders/buy', protect, async (req, res) => {
   try {
-    const { symbol, amount, total, useMaturedBalance = true } = req.body;
+    let { symbol, amount, total, useMaturedBalance = true } = req.body;
     const userId = req.user._id;
+    
+    // FIX: Extract symbol if it contains colon (like "BTC:2737")
+    if (symbol && symbol.includes(':')) {
+      symbol = symbol.split(':')[0]; // Get "BTC" from "BTC:2737"
+    }
     
     // Validate required fields
     if (!symbol || !amount || amount <= 0) {
@@ -18156,12 +18126,17 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
 });
 
 // =============================================
-// SELL ORDER ENDPOINT
+// SELL ORDER ENDPOINT - FIXED
 // =============================================
 app.post('/api/trading/orders/sell', protect, async (req, res) => {
   try {
-    const { symbol, amount } = req.body;
+    let { symbol, amount } = req.body;
     const userId = req.user._id;
+    
+    // FIX: Extract symbol if it contains colon (like "BTC:2737")
+    if (symbol && symbol.includes(':')) {
+      symbol = symbol.split(':')[0]; // Get "BTC" from "BTC:2737"
+    }
     
     // Validate required fields
     if (!symbol || !amount || amount <= 0) {
@@ -18370,240 +18345,6 @@ app.post('/api/trading/orders/sell', protect, async (req, res) => {
     });
   }
 });
-
-// =============================================
-// GET USER ORDERS ENDPOINT
-// =============================================
-app.get('/api/trading/orders', protect, async (req, res) => {
-  try {
-    const userId = req.user._id;
-    const { status, symbol, limit = 50, page = 1 } = req.query;
-    
-    const query = { user: userId };
-    if (status) query.status = status;
-    if (symbol) query.symbol = symbol.toLowerCase();
-    
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-    
-    const orders = await UserOrder.find(query)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit))
-      .populate('transactionId');
-    
-    const total = await UserOrder.countDocuments(query);
-    
-    res.status(200).json({
-      status: 'success',
-      data: orders,
-      pagination: {
-        total,
-        page: parseInt(page),
-        limit: parseInt(limit),
-        pages: Math.ceil(total / parseInt(limit))
-      }
-    });
-    
-  } catch (error) {
-    console.error('Get orders error:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch orders',
-      error: error.message
-    });
-  }
-});
-
-// =============================================
-// GET USER TRADES ENDPOINT
-// =============================================
-app.get('/api/trading/trades', protect, async (req, res) => {
-  try {
-    const userId = req.user._id;
-    const { symbol, limit = 50, page = 1 } = req.query;
-    
-    const query = { userId };
-    if (symbol) query.symbol = symbol.toLowerCase();
-    
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-    
-    const trades = await RecentTrade.find(query)
-      .sort({ timestamp: -1 })
-      .skip(skip)
-      .limit(parseInt(limit))
-      .populate('orderId');
-    
-    const total = await RecentTrade.countDocuments(query);
-    
-    res.status(200).json({
-      status: 'success',
-      data: trades,
-      pagination: {
-        total,
-        page: parseInt(page),
-        limit: parseInt(limit),
-        pages: Math.ceil(total / parseInt(limit))
-      }
-    });
-    
-  } catch (error) {
-    console.error('Get trades error:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch trades',
-      error: error.message
-    });
-  }
-});
-
-// =============================================
-// GET USER BALANCES ENDPOINT
-// =============================================
-app.get('/api/users/balances', protect, async (req, res) => {
-  try {
-    const userId = req.user._id;
-    
-    const user = await User.findById(userId).select('balances');
-    const assetBalance = await getUserAssetBalance(userId);
-    
-    res.status(200).json({
-      status: 'success',
-      data: {
-        balances: user.balances,
-        assetBalances: assetBalance.balances,
-        lastUpdated: assetBalance.lastUpdated
-      }
-    });
-    
-  } catch (error) {
-    console.error('Get balances error:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch balances',
-      error: error.message
-    });
-  }
-});
-
-// =============================================
-// CANCEL ORDER ENDPOINT
-// =============================================
-app.delete('/api/trading/orders/:orderId', protect, async (req, res) => {
-  try {
-    const { orderId } = req.params;
-    const userId = req.user._id;
-    
-    const order = await UserOrder.findOne({ _id: orderId, user: userId });
-    
-    if (!order) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'Order not found'
-      });
-    }
-    
-    if (order.status !== 'pending' && order.status !== 'partial') {
-      return res.status(400).json({
-        status: 'error',
-        message: `Cannot cancel order with status: ${order.status}`
-      });
-    }
-    
-    order.status = 'cancelled';
-    await order.save();
-    
-    await logActivity('order_cancelled', 'UserOrder', order._id, userId, 'User', req, {
-      orderId: order._id,
-      symbol: order.symbol,
-      type: order.type
-    });
-    
-    res.status(200).json({
-      status: 'success',
-      message: 'Order cancelled successfully',
-      data: order
-    });
-    
-  } catch (error) {
-    console.error('Cancel order error:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to cancel order',
-      error: error.message
-    });
-  }
-});
-
-// =============================================
-// CANCEL ALL ORDERS ENDPOINT
-// =============================================
-app.post('/api/trading/orders/cancel-all', protect, async (req, res) => {
-  try {
-    const userId = req.user._id;
-    
-    const result = await UserOrder.updateMany(
-      { user: userId, status: { $in: ['pending', 'partial'] } },
-      { $set: { status: 'cancelled' } }
-    );
-    
-    await logActivity('all_orders_cancelled', 'User', userId, userId, 'User', req, {
-      count: result.modifiedCount
-    });
-    
-    res.status(200).json({
-      status: 'success',
-      message: `Successfully cancelled ${result.modifiedCount} orders`,
-      data: { cancelledCount: result.modifiedCount }
-    });
-    
-  } catch (error) {
-    console.error('Cancel all orders error:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to cancel orders',
-      error: error.message
-    });
-  }
-});
-
-// =============================================
-// GET SINGLE ORDER ENDPOINT
-// =============================================
-app.get('/api/trading/orders/:orderId', protect, async (req, res) => {
-  try {
-    const { orderId } = req.params;
-    const userId = req.user._id;
-    
-    const order = await UserOrder.findOne({ _id: orderId, user: userId })
-      .populate('transactionId');
-    
-    if (!order) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'Order not found'
-      });
-    }
-    
-    res.status(200).json({
-      status: 'success',
-      data: order
-    });
-    
-  } catch (error) {
-    console.error('Get order error:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch order',
-      error: error.message
-    });
-  }
-});
-
-
-
-
-
-
 
 // Error handling middleware
 app.use((err, req, res, next) => {
