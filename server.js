@@ -48,22 +48,17 @@ app.use(helmet({
 
 
 app.use(cors({
-  origin: ['https://www.bithashcapital.live', 'https://website-backendd-tzep.onrender.com' , 'https://bithash-rental.vercel.app/'],
+  origin: ['https://www.bithashcapital.live', 'https://website-backendd-tzep.onrender.com', 'https://bithash-rental.vercel.app'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token', 'X-Rate-Limit']
 }));
 
 
 
 
 app.use((req, res, next) => {
-  // Allow fonts from Google
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  
-  // Cache static responses
+  // Only for Google Fonts and static routes - don't override CORS headers
   if (req.url.includes('/api/plans') || req.url.includes('/api/stats')) {
     res.setHeader('Cache-Control', 'public, max-age=300');
   }
@@ -1237,8 +1232,6 @@ const UserAssetBalanceSchema = new mongoose.Schema({
 UserAssetBalanceSchema.index({ user: 1 });
 UserAssetBalanceSchema.index({ 'history.timestamp': -1 });
 
-const UserAssetBalance = mongoose.model('UserAssetBalance', UserAssetBalanceSchema);
-
 // =============================================
 // User Preferences Schema
 // =============================================
@@ -1269,8 +1262,6 @@ const UserPreferenceSchema = new mongoose.Schema({
 
 UserPreferenceSchema.index({ user: 1 });
 UserPreferenceSchema.index({ displayAsset: 1 });
-
-const UserPreference = mongoose.model('UserPreference', UserPreferenceSchema);
 
 // =============================================
 // Deposit Asset Tracking Schema
@@ -1308,8 +1299,6 @@ const DepositAssetSchema = new mongoose.Schema({
 DepositAssetSchema.index({ user: 1, createdAt: -1 });
 DepositAssetSchema.index({ user: 1, asset: 1 });
 DepositAssetSchema.index({ status: 1 });
-
-const DepositAsset = mongoose.model('DepositAsset', DepositAssetSchema);
 
 
 
@@ -2556,11 +2545,96 @@ const upload = multer({
   }
 });
 
+// =============================================
+// BUY SCHEMA
+// =============================================
+const BuySchema = new mongoose.Schema({
+  user: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'User', 
+    required: true,
+    index: true 
+  },
+  asset: { 
+    type: String, 
+    required: true,
+    enum: ['btc', 'eth', 'usdt', 'bnb', 'sol', 'usdc', 'xrp', 'doge', 'ada', 'shib',
+           'avax', 'dot', 'trx', 'link', 'matic', 'wbtc', 'ltc', 'near', 'uni', 'bch',
+           'xlm', 'atom', 'xmr', 'flow', 'vet', 'fil', 'theta', 'hbar', 'ftm', 'xtz']
+  },
+  amount: { type: Number, required: true, min: 0 },
+  price: { type: Number, required: true, min: 0 },
+  total: { type: Number, required: true, min: 0 },
+  status: { 
+    type: String, 
+    enum: ['pending', 'completed', 'cancelled'], 
+    default: 'pending' 
+  },
+  transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' }
+}, { timestamps: true });
 
+// =============================================
+// SELL SCHEMA
+// =============================================
+const SellSchema = new mongoose.Schema({
+  user: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'User', 
+    required: true,
+    index: true 
+  },
+  asset: { 
+    type: String, 
+    required: true,
+    enum: ['btc', 'eth', 'usdt', 'bnb', 'sol', 'usdc', 'xrp', 'doge', 'ada', 'shib',
+           'avax', 'dot', 'trx', 'link', 'matic', 'wbtc', 'ltc', 'near', 'uni', 'bch',
+           'xlm', 'atom', 'xmr', 'flow', 'vet', 'fil', 'theta', 'hbar', 'ftm', 'xtz']
+  },
+  amount: { type: Number, required: true, min: 0 },
+  price: { type: Number, required: true, min: 0 },
+  total: { type: Number, required: true, min: 0 },
+  status: { 
+    type: String, 
+    enum: ['pending', 'completed', 'cancelled'], 
+    default: 'pending' 
+  },
+  transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' }
+}, { timestamps: true });
 
+// Create the Buy and Sell models
+const Buy = mongoose.model('Buy', BuySchema);
+const Sell = mongoose.model('Sell', SellSchema);
 
+// Create UserAssetBalance and UserPreference models if they don't exist
+const UserAssetBalance = mongoose.model('UserAssetBalance', UserAssetBalanceSchema);
+const UserPreference = mongoose.model('UserPreference', UserPreferenceSchema);
+const DepositAsset = mongoose.model('DepositAsset', DepositAssetSchema);
 
+// =============================================
+// SUPPORT CONVERSATION SCHEMA
+// =============================================
+const SupportConversationSchema = new mongoose.Schema({
+  conversationId: { type: String, required: true, unique: true },
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  agentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
+  status: { 
+    type: String, 
+    enum: ['open', 'active', 'waiting', 'closed'], 
+    default: 'open' 
+  },
+  lastMessageAt: { type: Date, default: Date.now }
+}, { timestamps: true });
 
+const SupportMessageSchema = new mongoose.Schema({
+  conversationId: { type: String, required: true },
+  sender: { type: String, enum: ['user', 'agent'], required: true },
+  senderId: { type: String, required: true },
+  message: { type: String, required: true },
+  read: { type: Boolean, default: false }
+}, { timestamps: true });
+
+const SupportConversation = mongoose.model('SupportConversation', SupportConversationSchema);
+const SupportMessage = mongoose.model('SupportMessage', SupportMessageSchema);
 
 // Replace the existing setupWebSocketServer function with this enhanced version
 const setupWebSocketServer = (server) => {
@@ -2893,10 +2967,6 @@ module.exports = {
   DepositAsset,
   Buy,
   Sell,
-  OrderBook,
-  UserOrder,
-  RecentTrade,
-  AssetPrice,
   setupWebSocketServer
 };
 
@@ -3530,6 +3600,25 @@ const calculateReferralCommissions = async (investment) => {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
 // Enhanced email service with professional Bitcoin mining templates
 const sendProfessionalEmail = async (options) => {
   try {
