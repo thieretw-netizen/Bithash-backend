@@ -3532,8 +3532,6 @@ const calculateReferralCommissions = async (investment) => {
 
 
 
-
-
 // Enhanced email service with professional Bitcoin mining templates
 const sendProfessionalEmail = async (options) => {
   try {
