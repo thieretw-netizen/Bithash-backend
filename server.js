@@ -18007,7 +18007,49 @@ app.post('/api/withdrawals/confirm-gas-payment', protect, async (req, res) => {
 
 
 
+// =============================================
+// TRADING ENDPOINTS - EXACTLY AS FRONTEND EXPECTS
+// =============================================
 
+// GET /api/trading/orders - Get user orders
+app.get('/api/trading/orders', protect, async (req, res) => {
+  try {
+    const orders = await UserOrder.find({ user: req.user._id })
+      .sort({ createdAt: -1 })
+      .limit(50);
+
+    res.json({
+      status: 'success',
+      data: orders
+    });
+  } catch (err) {
+    console.error('Error fetching orders:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch orders'
+    });
+  }
+});
+
+// GET /api/trading/trades - Get user trades
+app.get('/api/trading/trades', protect, async (req, res) => {
+  try {
+    const trades = await RecentTrade.find({ userId: req.user._id })
+      .sort({ timestamp: -1 })
+      .limit(50);
+
+    res.json({
+      status: 'success',
+      data: trades
+    });
+  } catch (err) {
+    console.error('Error fetching trades:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch trades'
+    });
+  }
+});
 
 
 
