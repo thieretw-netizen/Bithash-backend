@@ -1305,6 +1305,8 @@ DepositAssetSchema.index({ user: 1, createdAt: -1 });
 DepositAssetSchema.index({ user: 1, asset: 1 });
 DepositAssetSchema.index({ status: 1 });
 
+const DepositAsset = mongoose.model('DepositAsset', DepositAssetSchema);
+
 
 
 
@@ -2339,6 +2341,9 @@ UserAssetBalanceSchema.add({
   }
 });
 
+// Create the model after all schema additions
+const UserAssetBalance = mongoose.model('UserAssetBalance', UserAssetBalanceSchema);
+
 
 
 
@@ -2882,7 +2887,7 @@ module.exports = {
   CommissionHistory,
   CommissionSettings,
   Translation,
-  UserAssetBalance,
+  UserAssetBalance, // Now this is properly defined
   UserPreference,
   DepositAsset,
   setupWebSocketServer
@@ -3512,10 +3517,6 @@ const calculateReferralCommissions = async (investment) => {
     // Don't throw error to avoid disrupting investment process
   }
 };
-
-
-
-
 
 
 
@@ -18506,8 +18507,6 @@ UserOrderSchema.index({ symbol: 1, status: 1, createdAt: -1 });
 
 
 
-
-
 // =============================================
 // =============================================
 // TRADING ENDPOINTS
@@ -19105,11 +19104,13 @@ app.get('/api/users/balances', protect, async (req, res) => {
     res.status(200).json({
       status: 'success',
       data: {
-        main: user.balances.main,
-        matured: user.balances.matured,
-        active: user.balances.active,
-        savings: user.balances.savings,
-        loan: user.balances.loan,
+        balances: {
+          main: user.balances.main,
+          matured: user.balances.matured,
+          active: user.balances.active,
+          savings: user.balances.savings,
+          loan: user.balances.loan
+        },
         assets: assetBalance ? assetBalance.balances : {}
       }
     });
@@ -19217,7 +19218,6 @@ async function updateUserAssetBalance(userId, asset, amount, type, price) {
 // =============================================
 // END OF TRADING ENDPOINTS
 // =============================================
-
 
 
 
