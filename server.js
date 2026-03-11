@@ -1237,6 +1237,8 @@ const UserAssetBalanceSchema = new mongoose.Schema({
 UserAssetBalanceSchema.index({ user: 1 });
 UserAssetBalanceSchema.index({ 'history.timestamp': -1 });
 
+const UserAssetBalance = mongoose.model('UserAssetBalance', UserAssetBalanceSchema);
+
 // =============================================
 // User Preferences Schema
 // =============================================
@@ -1267,6 +1269,8 @@ const UserPreferenceSchema = new mongoose.Schema({
 
 UserPreferenceSchema.index({ user: 1 });
 UserPreferenceSchema.index({ displayAsset: 1 });
+
+const UserPreference = mongoose.model('UserPreference', UserPreferenceSchema);
 
 // =============================================
 // Deposit Asset Tracking Schema
@@ -1304,6 +1308,8 @@ const DepositAssetSchema = new mongoose.Schema({
 DepositAssetSchema.index({ user: 1, createdAt: -1 });
 DepositAssetSchema.index({ user: 1, asset: 1 });
 DepositAssetSchema.index({ status: 1 });
+
+const DepositAsset = mongoose.model('DepositAsset', DepositAssetSchema);
 
 
 
@@ -2887,6 +2893,10 @@ module.exports = {
   DepositAsset,
   Buy,
   Sell,
+  OrderBook,
+  UserOrder,
+  RecentTrade,
+  AssetPrice,
   setupWebSocketServer
 };
 
