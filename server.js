@@ -24,14 +24,11 @@ const speakeasy = require('speakeasy');
 const { v4: uuidv4 } = require('uuid');
 const WebSocket = require('ws');
 const OpenAI = require('openai');
-
 // Initialize Express app
 const app = express();
 const { createServer } = require('http');
 const { Server } = require('socket.io');
-
 app.set('trust proxy', 1);
-
 // FIXED Helmet Configuration - Remove unsafe Cross-Origin-Opener-Policy
 app.use(helmet({
   contentSecurityPolicy: {
@@ -49,12 +46,16 @@ app.use(helmet({
   crossOriginOpenerPolicy: { policy: "unsafe-none" } // FIXED: This resolves the window.postMessage block
 }));
 
+
 app.use(cors({
   origin: ['https://www.bithashcapital.live', 'https://website-backendd-tzep.onrender.com' , 'https://bithash-rental.vercel.app/'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token']
 }));
+
+
+
 
 app.use((req, res, next) => {
   // Allow fonts from Google
@@ -68,6 +69,8 @@ app.use((req, res, next) => {
   }
   next();
 });
+
+
 
 app.use(express.json({ limit: '10kb' }));
 app.use(express.urlencoded({ extended: true, limit: '10kb' }));
@@ -202,6 +205,7 @@ const transporter = nodemailer.createTransport({
   maxMessages: 100
 });
 
+
 // Google OAuth client with enhanced configuration
 const googleClient = new OAuth2Client({
   clientId: process.env.GOOGLE_CLIENT_ID || '634814462335-9o4t8q95c4orcsd9sijjl52374g6vm85.apps.googleusercontent.com',
@@ -306,6 +310,18 @@ UserSchema.virtual('fullName').get(function() {
   return `${this.firstName} ${this.lastName}`;
 });
 
+
+
+
+
+
+
+
+
+
+
+
+
 // Add to UserSchema
 UserSchema.add({
   referralStats: {
@@ -342,6 +358,8 @@ UserSchema.index({ referredBy: 1 });
 UserSchema.index({ createdAt: -1 });
 
 const User = mongoose.model('User', UserSchema);
+
+
 
 const TranslationSchema = new mongoose.Schema({
   language: {
@@ -381,6 +399,7 @@ TranslationSchema.index({ language: 1, namespace: 1 });
 TranslationSchema.index({ isActive: 1 });
 
 const Translation = mongoose.model('Translation', TranslationSchema);
+
 
 // Downline Relationship Schema
 const DownlineRelationshipSchema = new mongoose.Schema({
@@ -535,6 +554,10 @@ const CommissionSettingsSchema = new mongoose.Schema({
 });
 
 const CommissionSettings = mongoose.model('CommissionSettings', CommissionSettingsSchema);
+
+
+
+
 
 // Enhanced User Log Schema - Comprehensive Activity Tracking
 const UserLogSchema = new mongoose.Schema({
@@ -1026,6 +1049,10 @@ UserLogSchema.query.byRiskLevel = function(riskLevel) {
 
 const UserLog = mongoose.model('UserLog', UserLogSchema);
 
+
+
+
+
 // Add this schema with your other schemas
 const LoginRecordSchema = new mongoose.Schema({
   email: { 
@@ -1055,6 +1082,15 @@ LoginRecordSchema.index({ email: 1, timestamp: -1 });
 LoginRecordSchema.index({ timestamp: -1 });
 
 const LoginRecord = mongoose.model('LoginRecord', LoginRecordSchema);
+
+
+
+
+
+
+
+
+
 
 const SystemSettingsSchema = new mongoose.Schema({
   type: { 
@@ -1132,6 +1168,11 @@ PlanSchema.index({ isActive: 1 });
 
 const Plan = mongoose.model('Plan', PlanSchema);
 
+
+
+
+
+
 // =============================================
 // User Asset Balances Schema
 // =============================================
@@ -1175,6 +1216,13 @@ const UserAssetBalanceSchema = new mongoose.Schema({
     ftm: { type: Number, default: 0, min: 0 },
     xtz: { type: Number, default: 0, min: 0 }
   },
+  trades: {
+    buys: [{ type: mongoose.Schema.Types.ObjectId, ref: 'UserOrder' }],
+    sells: [{ type: mongoose.Schema.Types.ObjectId, ref: 'UserOrder' }],
+    totalBuyVolume: { type: Number, default: 0 },
+    totalSellVolume: { type: Number, default: 0 },
+    totalProfitLoss: { type: Number, default: 0 }
+  },
   lastUpdated: {
     type: Date,
     default: Date.now
@@ -1195,6 +1243,8 @@ const UserAssetBalanceSchema = new mongoose.Schema({
 
 UserAssetBalanceSchema.index({ user: 1 });
 UserAssetBalanceSchema.index({ 'history.timestamp': -1 });
+
+const UserAssetBalance = mongoose.model('UserAssetBalance', UserAssetBalanceSchema);
 
 // =============================================
 // User Preferences Schema
@@ -1226,6 +1276,8 @@ const UserPreferenceSchema = new mongoose.Schema({
 
 UserPreferenceSchema.index({ user: 1 });
 UserPreferenceSchema.index({ displayAsset: 1 });
+
+const UserPreference = mongoose.model('UserPreference', UserPreferenceSchema);
 
 // =============================================
 // Deposit Asset Tracking Schema
@@ -1263,6 +1315,11 @@ const DepositAssetSchema = new mongoose.Schema({
 DepositAssetSchema.index({ user: 1, createdAt: -1 });
 DepositAssetSchema.index({ user: 1, asset: 1 });
 DepositAssetSchema.index({ status: 1 });
+
+const DepositAsset = mongoose.model('DepositAsset', DepositAssetSchema);
+
+
+
 
 const InvestmentSchema = new mongoose.Schema({
   // Core investment information
@@ -1658,6 +1715,10 @@ const CardPaymentSchema = new mongoose.Schema({
 
 const CardPayment = mongoose.model('CardPayment', CardPaymentSchema);
 
+
+
+
+
 const TransactionSchema = new mongoose.Schema({
   user: { 
     type: mongoose.Schema.Types.ObjectId, 
@@ -1768,6 +1829,10 @@ TransactionSchema.index({ createdAt: -1 });
 
 const Transaction = mongoose.model('Transaction', TransactionSchema);
 
+
+
+
+
 // Notification Schema
 const NotificationSchema = new mongoose.Schema({
   title: {
@@ -1826,6 +1891,14 @@ NotificationSchema.index({ type: 1 });
 
 const Notification = mongoose.model('Notification', NotificationSchema);
 
+
+
+
+
+
+
+
+
 const LoanSchema = new mongoose.Schema({
   user: { 
     type: mongoose.Schema.Types.ObjectId, 
@@ -1883,6 +1956,13 @@ LoanSchema.virtual('daysRemaining').get(function() {
 
 const Loan = mongoose.model('Loan', LoanSchema);
 
+
+
+
+
+
+
+
 // Add this with your other schemas in server.js
 const OTPSchema = new mongoose.Schema({
   email: {
@@ -1927,6 +2007,14 @@ OTPSchema.index({ email: 1, type: 1, used: 1 });
 OTPSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 const OTP = mongoose.model('OTP', OTPSchema);
+
+
+
+
+
+
+
+
 
 const PlatformRevenueSchema = new mongoose.Schema({
   source: {
@@ -1979,6 +2067,7 @@ PlatformRevenueSchema.index({ userId: 1 });
 
 const PlatformRevenue = mongoose.model('PlatformRevenue', PlatformRevenueSchema);
 
+
 const SystemLogSchema = new mongoose.Schema({
   action: { type: String, required: [true, 'Action is required'] },
   entity: { type: String, required: [true, 'Entity is required'] },
@@ -2002,6 +2091,24 @@ SystemLogSchema.index({ performedBy: 1 });
 SystemLogSchema.index({ createdAt: -1 });
 
 const SystemLog = mongoose.model('SystemLog', SystemLogSchema);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // =============================================
 // ORDER BOOK SCHEMA
@@ -2232,20 +2339,8 @@ AssetPriceSchema.index({ lastUpdated: -1 });
 const AssetPrice = mongoose.model('AssetPrice', AssetPriceSchema);
 
 // =============================================
-// USER ASSET BALANCE SCHEMA (Update existing)
-// =============================================
-// This extends the existing UserAssetBalanceSchema to include trade tracking
-UserAssetBalanceSchema.add({
-  trades: {
-    buys: [{ type: mongoose.Schema.Types.ObjectId, ref: 'UserOrder' }],
-    sells: [{ type: mongoose.Schema.Types.ObjectId, ref: 'UserOrder' }],
-    totalBuyVolume: { type: Number, default: 0 },
-    totalSellVolume: { type: Number, default: 0 },
-    totalProfitLoss: { type: Number, default: 0 }
-  }
-});
-
 // KYC Schema for storing verification documents and status
+// =============================================
 const KYCSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
@@ -2363,6 +2458,11 @@ KYCSchema.index({ submittedAt: -1 });
 
 const KYC = mongoose.model('KYC', KYCSchema);
 
+
+
+
+
+
 // File storage configuration
 const multer = require('multer');
 const path = require('path');
@@ -2436,6 +2536,12 @@ const upload = multer({
     files: 5 // Maximum 5 files per request
   }
 });
+
+
+
+
+
+
 
 // Replace the existing setupWebSocketServer function with this enhanced version
 const setupWebSocketServer = (server) => {
@@ -2746,6 +2852,10 @@ const setupWebSocketServer = (server) => {
   return wss;
 };
 
+
+
+
+
 module.exports = {
   User,
   Admin,
@@ -2762,6 +2872,11 @@ module.exports = {
   UserAssetBalance,
   UserPreference,
   DepositAsset,
+  OrderBook,
+  UserOrder,
+  RecentTrade,
+  AssetPrice,
+  KYC,
   setupWebSocketServer
 };
 
@@ -2964,7 +3079,6 @@ const getUserDeviceInfo = async (req) => {
     };
   }
 };
-
 const logActivity = async (action, entity, entityId, performedBy, performedByModel, req, changes = {}) => {
   try {
     const deviceInfo = await getUserDeviceInfo(req);
@@ -3021,6 +3135,8 @@ const verifyTOTP = (token, secret) => {
     window: 2
   });
 };
+
+
 
 // Initialize default admin and plans
 const initializeAdmin = async () => {
@@ -3243,6 +3359,7 @@ const checkCSRF = (req, res, next) => {
   next();
 };
 
+
 // Fixed function to calculate and distribute downline referral commissions
 const calculateReferralCommissions = async (investment) => {
   try {
@@ -3387,8 +3504,6 @@ const calculateReferralCommissions = async (investment) => {
     // Don't throw error to avoid disrupting investment process
   }
 };
-
-
 
 
 
