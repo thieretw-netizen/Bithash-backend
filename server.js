@@ -18088,152 +18088,6 @@ app.get('/api/trading/trades', protect, async (req, res) => {
 });
 
 
-// =============================================
-// PLACE BUY ORDER - EXACT MATCH TO DATABASE & FRONTEND
-// =============================================
-app.post('/api/trading/orders/buy', protect, async (req, res) => {
-  try {
-    const userId = req.user._id;
-    const { 
-      symbol, 
-      baseAsset, 
-      quoteAsset, 
-      side, 
-      type, 
-      price, 
-      amount, 
-      total,
-      useMaturedBalance 
-    } = req.body;
-
-    // Validation
-    if (!symbol || !baseAsset || !price || !amount || !total) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Missing required fields'
-      });
-    }
-
-    if (total < 10) {
-      return res.status(400).json({
-        status: 'fail',
-        message: `Minimum trade amount is $10`
-      });
-    }
-
-    // Get user balances
-    const user = await User.findById(userId).select('balances');
-    if (!user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found'
-      });
-    }
-
-    const mainBalance = user.balances?.main || 0;
-    const maturedBalance = user.balances?.matured || 0;
-    const totalAvailable = mainBalance + maturedBalance;
-
-    if (total > totalAvailable) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Insufficient balance'
-      });
-    }
-
-    // Create order - EXACTLY as UserOrderSchema expects
-    const order = new UserOrder({
-      user: userId,
-      symbol: symbol,
-      type: 'buy', // This matches schema enum
-      orderType: type || 'limit',
-      price: price,
-      amount: amount,
-      total: total,
-      filled: 0,
-      remaining: amount,
-      status: 'pending',
-      metadata: {
-        ipAddress: req.ip,
-        userAgent: req.headers['user-agent']
-      }
-    });
-
-    await order.save();
-
-    // Update user balance - EXACTLY as UserSchema expects
-    let mainDeduction = 0;
-    let maturedDeduction = 0;
-
-    if (maturedBalance >= total) {
-      maturedDeduction = total;
-    } else {
-      maturedDeduction = maturedBalance;
-      mainDeduction = total - maturedBalance;
-    }
-
-    const updateData = {};
-    if (mainDeduction > 0) updateData['balances.main'] = mainBalance - mainDeduction;
-    if (maturedDeduction > 0) updateData['balances.matured'] = maturedBalance - maturedDeduction;
-    
-    await User.findByIdAndUpdate(userId, { $set: updateData });
-
-    // Create transaction - EXACTLY as TransactionSchema expects
-    const transaction = new Transaction({
-      user: userId,
-      type: 'buy',
-      amount: total,
-      asset: baseAsset.toLowerCase(),
-      assetAmount: amount,
-      currency: 'USD',
-      status: 'pending',
-      method: 'internal',
-      reference: `BUY-${Date.now()}-${Math.random().toString(36).substring(7)}`,
-      details: {
-        symbol: symbol,
-        price: price,
-        fromWallets: {
-          main: mainDeduction,
-          matured: maturedDeduction
-        }
-      },
-      fee: 0,
-      netAmount: total
-    });
-
-    await transaction.save();
-
-    // Link transaction to order
-    order.transactionId = transaction._id;
-    order.status = 'open';
-    await order.save();
-
-    // Return EXACT format frontend expects
-    return res.status(201).json({
-      status: 'success',
-      message: 'Buy order placed successfully',
-      data: {
-        id: order._id,
-        symbol: order.symbol,
-        side: order.type,
-        price: order.price,
-        amount: order.amount,
-        total: order.total,
-        status: order.status,
-        createdAt: order.createdAt
-      }
-    });
-
-  } catch (error) {
-    console.error('Buy order error:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Failed to place buy order'
-    });
-  }
-});
-
-
 
 
 // =============================================
@@ -18493,7 +18347,148 @@ app.post('/api/trading/orders/sell', protect, async (req, res) => {
 
 
 
+// =============================================
+// PLACE BUY ORDER - EXACT MATCH TO YOUR DATABASE
+// =============================================
+app.post('/api/trading/orders/buy', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { symbol, baseAsset, quoteAsset, side, type, price, amount, total, useMaturedBalance } = req.body;
 
+    // Validate minimum amount
+    if (total < 10) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Minimum trade amount is $10`
+      });
+    }
+
+    // Get user with balances
+    const user = await User.findById(userId).select('balances');
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+
+    // Check balances
+    const mainBalance = user.balances?.main || 0;
+    const maturedBalance = user.balances?.matured || 0;
+    const totalAvailable = mainBalance + maturedBalance;
+
+    if (total > totalAvailable) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Insufficient balance'
+      });
+    }
+
+    // Calculate deductions
+    let mainDeduction = 0;
+    let maturedDeduction = 0;
+    
+    if (useMaturedBalance) {
+      if (maturedBalance >= total) {
+        maturedDeduction = total;
+      } else {
+        maturedDeduction = maturedBalance;
+        mainDeduction = total - maturedBalance;
+      }
+    } else {
+      if (mainBalance >= total) {
+        mainDeduction = total;
+      } else {
+        return res.status(400).json({
+          status: 'fail',
+          message: 'Insufficient main balance'
+        });
+      }
+    }
+
+    // Create order - EXACT UserOrderSchema fields
+    const order = new UserOrder({
+      user: userId,
+      symbol: symbol,
+      type: 'buy',
+      orderType: type || 'limit',
+      price: price,
+      amount: amount,
+      total: total,
+      filled: 0,
+      remaining: amount,
+      status: 'pending',
+      assetBalanceSource: useMaturedBalance ? 'main' : 'main', // Your schema only has 'main', 'matured', 'asset_balance'
+      assetBalanceUsed: false,
+      metadata: {
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent']
+      }
+    });
+
+    await order.save();
+
+    // Update user balances
+    const updateData = {};
+    if (mainDeduction > 0) updateData['balances.main'] = mainBalance - mainDeduction;
+    if (maturedDeduction > 0) updateData['balances.matured'] = maturedBalance - maturedDeduction;
+    
+    await User.findByIdAndUpdate(userId, { $set: updateData });
+
+    // Create transaction - EXACT TransactionSchema fields
+    const transaction = new Transaction({
+      user: userId,
+      type: 'buy',
+      amount: total,
+      asset: baseAsset?.toLowerCase(),
+      assetAmount: amount,
+      currency: 'USD',
+      status: 'completed',
+      method: 'internal',
+      reference: `BUY-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
+      details: {
+        symbol: symbol,
+        price: price,
+        fromWallets: {
+          main: mainDeduction,
+          matured: maturedDeduction
+        }
+      },
+      fee: 0,
+      netAmount: total
+    });
+
+    await transaction.save();
+
+    // Link transaction to order
+    order.transactionId = transaction._id;
+    order.status = 'completed'; // Your frontend expects 'completed' for successful orders
+    await order.save();
+
+    // Return EXACT format your frontend's placeOrder() expects
+    return res.status(201).json({
+      status: 'success',
+      message: 'Buy order placed successfully',
+      data: {
+        id: order._id,
+        symbol: order.symbol,
+        side: order.type,
+        price: order.price,
+        amount: order.amount,
+        total: order.total,
+        status: order.status,
+        createdAt: order.createdAt
+      }
+    });
+
+  } catch (error) {
+    console.error('Buy order error:', error);
+    return res.status(500).json({
+      status: 'error',
+      message: 'Failed to place buy order'
+    });
+  }
+});
 
 
 
