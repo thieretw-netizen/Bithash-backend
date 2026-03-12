@@ -46,24 +46,29 @@ app.use(helmet({
   crossOriginOpenerPolicy: { policy: "unsafe-none" } // FIXED: This resolves the window.postMessage block
 }));
 
+
 app.use(cors({
-  origin: ['https://www.bithashcapital.live', 'https://website-backendd-tzep.onrender.com', 'https://bithash-rental.vercel.app'],
+  origin: ['https://www.bithashcapital.live', 'https://website-backendd-tzep.onrender.com' , 'https://bithash-rental.vercel.app/'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token', 'X-Rate-Limit']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token']
 }));
 
 
 
 
 app.use((req, res, next) => {
-  // Only for Google Fonts and static routes - don't override CORS headers
+  // Allow fonts from Google
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  
+  // Cache static responses
   if (req.url.includes('/api/plans') || req.url.includes('/api/stats')) {
     res.setHeader('Cache-Control', 'public, max-age=300');
   }
   next();
 });
-
 
 
 
@@ -2335,15 +2340,84 @@ UserAssetBalanceSchema.add({
 });
 
 
+// =============================================
+// BUY MODEL
+// =============================================
+const BuySchema = new mongoose.Schema({
+  user: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+    index: true
+  },
+  asset: {
+    type: String,
+    required: true,
+    enum: ['btc', 'eth', 'usdt', 'bnb', 'sol', 'usdc', 'xrp', 'doge', 'ada', 'shib',
+           'avax', 'dot', 'trx', 'link', 'matic', 'wbtc', 'ltc', 'near', 'uni', 'bch',
+           'xlm', 'atom', 'xmr', 'flow', 'vet', 'fil', 'theta', 'hbar', 'ftm', 'xtz']
+  },
+  amountUSD: { type: Number, required: true, min: 0 },
+  assetAmount: { type: Number, required: true, min: 0 },
+  price: { type: Number, required: true, min: 0 },
+  total: { type: Number, required: true, min: 0 },
+  fromWallets: {
+    main: { type: Number, default: 0 },
+    matured: { type: Number, default: 0 }
+  },
+  status: { 
+    type: String, 
+    enum: ['pending', 'completed', 'failed'], 
+    default: 'completed' 
+  },
+  transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' }
+}, { timestamps: true });
 
+BuySchema.index({ user: 1, createdAt: -1 });
+BuySchema.index({ asset: 1, status: 1 });
 
+const Buy = mongoose.model('Buy', BuySchema);
 
+// =============================================
+// SELL MODEL
+// =============================================
+const SellSchema = new mongoose.Schema({
+  user: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+    index: true
+  },
+  asset: {
+    type: String,
+    required: true,
+    enum: ['btc', 'eth', 'usdt', 'bnb', 'sol', 'usdc', 'xrp', 'doge', 'ada', 'shib',
+           'avax', 'dot', 'trx', 'link', 'matic', 'wbtc', 'ltc', 'near', 'uni', 'bch',
+           'xlm', 'atom', 'xmr', 'flow', 'vet', 'fil', 'theta', 'hbar', 'ftm', 'xtz']
+  },
+  amountUSD: { type: Number, required: true, min: 0 },
+  assetAmount: { type: Number, required: true, min: 0 },
+  price: { type: Number, required: true, min: 0 },
+  total: { type: Number, required: true, min: 0 },
+  fromWallets: {
+    main: { type: Number, default: 0 },
+    matured: { type: Number, default: 0 }
+  },
+  profitLoss: { type: Number },
+  profitLossPercentage: { type: Number },
+  avgBuyPrice: { type: Number },
+  status: { 
+    type: String, 
+    enum: ['pending', 'completed', 'failed'], 
+    default: 'completed' 
+  },
+  transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' }
+}, { timestamps: true });
 
+SellSchema.index({ user: 1, createdAt: -1 });
+SellSchema.index({ asset: 1, status: 1 });
 
-
-
-
-
+const Sell = mongoose.model('Sell', SellSchema);
 
 
 
@@ -2860,174 +2934,7 @@ const setupWebSocketServer = (server) => {
   return wss;
 };
 
-// =============================================
-// ADD MISSING MODEL DEFINITIONS HERE
-// =============================================
 
-// UserAssetBalance Model (if not already defined)
-const UserAssetBalance = mongoose.models.UserAssetBalance || 
-  mongoose.model('UserAssetBalance', UserAssetBalanceSchema);
-
-// UserPreference Model
-const UserPreference = mongoose.models.UserPreference || 
-  mongoose.model('UserPreference', UserPreferenceSchema);
-
-// DepositAsset Model
-const DepositAsset = mongoose.models.DepositAsset || 
-  mongoose.model('DepositAsset', DepositAssetSchema);
-
-// Buy Model (for tracking buy orders)
-const BuySchema = new mongoose.Schema({
-  user: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'User', 
-    required: true,
-    index: true 
-  },
-  asset: { 
-    type: String, 
-    required: true,
-    enum: ['btc', 'eth', 'usdt', 'bnb', 'sol', 'usdc', 'xrp', 'doge', 'ada', 'shib',
-           'avax', 'dot', 'trx', 'link', 'matic', 'wbtc', 'ltc', 'near', 'uni', 'bch',
-           'xlm', 'atom', 'xmr', 'flow', 'vet', 'fil', 'theta', 'hbar', 'ftm', 'xtz']
-  },
-  amountUSD: { type: Number, required: true, min: 0 },
-  assetAmount: { type: Number, required: true, min: 0 },
-  buyingPrice: { type: Number, required: true, min: 0 },
-  currentPrice: { type: Number },
-  profitLoss: { type: Number },
-  profitLossPercentage: { type: Number },
-  status: { 
-    type: String, 
-    enum: ['pending', 'completed', 'cancelled', 'failed'], 
-    default: 'pending' 
-  },
-  transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
-  metadata: mongoose.Schema.Types.Mixed
-}, { timestamps: true });
-
-BuySchema.index({ user: 1, createdAt: -1 });
-BuySchema.index({ asset: 1 });
-
-const Buy = mongoose.model('Buy', BuySchema);
-
-// Sell Model (for tracking sell orders)
-const SellSchema = new mongoose.Schema({
-  user: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'User', 
-    required: true,
-    index: true 
-  },
-  asset: { 
-    type: String, 
-    required: true,
-    enum: ['btc', 'eth', 'usdt', 'bnb', 'sol', 'usdc', 'xrp', 'doge', 'ada', 'shib',
-           'avax', 'dot', 'trx', 'link', 'matic', 'wbtc', 'ltc', 'near', 'uni', 'bch',
-           'xlm', 'atom', 'xmr', 'flow', 'vet', 'fil', 'theta', 'hbar', 'ftm', 'xtz']
-  },
-  amountUSD: { type: Number, required: true, min: 0 },
-  assetAmount: { type: Number, required: true, min: 0 },
-  sellingPrice: { type: Number, required: true, min: 0 },
-  buyingPrice: { type: Number },
-  profitLoss: { type: Number },
-  profitLossPercentage: { type: Number },
-  status: { 
-    type: String, 
-    enum: ['pending', 'completed', 'cancelled', 'failed'], 
-    default: 'pending' 
-  },
-  transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
-  metadata: mongoose.Schema.Types.Mixed
-}, { timestamps: true });
-
-SellSchema.index({ user: 1, createdAt: -1 });
-SellSchema.index({ asset: 1 });
-
-const Sell = mongoose.model('Sell', SellSchema);
-
-// Support Conversation Model (for WebSocket chat)
-const SupportConversationSchema = new mongoose.Schema({
-  conversationId: { 
-    type: String, 
-    required: true, 
-    unique: true,
-    index: true 
-  },
-  userId: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'User', 
-    required: true,
-    index: true 
-  },
-  agentId: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'Admin',
-    index: true 
-  },
-  status: { 
-    type: String, 
-    enum: ['open', 'active', 'waiting', 'closed'], 
-    default: 'open' 
-  },
-  subject: String,
-  department: {
-    type: String,
-    enum: ['general', 'technical', 'billing', 'verification'],
-    default: 'general'
-  },
-  priority: {
-    type: String,
-    enum: ['low', 'medium', 'high', 'urgent'],
-    default: 'medium'
-  },
-  lastMessageAt: { type: Date, default: Date.now },
-  metadata: mongoose.Schema.Types.Mixed
-}, { timestamps: true });
-
-SupportConversationSchema.index({ userId: 1, status: 1 });
-SupportConversationSchema.index({ agentId: 1, status: 1 });
-
-const SupportConversation = mongoose.model('SupportConversation', SupportConversationSchema);
-
-// Support Message Model
-const SupportMessageSchema = new mongoose.Schema({
-  conversationId: { 
-    type: String, 
-    required: true,
-    index: true 
-  },
-  sender: { 
-    type: String, 
-    enum: ['user', 'agent', 'system'], 
-    required: true 
-  },
-  senderId: { 
-    type: String, 
-    required: true,
-    index: true 
-  },
-  message: { 
-    type: String, 
-    required: true 
-  },
-  attachments: [{
-    filename: String,
-    url: String,
-    size: Number
-  }],
-  read: { 
-    type: Boolean, 
-    default: false 
-  },
-  readAt: Date,
-  deliveredAt: Date,
-  metadata: mongoose.Schema.Types.Mixed
-}, { timestamps: true });
-
-SupportMessageSchema.index({ conversationId: 1, createdAt: 1 });
-
-const SupportMessage = mongoose.model('SupportMessage', SupportMessageSchema);
 
 
 
@@ -3044,23 +2951,11 @@ module.exports = {
   CommissionHistory,
   CommissionSettings,
   Translation,
-  UserAssetBalance,
-  UserPreference,
-  DepositAsset,
-  Buy,
-  Sell,
-  SupportConversation,
-  SupportMessage,
-  OrderBook,
-  UserOrder,
-  RecentTrade,
-  AssetPrice,
-  KYC,
-  Notification,
-  PlatformRevenue,
-  LoginRecord,
-  OTP,
-  CardPayment,
+  UserAssetBalance: mongoose.model('UserAssetBalance', UserAssetBalanceSchema),
+  UserPreference: mongoose.model('UserPreference', UserPreferenceSchema),
+  DepositAsset: mongoose.model('DepositAsset', DepositAssetSchema),
+  Buy: mongoose.model('Buy', BuySchema),
+  Sell: mongoose.model('Sell', SellSchema),
   setupWebSocketServer
 };
 
