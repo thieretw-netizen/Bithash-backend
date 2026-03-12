@@ -18308,7 +18308,7 @@ app.post('/api/trading/orders/sell', protect, async (req, res) => {
 
 
 // =============================================
-// BUY ORDER ENDPOINT - Create a buy order (FIXED)
+// BUY ORDER ENDPOINT - Create a buy order (FIXED with proper history)
 // =============================================
 app.post('/api/trading/orders/buy', protect, async (req, res) => {
   try {
@@ -18377,7 +18377,30 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
     // Generate unique reference
     const reference = `BUY-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
 
-    // Create buy record using your existing Buy model
+    // Create transaction record
+    const transaction = new Transaction({
+      user: userId,
+      type: 'buy',
+      amount: total,
+      currency: 'USD',
+      status: 'completed',
+      method: 'internal',
+      reference: reference,
+      details: {
+        asset: baseAsset,
+        assetAmount: amount,
+        price: price,
+        symbol: symbol
+      },
+      asset: baseAsset.toLowerCase(),
+      assetAmount: amount,
+      fee: 0,
+      netAmount: total
+    });
+    
+    await transaction.save();
+
+    // Create buy record
     const buy = new Buy({
       user: userId,
       asset: baseAsset.toLowerCase(),
@@ -18390,46 +18413,20 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
         matured: maturedDeduction
       },
       status: 'completed',
-      transactionId: null // Will update after transaction is created
+      transactionId: transaction._id
     });
     
     await buy.save();
 
-    // Create transaction record with CORRECT method enum
-    const transaction = new Transaction({
-      user: userId,
-      type: 'buy',
-      amount: total,
-      currency: 'USD',
-      status: 'completed',
-      method: 'internal', // FIXED: Using 'internal' instead of 'USDT' which matches your enum
-      reference: reference,
-      details: {
-        asset: baseAsset,
-        assetAmount: amount,
-        price: price,
-        symbol: symbol,
-        buyId: buy._id
-      },
-      asset: baseAsset.toLowerCase(),
-      assetAmount: amount,
-      fee: 0,
-      netAmount: total
-    });
-    
-    await transaction.save();
-
-    // Update buy record with transaction ID
-    buy.transactionId = transaction._id;
-    await buy.save();
-
-    // Update or create user asset balance
-    let userAssetBalance = await mongoose.model('UserAssetBalance').findOne({ user: userId });
+    // Update or create user asset balance with PROPER history
+    const UserAssetBalance = mongoose.model('UserAssetBalance');
+    let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
     
     if (!userAssetBalance) {
-      userAssetBalance = new (mongoose.model('UserAssetBalance'))({
+      userAssetBalance = new UserAssetBalance({
         user: userId,
-        balances: {}
+        balances: {},
+        history: []
       });
     }
     
@@ -18439,18 +18436,23 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
     }
     
     const assetKey = baseAsset.toLowerCase();
-    userAssetBalance.balances[assetKey] = (userAssetBalance.balances[assetKey] || 0) + amount;
+    const currentBalance = userAssetBalance.balances[assetKey] || 0;
+    const newBalance = currentBalance + amount;
     
-    // Add to history
+    // Update balance
+    userAssetBalance.balances[assetKey] = newBalance;
+    
+    // Initialize history array if not exists
     if (!userAssetBalance.history) {
       userAssetBalance.history = [];
     }
     
+    // Add to history with ALL required fields
     userAssetBalance.history.push({
       asset: assetKey,
       type: 'buy',
       amount: amount,
-      balance: userAssetBalance.balances[assetKey],
+      balance: newBalance, // CRITICAL: This is the required field
       usdValue: total,
       price: price,
       transactionId: transaction._id,
@@ -18496,7 +18498,6 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
     });
   }
 });
-
 
 
 
