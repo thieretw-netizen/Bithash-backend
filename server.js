@@ -18355,9 +18355,27 @@ app.post('/api/trading/orders/sell', protect, async (req, res) => {
 app.post('/api/trading/orders/buy', protect, async (req, res) => {
   try {
     const userId = req.user._id;
-    const { symbol, baseAsset, quoteAsset, side, type, price, amount, total, useMaturedBalance } = req.body;
+    const { 
+      symbol, 
+      baseAsset, 
+      quoteAsset, 
+      side, 
+      type, 
+      price, 
+      amount, 
+      total,
+      useMaturedBalance 
+    } = req.body;
 
-    // Validate minimum amount
+    // Validation
+    if (!symbol || !baseAsset || !price || !amount || !total) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Missing required fields'
+      });
+    }
+
+    // Minimum $10 trade amount
     if (total < 10) {
       return res.status(400).json({
         status: 'fail',
@@ -18374,7 +18392,7 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
       });
     }
 
-    // Check balances
+    // Check available balance (main + matured)
     const mainBalance = user.balances?.main || 0;
     const maturedBalance = user.balances?.matured || 0;
     const totalAvailable = mainBalance + maturedBalance;
@@ -18386,29 +18404,18 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
       });
     }
 
-    // Calculate deductions
+    // Calculate deductions (use matured first)
     let mainDeduction = 0;
     let maturedDeduction = 0;
     
-    if (useMaturedBalance) {
-      if (maturedBalance >= total) {
-        maturedDeduction = total;
-      } else {
-        maturedDeduction = maturedBalance;
-        mainDeduction = total - maturedBalance;
-      }
+    if (maturedBalance >= total) {
+      maturedDeduction = total;
     } else {
-      if (mainBalance >= total) {
-        mainDeduction = total;
-      } else {
-        return res.status(400).json({
-          status: 'fail',
-          message: 'Insufficient main balance'
-        });
-      }
+      maturedDeduction = maturedBalance;
+      mainDeduction = total - maturedBalance;
     }
 
-    // Create order - EXACT UserOrderSchema fields
+    // Create order - DIRECT MODEL USAGE (models are already defined)
     const order = new UserOrder({
       user: userId,
       symbol: symbol,
@@ -18420,7 +18427,7 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
       filled: 0,
       remaining: amount,
       status: 'pending',
-      assetBalanceSource: useMaturedBalance ? 'main' : 'main', // Your schema only has 'main', 'matured', 'asset_balance'
+      assetBalanceSource: 'main',
       assetBalanceUsed: false,
       metadata: {
         ipAddress: req.ip,
@@ -18431,23 +18438,29 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
     await order.save();
 
     // Update user balances
-    const updateData = {};
-    if (mainDeduction > 0) updateData['balances.main'] = mainBalance - mainDeduction;
-    if (maturedDeduction > 0) updateData['balances.matured'] = maturedBalance - maturedDeduction;
+    const balanceUpdate = {};
+    if (mainDeduction > 0) {
+      balanceUpdate['balances.main'] = mainBalance - mainDeduction;
+    }
+    if (maturedDeduction > 0) {
+      balanceUpdate['balances.matured'] = maturedBalance - maturedDeduction;
+    }
     
-    await User.findByIdAndUpdate(userId, { $set: updateData });
+    await User.findByIdAndUpdate(userId, {
+      $set: balanceUpdate
+    });
 
-    // Create transaction - EXACT TransactionSchema fields
+    // Create transaction record
     const transaction = new Transaction({
       user: userId,
       type: 'buy',
       amount: total,
-      asset: baseAsset?.toLowerCase(),
+      asset: baseAsset.toLowerCase(),
       assetAmount: amount,
       currency: 'USD',
       status: 'completed',
       method: 'internal',
-      reference: `BUY-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
+      reference: `BUY-${Date.now()}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
       details: {
         symbol: symbol,
         price: price,
@@ -18462,12 +18475,14 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
 
     await transaction.save();
 
-    // Link transaction to order
+    // Update order with transaction reference
     order.transactionId = transaction._id;
-    order.status = 'completed'; // Your frontend expects 'completed' for successful orders
+    order.status = 'completed';
+    order.filled = amount;
+    order.remaining = 0;
     await order.save();
 
-    // Return EXACT format your frontend's placeOrder() expects
+    // Return success response - EXACT format frontend expects
     return res.status(201).json({
       status: 'success',
       message: 'Buy order placed successfully',
