@@ -18088,9 +18088,8 @@ app.get('/api/trading/trades', protect, async (req, res) => {
 });
 
 
-
 // =============================================
-// PLACE BUY ORDER - EXACTLY AS FRONTEND EXPECTS
+// PLACE BUY ORDER - EXACT MATCH TO DATABASE & FRONTEND
 // =============================================
 app.post('/api/trading/orders/buy', protect, async (req, res) => {
   try {
@@ -18104,27 +18103,26 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
       price, 
       amount, 
       total,
-      useMaturedBalance = true 
+      useMaturedBalance 
     } = req.body;
 
     // Validation
-    if (!symbol || !baseAsset || !quoteAsset || !price || !amount || !total) {
+    if (!symbol || !baseAsset || !price || !amount || !total) {
       return res.status(400).json({
         status: 'fail',
         message: 'Missing required fields'
       });
     }
 
-    // Check minimum trade amount ($10 USD)
     if (total < 10) {
       return res.status(400).json({
         status: 'fail',
-        message: `Minimum trade amount is $10. Your total is $${total.toFixed(2)}`
+        message: `Minimum trade amount is $10`
       });
     }
 
-    // Get user with balances
-    const user = await User.findById(userId);
+    // Get user balances
+    const user = await User.findById(userId).select('balances');
     if (!user) {
       return res.status(404).json({
         status: 'fail',
@@ -18132,50 +18130,22 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
       });
     }
 
-    // Calculate available balance (main + matured)
     const mainBalance = user.balances?.main || 0;
     const maturedBalance = user.balances?.matured || 0;
     const totalAvailable = mainBalance + maturedBalance;
 
-    // Check if user has sufficient balance
     if (total > totalAvailable) {
       return res.status(400).json({
         status: 'fail',
-        message: `Insufficient balance. You have $${totalAvailable.toFixed(2)} USDT available`
+        message: 'Insufficient balance'
       });
     }
 
-    // Determine how much to deduct from each balance
-    let mainDeduction = 0;
-    let maturedDeduction = 0;
-    
-    if (useMaturedBalance) {
-      // Use matured balance first, then main
-      if (maturedBalance >= total) {
-        maturedDeduction = total;
-      } else {
-        maturedDeduction = maturedBalance;
-        mainDeduction = total - maturedBalance;
-      }
-    } else {
-      // Use only main balance
-      if (mainBalance >= total) {
-        mainDeduction = total;
-      } else {
-        return res.status(400).json({
-          status: 'fail',
-          message: `Insufficient main balance. You have $${mainBalance.toFixed(2)} USDT in main`
-        });
-      }
-    }
-
-    // Create the order
+    // Create order - EXACTLY as UserOrderSchema expects
     const order = new UserOrder({
       user: userId,
       symbol: symbol,
-      baseAsset: baseAsset,
-      quoteAsset: quoteAsset,
-      type: side, // 'buy'
+      type: 'buy', // This matches schema enum
       orderType: type || 'limit',
       price: price,
       amount: amount,
@@ -18183,31 +18153,32 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
       filled: 0,
       remaining: amount,
       status: 'pending',
-      assetBalanceSource: useMaturedBalance ? 'main+matured' : 'main',
-      assetBalanceUsed: false,
       metadata: {
         ipAddress: req.ip,
-        userAgent: req.headers['user-agent'],
-        deviceInfo: req.headers['user-agent']
+        userAgent: req.headers['user-agent']
       }
     });
 
     await order.save();
 
-    // Deduct from user balances
-    const updateQuery = {};
-    if (mainDeduction > 0) {
-      updateQuery['balances.main'] = mainBalance - mainDeduction;
-    }
-    if (maturedDeduction > 0) {
-      updateQuery['balances.matured'] = maturedBalance - maturedDeduction;
+    // Update user balance - EXACTLY as UserSchema expects
+    let mainDeduction = 0;
+    let maturedDeduction = 0;
+
+    if (maturedBalance >= total) {
+      maturedDeduction = total;
+    } else {
+      maturedDeduction = maturedBalance;
+      mainDeduction = total - maturedBalance;
     }
 
-    await User.findByIdAndUpdate(userId, {
-      $set: updateQuery
-    });
+    const updateData = {};
+    if (mainDeduction > 0) updateData['balances.main'] = mainBalance - mainDeduction;
+    if (maturedDeduction > 0) updateData['balances.matured'] = maturedBalance - maturedDeduction;
+    
+    await User.findByIdAndUpdate(userId, { $set: updateData });
 
-    // Create transaction record
+    // Create transaction - EXACTLY as TransactionSchema expects
     const transaction = new Transaction({
       user: userId,
       type: 'buy',
@@ -18215,9 +18186,9 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
       asset: baseAsset.toLowerCase(),
       assetAmount: amount,
       currency: 'USD',
-      status: 'completed',
+      status: 'pending',
       method: 'internal',
-      reference: `BUY-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      reference: `BUY-${Date.now()}-${Math.random().toString(36).substring(7)}`,
       details: {
         symbol: symbol,
         price: price,
@@ -18232,74 +18203,12 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
 
     await transaction.save();
 
-    // Update order with transaction ID
+    // Link transaction to order
     order.transactionId = transaction._id;
-    order.status = 'open'; // or 'completed' depending on your business logic
+    order.status = 'open';
     await order.save();
 
-    // Update user's asset balance
-    let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
-    if (!userAssetBalance) {
-      userAssetBalance = new UserAssetBalance({
-        user: userId,
-        balances: {}
-      });
-    }
-    
-    const assetKey = baseAsset.toLowerCase();
-    userAssetBalance.balances[assetKey] = (userAssetBalance.balances[assetKey] || 0) + amount;
-    userAssetBalance.lastUpdated = new Date();
-    
-    // Add to history
-    userAssetBalance.history.push({
-      asset: assetKey,
-      type: 'buy',
-      amount: amount,
-      balance: userAssetBalance.balances[assetKey],
-      usdValue: total,
-      price: price,
-      timestamp: new Date(),
-      transactionId: transaction._id
-    });
-    
-    await userAssetBalance.save();
-
-    // Create Buy record
-    const buyRecord = new Buy({
-      user: userId,
-      asset: baseAsset.toLowerCase(),
-      amountUSD: total,
-      assetAmount: amount,
-      price: price,
-      total: total,
-      fromWallets: {
-        main: mainDeduction,
-        matured: maturedDeduction
-      },
-      status: 'completed',
-      transactionId: transaction._id
-    });
-
-    await buyRecord.save();
-
-    // Log activity
-    await logActivity(
-      'buy_order_placed',
-      'UserOrder',
-      order._id,
-      userId,
-      'User',
-      req,
-      {
-        symbol: symbol,
-        amount: amount,
-        price: price,
-        total: total,
-        fromWallets: { main: mainDeduction, matured: maturedDeduction }
-      }
-    );
-
-    // Format response exactly as frontend expects
+    // Return EXACT format frontend expects
     return res.status(201).json({
       status: 'success',
       message: 'Buy order placed successfully',
@@ -18316,7 +18225,7 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error placing buy order:', error);
+    console.error('Buy order error:', error);
     return res.status(500).json({
       status: 'error',
       message: 'Failed to place buy order'
