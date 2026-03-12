@@ -1174,7 +1174,7 @@ const Plan = mongoose.model('Plan', PlanSchema);
 
 
 // =============================================
-// User Asset Balances Schema - FIXED VERSION
+// User Asset Balances Schema
 // =============================================
 const UserAssetBalanceSchema = new mongoose.Schema({
   user: {
@@ -2550,369 +2550,11 @@ const upload = multer({
   }
 });
 
-// =============================================
-// BUY SCHEMA
-// =============================================
-const BuySchema = new mongoose.Schema({
-  user: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'User', 
-    required: true,
-    index: true 
-  },
-  asset: { 
-    type: String, 
-    required: true,
-    enum: ['btc', 'eth', 'usdt', 'bnb', 'sol', 'usdc', 'xrp', 'doge', 'ada', 'shib',
-           'avax', 'dot', 'trx', 'link', 'matic', 'wbtc', 'ltc', 'near', 'uni', 'bch',
-           'xlm', 'atom', 'xmr', 'flow', 'vet', 'fil', 'theta', 'hbar', 'ftm', 'xtz']
-  },
-  amount: { type: Number, required: true, min: 0 },
-  price: { type: Number, required: true, min: 0 },
-  total: { type: Number, required: true, min: 0 },
-  status: { 
-    type: String, 
-    enum: ['pending', 'completed', 'cancelled'], 
-    default: 'pending' 
-  },
-  transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' }
-}, { timestamps: true });
 
-// =============================================
-// SELL SCHEMA
-// =============================================
-const SellSchema = new mongoose.Schema({
-  user: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'User', 
-    required: true,
-    index: true 
-  },
-  asset: { 
-    type: String, 
-    required: true,
-    enum: ['btc', 'eth', 'usdt', 'bnb', 'sol', 'usdc', 'xrp', 'doge', 'ada', 'shib',
-           'avax', 'dot', 'trx', 'link', 'matic', 'wbtc', 'ltc', 'near', 'uni', 'bch',
-           'xlm', 'atom', 'xmr', 'flow', 'vet', 'fil', 'theta', 'hbar', 'ftm', 'xtz']
-  },
-  amount: { type: Number, required: true, min: 0 },
-  price: { type: Number, required: true, min: 0 },
-  total: { type: Number, required: true, min: 0 },
-  status: { 
-    type: String, 
-    enum: ['pending', 'completed', 'cancelled'], 
-    default: 'pending' 
-  },
-  transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' }
-}, { timestamps: true });
 
-// Create the Buy and Sell models
-const Buy = mongoose.model('Buy', BuySchema);
-const Sell = mongoose.model('Sell', SellSchema);
 
-// Create UserAssetBalance and UserPreference models if they don't exist
-const UserAssetBalance = mongoose.model('UserAssetBalance', UserAssetBalanceSchema);
-const UserPreference = mongoose.model('UserPreference', UserPreferenceSchema);
-const DepositAsset = mongoose.model('DepositAsset', DepositAssetSchema);
 
-// =============================================
-// SUPPORT CONVERSATION SCHEMA
-// =============================================
-const SupportConversationSchema = new mongoose.Schema({
-  conversationId: { type: String, required: true, unique: true },
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  agentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
-  status: { 
-    type: String, 
-    enum: ['open', 'active', 'waiting', 'closed'], 
-    default: 'open' 
-  },
-  lastMessageAt: { type: Date, default: Date.now }
-}, { timestamps: true });
 
-const SupportMessageSchema = new mongoose.Schema({
-  conversationId: { type: String, required: true },
-  sender: { type: String, enum: ['user', 'agent'], required: true },
-  senderId: { type: String, required: true },
-  message: { type: String, required: true },
-  read: { type: Boolean, default: false }
-}, { timestamps: true });
-
-const SupportConversation = mongoose.model('SupportConversation', SupportConversationSchema);
-const SupportMessage = mongoose.model('SupportMessage', SupportMessageSchema);
-
-// =============================================
-// TRADING ENDPOINTS - BUY ORDER
-// =============================================
-
-// POST /api/trading/orders/buy - Place buy order
-app.post('/api/trading/orders/buy', protect, async (req, res) => {
-  try {
-    const {
-      symbol,
-      baseAsset,
-      quoteAsset,
-      side,
-      type,
-      price,
-      amount,
-      total,
-      useMaturedBalance,
-      timestamp
-    } = req.body;
-
-    // Validation
-    if (!symbol || !baseAsset || !amount || !price || !total) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Missing required fields'
-      });
-    }
-
-    // Minimum trade amount check ($10)
-    if (total < 10) {
-      return res.status(400).json({
-        status: 'error',
-        message: `Minimum trade amount is $10 worth of ${baseAsset}`
-      });
-    }
-
-    // Get user with current balances
-    const user = await User.findById(req.user._id);
-    if (!user) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'User not found'
-      });
-    }
-
-    const totalAvailable = user.balances.main + user.balances.matured;
-
-    // Check sufficient balance
-    if (total > totalAvailable) {
-      return res.status(400).json({
-        status: 'error',
-        message: `Insufficient balance. You have $${totalAvailable.toFixed(2)} USDT available`
-      });
-    }
-
-    // Determine which balance to use
-    let mainUsed = 0;
-    let maturedUsed = 0;
-
-    if (user.balances.main >= total) {
-      mainUsed = total;
-    } else {
-      mainUsed = user.balances.main;
-      maturedUsed = total - mainUsed;
-    }
-
-    // Create transaction record
-    const transactionReference = `BUY-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`.toUpperCase();
-    
-    const transaction = await Transaction.create({
-      user: user._id,
-      type: 'buy',
-      amount: total,
-      asset: baseAsset.toLowerCase(),
-      assetAmount: amount,
-      currency: 'USD',
-      status: 'completed',
-      method: 'internal',
-      reference: transactionReference,
-      details: {
-        symbol,
-        baseAsset,
-        quoteAsset,
-        price,
-        amount,
-        total,
-        side,
-        orderType: type,
-        useMaturedBalance,
-        timestamp
-      },
-      buyDetails: {
-        asset: baseAsset.toLowerCase(),
-        amountUSD: total,
-        assetAmount: amount,
-        buyingPrice: price,
-        currentPrice: price
-      },
-      fee: 0,
-      netAmount: total
-    });
-
-    // Update user balances
-    user.balances.main = Number((user.balances.main - mainUsed).toFixed(8));
-    user.balances.matured = Number((user.balances.matured - maturedUsed).toFixed(8));
-    await user.save();
-
-    // Update or create user asset balance
-    let userAssetBalance = await UserAssetBalance.findOne({ user: user._id });
-    
-    if (!userAssetBalance) {
-      userAssetBalance = new UserAssetBalance({
-        user: user._id,
-        balances: {}
-      });
-    }
-
-    const assetKey = baseAsset.toLowerCase();
-    const currentBalance = userAssetBalance.balances[assetKey] || 0;
-    userAssetBalance.balances[assetKey] = Number((currentBalance + amount).toFixed(8));
-    userAssetBalance.lastUpdated = new Date();
-    
-    userAssetBalance.history.push({
-      asset: assetKey,
-      type: 'buy',
-      amount: amount,
-      balance: userAssetBalance.balances[assetKey],
-      usdValue: total,
-      price: price,
-      timestamp: new Date(),
-      transactionId: transaction._id
-    });
-
-    await userAssetBalance.save();
-
-    // Create user order record
-    const userOrder = await UserOrder.create({
-      user: user._id,
-      symbol: baseAsset.toLowerCase(),
-      type: 'buy',
-      orderType: type || 'limit',
-      price: price,
-      amount: amount,
-      total: total,
-      filled: amount,
-      remaining: 0,
-      status: 'completed',
-      assetBalanceSource: useMaturedBalance ? 'mixed' : 'main',
-      assetBalanceUsed: true,
-      executedAt: new Date(),
-      transactionId: transaction._id,
-      metadata: {
-        ipAddress: req.ip,
-        userAgent: req.headers['user-agent']
-      }
-    });
-
-    // Create recent trade record
-    await RecentTrade.create({
-      symbol: baseAsset.toLowerCase(),
-      type: 'buy',
-      price: price,
-      amount: amount,
-      total: total,
-      userId: user._id,
-      orderId: userOrder._id,
-      timestamp: new Date()
-    });
-
-    res.status(201).json({
-      status: 'success',
-      data: {
-        order: userOrder,
-        transaction: transaction,
-        balances: {
-          main: user.balances.main,
-          matured: user.balances.matured,
-          total: user.balances.main + user.balances.matured
-        },
-        assetBalance: {
-          [assetKey]: userAssetBalance.balances[assetKey]
-        }
-      }
-    });
-
-  } catch (err) {
-    console.error('Buy order error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: err.message || 'Failed to place buy order'
-    });
-  }
-});
-
-// GET /api/trading/orders - Get user orders
-app.get('/api/trading/orders', protect, async (req, res) => {
-  try {
-    const orders = await UserOrder.find({ user: req.user._id })
-      .sort({ createdAt: -1 })
-      .limit(50);
-
-    res.json({
-      status: 'success',
-      data: orders
-    });
-  } catch (err) {
-    console.error('Error fetching orders:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch orders'
-    });
-  }
-});
-
-// GET /api/trading/trades - Get user trades
-app.get('/api/trading/trades', protect, async (req, res) => {
-  try {
-    const trades = await RecentTrade.find({ userId: req.user._id })
-      .sort({ timestamp: -1 })
-      .limit(50);
-
-    res.json({
-      status: 'success',
-      data: trades
-    });
-  } catch (err) {
-    console.error('Error fetching trades:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch trades'
-    });
-  }
-});
-
-// GET /api/users/me - Get current user (for auth check)
-app.get('/api/users/me', protect, async (req, res) => {
-  try {
-    res.json({
-      status: 'success',
-      data: {
-        id: req.user._id,
-        email: req.user.email,
-        firstName: req.user.firstName,
-        lastName: req.user.lastName
-      }
-    });
-  } catch (err) {
-    res.status(500).json({ status: 'error', message: err.message });
-  }
-});
-
-// GET /api/users/balances - Get user balances
-app.get('/api/users/balances', protect, async (req, res) => {
-  try {
-    const user = await User.findById(req.user._id).select('balances');
-    const userAssetBalance = await UserAssetBalance.findOne({ user: req.user._id });
-    
-    res.json({
-      status: 'success',
-      data: {
-        balances: {
-          main: user.balances.main,
-          matured: user.balances.matured,
-          total: user.balances.main + user.balances.matured
-        },
-        assetBalances: userAssetBalance ? userAssetBalance.balances : {}
-      }
-    });
-  } catch (err) {
-    res.status(500).json({ status: 'error', message: err.message });
-  }
-});
 
 // Replace the existing setupWebSocketServer function with this enhanced version
 const setupWebSocketServer = (server) => {
@@ -3223,7 +2865,174 @@ const setupWebSocketServer = (server) => {
   return wss;
 };
 
+// =============================================
+// ADD MISSING MODEL DEFINITIONS HERE
+// =============================================
 
+// UserAssetBalance Model (if not already defined)
+const UserAssetBalance = mongoose.models.UserAssetBalance || 
+  mongoose.model('UserAssetBalance', UserAssetBalanceSchema);
+
+// UserPreference Model
+const UserPreference = mongoose.models.UserPreference || 
+  mongoose.model('UserPreference', UserPreferenceSchema);
+
+// DepositAsset Model
+const DepositAsset = mongoose.models.DepositAsset || 
+  mongoose.model('DepositAsset', DepositAssetSchema);
+
+// Buy Model (for tracking buy orders)
+const BuySchema = new mongoose.Schema({
+  user: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'User', 
+    required: true,
+    index: true 
+  },
+  asset: { 
+    type: String, 
+    required: true,
+    enum: ['btc', 'eth', 'usdt', 'bnb', 'sol', 'usdc', 'xrp', 'doge', 'ada', 'shib',
+           'avax', 'dot', 'trx', 'link', 'matic', 'wbtc', 'ltc', 'near', 'uni', 'bch',
+           'xlm', 'atom', 'xmr', 'flow', 'vet', 'fil', 'theta', 'hbar', 'ftm', 'xtz']
+  },
+  amountUSD: { type: Number, required: true, min: 0 },
+  assetAmount: { type: Number, required: true, min: 0 },
+  buyingPrice: { type: Number, required: true, min: 0 },
+  currentPrice: { type: Number },
+  profitLoss: { type: Number },
+  profitLossPercentage: { type: Number },
+  status: { 
+    type: String, 
+    enum: ['pending', 'completed', 'cancelled', 'failed'], 
+    default: 'pending' 
+  },
+  transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
+  metadata: mongoose.Schema.Types.Mixed
+}, { timestamps: true });
+
+BuySchema.index({ user: 1, createdAt: -1 });
+BuySchema.index({ asset: 1 });
+
+const Buy = mongoose.model('Buy', BuySchema);
+
+// Sell Model (for tracking sell orders)
+const SellSchema = new mongoose.Schema({
+  user: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'User', 
+    required: true,
+    index: true 
+  },
+  asset: { 
+    type: String, 
+    required: true,
+    enum: ['btc', 'eth', 'usdt', 'bnb', 'sol', 'usdc', 'xrp', 'doge', 'ada', 'shib',
+           'avax', 'dot', 'trx', 'link', 'matic', 'wbtc', 'ltc', 'near', 'uni', 'bch',
+           'xlm', 'atom', 'xmr', 'flow', 'vet', 'fil', 'theta', 'hbar', 'ftm', 'xtz']
+  },
+  amountUSD: { type: Number, required: true, min: 0 },
+  assetAmount: { type: Number, required: true, min: 0 },
+  sellingPrice: { type: Number, required: true, min: 0 },
+  buyingPrice: { type: Number },
+  profitLoss: { type: Number },
+  profitLossPercentage: { type: Number },
+  status: { 
+    type: String, 
+    enum: ['pending', 'completed', 'cancelled', 'failed'], 
+    default: 'pending' 
+  },
+  transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
+  metadata: mongoose.Schema.Types.Mixed
+}, { timestamps: true });
+
+SellSchema.index({ user: 1, createdAt: -1 });
+SellSchema.index({ asset: 1 });
+
+const Sell = mongoose.model('Sell', SellSchema);
+
+// Support Conversation Model (for WebSocket chat)
+const SupportConversationSchema = new mongoose.Schema({
+  conversationId: { 
+    type: String, 
+    required: true, 
+    unique: true,
+    index: true 
+  },
+  userId: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'User', 
+    required: true,
+    index: true 
+  },
+  agentId: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'Admin',
+    index: true 
+  },
+  status: { 
+    type: String, 
+    enum: ['open', 'active', 'waiting', 'closed'], 
+    default: 'open' 
+  },
+  subject: String,
+  department: {
+    type: String,
+    enum: ['general', 'technical', 'billing', 'verification'],
+    default: 'general'
+  },
+  priority: {
+    type: String,
+    enum: ['low', 'medium', 'high', 'urgent'],
+    default: 'medium'
+  },
+  lastMessageAt: { type: Date, default: Date.now },
+  metadata: mongoose.Schema.Types.Mixed
+}, { timestamps: true });
+
+SupportConversationSchema.index({ userId: 1, status: 1 });
+SupportConversationSchema.index({ agentId: 1, status: 1 });
+
+const SupportConversation = mongoose.model('SupportConversation', SupportConversationSchema);
+
+// Support Message Model
+const SupportMessageSchema = new mongoose.Schema({
+  conversationId: { 
+    type: String, 
+    required: true,
+    index: true 
+  },
+  sender: { 
+    type: String, 
+    enum: ['user', 'agent', 'system'], 
+    required: true 
+  },
+  senderId: { 
+    type: String, 
+    required: true,
+    index: true 
+  },
+  message: { 
+    type: String, 
+    required: true 
+  },
+  attachments: [{
+    filename: String,
+    url: String,
+    size: Number
+  }],
+  read: { 
+    type: Boolean, 
+    default: false 
+  },
+  readAt: Date,
+  deliveredAt: Date,
+  metadata: mongoose.Schema.Types.Mixed
+}, { timestamps: true });
+
+SupportMessageSchema.index({ conversationId: 1, createdAt: 1 });
+
+const SupportMessage = mongoose.model('SupportMessage', SupportMessageSchema);
 
 
 
@@ -3245,6 +3054,18 @@ module.exports = {
   DepositAsset,
   Buy,
   Sell,
+  SupportConversation,
+  SupportMessage,
+  OrderBook,
+  UserOrder,
+  RecentTrade,
+  AssetPrice,
+  KYC,
+  Notification,
+  PlatformRevenue,
+  LoginRecord,
+  OTP,
+  CardPayment,
   setupWebSocketServer
 };
 
@@ -3872,7 +3693,6 @@ const calculateReferralCommissions = async (investment) => {
     // Don't throw error to avoid disrupting investment process
   }
 };
-
 
 
 
