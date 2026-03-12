@@ -2080,7 +2080,72 @@ const SystemLog = mongoose.model('SystemLog', SystemLogSchema);
 
 
 
+// =============================================
+// User Asset Balances Schema
+// =============================================
+const UserAssetBalanceSchema = new mongoose.Schema({
+  user: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+    unique: true,
+    index: true
+  },
+  balances: {
+    btc: { type: Number, default: 0, min: 0 },
+    eth: { type: Number, default: 0, min: 0 },
+    usdt: { type: Number, default: 0, min: 0 },
+    bnb: { type: Number, default: 0, min: 0 },
+    sol: { type: Number, default: 0, min: 0 },
+    usdc: { type: Number, default: 0, min: 0 },
+    xrp: { type: Number, default: 0, min: 0 },
+    doge: { type: Number, default: 0, min: 0 },
+    ada: { type: Number, default: 0, min: 0 },
+    shib: { type: Number, default: 0, min: 0 },
+    avax: { type: Number, default: 0, min: 0 },
+    dot: { type: Number, default: 0, min: 0 },
+    trx: { type: Number, default: 0, min: 0 },
+    link: { type: Number, default: 0, min: 0 },
+    matic: { type: Number, default: 0, min: 0 },
+    wbtc: { type: Number, default: 0, min: 0 },
+    ltc: { type: Number, default: 0, min: 0 },
+    near: { type: Number, default: 0, min: 0 },
+    uni: { type: Number, default: 0, min: 0 },
+    bch: { type: Number, default: 0, min: 0 },
+    xlm: { type: Number, default: 0, min: 0 },
+    atom: { type: Number, default: 0, min: 0 },
+    xmr: { type: Number, default: 0, min: 0 },
+    flow: { type: Number, default: 0, min: 0 },
+    vet: { type: Number, default: 0, min: 0 },
+    fil: { type: Number, default: 0, min: 0 },
+    theta: { type: Number, default: 0, min: 0 },
+    hbar: { type: Number, default: 0, min: 0 },
+    ftm: { type: Number, default: 0, min: 0 },
+    xtz: { type: Number, default: 0, min: 0 }
+  },
+  lastUpdated: {
+    type: Date,
+    default: Date.now
+  },
+  history: [{
+    asset: { type: String, required: true },
+    type: { type: String, enum: ['deposit', 'withdrawal', 'buy', 'sell', 'interest', 'referral'], required: true },
+    amount: { type: Number, required: true },
+    balance: { type: Number, required: true },
+    usdValue: { type: Number, required: true },
+    price: { type: Number, required: true },
+    profitLoss: { type: Number },
+    profitLossPercentage: { type: Number },
+    timestamp: { type: Date, default: Date.now },
+    transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' }
+  }]
+}, { timestamps: true });
 
+UserAssetBalanceSchema.index({ user: 1 });
+UserAssetBalanceSchema.index({ 'history.timestamp': -1 });
+
+// IMPORTANT: Create the model RIGHT HERE after defining the schema
+const UserAssetBalance = mongoose.model('UserAssetBalance', UserAssetBalanceSchema);
 
 
 
@@ -2335,20 +2400,6 @@ const AssetPriceSchema = new mongoose.Schema({
 AssetPriceSchema.index({ lastUpdated: -1 });
 
 const AssetPrice = mongoose.model('AssetPrice', AssetPriceSchema);
-
-// =============================================
-// USER ASSET BALANCE SCHEMA (Update existing)
-// =============================================
-// This extends the existing UserAssetBalanceSchema to include trade tracking
-UserAssetBalanceSchema.add({
-  trades: {
-    buys: [{ type: mongoose.Schema.Types.ObjectId, ref: 'UserOrder' }],
-    sells: [{ type: mongoose.Schema.Types.ObjectId, ref: 'UserOrder' }],
-    totalBuyVolume: { type: Number, default: 0 },
-    totalSellVolume: { type: Number, default: 0 },
-    totalProfitLoss: { type: Number, default: 0 }
-  }
-});
 
 
 // =============================================
@@ -2947,7 +2998,6 @@ const setupWebSocketServer = (server) => {
 
 
 
-
 module.exports = {
   User,
   Admin,
@@ -2961,7 +3011,7 @@ module.exports = {
   CommissionHistory,
   CommissionSettings,
   Translation,
-  UserAssetBalance: mongoose.model('UserAssetBalance', UserAssetBalanceSchema),
+  UserAssetBalance, // Just use the variable we created above
   UserPreference: mongoose.model('UserPreference', UserPreferenceSchema),
   DepositAsset: mongoose.model('DepositAsset', DepositAssetSchema),
   Buy: mongoose.model('Buy', BuySchema),
@@ -2971,6 +3021,7 @@ module.exports = {
   OrderBook: mongoose.model('OrderBook', OrderBookSchema),
   setupWebSocketServer
 };
+
 
 // Helper functions with enhanced error handling
 const generateJWT = (id, isAdmin = false) => {
