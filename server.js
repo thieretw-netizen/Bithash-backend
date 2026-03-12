@@ -2950,6 +2950,7 @@ module.exports = {
   UserAssetBalance: mongoose.model('UserAssetBalance', UserAssetBalanceSchema),
   UserPreference: mongoose.model('UserPreference', UserPreferenceSchema),
   DepositAsset: mongoose.model('DepositAsset', DepositAssetSchema),
+  UserOrder: mongoose.model('UserOrder', UserOrderSchema),
   Buy: mongoose.model('Buy', BuySchema),
   Sell: mongoose.model('Sell', SellSchema),
   setupWebSocketServer
