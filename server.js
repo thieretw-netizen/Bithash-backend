@@ -2092,31 +2092,32 @@ const SystemLog = mongoose.model('SystemLog', SystemLogSchema);
 
 
 
-
 // =============================================
-// ORDER BOOK SCHEMA
+// ORDER BOOK SCHEMA - FIXED
 // =============================================
 const OrderBookSchema = new mongoose.Schema({
   symbol: { 
     type: String, 
     required: true, 
     index: true,
-    enum: ['btc', 'eth', 'usdt', 'bnb', 'sol', 'usdc', 'xrp', 'doge', 'ada', 'shib',
-           'avax', 'dot', 'trx', 'link', 'matic', 'wbtc', 'ltc', 'near', 'uni', 'bch',
-           'xlm', 'atom', 'xmr', 'flow', 'vet', 'fil', 'theta', 'hbar', 'ftm', 'xtz']
+    enum: ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'ADAUSDT', 'DOGEUSDT', 'AVAXUSDT', 'DOTUSDT', 'LINKUSDT',
+           'MATICUSDT', 'SHIBUSDT', 'TRXUSDT', 'UNIUSDT', 'ATOMUSDT', 'XLMUSDT', 'FILUSDT', 'VETUSDT', 'ALGOUSDT', 'MANAUSDT',
+           'SANDUSDT', 'AXSUSDT', 'AAVEUSDT', 'EOSUSDT', 'MKRUSDT', 'DASHUSDT', 'XTZUSDT', 'FTMUSDT', 'NEARUSDT', 'GRTUSDT',
+           'HBARUSDT', 'QNTUSDT', 'THETAUSDT', 'ICPUSDT', 'FLOWUSDT', 'BCHUSDT', 'WBTCUSDT', 'LTCUSDT', 'XMRUSDT', 'ETCUSDT',
+           'ZECUSDT', 'NEOUSDT', 'IOTAUSDT']
   },
   asks: [{
     price: { type: Number, required: true, min: 0 },
     amount: { type: Number, required: true, min: 0 },
     total: { type: Number, required: true, min: 0 },
-    orderId: { type: String, required: true, unique: true },
+    orderId: { type: String, required: true }, // REMOVED unique: true
     createdAt: { type: Date, default: Date.now }
   }],
   bids: [{
     price: { type: Number, required: true, min: 0 },
     amount: { type: Number, required: true, min: 0 },
     total: { type: Number, required: true, min: 0 },
-    orderId: { type: String, required: true, unique: true },
+    orderId: { type: String, required: true }, // REMOVED unique: true
     createdAt: { type: Date, default: Date.now }
   }],
   lastPrice: { type: Number, required: true },
@@ -2129,8 +2130,9 @@ const OrderBookSchema = new mongoose.Schema({
 });
 
 OrderBookSchema.index({ symbol: 1, updatedAt: -1 });
-OrderBookSchema.index({ 'asks.orderId': 1 });
-OrderBookSchema.index({ 'bids.orderId': 1 });
+// REMOVED the unique indexes on asks.orderId and bids.orderId
+// OrderBookSchema.index({ 'asks.orderId': 1 }, { unique: true }); // REMOVE THIS
+// OrderBookSchema.index({ 'bids.orderId': 1 }, { unique: true }); // REMOVE THIS
 
 const OrderBook = mongoose.model('OrderBook', OrderBookSchema);
 
@@ -2138,7 +2140,7 @@ const OrderBook = mongoose.model('OrderBook', OrderBookSchema);
 
 
 // =============================================
-// USER ORDER SCHEMA (Buy/Sell) - FIXED VERSION
+// USER ORDER SCHEMA (Buy/Sell) - FIXED VERSION (NO orderId INDEX)
 // =============================================
 const UserOrderSchema = new mongoose.Schema({
   user: { 
@@ -2151,7 +2153,7 @@ const UserOrderSchema = new mongoose.Schema({
     type: String, 
     required: true,
     index: true,
-    uppercase: true, // Store as uppercase
+    uppercase: true,
     enum: ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'ADAUSDT', 'DOGEUSDT', 'AVAXUSDT', 'DOTUSDT', 'LINKUSDT',
            'MATICUSDT', 'SHIBUSDT', 'TRXUSDT', 'UNIUSDT', 'ATOMUSDT', 'XLMUSDT', 'FILUSDT', 'VETUSDT', 'ALGOUSDT', 'MANAUSDT',
            'SANDUSDT', 'AXSUSDT', 'AAVEUSDT', 'EOSUSDT', 'MKRUSDT', 'DASHUSDT', 'XTZUSDT', 'FTMUSDT', 'NEARUSDT', 'GRTUSDT',
@@ -2238,12 +2240,13 @@ const UserOrderSchema = new mongoose.Schema({
   toObject: { virtuals: true }
 });
 
+// Indexes - REMOVED the problematic orderId index
 UserOrderSchema.index({ user: 1, status: 1, createdAt: -1 });
 UserOrderSchema.index({ symbol: 1, status: 1, createdAt: -1 });
 UserOrderSchema.index({ type: 1, status: 1 });
+// DO NOT add an index on orderId as it doesn't exist
 
 const UserOrder = mongoose.model('UserOrder', UserOrderSchema);
-
 
 
 
@@ -18659,7 +18662,15 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
 
 
 
-
+// Add this temporarily to drop the index (run once then remove)
+app.post('/api/debug/drop-index', async (req, res) => {
+  try {
+    await mongoose.connection.collection('userorders').dropIndex('orderId_1');
+    res.json({ success: true, message: 'Index dropped' });
+  } catch (error) {
+    res.json({ success: false, error: error.message });
+  }
+});
 
 
 
