@@ -2933,7 +2933,6 @@ const setupWebSocketServer = (server) => {
 
 
 
-
 module.exports = {
   User,
   Admin,
@@ -2950,9 +2949,11 @@ module.exports = {
   UserAssetBalance: mongoose.model('UserAssetBalance', UserAssetBalanceSchema),
   UserPreference: mongoose.model('UserPreference', UserPreferenceSchema),
   DepositAsset: mongoose.model('DepositAsset', DepositAssetSchema),
-  UserOrder: mongoose.model('UserOrder', UserOrderSchema),
   Buy: mongoose.model('Buy', BuySchema),
   Sell: mongoose.model('Sell', SellSchema),
+  UserOrder: mongoose.model('UserOrder', UserOrderSchema), // ADD THIS LINE
+  RecentTrade: mongoose.model('RecentTrade', RecentTradeSchema), // ADD THIS FOR COMPLETENESS
+  OrderBook: mongoose.model('OrderBook', OrderBookSchema), // ADD THIS FOR COMPLETENESS
   setupWebSocketServer
 };
 
