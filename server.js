@@ -18097,7 +18097,152 @@ app.get('/api/trading/trades', protect, async (req, res) => {
   }
 });
 
+// =============================================
+// BUY ORDER ENDPOINT - Create a buy order
+// =============================================
+app.post('/api/trading/orders/buy', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { symbol, baseAsset, quoteAsset, side, type, price, amount, total, useMaturedBalance } = req.body;
 
+    // Validation
+    if (!symbol || !baseAsset || !amount || !total) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Missing required fields'
+      });
+    }
+
+    // Check minimum trade amount ($10)
+    if (total < 10) {
+      return res.status(400).json({
+        status: 'error',
+        message: `Minimum trade amount is $10. Your total is $${total.toFixed(2)}`
+      });
+    }
+
+    // Get user with current balances
+    const user = await User.findById(userId).select('balances');
+    if (!user) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'User not found'
+      });
+    }
+
+    // Calculate available balance (main + matured)
+    const mainBalance = user.balances.main || 0;
+    const maturedBalance = user.balances.matured || 0;
+    const totalAvailable = mainBalance + maturedBalance;
+
+    // Check sufficient funds
+    if (total > totalAvailable) {
+      return res.status(400).json({
+        status: 'error',
+        message: `Insufficient balance. You have $${totalAvailable.toFixed(2)} available but need $${total.toFixed(2)}`
+      });
+    }
+
+    // Determine which balance to deduct from (matured first if allowed)
+    let mainDeduction = 0;
+    let maturedDeduction = 0;
+
+    if (useMaturedBalance && maturedBalance >= total) {
+      maturedDeduction = total;
+    } else if (useMaturedBalance && maturedBalance > 0) {
+      maturedDeduction = maturedBalance;
+      mainDeduction = total - maturedBalance;
+    } else {
+      mainDeduction = total;
+    }
+
+    // Create the order
+    const orderId = uuidv4();
+    const order = new UserOrder({
+      user: userId,
+      symbol: baseAsset,
+      quoteAsset: quoteAsset || 'USDT',
+      type: side, // 'buy'
+      orderType: type || 'limit',
+      price: price,
+      amount: amount,
+      total: total,
+      filled: 0,
+      remaining: amount,
+      status: 'open',
+      assetBalanceSource: useMaturedBalance ? 'matured' : 'main',
+      metadata: {
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent']
+      }
+    });
+
+    // Deduct from user balances
+    const updateQuery = {
+      $inc: {
+        'balances.main': -mainDeduction,
+        'balances.matured': -maturedDeduction
+      }
+    };
+
+    await User.findByIdAndUpdate(userId, updateQuery);
+    await order.save();
+
+    // Create transaction record
+    const transaction = new Transaction({
+      user: userId,
+      type: 'buy',
+      amount: total,
+      currency: 'USD',
+      status: 'pending',
+      method: quoteAsset || 'USDT',
+      reference: `BUY-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      details: {
+        asset: baseAsset,
+        assetAmount: amount,
+        price: price,
+        orderId: order._id
+      },
+      fee: 0,
+      netAmount: total
+    });
+    await transaction.save();
+
+    // Log activity
+    await logActivity('buy_created', 'UserOrder', order._id, userId, 'User', req, {
+      amount: total,
+      asset: baseAsset,
+      assetAmount: amount,
+      price: price,
+      fromBalances: {
+        main: mainDeduction,
+        matured: maturedDeduction
+      }
+    });
+
+    return res.status(201).json({
+      status: 'success',
+      message: 'Buy order created successfully',
+      data: {
+        orderId: order._id,
+        symbol: `${baseAsset}/${quoteAsset}`,
+        side: 'buy',
+        price: price,
+        amount: amount,
+        total: total,
+        status: 'open',
+        createdAt: order.createdAt
+      }
+    });
+
+  } catch (err) {
+    console.error('Error creating buy order:', err);
+    return res.status(500).json({
+      status: 'error',
+      message: 'Failed to create buy order'
+    });
+  }
+});
 
 
 
