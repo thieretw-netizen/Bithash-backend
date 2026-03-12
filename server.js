@@ -2134,8 +2134,11 @@ OrderBookSchema.index({ 'bids.orderId': 1 });
 
 const OrderBook = mongoose.model('OrderBook', OrderBookSchema);
 
+
+
+
 // =============================================
-// USER ORDER SCHEMA (Buy/Sell)
+// USER ORDER SCHEMA (Buy/Sell) - FIXED VERSION
 // =============================================
 const UserOrderSchema = new mongoose.Schema({
   user: { 
@@ -2148,9 +2151,21 @@ const UserOrderSchema = new mongoose.Schema({
     type: String, 
     required: true,
     index: true,
-    enum: ['btc', 'eth', 'usdt', 'bnb', 'sol', 'usdc', 'xrp', 'doge', 'ada', 'shib',
-           'avax', 'dot', 'trx', 'link', 'matic', 'wbtc', 'ltc', 'near', 'uni', 'bch',
-           'xlm', 'atom', 'xmr', 'flow', 'vet', 'fil', 'theta', 'hbar', 'ftm', 'xtz']
+    uppercase: true, // Store as uppercase
+    enum: ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'ADAUSDT', 'DOGEUSDT', 'AVAXUSDT', 'DOTUSDT', 'LINKUSDT',
+           'MATICUSDT', 'SHIBUSDT', 'TRXUSDT', 'UNIUSDT', 'ATOMUSDT', 'XLMUSDT', 'FILUSDT', 'VETUSDT', 'ALGOUSDT', 'MANAUSDT',
+           'SANDUSDT', 'AXSUSDT', 'AAVEUSDT', 'EOSUSDT', 'MKRUSDT', 'DASHUSDT', 'XTZUSDT', 'FTMUSDT', 'NEARUSDT', 'GRTUSDT',
+           'HBARUSDT', 'QNTUSDT', 'THETAUSDT', 'ICPUSDT', 'FLOWUSDT', 'BCHUSDT', 'WBTCUSDT', 'LTCUSDT', 'XMRUSDT', 'ETCUSDT',
+           'ZECUSDT', 'NEOUSDT', 'IOTAUSDT', 'USDUSDT']
+  },
+  baseAsset: { 
+    type: String, 
+    required: true 
+  },
+  quoteAsset: { 
+    type: String, 
+    required: true,
+    default: 'USDT' 
   },
   type: { 
     type: String, 
@@ -2189,6 +2204,10 @@ const UserOrderSchema = new mongoose.Schema({
     required: true,
     min: 0 
   },
+  fromWallets: {
+    main: { type: Number, default: 0 },
+    matured: { type: Number, default: 0 }
+  },
   status: { 
     type: String, 
     enum: ['pending', 'partial', 'completed', 'cancelled', 'failed'], 
@@ -2224,6 +2243,13 @@ UserOrderSchema.index({ symbol: 1, status: 1, createdAt: -1 });
 UserOrderSchema.index({ type: 1, status: 1 });
 
 const UserOrder = mongoose.model('UserOrder', UserOrderSchema);
+
+
+
+
+
+
+
 
 // =============================================
 // RECENT TRADES SCHEMA (All completed trades)
@@ -18350,7 +18376,7 @@ app.post('/api/trading/orders/sell', protect, async (req, res) => {
 
 
 // =============================================
-// PLACE BUY ORDER - FIXED VERSION
+// PLACE BUY ORDER - FIXED VERSION WITH SYMBOL HANDLING
 // =============================================
 app.post('/api/trading/orders/buy', protect, async (req, res) => {
   try {
@@ -18419,10 +18445,13 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
       mainDeduction = total;
     }
 
+    // FIXED: Convert symbol to uppercase to match enum
+    const upperSymbol = symbol.toUpperCase();
+
     // Create the buy order
     const order = new UserOrder({
       user: userId,
-      symbol: symbol,
+      symbol: upperSymbol, // Use uppercase version
       baseAsset: baseAsset,
       quoteAsset: quoteAsset,
       type: side, // 'buy'
@@ -18432,13 +18461,13 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
       total: total,
       filled: 0,
       remaining: amount,
-      status: 'pending',
-      assetBalanceSource: 'main',
-      assetBalanceUsed: false,
       fromWallets: {
         main: mainDeduction,
         matured: maturedDeduction
       },
+      status: 'pending',
+      assetBalanceSource: 'main',
+      assetBalanceUsed: false,
       metadata: {
         ipAddress: req.ip,
         userAgent: req.headers['user-agent'],
@@ -18461,7 +18490,7 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
       $set: balanceUpdate
     });
 
-    // FIXED: Get or create user asset balance with proper structure
+    // Get or create user asset balance with proper structure
     let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
     
     if (!userAssetBalance) {
@@ -18477,7 +18506,7 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
       });
     }
 
-    // FIXED: Update the specific asset balance safely
+    // Update the specific asset balance safely
     const assetKey = baseAsset.toLowerCase();
     
     // Check if the asset exists in the schema
@@ -18517,7 +18546,7 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
       method: 'internal',
       reference: `BUY-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       details: {
-        symbol: symbol,
+        symbol: upperSymbol,
         price: price,
         fromWallets: {
           main: mainDeduction,
@@ -18558,7 +18587,7 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
 
     // Add to recent trades
     const recentTrade = new RecentTrade({
-      symbol: symbol,
+      symbol: upperSymbol,
       type: 'buy',
       price: price,
       amount: amount,
@@ -18579,7 +18608,7 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
       'User',
       req,
       {
-        symbol: symbol,
+        symbol: upperSymbol,
         amount: amount,
         price: price,
         total: total,
@@ -18608,6 +18637,15 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
 
   } catch (error) {
     console.error('Error placing buy order:', error);
+    
+    // Handle validation errors specifically
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Validation failed: ' + Object.values(error.errors).map(e => e.message).join(', ')
+      });
+    }
+    
     return res.status(500).json({
       status: 'error',
       message: 'Failed to place buy order: ' + error.message
