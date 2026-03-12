@@ -3592,6 +3592,27 @@ const calculateReferralCommissions = async (investment) => {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     
 // Enhanced email service with professional Bitcoin mining templates
 const sendProfessionalEmail = async (options) => {
@@ -17961,9 +17982,120 @@ app.post('/api/withdrawals/confirm-gas-payment', protect, async (req, res) => {
 
 
 
+// =============================================
+// TRADING ORDERS ENDPOINT - Get all user orders
+// =============================================
+app.get('/api/trading/orders', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    
+    // Find all orders for this user
+    const orders = await UserOrder.find({ user: userId })
+      .sort({ createdAt: -1 })
+      .limit(100); // Limit to last 100 orders for performance
 
+    // Format orders exactly as frontend expects
+    const formattedOrders = orders.map(order => ({
+      id: order._id,
+      symbol: order.symbol + order.quoteAsset || 'USDT', // e.g., "ETHUSDT"
+      baseAsset: order.symbol,
+      quoteAsset: order.quoteAsset || 'USDT',
+      side: order.type, // 'buy' or 'sell'
+      type: order.orderType || 'limit', // 'limit' or 'market'
+      price: order.price,
+      amount: order.amount,
+      filled: order.filled || 0,
+      remaining: order.remaining || order.amount,
+      total: order.total || (order.price * order.amount),
+      status: order.status, // 'open', 'partial', 'filled', 'cancelled'
+      createdAt: order.createdAt,
+      updatedAt: order.updatedAt
+    }));
 
+    return res.status(200).json({
+      status: 'success',
+      results: formattedOrders.length,
+      data: formattedOrders
+    });
 
+  } catch (err) {
+    console.error('Error fetching trading orders:', err);
+    return res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch orders'
+    });
+  }
+});
+
+// =============================================
+// USER TRADES ENDPOINT - Get user's trade history
+// =============================================
+app.get('/api/trading/trades', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    
+    // Combine completed orders and trade history
+    const [completedOrders, recentTrades] = await Promise.all([
+      // Get all completed orders (filled/cancelled)
+      UserOrder.find({ 
+        user: userId,
+        status: { $in: ['filled', 'completed'] }
+      }).sort({ updatedAt: -1 }).limit(50),
+      
+      // Get user's recent trades from trade history
+      RecentTrade.find({ userId })
+        .sort({ timestamp: -1 })
+        .limit(50)
+        .populate('orderId')
+    ]);
+
+    // Format completed orders as trades
+    const orderTrades = completedOrders.map(order => ({
+      id: order._id,
+      symbol: order.symbol + (order.quoteAsset || 'USDT'),
+      baseAsset: order.symbol,
+      quoteAsset: order.quoteAsset || 'USDT',
+      side: order.type,
+      price: order.price,
+      amount: order.filled || order.amount,
+      total: order.filled ? order.filled * order.price : order.total,
+      time: order.updatedAt || order.createdAt,
+      isBuyerMaker: order.type === 'buy'
+    }));
+
+    // Format recent trades
+    const tradeHistory = recentTrades.map(trade => ({
+      id: trade._id,
+      symbol: trade.symbol + 'USDT',
+      baseAsset: trade.symbol,
+      quoteAsset: 'USDT',
+      side: trade.type,
+      price: trade.price,
+      amount: trade.amount,
+      total: trade.total,
+      time: trade.timestamp,
+      isBuyerMaker: trade.type === 'buy'
+    }));
+
+    // Combine and sort by time (newest first)
+    const allTrades = [...orderTrades, ...tradeHistory]
+      .sort((a, b) => new Date(b.time) - new Date(a.time))
+      .slice(0, 100);
+
+    return res.status(200).json({
+      status: 'success',
+      results: allTrades.length,
+      data: allTrades
+    });
+
+  } catch (err) {
+    console.error('Error fetching user trades:', err);
+    return res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch trade history'
+    });
+  }
+});
 
 
 
