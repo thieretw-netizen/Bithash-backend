@@ -18102,190 +18102,6 @@ app.get('/api/trading/trades', protect, async (req, res) => {
 
 
 
-// =============================================
-// BUY ORDER ENDPOINT - Create a buy order
-// =============================================
-app.post('/api/trading/orders/buy', protect, async (req, res) => {
-  try {
-    const userId = req.user._id;
-    const { symbol, baseAsset, quoteAsset, side, type, price, amount, total, useMaturedBalance } = req.body;
-
-    // Validation
-    if (!symbol || !baseAsset || !amount || !total || !price) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Missing required fields'
-      });
-    }
-
-    // Check minimum trade amount ($10)
-    if (total < 10) {
-      return res.status(400).json({
-        status: 'error',
-        message: `Minimum trade amount is $10. Your total is $${total.toFixed(2)}`
-      });
-    }
-
-    // Get user with current balances
-    const user = await User.findById(userId).select('balances');
-    if (!user) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'User not found'
-      });
-    }
-
-    // Calculate available balance (main + matured)
-    const mainBalance = user.balances.main || 0;
-    const maturedBalance = user.balances.matured || 0;
-    const totalAvailable = mainBalance + maturedBalance;
-
-    // Check sufficient funds
-    if (total > totalAvailable) {
-      return res.status(400).json({
-        status: 'error',
-        message: `Insufficient balance. You have $${totalAvailable.toFixed(2)} available but need $${total.toFixed(2)}`
-      });
-    }
-
-    // Determine which balance to deduct from (matured first if allowed)
-    let mainDeduction = 0;
-    let maturedDeduction = 0;
-
-    if (useMaturedBalance && maturedBalance >= total) {
-      maturedDeduction = total;
-    } else if (useMaturedBalance && maturedBalance > 0) {
-      maturedDeduction = maturedBalance;
-      mainDeduction = total - maturedBalance;
-    } else {
-      mainDeduction = total;
-    }
-
-    // Generate unique reference
-    const reference = `BUY-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
-
-    // Create transaction record FIRST
-    const transaction = new Transaction({
-      user: userId,
-      type: 'buy',
-      amount: total,
-      currency: 'USD',
-      status: 'completed',
-      method: quoteAsset || 'USDT',
-      reference: reference,
-      details: {
-        asset: baseAsset,
-        assetAmount: amount,
-        price: price,
-        symbol: symbol
-      },
-      asset: baseAsset.toLowerCase(),
-      assetAmount: amount,
-      fee: 0,
-      netAmount: total
-    });
-    
-    await transaction.save();
-
-    // Deduct from user balances
-    await User.findByIdAndUpdate(userId, {
-      $inc: {
-        'balances.main': -mainDeduction,
-        'balances.matured': -maturedDeduction
-      }
-    });
-
-    // Update or create user asset balance
-    let userAssetBalance = await mongoose.model('UserAssetBalance').findOne({ user: userId });
-    
-    if (!userAssetBalance) {
-      userAssetBalance = new (mongoose.model('UserAssetBalance'))({
-        user: userId,
-        balances: {}
-      });
-    }
-    
-    // Initialize balance if not exists
-    if (!userAssetBalance.balances) {
-      userAssetBalance.balances = {};
-    }
-    
-    const assetKey = baseAsset.toLowerCase();
-    userAssetBalance.balances[assetKey] = (userAssetBalance.balances[assetKey] || 0) + amount;
-    
-    // Add to history
-    if (!userAssetBalance.history) {
-      userAssetBalance.history = [];
-    }
-    
-    userAssetBalance.history.push({
-      asset: assetKey,
-      type: 'buy',
-      amount: amount,
-      balance: userAssetBalance.balances[assetKey],
-      usdValue: total,
-      price: price,
-      transactionId: transaction._id,
-      timestamp: new Date()
-    });
-    
-    userAssetBalance.lastUpdated = new Date();
-    await userAssetBalance.save();
-
-    // Create buy record using your existing Buy model
-    const buy = new Buy({
-      user: userId,
-      asset: baseAsset.toLowerCase(),
-      amountUSD: total,
-      assetAmount: amount,
-      price: price,
-      total: total,
-      fromWallets: {
-        main: mainDeduction,
-        matured: maturedDeduction
-      },
-      status: 'completed',
-      transactionId: transaction._id
-    });
-    
-    await buy.save();
-
-    // Log activity
-    await logActivity('buy_completed', 'Buy', buy._id, userId, 'User', req, {
-      amount: total,
-      asset: baseAsset,
-      assetAmount: amount,
-      price: price,
-      fromBalances: {
-        main: mainDeduction,
-        matured: maturedDeduction
-      }
-    });
-
-    return res.status(201).json({
-      status: 'success',
-      message: 'Buy order completed successfully',
-      data: {
-        orderId: buy._id,
-        transactionId: transaction._id,
-        symbol: `${baseAsset}/${quoteAsset}`,
-        side: 'buy',
-        price: price,
-        amount: amount,
-        total: total,
-        status: 'completed',
-        createdAt: new Date()
-      }
-    });
-
-  } catch (err) {
-    console.error('Error creating buy order:', err);
-    return res.status(500).json({
-      status: 'error',
-      message: err.message || 'Failed to create buy order'
-    });
-  }
-});
 
 
 // =============================================
@@ -18491,7 +18307,195 @@ app.post('/api/trading/orders/sell', protect, async (req, res) => {
 
 
 
+// =============================================
+// BUY ORDER ENDPOINT - Create a buy order (FIXED)
+// =============================================
+app.post('/api/trading/orders/buy', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { symbol, baseAsset, quoteAsset, side, type, price, amount, total, useMaturedBalance } = req.body;
 
+    // Validation
+    if (!symbol || !baseAsset || !amount || !total || !price) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Missing required fields'
+      });
+    }
+
+    // Check minimum trade amount ($10)
+    if (total < 10) {
+      return res.status(400).json({
+        status: 'error',
+        message: `Minimum trade amount is $10. Your total is $${total.toFixed(2)}`
+      });
+    }
+
+    // Get user with current balances
+    const user = await User.findById(userId).select('balances');
+    if (!user) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'User not found'
+      });
+    }
+
+    // Calculate available balance (main + matured)
+    const mainBalance = user.balances.main || 0;
+    const maturedBalance = user.balances.matured || 0;
+    const totalAvailable = mainBalance + maturedBalance;
+
+    // Check sufficient funds
+    if (total > totalAvailable) {
+      return res.status(400).json({
+        status: 'error',
+        message: `Insufficient balance. You have $${totalAvailable.toFixed(2)} available but need $${total.toFixed(2)}`
+      });
+    }
+
+    // Determine which balance to deduct from (matured first if allowed)
+    let mainDeduction = 0;
+    let maturedDeduction = 0;
+
+    if (useMaturedBalance && maturedBalance >= total) {
+      maturedDeduction = total;
+    } else if (useMaturedBalance && maturedBalance > 0) {
+      maturedDeduction = maturedBalance;
+      mainDeduction = total - maturedBalance;
+    } else {
+      mainDeduction = total;
+    }
+
+    // Deduct from user balances FIRST
+    await User.findByIdAndUpdate(userId, {
+      $inc: {
+        'balances.main': -mainDeduction,
+        'balances.matured': -maturedDeduction
+      }
+    });
+
+    // Generate unique reference
+    const reference = `BUY-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+
+    // Create buy record using your existing Buy model
+    const buy = new Buy({
+      user: userId,
+      asset: baseAsset.toLowerCase(),
+      amountUSD: total,
+      assetAmount: amount,
+      price: price,
+      total: total,
+      fromWallets: {
+        main: mainDeduction,
+        matured: maturedDeduction
+      },
+      status: 'completed',
+      transactionId: null // Will update after transaction is created
+    });
+    
+    await buy.save();
+
+    // Create transaction record with CORRECT method enum
+    const transaction = new Transaction({
+      user: userId,
+      type: 'buy',
+      amount: total,
+      currency: 'USD',
+      status: 'completed',
+      method: 'internal', // FIXED: Using 'internal' instead of 'USDT' which matches your enum
+      reference: reference,
+      details: {
+        asset: baseAsset,
+        assetAmount: amount,
+        price: price,
+        symbol: symbol,
+        buyId: buy._id
+      },
+      asset: baseAsset.toLowerCase(),
+      assetAmount: amount,
+      fee: 0,
+      netAmount: total
+    });
+    
+    await transaction.save();
+
+    // Update buy record with transaction ID
+    buy.transactionId = transaction._id;
+    await buy.save();
+
+    // Update or create user asset balance
+    let userAssetBalance = await mongoose.model('UserAssetBalance').findOne({ user: userId });
+    
+    if (!userAssetBalance) {
+      userAssetBalance = new (mongoose.model('UserAssetBalance'))({
+        user: userId,
+        balances: {}
+      });
+    }
+    
+    // Initialize balances if not exists
+    if (!userAssetBalance.balances) {
+      userAssetBalance.balances = {};
+    }
+    
+    const assetKey = baseAsset.toLowerCase();
+    userAssetBalance.balances[assetKey] = (userAssetBalance.balances[assetKey] || 0) + amount;
+    
+    // Add to history
+    if (!userAssetBalance.history) {
+      userAssetBalance.history = [];
+    }
+    
+    userAssetBalance.history.push({
+      asset: assetKey,
+      type: 'buy',
+      amount: amount,
+      balance: userAssetBalance.balances[assetKey],
+      usdValue: total,
+      price: price,
+      transactionId: transaction._id,
+      timestamp: new Date()
+    });
+    
+    userAssetBalance.lastUpdated = new Date();
+    await userAssetBalance.save();
+
+    // Log activity
+    await logActivity('buy_completed', 'Buy', buy._id, userId, 'User', req, {
+      amount: total,
+      asset: baseAsset,
+      assetAmount: amount,
+      price: price,
+      fromBalances: {
+        main: mainDeduction,
+        matured: maturedDeduction
+      }
+    });
+
+    return res.status(201).json({
+      status: 'success',
+      message: 'Buy order completed successfully',
+      data: {
+        orderId: buy._id,
+        transactionId: transaction._id,
+        symbol: `${baseAsset}/${quoteAsset}`,
+        side: 'buy',
+        price: price,
+        amount: amount,
+        total: total,
+        status: 'completed',
+        createdAt: new Date()
+      }
+    });
+
+  } catch (err) {
+    console.error('Error creating buy order:', err);
+    return res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to create buy order'
+    });
+  }
+});
 
 
 
