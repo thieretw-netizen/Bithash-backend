@@ -48,27 +48,23 @@ app.use(helmet({
 
 
 app.use(cors({
-  origin: ['https://www.bithashcapital.live', 'https://website-backendd-tzep.onrender.com' , 'https://bithash-rental.vercel.app/'],
+  origin: ['https://www.bithashcapital.live', 'https://website-backendd-tzep.onrender.com', 'https://bithash-rental.vercel.app'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token', 'X-Rate-Limit']
 }));
 
 
 
 
 app.use((req, res, next) => {
-  // Allow fonts from Google
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  
-  // Cache static responses
+  // Only for Google Fonts and static routes - don't override CORS headers
   if (req.url.includes('/api/plans') || req.url.includes('/api/stats')) {
     res.setHeader('Cache-Control', 'public, max-age=300');
   }
   next();
 });
+
 
 
 
