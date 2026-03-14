@@ -18004,7 +18004,222 @@ app.post('/api/withdrawals/confirm-gas-payment', protect, async (req, res) => {
 
 
 
+// =============================================
+// GET USER ORDERS ENDPOINT - Matches frontend expectations exactly
+// =============================================
+app.get('/api/trading/orders', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    
+    // Fetch user's orders from UserOrder model
+    const userOrders = await UserOrder.find({ user: userId })
+      .sort({ createdAt: -1 })
+      .lean();
 
+    // Format orders to match the exact structure expected by frontend
+    const formattedOrders = [];
+
+    userOrders.forEach(order => {
+      formattedOrders.push({
+        id: order._id,
+        _id: order._id,
+        symbol: order.symbol,
+        baseAsset: order.baseAsset || order.symbol.replace('USDT', ''),
+        quoteAsset: order.quoteAsset || 'USDT',
+        side: order.type,
+        type: order.orderType,
+        price: order.price,
+        amount: order.amount,
+        filled: order.filled || 0,
+        remaining: order.remaining || order.amount,
+        total: order.total,
+        status: order.status === 'completed' ? 'filled' : order.status,
+        createdAt: order.createdAt,
+        updatedAt: order.updatedAt,
+        fromWallets: order.fromWallets || { main: 0, matured: 0 },
+        transactionId: order.transactionId,
+        assetBalanceSource: order.assetBalanceSource,
+        assetBalanceUsed: order.assetBalanceUsed
+      });
+    });
+
+    // Log activity
+    await logActivity('user_orders_fetched', 'order', userId, userId, 'User', req, {
+      orderCount: formattedOrders.length
+    });
+
+    // Send response in exact format expected by frontend
+    res.status(200).json({
+      status: 'success',
+      results: formattedOrders.length,
+      data: formattedOrders
+    });
+
+  } catch (err) {
+    console.error('Error fetching user orders:', err);
+    
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch user orders'
+    });
+  }
+});
+
+
+
+
+
+
+
+
+
+
+
+
+// =============================================
+// GET USER TRADES ENDPOINT - Matches frontend expectations exactly
+// =============================================
+app.get('/api/trading/trades', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    
+    // Fetch all completed trades for this user
+    const allTrades = [];
+    
+    // Get completed Buy orders
+    const buyTrades = await Buy.find({ 
+      user: userId,
+      status: 'completed'
+    }).lean();
+    
+    // Get completed Sell orders
+    const sellTrades = await Sell.find({ 
+      user: userId,
+      status: 'completed'
+    }).lean();
+    
+    // Get completed UserOrders
+    const userOrderTrades = await UserOrder.find({ 
+      user: userId,
+      status: { $in: ['completed', 'filled'] }
+    }).lean();
+    
+    // Get recent trades from RecentTrade model
+    const recentTrades = await RecentTrade.find({ 
+      userId: userId 
+    }).lean();
+
+    // Format Buy trades
+    buyTrades.forEach(trade => {
+      allTrades.push({
+        id: trade._id,
+        _id: trade._id,
+        symbol: `${trade.asset}USDT`,
+        baseAsset: trade.asset,
+        quoteAsset: 'USDT',
+        side: 'buy',
+        type: 'limit',
+        price: trade.price,
+        amount: trade.assetAmount,
+        total: trade.total,
+        time: trade.createdAt,
+        createdAt: trade.createdAt,
+        isBuyerMaker: true,
+        transactionId: trade.transactionId,
+        status: 'filled'
+      });
+    });
+
+    // Format Sell trades
+    sellTrades.forEach(trade => {
+      allTrades.push({
+        id: trade._id,
+        _id: trade._id,
+        symbol: `${trade.asset}USDT`,
+        baseAsset: trade.asset,
+        quoteAsset: 'USDT',
+        side: 'sell',
+        type: 'limit',
+        price: trade.price,
+        amount: trade.assetAmount,
+        total: trade.total,
+        time: trade.createdAt,
+        createdAt: trade.createdAt,
+        isBuyerMaker: false,
+        transactionId: trade.transactionId,
+        status: 'filled',
+        profitLoss: trade.profitLoss || 0,
+        profitLossPercentage: trade.profitLossPercentage || 0
+      });
+    });
+
+    // Format UserOrder trades
+    userOrderTrades.forEach(trade => {
+      allTrades.push({
+        id: trade._id,
+        _id: trade._id,
+        symbol: trade.symbol,
+        baseAsset: trade.baseAsset || trade.symbol.replace('USDT', ''),
+        quoteAsset: trade.quoteAsset || 'USDT',
+        side: trade.type,
+        type: trade.orderType,
+        price: trade.price,
+        amount: trade.amount,
+        total: trade.total,
+        filled: trade.filled || trade.amount,
+        time: trade.createdAt,
+        createdAt: trade.createdAt,
+        isBuyerMaker: trade.type === 'buy',
+        transactionId: trade.transactionId,
+        status: 'filled'
+      });
+    });
+
+    // Format RecentTrade trades
+    recentTrades.forEach(trade => {
+      allTrades.push({
+        id: trade._id,
+        _id: trade._id,
+        symbol: `${trade.symbol}USDT`,
+        baseAsset: trade.symbol,
+        quoteAsset: 'USDT',
+        side: trade.type,
+        type: 'market',
+        price: trade.price,
+        amount: trade.amount,
+        total: trade.total,
+        time: trade.timestamp,
+        createdAt: trade.timestamp,
+        isBuyerMaker: trade.type === 'buy',
+        orderId: trade.orderId,
+        status: 'filled'
+      });
+    });
+
+    // Sort by time descending (newest first)
+    allTrades.sort((a, b) => new Date(b.time || b.createdAt) - new Date(a.time || a.createdAt));
+
+    // Log activity
+    await logActivity('user_trades_fetched', 'trade', userId, userId, 'User', req, {
+      tradeCount: allTrades.length
+    });
+
+    // Send response in exact format expected by frontend
+    res.status(200).json({
+      status: 'success',
+      results: allTrades.length,
+      data: allTrades
+    });
+
+  } catch (err) {
+    console.error('Error fetching user trades:', err);
+    
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch user trades'
+    });
+  }
+});
 
 
 
