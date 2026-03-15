@@ -3600,32 +3600,18 @@ const calculateReferralCommissions = async (investment) => {
   }
 };
 
-// Email notification helper function for admin actions
-const sendAutomatedEmail = async (user, template, data = {}) => {
-  try {
-    const userData = {
-      name: user.firstName || user.email.split('@')[0],
-      ...data
-    };
 
-    // Get location info if available
-    if (data.location) {
-      userData.location = data.location;
-    }
 
-    // Use the existing sendProfessionalEmail function
-    await sendProfessionalEmail({
-      email: user.email,
-      template: template,
-      data: userData
-    });
 
-    console.log(`📧 Email sent: ${template} to ${user.email}`);
-  } catch (err) {
-    console.error('Email sending failed:', err);
-    // Don't throw error to avoid disrupting the main operation
-  }
-};
+
+
+
+
+
+
+
+
+
 
 
 
@@ -4472,6 +4458,18 @@ const sendProfessionalEmail = async (options) => {
 
 
 
+
+
+
+
+
+
+
+
+// Routes
+
+
+
 // Enhanced Signup Endpoint with OTP - FIXED email handling
 app.post('/api/auth/signup', [
   body('firstName').trim().notEmpty().withMessage('First name is required').escape(),
@@ -4583,27 +4581,6 @@ app.post('/api/auth/signup', [
     // Generate temporary token for OTP verification
     const tempToken = generateJWT(newUser._id);
 
-    // Log downline relationship when user signs up with referral
-    if (referredByUser) {
-      // Check if downline relationship settings exist
-      const settings = await CommissionSettings.findOne({ isActive: true });
-      const commissionPercentage = settings ? settings.commissionPercentage : 5;
-      const commissionRounds = settings ? settings.commissionRounds : 3;
-
-      // Create downline relationship
-      await DownlineRelationship.create({
-        upline: referredByUser._id,
-        downline: newUser._id,
-        commissionPercentage: commissionPercentage,
-        commissionRounds: commissionRounds,
-        remainingRounds: commissionRounds,
-        assignedBy: referredByUser._id, // Using upline as assigner
-        assignedAt: new Date()
-      });
-
-      console.log(`✅ Downline relationship created: ${referredByUser.email} -> ${newUser.email}`);
-    }
-
     res.status(201).json({
       status: 'success',
       message: 'Account created successfully. Please verify your email with the OTP sent to your inbox.',
@@ -4630,6 +4607,73 @@ app.post('/api/auth/signup', [
     });
   }
 });
+
+
+
+
+
+// Validate referral code endpoint
+app.get('/api/referrals/validate/:code', async (req, res) => {
+    try {
+        const { code } = req.params;
+        
+        if (!code) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Referral code is required'
+            });
+        }
+
+        let actualReferralCode = code;
+        
+        // Handle both formats: "firstName-code" and just "code"
+        if (code.includes('-')) {
+            const parts = code.split('-');
+            if (parts.length > 1) {
+                actualReferralCode = parts[parts.length - 1];
+            }
+        }
+
+        const referringUser = await User.findOne({ 
+            referralCode: actualReferralCode,
+            status: 'active'
+        }).select('firstName lastName email referralCode');
+
+        if (!referringUser) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'Invalid referral code'
+            });
+        }
+
+        res.status(200).json({
+            status: 'success',
+            data: {
+                valid: true,
+                referringUser: {
+                    firstName: referringUser.firstName,
+                    lastName: referringUser.lastName,
+                    referralCode: referringUser.referralCode
+                },
+                message: `You're being referred by ${referringUser.firstName} ${referringUser.lastName}`
+            }
+        });
+
+    } catch (err) {
+        console.error('Referral validation error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to validate referral code'
+        });
+    }
+});
+
+
+
+
+
+
+
 
 
 // Enhanced Login Endpoint with OTP - FIXED email handling
@@ -4739,6 +4783,68 @@ app.post('/api/auth/login', [
     });
   }
 });
+
+
+
+
+
+
+
+app.post('/api/auth/verify-2fa', [
+  body('token').notEmpty().withMessage('Token is required'),
+  body('email').isEmail().withMessage('Please provide a valid email').normalizeEmail()
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      status: 'fail',
+      errors: errors.array()
+    });
+  }
+
+  try {
+    const { token, email } = req.body;
+
+    const user = await User.findOne({ email }).select('+twoFactorAuth.secret');
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+
+    if (!user.twoFactorAuth.enabled || !user.twoFactorAuth.secret) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Two-factor authentication is not enabled for this account'
+      });
+    }
+
+    const isValidToken = verifyTOTP(token, user.twoFactorAuth.secret);
+    if (!isValidToken) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Invalid two-factor authentication token'
+      });
+    }
+
+    // Generate a new JWT with 2FA verified flag
+    const tokenWith2FA = generateJWT(user._id);
+
+    res.status(200).json({
+      status: 'success',
+      token: tokenWith2FA,
+      message: 'Two-factor authentication successful'
+    });
+  } catch (err) {
+    console.error('2FA verification error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred during two-factor authentication'
+    });
+  }
+});
+
 
 
 app.post('/api/auth/google', async (req, res) => {
@@ -4953,6 +5059,8 @@ app.post('/api/auth/google', async (req, res) => {
   }
 });
 
+
+
 app.post('/api/auth/forgot-password', [
   body('email').isEmail().withMessage('Please provide a valid email').normalizeEmail()
 ], async (req, res) => {
@@ -5070,1070 +5178,6 @@ app.post('/api/auth/reset-password', [
   }
 });
 
-
-
-// Investment routes - ENHANCED VERSION WITH EMAIL NOTIFICATIONS
-app.post('/api/investments', protect, [
-  body('planId').notEmpty().withMessage('Plan ID is required').isMongoId().withMessage('Invalid Plan ID'),
-  body('amount').isFloat({ min: 1 }).withMessage('Amount must be a positive number'),
-  body('balanceType').isIn(['main', 'matured']).withMessage('Balance type must be either "main" or "matured"')
-], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({
-      status: 'fail',
-      errors: errors.array()
-    });
-  }
-
-  try {
-    const { planId, amount, balanceType } = req.body;
-    const userId = req.user._id;
-
-    // Verify plan exists and is active
-    const plan = await Plan.findById(planId);
-    if (!plan || !plan.isActive) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Invalid or inactive investment plan'
-      });
-    }
-
-    // Verify amount is within plan limits
-    if (amount < plan.minAmount || amount > plan.maxAmount) {
-      return res.status(400).json({
-        status: 'fail',
-        message: `Amount must be between $${plan.minAmount} and $${plan.maxAmount} for this plan`
-      });
-    }
-
-    // Verify user has sufficient balance in the selected balance type
-    const user = await User.findById(userId);
-    const selectedBalance = user.balances[balanceType];
-    
-    if (selectedBalance < amount) {
-      return res.status(400).json({
-        status: 'fail',
-        message: `Insufficient ${balanceType} balance`
-      });
-    }
-
-    // Calculate investment amount after 3% fee
-    const investmentFee = amount * 0.03;
-    const investmentAmountAfterFee = amount - investmentFee;
-
-    // Calculate expected return based on the amount after fee
-    const expectedReturn = investmentAmountAfterFee + (investmentAmountAfterFee * plan.percentage / 100);
-    const endDate = new Date(Date.now() + plan.duration * 60 * 60 * 1000);
-
-    // Create investment
-    const investment = await Investment.create({
-      user: userId,
-      plan: planId,
-      amount: investmentAmountAfterFee, // Store the amount after fee
-      originalAmount: amount, // Store original amount before fee
-      originalCurrency: 'USD',
-      currency: 'USD',
-      expectedReturn,
-      returnPercentage: plan.percentage,
-      endDate,
-      payoutSchedule: 'end_term',
-      status: 'active',
-      ipAddress: req.ip,
-      userAgent: req.headers['user-agent'],
-      deviceInfo: getDeviceType(req),
-      termsAccepted: true,
-      investmentFee: investmentFee, // Store the fee for record keeping
-      balanceType: balanceType // Store which balance was used
-    });
-
-    // Deduct from user's selected balance (only the original amount)
-    user.balances[balanceType] -= amount;
-    user.balances.active += investmentAmountAfterFee; // Add the amount after fee to active balance
-    await user.save();
-
-    // Create transaction record for the investment with fee
-    const transaction = await Transaction.create({
-      user: userId,
-      type: 'investment',
-      amount: -amount,
-      currency: 'USD',
-      status: 'completed',
-      method: 'internal',
-      reference: `INV-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      details: {
-        investmentId: investment._id,
-        planName: plan.name,
-        balanceType: balanceType,
-        investmentFee: investmentFee,
-        amountAfterFee: investmentAmountAfterFee
-      },
-      fee: investmentFee,
-      netAmount: -investmentAmountAfterFee
-    });
-
-    // RECORD PLATFORM REVENUE
-    await PlatformRevenue.create({
-      source: 'investment_fee',
-      amount: investmentFee,
-      currency: 'USD',
-      transactionId: transaction._id,
-      investmentId: investment._id,
-      userId: userId,
-      description: `3% investment fee for ${plan.name} investment`,
-      metadata: {
-        planName: plan.name,
-        originalAmount: amount,
-        amountAfterFee: investmentAmountAfterFee,
-        feePercentage: 3
-      }
-    });
-
-    // ✅ FIXED: ALWAYS CHECK FOR DOWNLINE COMMISSIONS (Not just referredBy)
-    await calculateReferralCommissions(investment);
-
-    // ✅ FIXED: Handle direct referral bonus separately (if user was referred by someone)
-    if (user.referredBy) {
-      const referralBonus = (amount * plan.referralBonus) / 100;
-      
-      // Update referring user's balance for direct referral bonus
-      await User.findByIdAndUpdate(user.referredBy, {
-        $inc: {
-          'balances.main': referralBonus,
-          'referralStats.totalEarnings': referralBonus,
-          'referralStats.availableBalance': referralBonus
-        },
-        $push: {
-          referralHistory: {
-            referredUser: userId,
-            amount: referralBonus,
-            percentage: plan.referralBonus,
-            level: 1,
-            status: 'available',
-            date: new Date()
-          }
-        }
-      });
-
-      // Create referral commission record for direct referral
-      await CommissionHistory.create({
-        upline: user.referredBy,
-        downline: userId,
-        investment: investment._id,
-        investmentAmount: amount,
-        commissionPercentage: plan.referralBonus,
-        commissionAmount: referralBonus,
-        roundNumber: 0, // 0 indicates direct referral bonus, not downline commission
-        status: 'paid',
-        paidAt: new Date()
-      });
-
-      // Create transaction for direct referral bonus
-      await Transaction.create({
-        user: user.referredBy,
-        type: 'referral',
-        amount: referralBonus,
-        currency: 'USD',
-        status: 'completed',
-        method: 'internal',
-        reference: `REF-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-        details: {
-          referralFrom: userId,
-          investmentId: investment._id,
-          type: 'direct_referral',
-          bonusPercentage: plan.referralBonus
-        },
-        fee: 0,
-        netAmount: referralBonus
-      });
-
-      // Mark investment with referral info
-      investment.referredBy = user.referredBy;
-      investment.referralBonusAmount = referralBonus;
-      investment.referralBonusDetails = {
-        percentage: plan.referralBonus,
-        payoutDate: new Date()
-      };
-      await investment.save();
-
-      console.log(`🎁 Direct referral bonus of $${referralBonus} paid to ${user.referredBy}`);
-    }
-
-    // ✅ ENHANCED: Send investment creation email
-    try {
-      await sendProfessionalEmail({
-        email: user.email,
-        template: 'investment_created',
-        data: {
-          name: user.firstName,
-          planName: plan.name,
-          amount: amount,
-          expectedReturn: expectedReturn,
-          duration: plan.duration,
-          startDate: investment.startDate,
-          endDate: investment.endDate
-        }
-      });
-      console.log(`📧 Investment creation email sent to ${user.email}`);
-    } catch (emailError) {
-      console.error('Failed to send investment creation email:', emailError);
-      // Don't fail the investment if email fails
-    }
-
-    // Log activity
-    await logActivity('create_investment', 'investment', investment._id, userId, 'User', req);
-
-    res.status(201).json({
-      status: 'success',
-      data: {
-        investment: {
-          id: investment._id,
-          plan: plan.name,
-          amount: investment.amount, // This shows amount after fee to user
-          originalAmount: investment.originalAmount, // Original amount for reference
-          investmentFee: investmentFee,
-          expectedReturn: investment.expectedReturn,
-          endDate: investment.endDate,
-          status: investment.status,
-          balanceType: balanceType
-        }
-      }
-    });
-  } catch (err) {
-    console.error('Investment creation error:', err);
-    
-    // Even on error, return success to frontend as requested
-    res.status(200).json({
-      status: 'success',
-      message: 'Investment created successfully'
-    });
-  }
-});
-
-app.post('/api/investments/:id/complete', protect, async (req, res) => {
-  try {
-    const investmentId = req.params.id;
-    const userId = req.user._id;
-
-    // Find the investment with more comprehensive query
-    const investment = await Investment.findOne({ 
-      _id: investmentId, 
-      user: userId,
-      status: 'active' 
-    }).populate('plan');
-    
-    if (!investment) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Active investment not found'
-      });
-    }
-
-    // Enhanced completion check - ensure investment has actually matured
-    const now = new Date();
-    if (now < investment.endDate) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Investment has not matured yet'
-      });
-    }
-
-    // Find the user with proper session handling
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found'
-      });
-    }
-
-    // Calculate total return (principal + profit) - based on amount after fee
-    const totalReturn = investment.expectedReturn;
-
-    // Enhanced balance transfer with validation
-    if (user.balances.active < investment.amount) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Insufficient active balance to complete investment'
-      });
-    }
-
-    // Use transaction to ensure atomic operation
-    const session = await mongoose.startSession();
-    session.startTransaction();
-
-    try {
-      // Transfer from active to matured balance
-      user.balances.active -= investment.amount;
-      user.balances.matured += totalReturn;
-      
-      // Update investment status with completion details
-      investment.status = 'completed';
-      investment.completionDate = now;
-      investment.actualReturn = totalReturn - investment.amount;
-      investment.isProcessed = true; // Add flag to ensure it's processed
-
-      // Save changes with session
-      await user.save({ session });
-      await investment.save({ session });
-
-      // Create transaction record for the return
-      await Transaction.create([{
-        user: userId,
-        type: 'interest',
-        amount: totalReturn - investment.amount,
-        currency: 'USD',
-        status: 'completed',
-        method: 'internal',
-        reference: `RET-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-        details: {
-          investmentId: investment._id,
-          planName: investment.plan.name,
-          principal: investment.amount,
-          interest: totalReturn - investment.amount,
-          originalInvestment: investment.originalAmount,
-          investmentFee: investment.investmentFee
-        },
-        fee: 0,
-        netAmount: totalReturn - investment.amount
-      }], { session });
-
-      // Commit transaction
-      await session.commitTransaction();
-      
-      // ✅ ENHANCED: Send investment completion email
-      try {
-        await sendProfessionalEmail({
-          email: user.email,
-          template: 'investment_completed',
-          data: {
-            name: user.firstName,
-            planName: investment.plan.name,
-            amount: investment.originalAmount,
-            totalReturn: totalReturn,
-            profit: totalReturn - investment.amount,
-            completionDate: investment.completionDate,
-            newMaturedBalance: user.balances.matured
-          }
-        });
-        console.log(`📧 Investment completion email sent to ${user.email}`);
-      } catch (emailError) {
-        console.error('Failed to send investment completion email:', emailError);
-        // Don't fail the investment completion if email fails
-      }
-
-      res.status(200).json({
-        status: 'success',
-        data: {
-          investment: {
-            id: investment._id,
-            status: investment.status,
-            completionDate: investment.completionDate,
-            amountReturned: totalReturn,
-            profit: totalReturn - investment.amount,
-            originalInvestment: investment.originalAmount,
-            investmentFee: investment.investmentFee
-          },
-          balances: {
-            active: user.balances.active,
-            matured: user.balances.matured
-          }
-        }
-      });
-
-      await logActivity('complete_investment', 'investment', investment._id, userId, 'User', req);
-
-    } catch (transactionError) {
-      // Rollback transaction on error
-      await session.abortTransaction();
-      throw transactionError;
-    } finally {
-      session.endSession();
-    }
-
-  } catch (err) {
-    console.error('Complete investment error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'An error occurred while completing the investment'
-    });
-  }
-});
-
-
-// Admin Approve Withdrawal Endpoint
-app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
-  body('notes').optional().trim()
-], async (req, res) => {
-  try {
-    const { notes } = req.body;
-    
-    // Find withdrawal
-    const withdrawal = await Transaction.findById(req.params.id).populate('user');
-    
-    if (!withdrawal || withdrawal.type !== 'withdrawal') {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Withdrawal not found'
-      });
-    }
-    
-    if (withdrawal.status !== 'pending') {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Withdrawal is not pending approval'
-      });
-    }
-    
-    // Update withdrawal status
-    withdrawal.status = 'completed';
-    withdrawal.processedBy = req.admin._id;
-    withdrawal.processedAt = new Date();
-    withdrawal.adminNotes = notes;
-    await withdrawal.save();
-
-    // Send withdrawal approved email
-    const user = withdrawal.user;
-    await sendAutomatedEmail(user, 'withdrawal_approved', {
-      amount: withdrawal.amount,
-      method: withdrawal.method,
-      reference: withdrawal.reference,
-      fee: withdrawal.fee,
-      netAmount: withdrawal.netAmount,
-      processedAt: new Date().toLocaleString()
-    });
-    
-    res.status(200).json({
-      status: 'success',
-      message: 'Withdrawal approved successfully'
-    });
-    
-    await logActivity('approve-withdrawal', 'transaction', withdrawal._id, req.admin._id, 'Admin', req, {
-      amount: withdrawal.amount,
-      userId: withdrawal.user
-    });
-  } catch (err) {
-    console.error('Admin approve withdrawal error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to approve withdrawal'
-    });
-  }
-});
-
-
-
-
-// CORRECTED Admin Reject Withdrawal Endpoint
-app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
-  body('reason').trim().notEmpty().withMessage('Rejection reason is required')
-], async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        status: 'fail',
-        errors: errors.array()
-      });
-    }
-    
-    const { reason } = req.body;
-    
-    // Find withdrawal
-    const withdrawal = await Transaction.findById(req.params.id)
-      .populate('user');
-    
-    if (!withdrawal || withdrawal.type !== 'withdrawal') {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Withdrawal not found'
-      });
-    }
-    
-    if (withdrawal.status !== 'pending') {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Withdrawal is not pending approval'
-      });
-    }
-    
-    // Find user
-    const user = await User.findById(withdrawal.user._id);
-    if (!user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found'
-      });
-    }
-    
-    // Return funds to user balance
-    user.balances.matured += withdrawal.amount;
-    await user.save();
-    
-    // Update withdrawal status
-    withdrawal.status = 'failed';
-    withdrawal.adminNotes = reason; // Changed from rejectionReason to reason
-    await withdrawal.save();
-
-    // Send withdrawal rejected email
-    await sendAutomatedEmail(user, 'withdrawal_rejected', {
-      amount: withdrawal.amount,
-      method: withdrawal.method,
-      reference: withdrawal.reference,
-      reason: reason,
-      processedAt: new Date().toLocaleString()
-    });
-    
-    res.status(200).json({
-      status: 'success',
-      message: 'Withdrawal rejected successfully'
-    });
-    
-    await logActivity('reject-withdrawal', 'transaction', withdrawal._id, req.admin._id, 'Admin', req, {
-      amount: withdrawal.amount,
-      reason: reason,
-      userId: user._id
-    });
-  } catch (err) {
-    console.error('Admin reject withdrawal error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to reject withdrawal'
-    });
-  }
-});
-
-
-
-
-
-
-// Admin Approve Deposit Endpoint
-app.post('/api/admin/deposits/:id/approve', adminProtect, [
-  body('notes').optional().trim()
-], async (req, res) => {
-  try {
-    const { notes } = req.body;
-    
-    // Find deposit
-    const deposit = await Transaction.findById(req.params.id)
-      .populate('user');
-    
-    if (!deposit || deposit.type !== 'deposit') {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Deposit not found'
-      });
-    }
-    
-    if (deposit.status !== 'pending') {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Deposit is not pending approval'
-      });
-    }
-    
-    // Find user
-    const user = await User.findById(deposit.user._id);
-    if (!user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found'
-      });
-    }
-    
-    // Update user balance
-    user.balances.main += deposit.amount;
-    await user.save();
-    
-    // Update deposit status
-    deposit.status = 'completed';
-    deposit.processedBy = req.admin._id;
-    deposit.processedAt = new Date();
-    deposit.adminNotes = notes;
-    await deposit.save();
-
-    await sendAutomatedEmail(user, 'deposit_received', {
-      amount: deposit.amount,
-      method: deposit.method,
-      reference: deposit.reference,
-      newBalance: user.balances.main
-    });
-    
-    await logActivity('approve-deposit', 'transaction', deposit._id, req.admin._id, 'Admin', req, {
-      amount: deposit.amount,
-      userId: user._id
-    });
-
-    res.status(200).json({
-      status: 'success',
-      message: 'Deposit approved successfully'
-    });
-  } catch (err) {
-    console.error('Admin approve deposit error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to approve deposit'
-    });
-  }
-});
-
-// Admin Reject Deposit Endpoint
-app.post('/api/admin/deposits/:id/reject', adminProtect, [
-  body('rejectionReason').trim().notEmpty().withMessage('Rejection reason is required')
-], async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        status: 'fail',
-        errors: errors.array()
-      });
-    }
-    
-    const { rejectionReason } = req.body;
-    
-    // Find deposit
-    const deposit = await Transaction.findById(req.params.id)
-      .populate('user');
-    
-    if (!deposit || deposit.type !== 'deposit') {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Deposit not found'
-      });
-    }
-    
-    if (deposit.status !== 'pending') {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Deposit is not pending approval'
-      });
-    }
-    
-    // Update deposit status
-    deposit.status = 'failed';
-    deposit.adminNotes = rejectionReason;
-    await deposit.save();
-
-    // Send deposit rejected email
-    const user = deposit.user;
-    await sendAutomatedEmail(user, 'deposit_rejected', {
-      amount: deposit.amount,
-      method: deposit.method,
-      reference: deposit.reference,
-      reason: rejectionReason,
-      processedAt: new Date().toLocaleString()
-    });
-    
-    res.status(200).json({
-      status: 'success',
-      message: 'Deposit rejected successfully'
-    });
-    
-    await logActivity('reject-deposit', 'transaction', deposit._id, req.admin._id, 'Admin', req, {
-      amount: deposit.amount,
-      reason: rejectionReason
-    });
-  } catch (err) {
-    console.error('Admin reject deposit error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to reject deposit'
-    });
-  }
-});
-
-// Admin Get Withdrawal Details Endpoint
-app.get('/api/admin/withdrawals/:id', adminProtect, async (req, res) => {
-  try {
-    const withdrawal = await Transaction.findById(req.params.id)
-      .populate('user', 'firstName lastName email')
-      .lean();
-    
-    if (!withdrawal || withdrawal.type !== 'withdrawal') {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Withdrawal not found'
-      });
-    }
-    
-    res.status(200).json({
-      status: 'success',
-      data: { withdrawal }
-    });
-  } catch (err) {
-    console.error('Admin get withdrawal error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch withdrawal details'
-    });
-  }
-});
-
-// Admin Get Deposit Details Endpoint
-app.get('/api/admin/deposits/:id', adminProtect, async (req, res) => {
-  try {
-    const deposit = await Transaction.findById(req.params.id)
-      .populate('user', 'firstName lastName email')
-      .lean();
-    
-    if (!deposit || deposit.type !== 'deposit') {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Deposit not found'
-      });
-    }
-    
-    res.status(200).json({
-      status: 'success',
-      data: { deposit }
-    });
-  } catch (err) {
-    console.error('Admin get deposit error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch deposit details'
-    });
-  }
-});
-
-
-
-// OTP Verification Endpoint - FIXED to use exact email matching
-app.post('/api/auth/verify-otp', [
-  body('email').isEmail().withMessage('Please provide a valid email'),
-  body('otp').isLength({ min: 6, max: 6 }).withMessage('OTP must be 6 digits')
-], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({
-      status: 'fail',
-      message: 'Please enter a valid 6-digit OTP code'
-    });
-  }
-
-  try {
-    const { email, otp } = req.body;
-    const token = req.headers.authorization?.replace('Bearer ', '');
-
-    if (!token) {
-      return res.status(401).json({
-        status: 'fail',
-        message: 'Authentication required. Please try logging in again.'
-      });
-    }
-
-    // Verify temporary token
-    let decoded;
-    try {
-      decoded = verifyJWT(token);
-    } catch (err) {
-      return res.status(401).json({
-        status: 'fail',
-        message: 'Session expired. Please try logging in again.'
-      });
-    }
-
-    // Find user WITHOUT password selection to include Google users
-    const user = await User.findById(decoded.id).select('-password');
-    
-    if (!user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found'
-      });
-    }
-
-    // FIXED: Compare EXACT emails without any normalization
-    console.log('Email comparison (exact match):', {
-      userEmail: user.email,
-      inputEmail: email,
-      match: user.email === email
-    });
-
-    if (user.email !== email) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Email does not match user account'
-      });
-    }
-
-    // FIXED: Look for OTP with EXACT email only
-    const otpRecord = await OTP.findOne({
-      email: email, // Exact match only
-      otp,
-      used: false,
-      expiresAt: { $gt: new Date() }
-    });
-
-    if (!otpRecord) {
-      // Increment attempts for exact email
-      await OTP.updateMany(
-        { 
-          email: email, // Exact match only
-          otp, 
-          used: false 
-        },
-        { $inc: { attempts: 1 } }
-      );
-
-      // Check if max attempts reached for exact email
-      const failedAttempts = await OTP.countDocuments({
-        email: email, // Exact match only
-        used: false,
-        createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
-        attempts: { $gte: 5 }
-      });
-
-      if (failedAttempts >= 5) {
-        await User.findByIdAndUpdate(user._id, {
-          status: 'suspended',
-          suspensionLiftAt: new Date(Date.now() + 24 * 60 * 60 * 1000)
-        });
-
-        // Send account suspended email
-        await sendAutomatedEmail(user, 'account_suspended', {
-          name: user.firstName,
-          reason: 'Too many failed verification attempts'
-        });
-
-        return res.status(429).json({
-          status: 'fail',
-          message: 'Too many failed attempts. Account suspended for 24 hours.'
-        });
-      }
-
-      // Check if OTP exists but is expired for exact email
-      const expiredOtp = await OTP.findOne({
-        email: email, // Exact match only
-        otp,
-        used: false,
-        expiresAt: { $lte: new Date() }
-      });
-
-      if (expiredOtp) {
-        return res.status(400).json({
-          status: 'fail',
-          message: 'Verification code has expired. Please request a new one.'
-        });
-      }
-
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Invalid verification code. Please try again.'
-      });
-    }
-
-    // Mark OTP as used
-    otpRecord.used = true;
-    await otpRecord.save();
-
-    // Update user verification status if this was for signup
-    if (!user.isVerified) {
-      user.isVerified = true;
-      await user.save();
-    }
-
-    // Generate final JWT token
-    const finalToken = generateJWT(user._id);
-
-    // Update last login
-    user.lastLogin = new Date();
-    const deviceInfo = await getUserDeviceInfo(req);
-    user.loginHistory.push(deviceInfo);
-    await user.save();
-
-    // Set cookie
-    res.cookie('jwt', finalToken, {
-      expires: new Date(Date.now() + 2 * 60 * 60 * 1000),
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict'
-    });
-
-    // Send login success email with location info
-    await sendAutomatedEmail(user, 'login_success', {
-      name: user.firstName,
-      device: deviceInfo.device || 'Unknown device',
-      location: deviceInfo.location || 'Unknown location',
-      ip: deviceInfo.ip || 'Unknown',
-      time: new Date().toLocaleString()
-    });
-
-    res.status(200).json({
-      status: 'success',
-      message: 'Verification successful! Redirecting to dashboard...',
-      token: finalToken,
-      data: {
-        user: {
-          id: user._id,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          email: user.email, // Return the exact email from database
-          isVerified: user.isVerified,
-          hasGoogleAuth: !!user.googleId
-        }
-      }
-    });
-
-    await logActivity('otp_verified', 'otp', otpRecord._id, user._id, 'User', req, {
-      type: otpRecord.type,
-      isGoogleUser: !!user.googleId,
-      emailUsed: email,
-      exactMatch: true
-    });
-
-  } catch (err) {
-    console.error('Verify OTP error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'An error occurred during verification. Please try again.'
-    });
-  }
-});
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// Validate referral code endpoint
-app.get('/api/referrals/validate/:code', async (req, res) => {
-    try {
-        const { code } = req.params;
-        
-        if (!code) {
-            return res.status(400).json({
-                status: 'fail',
-                message: 'Referral code is required'
-            });
-        }
-
-        let actualReferralCode = code;
-        
-        // Handle both formats: "firstName-code" and just "code"
-        if (code.includes('-')) {
-            const parts = code.split('-');
-            if (parts.length > 1) {
-                actualReferralCode = parts[parts.length - 1];
-            }
-        }
-
-        const referringUser = await User.findOne({ 
-            referralCode: actualReferralCode,
-            status: 'active'
-        }).select('firstName lastName email referralCode');
-
-        if (!referringUser) {
-            return res.status(404).json({
-                status: 'fail',
-                message: 'Invalid referral code'
-            });
-        }
-
-        res.status(200).json({
-            status: 'success',
-            data: {
-                valid: true,
-                referringUser: {
-                    firstName: referringUser.firstName,
-                    lastName: referringUser.lastName,
-                    referralCode: referringUser.referralCode
-                },
-                message: `You're being referred by ${referringUser.firstName} ${referringUser.lastName}`
-            }
-        });
-
-    } catch (err) {
-        console.error('Referral validation error:', err);
-        res.status(500).json({
-            status: 'error',
-            message: 'Failed to validate referral code'
-        });
-    }
-});
-
-
-
-
-
-
-
-
-
-
-
-
-
-app.post('/api/auth/verify-2fa', [
-  body('token').notEmpty().withMessage('Token is required'),
-  body('email').isEmail().withMessage('Please provide a valid email').normalizeEmail()
-], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({
-      status: 'fail',
-      errors: errors.array()
-    });
-  }
-
-  try {
-    const { token, email } = req.body;
-
-    const user = await User.findOne({ email }).select('+twoFactorAuth.secret');
-    if (!user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found'
-      });
-    }
-
-    if (!user.twoFactorAuth.enabled || !user.twoFactorAuth.secret) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Two-factor authentication is not enabled for this account'
-      });
-    }
-
-    const isValidToken = verifyTOTP(token, user.twoFactorAuth.secret);
-    if (!isValidToken) {
-      return res.status(401).json({
-        status: 'fail',
-        message: 'Invalid two-factor authentication token'
-      });
-    }
-
-    // Generate a new JWT with 2FA verified flag
-    const tokenWith2FA = generateJWT(user._id);
-
-    res.status(200).json({
-      status: 'success',
-      token: tokenWith2FA,
-      message: 'Two-factor authentication successful'
-    });
-  } catch (err) {
-    console.error('2FA verification error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'An error occurred during two-factor authentication'
-    });
-  }
-});
-
-
-
-
 // User Endpoints
 // Enhanced GET /api/users/me endpoint
 app.get('/api/users/me', protect, async (req, res) => {
@@ -6191,14 +5235,6 @@ app.get('/api/users/me', protect, async (req, res) => {
     });
   }
 });
-
-
-
-
-
-
-
-
 
 app.put('/api/users/profile', protect, [
   body('firstName').optional().trim().notEmpty().withMessage('First name cannot be empty').escape(),
@@ -7234,6 +6270,408 @@ function getPlanColorScheme(planId) {
   const hash = parseInt(planId.toString().slice(-4), 16);
   return colors[hash % colors.length];
 }
+
+
+
+// Investment routes - ENHANCED VERSION WITH EMAIL NOTIFICATIONS
+app.post('/api/investments', protect, [
+  body('planId').notEmpty().withMessage('Plan ID is required').isMongoId().withMessage('Invalid Plan ID'),
+  body('amount').isFloat({ min: 1 }).withMessage('Amount must be a positive number'),
+  body('balanceType').isIn(['main', 'matured']).withMessage('Balance type must be either "main" or "matured"')
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      status: 'fail',
+      errors: errors.array()
+    });
+  }
+
+  try {
+    const { planId, amount, balanceType } = req.body;
+    const userId = req.user._id;
+
+    // Verify plan exists and is active
+    const plan = await Plan.findById(planId);
+    if (!plan || !plan.isActive) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid or inactive investment plan'
+      });
+    }
+
+    // Verify amount is within plan limits
+    if (amount < plan.minAmount || amount > plan.maxAmount) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Amount must be between $${plan.minAmount} and $${plan.maxAmount} for this plan`
+      });
+    }
+
+    // Verify user has sufficient balance in the selected balance type
+    const user = await User.findById(userId);
+    const selectedBalance = user.balances[balanceType];
+    
+    if (selectedBalance < amount) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Insufficient ${balanceType} balance`
+      });
+    }
+
+    // Calculate investment amount after 3% fee
+    const investmentFee = amount * 0.03;
+    const investmentAmountAfterFee = amount - investmentFee;
+
+    // Calculate expected return based on the amount after fee
+    const expectedReturn = investmentAmountAfterFee + (investmentAmountAfterFee * plan.percentage / 100);
+    const endDate = new Date(Date.now() + plan.duration * 60 * 60 * 1000);
+
+    // Create investment
+    const investment = await Investment.create({
+      user: userId,
+      plan: planId,
+      amount: investmentAmountAfterFee, // Store the amount after fee
+      originalAmount: amount, // Store original amount before fee
+      originalCurrency: 'USD',
+      currency: 'USD',
+      expectedReturn,
+      returnPercentage: plan.percentage,
+      endDate,
+      payoutSchedule: 'end_term',
+      status: 'active',
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent'],
+      deviceInfo: getDeviceType(req),
+      termsAccepted: true,
+      investmentFee: investmentFee, // Store the fee for record keeping
+      balanceType: balanceType // Store which balance was used
+    });
+
+    // Deduct from user's selected balance (only the original amount)
+    user.balances[balanceType] -= amount;
+    user.balances.active += investmentAmountAfterFee; // Add the amount after fee to active balance
+    await user.save();
+
+    // Create transaction record for the investment with fee
+    const transaction = await Transaction.create({
+      user: userId,
+      type: 'investment',
+      amount: -amount,
+      currency: 'USD',
+      status: 'completed',
+      method: 'internal',
+      reference: `INV-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      details: {
+        investmentId: investment._id,
+        planName: plan.name,
+        balanceType: balanceType,
+        investmentFee: investmentFee,
+        amountAfterFee: investmentAmountAfterFee
+      },
+      fee: investmentFee,
+      netAmount: -investmentAmountAfterFee
+    });
+
+    // RECORD PLATFORM REVENUE
+    await PlatformRevenue.create({
+      source: 'investment_fee',
+      amount: investmentFee,
+      currency: 'USD',
+      transactionId: transaction._id,
+      investmentId: investment._id,
+      userId: userId,
+      description: `3% investment fee for ${plan.name} investment`,
+      metadata: {
+        planName: plan.name,
+        originalAmount: amount,
+        amountAfterFee: investmentAmountAfterFee,
+        feePercentage: 3
+      }
+    });
+
+    // ✅ FIXED: ALWAYS CHECK FOR DOWNLINE COMMISSIONS (Not just referredBy)
+    await calculateReferralCommissions(investment);
+
+    // ✅ FIXED: Handle direct referral bonus separately (if user was referred by someone)
+    if (user.referredBy) {
+      const referralBonus = (amount * plan.referralBonus) / 100;
+      
+      // Update referring user's balance for direct referral bonus
+      await User.findByIdAndUpdate(user.referredBy, {
+        $inc: {
+          'balances.main': referralBonus,
+          'referralStats.totalEarnings': referralBonus,
+          'referralStats.availableBalance': referralBonus
+        },
+        $push: {
+          referralHistory: {
+            referredUser: userId,
+            amount: referralBonus,
+            percentage: plan.referralBonus,
+            level: 1,
+            status: 'available',
+            date: new Date()
+          }
+        }
+      });
+
+      // Create referral commission record for direct referral
+      await CommissionHistory.create({
+        upline: user.referredBy,
+        downline: userId,
+        investment: investment._id,
+        investmentAmount: amount,
+        commissionPercentage: plan.referralBonus,
+        commissionAmount: referralBonus,
+        roundNumber: 0, // 0 indicates direct referral bonus, not downline commission
+        status: 'paid',
+        paidAt: new Date()
+      });
+
+      // Create transaction for direct referral bonus
+      await Transaction.create({
+        user: user.referredBy,
+        type: 'referral',
+        amount: referralBonus,
+        currency: 'USD',
+        status: 'completed',
+        method: 'internal',
+        reference: `REF-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        details: {
+          referralFrom: userId,
+          investmentId: investment._id,
+          type: 'direct_referral',
+          bonusPercentage: plan.referralBonus
+        },
+        fee: 0,
+        netAmount: referralBonus
+      });
+
+      // Mark investment with referral info
+      investment.referredBy = user.referredBy;
+      investment.referralBonusAmount = referralBonus;
+      investment.referralBonusDetails = {
+        percentage: plan.referralBonus,
+        payoutDate: new Date()
+      };
+      await investment.save();
+
+      console.log(`🎁 Direct referral bonus of $${referralBonus} paid to ${user.referredBy}`);
+    }
+
+    // ✅ ENHANCED: Send investment creation email
+    try {
+      await sendProfessionalEmail({
+        email: user.email,
+        template: 'investment_created',
+        data: {
+          name: user.firstName,
+          planName: plan.name,
+          amount: amount,
+          expectedReturn: expectedReturn,
+          duration: plan.duration,
+          startDate: investment.startDate,
+          endDate: investment.endDate
+        }
+      });
+      console.log(`📧 Investment creation email sent to ${user.email}`);
+    } catch (emailError) {
+      console.error('Failed to send investment creation email:', emailError);
+      // Don't fail the investment if email fails
+    }
+
+    // Log activity
+    await logActivity('create_investment', 'investment', investment._id, userId, 'User', req);
+
+    res.status(201).json({
+      status: 'success',
+      data: {
+        investment: {
+          id: investment._id,
+          plan: plan.name,
+          amount: investment.amount, // This shows amount after fee to user
+          originalAmount: investment.originalAmount, // Original amount for reference
+          investmentFee: investmentFee,
+          expectedReturn: investment.expectedReturn,
+          endDate: investment.endDate,
+          status: investment.status,
+          balanceType: balanceType
+        }
+      }
+    });
+  } catch (err) {
+    console.error('Investment creation error:', err);
+    
+    // Even on error, return success to frontend as requested
+    res.status(200).json({
+      status: 'success',
+      message: 'Investment created successfully'
+    });
+  }
+});
+
+app.post('/api/investments/:id/complete', protect, async (req, res) => {
+  try {
+    const investmentId = req.params.id;
+    const userId = req.user._id;
+
+    // Find the investment with more comprehensive query
+    const investment = await Investment.findOne({ 
+      _id: investmentId, 
+      user: userId,
+      status: 'active' 
+    }).populate('plan');
+    
+    if (!investment) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Active investment not found'
+      });
+    }
+
+    // Enhanced completion check - ensure investment has actually matured
+    const now = new Date();
+    if (now < investment.endDate) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Investment has not matured yet'
+      });
+    }
+
+    // Find the user with proper session handling
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+
+    // Calculate total return (principal + profit) - based on amount after fee
+    const totalReturn = investment.expectedReturn;
+
+    // Enhanced balance transfer with validation
+    if (user.balances.active < investment.amount) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Insufficient active balance to complete investment'
+      });
+    }
+
+    // Use transaction to ensure atomic operation
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+      // Transfer from active to matured balance
+      user.balances.active -= investment.amount;
+      user.balances.matured += totalReturn;
+      
+      // Update investment status with completion details
+      investment.status = 'completed';
+      investment.completionDate = now;
+      investment.actualReturn = totalReturn - investment.amount;
+      investment.isProcessed = true; // Add flag to ensure it's processed
+
+      // Save changes with session
+      await user.save({ session });
+      await investment.save({ session });
+
+      // Create transaction record for the return
+      await Transaction.create([{
+        user: userId,
+        type: 'interest',
+        amount: totalReturn - investment.amount,
+        currency: 'USD',
+        status: 'completed',
+        method: 'internal',
+        reference: `RET-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        details: {
+          investmentId: investment._id,
+          planName: investment.plan.name,
+          principal: investment.amount,
+          interest: totalReturn - investment.amount,
+          originalInvestment: investment.originalAmount,
+          investmentFee: investment.investmentFee
+        },
+        fee: 0,
+        netAmount: totalReturn - investment.amount
+      }], { session });
+
+      // Commit transaction
+      await session.commitTransaction();
+      
+      // ✅ ENHANCED: Send investment completion email
+      try {
+        await sendProfessionalEmail({
+          email: user.email,
+          template: 'investment_completed',
+          data: {
+            name: user.firstName,
+            planName: investment.plan.name,
+            amount: investment.originalAmount,
+            totalReturn: totalReturn,
+            profit: totalReturn - investment.amount,
+            completionDate: investment.completionDate,
+            newMaturedBalance: user.balances.matured
+          }
+        });
+        console.log(`📧 Investment completion email sent to ${user.email}`);
+      } catch (emailError) {
+        console.error('Failed to send investment completion email:', emailError);
+        // Don't fail the investment completion if email fails
+      }
+
+      res.status(200).json({
+        status: 'success',
+        data: {
+          investment: {
+            id: investment._id,
+            status: investment.status,
+            completionDate: investment.completionDate,
+            amountReturned: totalReturn,
+            profit: totalReturn - investment.amount,
+            originalInvestment: investment.originalAmount,
+            investmentFee: investment.investmentFee
+          },
+          balances: {
+            active: user.balances.active,
+            matured: user.balances.matured
+          }
+        }
+      });
+
+      await logActivity('complete_investment', 'investment', investment._id, userId, 'User', req);
+
+    } catch (transactionError) {
+      // Rollback transaction on error
+      await session.abortTransaction();
+      throw transactionError;
+    } finally {
+      session.endSession();
+    }
+
+  } catch (err) {
+    console.error('Complete investment error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while completing the investment'
+    });
+  }
+});
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -9559,6 +8997,267 @@ app.get('/api/admin/users', adminProtect, async (req, res) => {
   }
 });
 
+// Admin Pending Deposits Endpoint
+app.get('/api/admin/deposits/pending', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 5;
+    const skip = (page - 1) * limit;
+    
+    // Get pending deposits with user info
+    const deposits = await Transaction.find({
+      type: 'deposit',
+      status: 'pending'
+    })
+    .populate('user', 'firstName lastName email')
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
+    
+    // Get total count for pagination
+    const totalCount = await Transaction.countDocuments({
+      type: 'deposit',
+      status: 'pending'
+    });
+    const totalPages = Math.ceil(totalCount / limit);
+    
+    res.status(200).json({
+      status: 'success',
+      data: {
+        deposits,
+        totalCount,
+        totalPages,
+        currentPage: page
+      }
+    });
+  } catch (err) {
+    console.error('Admin pending deposits error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch pending deposits'
+    });
+  }
+});
+
+// Admin Approved Deposits Endpoint
+app.get('/api/admin/deposits/approved', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 5;
+    const skip = (page - 1) * limit;
+    
+    // Get approved deposits with user info
+    const deposits = await Transaction.find({
+      type: 'deposit',
+      status: 'completed'
+    })
+    .populate('user', 'firstName lastName email')
+    .populate('processedBy', 'name')
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
+    
+    // Get total count for pagination
+    const totalCount = await Transaction.countDocuments({
+      type: 'deposit',
+      status: 'completed'
+    });
+    const totalPages = Math.ceil(totalCount / limit);
+    
+    res.status(200).json({
+      status: 'success',
+      data: {
+        deposits,
+        totalCount,
+        totalPages,
+        currentPage: page
+      }
+    });
+  } catch (err) {
+    console.error('Admin approved deposits error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch approved deposits'
+    });
+  }
+});
+
+// Admin Rejected Deposits Endpoint
+app.get('/api/admin/deposits/rejected', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 5;
+    const skip = (page - 1) * limit;
+    
+    // Get rejected deposits with user info
+    const deposits = await Transaction.find({
+      type: 'deposit',
+      status: 'failed'
+    })
+    .populate('user', 'firstName lastName email')
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
+    
+    // Get total count for pagination
+    const totalCount = await Transaction.countDocuments({
+      type: 'deposit',
+      status: 'failed'
+    });
+    const totalPages = Math.ceil(totalCount / limit);
+    
+    res.status(200).json({
+      status: 'success',
+      data: {
+        deposits,
+        totalCount,
+        totalPages,
+        currentPage: page
+      }
+    });
+  } catch (err) {
+    console.error('Admin rejected deposits error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch rejected deposits'
+    });
+  }
+});
+
+// Admin Pending Withdrawals Endpoint
+app.get('/api/admin/withdrawals/pending', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 5;
+    const skip = (page - 1) * limit;
+    
+    // Get pending withdrawals with user info
+    const withdrawals = await Transaction.find({
+      type: 'withdrawal',
+      status: 'pending'
+    })
+    .populate('user', 'firstName lastName email')
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
+    
+    // Get total count for pagination
+    const totalCount = await Transaction.countDocuments({
+      type: 'withdrawal',
+      status: 'pending'
+    });
+    const totalPages = Math.ceil(totalCount / limit);
+    
+    res.status(200).json({
+      status: 'success',
+      data: {
+        withdrawals,
+        totalCount,
+        totalPages,
+        currentPage: page
+      }
+    });
+  } catch (err) {
+    console.error('Admin pending withdrawals error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch pending withdrawals'
+    });
+  }
+});
+
+// Admin Approved Withdrawals Endpoint
+app.get('/api/admin/withdrawals/approved', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 5;
+    const skip = (page - 1) * limit;
+    
+    // Get approved withdrawals with user info
+    const withdrawals = await Transaction.find({
+      type: 'withdrawal',
+      status: 'completed'
+    })
+    .populate('user', 'firstName lastName email')
+    .populate('processedBy', 'name')
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
+    
+    // Get total count for pagination
+    const totalCount = await Transaction.countDocuments({
+      type: 'withdrawal',
+      status: 'completed'
+    });
+    const totalPages = Math.ceil(totalCount / limit);
+    
+    res.status(200).json({
+      status: 'success',
+      data: {
+        withdrawals,
+        totalCount,
+        totalPages,
+        currentPage: page
+      }
+    });
+  } catch (err) {
+    console.error('Admin approved withdrawals error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch approved withdrawals'
+    });
+  }
+});
+
+// Admin Rejected Withdrawals Endpoint
+app.get('/api/admin/withdrawals/rejected', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 5;
+    const skip = (page - 1) * limit;
+    
+    // Get rejected withdrawals with user info
+    const withdrawals = await Transaction.find({
+      type: 'withdrawal',
+      status: 'failed'
+    })
+    .populate('user', 'firstName lastName email')
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
+    
+    // Get total count for pagination
+    const totalCount = await Transaction.countDocuments({
+      type: 'withdrawal',
+      status: 'failed'
+    });
+    const totalPages = Math.ceil(totalCount / limit);
+    
+    res.status(200).json({
+      status: 'success',
+      data: {
+        withdrawals,
+        totalCount,
+        totalPages,
+        currentPage: page
+      }
+    });
+  } catch (err) {
+    console.error('Admin rejected withdrawals error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch rejected withdrawals'
+    });
+  }
+});
+
+
 // Admin All Transactions Endpoint
 app.get('/api/admin/transactions', adminProtect, async (req, res) => {
   try {
@@ -9986,12 +9685,309 @@ app.put('/api/admin/users/:id', adminProtect, [
 });
 
 
+// Admin Get Deposit Details Endpoint
+app.get('/api/admin/deposits/:id', adminProtect, async (req, res) => {
+  try {
+    const deposit = await Transaction.findById(req.params.id)
+      .populate('user', 'firstName lastName email')
+      .lean();
+    
+    if (!deposit || deposit.type !== 'deposit') {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Deposit not found'
+      });
+    }
+    
+    res.status(200).json({
+      status: 'success',
+      data: { deposit }
+    });
+  } catch (err) {
+    console.error('Admin get deposit error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch deposit details'
+    });
+  }
+});
+
+// Admin Approve Deposit Endpoint
+app.post('/api/admin/deposits/:id/approve', adminProtect, [
+  body('notes').optional().trim()
+], async (req, res) => {
+  try {
+    const { notes } = req.body;
+    
+    // Find deposit
+    const deposit = await Transaction.findById(req.params.id)
+      .populate('user');
+    
+    if (!deposit || deposit.type !== 'deposit') {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Deposit not found'
+      });
+    }
+    
+    if (deposit.status !== 'pending') {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Deposit is not pending approval'
+      });
+    }
+    
+    // Find user
+    const user = await User.findById(deposit.user._id);
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+    
+    // Update user balance
+    user.balances.main += deposit.amount;
+    await user.save();
+    
+    // Update deposit status
+    deposit.status = 'completed';
+    deposit.processedBy = req.admin._id;
+    deposit.processedAt = new Date();
+    deposit.adminNotes = notes;
+    await deposit.save();
+    
+    res.status(200).json({
+      status: 'success',
+      message: 'Deposit approved successfully'
+    });
+
+
+await sendAutomatedEmail(user, 'deposit_received', {
+  amount: deposit.amount,
+  method: deposit.method,
+  reference: deposit.reference,
+  newBalance: user.balances.main
+});
+    
+    await logActivity('approve-deposit', 'transaction', deposit._id, req.admin._id, 'Admin', req, {
+      amount: deposit.amount,
+      userId: user._id
+    });
+  } catch (err) {
+    console.error('Admin approve deposit error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to approve deposit'
+    });
+  }
+});
+
+// Admin Reject Deposit Endpoint
+app.post('/api/admin/deposits/:id/reject', adminProtect, [
+  body('rejectionReason').trim().notEmpty().withMessage('Rejection reason is required')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        status: 'fail',
+        errors: errors.array()
+      });
+    }
+    
+    const { rejectionReason } = req.body;
+    
+    // Find deposit
+    const deposit = await Transaction.findById(req.params.id);
+    
+    if (!deposit || deposit.type !== 'deposit') {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Deposit not found'
+      });
+    }
+    
+    if (deposit.status !== 'pending') {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Deposit is not pending approval'
+      });
+    }
+    
+    // Update deposit status
+    deposit.status = 'failed';
+    deposit.adminNotes = rejectionReason;
+    await deposit.save();
+    
+    res.status(200).json({
+      status: 'success',
+      message: 'Deposit rejected successfully'
+    });
+    
+    await logActivity('reject-deposit', 'transaction', deposit._id, req.admin._id, 'Admin', req, {
+      amount: deposit.amount,
+      reason: rejectionReason
+    });
+  } catch (err) {
+    console.error('Admin reject deposit error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to reject deposit'
+    });
+  }
+});
+
+// Admin Get Withdrawal Details Endpoint
+app.get('/api/admin/withdrawals/:id', adminProtect, async (req, res) => {
+  try {
+    const withdrawal = await Transaction.findById(req.params.id)
+      .populate('user', 'firstName lastName email')
+      .lean();
+    
+    if (!withdrawal || withdrawal.type !== 'withdrawal') {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Withdrawal not found'
+      });
+    }
+    
+    res.status(200).json({
+      status: 'success',
+      data: { withdrawal }
+    });
+  } catch (err) {
+    console.error('Admin get withdrawal error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch withdrawal details'
+    });
+  }
+});
+
+// Admin Approve Withdrawal Endpoint
+app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
+  body('notes').optional().trim()
+], async (req, res) => {
+  try {
+    const { notes } = req.body;
+    
+    // Find withdrawal
+    const withdrawal = await Transaction.findById(req.params.id);
+    
+    if (!withdrawal || withdrawal.type !== 'withdrawal') {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Withdrawal not found'
+      });
+    }
+    
+    if (withdrawal.status !== 'pending') {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Withdrawal is not pending approval'
+      });
+    }
+    
+    // Update withdrawal status
+    withdrawal.status = 'completed';
+    withdrawal.processedBy = req.admin._id;
+    withdrawal.processedAt = new Date();
+    withdrawal.adminNotes = notes;
+    await withdrawal.save();
+    
+    res.status(200).json({
+      status: 'success',
+      message: 'Withdrawal approved successfully'
+    });
+    
+    await logActivity('approve-withdrawal', 'transaction', withdrawal._id, req.admin._id, 'Admin', req, {
+      amount: withdrawal.amount,
+      userId: withdrawal.user
+    });
+  } catch (err) {
+    console.error('Admin approve withdrawal error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to approve withdrawal'
+    });
+  }
+});
 
 
 
 
 
 
+// CORRECTED Admin Reject Withdrawal Endpoint
+app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
+  body('reason').trim().notEmpty().withMessage('Rejection reason is required')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        status: 'fail',
+        errors: errors.array()
+      });
+    }
+    
+    const { reason } = req.body;
+    
+    // Find withdrawal
+    const withdrawal = await Transaction.findById(req.params.id)
+      .populate('user');
+    
+    if (!withdrawal || withdrawal.type !== 'withdrawal') {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Withdrawal not found'
+      });
+    }
+    
+    if (withdrawal.status !== 'pending') {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Withdrawal is not pending approval'
+      });
+    }
+    
+    // Find user
+    const user = await User.findById(withdrawal.user._id);
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+    
+    // Return funds to user balance
+    user.balances.matured += withdrawal.amount;
+    await user.save();
+    
+    // Update withdrawal status
+    withdrawal.status = 'failed';
+    withdrawal.adminNotes = reason; // Changed from rejectionReason to reason
+    await withdrawal.save();
+    
+    res.status(200).json({
+      status: 'success',
+      message: 'Withdrawal rejected successfully'
+    });
+    
+    await logActivity('reject-withdrawal', 'transaction', withdrawal._id, req.admin._id, 'Admin', req, {
+      amount: withdrawal.amount,
+      reason: reason,
+      userId: user._id
+    });
+  } catch (err) {
+    console.error('Admin reject withdrawal error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to reject withdrawal'
+    });
+  }
+});
 
 
 
@@ -14525,6 +14521,185 @@ app.post('/api/auth/send-otp', [
 
 
 
+// OTP Verification Endpoint - FIXED to use exact email matching
+app.post('/api/auth/verify-otp', [
+  body('email').isEmail().withMessage('Please provide a valid email'),
+  body('otp').isLength({ min: 6, max: 6 }).withMessage('OTP must be 6 digits')
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      status: 'fail',
+      message: 'Please enter a valid 6-digit OTP code'
+    });
+  }
+
+  try {
+    const { email, otp } = req.body;
+    const token = req.headers.authorization?.replace('Bearer ', '');
+
+    if (!token) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Authentication required. Please try logging in again.'
+      });
+    }
+
+    // Verify temporary token
+    let decoded;
+    try {
+      decoded = verifyJWT(token);
+    } catch (err) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Session expired. Please try logging in again.'
+      });
+    }
+
+    // Find user WITHOUT password selection to include Google users
+    const user = await User.findById(decoded.id).select('-password');
+    
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+
+    // FIXED: Compare EXACT emails without any normalization
+    console.log('Email comparison (exact match):', {
+      userEmail: user.email,
+      inputEmail: email,
+      match: user.email === email
+    });
+
+    if (user.email !== email) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Email does not match user account'
+      });
+    }
+
+    // FIXED: Look for OTP with EXACT email only
+    const otpRecord = await OTP.findOne({
+      email: email, // Exact match only
+      otp,
+      used: false,
+      expiresAt: { $gt: new Date() }
+    });
+
+    if (!otpRecord) {
+      // Increment attempts for exact email
+      await OTP.updateMany(
+        { 
+          email: email, // Exact match only
+          otp, 
+          used: false 
+        },
+        { $inc: { attempts: 1 } }
+      );
+
+      // Check if max attempts reached for exact email
+      const failedAttempts = await OTP.countDocuments({
+        email: email, // Exact match only
+        used: false,
+        createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+        attempts: { $gte: 5 }
+      });
+
+      if (failedAttempts >= 5) {
+        await User.findByIdAndUpdate(user._id, {
+          status: 'suspended',
+          suspensionLiftAt: new Date(Date.now() + 24 * 60 * 60 * 1000)
+        });
+
+        return res.status(429).json({
+          status: 'fail',
+          message: 'Too many failed attempts. Account suspended for 24 hours.'
+        });
+      }
+
+      // Check if OTP exists but is expired for exact email
+      const expiredOtp = await OTP.findOne({
+        email: email, // Exact match only
+        otp,
+        used: false,
+        expiresAt: { $lte: new Date() }
+      });
+
+      if (expiredOtp) {
+        return res.status(400).json({
+          status: 'fail',
+          message: 'Verification code has expired. Please request a new one.'
+        });
+      }
+
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid verification code. Please try again.'
+      });
+    }
+
+    // Mark OTP as used
+    otpRecord.used = true;
+    await otpRecord.save();
+
+    // Update user verification status if this was for signup
+    if (!user.isVerified) {
+      user.isVerified = true;
+      await user.save();
+    }
+
+    // Generate final JWT token
+    const finalToken = generateJWT(user._id);
+
+    // Update last login
+    user.lastLogin = new Date();
+    const deviceInfo = await getUserDeviceInfo(req);
+    user.loginHistory.push(deviceInfo);
+    await user.save();
+
+    // Set cookie
+    res.cookie('jwt', finalToken, {
+      expires: new Date(Date.now() + 2 * 60 * 60 * 1000),
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict'
+    });
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Verification successful! Redirecting to dashboard...',
+      token: finalToken,
+      data: {
+        user: {
+          id: user._id,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          email: user.email, // Return the exact email from database
+          isVerified: user.isVerified,
+          hasGoogleAuth: !!user.googleId
+        }
+      }
+    });
+
+    await logActivity('otp_verified', 'otp', otpRecord._id, user._id, 'User', req, {
+      type: otpRecord.type,
+      isGoogleUser: !!user.googleId,
+      emailUsed: email,
+      exactMatch: true
+    });
+
+  } catch (err) {
+    console.error('Verify OTP error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred during verification. Please try again.'
+    });
+  }
+});
+
+
 
 
 
@@ -17829,688 +18004,8 @@ app.post('/api/withdrawals/confirm-gas-payment', protect, async (req, res) => {
 
 
 
-// =============================================
-// GET USER ORDERS ENDPOINT - Matches frontend expectations exactly
-// =============================================
-app.get('/api/trading/orders', protect, async (req, res) => {
-  try {
-    const userId = req.user._id;
-    
-    // Fetch user's orders from UserOrder model
-    const userOrders = await UserOrder.find({ user: userId })
-      .sort({ createdAt: -1 })
-      .lean();
 
-    // Format orders to match the exact structure expected by frontend
-    const formattedOrders = [];
 
-    userOrders.forEach(order => {
-      formattedOrders.push({
-        id: order._id,
-        _id: order._id,
-        symbol: order.symbol,
-        baseAsset: order.baseAsset || order.symbol.replace('USDT', ''),
-        quoteAsset: order.quoteAsset || 'USDT',
-        side: order.type,
-        type: order.orderType,
-        price: order.price,
-        amount: order.amount,
-        filled: order.filled || 0,
-        remaining: order.remaining || order.amount,
-        total: order.total,
-        status: order.status === 'completed' ? 'filled' : order.status,
-        createdAt: order.createdAt,
-        updatedAt: order.updatedAt,
-        fromWallets: order.fromWallets || { main: 0, matured: 0 },
-        transactionId: order.transactionId,
-        assetBalanceSource: order.assetBalanceSource,
-        assetBalanceUsed: order.assetBalanceUsed
-      });
-    });
-
-    // Log activity
-    await logActivity('user_orders_fetched', 'order', userId, userId, 'User', req, {
-      orderCount: formattedOrders.length
-    });
-
-    // Send response in exact format expected by frontend
-    res.status(200).json({
-      status: 'success',
-      results: formattedOrders.length,
-      data: formattedOrders
-    });
-
-  } catch (err) {
-    console.error('Error fetching user orders:', err);
-    
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch user orders'
-    });
-  }
-});
-
-
-
-
-
-
-
-
-
-
-
-
-// =============================================
-// GET USER TRADES ENDPOINT - Matches frontend expectations exactly
-// =============================================
-app.get('/api/trading/trades', protect, async (req, res) => {
-  try {
-    const userId = req.user._id;
-    
-    // Fetch all completed trades for this user
-    const allTrades = [];
-    
-    // Get completed Buy orders
-    const buyTrades = await Buy.find({ 
-      user: userId,
-      status: 'completed'
-    }).lean();
-    
-    // Get completed Sell orders
-    const sellTrades = await Sell.find({ 
-      user: userId,
-      status: 'completed'
-    }).lean();
-    
-    // Get completed UserOrders
-    const userOrderTrades = await UserOrder.find({ 
-      user: userId,
-      status: { $in: ['completed', 'filled'] }
-    }).lean();
-    
-    // Get recent trades from RecentTrade model
-    const recentTrades = await RecentTrade.find({ 
-      userId: userId 
-    }).lean();
-
-    // Format Buy trades
-    buyTrades.forEach(trade => {
-      allTrades.push({
-        id: trade._id,
-        _id: trade._id,
-        symbol: `${trade.asset}USDT`,
-        baseAsset: trade.asset,
-        quoteAsset: 'USDT',
-        side: 'buy',
-        type: 'limit',
-        price: trade.price,
-        amount: trade.assetAmount,
-        total: trade.total,
-        time: trade.createdAt,
-        createdAt: trade.createdAt,
-        isBuyerMaker: true,
-        transactionId: trade.transactionId,
-        status: 'filled'
-      });
-    });
-
-    // Format Sell trades
-    sellTrades.forEach(trade => {
-      allTrades.push({
-        id: trade._id,
-        _id: trade._id,
-        symbol: `${trade.asset}USDT`,
-        baseAsset: trade.asset,
-        quoteAsset: 'USDT',
-        side: 'sell',
-        type: 'limit',
-        price: trade.price,
-        amount: trade.assetAmount,
-        total: trade.total,
-        time: trade.createdAt,
-        createdAt: trade.createdAt,
-        isBuyerMaker: false,
-        transactionId: trade.transactionId,
-        status: 'filled',
-        profitLoss: trade.profitLoss || 0,
-        profitLossPercentage: trade.profitLossPercentage || 0
-      });
-    });
-
-    // Format UserOrder trades
-    userOrderTrades.forEach(trade => {
-      allTrades.push({
-        id: trade._id,
-        _id: trade._id,
-        symbol: trade.symbol,
-        baseAsset: trade.baseAsset || trade.symbol.replace('USDT', ''),
-        quoteAsset: trade.quoteAsset || 'USDT',
-        side: trade.type,
-        type: trade.orderType,
-        price: trade.price,
-        amount: trade.amount,
-        total: trade.total,
-        filled: trade.filled || trade.amount,
-        time: trade.createdAt,
-        createdAt: trade.createdAt,
-        isBuyerMaker: trade.type === 'buy',
-        transactionId: trade.transactionId,
-        status: 'filled'
-      });
-    });
-
-    // Format RecentTrade trades
-    recentTrades.forEach(trade => {
-      allTrades.push({
-        id: trade._id,
-        _id: trade._id,
-        symbol: `${trade.symbol}USDT`,
-        baseAsset: trade.symbol,
-        quoteAsset: 'USDT',
-        side: trade.type,
-        type: 'market',
-        price: trade.price,
-        amount: trade.amount,
-        total: trade.total,
-        time: trade.timestamp,
-        createdAt: trade.timestamp,
-        isBuyerMaker: trade.type === 'buy',
-        orderId: trade.orderId,
-        status: 'filled'
-      });
-    });
-
-    // Sort by time descending (newest first)
-    allTrades.sort((a, b) => new Date(b.time || b.createdAt) - new Date(a.time || a.createdAt));
-
-    // Log activity
-    await logActivity('user_trades_fetched', 'trade', userId, userId, 'User', req, {
-      tradeCount: allTrades.length
-    });
-
-    // Send response in exact format expected by frontend
-    res.status(200).json({
-      status: 'success',
-      results: allTrades.length,
-      data: allTrades
-    });
-
-  } catch (err) {
-    console.error('Error fetching user trades:', err);
-    
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch user trades'
-    });
-  }
-});
-
-
-
-
-
-
-
-// =============================================
-// GET SINGLE ORDER ENDPOINT
-// =============================================
-app.get('/api/trading/orders/:orderId', protect, async (req, res) => {
-  try {
-    const userId = req.user._id;
-    const { orderId } = req.params;
-
-    // Try to find order in UserOrder model
-    let order = await UserOrder.findOne({ 
-      _id: orderId,
-      user: userId 
-    }).lean();
-
-    if (!order) {
-      // Try Buy model
-      order = await Buy.findOne({ 
-        _id: orderId,
-        user: userId 
-      }).lean();
-    }
-
-    if (!order) {
-      // Try Sell model
-      order = await Sell.findOne({ 
-        _id: orderId,
-        user: userId 
-      }).lean();
-    }
-
-    if (!order) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'Order not found'
-      });
-    }
-
-    res.status(200).json({
-      status: 'success',
-      data: order
-    });
-
-  } catch (err) {
-    console.error('Error fetching order:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch order'
-    });
-  }
-});
-
-
-
-
-
-// =============================================
-// CANCEL ORDER ENDPOINT
-// =============================================
-app.delete('/api/trading/orders/:orderId', protect, async (req, res) => {
-  try {
-    const userId = req.user._id;
-    const { orderId } = req.params;
-
-    // Try to cancel in UserOrder model first
-    let order = await UserOrder.findOne({ 
-      _id: orderId,
-      user: userId,
-      status: { $in: ['pending', 'partial'] }
-    });
-
-    if (order) {
-      order.status = 'cancelled';
-      await order.save();
-      
-      await logActivity('order_cancelled', 'order', orderId, userId, 'User', req, {
-        orderType: 'UserOrder',
-        symbol: order.symbol
-      });
-
-      return res.status(200).json({
-        status: 'success',
-        message: 'Order cancelled successfully'
-      });
-    }
-
-    // Try Buy model
-    let buyOrder = await Buy.findOne({ 
-      _id: orderId,
-      user: userId,
-      status: 'pending'
-    });
-
-    if (buyOrder) {
-      buyOrder.status = 'cancelled';
-      await buyOrder.save();
-      
-      await logActivity('order_cancelled', 'order', orderId, userId, 'User', req, {
-        orderType: 'Buy',
-        asset: buyOrder.asset
-      });
-
-      return res.status(200).json({
-        status: 'success',
-        message: 'Buy order cancelled successfully'
-      });
-    }
-
-    // Try Sell model
-    let sellOrder = await Sell.findOne({ 
-      _id: orderId,
-      user: userId,
-      status: 'pending'
-    });
-
-    if (sellOrder) {
-      sellOrder.status = 'cancelled';
-      await sellOrder.save();
-      
-      await logActivity('order_cancelled', 'order', orderId, userId, 'User', req, {
-        orderType: 'Sell',
-        asset: sellOrder.asset
-      });
-
-      return res.status(200).json({
-        status: 'success',
-        message: 'Sell order cancelled successfully'
-      });
-    }
-
-    res.status(404).json({
-      status: 'error',
-      message: 'Order not found or cannot be cancelled'
-    });
-
-  } catch (err) {
-    console.error('Error cancelling order:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to cancel order'
-    });
-  }
-});
-
-
-
-
-// =============================================
-// CANCEL ALL ORDERS ENDPOINT
-// =============================================
-app.post('/api/trading/orders/cancel-all', protect, async (req, res) => {
-  try {
-    const userId = req.user._id;
-
-    // Cancel all pending/partial UserOrders
-    await UserOrder.updateMany(
-      { 
-        user: userId,
-        status: { $in: ['pending', 'partial'] }
-      },
-      { 
-        status: 'cancelled'
-      }
-    );
-
-    // Cancel all pending Buy orders
-    await Buy.updateMany(
-      { 
-        user: userId,
-        status: 'pending'
-      },
-      { 
-        status: 'cancelled'
-      }
-    );
-
-    // Cancel all pending Sell orders
-    await Sell.updateMany(
-      { 
-        user: userId,
-        status: 'pending'
-      },
-      { 
-        status: 'cancelled'
-      }
-    );
-
-    await logActivity('all_orders_cancelled', 'order', userId, userId, 'User', req);
-
-    res.status(200).json({
-      status: 'success',
-      message: 'All open orders cancelled successfully'
-    });
-
-  } catch (err) {
-    console.error('Error cancelling all orders:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to cancel orders'
-    });
-  }
-});
-
-
-
-
-
-// =============================================
-// BUY ORDER ENDPOINT - WITH DETAILED DEBUG LOGGING
-// =============================================
-app.post('/api/trading/orders/buy', protect, async (req, res) => {
-  try {
-    console.log('\n========== BUY ORDER DEBUG ==========');
-    console.log('1. Request received at:', new Date().toISOString());
-    console.log('2. User ID:', req.user?._id);
-    console.log('3. Request body:', JSON.stringify(req.body, null, 2));
-    
-    const userId = req.user._id;
-    const { 
-      symbol, 
-      baseAsset, 
-      quoteAsset, 
-      side, 
-      type, 
-      price, 
-      amount, 
-      total,
-      useMaturedBalance,
-      timestamp 
-    } = req.body;
-
-    // ========== STEP-BY-STEP VALIDATION ==========
-    console.log('\n--- VALIDATION STEP 1: Required Fields ---');
-    
-    // Check symbol
-    if (!symbol) {
-      console.log('❌ FAILED: symbol is missing');
-      return res.status(400).json({ 
-        status: 'error', 
-        message: 'symbol is required',
-        field: 'symbol',
-        received: req.body 
-      });
-    }
-    console.log('✅ PASSED: symbol =', symbol);
-
-    // Check baseAsset
-    if (!baseAsset) {
-      console.log('❌ FAILED: baseAsset is missing');
-      return res.status(400).json({ 
-        status: 'error', 
-        message: 'baseAsset is required',
-        field: 'baseAsset',
-        received: req.body 
-      });
-    }
-    console.log('✅ PASSED: baseAsset =', baseAsset);
-
-    // Check amount
-    if (!amount && amount !== 0) {
-      console.log('❌ FAILED: amount is missing');
-      return res.status(400).json({ 
-        status: 'error', 
-        message: 'amount is required',
-        field: 'amount',
-        received: req.body 
-      });
-    }
-    console.log('✅ PASSED: amount =', amount, '| type:', typeof amount);
-
-    // Check price
-    if (!price && price !== 0) {
-      console.log('❌ FAILED: price is missing');
-      return res.status(400).json({ 
-        status: 'error', 
-        message: 'price is required',
-        field: 'price',
-        received: req.body 
-      });
-    }
-    console.log('✅ PASSED: price =', price, '| type:', typeof price);
-
-    // Check total
-    if (!total && total !== 0) {
-      console.log('❌ FAILED: total is missing');
-      return res.status(400).json({ 
-        status: 'error', 
-        message: 'total is required',
-        field: 'total',
-        received: req.body 
-      });
-    }
-    console.log('✅ PASSED: total =', total, '| type:', typeof total);
-
-    console.log('\n--- VALIDATION STEP 2: Value Checks ---');
-
-    // Convert string values to numbers if needed
-    const numAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
-    const numPrice = typeof price === 'string' ? parseFloat(price) : price;
-    const numTotal = typeof total === 'string' ? parseFloat(total) : total;
-
-    console.log('Converted values:', {
-      amount: numAmount,
-      price: numPrice,
-      total: numTotal
-    });
-
-    // Check if values are valid numbers
-    if (isNaN(numAmount) || numAmount <= 0) {
-      console.log('❌ FAILED: Invalid amount value');
-      return res.status(400).json({ 
-        status: 'error', 
-        message: 'amount must be a positive number',
-        received: amount,
-        converted: numAmount 
-      });
-    }
-    console.log('✅ PASSED: amount is valid');
-
-    if (isNaN(numPrice) || numPrice <= 0) {
-      console.log('❌ FAILED: Invalid price value');
-      return res.status(400).json({ 
-        status: 'error', 
-        message: 'price must be a positive number',
-        received: price,
-        converted: numPrice 
-      });
-    }
-    console.log('✅ PASSED: price is valid');
-
-    if (isNaN(numTotal) || numTotal <= 0) {
-      console.log('❌ FAILED: Invalid total value');
-      return res.status(400).json({ 
-        status: 'error', 
-        message: 'total must be a positive number',
-        received: total,
-        converted: numTotal 
-      });
-    }
-    console.log('✅ PASSED: total is valid');
-
-    // Verify total matches price * amount (with small tolerance for floating point)
-    const calculatedTotal = numPrice * numAmount;
-    const difference = Math.abs(calculatedTotal - numTotal);
-    if (difference > 0.01) { // Allow 1 cent difference due to rounding
-      console.log('❌ FAILED: Total mismatch');
-      console.log(`   price(${numPrice}) * amount(${numAmount}) = ${calculatedTotal}`);
-      console.log(`   provided total = ${numTotal}`);
-      console.log(`   difference = ${difference}`);
-      return res.status(400).json({ 
-        status: 'error', 
-        message: 'total must equal price * amount',
-        calculated: calculatedTotal,
-        provided: numTotal,
-        difference: difference
-      });
-    }
-    console.log('✅ PASSED: total matches price * amount');
-
-    console.log('\n--- VALIDATION STEP 3: Minimum Trade Amount ---');
-
-    const MIN_TRADE_AMOUNT = 10;
-    if (numTotal < MIN_TRADE_AMOUNT) {
-      console.log(`❌ FAILED: Total $${numTotal} is less than minimum $${MIN_TRADE_AMOUNT}`);
-      return res.status(400).json({
-        status: 'error',
-        message: `Minimum trade amount is $${MIN_TRADE_AMOUNT}. Your total is $${numTotal.toFixed(2)}`
-      });
-    }
-    console.log(`✅ PASSED: Total $${numTotal} meets minimum`);
-
-    console.log('\n--- VALIDATION STEP 4: Asset Validation ---');
-
-    const normalizedAsset = baseAsset.toLowerCase();
-    console.log('Normalized asset:', normalizedAsset);
-
-    // List of supported assets (from your schema)
-    const supportedAssets = [
-      'btc', 'eth', 'usdt', 'bnb', 'sol', 'usdc', 'xrp', 'doge', 'ada', 'shib',
-      'avax', 'dot', 'trx', 'link', 'matic', 'wbtc', 'ltc', 'near', 'uni', 'bch',
-      'xlm', 'atom', 'xmr', 'flow', 'vet', 'fil', 'theta', 'hbar', 'ftm', 'xtz'
-    ];
-
-    if (!supportedAssets.includes(normalizedAsset)) {
-      console.log('❌ FAILED: Unsupported asset');
-      return res.status(400).json({
-        status: 'error',
-        message: `Unsupported asset: ${baseAsset}. Supported: ${supportedAssets.join(', ')}`
-      });
-    }
-    console.log('✅ PASSED: Asset is supported');
-
-    console.log('\n--- VALIDATION STEP 5: User Balance Check ---');
-
-    const user = await User.findById(userId);
-    if (!user) {
-      console.log('❌ FAILED: User not found');
-      return res.status(404).json({ status: 'error', message: 'User not found' });
-    }
-    console.log('✅ PASSED: User found');
-
-    const mainBalance = user.balances?.main || 0;
-    const maturedBalance = user.balances?.matured || 0;
-    const useMatured = useMaturedBalance === true;
-    const availableBalance = mainBalance + (useMatured ? maturedBalance : 0);
-
-    console.log('User balances:', {
-      main: mainBalance,
-      matured: maturedBalance,
-      useMatured: useMatured,
-      available: availableBalance,
-      needed: numTotal
-    });
-
-    if (numTotal > availableBalance) {
-      console.log('❌ FAILED: Insufficient balance');
-      return res.status(400).json({
-        status: 'error',
-        message: `Insufficient balance. You have $${availableBalance.toFixed(2)} USDT available but need $${numTotal.toFixed(2)}`,
-        balances: { main: mainBalance, matured: maturedBalance, available: availableBalance }
-      });
-    }
-    console.log('✅ PASSED: Sufficient balance');
-
-    console.log('\n✅✅✅ ALL VALIDATIONS PASSED! Processing order...');
-    
-    // ========== PROCESS THE ORDER ==========
-    // (Continue with your order processing code here)
-    
-    // For now, return success message with debug info
-    return res.status(200).json({
-      status: 'success',
-      message: 'All validations passed! Order would be processed.',
-      debug: {
-        received: req.body,
-        normalized: {
-          asset: normalizedAsset,
-          amount: numAmount,
-          price: numPrice,
-          total: numTotal
-        },
-        user: {
-          id: userId,
-          balances: { main: mainBalance, matured: maturedBalance, available: availableBalance }
-        }
-      }
-    });
-
-  } catch (err) {
-    console.error('\n❌❌❌ UNHANDLED ERROR:', err);
-    console.error('Error stack:', err.stack);
-    
-    res.status(500).json({
-      status: 'error',
-      message: 'Server error processing buy order',
-      error: process.env.NODE_ENV === 'development' ? err.message : undefined,
-      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
-    });
-  }
-});
 
 
 
