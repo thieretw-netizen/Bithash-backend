@@ -4803,117 +4803,7 @@ const getDeviceType = (req) => {
   return 'desktop';
 };
 
-// Helper function to log user activity
-const logUserActivity = async (req, action, status = 'success', metadata = {}, user = null) => {
-  try {
-    const deviceInfo = await getUserDeviceInfo(req);
-    
-    // Get user if not provided but available in request
-    if (!user && req.user) {
-      user = req.user;
-    }
-    
-    if (!user) {
-      console.log('Cannot log activity: No user found');
-      return;
-    }
 
-    // Parse device info for detailed logging
-    const parsedDevice = {
-      type: deviceInfo.deviceInfo.type,
-      os: `${deviceInfo.deviceInfo.os.name} ${deviceInfo.deviceInfo.os.version}`,
-      browser: `${deviceInfo.deviceInfo.browser.name} ${deviceInfo.deviceInfo.browser.version}`,
-      model: deviceInfo.deviceInfo.model,
-      vendor: deviceInfo.deviceInfo.vendor
-    };
-
-    // Enhanced location data
-    const locationData = {
-      ip: deviceInfo.ip,
-      location: deviceInfo.location,
-      isPublicIP: deviceInfo.isPublicIP,
-      userAgent: deviceInfo.device,
-      detectedAt: new Date()
-    };
-    
-    await UserLog.create({
-      user: user._id,
-      username: user.firstName + ' ' + user.lastName,
-      email: user.email,
-      userFullName: user.firstName + ' ' + user.lastName,
-      action: action,
-      actionCategory: getActionCategory(action),
-      ipAddress: locationData.ip,
-      userAgent: locationData.userAgent,
-      deviceInfo: {
-        type: parsedDevice.type,
-        os: { name: deviceInfo.deviceInfo.os.name, version: deviceInfo.deviceInfo.os.version },
-        browser: { name: deviceInfo.deviceInfo.browser.name, version: deviceInfo.deviceInfo.browser.version },
-        platform: parsedDevice.platform,
-        model: parsedDevice.model,
-        vendor: parsedDevice.vendor,
-        language: req.headers['accept-language'],
-        timezone: req.headers['timezone']
-      },
-      location: {
-        ip: locationData.ip,
-        country: { name: locationData.location.split(',')[2]?.trim() || 'Unknown' },
-        region: { name: locationData.location.split(',')[1]?.trim() || 'Unknown' },
-        city: locationData.location.split(',')[0]?.trim() || 'Unknown',
-        timezone: req.headers['timezone']
-      },
-      status: status,
-      metadata: metadata,
-      sessionId: req.session?.id,
-      requestId: req.id,
-      riskLevel: status === 'failed' ? 'medium' : 'low'
-    });
-    
-    console.log(`✅ Activity Logged: ${action}`, {
-      user: user.email,
-      location: locationData.location,
-      ip: locationData.ip,
-      device: parsedDevice.model || parsedDevice.type
-    });
-  } catch (err) {
-    console.error('❌ Error logging user activity:', err);
-  }
-};
-
-// Helper function to get action category
-const getActionCategory = (action) => {
-  const categoryMap = {
-    'signup': 'authentication',
-    'login': 'authentication',
-    'logout': 'authentication',
-    'login_attempt': 'authentication',
-    'password_change': 'security',
-    'password_reset': 'security',
-    '2fa_enable': 'security',
-    '2fa_disable': 'security',
-    'deposit_created': 'financial',
-    'deposit_completed': 'financial',
-    'withdrawal_created': 'financial',
-    'withdrawal_completed': 'financial',
-    'investment_created': 'investment',
-    'investment_completed': 'investment',
-    'buy_created': 'financial',
-    'sell_created': 'financial',
-    'profile_update': 'profile',
-    'kyc_submission': 'verification',
-    'referral_joined': 'referral',
-    'admin_login': 'system'
-  };
-  return categoryMap[action] || 'system';
-};
-
-// Helper function to get device type
-const getDeviceType = (req) => {
-  const ua = req.headers['user-agent'] || '';
-  if (ua.includes('Mobile')) return 'mobile';
-  if (ua.includes('Tablet')) return 'tablet';
-  return 'desktop';
-};
 
 
 
@@ -6974,13 +6864,6 @@ const getLocationFromIP = async (ip) => {
     return 'Unknown';
   }
 };
-
-
-
-
-
-
-
 
 
 
