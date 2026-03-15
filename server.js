@@ -5510,13 +5510,12 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
     });
 
 
-    await sendAutomatedEmail(user, 'deposit_received', {
-      req: req,
-      amount: deposit.amount,
-      method: deposit.method,
-      reference: deposit.reference,
-      newBalance: user.balances.main
-    });
+await sendAutomatedEmail(user, 'deposit_received', {
+  amount: deposit.amount,
+  method: deposit.method,
+  reference: deposit.reference,
+  newBalance: user.balances.main
+});
     
     await logActivity('approve-deposit', 'transaction', deposit._id, req.admin._id, 'Admin', req, {
       amount: deposit.amount,
@@ -5547,8 +5546,7 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
     const { rejectionReason } = req.body;
     
     // Find deposit
-    const deposit = await Transaction.findById(req.params.id)
-      .populate('user');
+    const deposit = await Transaction.findById(req.params.id);
     
     if (!deposit || deposit.type !== 'deposit') {
       return res.status(404).json({
@@ -5568,17 +5566,6 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
     deposit.status = 'failed';
     deposit.adminNotes = rejectionReason;
     await deposit.save();
-    
-    // Send rejection email
-    if (deposit.user) {
-      await sendAutomatedEmail(deposit.user, 'deposit_rejected', {
-        req: req,
-        amount: deposit.amount,
-        reason: rejectionReason,
-        method: deposit.method,
-        reference: deposit.reference
-      });
-    }
     
     res.status(200).json({
       status: 'success',
@@ -5651,7 +5638,6 @@ app.get('/api/admin/deposits/:id', adminProtect, async (req, res) => {
     });
   }
 });
-
 
 
 
