@@ -3174,6 +3174,8 @@ const getUserDeviceInfo = async (req) => {
     };
   }
 };
+
+// Enhanced logActivity function with location data
 const logActivity = async (action, entity, entityId, performedBy, performedByModel, req, changes = {}) => {
   try {
     const deviceInfo = await getUserDeviceInfo(req);
@@ -3211,6 +3213,78 @@ const logActivity = async (action, entity, entityId, performedBy, performedByMod
     });
   } catch (err) {
     console.error('Error logging activity:', err);
+  }
+};
+
+// Enhanced logUserActivity function for UserLog
+const logUserActivity = async (req, action, status = 'success', metadata = {}, user = null) => {
+  try {
+    const deviceInfo = await getUserDeviceInfo(req);
+    
+    // Get detailed device information from user-agent
+    const userAgent = req.headers['user-agent'] || 'Unknown';
+    let deviceType = 'unknown';
+    let os = { name: 'Unknown', version: 'Unknown' };
+    let browser = { name: 'Unknown', version: 'Unknown' };
+    
+    // Simple device type detection
+    if (userAgent.includes('Mobile')) {
+      deviceType = 'mobile';
+    } else if (userAgent.includes('Tablet')) {
+      deviceType = 'tablet';
+    } else if (userAgent.includes('Windows') || userAgent.includes('Mac') || userAgent.includes('Linux')) {
+      deviceType = 'desktop';
+    }
+    
+    // OS detection
+    if (userAgent.includes('Windows')) os.name = 'Windows';
+    else if (userAgent.includes('Mac OS')) os.name = 'macOS';
+    else if (userAgent.includes('Linux')) os.name = 'Linux';
+    else if (userAgent.includes('Android')) os.name = 'Android';
+    else if (userAgent.includes('iOS')) os.name = 'iOS';
+    
+    // Browser detection
+    if (userAgent.includes('Chrome') && !userAgent.includes('Edg')) browser.name = 'Chrome';
+    else if (userAgent.includes('Firefox')) browser.name = 'Firefox';
+    else if (userAgent.includes('Safari') && !userAgent.includes('Chrome')) browser.name = 'Safari';
+    else if (userAgent.includes('Edg')) browser.name = 'Edge';
+    
+    const logData = {
+      user: user ? user._id : metadata.userId,
+      username: user ? `${user.firstName} ${user.lastName}` : metadata.username || 'Unknown',
+      email: user ? user.email : metadata.email || 'Unknown',
+      userFullName: user ? `${user.firstName} ${user.lastName}` : metadata.fullName || 'Unknown',
+      action: action,
+      actionCategory: metadata.category || 'system',
+      ipAddress: deviceInfo.ip,
+      userAgent: userAgent,
+      deviceInfo: {
+        type: deviceType,
+        os: os,
+        browser: browser,
+        platform: os.name,
+        language: req.headers['accept-language']?.split(',')[0] || 'Unknown',
+        timezone: deviceInfo.location.split(',').pop()?.trim() || 'Unknown'
+      },
+      location: {
+        ip: deviceInfo.ip,
+        country: { name: deviceInfo.location.split(',').pop()?.trim() || 'Unknown' },
+        region: { name: deviceInfo.location.split(',')[1]?.trim() || 'Unknown' },
+        city: deviceInfo.location.split(',')[0]?.trim() || 'Unknown'
+      },
+      status: status,
+      metadata: metadata,
+      sessionId: req.session?.id,
+      requestId: uuidv4(),
+      riskLevel: metadata.riskLevel || 'low',
+      isSuspicious: metadata.isSuspicious || false
+    };
+    
+    await UserLog.create(logData);
+    console.log(`User Activity Logged: ${action} for user ${logData.email}`);
+    
+  } catch (err) {
+    console.error('Error logging user activity:', err);
   }
 };
 
@@ -3600,10 +3674,22 @@ const calculateReferralCommissions = async (investment) => {
   }
 };
 
-
-
-
-
+// Helper function to send automated emails for user activities
+const sendAutomatedEmail = async (user, template, data) => {
+  try {
+    await sendProfessionalEmail({
+      email: user.email,
+      template: template,
+      data: {
+        name: user.firstName,
+        ...data
+      }
+    });
+    console.log(`📧 Automated email sent to ${user.email} for ${template}`);
+  } catch (emailError) {
+    console.error(`Failed to send ${template} email:`, emailError);
+  }
+};
 
 
 
@@ -4040,6 +4126,93 @@ const sendProfessionalEmail = async (options) => {
         `
       },
 
+      // INVESTMENT COMPLETED
+      investment_completed: {
+        subject: 'BitHash Capital - Investment Matured Successfully',
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Investment Matured - BitHash Capital</title>
+              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <style>
+                  * { margin: 0; padding: 0; box-sizing: border-box; }
+                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
+                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
+                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #27ae60; }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
+                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
+                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
+                  .content { padding: 40px; background: #ffffff; }
+                  .matured-details { background: #e8f6ef; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #27ae60; }
+                  .detail-item { margin-bottom: 12px; display: flex; justify-content: space-between; }
+                  .detail-label { font-weight: 600; color: #333; }
+                  .detail-value { color: #0a0a0a; font-weight: 500; }
+                  .profit-highlight { color: #27ae60; font-weight: 700; }
+                  .cta-button { background: #f0b90b; color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 20px 0; font-weight: 600; }
+                  .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
+                  .footer-text { font-size: 12px; line-height: 1.5; }
+              </style>
+          </head>
+          <body>
+              <div class="container">
+                  <div class="header">
+                      <div class="logo-container">
+                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
+                          <div class="logo-text">BitHash Capital</div>
+                      </div>
+                  </div>
+                  <div class="content">
+                      <h2>Hello ${data.name},</h2>
+                      <p>Congratulations! Your investment has matured and the returns have been credited to your matured balance.</p>
+                      
+                      <div class="matured-details">
+                          <div class="detail-item">
+                              <span class="detail-label">Investment Plan:</span>
+                              <span class="detail-value">${data.planName}</span>
+                          </div>
+                          <div class="detail-item">
+                              <span class="detail-label">Original Amount:</span>
+                              <span class="detail-value">$${data.amount}</span>
+                          </div>
+                          <div class="detail-item">
+                              <span class="detail-label">Total Return:</span>
+                              <span class="detail-value profit-highlight">$${data.totalReturn}</span>
+                          </div>
+                          <div class="detail-item">
+                              <span class="detail-label">Profit Earned:</span>
+                              <span class="detail-value profit-highlight">$${data.profit}</span>
+                          </div>
+                          <div class="detail-item">
+                              <span class="detail-label">Completion Date:</span>
+                              <span class="detail-value">${new Date(data.completionDate).toLocaleDateString()}</span>
+                          </div>
+                          <div class="detail-item">
+                              <span class="detail-label">New Matured Balance:</span>
+                              <span class="detail-value">$${data.newMaturedBalance}</span>
+                          </div>
+                      </div>
+                      
+                      <p>Your funds are now available in your matured balance. You can reinvest for higher returns or withdraw to your wallet.</p>
+                      
+                      <div style="text-align: center;">
+                          <a href="https://www.bithashcapital.live/investment.html" class="cta-button">Reinvest Now</a>
+                      </div>
+                      
+                      <p>Best regards,<br><strong>BitHash Capital Investment Team</strong></p>
+                  </div>
+                  <div class="footer">
+                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
+                      Professional Bitcoin Mining and Investment Platform</p>
+                  </div>
+              </div>
+          </body>
+          </html>
+        `
+      },
+
       // WITHDRAWAL REQUEST
       withdrawal_request: {
         subject: 'BitHash Capital - Withdrawal Request Received',
@@ -4109,6 +4282,173 @@ const sendProfessionalEmail = async (options) => {
                       </div>
                       
                       <p>If you did not initiate this withdrawal, please contact our security team immediately.</p>
+                      
+                      <p>Best regards,<br><strong>BitHash Capital Finance Team</strong></p>
+                  </div>
+                  <div class="footer">
+                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
+                      Professional Bitcoin Mining and Investment Platform</p>
+                  </div>
+              </div>
+          </body>
+          </html>
+        `
+      },
+
+      // WITHDRAWAL COMPLETED
+      withdrawal_completed: {
+        subject: 'BitHash Capital - Withdrawal Completed',
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Withdrawal Completed - BitHash Capital</title>
+              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <style>
+                  * { margin: 0; padding: 0; box-sizing: border-box; }
+                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
+                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
+                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #27ae60; }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
+                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
+                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
+                  .content { padding: 40px; background: #ffffff; }
+                  .withdrawal-details { background: #e8f6ef; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #27ae60; }
+                  .detail-item { margin-bottom: 12px; display: flex; justify-content: space-between; }
+                  .detail-label { font-weight: 600; color: #333; }
+                  .detail-value { color: #0a0a0a; font-weight: 500; }
+                  .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
+                  .footer-text { font-size: 12px; line-height: 1.5; }
+              </style>
+          </head>
+          <body>
+              <div class="container">
+                  <div class="header">
+                      <div class="logo-container">
+                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
+                          <div class="logo-text">BitHash Capital</div>
+                      </div>
+                  </div>
+                  <div class="content">
+                      <h2>Hello ${data.name},</h2>
+                      <p>Your withdrawal has been successfully completed and the funds have been sent to your designated wallet.</p>
+                      
+                      <div class="withdrawal-details">
+                          <div class="detail-item">
+                              <span class="detail-label">Amount:</span>
+                              <span class="detail-value">$${data.amount}</span>
+                          </div>
+                          <div class="detail-item">
+                              <span class="detail-label">Method:</span>
+                              <span class="detail-value">${data.method}</span>
+                          </div>
+                          <div class="detail-item">
+                              <span class="detail-label">Reference:</span>
+                              <span class="detail-value">${data.reference}</span>
+                          </div>
+                          <div class="detail-item">
+                              <span class="detail-label">Fee:</span>
+                              <span class="detail-value">$${data.fee}</span>
+                          </div>
+                          <div class="detail-item">
+                              <span class="detail-label">Net Amount:</span>
+                              <span class="detail-value">$${data.netAmount}</span>
+                          </div>
+                          <div class="detail-item">
+                              <span class="detail-label">Destination:</span>
+                              <span class="detail-value">${data.destination || data.btcAddress || 'Bank Account'}</span>
+                          </div>
+                          <div class="detail-item">
+                              <span class="detail-label">Transaction Hash:</span>
+                              <span class="detail-value">${data.txHash || 'N/A'}</span>
+                          </div>
+                      </div>
+                      
+                      <p>Thank you for using BitHash Capital. If you have any questions about this transaction, please contact our support team.</p>
+                      
+                      <p>Best regards,<br><strong>BitHash Capital Finance Team</strong></p>
+                  </div>
+                  <div class="footer">
+                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
+                      Professional Bitcoin Mining and Investment Platform</p>
+                  </div>
+              </div>
+          </body>
+          </html>
+        `
+      },
+
+      // DEPOSIT RECEIVED
+      deposit_received: {
+        subject: 'BitHash Capital - Deposit Successfully Received',
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Deposit Received - BitHash Capital</title>
+              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <style>
+                  * { margin: 0; padding: 0; box-sizing: border-box; }
+                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
+                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
+                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #27ae60; }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
+                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
+                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
+                  .content { padding: 40px; background: #ffffff; }
+                  .deposit-details { background: #f8f9fa; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #27ae60; }
+                  .detail-item { margin-bottom: 12px; display: flex; justify-content: space-between; }
+                  .detail-label { font-weight: 600; color: #333; }
+                  .detail-value { color: #0a0a0a; font-weight: 500; }
+                  .cta-button { background: #f0b90b; color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 20px 0; font-weight: 600; }
+                  .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
+                  .footer-text { font-size: 12px; line-height: 1.5; }
+              </style>
+          </head>
+          <body>
+              <div class="container">
+                  <div class="header">
+                      <div class="logo-container">
+                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
+                          <div class="logo-text">BitHash Capital</div>
+                      </div>
+                  </div>
+                  <div class="content">
+                      <h2>Hello ${data.name},</h2>
+                      <p>Your deposit has been successfully received and credited to your account.</p>
+                      
+                      <div class="deposit-details">
+                          <div class="detail-item">
+                              <span class="detail-label">Amount:</span>
+                              <span class="detail-value">$${data.amount}</span>
+                          </div>
+                          <div class="detail-item">
+                              <span class="detail-label">Method:</span>
+                              <span class="detail-value">${data.method}</span>
+                          </div>
+                          <div class="detail-item">
+                              <span class="detail-label">Reference:</span>
+                              <span class="detail-value">${data.reference}</span>
+                          </div>
+                          <div class="detail-item">
+                              <span class="detail-label">Date:</span>
+                              <span class="detail-value">${new Date().toLocaleDateString()}</span>
+                          </div>
+                          <div class="detail-item">
+                              <span class="detail-label">New Balance:</span>
+                              <span class="detail-value">$${data.newBalance}</span>
+                          </div>
+                      </div>
+                      
+                      <p>Your funds are now available for mining investments and other platform activities.</p>
+                      
+                      <div style="text-align: center;">
+                          <a href="https://www.bithashcapital.live/investment.html" class="cta-button">Start Mining</a>
+                      </div>
                       
                       <p>Best regards,<br><strong>BitHash Capital Finance Team</strong></p>
                   </div>
@@ -4206,30 +4546,31 @@ const sendProfessionalEmail = async (options) => {
         `
       },
 
-      // DEPOSIT RECEIVED
-      deposit_received: {
-        subject: 'BitHash Capital - Deposit Successfully Received',
+      // KYC REJECTED
+      kyc_rejected: {
+        subject: 'BitHash Capital - KYC Verification Status',
         html: `
           <!DOCTYPE html>
           <html>
           <head>
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>Deposit Received - BitHash Capital</title>
+              <title>KYC Status - BitHash Capital</title>
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
                   body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
                   .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #27ae60; }
+                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #e74c3c; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
                   .logo-img { width: 40px; height: 40px; border-radius: 50%; }
                   .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: #ffffff; }
-                  .deposit-details { background: #f8f9fa; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #27ae60; }
-                  .detail-item { margin-bottom: 12px; display: flex; justify-content: space-between; }
-                  .detail-label { font-weight: 600; color: #333; }
-                  .detail-value { color: #0a0a0a; font-weight: 500; }
+                  .rejection-message { background: #fee; border: 1px solid #e74c3c; padding: 25px; border-radius: 8px; margin: 25px 0; }
+                  .rejection-reason { background: #f8f9fa; padding: 20px; border-left: 4px solid #e74c3c; margin: 20px 0; }
+                  .steps-list { margin: 25px 0; }
+                  .step-item { display: flex; align-items: center; margin-bottom: 12px; color: #333; }
+                  .step-icon { color: #e74c3c; margin-right: 12px; font-weight: bold; }
                   .cta-button { background: #f0b90b; color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 20px 0; font-weight: 600; }
                   .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
                   .footer-text { font-size: 12px; line-height: 1.5; }
@@ -4245,38 +4586,44 @@ const sendProfessionalEmail = async (options) => {
                   </div>
                   <div class="content">
                       <h2>Hello ${data.name},</h2>
-                      <p>Your deposit has been successfully received and credited to your account.</p>
                       
-                      <div class="deposit-details">
-                          <div class="detail-item">
-                              <span class="detail-label">Amount:</span>
-                              <span class="detail-value">$${data.amount}</span>
-                          </div>
-                          <div class="detail-item">
-                              <span class="detail-label">Method:</span>
-                              <span class="detail-value">${data.method}</span>
-                          </div>
-                          <div class="detail-item">
-                              <span class="detail-label">Reference:</span>
-                              <span class="detail-value">${data.reference}</span>
-                          </div>
-                          <div class="detail-item">
-                              <span class="detail-label">Date:</span>
-                              <span class="detail-value">${new Date().toLocaleDateString()}</span>
-                          </div>
-                          <div class="detail-item">
-                              <span class="detail-label">New Balance:</span>
-                              <span class="detail-value">$${data.newBalance}</span>
-                          </div>
+                      <div class="rejection-message">
+                          <h3 style="color: #e74c3c; margin-bottom: 10px;">KYC Verification Update</h3>
+                          <p>Unfortunately, we were unable to verify your identity at this time.</p>
                       </div>
                       
-                      <p>Your funds are now available for mining investments and other platform activities.</p>
+                      <div class="rejection-reason">
+                          <strong>Reason:</strong> ${data.reason || 'Documents provided were unclear or incomplete'}
+                      </div>
+                      
+                      <p>Please follow these steps to resubmit your verification:</p>
+                      
+                      <div class="steps-list">
+                          <div class="step-item">
+                              <span class="step-icon">1.</span>
+                              <span>Ensure all documents are clear and legible</span>
+                          </div>
+                          <div class="step-item">
+                              <span class="step-icon">2.</span>
+                              <span>Make sure your ID is not expired</span>
+                          </div>
+                          <div class="step-item">
+                              <span class="step-icon">3.</span>
+                              <span>Take photos in good lighting conditions</span>
+                          </div>
+                          <div class="step-item">
+                              <span class="step-icon">4.</span>
+                              <span>Submit all required documents again</span>
+                          </div>
+                      </div>
                       
                       <div style="text-align: center;">
-                          <a href="https://www.bithashcapital.live/investment.html" class="cta-button">Start Mining</a>
+                          <a href="https://www.bithashcapital.live/kyc.html" class="cta-button">Resubmit KYC</a>
                       </div>
                       
-                      <p>Best regards,<br><strong>BitHash Capital Finance Team</strong></p>
+                      <p>If you need assistance, our support team is available 24/7 to help you with the verification process.</p>
+                      
+                      <p>Best regards,<br><strong>BitHash Capital Compliance Team</strong></p>
                   </div>
                   <div class="footer">
                       <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
@@ -4433,6 +4780,343 @@ const sendProfessionalEmail = async (options) => {
           </body>
           </html>
         `
+      },
+
+      // ACCOUNT REACTIVATED
+      account_reactivated: {
+        subject: 'BitHash Capital - Account Reactivated',
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Account Reactivated - BitHash Capital</title>
+              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <style>
+                  * { margin: 0; padding: 0; box-sizing: border-box; }
+                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
+                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
+                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #27ae60; }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
+                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
+                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
+                  .content { padding: 40px; background: #ffffff; }
+                  .success-box { background: #e8f6ef; border: 2px solid #27ae60; padding: 25px; border-radius: 8px; margin: 25px 0; }
+                  .cta-button { background: #f0b90b; color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 20px 0; font-weight: 600; }
+                  .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
+                  .footer-text { font-size: 12px; line-height: 1.5; }
+              </style>
+          </head>
+          <body>
+              <div class="container">
+                  <div class="header">
+                      <div class="logo-container">
+                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
+                          <div class="logo-text">BitHash Capital</div>
+                      </div>
+                  </div>
+                  <div class="content">
+                      <h2>Hello ${data.name},</h2>
+                      
+                      <div class="success-box">
+                          <h3 style="color: #27ae60; margin-bottom: 15px;">Account Reactivated</h3>
+                          <p>Your BitHash Capital account has been successfully reactivated.</p>
+                      </div>
+                      
+                      <p>You can now access all platform features normally, including:</p>
+                      
+                      <ul style="margin: 20px 0; padding-left: 20px;">
+                          <li>Making deposits and withdrawals</li>
+                          <li>Creating new investments</li>
+                          <li>Accessing your referral program</li>
+                          <li>Using all trading features</li>
+                      </ul>
+                      
+                      <div style="text-align: center;">
+                          <a href="https://www.bithashcapital.live/dashboard.html" class="cta-button">Go to Dashboard</a>
+                      </div>
+                      
+                      <p>Thank you for being a valued member of the BitHash Capital community.</p>
+                      
+                      <p>Best regards,<br><strong>BitHash Capital Team</strong></p>
+                  </div>
+                  <div class="footer">
+                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
+                      Professional Bitcoin Mining and Investment Platform</p>
+                  </div>
+              </div>
+          </body>
+          </html>
+        `
+      },
+
+      // PASSWORD CHANGE CONFIRMATION
+      password_changed: {
+        subject: 'BitHash Capital - Password Changed Successfully',
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Password Changed - BitHash Capital</title>
+              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <style>
+                  * { margin: 0; padding: 0; box-sizing: border-box; }
+                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
+                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
+                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #27ae60; }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
+                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
+                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
+                  .content { padding: 40px; background: #ffffff; }
+                  .login-info { background: #f8f9fa; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #27ae60; }
+                  .info-item { margin-bottom: 10px; display: flex; }
+                  .info-label { font-weight: 600; min-width: 120px; color: #333; }
+                  .security-alert { background: #fff8e6; border: 1px solid #f0b90b; padding: 20px; border-radius: 6px; margin: 20px 0; }
+                  .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
+                  .footer-text { font-size: 12px; line-height: 1.5; }
+              </style>
+          </head>
+          <body>
+              <div class="container">
+                  <div class="header">
+                      <div class="logo-container">
+                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
+                          <div class="logo-text">BitHash Capital</div>
+                      </div>
+                  </div>
+                  <div class="content">
+                      <h2>Hello ${data.name},</h2>
+                      <p>Your BitHash Capital account password was successfully changed.</p>
+                      
+                      <div class="login-info">
+                          <div class="info-item">
+                              <span class="info-label">Time:</span>
+                              <span>${new Date().toLocaleString()}</span>
+                          </div>
+                          <div class="info-item">
+                              <span class="info-label">Device:</span>
+                              <span>${data.device || 'Unknown device'}</span>
+                          </div>
+                          <div class="info-item">
+                              <span class="info-label">Location:</span>
+                              <span>${data.location || 'Unknown location'}</span>
+                          </div>
+                          <div class="info-item">
+                              <span class="info-label">IP Address:</span>
+                              <span>${data.ip || 'Unknown'}</span>
+                          </div>
+                      </div>
+                      
+                      <div class="security-alert">
+                          <strong>Security Notice:</strong> If you did not make this change, please contact our support team immediately and secure your account.
+                      </div>
+                      
+                      <p>Best regards,<br><strong>BitHash Capital Security Team</strong></p>
+                  </div>
+                  <div class="footer">
+                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
+                      This is an automated security notification.</p>
+                  </div>
+              </div>
+          </body>
+          </html>
+        `
+      },
+
+      // 2FA ENABLED
+      two_factor_enabled: {
+        subject: 'BitHash Capital - Two-Factor Authentication Enabled',
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>2FA Enabled - BitHash Capital</title>
+              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <style>
+                  * { margin: 0; padding: 0; box-sizing: border-box; }
+                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
+                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
+                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #27ae60; }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
+                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
+                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
+                  .content { padding: 40px; background: #ffffff; }
+                  .security-tips { background: #e8f6ef; padding: 25px; border-radius: 8px; margin: 25px 0; }
+                  .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
+                  .footer-text { font-size: 12px; line-height: 1.5; }
+              </style>
+          </head>
+          <body>
+              <div class="container">
+                  <div class="header">
+                      <div class="logo-container">
+                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
+                          <div class="logo-text">BitHash Capital</div>
+                      </div>
+                  </div>
+                  <div class="content">
+                      <h2>Hello ${data.name},</h2>
+                      <p>Two-factor authentication (2FA) has been successfully enabled on your BitHash Capital account.</p>
+                      
+                      <div class="security-tips">
+                          <h3 style="color: #27ae60; margin-bottom: 15px;">Security Tips:</h3>
+                          <ul style="margin-left: 20px;">
+                              <li>Store your backup codes in a secure location</li>
+                              <li>Never share your 2FA codes with anyone</li>
+                              <li>Use an authenticator app like Google Authenticator or Authy</li>
+                              <li>Keep your recovery codes safe</li>
+                          </ul>
+                      </div>
+                      
+                      <p>If you did not enable 2FA, please contact our support team immediately.</p>
+                      
+                      <p>Best regards,<br><strong>BitHash Capital Security Team</strong></p>
+                  </div>
+                  <div class="footer">
+                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
+                      This is an automated security notification.</p>
+                  </div>
+              </div>
+          </body>
+          </html>
+        `
+      },
+
+      // 2FA DISABLED
+      two_factor_disabled: {
+        subject: 'BitHash Capital - Two-Factor Authentication Disabled',
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>2FA Disabled - BitHash Capital</title>
+              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <style>
+                  * { margin: 0; padding: 0; box-sizing: border-box; }
+                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
+                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
+                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #e74c3c; }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
+                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
+                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
+                  .content { padding: 40px; background: #ffffff; }
+                  .warning-box { background: #fee; border: 1px solid #e74c3c; padding: 25px; border-radius: 8px; margin: 25px 0; }
+                  .login-info { background: #f8f9fa; padding: 20px; border-radius: 6px; margin: 20px 0; }
+                  .info-item { margin-bottom: 10px; display: flex; }
+                  .info-label { font-weight: 600; min-width: 120px; }
+                  .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
+                  .footer-text { font-size: 12px; line-height: 1.5; }
+              </style>
+          </head>
+          <body>
+              <div class="container">
+                  <div class="header">
+                      <div class="logo-container">
+                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
+                          <div class="logo-text">BitHash Capital</div>
+                      </div>
+                  </div>
+                  <div class="content">
+                      <h2>Hello ${data.name},</h2>
+                      
+                      <div class="warning-box">
+                          <h3 style="color: #e74c3c; margin-bottom: 15px;">Security Alert</h3>
+                          <p>Two-factor authentication (2FA) has been disabled on your BitHash Capital account.</p>
+                      </div>
+                      
+                      <div class="login-info">
+                          <div class="info-item">
+                              <span class="info-label">Time:</span>
+                              <span>${new Date().toLocaleString()}</span>
+                          </div>
+                          <div class="info-item">
+                              <span class="info-label">Device:</span>
+                              <span>${data.device || 'Unknown device'}</span>
+                          </div>
+                          <div class="info-item">
+                              <span class="info-label">Location:</span>
+                              <span>${data.location || 'Unknown location'}</span>
+                          </div>
+                          <div class="info-item">
+                              <span class="info-label">IP Address:</span>
+                              <span>${data.ip || 'Unknown'}</span>
+                          </div>
+                      </div>
+                      
+                      <p>If you did not authorize this change, please contact our support team immediately and re-enable 2FA.</p>
+                      
+                      <p>Best regards,<br><strong>BitHash Capital Security Team</strong></p>
+                  </div>
+                  <div class="footer">
+                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
+                      This is an automated security notification.</p>
+                  </div>
+              </div>
+          </body>
+          </html>
+        `
+      },
+
+      // ADMIN ACTION NOTIFICATION (for user suspension, deposit approval, etc)
+      admin_action: {
+        subject: 'BitHash Capital - Account Update Notification',
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Account Update - BitHash Capital</title>
+              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <style>
+                  * { margin: 0; padding: 0; box-sizing: border-box; }
+                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
+                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
+                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid ${data.color || '#f0b90b'}; }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
+                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
+                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
+                  .content { padding: 40px; background: #ffffff; }
+                  .action-box { background: ${data.bgColor || '#f8f9fa'}; border-left: 4px solid ${data.color || '#f0b90b'}; padding: 25px; margin: 25px 0; border-radius: 4px; }
+                  .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
+                  .footer-text { font-size: 12px; line-height: 1.5; }
+              </style>
+          </head>
+          <body>
+              <div class="container">
+                  <div class="header">
+                      <div class="logo-container">
+                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
+                          <div class="logo-text">BitHash Capital</div>
+                      </div>
+                  </div>
+                  <div class="content">
+                      <h2>Hello ${data.name},</h2>
+                      
+                      <div class="action-box">
+                          <h3 style="color: ${data.color || '#333'}; margin-bottom: 15px;">${data.actionTitle || 'Account Update'}</h3>
+                          <p>${data.message}</p>
+                      </div>
+                      
+                      <p>If you have any questions about this update, please contact our support team.</p>
+                      
+                      <p>Best regards,<br><strong>BitHash Capital Team</strong></p>
+                  </div>
+                  <div class="footer">
+                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
+                      Professional Bitcoin Mining and Investment Platform</p>
+                  </div>
+              </div>
+          </body>
+          </html>
+        `
       }
     };
 
@@ -4466,147 +5150,46 @@ const sendProfessionalEmail = async (options) => {
 
 
 
-// Routes
 
 
 
-// Enhanced Signup Endpoint with OTP - FIXED email handling
-app.post('/api/auth/signup', [
-  body('firstName').trim().notEmpty().withMessage('First name is required').escape(),
-  body('lastName').trim().notEmpty().withMessage('Last name is required').escape(),
-  body('email').isEmail().withMessage('Please provide a valid email'),
-  body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters')
-      .matches(/[A-Z]/).withMessage('Password must contain at least one uppercase letter')
-      .matches(/[a-z]/).withMessage('Password must contain at least one lowercase letter')
-      .matches(/[0-9]/).withMessage('Password must contain at least one number')
-      .matches(/[^A-Za-z0-9]/).withMessage('Password must contain at least one special character'),
-  body('city').trim().notEmpty().withMessage('City is required').escape(),
-  body('referralCode').optional().trim().escape()
-], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({
-      status: 'fail',
-      errors: errors.array()
-    });
-  }
 
-  try {
-    const { firstName, lastName, email, password, city, referralCode } = req.body;
 
-    // Use exact email for all operations
-    const originalEmail = email;
 
-    // Check if email already exists - exact match only
-    const existingUser = await User.findOne({ email: originalEmail });
-    if (existingUser) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Email already in use'
-      });
-    }
 
-    const hashedPassword = await bcrypt.hash(password, 12);
-    const newReferralCode = generateReferralCode();
 
-    let referredByUser = null;
-    let referralSource = 'organic';
 
-    // Handle referral code from URL parameter
-    if (referralCode) {
-      console.log('Processing referral code:', referralCode);
-      
-      let actualReferralCode = referralCode;
-      if (referralCode.includes('-')) {
-        const parts = referralCode.split('-');
-        if (parts.length > 1) {
-          actualReferralCode = parts[parts.length - 1];
-        }
-      }
-      
-      referredByUser = await User.findOne({ referralCode: actualReferralCode });
-      
-      if (referredByUser) {
-        referralSource = 'referral_link';
-        console.log(`Referral found: ${referredByUser.firstName} ${referredByUser.lastName} (${referredByUser.email})`);
-      }
-    }
 
-    // Create user with exact email - no normalization
-    const newUser = await User.create({
-      firstName,
-      lastName,
-      email: originalEmail, // Store exact email as provided
-      password: hashedPassword,
-      city,
-      referralCode: newReferralCode,
-      referredBy: referredByUser ? referredByUser._id : undefined,
-      isVerified: false // User needs to verify via OTP first
-    });
 
-    // Generate OTP with exact email
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
 
-    await OTP.create({
-      email: originalEmail, // Exact email
-      otp,
-      type: 'signup',
-      expiresAt,
-      ipAddress: req.ip,
-      userAgent: req.headers['user-agent']
-    });
 
-    // Send OTP email to exact email address
-    await sendProfessionalEmail({
-      email: originalEmail, // Exact email
-      template: 'otp',
-      data: {
-        name: firstName,
-        otp: otp,
-        action: 'account verification'
-      }
-    });
 
-    // Send welcome email to exact email address
-    await sendProfessionalEmail({
-      email: originalEmail, // Exact email
-      template: 'welcome',
-      data: {
-        firstName,
-        referral: referredByUser ? `Referred by ${referredByUser.firstName}` : null
-      }
-    });
 
-    // Generate temporary token for OTP verification
-    const tempToken = generateJWT(newUser._id);
 
-    res.status(201).json({
-      status: 'success',
-      message: 'Account created successfully. Please verify your email with the OTP sent to your inbox.',
-      tempToken,
-      data: {
-        user: {
-          id: newUser._id,
-          firstName: newUser.firstName,
-          lastName: newUser.lastName,
-          email: newUser.email, // Return exact email from database
-          needsVerification: true
-        }
-      }
-    });
 
-    // Log activity
-    await logActivity('signup_initiated', 'user', newUser._id, newUser._id, 'User', req);
 
-  } catch (err) {
-    console.error('Signup error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'An error occurred during signup'
-    });
-  }
-});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -4676,118 +5259,6 @@ app.get('/api/referrals/validate/:code', async (req, res) => {
 
 
 
-// Enhanced Login Endpoint with OTP - FIXED email handling
-app.post('/api/auth/login', [
-  body('email').isEmail().withMessage('Please provide a valid email'),
-  body('password').notEmpty().withMessage('Password is required'),
-  body('rememberMe').optional().isBoolean().withMessage('Remember me must be a boolean')
-], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({
-      status: 'fail',
-      errors: errors.array()
-    });
-  }
-
-  try {
-    const { email, password, rememberMe } = req.body;
-
-    // Use exact email for lookup - no normalization
-    const user = await User.findOne({ email }).select('+password +twoFactorAuth.secret');
-    if (!user || !(await bcrypt.compare(password, user.password))) {
-      // Log failed attempt
-      await logUserActivity(req, 'login_attempt', 'failed', {
-        error: 'Invalid credentials',
-        email: email // Log exact email used
-      });
-      
-      return res.status(401).json({
-        status: 'fail',
-        message: 'Incorrect email or password'
-      });
-    }
-
-    if (user.status !== 'active') {
-      await logUserActivity(req, 'login_attempt', 'failed', {
-        error: 'Account suspended',
-        userId: user._id,
-        status: user.status
-      });
-      
-      return res.status(401).json({
-        status: 'fail',
-        message: 'Your account has been suspended. Please contact support.'
-      });
-    }
-
-    // Generate OTP for login
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
-
-    // Store OTP with exact email
-    await OTP.create({
-      email: email, // Exact email from request
-      otp,
-      type: 'login',
-      expiresAt,
-      ipAddress: req.ip,
-      userAgent: req.headers['user-agent']
-    });
-
-    // Send OTP email to exact email address
-    await sendProfessionalEmail({
-      email: email, // Exact email from request
-      template: 'otp',
-      data: {
-        name: user.firstName,
-        otp: otp,
-        action: 'login'
-      }
-    });
-
-    // Generate temporary token for OTP verification
-    const tempToken = generateJWT(user._id);
-
-    res.status(200).json({
-      status: 'success',
-      message: 'OTP sent to your email. Please verify to complete login.',
-      tempToken,
-      needsOtp: true,
-      data: {
-        user: {
-          id: user._id,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          email: user.email // Return exact email from database
-        }
-      }
-    });
-
-    await logUserActivity(req, 'login_otp_sent', 'pending', {
-      email: email, // Log exact email used
-      userId: user._id
-    }, user);
-
-  } catch (err) {
-    console.error('Login error:', err);
-    
-    await logUserActivity(req, 'login_error', 'failed', {
-      error: err.message,
-      email: req.body.email // Log exact email used
-    });
-
-    res.status(500).json({
-      status: 'error',
-      message: 'An error occurred during login'
-    });
-  }
-});
-
-
-
-
-
 
 
 app.post('/api/auth/verify-2fa', [
@@ -4847,336 +5318,7 @@ app.post('/api/auth/verify-2fa', [
 
 
 
-app.post('/api/auth/google', async (req, res) => {
-  try {
-    console.log('Google auth request received');
-    
-    const { credential } = req.body;
-    
-    if (!credential) {
-      console.error('No credential provided');
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Google credential is required'
-      });
-    }
 
-    console.log('Verifying Google token...');
-
-    // Verify the Google token
-    let payload;
-    try {
-      const ticket = await googleClient.verifyIdToken({
-        idToken: credential,
-        audience: process.env.GOOGLE_CLIENT_ID || '634814462335-9o4t8q95c4orcsd9sijjl52374g6vm85.apps.googleusercontent.com'
-      });
-      payload = ticket.getPayload();
-      console.log('Google token verified successfully');
-    } catch (verifyError) {
-      console.error('Google token verification failed:', verifyError);
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Invalid Google token. Please try again.'
-      });
-    }
-
-    if (!payload) {
-      console.error('No payload from Google token');
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Invalid token payload'
-      });
-    }
-
-    const { email, given_name, family_name, sub } = payload;
-
-    if (!email) {
-      console.error('No email in Google payload');
-      return res.status(400).json({
-        status: 'fail',
-        message: 'No email found in Google account'
-      });
-    }
-
-    console.log('Google auth successful for:', email);
-
-    // Use the EXACT email from Google - no normalization
-    const originalEmail = email;
-
-    let user;
-    let isNewUser = false;
-
-    try {
-      user = await User.findOne({ email: originalEmail });
-      console.log('User lookup result:', user ? 'Found' : 'Not found');
-    } catch (dbError) {
-      console.error('Database lookup error:', dbError);
-      return res.status(500).json({
-        status: 'error',
-        message: 'Database error during user lookup'
-      });
-    }
-
-    if (!user) {
-      // Create new user with Google auth using exact email
-      try {
-        const referralCode = generateReferralCode();
-        user = await User.create({
-          firstName: given_name || 'Google',
-          lastName: family_name || 'User',
-          email: originalEmail,
-          googleId: sub,
-          isVerified: true,
-          referralCode,
-          status: 'active'
-        });
-        isNewUser = true;
-        console.log('New user created via Google:', originalEmail);
-
-        // Send welcome email
-        try {
-          await sendProfessionalEmail({
-            email: originalEmail,
-            template: 'welcome',
-            data: {
-              firstName: given_name || 'Google User'
-            }
-          });
-        } catch (emailError) {
-          console.error('Welcome email failed:', emailError);
-          // Don't fail the request if email fails
-        }
-      } catch (createError) {
-        console.error('User creation error:', createError);
-        return res.status(500).json({
-          status: 'error',
-          message: 'Failed to create user account'
-        });
-      }
-    } else if (!user.googleId) {
-      // Existing user, add Google auth
-      try {
-        user.googleId = sub;
-        user.isVerified = true;
-        await user.save();
-        console.log('Existing user linked with Google:', originalEmail);
-      } catch (updateError) {
-        console.error('User update error:', updateError);
-        return res.status(500).json({
-          status: 'error',
-          message: 'Failed to link Google account'
-        });
-      }
-    }
-
-    // Check if user is active
-    if (user.status !== 'active') {
-      return res.status(401).json({
-        status: 'fail',
-        message: 'Your account has been suspended. Please contact support.'
-      });
-    }
-
-    // Generate OTP for Google sign-in
-    try {
-      const otp = Math.floor(100000 + Math.random() * 900000).toString();
-      const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-
-      await OTP.create({
-        email: originalEmail,
-        otp,
-        type: 'login',
-        expiresAt,
-        ipAddress: req.ip,
-        userAgent: req.headers['user-agent']
-      });
-
-      // Send OTP email
-      await sendProfessionalEmail({
-        email: originalEmail,
-        template: 'otp',
-        data: {
-          name: user.firstName,
-          otp: otp,
-          action: 'Google sign-in verification'
-        }
-      });
-    } catch (otpError) {
-      console.error('OTP creation error:', otpError);
-      // Continue even if OTP fails for now
-    }
-
-    // Generate temporary token
-    const tempToken = generateJWT(user._id);
-
-    // Update last login
-    try {
-      user.lastLogin = new Date();
-      const deviceInfo = await getUserDeviceInfo(req);
-      user.loginHistory.push(deviceInfo);
-      await user.save();
-    } catch (updateError) {
-      console.error('User update error:', updateError);
-      // Continue even if update fails
-    }
-
-    // SUCCESS RESPONSE
-    res.status(200).json({
-      status: 'success',
-      message: 'OTP sent to your email. Please verify to complete Google sign-in.',
-      tempToken,
-      needsOtp: true,
-      isNewUser: isNewUser,
-      data: {
-        user: {
-          id: user._id,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          email: user.email
-        }
-      }
-    });
-
-    // Log activity (don't let this break the response)
-    try {
-      await logActivity('google_signin_otp_sent', 'user', user._id, user._id, 'User', req, {
-        isNewUser,
-        provider: 'google',
-        email: originalEmail
-      });
-    } catch (logError) {
-      console.error('Activity logging error:', logError);
-    }
-
-  } catch (err) {
-    console.error('Google auth UNEXPECTED error:', err);
-    console.error('Error stack:', err.stack);
-    
-    res.status(500).json({
-      status: 'error',
-      message: 'An unexpected error occurred during Google authentication'
-    });
-  }
-});
-
-
-
-app.post('/api/auth/forgot-password', [
-  body('email').isEmail().withMessage('Please provide a valid email').normalizeEmail()
-], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({
-      status: 'fail',
-      errors: errors.array()
-    });
-  }
-
-  try {
-    const { email } = req.body;
-    const user = await User.findOne({ email });
-
-    if (!user) {
-      // Return success even if user doesn't exist to prevent email enumeration
-      return res.status(200).json({
-        status: 'success',
-        message: 'If your email is registered, you will receive a password reset link'
-      });
-    }
-
-    const { resetToken, hashedToken, tokenExpires } = createPasswordResetToken();
-    user.passwordResetToken = hashedToken;
-    user.passwordResetExpires = tokenExpires;
-    await user.save();
-
-    const resetURL = `https://bithhash.vercel.app/reset-password?token=${resetToken}`;
-    const message = `Forgot your password? Click the link below to reset it: \n\n${resetURL}\n\nThis link is valid for 60 minutes. If you didn't request this, please ignore this email.`;
-
-    await sendEmail({
-      email: user.email,
-      subject: 'Your password reset token (valid for 60 minutes)',
-      message,
-      html: `<p>Forgot your password? Click the link below to reset it:</p><p><a href="${resetURL}">Reset Password</a></p><p>This link is valid for 60 minutes. If you didn't request this, please ignore this email.</p>`
-    });
-
-    res.status(200).json({
-      status: 'success',
-      message: 'Password reset link sent to email'
-    });
-
-    await logActivity('forgot-password', 'user', user._id, user._id, 'User', req);
-  } catch (err) {
-    console.error('Forgot password error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'An error occurred while sending the password reset email'
-    });
-  }
-});
-
-app.post('/api/auth/reset-password', [
-  body('token').notEmpty().withMessage('Token is required'),
-  body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters')
-    .matches(/[A-Z]/).withMessage('Password must contain at least one uppercase letter')
-    .matches(/[a-z]/).withMessage('Password must contain at least one lowercase letter')
-    .matches(/[0-9]/).withMessage('Password must contain at least one number')
-    .matches(/[^A-Za-z0-9]/).withMessage('Password must contain at least one special character')
-], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({
-      status: 'fail',
-      errors: errors.array()
-    });
-  }
-
-  try {
-    const { token, password } = req.body;
-    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
-
-    const user = await User.findOne({
-      passwordResetToken: hashedToken,
-      passwordResetExpires: { $gt: Date.now() }
-    });
-
-    if (!user) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Token is invalid or has expired'
-      });
-    }
-
-    user.password = await bcrypt.hash(password, 12);
-    user.passwordChangedAt = Date.now();
-    user.passwordResetToken = undefined;
-    user.passwordResetExpires = undefined;
-    await user.save();
-
-    const newToken = generateJWT(user._id);
-
-    // Set cookie
-    res.cookie('jwt', newToken, {
-      expires: new Date(Date.now() + JWT_COOKIE_EXPIRES * 24 * 60 * 60 * 1000),
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict'
-    });
-
-    res.status(200).json({
-      status: 'success',
-      token: newToken,
-      message: 'Password updated successfully'
-    });
-
-    await logActivity('reset-password', 'user', user._id, user._id, 'User', req);
-  } catch (err) {
-    console.error('Reset password error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'An error occurred while resetting the password'
-    });
-  }
-});
 
 // User Endpoints
 // Enhanced GET /api/users/me endpoint
@@ -5526,22 +5668,6 @@ app.get('/api/users/activity', protect, async (req, res) => {
   }
 });
 
-app.get('/api/users/devices', protect, async (req, res) => {
-  try {
-    const devices = req.user.loginHistory;
-
-    res.status(200).json({
-      status: 'success',
-      data: devices
-    });
-  } catch (err) {
-    console.error('Get user devices error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'An error occurred while fetching user devices'
-    });
-  }
-});
 
 
 
@@ -6271,395 +6397,6 @@ function getPlanColorScheme(planId) {
   return colors[hash % colors.length];
 }
 
-
-
-// Investment routes - ENHANCED VERSION WITH EMAIL NOTIFICATIONS
-app.post('/api/investments', protect, [
-  body('planId').notEmpty().withMessage('Plan ID is required').isMongoId().withMessage('Invalid Plan ID'),
-  body('amount').isFloat({ min: 1 }).withMessage('Amount must be a positive number'),
-  body('balanceType').isIn(['main', 'matured']).withMessage('Balance type must be either "main" or "matured"')
-], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({
-      status: 'fail',
-      errors: errors.array()
-    });
-  }
-
-  try {
-    const { planId, amount, balanceType } = req.body;
-    const userId = req.user._id;
-
-    // Verify plan exists and is active
-    const plan = await Plan.findById(planId);
-    if (!plan || !plan.isActive) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Invalid or inactive investment plan'
-      });
-    }
-
-    // Verify amount is within plan limits
-    if (amount < plan.minAmount || amount > plan.maxAmount) {
-      return res.status(400).json({
-        status: 'fail',
-        message: `Amount must be between $${plan.minAmount} and $${plan.maxAmount} for this plan`
-      });
-    }
-
-    // Verify user has sufficient balance in the selected balance type
-    const user = await User.findById(userId);
-    const selectedBalance = user.balances[balanceType];
-    
-    if (selectedBalance < amount) {
-      return res.status(400).json({
-        status: 'fail',
-        message: `Insufficient ${balanceType} balance`
-      });
-    }
-
-    // Calculate investment amount after 3% fee
-    const investmentFee = amount * 0.03;
-    const investmentAmountAfterFee = amount - investmentFee;
-
-    // Calculate expected return based on the amount after fee
-    const expectedReturn = investmentAmountAfterFee + (investmentAmountAfterFee * plan.percentage / 100);
-    const endDate = new Date(Date.now() + plan.duration * 60 * 60 * 1000);
-
-    // Create investment
-    const investment = await Investment.create({
-      user: userId,
-      plan: planId,
-      amount: investmentAmountAfterFee, // Store the amount after fee
-      originalAmount: amount, // Store original amount before fee
-      originalCurrency: 'USD',
-      currency: 'USD',
-      expectedReturn,
-      returnPercentage: plan.percentage,
-      endDate,
-      payoutSchedule: 'end_term',
-      status: 'active',
-      ipAddress: req.ip,
-      userAgent: req.headers['user-agent'],
-      deviceInfo: getDeviceType(req),
-      termsAccepted: true,
-      investmentFee: investmentFee, // Store the fee for record keeping
-      balanceType: balanceType // Store which balance was used
-    });
-
-    // Deduct from user's selected balance (only the original amount)
-    user.balances[balanceType] -= amount;
-    user.balances.active += investmentAmountAfterFee; // Add the amount after fee to active balance
-    await user.save();
-
-    // Create transaction record for the investment with fee
-    const transaction = await Transaction.create({
-      user: userId,
-      type: 'investment',
-      amount: -amount,
-      currency: 'USD',
-      status: 'completed',
-      method: 'internal',
-      reference: `INV-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      details: {
-        investmentId: investment._id,
-        planName: plan.name,
-        balanceType: balanceType,
-        investmentFee: investmentFee,
-        amountAfterFee: investmentAmountAfterFee
-      },
-      fee: investmentFee,
-      netAmount: -investmentAmountAfterFee
-    });
-
-    // RECORD PLATFORM REVENUE
-    await PlatformRevenue.create({
-      source: 'investment_fee',
-      amount: investmentFee,
-      currency: 'USD',
-      transactionId: transaction._id,
-      investmentId: investment._id,
-      userId: userId,
-      description: `3% investment fee for ${plan.name} investment`,
-      metadata: {
-        planName: plan.name,
-        originalAmount: amount,
-        amountAfterFee: investmentAmountAfterFee,
-        feePercentage: 3
-      }
-    });
-
-    // ✅ FIXED: ALWAYS CHECK FOR DOWNLINE COMMISSIONS (Not just referredBy)
-    await calculateReferralCommissions(investment);
-
-    // ✅ FIXED: Handle direct referral bonus separately (if user was referred by someone)
-    if (user.referredBy) {
-      const referralBonus = (amount * plan.referralBonus) / 100;
-      
-      // Update referring user's balance for direct referral bonus
-      await User.findByIdAndUpdate(user.referredBy, {
-        $inc: {
-          'balances.main': referralBonus,
-          'referralStats.totalEarnings': referralBonus,
-          'referralStats.availableBalance': referralBonus
-        },
-        $push: {
-          referralHistory: {
-            referredUser: userId,
-            amount: referralBonus,
-            percentage: plan.referralBonus,
-            level: 1,
-            status: 'available',
-            date: new Date()
-          }
-        }
-      });
-
-      // Create referral commission record for direct referral
-      await CommissionHistory.create({
-        upline: user.referredBy,
-        downline: userId,
-        investment: investment._id,
-        investmentAmount: amount,
-        commissionPercentage: plan.referralBonus,
-        commissionAmount: referralBonus,
-        roundNumber: 0, // 0 indicates direct referral bonus, not downline commission
-        status: 'paid',
-        paidAt: new Date()
-      });
-
-      // Create transaction for direct referral bonus
-      await Transaction.create({
-        user: user.referredBy,
-        type: 'referral',
-        amount: referralBonus,
-        currency: 'USD',
-        status: 'completed',
-        method: 'internal',
-        reference: `REF-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-        details: {
-          referralFrom: userId,
-          investmentId: investment._id,
-          type: 'direct_referral',
-          bonusPercentage: plan.referralBonus
-        },
-        fee: 0,
-        netAmount: referralBonus
-      });
-
-      // Mark investment with referral info
-      investment.referredBy = user.referredBy;
-      investment.referralBonusAmount = referralBonus;
-      investment.referralBonusDetails = {
-        percentage: plan.referralBonus,
-        payoutDate: new Date()
-      };
-      await investment.save();
-
-      console.log(`🎁 Direct referral bonus of $${referralBonus} paid to ${user.referredBy}`);
-    }
-
-    // ✅ ENHANCED: Send investment creation email
-    try {
-      await sendProfessionalEmail({
-        email: user.email,
-        template: 'investment_created',
-        data: {
-          name: user.firstName,
-          planName: plan.name,
-          amount: amount,
-          expectedReturn: expectedReturn,
-          duration: plan.duration,
-          startDate: investment.startDate,
-          endDate: investment.endDate
-        }
-      });
-      console.log(`📧 Investment creation email sent to ${user.email}`);
-    } catch (emailError) {
-      console.error('Failed to send investment creation email:', emailError);
-      // Don't fail the investment if email fails
-    }
-
-    // Log activity
-    await logActivity('create_investment', 'investment', investment._id, userId, 'User', req);
-
-    res.status(201).json({
-      status: 'success',
-      data: {
-        investment: {
-          id: investment._id,
-          plan: plan.name,
-          amount: investment.amount, // This shows amount after fee to user
-          originalAmount: investment.originalAmount, // Original amount for reference
-          investmentFee: investmentFee,
-          expectedReturn: investment.expectedReturn,
-          endDate: investment.endDate,
-          status: investment.status,
-          balanceType: balanceType
-        }
-      }
-    });
-  } catch (err) {
-    console.error('Investment creation error:', err);
-    
-    // Even on error, return success to frontend as requested
-    res.status(200).json({
-      status: 'success',
-      message: 'Investment created successfully'
-    });
-  }
-});
-
-app.post('/api/investments/:id/complete', protect, async (req, res) => {
-  try {
-    const investmentId = req.params.id;
-    const userId = req.user._id;
-
-    // Find the investment with more comprehensive query
-    const investment = await Investment.findOne({ 
-      _id: investmentId, 
-      user: userId,
-      status: 'active' 
-    }).populate('plan');
-    
-    if (!investment) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Active investment not found'
-      });
-    }
-
-    // Enhanced completion check - ensure investment has actually matured
-    const now = new Date();
-    if (now < investment.endDate) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Investment has not matured yet'
-      });
-    }
-
-    // Find the user with proper session handling
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found'
-      });
-    }
-
-    // Calculate total return (principal + profit) - based on amount after fee
-    const totalReturn = investment.expectedReturn;
-
-    // Enhanced balance transfer with validation
-    if (user.balances.active < investment.amount) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Insufficient active balance to complete investment'
-      });
-    }
-
-    // Use transaction to ensure atomic operation
-    const session = await mongoose.startSession();
-    session.startTransaction();
-
-    try {
-      // Transfer from active to matured balance
-      user.balances.active -= investment.amount;
-      user.balances.matured += totalReturn;
-      
-      // Update investment status with completion details
-      investment.status = 'completed';
-      investment.completionDate = now;
-      investment.actualReturn = totalReturn - investment.amount;
-      investment.isProcessed = true; // Add flag to ensure it's processed
-
-      // Save changes with session
-      await user.save({ session });
-      await investment.save({ session });
-
-      // Create transaction record for the return
-      await Transaction.create([{
-        user: userId,
-        type: 'interest',
-        amount: totalReturn - investment.amount,
-        currency: 'USD',
-        status: 'completed',
-        method: 'internal',
-        reference: `RET-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-        details: {
-          investmentId: investment._id,
-          planName: investment.plan.name,
-          principal: investment.amount,
-          interest: totalReturn - investment.amount,
-          originalInvestment: investment.originalAmount,
-          investmentFee: investment.investmentFee
-        },
-        fee: 0,
-        netAmount: totalReturn - investment.amount
-      }], { session });
-
-      // Commit transaction
-      await session.commitTransaction();
-      
-      // ✅ ENHANCED: Send investment completion email
-      try {
-        await sendProfessionalEmail({
-          email: user.email,
-          template: 'investment_completed',
-          data: {
-            name: user.firstName,
-            planName: investment.plan.name,
-            amount: investment.originalAmount,
-            totalReturn: totalReturn,
-            profit: totalReturn - investment.amount,
-            completionDate: investment.completionDate,
-            newMaturedBalance: user.balances.matured
-          }
-        });
-        console.log(`📧 Investment completion email sent to ${user.email}`);
-      } catch (emailError) {
-        console.error('Failed to send investment completion email:', emailError);
-        // Don't fail the investment completion if email fails
-      }
-
-      res.status(200).json({
-        status: 'success',
-        data: {
-          investment: {
-            id: investment._id,
-            status: investment.status,
-            completionDate: investment.completionDate,
-            amountReturned: totalReturn,
-            profit: totalReturn - investment.amount,
-            originalInvestment: investment.originalAmount,
-            investmentFee: investment.investmentFee
-          },
-          balances: {
-            active: user.balances.active,
-            matured: user.balances.matured
-          }
-        }
-      });
-
-      await logActivity('complete_investment', 'investment', investment._id, userId, 'User', req);
-
-    } catch (transactionError) {
-      // Rollback transaction on error
-      await session.abortTransaction();
-      throw transactionError;
-    } finally {
-      session.endSession();
-    }
-
-  } catch (err) {
-    console.error('Complete investment error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'An error occurred while completing the investment'
-    });
-  }
-});
 
 
 
@@ -7399,147 +7136,6 @@ app.get('/api/users/balances', protect, async (req, res) => {
 });
 
 
-
-app.get('/api/mining', protect, async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const cacheKey = `mining-stats:${userId}`;
-    
-    // Try to get cached data first (shorter cache time for real-time feel)
-    const cachedData = await redis.get(cacheKey);
-    if (cachedData) {
-      const parsedData = JSON.parse(cachedData);
-      // Add small random fluctuations to cached values for realism
-      parsedData.hashRate = fluctuateValue(parsedData.hashRate, 5); // ±5% fluctuation
-      parsedData.miningPower = fluctuateValue(parsedData.miningPower, 3); // ±3% fluctuation
-      parsedData.btcMined = fluctuateValue(parsedData.btcMined, 1); // ±1% fluctuation
-      return res.status(200).json({
-        status: 'success',
-        data: parsedData
-      });
-    }
-
-    // Get user's active investments
-    const activeInvestments = await Investment.find({
-      user: userId,
-      status: 'active'
-    }).populate('plan');
-
-    // Default response if no active investments
-    if (activeInvestments.length === 0) {
-      const defaultData = {
-        hashRate: "0 TH/s",
-        btcMined: "0 BTC",
-        miningPower: "0%",
-        totalReturn: "$0.00",
-        progress: 0,
-        lastUpdated: new Date().toISOString()
-      };
-      
-      await redis.set(cacheKey, JSON.stringify(defaultData), 'EX', 60); // Cache for 1 minute
-      return res.status(200).json({
-        status: 'success',
-        data: defaultData
-      });
-    }
-
-    // Calculate base values
-    let totalReturn = 0;
-    let totalInvestmentAmount = 0;
-    let maxProgress = 0;
-
-    for (const investment of activeInvestments) {
-      const investmentReturn = investment.expectedReturn - investment.amount;
-      totalReturn += investmentReturn;
-      totalInvestmentAmount += investment.amount;
-
-      // Calculate progress for this investment
-      const totalDuration = investment.endDate - investment.createdAt;
-      const elapsed = Date.now() - investment.createdAt;
-      const progress = Math.min(100, Math.max(0, (elapsed / totalDuration) * 100));
-      maxProgress = Math.max(maxProgress, progress);
-    }
-
-    // Get BTC price from CoinGecko
-    let btcPrice = 60000;
-    try {
-      const response = await axios.get('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd');
-      btcPrice = response.data.bitcoin.usd;
-    } catch (error) {
-      console.error('CoinGecko API error:', error);
-    }
-
-    // Base calculations
-    const baseHashRate = totalInvestmentAmount * 0.1;
-    const baseMiningPower = Math.min(100, (totalInvestmentAmount / 10000) * 100);
-    const baseBtcMined = totalReturn / btcPrice;
-
-    // Apply realistic fluctuations
-    const currentTime = Date.now();
-    const timeFactor = Math.sin(currentTime / 60000); // Fluctuates every minute
-    
-    // Hash rate fluctuates more dramatically
-    const hashRateFluctuation = 0.05 * timeFactor + (Math.random() * 0.1 - 0.05);
-    const hashRate = baseHashRate * (1 + hashRateFluctuation);
-    
-    // Mining power has smaller fluctuations
-    const miningPowerFluctuation = 0.02 * timeFactor + (Math.random() * 0.04 - 0.02);
-    const miningPower = baseMiningPower * (1 + miningPowerFluctuation);
-    
-    // BTC mined has very small incremental changes
-    const btcMined = baseBtcMined * (1 + (Math.random() * 0.01 - 0.005));
-
-    // Simulate network difficulty changes
-    const networkFactor = 1 + (Math.sin(currentTime / 300000) * 0.1); // Changes every 5 minutes
-    const adjustedHashRate = hashRate / networkFactor;
-    const adjustedMiningPower = miningPower / networkFactor;
-
-    const miningData = {
-      hashRate: `${adjustedHashRate.toFixed(2)} TH/s`,
-      btcMined: `${btcMined.toFixed(8)} BTC`,
-      miningPower: `${Math.min(100, adjustedMiningPower).toFixed(2)}%`,
-      totalReturn: `$${totalReturn.toFixed(2)}`,
-      progress: parseFloat(maxProgress.toFixed(2)),
-      lastUpdated: new Date().toISOString(),
-      networkDifficulty: networkFactor.toFixed(2),
-      workersOnline: Math.floor(3 + Math.random() * 3) // Random workers between 3-5
-    };
-    
-    // Cache for 1 minute (shorter cache for more real-time feel)
-    await redis.set(cacheKey, JSON.stringify(miningData), 'EX', 60);
-    
-    res.status(200).json({
-      status: 'success',
-      data: miningData
-    });
-
-  } catch (error) {
-    console.error('Mining endpoint error:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch mining data'
-    });
-  }
-});
-
-// Helper function to add fluctuations to cached values
-function fluctuateValue(valueStr, percent) {
-  const numericValue = parseFloat(valueStr);
-  const fluctuation = (Math.random() * percent * 2 - percent) / 100; // ±percent%
-  const newValue = numericValue * (1 + fluctuation);
-  
-  // Preserve units if they exist
-  if (valueStr.endsWith(' TH/s')) {
-    return `${newValue.toFixed(2)} TH/s`;
-  }
-  if (valueStr.endsWith(' BTC')) {
-    return `${newValue.toFixed(8)} BTC`;
-  }
-  if (valueStr.endsWith('%')) {
-    return `${Math.min(100, newValue).toFixed(2)}%`;
-  }
-  return valueStr; // Return original if no known unit
-}
 
 
 
@@ -8997,265 +8593,6 @@ app.get('/api/admin/users', adminProtect, async (req, res) => {
   }
 });
 
-// Admin Pending Deposits Endpoint
-app.get('/api/admin/deposits/pending', adminProtect, async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 5;
-    const skip = (page - 1) * limit;
-    
-    // Get pending deposits with user info
-    const deposits = await Transaction.find({
-      type: 'deposit',
-      status: 'pending'
-    })
-    .populate('user', 'firstName lastName email')
-    .sort({ createdAt: -1 })
-    .skip(skip)
-    .limit(limit)
-    .lean();
-    
-    // Get total count for pagination
-    const totalCount = await Transaction.countDocuments({
-      type: 'deposit',
-      status: 'pending'
-    });
-    const totalPages = Math.ceil(totalCount / limit);
-    
-    res.status(200).json({
-      status: 'success',
-      data: {
-        deposits,
-        totalCount,
-        totalPages,
-        currentPage: page
-      }
-    });
-  } catch (err) {
-    console.error('Admin pending deposits error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch pending deposits'
-    });
-  }
-});
-
-// Admin Approved Deposits Endpoint
-app.get('/api/admin/deposits/approved', adminProtect, async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 5;
-    const skip = (page - 1) * limit;
-    
-    // Get approved deposits with user info
-    const deposits = await Transaction.find({
-      type: 'deposit',
-      status: 'completed'
-    })
-    .populate('user', 'firstName lastName email')
-    .populate('processedBy', 'name')
-    .sort({ createdAt: -1 })
-    .skip(skip)
-    .limit(limit)
-    .lean();
-    
-    // Get total count for pagination
-    const totalCount = await Transaction.countDocuments({
-      type: 'deposit',
-      status: 'completed'
-    });
-    const totalPages = Math.ceil(totalCount / limit);
-    
-    res.status(200).json({
-      status: 'success',
-      data: {
-        deposits,
-        totalCount,
-        totalPages,
-        currentPage: page
-      }
-    });
-  } catch (err) {
-    console.error('Admin approved deposits error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch approved deposits'
-    });
-  }
-});
-
-// Admin Rejected Deposits Endpoint
-app.get('/api/admin/deposits/rejected', adminProtect, async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 5;
-    const skip = (page - 1) * limit;
-    
-    // Get rejected deposits with user info
-    const deposits = await Transaction.find({
-      type: 'deposit',
-      status: 'failed'
-    })
-    .populate('user', 'firstName lastName email')
-    .sort({ createdAt: -1 })
-    .skip(skip)
-    .limit(limit)
-    .lean();
-    
-    // Get total count for pagination
-    const totalCount = await Transaction.countDocuments({
-      type: 'deposit',
-      status: 'failed'
-    });
-    const totalPages = Math.ceil(totalCount / limit);
-    
-    res.status(200).json({
-      status: 'success',
-      data: {
-        deposits,
-        totalCount,
-        totalPages,
-        currentPage: page
-      }
-    });
-  } catch (err) {
-    console.error('Admin rejected deposits error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch rejected deposits'
-    });
-  }
-});
-
-// Admin Pending Withdrawals Endpoint
-app.get('/api/admin/withdrawals/pending', adminProtect, async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 5;
-    const skip = (page - 1) * limit;
-    
-    // Get pending withdrawals with user info
-    const withdrawals = await Transaction.find({
-      type: 'withdrawal',
-      status: 'pending'
-    })
-    .populate('user', 'firstName lastName email')
-    .sort({ createdAt: -1 })
-    .skip(skip)
-    .limit(limit)
-    .lean();
-    
-    // Get total count for pagination
-    const totalCount = await Transaction.countDocuments({
-      type: 'withdrawal',
-      status: 'pending'
-    });
-    const totalPages = Math.ceil(totalCount / limit);
-    
-    res.status(200).json({
-      status: 'success',
-      data: {
-        withdrawals,
-        totalCount,
-        totalPages,
-        currentPage: page
-      }
-    });
-  } catch (err) {
-    console.error('Admin pending withdrawals error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch pending withdrawals'
-    });
-  }
-});
-
-// Admin Approved Withdrawals Endpoint
-app.get('/api/admin/withdrawals/approved', adminProtect, async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 5;
-    const skip = (page - 1) * limit;
-    
-    // Get approved withdrawals with user info
-    const withdrawals = await Transaction.find({
-      type: 'withdrawal',
-      status: 'completed'
-    })
-    .populate('user', 'firstName lastName email')
-    .populate('processedBy', 'name')
-    .sort({ createdAt: -1 })
-    .skip(skip)
-    .limit(limit)
-    .lean();
-    
-    // Get total count for pagination
-    const totalCount = await Transaction.countDocuments({
-      type: 'withdrawal',
-      status: 'completed'
-    });
-    const totalPages = Math.ceil(totalCount / limit);
-    
-    res.status(200).json({
-      status: 'success',
-      data: {
-        withdrawals,
-        totalCount,
-        totalPages,
-        currentPage: page
-      }
-    });
-  } catch (err) {
-    console.error('Admin approved withdrawals error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch approved withdrawals'
-    });
-  }
-});
-
-// Admin Rejected Withdrawals Endpoint
-app.get('/api/admin/withdrawals/rejected', adminProtect, async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 5;
-    const skip = (page - 1) * limit;
-    
-    // Get rejected withdrawals with user info
-    const withdrawals = await Transaction.find({
-      type: 'withdrawal',
-      status: 'failed'
-    })
-    .populate('user', 'firstName lastName email')
-    .sort({ createdAt: -1 })
-    .skip(skip)
-    .limit(limit)
-    .lean();
-    
-    // Get total count for pagination
-    const totalCount = await Transaction.countDocuments({
-      type: 'withdrawal',
-      status: 'failed'
-    });
-    const totalPages = Math.ceil(totalCount / limit);
-    
-    res.status(200).json({
-      status: 'success',
-      data: {
-        withdrawals,
-        totalCount,
-        totalPages,
-        currentPage: page
-      }
-    });
-  } catch (err) {
-    console.error('Admin rejected withdrawals error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch rejected withdrawals'
-    });
-  }
-});
 
 
 // Admin All Transactions Endpoint
@@ -9708,283 +9045,6 @@ app.get('/api/admin/deposits/:id', adminProtect, async (req, res) => {
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch deposit details'
-    });
-  }
-});
-
-// Admin Approve Deposit Endpoint
-app.post('/api/admin/deposits/:id/approve', adminProtect, [
-  body('notes').optional().trim()
-], async (req, res) => {
-  try {
-    const { notes } = req.body;
-    
-    // Find deposit
-    const deposit = await Transaction.findById(req.params.id)
-      .populate('user');
-    
-    if (!deposit || deposit.type !== 'deposit') {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Deposit not found'
-      });
-    }
-    
-    if (deposit.status !== 'pending') {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Deposit is not pending approval'
-      });
-    }
-    
-    // Find user
-    const user = await User.findById(deposit.user._id);
-    if (!user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found'
-      });
-    }
-    
-    // Update user balance
-    user.balances.main += deposit.amount;
-    await user.save();
-    
-    // Update deposit status
-    deposit.status = 'completed';
-    deposit.processedBy = req.admin._id;
-    deposit.processedAt = new Date();
-    deposit.adminNotes = notes;
-    await deposit.save();
-    
-    res.status(200).json({
-      status: 'success',
-      message: 'Deposit approved successfully'
-    });
-
-
-await sendAutomatedEmail(user, 'deposit_received', {
-  amount: deposit.amount,
-  method: deposit.method,
-  reference: deposit.reference,
-  newBalance: user.balances.main
-});
-    
-    await logActivity('approve-deposit', 'transaction', deposit._id, req.admin._id, 'Admin', req, {
-      amount: deposit.amount,
-      userId: user._id
-    });
-  } catch (err) {
-    console.error('Admin approve deposit error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to approve deposit'
-    });
-  }
-});
-
-// Admin Reject Deposit Endpoint
-app.post('/api/admin/deposits/:id/reject', adminProtect, [
-  body('rejectionReason').trim().notEmpty().withMessage('Rejection reason is required')
-], async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        status: 'fail',
-        errors: errors.array()
-      });
-    }
-    
-    const { rejectionReason } = req.body;
-    
-    // Find deposit
-    const deposit = await Transaction.findById(req.params.id);
-    
-    if (!deposit || deposit.type !== 'deposit') {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Deposit not found'
-      });
-    }
-    
-    if (deposit.status !== 'pending') {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Deposit is not pending approval'
-      });
-    }
-    
-    // Update deposit status
-    deposit.status = 'failed';
-    deposit.adminNotes = rejectionReason;
-    await deposit.save();
-    
-    res.status(200).json({
-      status: 'success',
-      message: 'Deposit rejected successfully'
-    });
-    
-    await logActivity('reject-deposit', 'transaction', deposit._id, req.admin._id, 'Admin', req, {
-      amount: deposit.amount,
-      reason: rejectionReason
-    });
-  } catch (err) {
-    console.error('Admin reject deposit error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to reject deposit'
-    });
-  }
-});
-
-// Admin Get Withdrawal Details Endpoint
-app.get('/api/admin/withdrawals/:id', adminProtect, async (req, res) => {
-  try {
-    const withdrawal = await Transaction.findById(req.params.id)
-      .populate('user', 'firstName lastName email')
-      .lean();
-    
-    if (!withdrawal || withdrawal.type !== 'withdrawal') {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Withdrawal not found'
-      });
-    }
-    
-    res.status(200).json({
-      status: 'success',
-      data: { withdrawal }
-    });
-  } catch (err) {
-    console.error('Admin get withdrawal error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch withdrawal details'
-    });
-  }
-});
-
-// Admin Approve Withdrawal Endpoint
-app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
-  body('notes').optional().trim()
-], async (req, res) => {
-  try {
-    const { notes } = req.body;
-    
-    // Find withdrawal
-    const withdrawal = await Transaction.findById(req.params.id);
-    
-    if (!withdrawal || withdrawal.type !== 'withdrawal') {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Withdrawal not found'
-      });
-    }
-    
-    if (withdrawal.status !== 'pending') {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Withdrawal is not pending approval'
-      });
-    }
-    
-    // Update withdrawal status
-    withdrawal.status = 'completed';
-    withdrawal.processedBy = req.admin._id;
-    withdrawal.processedAt = new Date();
-    withdrawal.adminNotes = notes;
-    await withdrawal.save();
-    
-    res.status(200).json({
-      status: 'success',
-      message: 'Withdrawal approved successfully'
-    });
-    
-    await logActivity('approve-withdrawal', 'transaction', withdrawal._id, req.admin._id, 'Admin', req, {
-      amount: withdrawal.amount,
-      userId: withdrawal.user
-    });
-  } catch (err) {
-    console.error('Admin approve withdrawal error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to approve withdrawal'
-    });
-  }
-});
-
-
-
-
-
-
-// CORRECTED Admin Reject Withdrawal Endpoint
-app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
-  body('reason').trim().notEmpty().withMessage('Rejection reason is required')
-], async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        status: 'fail',
-        errors: errors.array()
-      });
-    }
-    
-    const { reason } = req.body;
-    
-    // Find withdrawal
-    const withdrawal = await Transaction.findById(req.params.id)
-      .populate('user');
-    
-    if (!withdrawal || withdrawal.type !== 'withdrawal') {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Withdrawal not found'
-      });
-    }
-    
-    if (withdrawal.status !== 'pending') {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Withdrawal is not pending approval'
-      });
-    }
-    
-    // Find user
-    const user = await User.findById(withdrawal.user._id);
-    if (!user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found'
-      });
-    }
-    
-    // Return funds to user balance
-    user.balances.matured += withdrawal.amount;
-    await user.save();
-    
-    // Update withdrawal status
-    withdrawal.status = 'failed';
-    withdrawal.adminNotes = reason; // Changed from rejectionReason to reason
-    await withdrawal.save();
-    
-    res.status(200).json({
-      status: 'success',
-      message: 'Withdrawal rejected successfully'
-    });
-    
-    await logActivity('reject-withdrawal', 'transaction', withdrawal._id, req.admin._id, 'Admin', req, {
-      amount: withdrawal.amount,
-      reason: reason,
-      userId: user._id
-    });
-  } catch (err) {
-    console.error('Admin reject withdrawal error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to reject withdrawal'
     });
   }
 });
@@ -10836,278 +9896,6 @@ app.post('/api/admin/users/:userId/balance', async (req, res) => {
 
 
 
-
-
-// Admin Activity Endpoint - FIXED VERSION
-app.get('/api/admin/activity', adminProtect, async (req, res) => {
-  try {
-    const { page = 1, limit = 10, type = 'all' } = req.query;
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-
-    console.log('Fetching admin activity...', { page, limit, type });
-
-    // Get BOTH UserLog and SystemLog data
-    const [userLogs, systemLogs] = await Promise.all([
-      UserLog.find({})
-        .populate('user', 'firstName lastName email')
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(parseInt(limit))
-        .lean(),
-      SystemLog.find({})
-        .populate('performedBy')
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(parseInt(limit))
-        .lean()
-    ]);
-
-    console.log(`Found ${userLogs.length} user logs and ${systemLogs.length} system logs`);
-
-    // Combine and sort all activities by timestamp
-    const allActivities = [...userLogs, ...systemLogs]
-      .sort((a, b) => new Date(b.createdAt || b.timestamp) - new Date(a.createdAt || a.timestamp))
-      .slice(0, parseInt(limit));
-
-    // Transform activities with PROPER user data mapping
-    const activities = allActivities.map(activity => {
-      // Determine if it's a UserLog or SystemLog
-      const isUserLog = activity.user !== undefined;
-      
-      let userData = {
-        id: 'system',
-        name: 'System',
-        email: 'system'
-      };
-      
-      let action = activity.action;
-      let ipAddress = 'Unknown';
-      let timestamp = activity.createdAt || activity.timestamp;
-      let status = activity.status || 'success';
-
-      if (isUserLog) {
-        // Handle UserLog entries
-        console.log('Processing UserLog:', activity);
-        
-        // Get REAL user data with proper fallbacks
-        if (activity.user && typeof activity.user === 'object') {
-          userData = {
-            id: activity.user._id || 'unknown',
-            name: `${activity.user.firstName || ''} ${activity.user.lastName || ''}`.trim() || 'Unknown User',
-            email: activity.user.email || 'Unknown Email'
-          };
-        } else if (activity.username) {
-          userData = {
-            id: activity.user || 'unknown',
-            name: activity.username,
-            email: activity.email || 'Unknown Email'
-          };
-        }
-        
-        ipAddress = activity.ipAddress || 'Unknown';
-        
-      } else {
-        // Handle SystemLog entries
-        console.log('Processing SystemLog:', activity);
-        
-        if (activity.performedBy && typeof activity.performedBy === 'object') {
-          if (activity.performedByModel === 'User') {
-            userData = {
-              id: activity.performedBy._id || 'unknown',
-              name: `${activity.performedBy.firstName || ''} ${activity.performedBy.lastName || ''}`.trim() || 'Unknown User',
-              email: activity.performedBy.email || 'Unknown Email'
-            };
-          } else if (activity.performedByModel === 'Admin') {
-            userData = {
-              id: activity.performedBy._id || 'unknown',
-              name: activity.performedBy.name || 'Admin',
-              email: activity.performedBy.email || 'admin@system'
-            };
-          }
-        }
-        
-        ipAddress = activity.ip || 'Unknown';
-      }
-
-      // Final safety check for user name
-      if (!userData.name || userData.name === ' ' || userData.name === 'undefined undefined') {
-        userData.name = 'System User';
-      }
-
-      return {
-        id: activity._id?.toString() || `activity-${Date.now()}-${Math.random()}`,
-        timestamp: timestamp,
-        user: {
-          id: userData.id,
-          name: userData.name,
-          email: userData.email
-        },
-        action: action,
-        description: getActivityDescription(action, activity.metadata || activity.changes),
-        ipAddress: ipAddress,
-        status: status,
-        type: isUserLog ? 'user_activity' : 'system_activity',
-        metadata: activity.metadata || activity.changes || {}
-      };
-    });
-
-    // Get total count for pagination
-    const totalCount = await UserLog.countDocuments() + await SystemLog.countDocuments();
-
-    console.log('Sending activities:', activities.length);
-
-    res.status(200).json({
-      status: 'success',
-      data: {
-        activities: activities,
-        pagination: {
-          currentPage: parseInt(page),
-          totalPages: Math.ceil(totalCount / parseInt(limit)),
-          totalItems: totalCount,
-          itemsPerPage: parseInt(limit),
-          hasNextPage: parseInt(page) < Math.ceil(totalCount / parseInt(limit)),
-          hasPrevPage: parseInt(page) > 1
-        }
-      }
-    });
-
-  } catch (err) {
-    console.error('Admin activity fetch error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'An error occurred while fetching activity data'
-    });
-  }
-});
-
-// COMPREHENSIVE activity description helper
-function getActivityDescription(action, metadata) {
-  const actionMap = {
-    // Authentication actions
-    'signup': 'Signed up for a new account',
-    'login': 'Logged into account',
-    'logout': 'Logged out of account',
-    'login_attempt': 'Attempted to log in',
-    'session_created': 'Created a new session',
-    'password_change': 'Changed password',
-    'password_reset_request': 'Requested password reset',
-    'password_reset_complete': 'Completed password reset',
-    'failed_login': 'Failed login attempt',
-    
-    // Financial actions
-    'deposit': 'Made a deposit',
-    'withdrawal': 'Requested a withdrawal',
-    'investment': 'Created an investment',
-    'transfer': 'Transferred funds',
-    'create-deposit': 'Created deposit request',
-    'create-withdrawal': 'Created withdrawal request',
-    'btc-withdrawal': 'Made BTC withdrawal',
-    'create-savings': 'Added to savings',
-    'investment_created': 'Created new investment',
-    'investment_matured': 'Investment matured',
-    'investment_completed': 'Investment completed',
-    
-    // Account actions
-    'profile_update': 'Updated profile information',
-    'update-profile': 'Updated profile',
-    'update-address': 'Updated address',
-    'kyc_submission': 'Submitted KYC documents',
-    'submit-kyc': 'Submitted KYC',
-    'settings_change': 'Changed account settings',
-    'update-preferences': 'Updated preferences',
-    
-    // Security actions
-    '2fa_enable': 'Enabled two-factor authentication',
-    '2fa_disable': 'Disabled two-factor authentication',
-    'enable-2fa': 'Enabled 2FA',
-    'disable-2fa': 'Disabled 2FA',
-    'api_key_create': 'Created API key',
-    'api_key_delete': 'Deleted API key',
-    'device_login': 'Logged in from new device',
-    
-    // System & Admin actions
-    'session_timeout': 'Session timed out',
-    'suspicious_activity': 'Suspicious activity detected',
-    'admin-login': 'Admin logged in',
-    'user_login': 'User logged in',
-    'create_investment': 'Created investment',
-    'complete_investment': 'Completed investment',
-    'verify-admin': 'Admin session verified',
-    'admin_login': 'Admin logged in',
-    
-    // Admin actions
-    'approve-deposit': 'Approved deposit',
-    'reject-deposit': 'Rejected deposit',
-    'approve-withdrawal': 'Approved withdrawal',
-    'reject-withdrawal': 'Rejected withdrawal',
-    'create-user': 'Created user account',
-    'update-user': 'Updated user account'
-  };
-
-  let description = actionMap[action] || `Performed ${action.replace(/_/g, ' ')}`;
-
-  // Add context from metadata if available
-  if (metadata) {
-    if (metadata.amount) {
-      description += ` of $${metadata.amount}`;
-    }
-    if (metadata.method) {
-      description += ` via ${metadata.method}`;
-    }
-    if (metadata.deviceType) {
-      description += ` from ${metadata.deviceType}`;
-    }
-    if (metadata.location) {
-      description += ` in ${metadata.location}`;
-    }
-    if (metadata.fields && Array.isArray(metadata.fields)) {
-      description += ` (${metadata.fields.join(', ')})`;
-    }
-  }
-
-  return description;
-}
-
-
-
-
-
-
-// Get latest admin activity
-app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
-    try {
-        const activities = await UserLog.find({})
-            .populate('user', 'firstName lastName email')
-            .sort({ createdAt: -1 })
-            .limit(20)
-            .lean();
-
-        const formattedActivities = activities.map(activity => ({
-            id: activity._id,
-            timestamp: activity.createdAt,
-            user: activity.user ? {
-                name: `${activity.user.firstName} ${activity.user.lastName}`,
-                email: activity.user.email
-            } : { name: 'System', email: 'system' },
-            action: activity.action,
-            ipAddress: activity.ipAddress,
-            status: activity.status
-        }));
-
-        res.status(200).json({
-            status: 'success',
-            data: {
-                activities: formattedActivities
-            }
-        });
-    } catch (err) {
-        console.error('Get latest activity error:', err);
-        res.status(500).json({
-            status: 'error',
-            message: 'Failed to fetch latest activity'
-        });
-    }
-});
 
 
 
