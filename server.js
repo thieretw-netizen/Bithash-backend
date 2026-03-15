@@ -9190,9 +9190,7 @@ const expectedProfit = investment.amount * (roiPercentage / 100);
 
 
 
-// Enhanced activity logger with device and location info
-const logUserActivity = async (req, action, status = 'success', metadata = {}, relatedEntity = null) => {
-  try {
+
     // Skip logging if no user is associated (like during signup)
     if (!req.user && !(action === 'signup' || action === 'login' || action === 'password_reset_request')) {
       return;
