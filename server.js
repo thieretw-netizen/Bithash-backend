@@ -3632,7 +3632,7 @@ const calculateReferralCommissions = async (investment) => {
 
 
     
-// Enhanced email service with professional Bitcoin mining templates matching the provided HTML branding
+// Enhanced email service with professional Bitcoin mining templates
 const sendProfessionalEmail = async (options) => {
   try {
     const { email, subject, template, data } = options;
@@ -3653,25 +3653,25 @@ const sendProfessionalEmail = async (options) => {
                   * { margin: 0; padding: 0; box-sizing: border-box; }
                   body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
                   .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #00D8FF; }
+                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #f0b90b; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 20px; }
                   .logo-img { width: 50px; height: 50px; border-radius: 50%; }
-                  .logo-text { font-size: 28px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
+                  .logo-text { font-size: 28px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
                   .header-title { font-size: 24px; font-weight: 600; color: #ffffff; margin-top: 10px; }
                   .content { padding: 40px; background: #ffffff; }
                   .greeting { font-size: 18px; color: #1a1a1a; margin-bottom: 25px; font-weight: 500; }
                   .features-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin: 30px 0; }
-                  .feature-card { background: #f8f9fa; padding: 20px; border-radius: 8px; border-left: 3px solid #00D8FF; }
+                  .feature-card { background: #f8f9fa; padding: 20px; border-radius: 8px; border-left: 3px solid #f0b90b; }
                   .feature-title { font-weight: 600; color: #0a0a0a; margin-bottom: 8px; font-size: 14px; }
                   .feature-desc { color: #666; font-size: 13px; line-height: 1.4; }
                   .benefits-list { margin: 25px 0; }
                   .benefit-item { display: flex; align-items: center; margin-bottom: 12px; color: #333; }
-                  .benefit-icon { color: #00D8FF; margin-right: 12px; font-weight: bold; }
-                  .cta-button { background: #00D8FF; color: #0a0a0a; padding: 14px 35px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 25px 0; font-weight: 600; font-size: 15px; text-align: center; }
-                  .security-note { background: #fff8e6; border: 1px solid #00D8FF; padding: 20px; border-radius: 6px; margin: 25px 0; }
+                  .benefit-icon { color: #f0b90b; margin-right: 12px; font-weight: bold; }
+                  .cta-button { background: #f0b90b; color: #0a0a0a; padding: 14px 35px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 25px 0; font-weight: 600; font-size: 15px; text-align: center; }
+                  .security-note { background: #fff8e6; border: 1px solid #f0b90b; padding: 20px; border-radius: 6px; margin: 25px 0; }
                   .footer { background: #0a0a0a; padding: 30px 40px; text-align: center; color: #999; }
                   .footer-text { font-size: 12px; line-height: 1.5; margin-bottom: 10px; }
-                  .support-link { color: #00D8FF; text-decoration: none; }
+                  .support-link { color: #f0b90b; text-decoration: none; }
               </style>
           </head>
           <body>
@@ -3764,13 +3764,13 @@ const sendProfessionalEmail = async (options) => {
                   * { margin: 0; padding: 0; box-sizing: border-box; }
                   body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
                   .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #00D8FF; }
+                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #f0b90b; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
                   .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
+                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: #ffffff; }
-                  .otp-code { background: #0a0a0a; color: #00D8FF; padding: 20px; font-size: 36px; font-weight: 700; text-align: center; letter-spacing: 8px; margin: 30px 0; border-radius: 8px; font-family: 'Courier New', monospace; }
-                  .security-note { background: #fff8e6; border: 1px solid #00D8FF; padding: 20px; border-radius: 6px; margin: 25px 0; }
+                  .otp-code { background: #0a0a0a; color: #f0b90b; padding: 20px; font-size: 36px; font-weight: 700; text-align: center; letter-spacing: 8px; margin: 30px 0; border-radius: 8px; font-family: 'Courier New', monospace; }
+                  .security-note { background: #fff8e6; border: 1px solid #f0b90b; padding: 20px; border-radius: 6px; margin: 25px 0; }
                   .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
                   .footer-text { font-size: 12px; line-height: 1.5; }
               </style>
@@ -3809,7 +3809,7 @@ const sendProfessionalEmail = async (options) => {
         `
       },
 
-      // LOGIN SUCCESS (AFTER OTP VERIFICATION)
+      // LOGIN SUCCESS
       login_success: {
         subject: 'BitHash Capital - Successful Login Detected',
         html: `
@@ -3824,15 +3824,15 @@ const sendProfessionalEmail = async (options) => {
                   * { margin: 0; padding: 0; box-sizing: border-box; }
                   body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
                   .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #28a745; }
+                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #27ae60; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
                   .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
+                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: #ffffff; }
-                  .login-info { background: #f8f9fa; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #28a745; }
+                  .login-info { background: #f8f9fa; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #27ae60; }
                   .info-item { margin-bottom: 10px; display: flex; }
                   .info-label { font-weight: 600; min-width: 120px; color: #333; }
-                  .security-alert { background: #fee; border: 1px solid #FF4D4D; padding: 20px; border-radius: 6px; margin: 20px 0; }
+                  .security-alert { background: #fee; border: 1px solid #e74c3c; padding: 20px; border-radius: 6px; margin: 20px 0; }
                   .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
                   .footer-text { font-size: 12px; line-height: 1.5; }
               </style>
@@ -3903,13 +3903,13 @@ const sendProfessionalEmail = async (options) => {
                   * { margin: 0; padding: 0; box-sizing: border-box; }
                   body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
                   .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #FF4D4D; }
+                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #e74c3c; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
                   .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
+                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: #ffffff; }
-                  .reset-button { background: #FF4D4D; color: white; padding: 14px 35px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 25px 0; font-weight: 600; font-size: 15px; }
-                  .security-note { background: #fee; border: 1px solid #FF4D4D; padding: 20px; border-radius: 6px; margin: 25px 0; }
+                  .reset-button { background: #e74c3c; color: white; padding: 14px 35px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 25px 0; font-weight: 600; font-size: 15px; }
+                  .security-note { background: #fee; border: 1px solid #e74c3c; padding: 20px; border-radius: 6px; margin: 25px 0; }
                   .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
                   .footer-text { font-size: 12px; line-height: 1.5; }
               </style>
@@ -3963,16 +3963,16 @@ const sendProfessionalEmail = async (options) => {
                   * { margin: 0; padding: 0; box-sizing: border-box; }
                   body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
                   .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #00D8FF; }
+                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #f0b90b; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
                   .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
+                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: #ffffff; }
-                  .investment-details { background: #f8f9fa; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #00D8FF; }
+                  .investment-details { background: #f8f9fa; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #f0b90b; }
                   .detail-item { margin-bottom: 12px; display: flex; justify-content: space-between; }
                   .detail-label { font-weight: 600; color: #333; }
                   .detail-value { color: #0a0a0a; font-weight: 500; }
-                  .cta-button { background: #00D8FF; color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 20px 0; font-weight: 600; }
+                  .cta-button { background: #f0b90b; color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 20px 0; font-weight: 600; }
                   .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
                   .footer-text { font-size: 12px; line-height: 1.5; }
               </style>
@@ -4034,9 +4034,9 @@ const sendProfessionalEmail = async (options) => {
         `
       },
 
-      // INVESTMENT COMPLETED
+      // INVESTMENT COMPLETED (MATURED)
       investment_completed: {
-        subject: 'BitHash Capital - Investment Matured Successfully',
+        subject: 'BitHash Capital - Investment Matured',
         html: `
           <!DOCTYPE html>
           <html>
@@ -4049,16 +4049,17 @@ const sendProfessionalEmail = async (options) => {
                   * { margin: 0; padding: 0; box-sizing: border-box; }
                   body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
                   .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #28a745; }
+                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #27ae60; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
                   .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
+                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: #ffffff; }
-                  .investment-details { background: #f8f9fa; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #28a745; }
+                  .matured-details { background: #f8f9fa; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #27ae60; }
                   .detail-item { margin-bottom: 12px; display: flex; justify-content: space-between; }
                   .detail-label { font-weight: 600; color: #333; }
                   .detail-value { color: #0a0a0a; font-weight: 500; }
-                  .cta-button { background: #00D8FF; color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 20px 0; font-weight: 600; }
+                  .profit { color: #27ae60; font-weight: 700; }
+                  .cta-button { background: #f0b90b; color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 20px 0; font-weight: 600; }
                   .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
                   .footer-text { font-size: 12px; line-height: 1.5; }
               </style>
@@ -4073,24 +4074,28 @@ const sendProfessionalEmail = async (options) => {
                   </div>
                   <div class="content">
                       <h2>Hello ${data.name},</h2>
-                      <p>Your investment has matured and the returns have been credited to your account.</p>
+                      <p>Congratulations! Your investment has successfully matured and returns have been credited to your matured balance.</p>
                       
-                      <div class="investment-details">
+                      <div class="matured-details">
                           <div class="detail-item">
                               <span class="detail-label">Investment Plan:</span>
                               <span class="detail-value">${data.planName}</span>
                           </div>
                           <div class="detail-item">
-                              <span class="detail-label">Amount:</span>
+                              <span class="detail-label">Initial Investment:</span>
                               <span class="detail-value">$${data.amount}</span>
+                          </div>
+                          <div class="detail-item">
+                              <span class="detail-label">Profit Earned:</span>
+                              <span class="detail-value profit">$${data.profit}</span>
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">Total Return:</span>
                               <span class="detail-value">$${data.totalReturn}</span>
                           </div>
                           <div class="detail-item">
-                              <span class="detail-label">Profit:</span>
-                              <span class="detail-value">$${data.profit}</span>
+                              <span class="detail-label">New Matured Balance:</span>
+                              <span class="detail-value">$${data.newMaturedBalance}</span>
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">Completion Date:</span>
@@ -4098,13 +4103,15 @@ const sendProfessionalEmail = async (options) => {
                           </div>
                       </div>
                       
-                      <p>Your funds are now available in your matured balance and can be reinvested or withdrawn.</p>
+                      <p>Your funds are now available in your matured balance. You can reinvest or withdraw them at any time.</p>
                       
                       <div style="text-align: center;">
-                          <a href="https://www.bithashcapital.live/investment.html" class="cta-button">Reinvest Now</a>
+                          <a href="https://www.bithashcapital.live/dashboard.html" class="cta-button">View Balance</a>
                       </div>
                       
-                      <p>Best regards,<br><strong>BitHash Capital Investment Team</strong></p>
+                      <p>Thank you for mining with BitHash Capital!</p>
+                      
+                      <p>Best regards,<br><strong>BitHash Capital Team</strong></p>
                   </div>
                   <div class="footer">
                       <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
@@ -4134,7 +4141,7 @@ const sendProfessionalEmail = async (options) => {
                   .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #3498db; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
                   .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
+                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: #ffffff; }
                   .withdrawal-details { background: #f8f9fa; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #3498db; }
                   .detail-item { margin-bottom: 12px; display: flex; justify-content: space-between; }
@@ -4213,12 +4220,12 @@ const sendProfessionalEmail = async (options) => {
                   * { margin: 0; padding: 0; box-sizing: border-box; }
                   body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
                   .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #28a745; }
+                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #27ae60; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
                   .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
+                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: #ffffff; }
-                  .withdrawal-details { background: #f8f9fa; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #28a745; }
+                  .withdrawal-details { background: #f8f9fa; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #27ae60; }
                   .detail-item { margin-bottom: 12px; display: flex; justify-content: space-between; }
                   .detail-label { font-weight: 600; color: #333; }
                   .detail-value { color: #0a0a0a; font-weight: 500; }
@@ -4236,7 +4243,7 @@ const sendProfessionalEmail = async (options) => {
                   </div>
                   <div class="content">
                       <h2>Hello ${data.name},</h2>
-                      <p>Your withdrawal has been successfully processed.</p>
+                      <p>Your withdrawal has been successfully completed and funds have been debited from your account.</p>
                       
                       <div class="withdrawal-details">
                           <div class="detail-item">
@@ -4252,12 +4259,16 @@ const sendProfessionalEmail = async (options) => {
                               <span class="detail-value">${data.reference}</span>
                           </div>
                           <div class="detail-item">
-                              <span class="detail-label">Processed Date:</span>
-                              <span class="detail-value">${new Date().toLocaleDateString()}</span>
+                              <span class="detail-label">New Balance:</span>
+                              <span class="detail-value">$${data.newBalance}</span>
+                          </div>
+                          <div class="detail-item">
+                              <span class="detail-label">Processed At:</span>
+                              <span class="detail-value">${new Date(data.processedAt).toLocaleString()}</span>
                           </div>
                       </div>
                       
-                      <p>The funds have been sent to your designated wallet/account.</p>
+                      <p>Thank you for using BitHash Capital.</p>
                       
                       <p>Best regards,<br><strong>BitHash Capital Finance Team</strong></p>
                   </div>
@@ -4286,16 +4297,16 @@ const sendProfessionalEmail = async (options) => {
                   * { margin: 0; padding: 0; box-sizing: border-box; }
                   body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
                   .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #28a745; }
+                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #27ae60; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
                   .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
+                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: #ffffff; }
-                  .deposit-details { background: #f8f9fa; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #28a745; }
+                  .deposit-details { background: #f8f9fa; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #27ae60; }
                   .detail-item { margin-bottom: 12px; display: flex; justify-content: space-between; }
                   .detail-label { font-weight: 600; color: #333; }
                   .detail-value { color: #0a0a0a; font-weight: 500; }
-                  .cta-button { background: #00D8FF; color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 20px 0; font-weight: 600; }
+                  .cta-button { background: #f0b90b; color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 20px 0; font-weight: 600; }
                   .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
                   .footer-text { font-size: 12px; line-height: 1.5; }
               </style>
@@ -4353,6 +4364,81 @@ const sendProfessionalEmail = async (options) => {
         `
       },
 
+      // ACCOUNT SUSPENDED
+      account_suspended: {
+        subject: 'BitHash Capital - Important Account Notification',
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Account Notification - BitHash Capital</title>
+              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <style>
+                  * { margin: 0; padding: 0; box-sizing: border-box; }
+                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
+                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
+                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #e74c3c; }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
+                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
+                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
+                  .content { padding: 40px; background: #ffffff; }
+                  .alert-box { background: #fee; border: 2px solid #e74c3c; padding: 25px; border-radius: 8px; margin: 25px 0; }
+                  .action-steps { background: #f8f9fa; padding: 20px; border-radius: 6px; margin: 20px 0; }
+                  .step-item { margin-bottom: 10px; display: flex; align-items: flex-start; }
+                  .step-number { background: #e74c3c; color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-right: 12px; font-size: 12px; font-weight: 600; }
+                  .support-link { color: #e74c3c; text-decoration: none; font-weight: 600; }
+                  .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
+                  .footer-text { font-size: 12px; line-height: 1.5; }
+              </style>
+          </head>
+          <body>
+              <div class="container">
+                  <div class="header">
+                      <div class="logo-container">
+                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
+                          <div class="logo-text">BitHash Capital</div>
+                      </div>
+                  </div>
+                  <div class="content">
+                      <h2>Hello ${data.name},</h2>
+                      
+                      <div class="alert-box">
+                          <h3 style="color: #e74c3c; margin-bottom: 15px;">Important Account Notification</h3>
+                          <p>Your BitHash Capital account has been temporarily suspended due to ${data.reason}.</p>
+                      </div>
+                      
+                      <div class="action-steps">
+                          <p><strong>Required Actions:</strong></p>
+                          <div class="step-item">
+                              <div class="step-number">1</div>
+                              <span>Contact our support team to resolve this issue</span>
+                          </div>
+                          <div class="step-item">
+                              <div class="step-number">2</div>
+                              <span>Provide any requested documentation or information</span>
+                          </div>
+                          <div class="step-item">
+                              <div class="step-number">3</div>
+                              <span>Follow instructions provided by our support team</span>
+                          </div>
+                      </div>
+                      
+                      <p>Please contact our support team immediately at <a href="mailto:support@bithashcapital.live" class="support-link">support@bithashcapital.live</a> to resolve this matter.</p>
+                      
+                      <p>Best regards,<br><strong>BitHash Capital Security Team</strong></p>
+                  </div>
+                  <div class="footer">
+                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
+                      This is an important security notification.</p>
+                  </div>
+              </div>
+          </body>
+          </html>
+        `
+      },
+
       // REFERRAL BONUS
       referral_bonus: {
         subject: 'BitHash Capital - Referral Bonus Earned',
@@ -4368,15 +4454,15 @@ const sendProfessionalEmail = async (options) => {
                   * { margin: 0; padding: 0; box-sizing: border-box; }
                   body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
                   .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #00D8FF; }
+                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #f0b90b; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
                   .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
+                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: #ffffff; }
-                  .bonus-card { background: #fff8e6; border: 2px solid #00D8FF; padding: 30px; border-radius: 8px; margin: 25px 0; text-align: center; }
-                  .bonus-amount { font-size: 36px; font-weight: 700; color: #00D8FF; margin: 10px 0; }
+                  .bonus-card { background: #fff8e6; border: 2px solid #f0b90b; padding: 30px; border-radius: 8px; margin: 25px 0; text-align: center; }
+                  .bonus-amount { font-size: 36px; font-weight: 700; color: #f0b90b; margin: 10px 0; }
                   .referral-details { background: #f8f9fa; padding: 20px; border-radius: 6px; margin: 20px 0; }
-                  .cta-button { background: #00D8FF; color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 20px 0; font-weight: 600; }
+                  .cta-button { background: #f0b90b; color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 20px 0; font-weight: 600; }
                   .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
                   .footer-text { font-size: 12px; line-height: 1.5; }
               </style>
@@ -4425,31 +4511,29 @@ const sendProfessionalEmail = async (options) => {
         `
       },
 
-      // ACCOUNT SUSPENDED
-      account_suspended: {
-        subject: 'BitHash Capital - Important Account Notification',
+      // PASSWORD RESET SUCCESS
+      password_reset_success: {
+        subject: 'BitHash Capital - Password Changed Successfully',
         html: `
           <!DOCTYPE html>
           <html>
           <head>
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>Account Notification - BitHash Capital</title>
+              <title>Password Changed - BitHash Capital</title>
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
                   body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
                   .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #FF4D4D; }
+                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #27ae60; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
                   .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
+                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: #ffffff; }
-                  .alert-box { background: #fee; border: 2px solid #FF4D4D; padding: 25px; border-radius: 8px; margin: 25px 0; }
-                  .action-steps { background: #f8f9fa; padding: 20px; border-radius: 6px; margin: 20px 0; }
-                  .step-item { margin-bottom: 10px; display: flex; align-items: flex-start; }
-                  .step-number { background: #FF4D4D; color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-right: 12px; font-size: 12px; font-weight: 600; }
-                  .support-link { color: #FF4D4D; text-decoration: none; font-weight: 600; }
+                  .success-message { text-align: center; padding: 25px; }
+                  .success-icon { font-size: 48px; color: #27ae60; margin-bottom: 20px; }
+                  .security-note { background: #f8f9fa; padding: 20px; border-radius: 6px; margin: 20px 0; }
                   .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
                   .footer-text { font-size: 12px; line-height: 1.5; }
               </style>
@@ -4463,262 +4547,21 @@ const sendProfessionalEmail = async (options) => {
                       </div>
                   </div>
                   <div class="content">
-                      <h2>Hello ${data.name},</h2>
-                      
-                      <div class="alert-box">
-                          <h3 style="color: #FF4D4D; margin-bottom: 15px;">Important Account Notification</h3>
-                          <p>Your BitHash Capital account has been temporarily suspended due to ${data.reason}.</p>
+                      <div class="success-message">
+                          <div class="success-icon">✓</div>
+                          <h2>Hello ${data.name},</h2>
+                          <p>Your password has been successfully changed.</p>
                       </div>
                       
-                      <div class="action-steps">
-                          <p><strong>Required Actions:</strong></p>
-                          <div class="step-item">
-                              <div class="step-number">1</div>
-                              <span>Contact our support team to resolve this issue</span>
-                          </div>
-                          <div class="step-item">
-                              <div class="step-number">2</div>
-                              <span>Provide any requested documentation or information</span>
-                          </div>
-                          <div class="step-item">
-                              <div class="step-number">3</div>
-                              <span>Follow instructions provided by our support team</span>
-                          </div>
+                      <div class="security-note">
+                          <strong>Security Notice:</strong> If you did not perform this action, please contact our support team immediately and secure your account.
                       </div>
-                      
-                      <p>Please contact our support team immediately at <a href="mailto:support@bithashcapital.live" class="support-link">support@bithashcapital.live</a> to resolve this matter.</p>
                       
                       <p>Best regards,<br><strong>BitHash Capital Security Team</strong></p>
                   </div>
                   <div class="footer">
                       <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
-                      This is an important security notification.</p>
-                  </div>
-              </div>
-          </body>
-          </html>
-        `
-      },
-
-      // ACCOUNT REACTIVATED
-      account_reactivated: {
-        subject: 'BitHash Capital - Account Reactivated',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>Account Reactivated - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-              <style>
-                  * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #28a745; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
-                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
-                  .content { padding: 40px; background: #ffffff; }
-                  .success-box { background: #e8f6ef; border: 2px solid #28a745; padding: 25px; border-radius: 8px; margin: 25px 0; text-align: center; }
-                  .cta-button { background: #00D8FF; color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 20px 0; font-weight: 600; }
-                  .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 12px; line-height: 1.5; }
-              </style>
-          </head>
-          <body>
-              <div class="container">
-                  <div class="header">
-                      <div class="logo-container">
-                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash Capital</div>
-                      </div>
-                  </div>
-                  <div class="content">
-                      <h2>Hello ${data.name},</h2>
-                      
-                      <div class="success-box">
-                          <h3 style="color: #28a745; margin-bottom: 15px;">Account Successfully Reactivated</h3>
-                          <p>Your BitHash Capital account has been reactivated. You can now log in and resume your mining activities.</p>
-                      </div>
-                      
-                      <p>We're glad to have you back! Your account is now in good standing and all features have been restored.</p>
-                      
-                      <div style="text-align: center;">
-                          <a href="https://www.bithashcapital.live/dashboard.html" class="cta-button">Go to Dashboard</a>
-                      </div>
-                      
-                      <p>If you have any questions, please don't hesitate to contact our support team.</p>
-                      
-                      <p>Best regards,<br><strong>BitHash Capital Team</strong></p>
-                  </div>
-                  <div class="footer">
-                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
-                      Professional Bitcoin Mining and Investment Platform</p>
-                  </div>
-              </div>
-          </body>
-          </html>
-        `
-      },
-
-      // KYC APPROVED
-      kyc_approved: {
-        subject: 'BitHash Capital - KYC Verification Approved',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>KYC Approved - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-              <style>
-                  * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #28a745; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
-                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
-                  .content { padding: 40px; background: #ffffff; }
-                  .success-message { background: #e8f6ef; border: 1px solid #28a745; padding: 25px; border-radius: 8px; margin: 25px 0; text-align: center; }
-                  .benefits-list { margin: 25px 0; }
-                  .benefit-item { display: flex; align-items: center; margin-bottom: 12px; color: #333; }
-                  .benefit-icon { color: #28a745; margin-right: 12px; font-weight: bold; }
-                  .cta-button { background: #00D8FF; color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 20px 0; font-weight: 600; }
-                  .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 12px; line-height: 1.5; }
-              </style>
-          </head>
-          <body>
-              <div class="container">
-                  <div class="header">
-                      <div class="logo-container">
-                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash Capital</div>
-                      </div>
-                  </div>
-                  <div class="content">
-                      <h2>Hello ${data.name},</h2>
-                      
-                      <div class="success-message">
-                          <h3 style="color: #28a745; margin-bottom: 10px;">KYC Verification Approved</h3>
-                          <p>Your identity verification has been successfully completed and approved.</p>
-                      </div>
-                      
-                      <p>With your KYC verification complete, you now have full access to all BitHash Capital features:</p>
-                      
-                      <div class="benefits-list">
-                          <div class="benefit-item">
-                              <span class="benefit-icon">•</span>
-                              <span>Higher withdrawal limits</span>
-                          </div>
-                          <div class="benefit-item">
-                              <span class="benefit-icon">•</span>
-                              <span>Access to premium investment plans</span>
-                          </div>
-                          <div class="benefit-item">
-                              <span class="benefit-icon">•</span>
-                              <span>Enhanced security features</span>
-                          </div>
-                          <div class="benefit-item">
-                              <span class="benefit-icon">•</span>
-                              <span>Priority customer support</span>
-                          </div>
-                      </div>
-                      
-                      <div style="text-align: center;">
-                          <a href="https://www.bithashcapital.live/dashboard.html" class="cta-button">Access Your Account</a>
-                      </div>
-                      
-                      <p>Thank you for completing the verification process and helping us maintain a secure platform.</p>
-                      
-                      <p>Best regards,<br><strong>BitHash Capital Compliance Team</strong></p>
-                  </div>
-                  <div class="footer">
-                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
-                      Professional Bitcoin Mining and Investment Platform</p>
-                  </div>
-              </div>
-          </body>
-          </html>
-        `
-      },
-
-      // KYC REJECTED
-      kyc_rejected: {
-        subject: 'BitHash Capital - KYC Verification Status',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>KYC Status - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-              <style>
-                  * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #FF4D4D; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
-                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
-                  .content { padding: 40px; background: #ffffff; }
-                  .alert-box { background: #fee; border: 1px solid #FF4D4D; padding: 25px; border-radius: 8px; margin: 25px 0; }
-                  .action-steps { background: #f8f9fa; padding: 20px; border-radius: 6px; margin: 20px 0; }
-                  .step-item { margin-bottom: 10px; display: flex; align-items: flex-start; }
-                  .step-number { background: #FF4D4D; color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-right: 12px; font-size: 12px; font-weight: 600; }
-                  .cta-button { background: #00D8FF; color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 20px 0; font-weight: 600; }
-                  .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 12px; line-height: 1.5; }
-              </style>
-          </head>
-          <body>
-              <div class="container">
-                  <div class="header">
-                      <div class="logo-container">
-                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash Capital</div>
-                      </div>
-                  </div>
-                  <div class="content">
-                      <h2>Hello ${data.name},</h2>
-                      
-                      <div class="alert-box">
-                          <h3 style="color: #FF4D4D; margin-bottom: 15px;">KYC Verification Update</h3>
-                          <p>Your KYC verification could not be approved at this time.</p>
-                          <p style="margin-top: 10px;"><strong>Reason:</strong> ${data.reason}</p>
-                      </div>
-                      
-                      <div class="action-steps">
-                          <p><strong>Next Steps:</strong></p>
-                          <div class="step-item">
-                              <div class="step-number">1</div>
-                              <span>Review the rejection reason above</span>
-                          </div>
-                          <div class="step-item">
-                              <div class="step-number">2</div>
-                              <span>Submit new documents with clear, legible information</span>
-                          </div>
-                          <div class="step-item">
-                              <div class="step-number">3</div>
-                              <span>Ensure all documents are valid and not expired</span>
-                          </div>
-                      </div>
-                      
-                      <div style="text-align: center;">
-                          <a href="https://www.bithashcapital.live/kyc.html" class="cta-button">Resubmit KYC</a>
-                      </div>
-                      
-                      <p>If you need assistance, please contact our support team.</p>
-                      
-                      <p>Best regards,<br><strong>BitHash Capital Compliance Team</strong></p>
-                  </div>
-                  <div class="footer">
-                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
-                      Professional Bitcoin Mining and Investment Platform</p>
+                      This is an automated security notification.</p>
                   </div>
               </div>
           </body>
@@ -4747,6 +4590,46 @@ const sendProfessionalEmail = async (options) => {
   }
 };
 
+// Helper function to send automated emails for key activities
+const sendAutomatedEmail = async (user, template, data = {}) => {
+  try {
+    // Get device info for location
+    let location = 'Unknown';
+    let ip = 'Unknown';
+    
+    if (data.req) {
+      const deviceInfo = await getUserDeviceInfo(data.req);
+      location = deviceInfo.location;
+      ip = deviceInfo.ip;
+    }
+    
+    // Prepare common data
+    const emailData = {
+      name: user.firstName,
+      email: user.email,
+      location: location,
+      ip: ip,
+      device: data.req?.headers['user-agent'] || 'Unknown',
+      ...data
+    };
+    
+    // Send email based on template
+    await sendProfessionalEmail({
+      email: user.email,
+      template: template,
+      data: emailData
+    });
+    
+    // Log email sent
+    await logActivity('email_sent', 'email', null, user._id, 'User', data.req, {
+      template: template,
+      email: user.email
+    });
+    
+  } catch (error) {
+    console.error(`Failed to send ${template} email to ${user.email}:`, error);
+  }
+};
 
 
 
@@ -4754,10 +4637,7 @@ const sendProfessionalEmail = async (options) => {
 
 
 
-
-
-
-// Enhanced Signup Endpoint with OTP and Welcome Email
+// Enhanced Signup Endpoint with OTP - FIXED email handling
 app.post('/api/auth/signup', [
   body('firstName').trim().notEmpty().withMessage('First name is required').escape(),
   body('lastName').trim().notEmpty().withMessage('Last name is required').escape(),
@@ -4816,6 +4696,19 @@ app.post('/api/auth/signup', [
       if (referredByUser) {
         referralSource = 'referral_link';
         console.log(`Referral found: ${referredByUser.firstName} ${referredByUser.lastName} (${referredByUser.email})`);
+        
+        // Log the referral in the database automatically when downline registers
+        await DownlineRelationship.create({
+          upline: referredByUser._id,
+          downline: newUser._id,
+          commissionPercentage: 5,
+          commissionRounds: 3,
+          remainingRounds: 3,
+          status: 'active',
+          assignedBy: referredByUser._id
+        });
+        
+        console.log(`Downline relationship created: ${referredByUser.email} -> ${newUser.email}`);
       }
     }
 
@@ -4897,7 +4790,13 @@ app.post('/api/auth/signup', [
 
 
 
-// Enhanced Login Endpoint with OTP and Location Email After Verification
+
+
+
+
+
+
+// Enhanced Login Endpoint with OTP - FIXED email handling
 app.post('/api/auth/login', [
   body('email').isEmail().withMessage('Please provide a valid email'),
   body('password').notEmpty().withMessage('Password is required'),
@@ -5001,445 +4900,6 @@ app.post('/api/auth/login', [
     res.status(500).json({
       status: 'error',
       message: 'An error occurred during login'
-    });
-  }
-});
-
-// OTP Verification Endpoint with Login Success Email
-app.post('/api/auth/verify-otp', [
-  body('email').isEmail().withMessage('Please provide a valid email'),
-  body('otp').notEmpty().withMessage('OTP is required').isLength({ min: 6, max: 6 }).withMessage('OTP must be 6 digits'),
-  body('type').isIn(['signup', 'login', 'password_reset', 'withdrawal']).withMessage('Invalid OTP type')
-], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({
-      status: 'fail',
-      errors: errors.array()
-    });
-  }
-
-  try {
-    const { email, otp, type } = req.body;
-
-    // Find the OTP record
-    const otpRecord = await OTP.findOne({
-      email,
-      otp,
-      type,
-      used: false,
-      expiresAt: { $gt: new Date() }
-    });
-
-    if (!otpRecord) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Invalid or expired OTP'
-      });
-    }
-
-    // Mark OTP as used
-    otpRecord.used = true;
-    await otpRecord.save();
-
-    // Find the user
-    const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found'
-      });
-    }
-
-    // Update user verification status for signup
-    if (type === 'signup') {
-      user.isVerified = true;
-      await user.save();
-    }
-
-    // For login, send login success email with location
-    if (type === 'login') {
-      const deviceInfo = await getUserDeviceInfo(req);
-      
-      // Send login success email with location
-      await sendProfessionalEmail({
-        email: user.email,
-        template: 'login_success',
-        data: {
-          name: user.firstName,
-          device: deviceInfo.device,
-          location: deviceInfo.location,
-          ip: deviceInfo.ip,
-          suspicious: false
-        }
-      });
-
-      // Update last login
-      user.lastLogin = new Date();
-      user.loginHistory.push({
-        ip: deviceInfo.ip,
-        device: deviceInfo.device,
-        location: deviceInfo.location,
-        timestamp: new Date()
-      });
-      await user.save();
-    }
-
-    // Generate final JWT token
-    const token = generateJWT(user._id);
-
-    // Set cookie
-    res.cookie('jwt', token, {
-      expires: new Date(Date.now() + JWT_COOKIE_EXPIRES * 24 * 60 * 60 * 1000),
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict'
-    });
-
-    res.status(200).json({
-      status: 'success',
-      token,
-      message: 'OTP verified successfully',
-      data: {
-        user: {
-          id: user._id,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          email: user.email,
-          isVerified: user.isVerified
-        }
-      }
-    });
-
-    await logActivity('otp_verified', 'user', user._id, user._id, 'User', req, { type });
-
-  } catch (err) {
-    console.error('OTP verification error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'An error occurred during OTP verification'
-    });
-  }
-});
-
-
-
-
-app.post('/api/auth/google', async (req, res) => {
-  try {
-    console.log('Google auth request received');
-    
-    const { credential } = req.body;
-    
-    if (!credential) {
-      console.error('No credential provided');
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Google credential is required'
-      });
-    }
-
-    console.log('Verifying Google token...');
-
-    // Verify the Google token
-    let payload;
-    try {
-      const ticket = await googleClient.verifyIdToken({
-        idToken: credential,
-        audience: process.env.GOOGLE_CLIENT_ID || '634814462335-9o4t8q95c4orcsd9sijjl52374g6vm85.apps.googleusercontent.com'
-      });
-      payload = ticket.getPayload();
-      console.log('Google token verified successfully');
-    } catch (verifyError) {
-      console.error('Google token verification failed:', verifyError);
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Invalid Google token. Please try again.'
-      });
-    }
-
-    if (!payload) {
-      console.error('No payload from Google token');
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Invalid token payload'
-      });
-    }
-
-    const { email, given_name, family_name, sub } = payload;
-
-    if (!email) {
-      console.error('No email in Google payload');
-      return res.status(400).json({
-        status: 'fail',
-        message: 'No email found in Google account'
-      });
-    }
-
-    console.log('Google auth successful for:', email);
-
-    // Use the EXACT email from Google - no normalization
-    const originalEmail = email;
-
-    let user;
-    let isNewUser = false;
-
-    try {
-      user = await User.findOne({ email: originalEmail });
-      console.log('User lookup result:', user ? 'Found' : 'Not found');
-    } catch (dbError) {
-      console.error('Database lookup error:', dbError);
-      return res.status(500).json({
-        status: 'error',
-        message: 'Database error during user lookup'
-      });
-    }
-
-    if (!user) {
-      // Create new user with Google auth using exact email
-      try {
-        const referralCode = generateReferralCode();
-        user = await User.create({
-          firstName: given_name || 'Google',
-          lastName: family_name || 'User',
-          email: originalEmail,
-          googleId: sub,
-          isVerified: true,
-          referralCode,
-          status: 'active'
-        });
-        isNewUser = true;
-        console.log('New user created via Google:', originalEmail);
-
-        // Send welcome email
-        try {
-          await sendProfessionalEmail({
-            email: originalEmail,
-            template: 'welcome',
-            data: {
-              firstName: given_name || 'Google User'
-            }
-          });
-        } catch (emailError) {
-          console.error('Welcome email failed:', emailError);
-          // Don't fail the request if email fails
-        }
-      } catch (createError) {
-        console.error('User creation error:', createError);
-        return res.status(500).json({
-          status: 'error',
-          message: 'Failed to create user account'
-        });
-      }
-    } else if (!user.googleId) {
-      // Existing user, add Google auth
-      try {
-        user.googleId = sub;
-        user.isVerified = true;
-        await user.save();
-        console.log('Existing user linked with Google:', originalEmail);
-      } catch (updateError) {
-        console.error('User update error:', updateError);
-        return res.status(500).json({
-          status: 'error',
-          message: 'Failed to link Google account'
-        });
-      }
-    }
-
-    // Check if user is active
-    if (user.status !== 'active') {
-      return res.status(401).json({
-        status: 'fail',
-        message: 'Your account has been suspended. Please contact support.'
-      });
-    }
-
-    // Generate OTP for Google sign-in
-    try {
-      const otp = Math.floor(100000 + Math.random() * 900000).toString();
-      const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-
-      await OTP.create({
-        email: originalEmail,
-        otp,
-        type: 'login',
-        expiresAt,
-        ipAddress: req.ip,
-        userAgent: req.headers['user-agent']
-      });
-
-      // Send OTP email
-      await sendProfessionalEmail({
-        email: originalEmail,
-        template: 'otp',
-        data: {
-          name: user.firstName,
-          otp: otp,
-          action: 'Google sign-in verification'
-        }
-      });
-    } catch (otpError) {
-      console.error('OTP creation error:', otpError);
-      // Continue even if OTP fails for now
-    }
-
-    // Generate temporary token
-    const tempToken = generateJWT(user._id);
-
-    res.status(200).json({
-      status: 'success',
-      message: 'OTP sent to your email. Please verify to complete Google sign-in.',
-      tempToken,
-      needsOtp: true,
-      isNewUser: isNewUser,
-      data: {
-        user: {
-          id: user._id,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          email: user.email
-        }
-      }
-    });
-
-    // Log activity
-    try {
-      await logActivity('google_signin_otp_sent', 'user', user._id, user._id, 'User', req, {
-        isNewUser,
-        provider: 'google',
-        email: originalEmail
-      });
-    } catch (logError) {
-      console.error('Activity logging error:', logError);
-    }
-
-  } catch (err) {
-    console.error('Google auth UNEXPECTED error:', err);
-    console.error('Error stack:', err.stack);
-    
-    res.status(500).json({
-      status: 'error',
-      message: 'An unexpected error occurred during Google authentication'
-    });
-  }
-});
-
-app.post('/api/auth/forgot-password', [
-  body('email').isEmail().withMessage('Please provide a valid email').normalizeEmail()
-], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({
-      status: 'fail',
-      errors: errors.array()
-    });
-  }
-
-  try {
-    const { email } = req.body;
-    const user = await User.findOne({ email });
-
-    if (!user) {
-      // Return success even if user doesn't exist to prevent email enumeration
-      return res.status(200).json({
-        status: 'success',
-        message: 'If your email is registered, you will receive a password reset link'
-      });
-    }
-
-    const { resetToken, hashedToken, tokenExpires } = createPasswordResetToken();
-    user.passwordResetToken = hashedToken;
-    user.passwordResetExpires = tokenExpires;
-    await user.save();
-
-    const resetURL = `https://bithhash.vercel.app/reset-password?token=${resetToken}`;
-    
-    // Send professional password reset email
-    await sendProfessionalEmail({
-      email: user.email,
-      template: 'password_reset',
-      data: {
-        name: user.firstName,
-        resetUrl: resetURL
-      }
-    });
-
-    res.status(200).json({
-      status: 'success',
-      message: 'Password reset link sent to email'
-    });
-
-    await logActivity('forgot-password', 'user', user._id, user._id, 'User', req);
-  } catch (err) {
-    console.error('Forgot password error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'An error occurred while sending the password reset email'
-    });
-  }
-});
-
-app.post('/api/auth/reset-password', [
-  body('token').notEmpty().withMessage('Token is required'),
-  body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters')
-    .matches(/[A-Z]/).withMessage('Password must contain at least one uppercase letter')
-    .matches(/[a-z]/).withMessage('Password must contain at least one lowercase letter')
-    .matches(/[0-9]/).withMessage('Password must contain at least one number')
-    .matches(/[^A-Za-z0-9]/).withMessage('Password must contain at least one special character')
-], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({
-      status: 'fail',
-      errors: errors.array()
-    });
-  }
-
-  try {
-    const { token, password } = req.body;
-    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
-
-    const user = await User.findOne({
-      passwordResetToken: hashedToken,
-      passwordResetExpires: { $gt: Date.now() }
-    });
-
-    if (!user) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Token is invalid or has expired'
-      });
-    }
-
-    user.password = await bcrypt.hash(password, 12);
-    user.passwordChangedAt = Date.now();
-    user.passwordResetToken = undefined;
-    user.passwordResetExpires = undefined;
-    await user.save();
-
-    const newToken = generateJWT(user._id);
-
-    // Set cookie
-    res.cookie('jwt', newToken, {
-      expires: new Date(Date.now() + JWT_COOKIE_EXPIRES * 24 * 60 * 60 * 1000),
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict'
-    });
-
-    res.status(200).json({
-      status: 'success',
-      token: newToken,
-      message: 'Password updated successfully'
-    });
-
-    await logActivity('reset-password', 'user', user._id, user._id, 'User', req);
-  } catch (err) {
-    console.error('Reset password error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'An error occurred while resetting the password'
     });
   }
 });
@@ -5572,7 +5032,7 @@ app.post('/api/investments', protect, [
       const referralBonus = (amount * plan.referralBonus) / 100;
       
       // Update referring user's balance for direct referral bonus
-      const uplineUser = await User.findByIdAndUpdate(user.referredBy, {
+      await User.findByIdAndUpdate(user.referredBy, {
         $inc: {
           'balances.main': referralBonus,
           'referralStats.totalEarnings': referralBonus,
@@ -5588,7 +5048,7 @@ app.post('/api/investments', protect, [
             date: new Date()
           }
         }
-      }, { new: true });
+      });
 
       // Create referral commission record for direct referral
       await CommissionHistory.create({
@@ -5631,22 +5091,17 @@ app.post('/api/investments', protect, [
       };
       await investment.save();
 
-      console.log(`🎁 Direct referral bonus of $${referralBonus} paid to ${uplineUser.email}`);
-
+      console.log(`🎁 Direct referral bonus of $${referralBonus} paid to ${user.referredBy}`);
+      
       // Send referral bonus email
-      try {
-        await sendProfessionalEmail({
-          email: uplineUser.email,
-          template: 'referral_bonus',
-          data: {
-            name: uplineUser.firstName,
-            bonusAmount: referralBonus,
-            referredUser: `${user.firstName} ${user.lastName}`,
-            bonusType: 'Direct Referral Bonus'
-          }
+      const uplineUser = await User.findById(user.referredBy);
+      if (uplineUser) {
+        await sendAutomatedEmail(uplineUser, 'referral_bonus', {
+          req: req,
+          bonusAmount: referralBonus,
+          referredUser: `${user.firstName} ${user.lastName}`,
+          bonusType: 'Direct Referral Bonus'
         });
-      } catch (emailError) {
-        console.error('Failed to send referral bonus email:', emailError);
       }
     }
 
@@ -5851,400 +5306,551 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
   }
 });
 
-// ✅ ADDED: Deposit approval endpoint with email notification
-app.post('/api/admin/deposits/:id/approve', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
-  try {
-    const depositId = req.params.id;
-    const adminId = req.admin._id;
 
-    const transaction = await Transaction.findById(depositId).populate('user');
-    if (!transaction || transaction.type !== 'deposit' || transaction.status !== 'pending') {
+
+
+
+
+
+
+// Admin Approve Withdrawal Endpoint
+app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
+  body('notes').optional().trim()
+], async (req, res) => {
+  try {
+    const { notes } = req.body;
+    
+    // Find withdrawal
+    const withdrawal = await Transaction.findById(req.params.id)
+      .populate('user');
+    
+    if (!withdrawal || withdrawal.type !== 'withdrawal') {
       return res.status(404).json({
         status: 'fail',
-        message: 'Pending deposit not found'
+        message: 'Withdrawal not found'
       });
     }
-
-    // Update transaction status
-    transaction.status = 'completed';
-    transaction.processedBy = adminId;
-    transaction.processedAt = new Date();
-    await transaction.save();
-
-    // Update user's main balance
-    const user = await User.findById(transaction.user._id);
-    user.balances.main += transaction.netAmount;
-    await user.save();
-
-    // Send deposit received email
-    await sendProfessionalEmail({
-      email: user.email,
-      template: 'deposit_received',
-      data: {
-        name: user.firstName,
-        amount: transaction.amount,
-        method: transaction.method,
-        reference: transaction.reference,
-        newBalance: user.balances.main
-      }
-    });
-
-    res.status(200).json({
-      status: 'success',
-      message: 'Deposit approved and credited to user'
-    });
-
-    await logActivity('deposit_approved', 'transaction', transaction._id, adminId, 'Admin', req);
-
-  } catch (err) {
-    console.error('Deposit approval error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'An error occurred while approving deposit'
-    });
-  }
-});
-
-// ✅ ADDED: Withdrawal approval endpoint with email notification
-app.post('/api/admin/withdrawals/:id/approve', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
-  try {
-    const withdrawalId = req.params.id;
-    const adminId = req.admin._id;
-
-    const transaction = await Transaction.findById(withdrawalId).populate('user');
-    if (!transaction || transaction.type !== 'withdrawal' || transaction.status !== 'pending') {
-      return res.status(404).json({
+    
+    if (withdrawal.status !== 'pending') {
+      return res.status(400).json({
         status: 'fail',
-        message: 'Pending withdrawal not found'
+        message: 'Withdrawal is not pending approval'
       });
     }
-
-    // Update transaction status
-    transaction.status = 'completed';
-    transaction.processedBy = adminId;
-    transaction.processedAt = new Date();
-    await transaction.save();
-
+    
+    // Update withdrawal status
+    withdrawal.status = 'completed';
+    withdrawal.processedBy = req.admin._id;
+    withdrawal.processedAt = new Date();
+    withdrawal.adminNotes = notes;
+    await withdrawal.save();
+    
     // Send withdrawal completed email
-    await sendProfessionalEmail({
-      email: transaction.user.email,
-      template: 'withdrawal_completed',
-      data: {
-        name: transaction.user.firstName,
-        amount: transaction.netAmount,
-        method: transaction.method,
-        reference: transaction.reference
-      }
+    await sendAutomatedEmail(withdrawal.user, 'withdrawal_completed', {
+      req: req,
+      amount: withdrawal.amount,
+      method: withdrawal.method,
+      reference: withdrawal.reference,
+      fee: withdrawal.fee || 0,
+      netAmount: withdrawal.netAmount || withdrawal.amount,
+      newBalance: withdrawal.user.balances.matured - withdrawal.amount,
+      processedAt: new Date()
     });
-
+    
     res.status(200).json({
       status: 'success',
-      message: 'Withdrawal approved'
+      message: 'Withdrawal approved successfully'
     });
-
-    await logActivity('withdrawal_approved', 'transaction', transaction._id, adminId, 'Admin', req);
-
+    
+    await logActivity('approve-withdrawal', 'transaction', withdrawal._id, req.admin._id, 'Admin', req, {
+      amount: withdrawal.amount,
+      userId: withdrawal.user._id
+    });
   } catch (err) {
-    console.error('Withdrawal approval error:', err);
+    console.error('Admin approve withdrawal error:', err);
     res.status(500).json({
       status: 'error',
-      message: 'An error occurred while approving withdrawal'
+      message: 'Failed to approve withdrawal'
     });
   }
 });
 
-// ✅ ADDED: Account suspension endpoint with email notification
-app.post('/api/admin/users/:id/suspend', adminProtect, restrictTo('super'), async (req, res) => {
+
+
+// CORRECTED Admin Reject Withdrawal Endpoint
+app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
+  body('reason').trim().notEmpty().withMessage('Rejection reason is required')
+], async (req, res) => {
   try {
-    const userId = req.params.id;
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        status: 'fail',
+        errors: errors.array()
+      });
+    }
+    
     const { reason } = req.body;
-    const adminId = req.admin._id;
-
-    const user = await User.findById(userId);
+    
+    // Find withdrawal
+    const withdrawal = await Transaction.findById(req.params.id)
+      .populate('user');
+    
+    if (!withdrawal || withdrawal.type !== 'withdrawal') {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Withdrawal not found'
+      });
+    }
+    
+    if (withdrawal.status !== 'pending') {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Withdrawal is not pending approval'
+      });
+    }
+    
+    // Find user
+    const user = await User.findById(withdrawal.user._id);
     if (!user) {
       return res.status(404).json({
         status: 'fail',
         message: 'User not found'
       });
     }
-
-    user.status = 'suspended';
+    
+    // Return funds to user balance
+    user.balances.matured += withdrawal.amount;
     await user.save();
-
-    // Send account suspension email
-    await sendProfessionalEmail({
-      email: user.email,
-      template: 'account_suspended',
-      data: {
-        name: user.firstName,
-        reason: reason || 'violation of terms of service'
-      }
+    
+    // Update withdrawal status
+    withdrawal.status = 'failed';
+    withdrawal.adminNotes = reason; // Changed from rejectionReason to reason
+    await withdrawal.save();
+    
+    // Send rejection email notification
+    await sendAutomatedEmail(user, 'withdrawal_rejected', {
+      req: req,
+      amount: withdrawal.amount,
+      reason: reason,
+      reference: withdrawal.reference,
+      newBalance: user.balances.matured
     });
-
+    
     res.status(200).json({
       status: 'success',
-      message: 'User suspended successfully'
+      message: 'Withdrawal rejected successfully'
     });
-
-    await logActivity('user_suspended', 'user', user._id, adminId, 'Admin', req);
-
+    
+    await logActivity('reject-withdrawal', 'transaction', withdrawal._id, req.admin._id, 'Admin', req, {
+      amount: withdrawal.amount,
+      reason: reason,
+      userId: user._id
+    });
   } catch (err) {
-    console.error('User suspension error:', err);
+    console.error('Admin reject withdrawal error:', err);
     res.status(500).json({
       status: 'error',
-      message: 'An error occurred while suspending user'
+      message: 'Failed to reject withdrawal'
     });
   }
 });
 
-// ✅ ADDED: Account reactivation endpoint with email notification
-app.post('/api/admin/users/:id/reactivate', adminProtect, restrictTo('super'), async (req, res) => {
+
+
+
+// Admin Approve Deposit Endpoint
+app.post('/api/admin/deposits/:id/approve', adminProtect, [
+  body('notes').optional().trim()
+], async (req, res) => {
   try {
-    const userId = req.params.id;
-    const adminId = req.admin._id;
-
-    const user = await User.findById(userId);
+    const { notes } = req.body;
+    
+    // Find deposit
+    const deposit = await Transaction.findById(req.params.id)
+      .populate('user');
+    
+    if (!deposit || deposit.type !== 'deposit') {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Deposit not found'
+      });
+    }
+    
+    if (deposit.status !== 'pending') {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Deposit is not pending approval'
+      });
+    }
+    
+    // Find user
+    const user = await User.findById(deposit.user._id);
     if (!user) {
       return res.status(404).json({
         status: 'fail',
         message: 'User not found'
       });
     }
-
-    user.status = 'active';
+    
+    // Update user balance
+    user.balances.main += deposit.amount;
     await user.save();
-
-    // Send account reactivation email
-    await sendProfessionalEmail({
-      email: user.email,
-      template: 'account_reactivated',
-      data: {
-        name: user.firstName
-      }
-    });
-
+    
+    // Update deposit status
+    deposit.status = 'completed';
+    deposit.processedBy = req.admin._id;
+    deposit.processedAt = new Date();
+    deposit.adminNotes = notes;
+    await deposit.save();
+    
     res.status(200).json({
       status: 'success',
-      message: 'User reactivated successfully'
+      message: 'Deposit approved successfully'
     });
 
-    await logActivity('user_reactivated', 'user', user._id, adminId, 'Admin', req);
 
+    await sendAutomatedEmail(user, 'deposit_received', {
+      req: req,
+      amount: deposit.amount,
+      method: deposit.method,
+      reference: deposit.reference,
+      newBalance: user.balances.main
+    });
+    
+    await logActivity('approve-deposit', 'transaction', deposit._id, req.admin._id, 'Admin', req, {
+      amount: deposit.amount,
+      userId: user._id
+    });
   } catch (err) {
-    console.error('User reactivation error:', err);
+    console.error('Admin approve deposit error:', err);
     res.status(500).json({
       status: 'error',
-      message: 'An error occurred while reactivating user'
+      message: 'Failed to approve deposit'
     });
   }
 });
 
-// ✅ ADDED: Withdrawal creation endpoint with email notification
-app.post('/api/withdrawals', protect, [
-  body('amount').isFloat({ min: 1 }).withMessage('Amount must be a positive number'),
-  body('method').isIn(['btc', 'eth', 'usdt', 'bnb', 'bank', 'card']).withMessage('Invalid withdrawal method')
+// Admin Reject Deposit Endpoint
+app.post('/api/admin/deposits/:id/reject', adminProtect, [
+  body('rejectionReason').trim().notEmpty().withMessage('Rejection reason is required')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        status: 'fail',
+        errors: errors.array()
+      });
+    }
+    
+    const { rejectionReason } = req.body;
+    
+    // Find deposit
+    const deposit = await Transaction.findById(req.params.id)
+      .populate('user');
+    
+    if (!deposit || deposit.type !== 'deposit') {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Deposit not found'
+      });
+    }
+    
+    if (deposit.status !== 'pending') {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Deposit is not pending approval'
+      });
+    }
+    
+    // Update deposit status
+    deposit.status = 'failed';
+    deposit.adminNotes = rejectionReason;
+    await deposit.save();
+    
+    // Send rejection email
+    if (deposit.user) {
+      await sendAutomatedEmail(deposit.user, 'deposit_rejected', {
+        req: req,
+        amount: deposit.amount,
+        reason: rejectionReason,
+        method: deposit.method,
+        reference: deposit.reference
+      });
+    }
+    
+    res.status(200).json({
+      status: 'success',
+      message: 'Deposit rejected successfully'
+    });
+    
+    await logActivity('reject-deposit', 'transaction', deposit._id, req.admin._id, 'Admin', req, {
+      amount: deposit.amount,
+      reason: rejectionReason
+    });
+  } catch (err) {
+    console.error('Admin reject deposit error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to reject deposit'
+    });
+  }
+});
+
+// Admin Get Withdrawal Details Endpoint
+app.get('/api/admin/withdrawals/:id', adminProtect, async (req, res) => {
+  try {
+    const withdrawal = await Transaction.findById(req.params.id)
+      .populate('user', 'firstName lastName email')
+      .lean();
+    
+    if (!withdrawal || withdrawal.type !== 'withdrawal') {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Withdrawal not found'
+      });
+    }
+    
+    res.status(200).json({
+      status: 'success',
+      data: { withdrawal }
+    });
+  } catch (err) {
+    console.error('Admin get withdrawal error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch withdrawal details'
+    });
+  }
+});
+
+// Admin Get Deposit Details Endpoint
+app.get('/api/admin/deposits/:id', adminProtect, async (req, res) => {
+  try {
+    const deposit = await Transaction.findById(req.params.id)
+      .populate('user', 'firstName lastName email')
+      .lean();
+    
+    if (!deposit || deposit.type !== 'deposit') {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Deposit not found'
+      });
+    }
+    
+    res.status(200).json({
+      status: 'success',
+      data: { deposit }
+    });
+  } catch (err) {
+    console.error('Admin get deposit error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch deposit details'
+    });
+  }
+});
+
+
+
+
+
+// OTP Verification Endpoint - FIXED to use exact email matching
+app.post('/api/auth/verify-otp', [
+  body('email').isEmail().withMessage('Please provide a valid email'),
+  body('otp').isLength({ min: 6, max: 6 }).withMessage('OTP must be 6 digits')
 ], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
     return res.status(400).json({
       status: 'fail',
-      errors: errors.array()
+      message: 'Please enter a valid 6-digit OTP code'
     });
   }
 
   try {
-    const { amount, method, address, bankDetails } = req.body;
-    const userId = req.user._id;
+    const { email, otp } = req.body;
+    const token = req.headers.authorization?.replace('Bearer ', '');
 
-    const user = await User.findById(userId);
-    if (user.balances.main < amount) {
+    if (!token) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Authentication required. Please try logging in again.'
+      });
+    }
+
+    // Verify temporary token
+    let decoded;
+    try {
+      decoded = verifyJWT(token);
+    } catch (err) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Session expired. Please try logging in again.'
+      });
+    }
+
+    // Find user WITHOUT password selection to include Google users
+    const user = await User.findById(decoded.id).select('-password');
+    
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+
+    // FIXED: Compare EXACT emails without any normalization
+    console.log('Email comparison (exact match):', {
+      userEmail: user.email,
+      inputEmail: email,
+      match: user.email === email
+    });
+
+    if (user.email !== email) {
       return res.status(400).json({
         status: 'fail',
-        message: 'Insufficient main balance'
+        message: 'Email does not match user account'
       });
     }
 
-    // Calculate fee (e.g., 1% for withdrawals)
-    const fee = amount * 0.01;
-    const netAmount = amount - fee;
-
-    const transaction = await Transaction.create({
-      user: userId,
-      type: 'withdrawal',
-      amount: -amount,
-      currency: 'USD',
-      status: 'pending',
-      method: method,
-      reference: `WTH-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      details: {
-        address: address,
-        bankDetails: bankDetails
-      },
-      fee: fee,
-      netAmount: -netAmount
+    // FIXED: Look for OTP with EXACT email only
+    const otpRecord = await OTP.findOne({
+      email: email, // Exact match only
+      otp,
+      used: false,
+      expiresAt: { $gt: new Date() }
     });
 
-    // Deduct from user's main balance
-    user.balances.main -= amount;
+    if (!otpRecord) {
+      // Increment attempts for exact email
+      await OTP.updateMany(
+        { 
+          email: email, // Exact match only
+          otp, 
+          used: false 
+        },
+        { $inc: { attempts: 1 } }
+      );
+
+      // Check if max attempts reached for exact email
+      const failedAttempts = await OTP.countDocuments({
+        email: email, // Exact match only
+        used: false,
+        createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+        attempts: { $gte: 5 }
+      });
+
+      if (failedAttempts >= 5) {
+        await User.findByIdAndUpdate(user._id, {
+          status: 'suspended',
+          suspensionLiftAt: new Date(Date.now() + 24 * 60 * 60 * 1000)
+        });
+
+        return res.status(429).json({
+          status: 'fail',
+          message: 'Too many failed attempts. Account suspended for 24 hours.'
+        });
+      }
+
+      // Check if OTP exists but is expired for exact email
+      const expiredOtp = await OTP.findOne({
+        email: email, // Exact match only
+        otp,
+        used: false,
+        expiresAt: { $lte: new Date() }
+      });
+
+      if (expiredOtp) {
+        return res.status(400).json({
+          status: 'fail',
+          message: 'Verification code has expired. Please request a new one.'
+        });
+      }
+
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid verification code. Please try again.'
+      });
+    }
+
+    // Mark OTP as used
+    otpRecord.used = true;
+    await otpRecord.save();
+
+    // Update user verification status if this was for signup
+    if (!user.isVerified) {
+      user.isVerified = true;
+      await user.save();
+    }
+
+    // Generate final JWT token
+    const finalToken = generateJWT(user._id);
+
+    // Update last login
+    user.lastLogin = new Date();
+    const deviceInfo = await getUserDeviceInfo(req);
+    user.loginHistory.push(deviceInfo);
     await user.save();
 
-    // Send withdrawal request email
-    await sendProfessionalEmail({
-      email: user.email,
-      template: 'withdrawal_request',
-      data: {
-        name: user.firstName,
-        amount: netAmount,
-        method: method,
-        reference: transaction.reference,
-        fee: fee,
-        netAmount: netAmount
+    // Set cookie
+    res.cookie('jwt', finalToken, {
+      expires: new Date(Date.now() + 2 * 60 * 60 * 1000),
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict'
+    });
+
+    // SEND LOGIN SUCCESS EMAIL AFTER OTP IS VERIFIED
+    // Only send for login type OTP, not for signup
+    if (otpRecord.type === 'login') {
+      try {
+        await sendAutomatedEmail(user, 'login_success', {
+          req: req,
+          location: deviceInfo.location,
+          ip: deviceInfo.ip,
+          device: deviceInfo.device
+        });
+        console.log(`Login success email sent to ${user.email} with location: ${deviceInfo.location}`);
+      } catch (emailError) {
+        console.error('Failed to send login success email:', emailError);
+        // Don't fail the verification if email fails
       }
-    });
-
-    res.status(201).json({
-      status: 'success',
-      data: {
-        transaction
-      }
-    });
-
-    await logActivity('withdrawal_created', 'transaction', transaction._id, userId, 'User', req);
-
-  } catch (err) {
-    console.error('Withdrawal creation error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'An error occurred while processing withdrawal'
-    });
-  }
-});
-
-// ✅ ADDED: KYC approval endpoint with email notification
-app.post('/api/admin/kyc/:id/approve', adminProtect, restrictTo('super', 'kyc'), async (req, res) => {
-  try {
-    const kycId = req.params.id;
-    const adminId = req.admin._id;
-
-    const kyc = await KYC.findById(kycId).populate('user');
-    if (!kyc) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'KYC record not found'
-      });
     }
-
-    kyc.overallStatus = 'verified';
-    kyc.identity.status = 'verified';
-    kyc.identity.verifiedAt = new Date();
-    kyc.identity.verifiedBy = adminId;
-    kyc.address.status = 'verified';
-    kyc.address.verifiedAt = new Date();
-    kyc.address.verifiedBy = adminId;
-    kyc.facial.status = 'verified';
-    kyc.facial.verifiedAt = new Date();
-    kyc.facial.verifiedBy = adminId;
-    kyc.reviewedAt = new Date();
-    await kyc.save();
-
-    // Update user's KYC status
-    await User.findByIdAndUpdate(kyc.user._id, {
-      'kycStatus.identity': 'verified',
-      'kycStatus.address': 'verified',
-      'kycStatus.facial': 'verified'
-    });
-
-    // Send KYC approval email
-    await sendProfessionalEmail({
-      email: kyc.user.email,
-      template: 'kyc_approved',
-      data: {
-        name: kyc.user.firstName
-      }
-    });
 
     res.status(200).json({
       status: 'success',
-      message: 'KYC approved successfully'
-    });
-
-    await logActivity('kyc_approved', 'kyc', kyc._id, adminId, 'Admin', req);
-
-  } catch (err) {
-    console.error('KYC approval error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'An error occurred while approving KYC'
-    });
-  }
-});
-
-// ✅ ADDED: KYC rejection endpoint with email notification
-app.post('/api/admin/kyc/:id/reject', adminProtect, restrictTo('super', 'kyc'), async (req, res) => {
-  try {
-    const kycId = req.params.id;
-    const { reason } = req.body;
-    const adminId = req.admin._id;
-
-    const kyc = await KYC.findById(kycId).populate('user');
-    if (!kyc) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'KYC record not found'
-      });
-    }
-
-    kyc.overallStatus = 'rejected';
-    kyc.identity.status = 'rejected';
-    kyc.identity.rejectionReason = reason || 'Documents do not meet requirements';
-    kyc.address.status = 'rejected';
-    kyc.address.rejectionReason = reason || 'Documents do not meet requirements';
-    kyc.facial.status = 'rejected';
-    kyc.facial.rejectionReason = reason || 'Documents do not meet requirements';
-    kyc.reviewedAt = new Date();
-    await kyc.save();
-
-    // Update user's KYC status
-    await User.findByIdAndUpdate(kyc.user._id, {
-      'kycStatus.identity': 'rejected',
-      'kycStatus.address': 'rejected',
-      'kycStatus.facial': 'rejected'
-    });
-
-    // Send KYC rejection email
-    await sendProfessionalEmail({
-      email: kyc.user.email,
-      template: 'kyc_rejected',
+      message: 'Verification successful! Redirecting to dashboard...',
+      token: finalToken,
       data: {
-        name: kyc.user.firstName,
-        reason: reason || 'Documents do not meet requirements'
+        user: {
+          id: user._id,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          email: user.email, // Return the exact email from database
+          isVerified: user.isVerified,
+          hasGoogleAuth: !!user.googleId
+        }
       }
     });
 
-    res.status(200).json({
-      status: 'success',
-      message: 'KYC rejected'
+    await logActivity('otp_verified', 'otp', otpRecord._id, user._id, 'User', req, {
+      type: otpRecord.type,
+      isGoogleUser: !!user.googleId,
+      emailUsed: email,
+      exactMatch: true,
+      location: deviceInfo.location
     });
 
-    await logActivity('kyc_rejected', 'kyc', kyc._id, adminId, 'Admin', req);
-
   } catch (err) {
-    console.error('KYC rejection error:', err);
+    console.error('Verify OTP error:', err);
     res.status(500).json({
       status: 'error',
-      message: 'An error occurred while rejecting KYC'
+      message: 'An error occurred during verification. Please try again.'
     });
   }
 });
-
-
-
-
-
-
-
-
-
 
 
 // Validate referral code endpoint
@@ -10478,309 +10084,12 @@ app.put('/api/admin/users/:id', adminProtect, [
 });
 
 
-// Admin Get Deposit Details Endpoint
-app.get('/api/admin/deposits/:id', adminProtect, async (req, res) => {
-  try {
-    const deposit = await Transaction.findById(req.params.id)
-      .populate('user', 'firstName lastName email')
-      .lean();
-    
-    if (!deposit || deposit.type !== 'deposit') {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Deposit not found'
-      });
-    }
-    
-    res.status(200).json({
-      status: 'success',
-      data: { deposit }
-    });
-  } catch (err) {
-    console.error('Admin get deposit error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch deposit details'
-    });
-  }
-});
-
-// Admin Approve Deposit Endpoint
-app.post('/api/admin/deposits/:id/approve', adminProtect, [
-  body('notes').optional().trim()
-], async (req, res) => {
-  try {
-    const { notes } = req.body;
-    
-    // Find deposit
-    const deposit = await Transaction.findById(req.params.id)
-      .populate('user');
-    
-    if (!deposit || deposit.type !== 'deposit') {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Deposit not found'
-      });
-    }
-    
-    if (deposit.status !== 'pending') {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Deposit is not pending approval'
-      });
-    }
-    
-    // Find user
-    const user = await User.findById(deposit.user._id);
-    if (!user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found'
-      });
-    }
-    
-    // Update user balance
-    user.balances.main += deposit.amount;
-    await user.save();
-    
-    // Update deposit status
-    deposit.status = 'completed';
-    deposit.processedBy = req.admin._id;
-    deposit.processedAt = new Date();
-    deposit.adminNotes = notes;
-    await deposit.save();
-    
-    res.status(200).json({
-      status: 'success',
-      message: 'Deposit approved successfully'
-    });
-
-
-await sendAutomatedEmail(user, 'deposit_received', {
-  amount: deposit.amount,
-  method: deposit.method,
-  reference: deposit.reference,
-  newBalance: user.balances.main
-});
-    
-    await logActivity('approve-deposit', 'transaction', deposit._id, req.admin._id, 'Admin', req, {
-      amount: deposit.amount,
-      userId: user._id
-    });
-  } catch (err) {
-    console.error('Admin approve deposit error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to approve deposit'
-    });
-  }
-});
-
-// Admin Reject Deposit Endpoint
-app.post('/api/admin/deposits/:id/reject', adminProtect, [
-  body('rejectionReason').trim().notEmpty().withMessage('Rejection reason is required')
-], async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        status: 'fail',
-        errors: errors.array()
-      });
-    }
-    
-    const { rejectionReason } = req.body;
-    
-    // Find deposit
-    const deposit = await Transaction.findById(req.params.id);
-    
-    if (!deposit || deposit.type !== 'deposit') {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Deposit not found'
-      });
-    }
-    
-    if (deposit.status !== 'pending') {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Deposit is not pending approval'
-      });
-    }
-    
-    // Update deposit status
-    deposit.status = 'failed';
-    deposit.adminNotes = rejectionReason;
-    await deposit.save();
-    
-    res.status(200).json({
-      status: 'success',
-      message: 'Deposit rejected successfully'
-    });
-    
-    await logActivity('reject-deposit', 'transaction', deposit._id, req.admin._id, 'Admin', req, {
-      amount: deposit.amount,
-      reason: rejectionReason
-    });
-  } catch (err) {
-    console.error('Admin reject deposit error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to reject deposit'
-    });
-  }
-});
-
-// Admin Get Withdrawal Details Endpoint
-app.get('/api/admin/withdrawals/:id', adminProtect, async (req, res) => {
-  try {
-    const withdrawal = await Transaction.findById(req.params.id)
-      .populate('user', 'firstName lastName email')
-      .lean();
-    
-    if (!withdrawal || withdrawal.type !== 'withdrawal') {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Withdrawal not found'
-      });
-    }
-    
-    res.status(200).json({
-      status: 'success',
-      data: { withdrawal }
-    });
-  } catch (err) {
-    console.error('Admin get withdrawal error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch withdrawal details'
-    });
-  }
-});
-
-// Admin Approve Withdrawal Endpoint
-app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
-  body('notes').optional().trim()
-], async (req, res) => {
-  try {
-    const { notes } = req.body;
-    
-    // Find withdrawal
-    const withdrawal = await Transaction.findById(req.params.id);
-    
-    if (!withdrawal || withdrawal.type !== 'withdrawal') {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Withdrawal not found'
-      });
-    }
-    
-    if (withdrawal.status !== 'pending') {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Withdrawal is not pending approval'
-      });
-    }
-    
-    // Update withdrawal status
-    withdrawal.status = 'completed';
-    withdrawal.processedBy = req.admin._id;
-    withdrawal.processedAt = new Date();
-    withdrawal.adminNotes = notes;
-    await withdrawal.save();
-    
-    res.status(200).json({
-      status: 'success',
-      message: 'Withdrawal approved successfully'
-    });
-    
-    await logActivity('approve-withdrawal', 'transaction', withdrawal._id, req.admin._id, 'Admin', req, {
-      amount: withdrawal.amount,
-      userId: withdrawal.user
-    });
-  } catch (err) {
-    console.error('Admin approve withdrawal error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to approve withdrawal'
-    });
-  }
-});
 
 
 
 
 
 
-// CORRECTED Admin Reject Withdrawal Endpoint
-app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
-  body('reason').trim().notEmpty().withMessage('Rejection reason is required')
-], async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        status: 'fail',
-        errors: errors.array()
-      });
-    }
-    
-    const { reason } = req.body;
-    
-    // Find withdrawal
-    const withdrawal = await Transaction.findById(req.params.id)
-      .populate('user');
-    
-    if (!withdrawal || withdrawal.type !== 'withdrawal') {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Withdrawal not found'
-      });
-    }
-    
-    if (withdrawal.status !== 'pending') {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Withdrawal is not pending approval'
-      });
-    }
-    
-    // Find user
-    const user = await User.findById(withdrawal.user._id);
-    if (!user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found'
-      });
-    }
-    
-    // Return funds to user balance
-    user.balances.matured += withdrawal.amount;
-    await user.save();
-    
-    // Update withdrawal status
-    withdrawal.status = 'failed';
-    withdrawal.adminNotes = reason; // Changed from rejectionReason to reason
-    await withdrawal.save();
-    
-    res.status(200).json({
-      status: 'success',
-      message: 'Withdrawal rejected successfully'
-    });
-    
-    await logActivity('reject-withdrawal', 'transaction', withdrawal._id, req.admin._id, 'Admin', req, {
-      amount: withdrawal.amount,
-      reason: reason,
-      userId: user._id
-    });
-  } catch (err) {
-    console.error('Admin reject withdrawal error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to reject withdrawal'
-    });
-  }
-});
 
 
 
@@ -15312,185 +14621,6 @@ app.post('/api/auth/send-otp', [
 
 
 
-
-
-// OTP Verification Endpoint - FIXED to use exact email matching
-app.post('/api/auth/verify-otp', [
-  body('email').isEmail().withMessage('Please provide a valid email'),
-  body('otp').isLength({ min: 6, max: 6 }).withMessage('OTP must be 6 digits')
-], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({
-      status: 'fail',
-      message: 'Please enter a valid 6-digit OTP code'
-    });
-  }
-
-  try {
-    const { email, otp } = req.body;
-    const token = req.headers.authorization?.replace('Bearer ', '');
-
-    if (!token) {
-      return res.status(401).json({
-        status: 'fail',
-        message: 'Authentication required. Please try logging in again.'
-      });
-    }
-
-    // Verify temporary token
-    let decoded;
-    try {
-      decoded = verifyJWT(token);
-    } catch (err) {
-      return res.status(401).json({
-        status: 'fail',
-        message: 'Session expired. Please try logging in again.'
-      });
-    }
-
-    // Find user WITHOUT password selection to include Google users
-    const user = await User.findById(decoded.id).select('-password');
-    
-    if (!user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found'
-      });
-    }
-
-    // FIXED: Compare EXACT emails without any normalization
-    console.log('Email comparison (exact match):', {
-      userEmail: user.email,
-      inputEmail: email,
-      match: user.email === email
-    });
-
-    if (user.email !== email) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Email does not match user account'
-      });
-    }
-
-    // FIXED: Look for OTP with EXACT email only
-    const otpRecord = await OTP.findOne({
-      email: email, // Exact match only
-      otp,
-      used: false,
-      expiresAt: { $gt: new Date() }
-    });
-
-    if (!otpRecord) {
-      // Increment attempts for exact email
-      await OTP.updateMany(
-        { 
-          email: email, // Exact match only
-          otp, 
-          used: false 
-        },
-        { $inc: { attempts: 1 } }
-      );
-
-      // Check if max attempts reached for exact email
-      const failedAttempts = await OTP.countDocuments({
-        email: email, // Exact match only
-        used: false,
-        createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
-        attempts: { $gte: 5 }
-      });
-
-      if (failedAttempts >= 5) {
-        await User.findByIdAndUpdate(user._id, {
-          status: 'suspended',
-          suspensionLiftAt: new Date(Date.now() + 24 * 60 * 60 * 1000)
-        });
-
-        return res.status(429).json({
-          status: 'fail',
-          message: 'Too many failed attempts. Account suspended for 24 hours.'
-        });
-      }
-
-      // Check if OTP exists but is expired for exact email
-      const expiredOtp = await OTP.findOne({
-        email: email, // Exact match only
-        otp,
-        used: false,
-        expiresAt: { $lte: new Date() }
-      });
-
-      if (expiredOtp) {
-        return res.status(400).json({
-          status: 'fail',
-          message: 'Verification code has expired. Please request a new one.'
-        });
-      }
-
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Invalid verification code. Please try again.'
-      });
-    }
-
-    // Mark OTP as used
-    otpRecord.used = true;
-    await otpRecord.save();
-
-    // Update user verification status if this was for signup
-    if (!user.isVerified) {
-      user.isVerified = true;
-      await user.save();
-    }
-
-    // Generate final JWT token
-    const finalToken = generateJWT(user._id);
-
-    // Update last login
-    user.lastLogin = new Date();
-    const deviceInfo = await getUserDeviceInfo(req);
-    user.loginHistory.push(deviceInfo);
-    await user.save();
-
-    // Set cookie
-    res.cookie('jwt', finalToken, {
-      expires: new Date(Date.now() + 2 * 60 * 60 * 1000),
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict'
-    });
-
-    res.status(200).json({
-      status: 'success',
-      message: 'Verification successful! Redirecting to dashboard...',
-      token: finalToken,
-      data: {
-        user: {
-          id: user._id,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          email: user.email, // Return the exact email from database
-          isVerified: user.isVerified,
-          hasGoogleAuth: !!user.googleId
-        }
-      }
-    });
-
-    await logActivity('otp_verified', 'otp', otpRecord._id, user._id, 'User', req, {
-      type: otpRecord.type,
-      isGoogleUser: !!user.googleId,
-      emailUsed: email,
-      exactMatch: true
-    });
-
-  } catch (err) {
-    console.error('Verify OTP error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'An error occurred during verification. Please try again.'
-    });
-  }
-});
 
 
 
