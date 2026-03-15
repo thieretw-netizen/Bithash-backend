@@ -5656,6 +5656,224 @@ app.get('/api/admin/deposits/:id', adminProtect, async (req, res) => {
 
 
 
+
+app.post('/api/auth/google', async (req, res) => {
+  try {
+    console.log('Google auth request received');
+    
+    const { credential } = req.body;
+    
+    if (!credential) {
+      console.error('No credential provided');
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Google credential is required'
+      });
+    }
+
+    console.log('Verifying Google token...');
+
+    // Verify the Google token
+    let payload;
+    try {
+      const ticket = await googleClient.verifyIdToken({
+        idToken: credential,
+        audience: process.env.GOOGLE_CLIENT_ID || '634814462335-9o4t8q95c4orcsd9sijjl52374g6vm85.apps.googleusercontent.com'
+      });
+      payload = ticket.getPayload();
+      console.log('Google token verified successfully');
+    } catch (verifyError) {
+      console.error('Google token verification failed:', verifyError);
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid Google token. Please try again.'
+      });
+    }
+
+    if (!payload) {
+      console.error('No payload from Google token');
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid token payload'
+      });
+    }
+
+    const { email, given_name, family_name, sub } = payload;
+
+    if (!email) {
+      console.error('No email in Google payload');
+      return res.status(400).json({
+        status: 'fail',
+        message: 'No email found in Google account'
+      });
+    }
+
+    console.log('Google auth successful for:', email);
+
+    // Use the EXACT email from Google - no normalization
+    const originalEmail = email;
+
+    let user;
+    let isNewUser = false;
+
+    try {
+      user = await User.findOne({ email: originalEmail });
+      console.log('User lookup result:', user ? 'Found' : 'Not found');
+    } catch (dbError) {
+      console.error('Database lookup error:', dbError);
+      return res.status(500).json({
+        status: 'error',
+        message: 'Database error during user lookup'
+      });
+    }
+
+    if (!user) {
+      // Create new user with Google auth using exact email
+      try {
+        const referralCode = generateReferralCode();
+        user = await User.create({
+          firstName: given_name || 'Google',
+          lastName: family_name || 'User',
+          email: originalEmail,
+          googleId: sub,
+          isVerified: true,
+          referralCode,
+          status: 'active'
+        });
+        isNewUser = true;
+        console.log('New user created via Google:', originalEmail);
+
+        // Send welcome email
+        try {
+          await sendProfessionalEmail({
+            email: originalEmail,
+            template: 'welcome',
+            data: {
+              firstName: given_name || 'Google User'
+            }
+          });
+        } catch (emailError) {
+          console.error('Welcome email failed:', emailError);
+          // Don't fail the request if email fails
+        }
+      } catch (createError) {
+        console.error('User creation error:', createError);
+        return res.status(500).json({
+          status: 'error',
+          message: 'Failed to create user account'
+        });
+      }
+    } else if (!user.googleId) {
+      // Existing user, add Google auth
+      try {
+        user.googleId = sub;
+        user.isVerified = true;
+        await user.save();
+        console.log('Existing user linked with Google:', originalEmail);
+      } catch (updateError) {
+        console.error('User update error:', updateError);
+        return res.status(500).json({
+          status: 'error',
+          message: 'Failed to link Google account'
+        });
+      }
+    }
+
+    // Check if user is active
+    if (user.status !== 'active') {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Your account has been suspended. Please contact support.'
+      });
+    }
+
+    // Generate OTP for Google sign-in
+    try {
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+      await OTP.create({
+        email: originalEmail,
+        otp,
+        type: 'login',
+        expiresAt,
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent']
+      });
+
+      // Send OTP email
+      await sendProfessionalEmail({
+        email: originalEmail,
+        template: 'otp',
+        data: {
+          name: user.firstName,
+          otp: otp,
+          action: 'Google sign-in verification'
+        }
+      });
+    } catch (otpError) {
+      console.error('OTP creation error:', otpError);
+      // Continue even if OTP fails for now
+    }
+
+    // Generate temporary token
+    const tempToken = generateJWT(user._id);
+
+    // Update last login
+    try {
+      user.lastLogin = new Date();
+      const deviceInfo = await getUserDeviceInfo(req);
+      user.loginHistory.push(deviceInfo);
+      await user.save();
+    } catch (updateError) {
+      console.error('User update error:', updateError);
+      // Continue even if update fails
+    }
+
+    // SUCCESS RESPONSE
+    res.status(200).json({
+      status: 'success',
+      message: 'OTP sent to your email. Please verify to complete Google sign-in.',
+      tempToken,
+      needsOtp: true,
+      isNewUser: isNewUser,
+      data: {
+        user: {
+          id: user._id,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          email: user.email
+        }
+      }
+    });
+
+    // Log activity (don't let this break the response)
+    try {
+      await logActivity('google_signin_otp_sent', 'user', user._id, user._id, 'User', req, {
+        isNewUser,
+        provider: 'google',
+        email: originalEmail
+      });
+    } catch (logError) {
+      console.error('Activity logging error:', logError);
+    }
+
+  } catch (err) {
+    console.error('Google auth UNEXPECTED error:', err);
+    console.error('Error stack:', err.stack);
+    
+    res.status(500).json({
+      status: 'error',
+      message: 'An unexpected error occurred during Google authentication'
+    });
+  }
+});
+
+
+
+
+
+
 // OTP Verification Endpoint - FIXED to use exact email matching
 app.post('/api/auth/verify-otp', [
   body('email').isEmail().withMessage('Please provide a valid email'),
@@ -6036,6 +6254,14 @@ app.get('/api/users/me', protect, async (req, res) => {
     });
   }
 });
+
+
+
+
+
+
+
+
 
 app.put('/api/users/profile', protect, [
   body('firstName').optional().trim().notEmpty().withMessage('First name cannot be empty').escape(),
