@@ -3600,18 +3600,32 @@ const calculateReferralCommissions = async (investment) => {
   }
 };
 
+// Email notification helper function for admin actions
+const sendAutomatedEmail = async (user, template, data = {}) => {
+  try {
+    const userData = {
+      name: user.firstName || user.email.split('@')[0],
+      ...data
+    };
 
+    // Get location info if available
+    if (data.location) {
+      userData.location = data.location;
+    }
 
+    // Use the existing sendProfessionalEmail function
+    await sendProfessionalEmail({
+      email: user.email,
+      template: template,
+      data: userData
+    });
 
-
-
-
-
-
-
-
-
-
+    console.log(`📧 Email sent: ${template} to ${user.email}`);
+  } catch (err) {
+    console.error('Email sending failed:', err);
+    // Don't throw error to avoid disrupting the main operation
+  }
+};
 
 
 
@@ -3637,7 +3651,7 @@ const calculateReferralCommissions = async (investment) => {
 // Enhanced email service with professional Bitcoin mining templates
 const sendProfessionalEmail = async (options) => {
   try {
-    const { email, template, data } = options;
+    const { email, subject, template, data } = options;
     
     const emailTemplates = {
       // WELCOME EMAIL
@@ -3751,6 +3765,10 @@ const sendProfessionalEmail = async (options) => {
         `
       },
 
+
+
+
+      
       // OTP VERIFICATION
       otp: {
         subject: 'BitHash Capital - Verification Code Required',
@@ -4006,7 +4024,7 @@ const sendProfessionalEmail = async (options) => {
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">Duration:</span>
-                              <span class="detail-value">${data.duration} hours</span>
+                              <span class="detail-value">${data.duration}</span>
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">Start Date:</span>
@@ -4105,146 +4123,6 @@ const sendProfessionalEmail = async (options) => {
                       </div>
                       
                       <p>If you did not initiate this withdrawal, please contact our security team immediately.</p>
-                      
-                      <p>Best regards,<br><strong>BitHash Capital Finance Team</strong></p>
-                  </div>
-                  <div class="footer">
-                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
-                      Professional Bitcoin Mining and Investment Platform</p>
-                  </div>
-              </div>
-          </body>
-          </html>
-        `
-      },
-
-      // WITHDRAWAL COMPLETED
-      withdrawal_completed: {
-        subject: 'BitHash Capital - Withdrawal Completed',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>Withdrawal Completed - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-              <style>
-                  * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #27ae60; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
-                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
-                  .content { padding: 40px; background: #ffffff; }
-                  .withdrawal-details { background: #f8f9fa; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #27ae60; }
-                  .detail-item { margin-bottom: 12px; display: flex; justify-content: space-between; }
-                  .detail-label { font-weight: 600; color: #333; }
-                  .detail-value { color: #0a0a0a; font-weight: 500; }
-                  .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 12px; line-height: 1.5; }
-              </style>
-          </head>
-          <body>
-              <div class="container">
-                  <div class="header">
-                      <div class="logo-container">
-                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash Capital</div>
-                      </div>
-                  </div>
-                  <div class="content">
-                      <h2>Hello ${data.name},</h2>
-                      <p>Your withdrawal has been successfully processed and completed.</p>
-                      
-                      <div class="withdrawal-details">
-                          <div class="detail-item">
-                              <span class="detail-label">Amount:</span>
-                              <span class="detail-value">$${data.amount}</span>
-                          </div>
-                          <div class="detail-item">
-                              <span class="detail-label">Method:</span>
-                              <span class="detail-value">${data.method}</span>
-                          </div>
-                          <div class="detail-item">
-                              <span class="detail-label">Reference:</span>
-                              <span class="detail-value">${data.reference}</span>
-                          </div>
-                          <div class="detail-item">
-                              <span class="detail-label">Processed:</span>
-                              <span class="detail-value">${new Date().toLocaleDateString()}</span>
-                          </div>
-                      </div>
-                      
-                      <p>Thank you for using BitHash Capital. If you have any questions, please contact our support team.</p>
-                      
-                      <p>Best regards,<br><strong>BitHash Capital Finance Team</strong></p>
-                  </div>
-                  <div class="footer">
-                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
-                      Professional Bitcoin Mining and Investment Platform</p>
-                  </div>
-              </div>
-          </body>
-          </html>
-        `
-      },
-
-      // WITHDRAWAL REJECTED
-      withdrawal_rejected: {
-        subject: 'BitHash Capital - Withdrawal Update',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>Withdrawal Update - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-              <style>
-                  * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #e74c3c; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
-                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
-                  .content { padding: 40px; background: #ffffff; }
-                  .info-box { background: #f8f9fa; padding: 25px; border-radius: 8px; margin: 25px 0; }
-                  .reason-text { background: #fee; padding: 15px; border-radius: 6px; margin: 20px 0; color: #e74c3c; }
-                  .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 12px; line-height: 1.5; }
-              </style>
-          </head>
-          <body>
-              <div class="container">
-                  <div class="header">
-                      <div class="logo-container">
-                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash Capital</div>
-                      </div>
-                  </div>
-                  <div class="content">
-                      <h2>Hello ${data.name},</h2>
-                      <p>Your withdrawal request requires your attention.</p>
-                      
-                      <div class="info-box">
-                          <div class="detail-item">
-                              <span class="detail-label">Amount:</span>
-                              <span class="detail-value">$${data.amount}</span>
-                          </div>
-                          <div class="detail-item">
-                              <span class="detail-label">Status:</span>
-                              <span class="detail-value">Not Processed</span>
-                          </div>
-                      </div>
-                      
-                      <div class="reason-text">
-                          <strong>Reason:</strong> ${data.reason}
-                      </div>
-                      
-                      <p>The funds have been returned to your account. Please review and resubmit your request if needed.</p>
                       
                       <p>Best regards,<br><strong>BitHash Capital Finance Team</strong></p>
                   </div>
@@ -4424,73 +4302,6 @@ const sendProfessionalEmail = async (options) => {
         `
       },
 
-      // DEPOSIT REJECTED
-      deposit_rejected: {
-        subject: 'BitHash Capital - Deposit Update',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>Deposit Update - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-              <style>
-                  * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #e74c3c; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
-                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
-                  .content { padding: 40px; background: #ffffff; }
-                  .info-box { background: #f8f9fa; padding: 25px; border-radius: 8px; margin: 25px 0; }
-                  .reason-text { background: #fee; padding: 15px; border-radius: 6px; margin: 20px 0; color: #e74c3c; }
-                  .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 12px; line-height: 1.5; }
-              </style>
-          </head>
-          <body>
-              <div class="container">
-                  <div class="header">
-                      <div class="logo-container">
-                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash Capital</div>
-                      </div>
-                  </div>
-                  <div class="content">
-                      <h2>Hello ${data.name},</h2>
-                      <p>We were unable to process your deposit request.</p>
-                      
-                      <div class="info-box">
-                          <div class="detail-item">
-                              <span class="detail-label">Amount:</span>
-                              <span class="detail-value">$${data.amount}</span>
-                          </div>
-                          <div class="detail-item">
-                              <span class="detail-label">Method:</span>
-                              <span class="detail-value">${data.method}</span>
-                          </div>
-                      </div>
-                      
-                      <div class="reason-text">
-                          <strong>Reason:</strong> ${data.reason}
-                      </div>
-                      
-                      <p>Please review the information and try again or contact support if you need assistance.</p>
-                      
-                      <p>Best regards,<br><strong>BitHash Capital Finance Team</strong></p>
-                  </div>
-                  <div class="footer">
-                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
-                      Professional Bitcoin Mining and Investment Platform</p>
-                  </div>
-              </div>
-          </body>
-          </html>
-        `
-      },
-
       // REFERRAL BONUS
       referral_bonus: {
         subject: 'BitHash Capital - Referral Bonus Earned',
@@ -4636,90 +4447,6 @@ const sendProfessionalEmail = async (options) => {
           </body>
           </html>
         `
-      },
-
-      // INVESTMENT COMPLETED
-      investment_completed: {
-        subject: 'BitHash Capital - Investment Matured Successfully',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>Investment Matured - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-              <style>
-                  * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #27ae60; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
-                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
-                  .content { padding: 40px; background: #ffffff; }
-                  .investment-details { background: #f8f9fa; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #27ae60; }
-                  .detail-item { margin-bottom: 12px; display: flex; justify-content: space-between; }
-                  .detail-label { font-weight: 600; color: #333; }
-                  .detail-value { color: #0a0a0a; font-weight: 500; }
-                  .cta-button { background: #f0b90b; color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 20px 0; font-weight: 600; }
-                  .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 12px; line-height: 1.5; }
-              </style>
-          </head>
-          <body>
-              <div class="container">
-                  <div class="header">
-                      <div class="logo-container">
-                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash Capital</div>
-                      </div>
-                  </div>
-                  <div class="content">
-                      <h2>Hello ${data.name},</h2>
-                      <p>Your investment has successfully matured and the returns have been credited to your account.</p>
-                      
-                      <div class="investment-details">
-                          <div class="detail-item">
-                              <span class="detail-label">Investment Plan:</span>
-                              <span class="detail-value">${data.planName}</span>
-                          </div>
-                          <div class="detail-item">
-                              <span class="detail-label">Original Amount:</span>
-                              <span class="detail-value">$${data.amount}</span>
-                          </div>
-                          <div class="detail-item">
-                              <span class="detail-label">Total Return:</span>
-                              <span class="detail-value">$${data.totalReturn}</span>
-                          </div>
-                          <div class="detail-item">
-                              <span class="detail-label">Profit Earned:</span>
-                              <span class="detail-value">$${data.profit}</span>
-                          </div>
-                          <div class="detail-item">
-                              <span class="detail-label">Completion Date:</span>
-                              <span class="detail-value">${new Date(data.completionDate).toLocaleDateString()}</span>
-                          </div>
-                      </div>
-                      
-                      <p>Your funds are now available in your matured balance. You can reinvest or withdraw at any time.</p>
-                      
-                      <div style="text-align: center;">
-                          <a href="https://www.bithashcapital.live/dashboard.html" class="cta-button">View Dashboard</a>
-                      </div>
-                      
-                      <p>Thank you for mining with BitHash Capital!</p>
-                      
-                      <p>Best regards,<br><strong>BitHash Capital Investment Team</strong></p>
-                  </div>
-                  <div class="footer">
-                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
-                      Professional Bitcoin Mining and Investment Platform</p>
-                  </div>
-              </div>
-          </body>
-          </html>
-        `
       }
     };
 
@@ -4743,38 +4470,6 @@ const sendProfessionalEmail = async (options) => {
   }
 };
 
-// Helper function to send automated emails for key activities
-const sendAutomatedEmail = async (user, template, data = {}) => {
-  try {
-    if (!user || !user.email) {
-      console.error('Cannot send email: No user or email provided');
-      return;
-    }
-
-    // Get device info for login emails
-    const deviceInfo = data.req ? await getUserDeviceInfo(data.req) : null;
-
-    const emailData = {
-      name: user.firstName || user.name || 'Valued Customer',
-      email: user.email,
-      ...data,
-      device: deviceInfo?.device || data.device || 'Unknown device',
-      location: deviceInfo?.location || data.location || 'Unknown location',
-      ip: deviceInfo?.ip || data.ip || 'Unknown'
-    };
-
-    await sendProfessionalEmail({
-      email: user.email,
-      template: template,
-      data: emailData
-    });
-
-    console.log(`✅ Automated email sent: ${template} to ${user.email}`);
-  } catch (error) {
-    console.error(`❌ Failed to send automated email (${template}):`, error);
-    // Don't throw - prevent email failures from breaking main flow
-  }
-};
 
 
 // Enhanced Signup Endpoint with OTP - FIXED email handling
@@ -4888,6 +4583,27 @@ app.post('/api/auth/signup', [
     // Generate temporary token for OTP verification
     const tempToken = generateJWT(newUser._id);
 
+    // Log downline relationship when user signs up with referral
+    if (referredByUser) {
+      // Check if downline relationship settings exist
+      const settings = await CommissionSettings.findOne({ isActive: true });
+      const commissionPercentage = settings ? settings.commissionPercentage : 5;
+      const commissionRounds = settings ? settings.commissionRounds : 3;
+
+      // Create downline relationship
+      await DownlineRelationship.create({
+        upline: referredByUser._id,
+        downline: newUser._id,
+        commissionPercentage: commissionPercentage,
+        commissionRounds: commissionRounds,
+        remainingRounds: commissionRounds,
+        assignedBy: referredByUser._id, // Using upline as assigner
+        assignedAt: new Date()
+      });
+
+      console.log(`✅ Downline relationship created: ${referredByUser.email} -> ${newUser.email}`);
+    }
+
     res.status(201).json({
       status: 'success',
       message: 'Account created successfully. Please verify your email with the OTP sent to your inbox.',
@@ -4914,6 +4630,7 @@ app.post('/api/auth/signup', [
     });
   }
 });
+
 
 // Enhanced Login Endpoint with OTP - FIXED email handling
 app.post('/api/auth/login', [
@@ -5023,6 +4740,7 @@ app.post('/api/auth/login', [
   }
 });
 
+
 app.post('/api/auth/google', async (req, res) => {
   try {
     console.log('Google auth request received');
@@ -5094,11 +4812,41 @@ app.post('/api/auth/google', async (req, res) => {
     }
 
     if (!user) {
-      // Check if user exists - if not, they can't login (unregistered users cannot login)
-      return res.status(400).json({
-        status: 'fail',
-        message: 'No account found with this email. Please sign up first.'
-      });
+      // Create new user with Google auth using exact email
+      try {
+        const referralCode = generateReferralCode();
+        user = await User.create({
+          firstName: given_name || 'Google',
+          lastName: family_name || 'User',
+          email: originalEmail,
+          googleId: sub,
+          isVerified: true,
+          referralCode,
+          status: 'active'
+        });
+        isNewUser = true;
+        console.log('New user created via Google:', originalEmail);
+
+        // Send welcome email
+        try {
+          await sendProfessionalEmail({
+            email: originalEmail,
+            template: 'welcome',
+            data: {
+              firstName: given_name || 'Google User'
+            }
+          });
+        } catch (emailError) {
+          console.error('Welcome email failed:', emailError);
+          // Don't fail the request if email fails
+        }
+      } catch (createError) {
+        console.error('User creation error:', createError);
+        return res.status(500).json({
+          status: 'error',
+          message: 'Failed to create user account'
+        });
+      }
     } else if (!user.googleId) {
       // Existing user, add Google auth
       try {
@@ -5205,8 +4953,6 @@ app.post('/api/auth/google', async (req, res) => {
   }
 });
 
-
-
 app.post('/api/auth/forgot-password', [
   body('email').isEmail().withMessage('Please provide a valid email').normalizeEmail()
 ], async (req, res) => {
@@ -5236,15 +4982,13 @@ app.post('/api/auth/forgot-password', [
     await user.save();
 
     const resetURL = `https://bithhash.vercel.app/reset-password?token=${resetToken}`;
-    
-    // Send password reset email using professional template
-    await sendProfessionalEmail({
+    const message = `Forgot your password? Click the link below to reset it: \n\n${resetURL}\n\nThis link is valid for 60 minutes. If you didn't request this, please ignore this email.`;
+
+    await sendEmail({
       email: user.email,
-      template: 'password_reset',
-      data: {
-        name: user.firstName,
-        resetUrl: resetURL
-      }
+      subject: 'Your password reset token (valid for 60 minutes)',
+      message,
+      html: `<p>Forgot your password? Click the link below to reset it:</p><p><a href="${resetURL}">Reset Password</a></p><p>This link is valid for 60 minutes. If you didn't request this, please ignore this email.</p>`
     });
 
     res.status(200).json({
@@ -5325,6 +5069,8 @@ app.post('/api/auth/reset-password', [
     });
   }
 });
+
+
 
 // Investment routes - ENHANCED VERSION WITH EMAIL NOTIFICATIONS
 app.post('/api/investments', protect, [
@@ -5511,16 +5257,6 @@ app.post('/api/investments', protect, [
       await investment.save();
 
       console.log(`🎁 Direct referral bonus of $${referralBonus} paid to ${user.referredBy}`);
-
-      // Send referral bonus email
-      const referrerUser = await User.findById(user.referredBy);
-      if (referrerUser) {
-        await sendAutomatedEmail(referrerUser, 'referral_bonus', {
-          bonusAmount: referralBonus,
-          referredUser: `${user.firstName} ${user.lastName}`,
-          bonusType: 'Direct Referral Bonus'
-        });
-      }
     }
 
     // ✅ ENHANCED: Send investment creation email
@@ -5733,7 +5469,7 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
     const { notes } = req.body;
     
     // Find withdrawal
-    const withdrawal = await Transaction.findById(req.params.id);
+    const withdrawal = await Transaction.findById(req.params.id).populate('user');
     
     if (!withdrawal || withdrawal.type !== 'withdrawal') {
       return res.status(404).json({
@@ -5756,16 +5492,16 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
     withdrawal.adminNotes = notes;
     await withdrawal.save();
 
-    // Send withdrawal completed email
-    const user = await User.findById(withdrawal.user);
-    if (user) {
-      await sendAutomatedEmail(user, 'withdrawal_completed', {
-        amount: withdrawal.amount,
-        method: withdrawal.method,
-        reference: withdrawal.reference,
-        req
-      });
-    }
+    // Send withdrawal approved email
+    const user = withdrawal.user;
+    await sendAutomatedEmail(user, 'withdrawal_approved', {
+      amount: withdrawal.amount,
+      method: withdrawal.method,
+      reference: withdrawal.reference,
+      fee: withdrawal.fee,
+      netAmount: withdrawal.netAmount,
+      processedAt: new Date().toLocaleString()
+    });
     
     res.status(200).json({
       status: 'success',
@@ -5784,6 +5520,8 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
     });
   }
 });
+
+
 
 
 // CORRECTED Admin Reject Withdrawal Endpoint
@@ -5840,8 +5578,10 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
     // Send withdrawal rejected email
     await sendAutomatedEmail(user, 'withdrawal_rejected', {
       amount: withdrawal.amount,
+      method: withdrawal.method,
+      reference: withdrawal.reference,
       reason: reason,
-      req
+      processedAt: new Date().toLocaleString()
     });
     
     res.status(200).json({
@@ -5862,6 +5602,11 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
     });
   }
 });
+
+
+
+
+
 
 // Admin Approve Deposit Endpoint
 app.post('/api/admin/deposits/:id/approve', adminProtect, [
@@ -5912,8 +5657,7 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       amount: deposit.amount,
       method: deposit.method,
       reference: deposit.reference,
-      newBalance: user.balances.main,
-      req
+      newBalance: user.balances.main
     });
     
     await logActivity('approve-deposit', 'transaction', deposit._id, req.admin._id, 'Admin', req, {
@@ -5966,15 +5710,6 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
         message: 'Deposit is not pending approval'
       });
     }
-
-    // Find user
-    const user = await User.findById(deposit.user._id);
-    if (!user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found'
-      });
-    }
     
     // Update deposit status
     deposit.status = 'failed';
@@ -5982,11 +5717,13 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
     await deposit.save();
 
     // Send deposit rejected email
+    const user = deposit.user;
     await sendAutomatedEmail(user, 'deposit_rejected', {
       amount: deposit.amount,
       method: deposit.method,
+      reference: deposit.reference,
       reason: rejectionReason,
-      req
+      processedAt: new Date().toLocaleString()
     });
     
     res.status(200).json({
@@ -6060,6 +5797,7 @@ app.get('/api/admin/deposits/:id', adminProtect, async (req, res) => {
     });
   }
 });
+
 
 
 // OTP Verification Endpoint - FIXED to use exact email matching
@@ -6156,8 +5894,8 @@ app.post('/api/auth/verify-otp', [
 
         // Send account suspended email
         await sendAutomatedEmail(user, 'account_suspended', {
-          reason: 'Too many failed verification attempts',
-          req
+          name: user.firstName,
+          reason: 'Too many failed verification attempts'
         });
 
         return res.status(429).json({
@@ -6200,22 +5938,11 @@ app.post('/api/auth/verify-otp', [
     // Generate final JWT token
     const finalToken = generateJWT(user._id);
 
-    // Get device info for login email
-    const deviceInfo = await getUserDeviceInfo(req);
-
     // Update last login
     user.lastLogin = new Date();
+    const deviceInfo = await getUserDeviceInfo(req);
     user.loginHistory.push(deviceInfo);
     await user.save();
-
-    // Send login success email with location and device info
-    await sendAutomatedEmail(user, 'login_success', {
-      device: deviceInfo.device,
-      location: deviceInfo.location,
-      ip: deviceInfo.ip,
-      suspicious: false,
-      req
-    });
 
     // Set cookie
     res.cookie('jwt', finalToken, {
@@ -6223,6 +5950,15 @@ app.post('/api/auth/verify-otp', [
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict'
+    });
+
+    // Send login success email with location info
+    await sendAutomatedEmail(user, 'login_success', {
+      name: user.firstName,
+      device: deviceInfo.device || 'Unknown device',
+      location: deviceInfo.location || 'Unknown location',
+      ip: deviceInfo.ip || 'Unknown',
+      time: new Date().toLocaleString()
     });
 
     res.status(200).json({
@@ -6256,13 +5992,6 @@ app.post('/api/auth/verify-otp', [
     });
   }
 });
-
-
-
-
-
-
-
 
 
 
