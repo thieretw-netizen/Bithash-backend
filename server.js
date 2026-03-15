@@ -5360,7 +5360,6 @@ app.post('/api/auth/verify-otp', [
   }
 });
 
-
 app.post('/api/auth/google', async (req, res) => {
   try {
     console.log('Google auth request received');
