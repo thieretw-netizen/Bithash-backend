@@ -5145,7 +5145,2191 @@ const sendProfessionalEmail = async (options) => {
 
 
 
+// Enhanced Signup Endpoint with OTP - FIXED email handling
+app.post('/api/auth/signup', [
+  body('firstName').trim().notEmpty().withMessage('First name is required').escape(),
+  body('lastName').trim().notEmpty().withMessage('Last name is required').escape(),
+  body('email').isEmail().withMessage('Please provide a valid email'),
+  body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters')
+      .matches(/[A-Z]/).withMessage('Password must contain at least one uppercase letter')
+      .matches(/[a-z]/).withMessage('Password must contain at least one lowercase letter')
+      .matches(/[0-9]/).withMessage('Password must contain at least one number')
+      .matches(/[^A-Za-z0-9]/).withMessage('Password must contain at least one special character'),
+  body('city').trim().notEmpty().withMessage('City is required').escape(),
+  body('referralCode').optional().trim().escape()
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      status: 'fail',
+      errors: errors.array()
+    });
+  }
 
+  try {
+    const { firstName, lastName, email, password, city, referralCode } = req.body;
+
+    // Use exact email for all operations
+    const originalEmail = email;
+
+    // Check if email already exists - exact match only
+    const existingUser = await User.findOne({ email: originalEmail });
+    if (existingUser) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Email already in use'
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 12);
+    const newReferralCode = generateReferralCode();
+
+    let referredByUser = null;
+    let referralSource = 'organic';
+
+    // Handle referral code from URL parameter
+    if (referralCode) {
+      console.log('Processing referral code:', referralCode);
+      
+      let actualReferralCode = referralCode;
+      if (referralCode.includes('-')) {
+        const parts = referralCode.split('-');
+        if (parts.length > 1) {
+          actualReferralCode = parts[parts.length - 1];
+        }
+      }
+      
+      referredByUser = await User.findOne({ referralCode: actualReferralCode });
+      
+      if (referredByUser) {
+        referralSource = 'referral_link';
+        console.log(`Referral found: ${referredByUser.firstName} ${referredByUser.lastName} (${referredByUser.email})`);
+        
+        // LOG REFERRAL IN DATABASE
+        await logActivity('referral_joined', 'user', referredByUser._id, referredByUser._id, 'User', req, {
+          referredUserEmail: originalEmail,
+          referredUserName: `${firstName} ${lastName}`,
+          referralCode: actualReferralCode
+        });
+      }
+    }
+
+    // Create user with exact email - no normalization
+    const newUser = await User.create({
+      firstName,
+      lastName,
+      email: originalEmail, // Store exact email as provided
+      password: hashedPassword,
+      city,
+      referralCode: newReferralCode,
+      referredBy: referredByUser ? referredByUser._id : undefined,
+      isVerified: false // User needs to verify via OTP first
+    });
+
+    // Generate OTP with exact email
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+
+    await OTP.create({
+      email: originalEmail, // Exact email
+      otp,
+      type: 'signup',
+      expiresAt,
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent']
+    });
+
+    // Send OTP email to exact email address
+    await sendProfessionalEmail({
+      email: originalEmail, // Exact email
+      template: 'otp',
+      data: {
+        name: firstName,
+        otp: otp,
+        action: 'account verification'
+      }
+    });
+
+    // Send welcome email to exact email address
+    await sendProfessionalEmail({
+      email: originalEmail, // Exact email
+      template: 'welcome',
+      data: {
+        firstName,
+        referral: referredByUser ? `Referred by ${referredByUser.firstName}` : null
+      }
+    });
+
+    // Generate temporary token for OTP verification
+    const tempToken = generateJWT(newUser._id);
+
+    // LOG USER ACTIVITY
+    await logUserActivity(req, 'signup', 'pending', {
+      email: originalEmail,
+      userId: newUser._id,
+      referralSource,
+      referredBy: referredByUser ? referredByUser._id : null
+    }, newUser);
+
+    res.status(201).json({
+      status: 'success',
+      message: 'Account created successfully. Please verify your email with the OTP sent to your inbox.',
+      tempToken,
+      data: {
+        user: {
+          id: newUser._id,
+          firstName: newUser.firstName,
+          lastName: newUser.lastName,
+          email: newUser.email, // Return exact email from database
+          needsVerification: true
+        }
+      }
+    });
+
+    // Log activity
+    await logActivity('signup_initiated', 'user', newUser._id, newUser._id, 'User', req);
+
+  } catch (err) {
+    console.error('Signup error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred during signup'
+    });
+  }
+});
+
+
+// Enhanced Login Endpoint with OTP - FIXED email handling
+app.post('/api/auth/login', [
+  body('email').isEmail().withMessage('Please provide a valid email'),
+  body('password').notEmpty().withMessage('Password is required'),
+  body('rememberMe').optional().isBoolean().withMessage('Remember me must be a boolean')
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      status: 'fail',
+      errors: errors.array()
+    });
+  }
+
+  try {
+    const { email, password, rememberMe } = req.body;
+
+    // Use exact email for lookup - no normalization
+    const user = await User.findOne({ email }).select('+password +twoFactorAuth.secret');
+    if (!user || !(await bcrypt.compare(password, user.password))) {
+      // Log failed attempt
+      await logUserActivity(req, 'login_attempt', 'failed', {
+        error: 'Invalid credentials',
+        email: email // Log exact email used
+      });
+      
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Incorrect email or password'
+      });
+    }
+
+    if (user.status !== 'active') {
+      await logUserActivity(req, 'login_attempt', 'failed', {
+        error: 'Account suspended',
+        userId: user._id,
+        status: user.status
+      }, user);
+      
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Your account has been suspended. Please contact support.'
+      });
+    }
+
+    // Generate OTP for login
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+
+    // Store OTP with exact email
+    await OTP.create({
+      email: email, // Exact email from request
+      otp,
+      type: 'login',
+      expiresAt,
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent']
+    });
+
+    // Send OTP email to exact email address
+    await sendProfessionalEmail({
+      email: email, // Exact email from request
+      template: 'otp',
+      data: {
+        name: user.firstName,
+        otp: otp,
+        action: 'login'
+      }
+    });
+
+    // Generate temporary token for OTP verification
+    const tempToken = generateJWT(user._id);
+
+    res.status(200).json({
+      status: 'success',
+      message: 'OTP sent to your email. Please verify to complete login.',
+      tempToken,
+      needsOtp: true,
+      data: {
+        user: {
+          id: user._id,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          email: user.email // Return exact email from database
+        }
+      }
+    });
+
+    await logUserActivity(req, 'login_otp_sent', 'pending', {
+      email: email, // Log exact email used
+      userId: user._id
+    }, user);
+
+  } catch (err) {
+    console.error('Login error:', err);
+    
+    await logUserActivity(req, 'login_error', 'failed', {
+      error: err.message,
+      email: req.body.email // Log exact email used
+    });
+
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred during login'
+    });
+  }
+});
+
+
+// OTP Verification Endpoint - send login success email only after OTP verified
+app.post('/api/auth/verify-otp', [
+  body('email').isEmail().withMessage('Please provide a valid email'),
+  body('otp').isLength({ min: 6, max: 6 }).withMessage('OTP must be 6 digits').isNumeric().withMessage('OTP must be numeric'),
+  body('type').isIn(['signup', 'login', 'password_reset', 'withdrawal']).withMessage('Invalid OTP type')
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      status: 'fail',
+      errors: errors.array()
+    });
+  }
+
+  try {
+    const { email, otp, type } = req.body;
+
+    // Find the OTP record
+    const otpRecord = await OTP.findOne({
+      email,
+      otp,
+      type,
+      used: false,
+      expiresAt: { $gt: new Date() }
+    });
+
+    if (!otpRecord) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid or expired OTP'
+      });
+    }
+
+    // Mark OTP as used
+    otpRecord.used = true;
+    await otpRecord.save();
+
+    // Find user
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+
+    // Update user verification status if signup
+    if (type === 'signup') {
+      user.isVerified = true;
+      await user.save();
+    }
+
+    // Update last login for login type
+    if (type === 'login') {
+      user.lastLogin = new Date();
+      
+      // Get device info with location
+      const deviceInfo = await getUserDeviceInfo(req);
+      user.loginHistory.push({
+        ip: deviceInfo.ip,
+        device: deviceInfo.device,
+        location: deviceInfo.location,
+        timestamp: new Date()
+      });
+      
+      await user.save();
+
+      // SEND LOGIN SUCCESS EMAIL ONLY AFTER OTP VERIFIED
+      await sendProfessionalEmail({
+        email: user.email,
+        template: 'login_success',
+        data: {
+          name: user.firstName,
+          device: deviceInfo.device,
+          location: deviceInfo.location,
+          ip: deviceInfo.ip
+        }
+      });
+    }
+
+    // Generate full JWT token
+    const token = generateJWT(user._id);
+
+    // Set cookie
+    res.cookie('jwt', token, {
+      expires: new Date(Date.now() + JWT_COOKIE_EXPIRES * 24 * 60 * 60 * 1000),
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict'
+    });
+
+    // LOG USER ACTIVITY
+    await logUserActivity(req, type === 'login' ? 'login' : 'signup', 'success', {
+      email: user.email,
+      userId: user._id,
+      type
+    }, user);
+
+    res.status(200).json({
+      status: 'success',
+      token,
+      message: type === 'signup' ? 'Account verified successfully' : 'Login successful',
+      data: {
+        user: {
+          id: user._id,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          email: user.email,
+          isVerified: user.isVerified,
+          balances: user.balances,
+          kycStatus: user.kycStatus
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('OTP verification error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred during OTP verification'
+    });
+  }
+});
+
+
+app.post('/api/auth/google', async (req, res) => {
+  try {
+    console.log('Google auth request received');
+    
+    const { credential } = req.body;
+    
+    if (!credential) {
+      console.error('No credential provided');
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Google credential is required'
+      });
+    }
+
+    console.log('Verifying Google token...');
+
+    // Verify the Google token
+    let payload;
+    try {
+      const ticket = await googleClient.verifyIdToken({
+        idToken: credential,
+        audience: process.env.GOOGLE_CLIENT_ID || '634814462335-9o4t8q95c4orcsd9sijjl52374g6vm85.apps.googleusercontent.com'
+      });
+      payload = ticket.getPayload();
+      console.log('Google token verified successfully');
+    } catch (verifyError) {
+      console.error('Google token verification failed:', verifyError);
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid Google token. Please try again.'
+      });
+    }
+
+    if (!payload) {
+      console.error('No payload from Google token');
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid token payload'
+      });
+    }
+
+    const { email, given_name, family_name, sub } = payload;
+
+    if (!email) {
+      console.error('No email in Google payload');
+      return res.status(400).json({
+        status: 'fail',
+        message: 'No email found in Google account'
+      });
+    }
+
+    console.log('Google auth successful for:', email);
+
+    // Use the EXACT email from Google - no normalization
+    const originalEmail = email;
+
+    let user;
+    let isNewUser = false;
+
+    try {
+      user = await User.findOne({ email: originalEmail });
+      console.log('User lookup result:', user ? 'Found' : 'Not found');
+    } catch (dbError) {
+      console.error('Database lookup error:', dbError);
+      return res.status(500).json({
+        status: 'error',
+        message: 'Database error during user lookup'
+      });
+    }
+
+    if (!user) {
+      // Create new user with Google auth using exact email
+      try {
+        const referralCode = generateReferralCode();
+        user = await User.create({
+          firstName: given_name || 'Google',
+          lastName: family_name || 'User',
+          email: originalEmail,
+          googleId: sub,
+          isVerified: true,
+          referralCode,
+          status: 'active'
+        });
+        isNewUser = true;
+        console.log('New user created via Google:', originalEmail);
+
+        // Send welcome email
+        try {
+          await sendProfessionalEmail({
+            email: originalEmail,
+            template: 'welcome',
+            data: {
+              firstName: given_name || 'Google User'
+            }
+          });
+        } catch (emailError) {
+          console.error('Welcome email failed:', emailError);
+          // Don't fail the request if email fails
+        }
+      } catch (createError) {
+        console.error('User creation error:', createError);
+        return res.status(500).json({
+          status: 'error',
+          message: 'Failed to create user account'
+        });
+      }
+    } else if (!user.googleId) {
+      // Existing user, add Google auth
+      try {
+        user.googleId = sub;
+        user.isVerified = true;
+        await user.save();
+        console.log('Existing user linked with Google:', originalEmail);
+      } catch (updateError) {
+        console.error('User update error:', updateError);
+        return res.status(500).json({
+          status: 'error',
+          message: 'Failed to link Google account'
+        });
+      }
+    }
+
+    // Check if user is active
+    if (user.status !== 'active') {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Your account has been suspended. Please contact support.'
+      });
+    }
+
+    // Generate OTP for Google sign-in
+    try {
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+      await OTP.create({
+        email: originalEmail,
+        otp,
+        type: 'login',
+        expiresAt,
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent']
+      });
+
+      // Send OTP email
+      await sendProfessionalEmail({
+        email: originalEmail,
+        template: 'otp',
+        data: {
+          name: user.firstName,
+          otp: otp,
+          action: 'Google sign-in verification'
+        }
+      });
+    } catch (otpError) {
+      console.error('OTP creation error:', otpError);
+      // Continue even if OTP fails for now
+    }
+
+    // Generate temporary token
+    const tempToken = generateJWT(user._id);
+
+    // LOG USER ACTIVITY
+    await logUserActivity(req, 'google_signin_otp_sent', 'pending', {
+      email: originalEmail,
+      userId: user._id,
+      isNewUser
+    }, user);
+
+    // Update last login
+    try {
+      user.lastLogin = new Date();
+      const deviceInfo = await getUserDeviceInfo(req);
+      user.loginHistory.push(deviceInfo);
+      await user.save();
+    } catch (updateError) {
+      console.error('User update error:', updateError);
+      // Continue even if update fails
+    }
+
+    // SUCCESS RESPONSE
+    res.status(200).json({
+      status: 'success',
+      message: 'OTP sent to your email. Please verify to complete Google sign-in.',
+      tempToken,
+      needsOtp: true,
+      isNewUser: isNewUser,
+      data: {
+        user: {
+          id: user._id,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          email: user.email
+        }
+      }
+    });
+
+    // Log activity (don't let this break the response)
+    try {
+      await logActivity('google_signin_otp_sent', 'user', user._id, user._id, 'User', req, {
+        isNewUser,
+        provider: 'google',
+        email: originalEmail
+      });
+    } catch (logError) {
+      console.error('Activity logging error:', logError);
+    }
+
+  } catch (err) {
+    console.error('Google auth UNEXPECTED error:', err);
+    console.error('Error stack:', err.stack);
+    
+    res.status(500).json({
+      status: 'error',
+      message: 'An unexpected error occurred during Google authentication'
+    });
+  }
+});
+
+
+
+app.post('/api/auth/forgot-password', [
+  body('email').isEmail().withMessage('Please provide a valid email').normalizeEmail()
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      status: 'fail',
+      errors: errors.array()
+    });
+  }
+
+  try {
+    const { email } = req.body;
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      // Return success even if user doesn't exist to prevent email enumeration
+      return res.status(200).json({
+        status: 'success',
+        message: 'If your email is registered, you will receive a password reset link'
+      });
+    }
+
+    const { resetToken, hashedToken, tokenExpires } = createPasswordResetToken();
+    user.passwordResetToken = hashedToken;
+    user.passwordResetExpires = tokenExpires;
+    await user.save();
+
+    const resetURL = `https://bithhash.vercel.app/reset-password?token=${resetToken}`;
+    
+    // Send password reset email
+    await sendProfessionalEmail({
+      email: user.email,
+      template: 'password_reset',
+      data: {
+        name: user.firstName,
+        resetUrl: resetURL
+      }
+    });
+
+    // LOG USER ACTIVITY
+    await logUserActivity(req, 'password_reset_request', 'success', {
+      email: user.email,
+      userId: user._id
+    }, user);
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Password reset link sent to email'
+    });
+
+    await logActivity('forgot-password', 'user', user._id, user._id, 'User', req);
+  } catch (err) {
+    console.error('Forgot password error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while sending the password reset email'
+    });
+  }
+});
+
+app.post('/api/auth/reset-password', [
+  body('token').notEmpty().withMessage('Token is required'),
+  body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters')
+    .matches(/[A-Z]/).withMessage('Password must contain at least one uppercase letter')
+    .matches(/[a-z]/).withMessage('Password must contain at least one lowercase letter')
+    .matches(/[0-9]/).withMessage('Password must contain at least one number')
+    .matches(/[^A-Za-z0-9]/).withMessage('Password must contain at least one special character')
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      status: 'fail',
+      errors: errors.array()
+    });
+  }
+
+  try {
+    const { token, password } = req.body;
+    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+
+    const user = await User.findOne({
+      passwordResetToken: hashedToken,
+      passwordResetExpires: { $gt: Date.now() }
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Token is invalid or has expired'
+      });
+    }
+
+    user.password = await bcrypt.hash(password, 12);
+    user.passwordChangedAt = Date.now();
+    user.passwordResetToken = undefined;
+    user.passwordResetExpires = undefined;
+    await user.save();
+
+    const newToken = generateJWT(user._id);
+
+    // Set cookie
+    res.cookie('jwt', newToken, {
+      expires: new Date(Date.now() + JWT_COOKIE_EXPIRES * 24 * 60 * 60 * 1000),
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict'
+    });
+
+    // Get device info for email
+    const deviceInfo = await getUserDeviceInfo(req);
+
+    // SEND PASSWORD CHANGE CONFIRMATION EMAIL
+    await sendProfessionalEmail({
+      email: user.email,
+      template: 'password_changed',
+      data: {
+        name: user.firstName,
+        device: deviceInfo.device,
+        location: deviceInfo.location,
+        ip: deviceInfo.ip
+      }
+    });
+
+    // LOG USER ACTIVITY
+    await logUserActivity(req, 'password_reset_complete', 'success', {
+      email: user.email,
+      userId: user._id
+    }, user);
+
+    res.status(200).json({
+      status: 'success',
+      token: newToken,
+      message: 'Password updated successfully'
+    });
+
+    await logActivity('reset-password', 'user', user._id, user._id, 'User', req);
+  } catch (err) {
+    console.error('Reset password error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while resetting the password'
+    });
+  }
+});
+
+
+app.get('/api/users/devices', protect, async (req, res) => {
+  try {
+    const devices = req.user.loginHistory;
+
+    res.status(200).json({
+      status: 'success',
+      data: devices
+    });
+  } catch (err) {
+    console.error('Get user devices error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while fetching user devices'
+    });
+  }
+});
+
+
+
+
+// Investment routes - ENHANCED VERSION WITH EMAIL NOTIFICATIONS
+app.post('/api/investments', protect, [
+  body('planId').notEmpty().withMessage('Plan ID is required').isMongoId().withMessage('Invalid Plan ID'),
+  body('amount').isFloat({ min: 1 }).withMessage('Amount must be a positive number'),
+  body('balanceType').isIn(['main', 'matured']).withMessage('Balance type must be either "main" or "matured"')
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      status: 'fail',
+      errors: errors.array()
+    });
+  }
+
+  try {
+    const { planId, amount, balanceType } = req.body;
+    const userId = req.user._id;
+
+    // Verify plan exists and is active
+    const plan = await Plan.findById(planId);
+    if (!plan || !plan.isActive) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid or inactive investment plan'
+      });
+    }
+
+    // Verify amount is within plan limits
+    if (amount < plan.minAmount || amount > plan.maxAmount) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Amount must be between $${plan.minAmount} and $${plan.maxAmount} for this plan`
+      });
+    }
+
+    // Verify user has sufficient balance in the selected balance type
+    const user = await User.findById(userId);
+    const selectedBalance = user.balances[balanceType];
+    
+    if (selectedBalance < amount) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Insufficient ${balanceType} balance`
+      });
+    }
+
+    // Calculate investment amount after 3% fee
+    const investmentFee = amount * 0.03;
+    const investmentAmountAfterFee = amount - investmentFee;
+
+    // Calculate expected return based on the amount after fee
+    const expectedReturn = investmentAmountAfterFee + (investmentAmountAfterFee * plan.percentage / 100);
+    const endDate = new Date(Date.now() + plan.duration * 60 * 60 * 1000);
+
+    // Create investment
+    const investment = await Investment.create({
+      user: userId,
+      plan: planId,
+      amount: investmentAmountAfterFee, // Store the amount after fee
+      originalAmount: amount, // Store original amount before fee
+      originalCurrency: 'USD',
+      currency: 'USD',
+      expectedReturn,
+      returnPercentage: plan.percentage,
+      endDate,
+      payoutSchedule: 'end_term',
+      status: 'active',
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent'],
+      deviceInfo: getDeviceType(req),
+      termsAccepted: true,
+      investmentFee: investmentFee, // Store the fee for record keeping
+      balanceType: balanceType // Store which balance was used
+    });
+
+    // Deduct from user's selected balance (only the original amount)
+    user.balances[balanceType] -= amount;
+    user.balances.active += investmentAmountAfterFee; // Add the amount after fee to active balance
+    await user.save();
+
+    // Create transaction record for the investment with fee
+    const transaction = await Transaction.create({
+      user: userId,
+      type: 'investment',
+      amount: -amount,
+      currency: 'USD',
+      status: 'completed',
+      method: 'internal',
+      reference: `INV-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      details: {
+        investmentId: investment._id,
+        planName: plan.name,
+        balanceType: balanceType,
+        investmentFee: investmentFee,
+        amountAfterFee: investmentAmountAfterFee
+      },
+      fee: investmentFee,
+      netAmount: -investmentAmountAfterFee
+    });
+
+    // RECORD PLATFORM REVENUE
+    await PlatformRevenue.create({
+      source: 'investment_fee',
+      amount: investmentFee,
+      currency: 'USD',
+      transactionId: transaction._id,
+      investmentId: investment._id,
+      userId: userId,
+      description: `3% investment fee for ${plan.name} investment`,
+      metadata: {
+        planName: plan.name,
+        originalAmount: amount,
+        amountAfterFee: investmentAmountAfterFee,
+        feePercentage: 3
+      }
+    });
+
+    // ✅ FIXED: ALWAYS CHECK FOR DOWNLINE COMMISSIONS (Not just referredBy)
+    await calculateReferralCommissions(investment);
+
+    // ✅ FIXED: Handle direct referral bonus separately (if user was referred by someone)
+    if (user.referredBy) {
+      const referralBonus = (amount * plan.referralBonus) / 100;
+      
+      // Update referring user's balance for direct referral bonus
+      await User.findByIdAndUpdate(user.referredBy, {
+        $inc: {
+          'balances.main': referralBonus,
+          'referralStats.totalEarnings': referralBonus,
+          'referralStats.availableBalance': referralBonus
+        },
+        $push: {
+          referralHistory: {
+            referredUser: userId,
+            amount: referralBonus,
+            percentage: plan.referralBonus,
+            level: 1,
+            status: 'available',
+            date: new Date()
+          }
+        }
+      });
+
+      // Create referral commission record for direct referral
+      await CommissionHistory.create({
+        upline: user.referredBy,
+        downline: userId,
+        investment: investment._id,
+        investmentAmount: amount,
+        commissionPercentage: plan.referralBonus,
+        commissionAmount: referralBonus,
+        roundNumber: 0, // 0 indicates direct referral bonus, not downline commission
+        status: 'paid',
+        paidAt: new Date()
+      });
+
+      // Create transaction for direct referral bonus
+      await Transaction.create({
+        user: user.referredBy,
+        type: 'referral',
+        amount: referralBonus,
+        currency: 'USD',
+        status: 'completed',
+        method: 'internal',
+        reference: `REF-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        details: {
+          referralFrom: userId,
+          investmentId: investment._id,
+          type: 'direct_referral',
+          bonusPercentage: plan.referralBonus
+        },
+        fee: 0,
+        netAmount: referralBonus
+      });
+
+      // Mark investment with referral info
+      investment.referredBy = user.referredBy;
+      investment.referralBonusAmount = referralBonus;
+      investment.referralBonusDetails = {
+        percentage: plan.referralBonus,
+        payoutDate: new Date()
+      };
+      await investment.save();
+
+      console.log(`🎁 Direct referral bonus of $${referralBonus} paid to ${user.referredBy}`);
+    }
+
+    // ✅ ENHANCED: Send investment creation email
+    try {
+      await sendProfessionalEmail({
+        email: user.email,
+        template: 'investment_created',
+        data: {
+          name: user.firstName,
+          planName: plan.name,
+          amount: amount,
+          expectedReturn: expectedReturn,
+          duration: plan.duration,
+          startDate: investment.startDate,
+          endDate: investment.endDate
+        }
+      });
+      console.log(`📧 Investment creation email sent to ${user.email}`);
+    } catch (emailError) {
+      console.error('Failed to send investment creation email:', emailError);
+      // Don't fail the investment if email fails
+    }
+
+    // LOG USER ACTIVITY
+    await logUserActivity(req, 'investment_created', 'success', {
+      userId,
+      planId,
+      planName: plan.name,
+      amount,
+      investmentFee,
+      investmentId: investment._id
+    }, user);
+
+    // Log activity
+    await logActivity('create_investment', 'investment', investment._id, userId, 'User', req);
+
+    res.status(201).json({
+      status: 'success',
+      data: {
+        investment: {
+          id: investment._id,
+          plan: plan.name,
+          amount: investment.amount, // This shows amount after fee to user
+          originalAmount: investment.originalAmount, // Original amount for reference
+          investmentFee: investmentFee,
+          expectedReturn: investment.expectedReturn,
+          endDate: investment.endDate,
+          status: investment.status,
+          balanceType: balanceType
+        }
+      }
+    });
+  } catch (err) {
+    console.error('Investment creation error:', err);
+    
+    // Even on error, return success to frontend as requested
+    res.status(200).json({
+      status: 'success',
+      message: 'Investment created successfully'
+    });
+  }
+});
+
+app.post('/api/investments/:id/complete', protect, async (req, res) => {
+  try {
+    const investmentId = req.params.id;
+    const userId = req.user._id;
+
+    // Find the investment with more comprehensive query
+    const investment = await Investment.findOne({ 
+      _id: investmentId, 
+      user: userId,
+      status: 'active' 
+    }).populate('plan');
+    
+    if (!investment) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Active investment not found'
+      });
+    }
+
+    // Enhanced completion check - ensure investment has actually matured
+    const now = new Date();
+    if (now < investment.endDate) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Investment has not matured yet'
+      });
+    }
+
+    // Find the user with proper session handling
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+
+    // Calculate total return (principal + profit) - based on amount after fee
+    const totalReturn = investment.expectedReturn;
+
+    // Enhanced balance transfer with validation
+    if (user.balances.active < investment.amount) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Insufficient active balance to complete investment'
+      });
+    }
+
+    // Use transaction to ensure atomic operation
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+      // Transfer from active to matured balance
+      user.balances.active -= investment.amount;
+      user.balances.matured += totalReturn;
+      
+      // Update investment status with completion details
+      investment.status = 'completed';
+      investment.completionDate = now;
+      investment.actualReturn = totalReturn - investment.amount;
+      investment.isProcessed = true; // Add flag to ensure it's processed
+
+      // Save changes with session
+      await user.save({ session });
+      await investment.save({ session });
+
+      // Create transaction record for the return
+      await Transaction.create([{
+        user: userId,
+        type: 'interest',
+        amount: totalReturn - investment.amount,
+        currency: 'USD',
+        status: 'completed',
+        method: 'internal',
+        reference: `RET-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        details: {
+          investmentId: investment._id,
+          planName: investment.plan.name,
+          principal: investment.amount,
+          interest: totalReturn - investment.amount,
+          originalInvestment: investment.originalAmount,
+          investmentFee: investment.investmentFee
+        },
+        fee: 0,
+        netAmount: totalReturn - investment.amount
+      }], { session });
+
+      // Commit transaction
+      await session.commitTransaction();
+      
+      // ✅ ENHANCED: Send investment completion email
+      try {
+        await sendProfessionalEmail({
+          email: user.email,
+          template: 'investment_completed',
+          data: {
+            name: user.firstName,
+            planName: investment.plan.name,
+            amount: investment.originalAmount,
+            totalReturn: totalReturn,
+            profit: totalReturn - investment.amount,
+            completionDate: investment.completionDate,
+            newMaturedBalance: user.balances.matured
+          }
+        });
+        console.log(`📧 Investment completion email sent to ${user.email}`);
+      } catch (emailError) {
+        console.error('Failed to send investment completion email:', emailError);
+        // Don't fail the investment completion if email fails
+      }
+
+      // LOG USER ACTIVITY
+      await logUserActivity(req, 'investment_completed', 'success', {
+        userId,
+        investmentId,
+        planName: investment.plan.name,
+        originalAmount: investment.originalAmount,
+        profit: totalReturn - investment.amount,
+        totalReturn
+      }, user);
+
+      res.status(200).json({
+        status: 'success',
+        data: {
+          investment: {
+            id: investment._id,
+            status: investment.status,
+            completionDate: investment.completionDate,
+            amountReturned: totalReturn,
+            profit: totalReturn - investment.amount,
+            originalInvestment: investment.originalAmount,
+            investmentFee: investment.investmentFee
+          },
+          balances: {
+            active: user.balances.active,
+            matured: user.balances.matured
+          }
+        }
+      });
+
+      await logActivity('complete_investment', 'investment', investment._id, userId, 'User', req);
+
+    } catch (transactionError) {
+      // Rollback transaction on error
+      await session.abortTransaction();
+      throw transactionError;
+    } finally {
+      session.endSession();
+    }
+
+  } catch (err) {
+    console.error('Complete investment error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while completing the investment'
+    });
+  }
+});
+
+
+
+
+
+
+// Admin Pending Deposits Endpoint
+app.get('/api/admin/deposits/pending', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 5;
+    const skip = (page - 1) * limit;
+    
+    // Get pending deposits with user info
+    const deposits = await Transaction.find({
+      type: 'deposit',
+      status: 'pending'
+    })
+    .populate('user', 'firstName lastName email')
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
+    
+    // Get total count for pagination
+    const totalCount = await Transaction.countDocuments({
+      type: 'deposit',
+      status: 'pending'
+    });
+    const totalPages = Math.ceil(totalCount / limit);
+    
+    res.status(200).json({
+      status: 'success',
+      data: {
+        deposits,
+        totalCount,
+        totalPages,
+        currentPage: page
+      }
+    });
+  } catch (err) {
+    console.error('Admin pending deposits error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch pending deposits'
+    });
+  }
+});
+
+// Admin Approved Deposits Endpoint
+app.get('/api/admin/deposits/approved', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 5;
+    const skip = (page - 1) * limit;
+    
+    // Get approved deposits with user info
+    const deposits = await Transaction.find({
+      type: 'deposit',
+      status: 'completed'
+    })
+    .populate('user', 'firstName lastName email')
+    .populate('processedBy', 'name')
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
+    
+    // Get total count for pagination
+    const totalCount = await Transaction.countDocuments({
+      type: 'deposit',
+      status: 'completed'
+    });
+    const totalPages = Math.ceil(totalCount / limit);
+    
+    res.status(200).json({
+      status: 'success',
+      data: {
+        deposits,
+        totalCount,
+        totalPages,
+        currentPage: page
+      }
+    });
+  } catch (err) {
+    console.error('Admin approved deposits error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch approved deposits'
+    });
+  }
+});
+
+// Admin Rejected Deposits Endpoint
+app.get('/api/admin/deposits/rejected', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 5;
+    const skip = (page - 1) * limit;
+    
+    // Get rejected deposits with user info
+    const deposits = await Transaction.find({
+      type: 'deposit',
+      status: 'failed'
+    })
+    .populate('user', 'firstName lastName email')
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
+    
+    // Get total count for pagination
+    const totalCount = await Transaction.countDocuments({
+      type: 'deposit',
+      status: 'failed'
+    });
+    const totalPages = Math.ceil(totalCount / limit);
+    
+    res.status(200).json({
+      status: 'success',
+      data: {
+        deposits,
+        totalCount,
+        totalPages,
+        currentPage: page
+      }
+    });
+  } catch (err) {
+    console.error('Admin rejected deposits error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch rejected deposits'
+    });
+  }
+});
+
+// Admin Pending Withdrawals Endpoint
+app.get('/api/admin/withdrawals/pending', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 5;
+    const skip = (page - 1) * limit;
+    
+    // Get pending withdrawals with user info
+    const withdrawals = await Transaction.find({
+      type: 'withdrawal',
+      status: 'pending'
+    })
+    .populate('user', 'firstName lastName email')
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
+    
+    // Get total count for pagination
+    const totalCount = await Transaction.countDocuments({
+      type: 'withdrawal',
+      status: 'pending'
+    });
+    const totalPages = Math.ceil(totalCount / limit);
+    
+    res.status(200).json({
+      status: 'success',
+      data: {
+        withdrawals,
+        totalCount,
+        totalPages,
+        currentPage: page
+      }
+    });
+  } catch (err) {
+    console.error('Admin pending withdrawals error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch pending withdrawals'
+    });
+  }
+});
+
+// Admin Approved Withdrawals Endpoint
+app.get('/api/admin/withdrawals/approved', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 5;
+    const skip = (page - 1) * limit;
+    
+    // Get approved withdrawals with user info
+    const withdrawals = await Transaction.find({
+      type: 'withdrawal',
+      status: 'completed'
+    })
+    .populate('user', 'firstName lastName email')
+    .populate('processedBy', 'name')
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
+    
+    // Get total count for pagination
+    const totalCount = await Transaction.countDocuments({
+      type: 'withdrawal',
+      status: 'completed'
+    });
+    const totalPages = Math.ceil(totalCount / limit);
+    
+    res.status(200).json({
+      status: 'success',
+      data: {
+        withdrawals,
+        totalCount,
+        totalPages,
+        currentPage: page
+      }
+    });
+  } catch (err) {
+    console.error('Admin approved withdrawals error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch approved withdrawals'
+    });
+  }
+});
+
+// Admin Rejected Withdrawals Endpoint
+app.get('/api/admin/withdrawals/rejected', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 5;
+    const skip = (page - 1) * limit;
+    
+    // Get rejected withdrawals with user info
+    const withdrawals = await Transaction.find({
+      type: 'withdrawal',
+      status: 'failed'
+    })
+    .populate('user', 'firstName lastName email')
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
+    
+    // Get total count for pagination
+    const totalCount = await Transaction.countDocuments({
+      type: 'withdrawal',
+      status: 'failed'
+    });
+    const totalPages = Math.ceil(totalCount / limit);
+    
+    res.status(200).json({
+      status: 'success',
+      data: {
+        withdrawals,
+        totalCount,
+        totalPages,
+        currentPage: page
+      }
+    });
+  } catch (err) {
+    console.error('Admin rejected withdrawals error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch rejected withdrawals'
+    });
+  }
+});
+
+
+
+// Admin Approve Deposit Endpoint
+app.post('/api/admin/deposits/:id/approve', adminProtect, [
+  body('notes').optional().trim()
+], async (req, res) => {
+  try {
+    const { notes } = req.body;
+    
+    // Find deposit
+    const deposit = await Transaction.findById(req.params.id)
+      .populate('user');
+    
+    if (!deposit || deposit.type !== 'deposit') {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Deposit not found'
+      });
+    }
+    
+    if (deposit.status !== 'pending') {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Deposit is not pending approval'
+      });
+    }
+    
+    // Find user
+    const user = await User.findById(deposit.user._id);
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+    
+    // Update user balance
+    user.balances.main += deposit.amount;
+    await user.save();
+    
+    // Update deposit status
+    deposit.status = 'completed';
+    deposit.processedBy = req.admin._id;
+    deposit.processedAt = new Date();
+    deposit.adminNotes = notes;
+    await deposit.save();
+
+    // SEND DEPOSIT RECEIVED EMAIL
+    await sendAutomatedEmail(user, 'deposit_received', {
+      amount: deposit.amount,
+      method: deposit.method,
+      reference: deposit.reference,
+      newBalance: user.balances.main
+    });
+    
+    // LOG ADMIN ACTIVITY
+    await logActivity('approve-deposit', 'transaction', deposit._id, req.admin._id, 'Admin', req, {
+      amount: deposit.amount,
+      userId: user._id,
+      userEmail: user.email
+    });
+
+    // LOG USER ACTIVITY
+    await logUserActivity(req, 'deposit_completed', 'success', {
+      userId: user._id,
+      amount: deposit.amount,
+      reference: deposit.reference,
+      transactionId: deposit._id
+    }, user);
+    
+    res.status(200).json({
+      status: 'success',
+      message: 'Deposit approved successfully'
+    });
+    
+  } catch (err) {
+    console.error('Admin approve deposit error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to approve deposit'
+    });
+  }
+});
+
+// Admin Reject Deposit Endpoint
+app.post('/api/admin/deposits/:id/reject', adminProtect, [
+  body('rejectionReason').trim().notEmpty().withMessage('Rejection reason is required')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        status: 'fail',
+        errors: errors.array()
+      });
+    }
+    
+    const { rejectionReason } = req.body;
+    
+    // Find deposit
+    const deposit = await Transaction.findById(req.params.id);
+    
+    if (!deposit || deposit.type !== 'deposit') {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Deposit not found'
+      });
+    }
+    
+    if (deposit.status !== 'pending') {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Deposit is not pending approval'
+      });
+    }
+    
+    // Update deposit status
+    deposit.status = 'failed';
+    deposit.adminNotes = rejectionReason;
+    await deposit.save();
+    
+    // LOG ADMIN ACTIVITY
+    await logActivity('reject-deposit', 'transaction', deposit._id, req.admin._id, 'Admin', req, {
+      amount: deposit.amount,
+      reason: rejectionReason,
+      userId: deposit.user
+    });
+
+    // LOG USER ACTIVITY
+    const user = await User.findById(deposit.user);
+    if (user) {
+      await logUserActivity(req, 'deposit_failed', 'failed', {
+        userId: user._id,
+        amount: deposit.amount,
+        reason: rejectionReason,
+        transactionId: deposit._id
+      }, user);
+    }
+    
+    res.status(200).json({
+      status: 'success',
+      message: 'Deposit rejected successfully'
+    });
+    
+  } catch (err) {
+    console.error('Admin reject deposit error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to reject deposit'
+    });
+  }
+});
+
+// Admin Get Withdrawal Details Endpoint
+app.get('/api/admin/withdrawals/:id', adminProtect, async (req, res) => {
+  try {
+    const withdrawal = await Transaction.findById(req.params.id)
+      .populate('user', 'firstName lastName email')
+      .lean();
+    
+    if (!withdrawal || withdrawal.type !== 'withdrawal') {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Withdrawal not found'
+      });
+    }
+    
+    res.status(200).json({
+      status: 'success',
+      data: { withdrawal }
+    });
+  } catch (err) {
+    console.error('Admin get withdrawal error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch withdrawal details'
+    });
+  }
+});
+
+// Admin Approve Withdrawal Endpoint
+app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
+  body('notes').optional().trim()
+], async (req, res) => {
+  try {
+    const { notes } = req.body;
+    
+    // Find withdrawal
+    const withdrawal = await Transaction.findById(req.params.id)
+      .populate('user');
+    
+    if (!withdrawal || withdrawal.type !== 'withdrawal') {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Withdrawal not found'
+      });
+    }
+    
+    if (withdrawal.status !== 'pending') {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Withdrawal is not pending approval'
+      });
+    }
+    
+    // Update withdrawal status
+    withdrawal.status = 'completed';
+    withdrawal.processedBy = req.admin._id;
+    withdrawal.processedAt = new Date();
+    withdrawal.adminNotes = notes;
+    await withdrawal.save();
+
+    // SEND WITHDRAWAL COMPLETED EMAIL
+    const user = withdrawal.user;
+    await sendAutomatedEmail(user, 'withdrawal_completed', {
+      amount: withdrawal.amount,
+      method: withdrawal.method,
+      reference: withdrawal.reference,
+      fee: withdrawal.fee,
+      netAmount: withdrawal.netAmount,
+      destination: withdrawal.btcAddress || 'Bank Account',
+      txHash: withdrawal.details?.txHash
+    });
+    
+    // LOG ADMIN ACTIVITY
+    await logActivity('approve-withdrawal', 'transaction', withdrawal._id, req.admin._id, 'Admin', req, {
+      amount: withdrawal.amount,
+      userId: withdrawal.user,
+      userEmail: user.email
+    });
+
+    // LOG USER ACTIVITY
+    await logUserActivity(req, 'withdrawal_completed', 'success', {
+      userId: user._id,
+      amount: withdrawal.amount,
+      reference: withdrawal.reference,
+      transactionId: withdrawal._id
+    }, user);
+    
+    res.status(200).json({
+      status: 'success',
+      message: 'Withdrawal approved successfully'
+    });
+    
+  } catch (err) {
+    console.error('Admin approve withdrawal error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to approve withdrawal'
+    });
+  }
+});
+
+
+
+
+
+
+// CORRECTED Admin Reject Withdrawal Endpoint
+app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
+  body('reason').trim().notEmpty().withMessage('Rejection reason is required')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        status: 'fail',
+        errors: errors.array()
+      });
+    }
+    
+    const { reason } = req.body;
+    
+    // Find withdrawal
+    const withdrawal = await Transaction.findById(req.params.id)
+      .populate('user');
+    
+    if (!withdrawal || withdrawal.type !== 'withdrawal') {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Withdrawal not found'
+      });
+    }
+    
+    if (withdrawal.status !== 'pending') {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Withdrawal is not pending approval'
+      });
+    }
+    
+    // Find user
+    const user = await User.findById(withdrawal.user._id);
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+    
+    // Return funds to user balance
+    user.balances.matured += withdrawal.amount;
+    await user.save();
+    
+    // Update withdrawal status
+    withdrawal.status = 'failed';
+    withdrawal.adminNotes = reason; // Changed from rejectionReason to reason
+    await withdrawal.save();
+    
+    // LOG ADMIN ACTIVITY
+    await logActivity('reject-withdrawal', 'transaction', withdrawal._id, req.admin._id, 'Admin', req, {
+      amount: withdrawal.amount,
+      reason: reason,
+      userId: user._id,
+      userEmail: user.email
+    });
+
+    // LOG USER ACTIVITY
+    await logUserActivity(req, 'withdrawal_failed', 'failed', {
+      userId: user._id,
+      amount: withdrawal.amount,
+      reason,
+      transactionId: withdrawal._id
+    }, user);
+    
+    res.status(200).json({
+      status: 'success',
+      message: 'Withdrawal rejected successfully'
+    });
+    
+  } catch (err) {
+    console.error('Admin reject withdrawal error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to reject withdrawal'
+    });
+  }
+});
+
+// Admin Suspend User Endpoint
+app.post('/api/admin/users/:id/suspend', adminProtect, [
+  body('reason').trim().notEmpty().withMessage('Suspension reason is required')
+], async (req, res) => {
+  try {
+    const { reason } = req.body;
+    const userId = req.params.id;
+    
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+    
+    if (user.status === 'suspended') {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'User is already suspended'
+      });
+    }
+    
+    // Update user status
+    user.status = 'suspended';
+    await user.save();
+    
+    // SEND ACCOUNT SUSPENDED EMAIL
+    await sendAutomatedEmail(user, 'account_suspended', {
+      reason,
+      name: user.firstName
+    });
+    
+    // LOG ADMIN ACTIVITY
+    await logActivity('user_suspended', 'user', userId, req.admin._id, 'Admin', req, {
+      reason,
+      userEmail: user.email,
+      userName: `${user.firstName} ${user.lastName}`
+    });
+    
+    res.status(200).json({
+      status: 'success',
+      message: 'User suspended successfully'
+    });
+    
+  } catch (err) {
+    console.error('Admin suspend user error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to suspend user'
+    });
+  }
+});
+
+// Admin Reactivate User Endpoint
+app.post('/api/admin/users/:id/reactivate', adminProtect, async (req, res) => {
+  try {
+    const userId = req.params.id;
+    
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+    
+    if (user.status !== 'suspended') {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'User is not suspended'
+      });
+    }
+    
+    // Update user status
+    user.status = 'active';
+    await user.save();
+    
+    // SEND ACCOUNT REACTIVATED EMAIL
+    await sendAutomatedEmail(user, 'account_reactivated', {
+      name: user.firstName
+    });
+    
+    // LOG ADMIN ACTIVITY
+    await logActivity('user_reactivated', 'user', userId, req.admin._id, 'Admin', req, {
+      userEmail: user.email,
+      userName: `${user.firstName} ${user.lastName}`
+    });
+    
+    res.status(200).json({
+      status: 'success',
+      message: 'User reactivated successfully'
+    });
+    
+  } catch (err) {
+    console.error('Admin reactivate user error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to reactivate user'
+    });
+  }
+});
+
+// Admin Activity Endpoint - FIXED VERSION WITH LOCATION AND DEVICE DATA
+app.get('/api/admin/activity', adminProtect, async (req, res) => {
+  try {
+    const { page = 1, limit = 10, type = 'all' } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    console.log('Fetching admin activity...', { page, limit, type });
+
+    // Get BOTH UserLog and SystemLog data
+    const [userLogs, systemLogs] = await Promise.all([
+      UserLog.find({})
+        .populate('user', 'firstName lastName email')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .lean(),
+      SystemLog.find({})
+        .populate('performedBy')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .lean()
+    ]);
+
+    console.log(`Found ${userLogs.length} user logs and ${systemLogs.length} system logs`);
+
+    // Combine and sort all activities by timestamp
+    const allActivities = [...userLogs, ...systemLogs]
+      .sort((a, b) => new Date(b.createdAt || b.timestamp) - new Date(a.createdAt || a.timestamp))
+      .slice(0, parseInt(limit));
+
+    // Transform activities with PROPER user data mapping
+    const activities = allActivities.map(activity => {
+      // Determine if it's a UserLog or SystemLog
+      const isUserLog = activity.user !== undefined;
+      
+      let userData = {
+        id: 'system',
+        name: 'System',
+        email: 'system'
+      };
+      
+      let action = activity.action;
+      let ipAddress = 'Unknown';
+      let location = 'Unknown';
+      let deviceInfo = { type: 'unknown', os: { name: 'Unknown' }, browser: { name: 'Unknown' } };
+      let timestamp = activity.createdAt || activity.timestamp;
+      let status = activity.status || 'success';
+
+      if (isUserLog) {
+        // Handle UserLog entries - contains detailed device and location info
+        console.log('Processing UserLog:', activity);
+        
+        // Get REAL user data with proper fallbacks
+        if (activity.user && typeof activity.user === 'object') {
+          userData = {
+            id: activity.user._id || 'unknown',
+            name: `${activity.user.firstName || ''} ${activity.user.lastName || ''}`.trim() || 'Unknown User',
+            email: activity.user.email || 'Unknown Email'
+          };
+        } else if (activity.username) {
+          userData = {
+            id: activity.user || 'unknown',
+            name: activity.username,
+            email: activity.email || 'Unknown Email'
+          };
+        }
+        
+        ipAddress = activity.ipAddress || 'Unknown';
+        
+        // Extract location from UserLog
+        if (activity.location) {
+          if (typeof activity.location === 'string') {
+            location = activity.location;
+          } else if (activity.location.city && activity.location.country) {
+            location = `${activity.location.city}, ${activity.location.country.name || activity.location.country}`;
+          } else if (activity.metadata?.locationData?.location) {
+            location = activity.metadata.locationData.location;
+          }
+        }
+        
+        // Extract device info from UserLog
+        if (activity.deviceInfo) {
+          deviceInfo = activity.deviceInfo;
+        } else if (activity.metadata?.deviceInfo) {
+          deviceInfo = activity.metadata.deviceInfo;
+        }
+        
+      } else {
+        // Handle SystemLog entries
+        console.log('Processing SystemLog:', activity);
+        
+        if (activity.performedBy && typeof activity.performedBy === 'object') {
+          if (activity.performedByModel === 'User') {
+            userData = {
+              id: activity.performedBy._id || 'unknown',
+              name: `${activity.performedBy.firstName || ''} ${activity.performedBy.lastName || ''}`.trim() || 'Unknown User',
+              email: activity.performedBy.email || 'Unknown Email'
+            };
+          } else if (activity.performedByModel === 'Admin') {
+            userData = {
+              id: activity.performedBy._id || 'unknown',
+              name: activity.performedBy.name || 'Admin',
+              email: activity.performedBy.email || 'admin@system'
+            };
+          }
+        }
+        
+        ipAddress = activity.ip || 'Unknown';
+        location = activity.location || 'Unknown';
+        
+        // Try to extract device info from SystemLog changes
+        if (activity.changes?.locationData?.location) {
+          location = activity.changes.locationData.location;
+        }
+        if (activity.changes?.locationData?.device) {
+          deviceInfo = { type: 'unknown', userAgent: activity.changes.locationData.device };
+        }
+      }
+
+      // Final safety check for user name
+      if (!userData.name || userData.name === ' ' || userData.name === 'undefined undefined') {
+        userData.name = 'System User';
+      }
+
+      return {
+        id: activity._id?.toString() || `activity-${Date.now()}-${Math.random()}`,
+        timestamp: timestamp,
+        user: {
+          id: userData.id,
+          name: userData.name,
+          email: userData.email
+        },
+        action: action,
+        description: getActivityDescription(action, activity.metadata || activity.changes),
+        ipAddress: ipAddress,
+        location: location,
+        deviceInfo: deviceInfo,
+        status: status,
+        type: isUserLog ? 'user_activity' : 'system_activity',
+        metadata: activity.metadata || activity.changes || {}
+      };
+    });
+
+    // Get total count for pagination
+    const totalCount = await UserLog.countDocuments() + await SystemLog.countDocuments();
+
+    console.log('Sending activities:', activities.length);
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        activities: activities,
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages: Math.ceil(totalCount / parseInt(limit)),
+          totalItems: totalCount,
+          itemsPerPage: parseInt(limit),
+          hasNextPage: parseInt(page) < Math.ceil(totalCount / parseInt(limit)),
+          hasPrevPage: parseInt(page) > 1
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Admin activity fetch error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while fetching activity data'
+    });
+  }
+});
+
+// COMPREHENSIVE activity description helper
+function getActivityDescription(action, metadata) {
+  const actionMap = {
+    // Authentication actions
+    'signup': 'Signed up for a new account',
+    'login': 'Logged into account',
+    'logout': 'Logged out of account',
+    'login_attempt': 'Attempted to log in',
+    'session_created': 'Created a new session',
+    'password_change': 'Changed password',
+    'password_reset_request': 'Requested password reset',
+    'password_reset_complete': 'Completed password reset',
+    'failed_login': 'Failed login attempt',
+    
+    // Financial actions
+    'deposit': 'Made a deposit',
+    'deposit_created': 'Created deposit request',
+    'deposit_completed': 'Deposit completed',
+    'deposit_failed': 'Deposit failed',
+    'withdrawal': 'Requested a withdrawal',
+    'withdrawal_created': 'Created withdrawal request',
+    'withdrawal_completed': 'Withdrawal completed',
+    'withdrawal_failed': 'Withdrawal failed',
+    'investment': 'Created an investment',
+    'investment_created': 'Created new investment',
+    'investment_completed': 'Investment completed',
+    'investment_matured': 'Investment matured',
+    'transfer': 'Transferred funds',
+    'btc-withdrawal': 'Made BTC withdrawal',
+    
+    // Account actions
+    'profile_update': 'Updated profile information',
+    'kyc_submission': 'Submitted KYC documents',
+    'kyc_approved': 'KYC approved',
+    'kyc_rejected': 'KYC rejected',
+    'settings_change': 'Changed account settings',
+    
+    // Security actions
+    '2fa_enable': 'Enabled two-factor authentication',
+    '2fa_disable': 'Disabled two-factor authentication',
+    'api_key_create': 'Created API key',
+    'api_key_delete': 'Deleted API key',
+    'device_login': 'Logged in from new device',
+    
+    // System & Admin actions
+    'admin_login': 'Admin logged in',
+    'admin_action': 'Admin performed action',
+    'user_suspended': 'User account suspended',
+    'user_reactivated': 'User account reactivated',
+    'approve-deposit': 'Approved deposit',
+    'reject-deposit': 'Rejected deposit',
+    'approve-withdrawal': 'Approved withdrawal',
+    'reject-withdrawal': 'Rejected withdrawal',
+    
+    // Referral actions
+    'referral_joined': 'New referral joined',
+    'referral_bonus_earned': 'Referral bonus earned'
+  };
+
+  let description = actionMap[action] || `Performed ${action.replace(/_/g, ' ')}`;
+
+  // Add context from metadata if available
+  if (metadata) {
+    if (metadata.amount) {
+      description += ` of $${metadata.amount}`;
+    }
+    if (metadata.method) {
+      description += ` via ${metadata.method}`;
+    }
+    if (metadata.reason) {
+      description += ` (Reason: ${metadata.reason})`;
+    }
+    if (metadata.planName) {
+      description += ` for ${metadata.planName}`;
+    }
+  }
+
+  return description;
+}
+
+
+
+
+
+
+// Get latest admin activity
+app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
+    try {
+        const activities = await UserLog.find({})
+            .populate('user', 'firstName lastName email')
+            .sort({ createdAt: -1 })
+            .limit(20)
+            .lean();
+
+        const formattedActivities = activities.map(activity => ({
+            id: activity._id,
+            timestamp: activity.createdAt,
+            user: activity.user ? {
+                name: `${activity.user.firstName} ${activity.user.lastName}`,
+                email: activity.user.email
+            } : { name: 'System', email: 'system' },
+            action: activity.action,
+            ipAddress: activity.ipAddress,
+            location: activity.location || 'Unknown',
+            status: activity.status
+        }));
+
+        res.status(200).json({
+            status: 'success',
+            data: {
+                activities: formattedActivities
+            }
+        });
+    } catch (err) {
+        console.error('Get latest activity error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch latest activity'
+        });
+    }
+});
 
 
 
