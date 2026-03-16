@@ -3976,1525 +3976,22 @@ const calculateReferralCommissions = async (investment) => {
 
 
 
-// Enhanced email service with professional Bitcoin mining templates
-const sendProfessionalEmail = async (options) => {
-  try {
-    const { email, subject, template, data } = options;
-    
-    const emailTemplates = {
-      // WELCOME EMAIL
-      welcome: {
-        subject: 'Welcome to BitHash Capital – Your Institutional Mining Journey Begins',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>Welcome to BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@300;400;700&display=swap" rel="stylesheet">
-              <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-              <style>
-                  * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { 
-                      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
-                      line-height: 1.5; 
-                      color: #FFFFFF; 
-                      background-color: #0A0E17; 
-                      margin: 0; 
-                      padding: 0; 
-                      -webkit-font-smoothing: antialiased;
-                  }
-                  .container { 
-                      max-width: 600px; 
-                      margin: 0 auto; 
-                      background: #0A0E17; 
-                      border: none;
-                  }
-                  .header { 
-                      background: #05080F; 
-                      padding: 40px 40px 30px; 
-                      text-align: center; 
-                      border-bottom: 2px solid #00D8FF;
-                  }
-                  .logo-container { 
-                      display: flex; 
-                      align-items: center; 
-                      justify-content: center; 
-                      gap: 12px; 
-                      margin-bottom: 20px; 
-                  }
-                  .logo-img { 
-                      width: 48px; 
-                      height: 48px; 
-                      border-radius: 50%; 
-                      object-fit: cover;
-                  }
-                  .logo-text { 
-                      font-family: 'Rowdies', sans-serif;
-                      font-size: 28px; 
-                      font-weight: 700; 
-                      color: #00D8FF; 
-                      letter-spacing: -0.5px; 
-                  }
-                  .logo-text span { color: #FFFFFF; }
-                  .header-title { 
-                      font-size: 24px; 
-                      font-weight: 600; 
-                      color: #FFFFFF; 
-                      margin-top: 10px; 
-                      letter-spacing: -0.3px;
-                  }
-                  .content { 
-                      padding: 40px; 
-                      background: #0A0E17; 
-                  }
-                  .greeting { 
-                      font-size: 20px; 
-                      color: #FFFFFF; 
-                      margin-bottom: 20px; 
-                      font-weight: 500; 
-                  }
-                  .greeting span { color: #00D8FF; }
-                  .features-grid { 
-                      display: grid; 
-                      grid-template-columns: 1fr 1fr; 
-                      gap: 20px; 
-                      margin: 40px 0; 
-                  }
-                  .feature-card { 
-                      background: #111827; 
-                      padding: 24px; 
-                      border-radius: 12px; 
-                      border-left: none;
-                      transition: all 0.3s ease;
-                  }
-                  .feature-card:hover { transform: translateY(-4px); background: #1F2937; }
-                  .feature-icon { 
-                      color: #00D8FF; 
-                      font-size: 24px; 
-                      margin-bottom: 12px; 
-                  }
-                  .feature-title { 
-                      font-weight: 600; 
-                      color: #FFFFFF; 
-                      margin-bottom: 8px; 
-                      font-size: 16px; 
-                  }
-                  .feature-desc { 
-                      color: #8E9BAE; 
-                      font-size: 14px; 
-                      line-height: 1.5; 
-                  }
-                  .benefits-list { 
-                      margin: 40px 0; 
-                      background: #111827; 
-                      padding: 30px; 
-                      border-radius: 12px; 
-                  }
-                  .benefit-item { 
-                      display: flex; 
-                      align-items: center; 
-                      margin-bottom: 16px; 
-                      color: #E5E7EB; 
-                  }
-                  .benefit-icon { 
-                      color: #00D8FF; 
-                      margin-right: 16px; 
-                      width: 20px;
-                      text-align: center;
-                  }
-                  .benefit-icon i { font-size: 16px; }
-                  .cta-button { 
-                      background: #00D8FF; 
-                      color: #05080F; 
-                      padding: 16px 40px; 
-                      text-decoration: none; 
-                      border-radius: 8px; 
-                      display: inline-block; 
-                      margin: 30px 0; 
-                      font-weight: 600; 
-                      font-size: 16px; 
-                      text-align: center; 
-                      transition: all 0.3s ease;
-                      border: none;
-                  }
-                  .cta-button:hover { 
-                      background: #33E0FF; 
-                      transform: translateY(-2px); 
-                      box-shadow: 0 8px 20px rgba(0, 216, 255, 0.3);
-                  }
-                  .security-note { 
-                      background: rgba(0, 216, 255, 0.1); 
-                      border-left: 4px solid #00D8FF; 
-                      padding: 24px; 
-                      border-radius: 8px; 
-                      margin: 40px 0; 
-                  }
-                  .security-note i { color: #00D8FF; margin-right: 12px; }
-                  .footer { 
-                      background: #05080F; 
-                      padding: 40px; 
-                      text-align: center; 
-                      color: #6B7280; 
-                      border-top: 1px solid #1F2937;
-                  }
-                  .footer-text { 
-                      font-size: 13px; 
-                      line-height: 1.6; 
-                      margin-bottom: 12px; 
-                  }
-                  .support-link { 
-                      color: #00D8FF; 
-                      text-decoration: none; 
-                      font-weight: 500;
-                  }
-                  .support-link:hover { text-decoration: underline; }
-                  .divider { 
-                      width: 60px; 
-                      height: 2px; 
-                      background: #00D8FF; 
-                      margin: 20px auto; 
-                  }
-              </style>
-          </head>
-          <body>
-              <div class="container">
-                  <div class="header">
-                      <div class="logo-container">
-                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Capital" class="logo-img">
-                          <div class="logo-text"><span>₿</span>itHash</div>
-                      </div>
-                      <h1 class="header-title">Welcome to Institutional Mining</h1>
-                  </div>
-                  <div class="content">
-                      <div class="greeting">Hello <span>${data.firstName || 'there'}</span>,</div>
-                      <p style="color: #E5E7EB; font-size: 16px;">Welcome to BitHash Capital. You've just joined an elite community of institutional Bitcoin miners and sophisticated investors who recognize the future of digital assets.</p>
-                      
-                      <div class="features-grid">
-                          <div class="feature-card">
-                              <div class="feature-icon"><i class="fas fa-cloud"></i></div>
-                              <div class="feature-title">Enterprise Cloud Mining</div>
-                              <div class="feature-desc">Access institutional-grade mining infrastructure with zero hardware maintenance</div>
-                          </div>
-                          <div class="feature-card">
-                              <div class="feature-icon"><i class="fas fa-chart-line"></i></div>
-                              <div class="feature-title">Optimized Returns</div>
-                              <div class="feature-desc">Strategically structured investment plans engineered for maximum yield</div>
-                          </div>
-                          <div class="feature-card">
-                              <div class="feature-icon"><i class="fas fa-shield-alt"></i></div>
-                              <div class="feature-title">Institutional Security</div>
-                              <div class="feature-desc">Multi-layer security with 256-bit encryption and cold storage protection</div>
-                          </div>
-                          <div class="feature-card">
-                              <div class="feature-icon"><i class="fas fa-headset"></i></div>
-                              <div class="feature-title">Dedicated Support</div>
-                              <div class="feature-desc">24/7 priority support from our team of mining and investment experts</div>
-                          </div>
                       </div>
                       
-                      <div class="benefits-list">
-                          <div class="benefit-item">
-                              <span class="benefit-icon"><i class="fas fa-check-circle"></i></span>
-                              <span>Access institutional mining pools with industry-leading hashrate</span>
-                          </div>
-                          <div class="benefit-item">
-                              <span class="benefit-icon"><i class="fas fa-check-circle"></i></span>
-                              <span>Real-time performance analytics and mining dashboard</span>
-                          </div>
-                          <div class="benefit-item">
-                              <span class="benefit-icon"><i class="fas fa-check-circle"></i></span>
-                              <span>Automated daily payouts directly to your wallet</span>
-                          </div>
-                          <div class="benefit-item">
-                              <span class="benefit-icon"><i class="fas fa-check-circle"></i></span>
-                              <span>Multi-tier referral program with lifetime commissions</span>
-                          </div>
-                          <div class="benefit-item">
-                              <span class="benefit-icon"><i class="fas fa-check-circle"></i></span>
-                              <span>Transparent fee structure with no hidden charges</span>
-                          </div>
+                      <p style="color: var(--gray);">You can now access all premium features and enjoy unlimited withdrawals. Thank you for completing the verification process and helping us maintain a secure platform for everyone.</p>
+                      
+                      <div style="text-align: center; margin: 30px 0;">
+                          <a href="https://www.bithashcapital.live/dashboard" class="cta-button"><i class="fas fa-rocket" style="margin-right: 8px;"></i>Explore Premium Features</a>
                       </div>
                       
-                      <div style="text-align: center;">
-                          <a href="https://www.bithashcapital.live/dashboard" class="cta-button">Access Your Dashboard <i class="fas fa-arrow-right" style="margin-left: 8px;"></i></a>
-                      </div>
+                      <p style="color: var(--dark);">Welcome to the fully verified club,<br><strong style="color: var(--primary);">The BitHash Capital Team</strong></p>
                       
-                      <div class="security-note">
-                          <i class="fas fa-shield-alt"></i>
-                          <strong style="color: #FFFFFF;">Security First:</strong> 
-                          <span style="color: #E5E7EB;">Enable two-factor authentication immediately to secure your account. Our system detected your registration from IP: ${data.ip || 'Unknown location'}.</span>
-                      </div>
+                      <hr>
                       
-                      <p style="color: #8E9BAE; font-size: 15px; margin: 30px 0 0;">Questions about our mining operations? Our team is available 24/7 to assist you.</p>
-                      
-                      <p style="color: #FFFFFF; margin-top: 40px; font-weight: 500;">Welcome to the future of mining,<br><span style="color: #00D8FF;">The BitHash Capital Team</span></p>
-                      
-                      <div class="divider"></div>
+                      <p style="color: var(--gray); text-align: center;">Questions about your new benefits? Contact our support team at <a href="mailto:support@bithashcapital.live" style="color: var(--primary);">support@bithashcapital.live</a></p>
                   </div>
                   <div class="footer">
-                      <p class="footer-text">© 2024 BitHash Capital LLC. All rights reserved.<br>Registered in Delaware, USA. FINRA/SIPC Member.</p>
-                      <p class="footer-text">This message was sent to <span style="color: #00D8FF;">${email}</span>. Please do not reply to this automated message.<br>
-                      Need assistance? <a href="mailto:support@bithashcapital.live" class="support-link">Contact Support</a> | <a href="https://www.bithashcapital.live/privacy" class="support-link">Privacy Policy</a></p>
-                      <p style="font-size: 11px; margin-top: 20px; color: #4B5563;">Protected by 256-bit AES and TLS 1.3 encryption</p>
-                  </div>
-              </div>
-          </body>
-          </html>
-        `
-      },
-
-      // INVESTMENT COMPLETED EMAIL
-      investment_completed: {
-        subject: 'Investment Matured – Funds Available | BitHash Capital',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>Investment Matured - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@300;400;700&display=swap" rel="stylesheet">
-              <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-              <style>
-                  * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { 
-                      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
-                      line-height: 1.5; 
-                      color: #FFFFFF; 
-                      background-color: #0A0E17; 
-                      margin: 0; 
-                      padding: 0; 
-                  }
-                  .container { 
-                      max-width: 600px; 
-                      margin: 0 auto; 
-                      background: #0A0E17; 
-                  }
-                  .header { 
-                      background: #05080F; 
-                      padding: 40px 40px 30px; 
-                      text-align: center; 
-                      border-bottom: 2px solid #00FF00;
-                  }
-                  .logo-container { 
-                      display: flex; 
-                      align-items: center; 
-                      justify-content: center; 
-                      gap: 12px; 
-                      margin-bottom: 20px; 
-                  }
-                  .logo-img { 
-                      width: 48px; 
-                      height: 48px; 
-                      border-radius: 50%; 
-                  }
-                  .logo-text { 
-                      font-family: 'Rowdies', sans-serif;
-                      font-size: 28px; 
-                      font-weight: 700; 
-                      color: #00D8FF; 
-                  }
-                  .logo-text span { color: #FFFFFF; }
-                  .content { 
-                      padding: 40px; 
-                      background: #0A0E17; 
-                  }
-                  .success-badge {
-                      background: rgba(0, 255, 0, 0.1);
-                      color: #00FF00;
-                      padding: 12px 24px;
-                      border-radius: 40px;
-                      display: inline-block;
-                      margin-bottom: 30px;
-                      font-weight: 600;
-                  }
-                  .success-badge i { margin-right: 8px; }
-                  .completion-details { 
-                      background: #111827; 
-                      padding: 30px; 
-                      border-radius: 12px; 
-                      margin: 30px 0; 
-                  }
-                  .detail-item { 
-                      margin-bottom: 16px; 
-                      display: flex; 
-                      justify-content: space-between; 
-                      align-items: center;
-                      padding-bottom: 12px;
-                      border-bottom: 1px solid #1F2937;
-                  }
-                  .detail-item:last-child { border-bottom: none; }
-                  .detail-label { 
-                      font-weight: 500; 
-                      color: #8E9BAE; 
-                  }
-                  .detail-value { 
-                      color: #FFFFFF; 
-                      font-weight: 600; 
-                  }
-                  .profit-positive { 
-                      color: #00FF00; 
-                      font-weight: 700; 
-                      font-size: 20px; 
-                  }
-                  .cta-button { 
-                      background: #00D8FF; 
-                      color: #05080F; 
-                      padding: 16px 40px; 
-                      text-decoration: none; 
-                      border-radius: 8px; 
-                      display: inline-block; 
-                      margin: 30px 0; 
-                      font-weight: 600; 
-                      transition: all 0.3s ease;
-                  }
-                  .cta-button:hover { 
-                      background: #33E0FF; 
-                      transform: translateY(-2px); 
-                      box-shadow: 0 8px 20px rgba(0, 216, 255, 0.3);
-                  }
-                  .footer { 
-                      background: #05080F; 
-                      padding: 40px; 
-                      text-align: center; 
-                      color: #6B7280; 
-                      border-top: 1px solid #1F2937;
-                  }
-              </style>
-          </head>
-          <body>
-              <div class="container">
-                  <div class="header">
-                      <div class="logo-container">
-                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Capital" class="logo-img">
-                          <div class="logo-text"><span>₿</span>itHash</div>
-                      </div>
-                  </div>
-                  <div class="content">
-                      <div class="success-badge">
-                          <i class="fas fa-check-circle"></i> INVESTMENT MATURED
-                      </div>
-                      
-                      <h2 style="font-size: 28px; margin-bottom: 10px;">Hello ${data.name},</h2>
-                      <p style="color: #E5E7EB; font-size: 16px;">Your mining investment has successfully reached maturity. Your returns have been calculated and funds are now available in your matured balance.</p>
-                      
-                      <div class="completion-details">
-                          <div class="detail-item">
-                              <span class="detail-label"><i class="fas fa-layer-group" style="color: #00D8FF; margin-right: 8px;"></i>Investment Plan</span>
-                              <span class="detail-value">${data.planName}</span>
-                          </div>
-                          <div class="detail-item">
-                              <span class="detail-label"><i class="fas fa-coins" style="color: #00D8FF; margin-right: 8px;"></i>Initial Amount</span>
-                              <span class="detail-value">$${data.amount.toLocaleString()}</span>
-                          </div>
-                          <div class="detail-item">
-                              <span class="detail-label"><i class="fas fa-chart-pie" style="color: #00D8FF; margin-right: 8px;"></i>Total Return</span>
-                              <span class="detail-value profit-positive">$${data.totalReturn.toLocaleString()}</span>
-                          </div>
-                          <div class="detail-item">
-                              <span class="detail-label"><i class="fas fa-arrow-up" style="color: #00FF00; margin-right: 8px;"></i>Profit Earned</span>
-                              <span class="detail-value profit-positive">+$${data.profit.toLocaleString()}</span>
-                          </div>
-                          <div class="detail-item">
-                              <span class="detail-label"><i class="fas fa-calendar-check" style="color: #00D8FF; margin-right: 8px;"></i>Maturity Date</span>
-                              <span class="detail-value">${new Date(data.completionDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
-                          </div>
-                          <div class="detail-item">
-                              <span class="detail-label"><i class="fas fa-wallet" style="color: #00D8FF; margin-right: 8px;"></i>New Matured Balance</span>
-                              <span class="detail-value">$${data.newMaturedBalance.toLocaleString()}</span>
-                          </div>
-                      </div>
-                      
-                      <p style="color: #8E9BAE; background: #1F2937; padding: 20px; border-radius: 8px;">
-                          <i class="fas fa-info-circle" style="color: #00D8FF; margin-right: 8px;"></i>
-                          Your funds are now ready for withdrawal or you can reinvest to continue earning compound returns.
-                      </p>
-                      
-                      <div style="text-align: center;">
-                          <a href="https://www.bithashcapital.live/dashboard" class="cta-button">View Dashboard <i class="fas fa-arrow-right" style="margin-left: 8px;"></i></a>
-                      </div>
-                      
-                      <p style="color: #FFFFFF; margin-top: 30px;">Thank you for mining with BitHash Capital.</p>
-                      
-                      <p style="color: #FFFFFF;">Best regards,<br><span style="color: #00D8FF;">The BitHash Capital Team</span></p>
-                  </div>
-                  <div class="footer">
-                      <p class="footer-text">© 2024 BitHash Capital LLC. All rights reserved.</p>
-                  </div>
-              </div>
-          </body>
-          </html>
-        `
-      },
-
-      // OTP VERIFICATION
-      otp: {
-        subject: 'Your Verification Code | BitHash Capital',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>Verification Code - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@300;400;700&display=swap" rel="stylesheet">
-              <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-              <style>
-                  * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { 
-                      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
-                      line-height: 1.5; 
-                      color: #FFFFFF; 
-                      background-color: #0A0E17; 
-                      margin: 0; 
-                      padding: 0; 
-                  }
-                  .container { 
-                      max-width: 600px; 
-                      margin: 0 auto; 
-                      background: #0A0E17; 
-                  }
-                  .header { 
-                      background: #05080F; 
-                      padding: 40px 40px 30px; 
-                      text-align: center; 
-                      border-bottom: 2px solid #00D8FF;
-                  }
-                  .logo-container { 
-                      display: flex; 
-                      align-items: center; 
-                      justify-content: center; 
-                      gap: 12px; 
-                      margin-bottom: 20px; 
-                  }
-                  .logo-img { 
-                      width: 48px; 
-                      height: 48px; 
-                      border-radius: 50%; 
-                  }
-                  .logo-text { 
-                      font-family: 'Rowdies', sans-serif;
-                      font-size: 28px; 
-                      font-weight: 700; 
-                      color: #00D8FF; 
-                  }
-                  .logo-text span { color: #FFFFFF; }
-                  .content { 
-                      padding: 40px; 
-                      background: #0A0E17; 
-                  }
-                  .otp-container { 
-                      background: #111827; 
-                      padding: 40px; 
-                      border-radius: 12px; 
-                      margin: 30px 0; 
-                      text-align: center;
-                  }
-                  .otp-code { 
-                      background: #05080F; 
-                      color: #00D8FF; 
-                      padding: 25px; 
-                      font-size: 48px; 
-                      font-weight: 700; 
-                      text-align: center; 
-                      letter-spacing: 12px; 
-                      margin: 25px 0; 
-                      border-radius: 12px; 
-                      font-family: 'Courier New', monospace; 
-                      border: 1px solid #1F2937;
-                  }
-                  .timer-box {
-                      background: rgba(0, 216, 255, 0.1);
-                      padding: 16px;
-                      border-radius: 8px;
-                      margin: 25px 0;
-                  }
-                  .security-note { 
-                      background: rgba(255, 0, 0, 0.1); 
-                      border-left: 4px solid #FF0000; 
-                      padding: 24px; 
-                      border-radius: 8px; 
-                      margin: 30px 0; 
-                  }
-                  .footer { 
-                      background: #05080F; 
-                      padding: 40px; 
-                      text-align: center; 
-                      color: #6B7280; 
-                      border-top: 1px solid #1F2937;
-                  }
-              </style>
-          </head>
-          <body>
-              <div class="container">
-                  <div class="header">
-                      <div class="logo-container">
-                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Capital" class="logo-img">
-                          <div class="logo-text"><span>₿</span>itHash</div>
-                      </div>
-                  </div>
-                  <div class="content">
-                      <h2 style="font-size: 24px; margin-bottom: 15px;">Hello ${data.name || 'there'},</h2>
-                      <p style="color: #8E9BAE;">Please use the following verification code to complete your ${data.action || 'account verification'}:</p>
-                      
-                      <div class="otp-container">
-                          <p style="color: #8E9BAE; margin-bottom: 10px;">Your one-time password</p>
-                          <div class="otp-code">${data.otp}</div>
-                          
-                          <div class="timer-box">
-                              <i class="fas fa-clock" style="color: #00D8FF; margin-right: 8px;"></i>
-                              <span style="color: #FFFFFF;">This code expires in 5 minutes</span>
-                          </div>
-                      </div>
-                      
-                      <div class="security-note">
-                          <i class="fas fa-exclamation-triangle" style="color: #FF0000; margin-right: 12px;"></i>
-                          <strong style="color: #FFFFFF;">Never share this code:</strong>
-                          <span style="color: #E5E7EB;"> BitHash Capital will never ask for your verification code via phone, email, or social media.</span>
-                      </div>
-                      
-                      <p style="color: #8E9BAE; margin-top: 30px;">If you didn't request this code, please secure your account immediately by changing your password and contacting our security team.</p>
-                      
-                      <p style="color: #FFFFFF; margin-top: 30px;">Best regards,<br><span style="color: #00D8FF;">BitHash Capital Security Team</span></p>
-                  </div>
-                  <div class="footer">
-                      <p class="footer-text">© 2024 BitHash Capital LLC. This is an automated security message.</p>
-                  </div>
-              </div>
-          </body>
-          </html>
-        `
-      },
-
-      // LOGIN SUCCESS
-      login_success: {
-        subject: 'New Login Detected | BitHash Capital Security',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>Login Notification - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@300;400;700&display=swap" rel="stylesheet">
-              <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-              <style>
-                  * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { 
-                      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
-                      line-height: 1.5; 
-                      color: #FFFFFF; 
-                      background-color: #0A0E17; 
-                      margin: 0; 
-                      padding: 0; 
-                  }
-                  .container { 
-                      max-width: 600px; 
-                      margin: 0 auto; 
-                      background: #0A0E17; 
-                  }
-                  .header { 
-                      background: #05080F; 
-                      padding: 40px 40px 30px; 
-                      text-align: center; 
-                      border-bottom: 2px solid #00FF00;
-                  }
-                  .logo-container { 
-                      display: flex; 
-                      align-items: center; 
-                      justify-content: center; 
-                      gap: 12px; 
-                      margin-bottom: 20px; 
-                  }
-                  .logo-img { 
-                      width: 48px; 
-                      height: 48px; 
-                      border-radius: 50%; 
-                  }
-                  .logo-text { 
-                      font-family: 'Rowdies', sans-serif;
-                      font-size: 28px; 
-                      font-weight: 700; 
-                      color: #00D8FF; 
-                  }
-                  .logo-text span { color: #FFFFFF; }
-                  .content { 
-                      padding: 40px; 
-                      background: #0A0E17; 
-                  }
-                  .login-info { 
-                      background: #111827; 
-                      padding: 30px; 
-                      border-radius: 12px; 
-                      margin: 30px 0; 
-                  }
-                  .info-item { 
-                      margin-bottom: 16px; 
-                      display: flex; 
-                      align-items: center;
-                      padding-bottom: 12px;
-                      border-bottom: 1px solid #1F2937;
-                  }
-                  .info-item:last-child { border-bottom: none; }
-                  .info-label { 
-                      font-weight: 500; 
-                      min-width: 100px; 
-                      color: #8E9BAE; 
-                  }
-                  .info-value { color: #FFFFFF; }
-                  .security-alert { 
-                      background: rgba(255, 0, 0, 0.1); 
-                      border-left: 4px solid #FF0000; 
-                      padding: 24px; 
-                      border-radius: 8px; 
-                      margin: 30px 0; 
-                  }
-                  .footer { 
-                      background: #05080F; 
-                      padding: 40px; 
-                      text-align: center; 
-                      color: #6B7280; 
-                      border-top: 1px solid #1F2937;
-                  }
-              </style>
-          </head>
-          <body>
-              <div class="container">
-                  <div class="header">
-                      <div class="logo-container">
-                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Capital" class="logo-img">
-                          <div class="logo-text"><span>₿</span>itHash</div>
-                      </div>
-                  </div>
-                  <div class="content">
-                      <div style="background: rgba(0, 255, 0, 0.1); color: #00FF00; padding: 8px 16px; border-radius: 40px; display: inline-block; margin-bottom: 20px;">
-                          <i class="fas fa-check-circle"></i> SUCCESSFUL LOGIN
-                      </div>
-                      
-                      <h2 style="font-size: 28px; margin-bottom: 15px;">Hello ${data.name},</h2>
-                      <p style="color: #E5E7EB;">A new login to your BitHash Capital account was detected with the following details:</p>
-                      
-                      <div class="login-info">
-                          <div class="info-item">
-                              <span class="info-label"><i class="fas fa-clock" style="color: #00D8FF; width: 20px; margin-right: 10px;"></i>Time</span>
-                              <span class="info-value">${new Date().toLocaleString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
-                          </div>
-                          <div class="info-item">
-                              <span class="info-label"><i class="fas fa-laptop" style="color: #00D8FF; width: 20px; margin-right: 10px;"></i>Device</span>
-                              <span class="info-value">${data.deviceInfo?.browser?.name || 'Unknown'} on ${data.deviceInfo?.os?.name || 'Unknown'}</span>
-                          </div>
-                          <div class="info-item">
-                              <span class="info-label"><i class="fas fa-map-marker-alt" style="color: #00D8FF; width: 20px; margin-right: 10px;"></i>Location</span>
-                              <span class="info-value">${data.locationString || data.location || 'Unknown location'}</span>
-                          </div>
-                          <div class="info-item">
-                              <span class="info-label"><i class="fas fa-network-wired" style="color: #00D8FF; width: 20px; margin-right: 10px;"></i>IP Address</span>
-                              <span class="info-value">${data.ip || 'Unknown'}</span>
-                          </div>
-                      </div>
-                      
-                      ${data.suspicious ? `
-                      <div class="security-alert">
-                          <i class="fas fa-exclamation-triangle" style="color: #FF0000; margin-right: 12px;"></i>
-                          <strong style="color: #FFFFFF;">Security Alert:</strong>
-                          <span style="color: #E5E7EB;"> This login appears suspicious. If you didn't authorize this access, please secure your account immediately.</span>
-                      </div>
-                      ` : `
-                      <p style="color: #8E9BAE; background: #1F2937; padding: 20px; border-radius: 8px;">
-                          <i class="fas fa-shield-alt" style="color: #00FF00; margin-right: 8px;"></i>
-                          If this was you, no further action is required.
-                      </p>
-                      `}
-                      
-                      <p style="color: #FFFFFF; margin-top: 30px;">Best regards,<br><span style="color: #00D8FF;">BitHash Capital Security Team</span></p>
-                  </div>
-                  <div class="footer">
-                      <p class="footer-text">© 2024 BitHash Capital LLC. This is an automated security notification.</p>
-                  </div>
-              </div>
-          </body>
-          </html>
-        `
-      },
-
-      // PASSWORD RESET
-      password_reset: {
-        subject: 'Password Reset Request | BitHash Capital',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>Password Reset - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@300;400;700&display=swap" rel="stylesheet">
-              <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-              <style>
-                  * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { 
-                      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
-                      line-height: 1.5; 
-                      color: #FFFFFF; 
-                      background-color: #0A0E17; 
-                      margin: 0; 
-                      padding: 0; 
-                  }
-                  .container { 
-                      max-width: 600px; 
-                      margin: 0 auto; 
-                      background: #0A0E17; 
-                  }
-                  .header { 
-                      background: #05080F; 
-                      padding: 40px 40px 30px; 
-                      text-align: center; 
-                      border-bottom: 2px solid #FF0000;
-                  }
-                  .logo-container { 
-                      display: flex; 
-                      align-items: center; 
-                      justify-content: center; 
-                      gap: 12px; 
-                      margin-bottom: 20px; 
-                  }
-                  .logo-img { 
-                      width: 48px; 
-                      height: 48px; 
-                      border-radius: 50%; 
-                  }
-                  .logo-text { 
-                      font-family: 'Rowdies', sans-serif;
-                      font-size: 28px; 
-                      font-weight: 700; 
-                      color: #00D8FF; 
-                  }
-                  .logo-text span { color: #FFFFFF; }
-                  .content { 
-                      padding: 40px; 
-                      background: #0A0E17; 
-                  }
-                  .reset-box {
-                      background: #111827;
-                      padding: 40px;
-                      border-radius: 12px;
-                      margin: 30px 0;
-                      text-align: center;
-                  }
-                  .reset-button { 
-                      background: #00D8FF; 
-                      color: #05080F; 
-                      padding: 18px 40px; 
-                      text-decoration: none; 
-                      border-radius: 8px; 
-                      display: inline-block; 
-                      margin: 25px 0; 
-                      font-weight: 600; 
-                      font-size: 16px; 
-                      transition: all 0.3s ease;
-                  }
-                  .reset-button:hover { 
-                      background: #33E0FF; 
-                      transform: translateY(-2px); 
-                      box-shadow: 0 8px 20px rgba(0, 216, 255, 0.3);
-                  }
-                  .expiry-note {
-                      background: rgba(255, 0, 0, 0.1);
-                      padding: 16px;
-                      border-radius: 8px;
-                      margin: 20px 0;
-                  }
-                  .security-note { 
-                      background: #1F2937; 
-                      padding: 24px; 
-                      border-radius: 8px; 
-                      margin: 30px 0; 
-                  }
-                  .footer { 
-                      background: #05080F; 
-                      padding: 40px; 
-                      text-align: center; 
-                      color: #6B7280; 
-                      border-top: 1px solid #1F2937;
-                  }
-              </style>
-          </head>
-          <body>
-              <div class="container">
-                  <div class="header">
-                      <div class="logo-container">
-                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Capital" class="logo-img">
-                          <div class="logo-text"><span>₿</span>itHash</div>
-                      </div>
-                  </div>
-                  <div class="content">
-                      <h2 style="font-size: 28px; margin-bottom: 15px;">Hello ${data.name},</h2>
-                      <p style="color: #E5E7EB;">We received a request to reset the password for your BitHash Capital account.</p>
-                      
-                      <div class="reset-box">
-                          <i class="fas fa-lock" style="font-size: 48px; color: #00D8FF; margin-bottom: 20px;"></i>
-                          <p style="color: #8E9BAE; margin-bottom: 10px;">Click the button below to reset your password:</p>
-                          
-                          <a href="${data.resetUrl}" class="reset-button">Reset Your Password <i class="fas fa-arrow-right" style="margin-left: 8px;"></i></a>
-                          
-                          <div class="expiry-note">
-                              <i class="fas fa-clock" style="color: #FF0000; margin-right: 8px;"></i>
-                              <span style="color: #FFFFFF;">This link expires in 60 minutes</span>
-                          </div>
-                          
-                          <p style="color: #8E9BAE; font-size: 14px; margin-top: 20px;">If the button doesn't work, copy and paste this link into your browser:</p>
-                          <p style="color: #00D8FF; word-break: break-all; font-size: 12px;">${data.resetUrl}</p>
-                      </div>
-                      
-                      <div class="security-note">
-                          <i class="fas fa-shield-alt" style="color: #00D8FF; margin-right: 12px;"></i>
-                          <strong style="color: #FFFFFF;">Didn't request this?</strong>
-                          <span style="color: #E5E7EB;"> If you didn't request a password reset, please ignore this email. Your account remains secure. For additional protection, enable two-factor authentication.</span>
-                      </div>
-                      
-                      <p style="color: #FFFFFF; margin-top: 30px;">Best regards,<br><span style="color: #00D8FF;">BitHash Capital Security Team</span></p>
-                  </div>
-                  <div class="footer">
-                      <p class="footer-text">© 2024 BitHash Capital LLC. This is an automated security message.</p>
-                  </div>
-              </div>
-          </body>
-          </html>
-        `
-      },
-
-      // INVESTMENT CREATED
-      investment_created: {
-        subject: 'Investment Confirmed – Mining Has Started | BitHash Capital',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>Investment Confirmed - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@300;400;700&display=swap" rel="stylesheet">
-              <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-              <style>
-                  * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { 
-                      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
-                      line-height: 1.5; 
-                      color: #FFFFFF; 
-                      background-color: #0A0E17; 
-                      margin: 0; 
-                      padding: 0; 
-                  }
-                  .container { 
-                      max-width: 600px; 
-                      margin: 0 auto; 
-                      background: #0A0E17; 
-                  }
-                  .header { 
-                      background: #05080F; 
-                      padding: 40px 40px 30px; 
-                      text-align: center; 
-                      border-bottom: 2px solid #00D8FF;
-                  }
-                  .logo-container { 
-                      display: flex; 
-                      align-items: center; 
-                      justify-content: center; 
-                      gap: 12px; 
-                      margin-bottom: 20px; 
-                  }
-                  .logo-img { 
-                      width: 48px; 
-                      height: 48px; 
-                      border-radius: 50%; 
-                  }
-                  .logo-text { 
-                      font-family: 'Rowdies', sans-serif;
-                      font-size: 28px; 
-                      font-weight: 700; 
-                      color: #00D8FF; 
-                  }
-                  .logo-text span { color: #FFFFFF; }
-                  .content { 
-                      padding: 40px; 
-                      background: #0A0E17; 
-                  }
-                  .investment-badge {
-                      background: rgba(0, 216, 255, 0.1);
-                      color: #00D8FF;
-                      padding: 12px 24px;
-                      border-radius: 40px;
-                      display: inline-block;
-                      margin-bottom: 30px;
-                      font-weight: 600;
-                  }
-                  .investment-details { 
-                      background: #111827; 
-                      padding: 30px; 
-                      border-radius: 12px; 
-                      margin: 30px 0; 
-                  }
-                  .detail-item { 
-                      margin-bottom: 16px; 
-                      display: flex; 
-                      justify-content: space-between; 
-                      align-items: center;
-                      padding-bottom: 12px;
-                      border-bottom: 1px solid #1F2937;
-                  }
-                  .detail-item:last-child { border-bottom: none; }
-                  .detail-label { 
-                      font-weight: 500; 
-                      color: #8E9BAE; 
-                  }
-                  .detail-label i { margin-right: 8px; }
-                  .detail-value { 
-                      color: #FFFFFF; 
-                      font-weight: 600; 
-                  }
-                  .cta-button { 
-                      background: #00D8FF; 
-                      color: #05080F; 
-                      padding: 16px 40px; 
-                      text-decoration: none; 
-                      border-radius: 8px; 
-                      display: inline-block; 
-                      margin: 30px 0; 
-                      font-weight: 600; 
-                      transition: all 0.3s ease;
-                  }
-                  .footer { 
-                      background: #05080F; 
-                      padding: 40px; 
-                      text-align: center; 
-                      color: #6B7280; 
-                      border-top: 1px solid #1F2937;
-                  }
-              </style>
-          </head>
-          <body>
-              <div class="container">
-                  <div class="header">
-                      <div class="logo-container">
-                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Capital" class="logo-img">
-                          <div class="logo-text"><span>₿</span>itHash</div>
-                      </div>
-                  </div>
-                  <div class="content">
-                      <div class="investment-badge">
-                          <i class="fas fa-check-circle"></i> INVESTMENT CONFIRMED
-                      </div>
-                      
-                      <h2 style="font-size: 28px; margin-bottom: 15px;">Hello ${data.name},</h2>
-                      <p style="color: #E5E7EB;">Your investment has been successfully activated. Our mining infrastructure is now working to generate returns on your capital.</p>
-                      
-                      <div class="investment-details">
-                          <div class="detail-item">
-                              <span class="detail-label"><i class="fas fa-layer-group" style="color: #00D8FF;"></i>Investment Plan</span>
-                              <span class="detail-value">${data.planName}</span>
-                          </div>
-                          <div class="detail-item">
-                              <span class="detail-label"><i class="fas fa-coins" style="color: #00D8FF;"></i>Amount Invested</span>
-                              <span class="detail-value">$${data.amount.toLocaleString()}</span>
-                          </div>
-                          <div class="detail-item">
-                              <span class="detail-label"><i class="fas fa-chart-line" style="color: #00D8FF;"></i>Expected Return</span>
-                              <span class="detail-value">$${data.expectedReturn.toLocaleString()}</span>
-                          </div>
-                          <div class="detail-item">
-                              <span class="detail-label"><i class="fas fa-hourglass-half" style="color: #00D8FF;"></i>Duration</span>
-                              <span class="detail-value">${data.duration} hours</span>
-                          </div>
-                          <div class="detail-item">
-                              <span class="detail-label"><i class="fas fa-calendar-alt" style="color: #00D8FF;"></i>Start Date</span>
-                              <span class="detail-value">${new Date(data.startDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
-                          </div>
-                          <div class="detail-item">
-                              <span class="detail-label"><i class="fas fa-calendar-check" style="color: #00D8FF;"></i>Maturity Date</span>
-                              <span class="detail-value">${new Date(data.endDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
-                          </div>
-                      </div>
-                      
-                      <p style="color: #8E9BAE; background: #1F2937; padding: 20px; border-radius: 8px;">
-                          <i class="fas fa-chart-pie" style="color: #00D8FF; margin-right: 8px;"></i>
-                          Track your mining performance in real-time through your dashboard. Returns are calculated and credited daily.
-                      </p>
-                      
-                      <div style="text-align: center;">
-                          <a href="https://www.bithashcapital.live/dashboard" class="cta-button">Monitor Performance <i class="fas fa-arrow-right" style="margin-left: 8px;"></i></a>
-                      </div>
-                      
-                      <p style="color: #FFFFFF; margin-top: 30px;">Best regards,<br><span style="color: #00D8FF;">BitHash Capital Investment Team</span></p>
-                  </div>
-                  <div class="footer">
-                      <p class="footer-text">© 2024 BitHash Capital LLC. All rights reserved.</p>
-                  </div>
-              </div>
-          </body>
-          </html>
-        `
-      },
-
-      // WITHDRAWAL REQUEST
-      withdrawal_request: {
-        subject: 'Withdrawal Request Received | BitHash Capital',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>Withdrawal Request - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@300;400;700&display=swap" rel="stylesheet">
-              <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-              <style>
-                  * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { 
-                      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
-                      line-height: 1.5; 
-                      color: #FFFFFF; 
-                      background-color: #0A0E17; 
-                      margin: 0; 
-                      padding: 0; 
-                  }
-                  .container { 
-                      max-width: 600px; 
-                      margin: 0 auto; 
-                      background: #0A0E17; 
-                  }
-                  .header { 
-                      background: #05080F; 
-                      padding: 40px 40px 30px; 
-                      text-align: center; 
-                      border-bottom: 2px solid #00D8FF;
-                  }
-                  .logo-container { 
-                      display: flex; 
-                      align-items: center; 
-                      justify-content: center; 
-                      gap: 12px; 
-                      margin-bottom: 20px; 
-                  }
-                  .logo-img { 
-                      width: 48px; 
-                      height: 48px; 
-                      border-radius: 50%; 
-                  }
-                  .logo-text { 
-                      font-family: 'Rowdies', sans-serif;
-                      font-size: 28px; 
-                      font-weight: 700; 
-                      color: #00D8FF; 
-                  }
-                  .logo-text span { color: #FFFFFF; }
-                  .content { 
-                      padding: 40px; 
-                      background: #0A0E17; 
-                  }
-                  .withdrawal-details { 
-                      background: #111827; 
-                      padding: 30px; 
-                      border-radius: 12px; 
-                      margin: 30px 0; 
-                  }
-                  .detail-item { 
-                      margin-bottom: 16px; 
-                      display: flex; 
-                      justify-content: space-between; 
-                      align-items: center;
-                      padding-bottom: 12px;
-                      border-bottom: 1px solid #1F2937;
-                  }
-                  .detail-item:last-child { border-bottom: none; }
-                  .detail-label { 
-                      font-weight: 500; 
-                      color: #8E9BAE; 
-                  }
-                  .detail-label i { margin-right: 8px; }
-                  .detail-value { 
-                      color: #FFFFFF; 
-                      font-weight: 600; 
-                  }
-                  .processing-info { 
-                      background: rgba(0, 216, 255, 0.1); 
-                      border-left: 4px solid #00D8FF; 
-                      padding: 24px; 
-                      border-radius: 8px; 
-                      margin: 30px 0; 
-                  }
-                  .footer { 
-                      background: #05080F; 
-                      padding: 40px; 
-                      text-align: center; 
-                      color: #6B7280; 
-                      border-top: 1px solid #1F2937;
-                  }
-              </style>
-          </head>
-          <body>
-              <div class="container">
-                  <div class="header">
-                      <div class="logo-container">
-                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Capital" class="logo-img">
-                          <div class="logo-text"><span>₿</span>itHash</div>
-                      </div>
-                  </div>
-                  <div class="content">
-                      <h2 style="font-size: 28px; margin-bottom: 15px;">Hello ${data.name},</h2>
-                      <p style="color: #E5E7EB;">Your withdrawal request has been received and is now being processed by our finance team.</p>
-                      
-                      <div class="withdrawal-details">
-                          <div class="detail-item">
-                              <span class="detail-label"><i class="fas fa-dollar-sign" style="color: #00D8FF;"></i>Amount</span>
-                              <span class="detail-value">$${data.amount.toLocaleString()}</span>
-                          </div>
-                          <div class="detail-item">
-                              <span class="detail-label"><i class="fas fa-credit-card" style="color: #00D8FF;"></i>Method</span>
-                              <span class="detail-value">${data.method}</span>
-                          </div>
-                          <div class="detail-item">
-                              <span class="detail-label"><i class="fas fa-hashtag" style="color: #00D8FF;"></i>Reference</span>
-                              <span class="detail-value">${data.reference}</span>
-                          </div>
-                          <div class="detail-item">
-                              <span class="detail-label"><i class="fas fa-file-invoice" style="color: #00D8FF;"></i>Fee</span>
-                              <span class="detail-value">$${data.fee.toLocaleString()}</span>
-                          </div>
-                          <div class="detail-item">
-                              <span class="detail-label"><i class="fas fa-wallet" style="color: #00D8FF;"></i>Net Amount</span>
-                              <span class="detail-value">$${data.netAmount.toLocaleString()}</span>
-                          </div>
-                      </div>
-                      
-                      <div class="processing-info">
-                          <i class="fas fa-info-circle" style="color: #00D8FF; margin-right: 12px;"></i>
-                          <strong style="color: #FFFFFF;">Processing Time:</strong>
-                          <span style="color: #E5E7EB;"> Withdrawals are typically processed within 24 hours. You will receive a confirmation once completed.</span>
-                      </div>
-                      
-                      <p style="color: #FF0000; background: rgba(255, 0, 0, 0.1); padding: 20px; border-radius: 8px;">
-                          <i class="fas fa-exclamation-triangle" style="margin-right: 8px;"></i>
-                          If you did not authorize this withdrawal, please contact our security team immediately.
-                      </p>
-                      
-                      <p style="color: #FFFFFF; margin-top: 30px;">Best regards,<br><span style="color: #00D8FF;">BitHash Capital Finance Team</span></p>
-                  </div>
-                  <div class="footer">
-                      <p class="footer-text">© 2024 BitHash Capital LLC. All rights reserved.</p>
-                  </div>
-              </div>
-          </body>
-          </html>
-        `
-      },
-
-      // WITHDRAWAL COMPLETED
-      withdrawal_completed: {
-        subject: 'Withdrawal Completed – Funds Sent | BitHash Capital',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>Withdrawal Completed - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@300;400;700&display=swap" rel="stylesheet">
-              <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-              <style>
-                  * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { 
-                      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
-                      line-height: 1.5; 
-                      color: #FFFFFF; 
-                      background-color: #0A0E17; 
-                      margin: 0; 
-                      padding: 0; 
-                  }
-                  .container { 
-                      max-width: 600px; 
-                      margin: 0 auto; 
-                      background: #0A0E17; 
-                  }
-                  .header { 
-                      background: #05080F; 
-                      padding: 40px 40px 30px; 
-                      text-align: center; 
-                      border-bottom: 2px solid #00FF00;
-                  }
-                  .logo-container { 
-                      display: flex; 
-                      align-items: center; 
-                      justify-content: center; 
-                      gap: 12px; 
-                      margin-bottom: 20px; 
-                  }
-                  .logo-img { 
-                      width: 48px; 
-                      height: 48px; 
-                      border-radius: 50%; 
-                  }
-                  .logo-text { 
-                      font-family: 'Rowdies', sans-serif;
-                      font-size: 28px; 
-                      font-weight: 700; 
-                      color: #00D8FF; 
-                  }
-                  .logo-text span { color: #FFFFFF; }
-                  .content { 
-                      padding: 40px; 
-                      background: #0A0E17; 
-                  }
-                  .success-badge {
-                      background: rgba(0, 255, 0, 0.1);
-                      color: #00FF00;
-                      padding: 12px 24px;
-                      border-radius: 40px;
-                      display: inline-block;
-                      margin-bottom: 30px;
-                      font-weight: 600;
-                  }
-                  .withdrawal-details { 
-                      background: #111827; 
-                      padding: 30px; 
-                      border-radius: 12px; 
-                      margin: 30px 0; 
-                  }
-                  .detail-item { 
-                      margin-bottom: 16px; 
-                      display: flex; 
-                      justify-content: space-between; 
-                      align-items: center;
-                      padding-bottom: 12px;
-                      border-bottom: 1px solid #1F2937;
-                  }
-                  .detail-item:last-child { border-bottom: none; }
-                  .detail-label { 
-                      font-weight: 500; 
-                      color: #8E9BAE; 
-                  }
-                  .detail-label i { margin-right: 8px; }
-                  .detail-value { 
-                      color: #FFFFFF; 
-                      font-weight: 600; 
-                  }
-                  .footer { 
-                      background: #05080F; 
-                      padding: 40px; 
-                      text-align: center; 
-                      color: #6B7280; 
-                      border-top: 1px solid #1F2937;
-                  }
-              </style>
-          </head>
-          <body>
-              <div class="container">
-                  <div class="header">
-                      <div class="logo-container">
-                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Capital" class="logo-img">
-                          <div class="logo-text"><span>₿</span>itHash</div>
-                      </div>
-                  </div>
-                  <div class="content">
-                      <div class="success-badge">
-                          <i class="fas fa-check-circle"></i> WITHDRAWAL COMPLETED
-                      </div>
-                      
-                      <h2 style="font-size: 28px; margin-bottom: 15px;">Hello ${data.name},</h2>
-                      <p style="color: #E5E7EB;">Your withdrawal has been successfully processed. Funds have been sent to your designated account.</p>
-                      
-                      <div class="withdrawal-details">
-                          <div class="detail-item">
-                              <span class="detail-label"><i class="fas fa-dollar-sign" style="color: #00D8FF;"></i>Amount</span>
-                              <span class="detail-value">$${data.amount.toLocaleString()}</span>
-                          </div>
-                          <div class="detail-item">
-                              <span class="detail-label"><i class="fas fa-credit-card" style="color: #00D8FF;"></i>Method</span>
-                              <span class="detail-value">${data.method}</span>
-                          </div>
-                          <div class="detail-item">
-                              <span class="detail-label"><i class="fas fa-hashtag" style="color: #00D8FF;"></i>Reference</span>
-                              <span class="detail-value">${data.reference}</span>
-                          </div>
-                          <div class="detail-item">
-                              <span class="detail-label"><i class="fas fa-calendar-check" style="color: #00D8FF;"></i>Date</span>
-                              <span class="detail-value">${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
-                          </div>
-                      </div>
-                      
-                      <p style="color: #8E9BAE; background: #1F2937; padding: 20px; border-radius: 8px;">
-                          <i class="fas fa-check-circle" style="color: #00FF00; margin-right: 8px;"></i>
-                          Funds have been released. Please check your account for confirmation. Transaction times may vary based on network conditions.
-                      </p>
-                      
-                      <p style="color: #FFFFFF; margin-top: 30px;">Best regards,<br><span style="color: #00D8FF;">BitHash Capital Finance Team</span></p>
-                  </div>
-                  <div class="footer">
-                      <p class="footer-text">© 2024 BitHash Capital LLC. All rights reserved.</p>
-                  </div>
-              </div>
-          </body>
-          </html>
-        `
-      },
-
-      // KYC APPROVED
-      kyc_approved: {
-        subject: 'KYC Verification Approved | BitHash Capital',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>KYC Approved - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@300;400;700&display=swap" rel="stylesheet">
-              <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-              <style>
-                  * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { 
-                      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
-                      line-height: 1.5; 
-                      color: #FFFFFF; 
-                      background-color: #0A0E17; 
-                      margin: 0; 
-                      padding: 0; 
-                  }
-                  .container { 
-                      max-width: 600px; 
-                      margin: 0 auto; 
-                      background: #0A0E17; 
-                  }
-                  .header { 
-                      background: #05080F; 
-                      padding: 40px 40px 30px; 
-                      text-align: center; 
-                      border-bottom: 2px solid #00FF00;
-                  }
-                  .logo-container { 
-                      display: flex; 
-                      align-items: center; 
-                      justify-content: center; 
-                      gap: 12px; 
-                      margin-bottom: 20px; 
-                  }
-                  .logo-img { 
-                      width: 48px; 
-                      height: 48px; 
-                      border-radius: 50%; 
-                  }
-                  .logo-text { 
-                      font-family: 'Rowdies', sans-serif;
-                      font-size: 28px; 
-                      font-weight: 700; 
-                      color: #00D8FF; 
-                  }
-                  .logo-text span { color: #FFFFFF; }
-                  .content { 
-                      padding: 40px; 
-                      background: #0A0E17; 
-                  }
-                  .success-badge {
-                      background: rgba(0, 255, 0, 0.1);
-                      color: #00FF00;
-                      padding: 12px 24px;
-                      border-radius: 40px;
-                      display: inline-block;
-                      margin-bottom: 30px;
-                      font-weight: 600;
-                  }
-                  .kyc-box { 
-                      background: #111827; 
-                      padding: 40px; 
-                      border-radius: 12px; 
-                      margin: 30px 0; 
-                      text-align: center;
-                  }
-                  .benefits-list { 
-                      margin: 30px 0; 
-                      background: #1F2937; 
-                      padding: 30px; 
-                      border-radius: 12px; 
-                  }
-                  .benefit-item { 
-                      display: flex; 
-                      align-items: center; 
-                      margin-bottom: 16px; 
-                  }
-                  .benefit-icon { 
-                      color: #00FF00; 
-                      margin-right: 16px; 
-                  }
-                  .cta-button { 
-                      background: #00D8FF; 
-                      color: #05080F; 
-                      padding: 16px 40px; 
-                      text-decoration: none; 
-                      border-radius: 8px; 
-                      display: inline-block; 
-                      margin: 30px 0; 
-                      font-weight: 600; 
-                      transition: all 0.3s ease;
-                  }
-                  .footer { 
-                      background: #05080F; 
-                      padding: 40px; 
-                      text-align: center; 
-                      color: #6B7280; 
-                      border-top: 1px solid #1F2937;
-                  }
-              </style>
-          </head>
-          <body>
-              <div class="container">
-                  <div class="header">
-                      <div class="logo-container">
-                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Capital" class="logo-img">
-                          <div class="logo-text"><span>₿</span>itHash</div>
-                      </div>
-                  </div>
-                  <div class="content">
-                      <div class="success-badge">
-                          <i class="fas fa-check-circle"></i> KYC VERIFIED
-                      </div>
-                      
-                      <div class="kyc-box">
-                          <i class="fas fa-id-card" style="font-size: 48px; color: #00FF00; margin-bottom: 20px;"></i>
-                          <h2 style="font-size: 28px; margin-bottom: 15px;">Hello ${data.name},</h2>
-                          <p style="color: #E5E7EB; font-size: 16px;">Congratulations! Your identity verification has been successfully approved.</p>
-                      </div>
-                      
-                      <p style="color: #FFFFFF; font-weight: 500;">With KYC verification complete, you now have access to:</p>
-                      
-                      <div class="benefits-list">
-                          <div class="benefit-item">
-                              <span class="benefit-icon"><i class="fas fa-check-circle"></i></span>
-                              <span>Unlimited withdrawal limits</span>
-                          </div>
-                          <div class="benefit-item">
-                              <span class="benefit-icon"><i class="fas fa-check-circle"></i></span>
-                              <span>Premium investment plans with higher returns</span>
-                          </div>
-                          <div class="benefit-item">
-                              <span class="benefit-icon"><i class="fas fa-check-circle"></i></span>
-                              <span>Priority customer support</span>
-                          </div>
-                          <div class="benefit-item">
-                              <span class="benefit-icon"><i class="fas fa-check-circle"></i></span>
-                              <span>Access to institutional mining pools</span>
-                          </div>
-                      </div>
-                      
-                      <div style="text-align: center;">
-                          <a href="https://www.bithashcapital.live/dashboard" class="cta-button">Access Full Account <i class="fas fa-arrow-right" style="margin-left: 8px;"></i></a>
-                      </div>
-                      
-                      <p style="color: #8E9BAE; margin-top: 20px;">Thank you for completing the verification process and helping us maintain a secure platform.</p>
-                      
-                      <p style="color: #FFFFFF; margin-top: 30px;">Best regards,<br><span style="color: #00D8FF;">BitHash Capital Compliance Team</span></p>
-                  </div>
-                  <div class="footer">
-                      <p class="footer-text">© 2024 BitHash Capital LLC. All rights reserved.</p>
+                      <p class="footer-text">© 2024 BitHash Capital LLC • Verification Complete</p>
                   </div>
               </div>
           </body>
@@ -5504,7 +4001,7 @@ const sendProfessionalEmail = async (options) => {
 
       // KYC REJECTED
       kyc_rejected: {
-        subject: 'KYC Verification Update | BitHash Capital',
+        subject: 'Action Required: KYC Verification Update',
         html: `
           <!DOCTYPE html>
           <html>
@@ -5515,88 +4012,42 @@ const sendProfessionalEmail = async (options) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@300;400;700&display=swap" rel="stylesheet">
               <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
               <style>
+                  :root {
+                      --primary: #00D8FF;
+                      --secondary: #0A0E17;
+                      --secondary-dark: #05080F;
+                      --dark: #FFFFFF;
+                      --darker: #0A0E17;
+                      --gray: #8E9BAE;
+                      --error: #FF0000;
+                      --warning: #FFB800;
+                      --gold: #D4AF37;
+                  }
+                  
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { 
-                      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
-                      line-height: 1.5; 
-                      color: #FFFFFF; 
-                      background-color: #0A0E17; 
-                      margin: 0; 
-                      padding: 0; 
-                  }
-                  .container { 
-                      max-width: 600px; 
-                      margin: 0 auto; 
-                      background: #0A0E17; 
-                  }
-                  .header { 
-                      background: #05080F; 
-                      padding: 40px 40px 30px; 
-                      text-align: center; 
-                      border-bottom: 2px solid #FF0000;
-                  }
-                  .logo-container { 
-                      display: flex; 
-                      align-items: center; 
-                      justify-content: center; 
-                      gap: 12px; 
-                      margin-bottom: 20px; 
-                  }
-                  .logo-img { 
-                      width: 48px; 
-                      height: 48px; 
-                      border-radius: 50%; 
-                  }
-                  .logo-text { 
-                      font-family: 'Rowdies', sans-serif;
-                      font-size: 28px; 
-                      font-weight: 700; 
-                      color: #00D8FF; 
-                  }
-                  .logo-text span { color: #FFFFFF; }
-                  .content { 
-                      padding: 40px; 
-                      background: #0A0E17; 
-                  }
-                  .rejection-badge {
-                      background: rgba(255, 0, 0, 0.1);
-                      color: #FF0000;
-                      padding: 12px 24px;
-                      border-radius: 40px;
-                      display: inline-block;
-                      margin-bottom: 30px;
-                      font-weight: 600;
-                  }
-                  .rejection-box { 
-                      background: #111827; 
-                      padding: 40px; 
-                      border-radius: 12px; 
-                      margin: 30px 0; 
-                  }
-                  .reason-box { 
-                      background: #1F2937; 
-                      padding: 24px; 
-                      border-radius: 8px; 
-                      margin: 20px 0; 
-                      border-left: 4px solid #FF0000;
-                  }
-                  .cta-button { 
-                      background: #00D8FF; 
-                      color: #05080F; 
-                      padding: 16px 40px; 
-                      text-decoration: none; 
-                      border-radius: 8px; 
-                      display: inline-block; 
-                      margin: 30px 0; 
-                      font-weight: 600; 
-                      transition: all 0.3s ease;
-                  }
-                  .footer { 
-                      background: #05080F; 
-                      padding: 40px; 
-                      text-align: center; 
-                      color: #6B7280; 
-                      border-top: 1px solid #1F2937;
+                  body { font-family: 'Inter', sans-serif; line-height: 1.6; color: var(--dark); background-color: var(--secondary); margin: 0; padding: 0; }
+                  .container { max-width: 600px; margin: 0 auto; background: var(--darker); overflow: hidden; }
+                  .header { background: var(--secondary-dark); padding: 40px 40px 30px; text-align: center; }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 10px; }
+                  .logo-img { width: 48px; height: 48px; filter: drop-shadow(0 0 10px rgba(0, 216, 255, 0.3)); }
+                  .logo-text { font-family: 'Rowdies', sans-serif; font-size: 28px; color: var(--primary); }
+                  .content { padding: 40px; background: var(--darker); }
+                  .alert-box { background: rgba(255, 0, 0, 0.05); padding: 30px; border-radius: 12px; margin: 30px 0; border-left: 4px solid var(--error); }
+                  .alert-icon { font-size: 48px; color: var(--error); margin-bottom: 15px; }
+                  .alert-title { font-size: 24px; color: var(--error); margin-bottom: 10px; }
+                  .reason-box { background: rgba(255, 255, 255, 0.03); padding: 25px; border-radius: 8px; margin: 25px 0; }
+                  .reason-label { color: var(--gray); margin-bottom: 8px; }
+                  .reason-text { color: var(--dark); font-size: 16px; line-height: 1.6; }
+                  .steps-list { margin: 25px 0; }
+                  .step-item { display: flex; align-items: flex-start; margin-bottom: 15px; }
+                  .step-number { width: 28px; height: 28px; background: var(--primary); color: var(--secondary-dark); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; margin-right: 15px; flex-shrink: 0; }
+                  .step-text { color: var(--gray); }
+                  .cta-button { background: var(--primary); color: var(--secondary-dark); padding: 16px 40px; text-decoration: none; border-radius: 8px; display: inline-block; margin: 20px 0; font-weight: 600; border: none; }
+                  .footer { background: var(--secondary-dark); padding: 30px 40px; text-align: center; color: var(--gray); }
+                  hr { border: none; border-top: 1px solid rgba(255, 255, 255, 0.05); margin: 30px 0; }
+                  .bitcoin-icon { color: var(--gold); }
+                  @media (max-width: 480px) {
+                      .content { padding: 30px 20px; }
                   }
               </style>
           </head>
@@ -5604,38 +4055,55 @@ const sendProfessionalEmail = async (options) => {
               <div class="container">
                   <div class="header">
                       <div class="logo-container">
-                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Capital" class="logo-img">
-                          <div class="logo-text"><span>₿</span>itHash</div>
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
+                          <div class="logo-text"><span class="bitcoin-icon">₿</span>itHash</div>
                       </div>
                   </div>
                   <div class="content">
-                      <div class="rejection-badge">
-                          <i class="fas fa-exclamation-circle"></i> VERIFICATION UPDATE
+                      <div style="margin-bottom: 20px;">
+                          <span style="color: var(--gray);">Hello</span> <span style="color: var(--primary); font-weight: 600;">${data.name}</span>,
                       </div>
                       
-                      <div class="rejection-box">
-                          <i class="fas fa-id-card" style="font-size: 48px; color: #FF0000; margin-bottom: 20px;"></i>
-                          <h2 style="font-size: 28px; margin-bottom: 15px;">Hello ${data.name},</h2>
-                          <p style="color: #E5E7EB;">Your KYC verification could not be approved at this time.</p>
+                      <div class="alert-box">
+                          <div class="alert-icon"><i class="fas fa-exclamation-circle"></i></div>
+                          <div class="alert-title">Verification Update Required</div>
+                          <p style="color: var(--gray);">We couldn't approve your KYC verification at this time</p>
                       </div>
                       
                       <div class="reason-box">
-                          <p style="color: #FFFFFF;"><strong>Reason for rejection:</strong></p>
-                          <p style="color: #FF0000; margin-top: 10px;">${data.reason}</p>
+                          <div class="reason-label"><i class="fas fa-info-circle" style="color: var(--primary); margin-right: 5px;"></i>Reason for rejection:</div>
+                          <div class="reason-text">${data.reason}</div>
                       </div>
                       
-                      <p style="color: #E5E7EB;">Please review the reason above and submit your KYC documents again with the required corrections.</p>
+                      <p style="color: var(--gray); margin-bottom: 15px;">To complete your verification, please follow these steps:</p>
+                      
+                      <div class="steps-list">
+                          <div class="step-item">
+                              <div class="step-number">1</div>
+                              <div class="step-text">Review the reason provided above</div>
+                          </div>
+                          <div class="step-item">
+                              <div class="step-number">2</div>
+                              <div class="step-text">Prepare clear, legible documents that meet our requirements</div>
+                          </div>
+                          <div class="step-item">
+                              <div class="step-number">3</div>
+                              <div class="step-text">Submit your documents again through the KYC portal</div>
+                          </div>
+                      </div>
                       
                       <div style="text-align: center;">
-                          <a href="https://www.bithashcapital.live/kyc" class="cta-button">Resubmit Documents <i class="fas fa-arrow-right" style="margin-left: 8px;"></i></a>
+                          <a href="https://www.bithashcapital.live/kyc" class="cta-button"><i class="fas fa-redo" style="margin-right: 8px;"></i>Resubmit KYC</a>
                       </div>
                       
-                      <p style="color: #8E9BAE; margin-top: 20px;">Need assistance? Our support team is available 24/7 to help you with the verification process.</p>
+                      <p style="color: var(--gray); margin-top: 25px;">Need help? Our compliance team is ready to assist you. Simply reply to this email or contact us at <a href="mailto:compliance@bithashcapital.live" style="color: var(--primary);">compliance@bithashcapital.live</a>.</p>
                       
-                      <p style="color: #FFFFFF; margin-top: 30px;">Best regards,<br><span style="color: #00D8FF;">BitHash Capital Compliance Team</span></p>
+                      <hr>
+                      
+                      <p style="color: var(--gray); text-align: center;">We're here to help you complete your verification successfully</p>
                   </div>
                   <div class="footer">
-                      <p class="footer-text">© 2024 BitHash Capital LLC. All rights reserved.</p>
+                      <p class="footer-text">© 2024 BitHash Capital LLC • Verification Update</p>
                   </div>
               </div>
           </body>
@@ -5645,7 +4113,7 @@ const sendProfessionalEmail = async (options) => {
 
       // DEPOSIT RECEIVED
       deposit_received: {
-        subject: 'Deposit Confirmed – Funds Credited | BitHash Capital',
+        subject: 'Deposit Confirmed - Funds Credited to Your Account',
         html: `
           <!DOCTYPE html>
           <html>
@@ -5656,99 +4124,42 @@ const sendProfessionalEmail = async (options) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@300;400;700&display=swap" rel="stylesheet">
               <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
               <style>
+                  :root {
+                      --primary: #00D8FF;
+                      --secondary: #0A0E17;
+                      --secondary-dark: #05080F;
+                      --dark: #FFFFFF;
+                      --darker: #0A0E17;
+                      --gray: #8E9BAE;
+                      --success: #00FF00;
+                      --gold: #D4AF37;
+                  }
+                  
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { 
-                      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
-                      line-height: 1.5; 
-                      color: #FFFFFF; 
-                      background-color: #0A0E17; 
-                      margin: 0; 
-                      padding: 0; 
-                  }
-                  .container { 
-                      max-width: 600px; 
-                      margin: 0 auto; 
-                      background: #0A0E17; 
-                  }
-                  .header { 
-                      background: #05080F; 
-                      padding: 40px 40px 30px; 
-                      text-align: center; 
-                      border-bottom: 2px solid #00FF00;
-                  }
-                  .logo-container { 
-                      display: flex; 
-                      align-items: center; 
-                      justify-content: center; 
-                      gap: 12px; 
-                      margin-bottom: 20px; 
-                  }
-                  .logo-img { 
-                      width: 48px; 
-                      height: 48px; 
-                      border-radius: 50%; 
-                  }
-                  .logo-text { 
-                      font-family: 'Rowdies', sans-serif;
-                      font-size: 28px; 
-                      font-weight: 700; 
-                      color: #00D8FF; 
-                  }
-                  .logo-text span { color: #FFFFFF; }
-                  .content { 
-                      padding: 40px; 
-                      background: #0A0E17; 
-                  }
-                  .deposit-badge {
-                      background: rgba(0, 255, 0, 0.1);
-                      color: #00FF00;
-                      padding: 12px 24px;
-                      border-radius: 40px;
-                      display: inline-block;
-                      margin-bottom: 30px;
-                      font-weight: 600;
-                  }
-                  .deposit-details { 
-                      background: #111827; 
-                      padding: 30px; 
-                      border-radius: 12px; 
-                      margin: 30px 0; 
-                  }
-                  .detail-item { 
-                      margin-bottom: 16px; 
-                      display: flex; 
-                      justify-content: space-between; 
-                      align-items: center;
-                      padding-bottom: 12px;
-                      border-bottom: 1px solid #1F2937;
-                  }
-                  .detail-item:last-child { border-bottom: none; }
-                  .detail-label { 
-                      font-weight: 500; 
-                      color: #8E9BAE; 
-                  }
-                  .detail-label i { margin-right: 8px; }
-                  .detail-value { 
-                      color: #FFFFFF; 
-                      font-weight: 600; 
-                  }
-                  .cta-button { 
-                      background: #00D8FF; 
-                      color: #05080F; 
-                      padding: 16px 40px; 
-                      text-decoration: none; 
-                      border-radius: 8px; 
-                      display: inline-block; 
-                      margin: 30px 0; 
-                      font-weight: 600; 
-                      transition: all 0.3s ease;
-                  }
-                  .footer { 
-                      background: #05080F; 
-                      padding: 40px; 
-                      text-align: center; 
-                      color: #6B7280; 
-                      border-top: 1px solid #1F2937;
+                  body { font-family: 'Inter', sans-serif; line-height: 1.6; color: var(--dark); background-color: var(--secondary); margin: 0; padding: 0; }
+                  .container { max-width: 600px; margin: 0 auto; background: var(--darker); overflow: hidden; }
+                  .header { background: var(--secondary-dark); padding: 40px 40px 30px; text-align: center; }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 10px; }
+                  .logo-img { width: 48px; height: 48px; filter: drop-shadow(0 0 10px rgba(0, 216, 255, 0.3)); }
+                  .logo-text { font-family: 'Rowdies', sans-serif; font-size: 28px; color: var(--primary); }
+                  .content { padding: 40px; background: var(--darker); }
+                  .deposit-badge { background: rgba(0, 255, 0, 0.05); padding: 30px; border-radius: 12px; margin: 30px 0; text-align: center; border-left: 4px solid var(--success); }
+                  .deposit-icon { font-size: 48px; color: var(--success); margin-bottom: 15px; }
+                  .deposit-title { font-size: 24px; color: var(--success); margin-bottom: 10px; }
+                  .amount-highlight { font-size: 42px; font-weight: 700; color: var(--dark); margin: 15px 0; }
+                  .amount-highlight span { color: var(--primary); }
+                  .details-card { background: rgba(255, 255, 255, 0.03); padding: 30px; border-radius: 12px; margin: 30px 0; }
+                  .detail-row { display: flex; justify-content: space-between; margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
+                  .detail-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+                  .detail-label { color: var(--gray); }
+                  .detail-value { color: var(--dark); font-weight: 600; }
+                  .cta-button { background: var(--primary); color: var(--secondary-dark); padding: 16px 40px; text-decoration: none; border-radius: 8px; display: inline-block; margin: 20px 0; font-weight: 600; border: none; }
+                  .footer { background: var(--secondary-dark); padding: 30px 40px; text-align: center; color: var(--gray); }
+                  hr { border: none; border-top: 1px solid rgba(255, 255, 255, 0.05); margin: 30px 0; }
+                  .bitcoin-icon { color: var(--gold); }
+                  @media (max-width: 480px) {
+                      .content { padding: 30px 20px; }
+                      .amount-highlight { font-size: 32px; }
                   }
               </style>
           </head>
@@ -5756,54 +4167,59 @@ const sendProfessionalEmail = async (options) => {
               <div class="container">
                   <div class="header">
                       <div class="logo-container">
-                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Capital" class="logo-img">
-                          <div class="logo-text"><span>₿</span>itHash</div>
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
+                          <div class="logo-text"><span class="bitcoin-icon">₿</span>itHash</div>
                       </div>
                   </div>
                   <div class="content">
-                      <div class="deposit-badge">
-                          <i class="fas fa-check-circle"></i> DEPOSIT CONFIRMED
+                      <div style="margin-bottom: 20px;">
+                          <span style="color: var(--gray);">Hello</span> <span style="color: var(--primary); font-weight: 600;">${data.name}</span>,
                       </div>
                       
-                      <h2 style="font-size: 28px; margin-bottom: 15px;">Hello ${data.name},</h2>
-                      <p style="color: #E5E7EB;">Your deposit has been successfully received and credited to your BitHash Capital account.</p>
+                      <div class="deposit-badge">
+                          <div class="deposit-icon"><i class="fas fa-check-circle"></i></div>
+                          <div class="deposit-title">Deposit Received</div>
+                          <div class="amount-highlight"><span>$</span>${data.amount}</div>
+                          <p style="color: var(--gray);">has been credited to your account</p>
+                      </div>
                       
-                      <div class="deposit-details">
-                          <div class="detail-item">
-                              <span class="detail-label"><i class="fas fa-dollar-sign" style="color: #00D8FF;"></i>Amount</span>
-                              <span class="detail-value">$${data.amount.toLocaleString()}</span>
+                      <div class="details-card">
+                          <div class="detail-row">
+                              <span class="detail-label">Amount</span>
+                              <span class="detail-value">$${data.amount}</span>
                           </div>
-                          <div class="detail-item">
-                              <span class="detail-label"><i class="fas fa-credit-card" style="color: #00D8FF;"></i>Method</span>
+                          <div class="detail-row">
+                              <span class="detail-label">Method</span>
                               <span class="detail-value">${data.method}</span>
                           </div>
-                          <div class="detail-item">
-                              <span class="detail-label"><i class="fas fa-hashtag" style="color: #00D8FF;"></i>Reference</span>
-                              <span class="detail-value">${data.reference}</span>
+                          <div class="detail-row">
+                              <span class="detail-label">Reference</span>
+                              <span class="detail-value" style="font-family: monospace;">${data.reference}</span>
                           </div>
-                          <div class="detail-item">
-                              <span class="detail-label"><i class="fas fa-calendar-alt" style="color: #00D8FF;"></i>Date</span>
-                              <span class="detail-value">${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
+                          <div class="detail-row">
+                              <span class="detail-label">Date & Time</span>
+                              <span class="detail-value">${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
                           </div>
-                          <div class="detail-item">
-                              <span class="detail-label"><i class="fas fa-wallet" style="color: #00D8FF;"></i>New Balance</span>
-                              <span class="detail-value">$${data.newBalance.toLocaleString()}</span>
+                          <div class="detail-row">
+                              <span class="detail-label">New Balance</span>
+                              <span class="detail-value" style="color: var(--primary); font-weight: 700;">$${data.newBalance}</span>
                           </div>
                       </div>
                       
-                      <p style="color: #8E9BAE; background: #1F2937; padding: 20px; border-radius: 8px;">
-                          <i class="fas fa-chart-line" style="color: #00D8FF; margin-right: 8px;"></i>
-                          Your funds are now available for mining investments. Start earning passive income today.
-                      </p>
+                      <p style="color: var(--gray);">Your funds are now available for mining investments. Start earning returns immediately by choosing an investment plan that matches your goals.</p>
                       
                       <div style="text-align: center;">
-                          <a href="https://www.bithashcapital.live/investment" class="cta-button">Start Mining <i class="fas fa-arrow-right" style="margin-left: 8px;"></i></a>
+                          <a href="https://www.bithashcapital.live/invest" class="cta-button"><i class="fas fa-chart-line" style="margin-right: 8px;"></i>Start Investing Now</a>
                       </div>
                       
-                      <p style="color: #FFFFFF; margin-top: 30px;">Best regards,<br><span style="color: #00D8FF;">BitHash Capital Finance Team</span></p>
+                      <p style="color: var(--dark); margin-top: 30px;">Happy mining,<br><strong style="color: var(--primary);">The BitHash Capital Team</strong></p>
+                      
+                      <hr>
+                      
+                      <p style="color: var(--gray); text-align: center;">Questions about your deposit? Contact our finance team at <a href="mailto:finance@bithashcapital.live" style="color: var(--primary);">finance@bithashcapital.live</a></p>
                   </div>
                   <div class="footer">
-                      <p class="footer-text">© 2024 BitHash Capital LLC. All rights reserved.</p>
+                      <p class="footer-text">© 2024 BitHash Capital LLC • Deposit Confirmation</p>
                   </div>
               </div>
           </body>
@@ -5813,7 +4229,7 @@ const sendProfessionalEmail = async (options) => {
 
       // REFERRAL BONUS
       referral_bonus: {
-        subject: 'Referral Bonus Earned | BitHash Capital',
+        subject: 'You Earned a Referral Bonus - Thank You for Growing Our Community',
         html: `
           <!DOCTYPE html>
           <html>
@@ -5824,102 +4240,43 @@ const sendProfessionalEmail = async (options) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@300;400;700&display=swap" rel="stylesheet">
               <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
               <style>
+                  :root {
+                      --primary: #00D8FF;
+                      --secondary: #0A0E17;
+                      --secondary-dark: #05080F;
+                      --dark: #FFFFFF;
+                      --darker: #0A0E17;
+                      --gray: #8E9BAE;
+                      --gold: #D4AF37;
+                      --gold-light: #FFD700;
+                  }
+                  
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { 
-                      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
-                      line-height: 1.5; 
-                      color: #FFFFFF; 
-                      background-color: #0A0E17; 
-                      margin: 0; 
-                      padding: 0; 
-                  }
-                  .container { 
-                      max-width: 600px; 
-                      margin: 0 auto; 
-                      background: #0A0E17; 
-                  }
-                  .header { 
-                      background: #05080F; 
-                      padding: 40px 40px 30px; 
-                      text-align: center; 
-                      border-bottom: 2px solid #FFD700;
-                  }
-                  .logo-container { 
-                      display: flex; 
-                      align-items: center; 
-                      justify-content: center; 
-                      gap: 12px; 
-                      margin-bottom: 20px; 
-                  }
-                  .logo-img { 
-                      width: 48px; 
-                      height: 48px; 
-                      border-radius: 50%; 
-                  }
-                  .logo-text { 
-                      font-family: 'Rowdies', sans-serif;
-                      font-size: 28px; 
-                      font-weight: 700; 
-                      color: #00D8FF; 
-                  }
-                  .logo-text span { color: #FFFFFF; }
-                  .content { 
-                      padding: 40px; 
-                      background: #0A0E17; 
-                  }
-                  .bonus-badge {
-                      background: rgba(255, 215, 0, 0.1);
-                      color: #FFD700;
-                      padding: 12px 24px;
-                      border-radius: 40px;
-                      display: inline-block;
-                      margin-bottom: 30px;
-                      font-weight: 600;
-                  }
-                  .bonus-card { 
-                      background: #111827; 
-                      padding: 40px; 
-                      border-radius: 12px; 
-                      margin: 30px 0; 
-                      text-align: center; 
-                      border: 1px solid #FFD700;
-                  }
-                  .bonus-amount { 
-                      font-size: 56px; 
-                      font-weight: 700; 
-                      color: #FFD700; 
-                      margin: 20px 0; 
-                  }
-                  .referral-details { 
-                      background: #1F2937; 
-                      padding: 30px; 
-                      border-radius: 12px; 
-                      margin: 30px 0; 
-                  }
-                  .detail-item { 
-                      margin-bottom: 16px; 
-                      display: flex; 
-                      justify-content: space-between; 
-                      padding-bottom: 12px;
-                      border-bottom: 1px solid #374151;
-                  }
-                  .cta-button { 
-                      background: #00D8FF; 
-                      color: #05080F; 
-                      padding: 16px 40px; 
-                      text-decoration: none; 
-                      border-radius: 8px; 
-                      display: inline-block; 
-                      margin: 30px 0; 
-                      font-weight: 600; 
-                      transition: all 0.3s ease;
-                  }
-                  .footer { 
-                      background: #05080F; 
-                      padding: 40px; 
-                      text-align: center; 
-                      color: #6B7280; 
-                      border-top: 1px solid #1F2937;
+                  body { font-family: 'Inter', sans-serif; line-height: 1.6; color: var(--dark); background-color: var(--secondary); margin: 0; padding: 0; }
+                  .container { max-width: 600px; margin: 0 auto; background: var(--darker); overflow: hidden; }
+                  .header { background: var(--secondary-dark); padding: 40px 40px 30px; text-align: center; }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 10px; }
+                  .logo-img { width: 48px; height: 48px; filter: drop-shadow(0 0 10px rgba(0, 216, 255, 0.3)); }
+                  .logo-text { font-family: 'Rowdies', sans-serif; font-size: 28px; color: var(--primary); }
+                  .content { padding: 40px; background: var(--darker); }
+                  .bonus-card { background: linear-gradient(135deg, rgba(212, 175, 55, 0.1) 0%, rgba(255, 215, 0, 0.1) 100%); padding: 40px; border-radius: 12px; margin: 30px 0; text-align: center; border: 1px solid rgba(212, 175, 55, 0.3); }
+                  .bonus-icon { font-size: 48px; color: var(--gold); margin-bottom: 15px; }
+                  .bonus-title { font-size: 24px; color: var(--gold); margin-bottom: 10px; }
+                  .bonus-amount { font-size: 48px; font-weight: 700; color: var(--gold); margin: 20px 0; }
+                  .bonus-amount small { font-size: 24px; }
+                  .details-card { background: rgba(255, 255, 255, 0.03); padding: 30px; border-radius: 12px; margin: 30px 0; }
+                  .detail-row { display: flex; justify-content: space-between; margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
+                  .detail-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+                  .detail-label { color: var(--gray); }
+                  .detail-value { color: var(--dark); font-weight: 600; }
+                  .cta-button { background: var(--gold); color: var(--secondary-dark); padding: 16px 40px; text-decoration: none; border-radius: 8px; display: inline-block; margin: 20px 0; font-weight: 600; border: none; }
+                  .cta-button:hover { background: var(--gold-light); }
+                  .footer { background: var(--secondary-dark); padding: 30px 40px; text-align: center; color: var(--gray); }
+                  hr { border: none; border-top: 1px solid rgba(255, 255, 255, 0.05); margin: 30px 0; }
+                  .bitcoin-icon { color: var(--gold); }
+                  @media (max-width: 480px) {
+                      .content { padding: 30px 20px; }
+                      .bonus-amount { font-size: 36px; }
                   }
               </style>
           </head>
@@ -5927,60 +4284,65 @@ const sendProfessionalEmail = async (options) => {
               <div class="container">
                   <div class="header">
                       <div class="logo-container">
-                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Capital" class="logo-img">
-                          <div class="logo-text"><span>₿</span>itHash</div>
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
+                          <div class="logo-text"><span class="bitcoin-icon">₿</span>itHash</div>
                       </div>
                   </div>
                   <div class="content">
-                      <div class="bonus-badge">
-                          <i class="fas fa-gift"></i> REFERRAL BONUS
+                      <div style="margin-bottom: 20px;">
+                          <span style="color: var(--gray);">Hello</span> <span style="color: var(--primary); font-weight: 600;">${data.name}</span>,
                       </div>
-                      
-                      <h2 style="font-size: 28px; margin-bottom: 15px;">Hello ${data.name},</h2>
-                      <p style="color: #E5E7EB;">Great news! You've earned a referral bonus for helping grow the BitHash Capital community.</p>
                       
                       <div class="bonus-card">
-                          <i class="fas fa-trophy" style="font-size: 48px; color: #FFD700; margin-bottom: 10px;"></i>
-                          <p style="color: #8E9BAE;">Bonus Amount</p>
-                          <div class="bonus-amount">$${data.bonusAmount.toLocaleString()}</div>
-                          <p style="color: #00FF00;"><i class="fas fa-check-circle"></i> Credited to your account</p>
+                          <div class="bonus-icon"><i class="fas fa-gift"></i></div>
+                          <div class="bonus-title">Referral Bonus Earned</div>
+                          <div class="bonus-amount"><small>$</small>${data.bonusAmount}</div>
+                          <p style="color: var(--gray);">has been credited to your account</p>
                       </div>
                       
-                      <div class="referral-details">
-                          <div class="detail-item">
+                      <p style="color: var(--gray); margin-bottom: 20px;">Thank you for helping grow the BitHash Capital community! Your referral just made an investment, and you've earned a commission.</p>
+                      
+                      <div class="details-card">
+                          <div class="detail-row">
                               <span class="detail-label">Referred User</span>
                               <span class="detail-value">${data.referredUser}</span>
                           </div>
-                          <div class="detail-item">
+                          <div class="detail-row">
                               <span class="detail-label">Bonus Type</span>
                               <span class="detail-value">${data.bonusType}</span>
                           </div>
-                          <div class="detail-item">
-                              <span class="detail-label">Commission</span>
+                          <div class="detail-row">
+                              <span class="detail-label">Investment Amount</span>
+                              <span class="detail-value">$${data.investmentAmount || 'N/A'}</span>
+                          </div>
+                          <div class="detail-row">
+                              <span class="detail-label">Commission Rate</span>
                               <span class="detail-value">${data.percentage}%</span>
                           </div>
-                          <div class="detail-item">
-                              <span class="detail-label">Round</span>
+                          <div class="detail-row">
+                              <span class="detail-label">Referral Round</span>
                               <span class="detail-value">${data.roundNumber || 1}/${data.totalRounds || 3}</span>
                           </div>
-                          <div class="detail-item">
-                              <span class="detail-label">Date</span>
-                              <span class="detail-value">${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
+                          <div class="detail-row">
+                              <span class="detail-label">Date Earned</span>
+                              <span class="detail-value">${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</span>
                           </div>
                       </div>
                       
-                      <p style="color: #8E9BAE;">Keep sharing your referral link to earn more bonuses as your network grows and reinvests.</p>
+                      <p style="color: var(--gray);">Your referral can earn you commissions on up to 3 rounds of their investments. Share your referral link to earn even more!</p>
                       
                       <div style="text-align: center;">
-                          <a href="https://www.bithashcapital.live/referral" class="cta-button">View Referral Program <i class="fas fa-arrow-right" style="margin-left: 8px;"></i></a>
+                          <a href="https://www.bithashcapital.live/referrals" class="cta-button"><i class="fas fa-share-alt" style="margin-right: 8px;"></i>Share Your Referral Link</a>
                       </div>
                       
-                      <p style="color: #FFFFFF; margin-top: 30px;">Thank you for being a valued member of our community.</p>
+                      <p style="color: var(--dark); margin-top: 30px;">Keep growing the community,<br><strong style="color: var(--primary);">The BitHash Capital Team</strong></p>
                       
-                      <p style="color: #FFFFFF;">Best regards,<br><span style="color: #00D8FF;">BitHash Capital Team</span></p>
+                      <hr>
+                      
+                      <p style="color: var(--gray); text-align: center;">Your referral link: <a href="https://www.bithashcapital.live/ref/${data.referralCode}" style="color: var(--primary);">bithashcapital.live/ref/${data.referralCode}</a></p>
                   </div>
                   <div class="footer">
-                      <p class="footer-text">© 2024 BitHash Capital LLC. All rights reserved.</p>
+                      <p class="footer-text">© 2024 BitHash Capital LLC • Referral Bonus</p>
                   </div>
               </div>
           </body>
@@ -5990,7 +4352,7 @@ const sendProfessionalEmail = async (options) => {
 
       // ACCOUNT SUSPENDED
       account_suspended: {
-        subject: 'Important Account Notification | BitHash Capital',
+        subject: 'Important: Account Access Restricted',
         html: `
           <!DOCTYPE html>
           <html>
@@ -6001,99 +4363,43 @@ const sendProfessionalEmail = async (options) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@300;400;700&display=swap" rel="stylesheet">
               <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
               <style>
+                  :root {
+                      --primary: #00D8FF;
+                      --secondary: #0A0E17;
+                      --secondary-dark: #05080F;
+                      --dark: #FFFFFF;
+                      --darker: #0A0E17;
+                      --gray: #8E9BAE;
+                      --error: #FF0000;
+                      --warning: #FFB800;
+                      --gold: #D4AF37;
+                  }
+                  
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { 
-                      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
-                      line-height: 1.5; 
-                      color: #FFFFFF; 
-                      background-color: #0A0E17; 
-                      margin: 0; 
-                      padding: 0; 
-                  }
-                  .container { 
-                      max-width: 600px; 
-                      margin: 0 auto; 
-                      background: #0A0E17; 
-                  }
-                  .header { 
-                      background: #05080F; 
-                      padding: 40px 40px 30px; 
-                      text-align: center; 
-                      border-bottom: 2px solid #FF0000;
-                  }
-                  .logo-container { 
-                      display: flex; 
-                      align-items: center; 
-                      justify-content: center; 
-                      gap: 12px; 
-                      margin-bottom: 20px; 
-                  }
-                  .logo-img { 
-                      width: 48px; 
-                      height: 48px; 
-                      border-radius: 50%; 
-                  }
-                  .logo-text { 
-                      font-family: 'Rowdies', sans-serif;
-                      font-size: 28px; 
-                      font-weight: 700; 
-                      color: #00D8FF; 
-                  }
-                  .logo-text span { color: #FFFFFF; }
-                  .content { 
-                      padding: 40px; 
-                      background: #0A0E17; 
-                  }
-                  .alert-badge {
-                      background: rgba(255, 0, 0, 0.1);
-                      color: #FF0000;
-                      padding: 12px 24px;
-                      border-radius: 40px;
-                      display: inline-block;
-                      margin-bottom: 30px;
-                      font-weight: 600;
-                  }
-                  .alert-box { 
-                      background: #111827; 
-                      padding: 40px; 
-                      border-radius: 12px; 
-                      margin: 30px 0; 
-                      border-left: 4px solid #FF0000;
-                  }
-                  .action-steps { 
-                      background: #1F2937; 
-                      padding: 30px; 
-                      border-radius: 12px; 
-                      margin: 30px 0; 
-                  }
-                  .step-item { 
-                      display: flex; 
-                      align-items: center; 
-                      margin-bottom: 20px; 
-                  }
-                  .step-number { 
-                      background: #FF0000; 
-                      color: white; 
-                      width: 32px; 
-                      height: 32px; 
-                      border-radius: 50%; 
-                      display: flex; 
-                      align-items: center; 
-                      justify-content: center; 
-                      margin-right: 16px; 
-                      font-weight: 600; 
-                  }
-                  .support-link { 
-                      color: #00D8FF; 
-                      text-decoration: none; 
-                      font-weight: 600;
-                  }
-                  .footer { 
-                      background: #05080F; 
-                      padding: 40px; 
-                      text-align: center; 
-                      color: #6B7280; 
-                      border-top: 1px solid #1F2937;
+                  body { font-family: 'Inter', sans-serif; line-height: 1.6; color: var(--dark); background-color: var(--secondary); margin: 0; padding: 0; }
+                  .container { max-width: 600px; margin: 0 auto; background: var(--darker); overflow: hidden; }
+                  .header { background: var(--secondary-dark); padding: 40px 40px 30px; text-align: center; }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 10px; }
+                  .logo-img { width: 48px; height: 48px; filter: drop-shadow(0 0 10px rgba(0, 216, 255, 0.3)); }
+                  .logo-text { font-family: 'Rowdies', sans-serif; font-size: 28px; color: var(--primary); }
+                  .content { padding: 40px; background: var(--darker); }
+                  .alert-box { background: rgba(255, 0, 0, 0.05); padding: 30px; border-radius: 12px; margin: 30px 0; border-left: 4px solid var(--error); }
+                  .alert-icon { font-size: 48px; color: var(--error); margin-bottom: 15px; }
+                  .alert-title { font-size: 24px; color: var(--error); margin-bottom: 10px; }
+                  .reason-box { background: rgba(255, 255, 255, 0.03); padding: 25px; border-radius: 8px; margin: 25px 0; }
+                  .reason-text { color: var(--dark); font-size: 16px; margin-top: 10px; }
+                  .steps-container { margin: 30px 0; }
+                  .step { display: flex; align-items: flex-start; margin-bottom: 20px; }
+                  .step-marker { width: 32px; height: 32px; background: var(--primary); color: var(--secondary-dark); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; margin-right: 15px; flex-shrink: 0; }
+                  .step-content { color: var(--gray); }
+                  .step-content strong { color: var(--dark); }
+                  .contact-button { background: transparent; color: var(--primary); padding: 14px 30px; text-decoration: none; border-radius: 8px; display: inline-block; margin: 10px 0; font-weight: 600; border: 1px solid var(--primary); }
+                  .contact-button:hover { background: rgba(0, 216, 255, 0.1); }
+                  .footer { background: var(--secondary-dark); padding: 30px 40px; text-align: center; color: var(--gray); }
+                  hr { border: none; border-top: 1px solid rgba(255, 255, 255, 0.05); margin: 30px 0; }
+                  .bitcoin-icon { color: var(--gold); }
+                  @media (max-width: 480px) {
+                      .content { padding: 30px 20px; }
                   }
               </style>
           </head>
@@ -6101,44 +4407,55 @@ const sendProfessionalEmail = async (options) => {
               <div class="container">
                   <div class="header">
                       <div class="logo-container">
-                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Capital" class="logo-img">
-                          <div class="logo-text"><span>₿</span>itHash</div>
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
+                          <div class="logo-text"><span class="bitcoin-icon">₿</span>itHash</div>
                       </div>
                   </div>
                   <div class="content">
-                      <div class="alert-badge">
-                          <i class="fas fa-exclamation-triangle"></i> ACCOUNT NOTIFICATION
+                      <div style="margin-bottom: 20px;">
+                          <span style="color: var(--gray);">Hello</span> <span style="color: var(--primary); font-weight: 600;">${data.name}</span>,
                       </div>
                       
                       <div class="alert-box">
-                          <i class="fas fa-lock" style="font-size: 48px; color: #FF0000; margin-bottom: 20px;"></i>
-                          <h2 style="font-size: 28px; margin-bottom: 15px;">Hello ${data.name},</h2>
-                          <p style="color: #FF0000; font-weight: 500;">Your BitHash Capital account has been temporarily suspended.</p>
-                          <p style="color: #E5E7EB; margin-top: 15px;">Reason: ${data.reason}</p>
+                          <div class="alert-icon"><i class="fas fa-lock"></i></div>
+                          <div class="alert-title">Account Access Restricted</div>
+                          <p style="color: var(--gray);">We need to address an important matter regarding your account</p>
                       </div>
                       
-                      <div class="action-steps">
-                          <p style="color: #FFFFFF; font-weight: 600; margin-bottom: 20px;">Required Actions:</p>
-                          <div class="step-item">
-                              <div class="step-number">1</div>
-                              <span style="color: #E5E7EB;">Contact our support team to resolve this issue</span>
+                      <div class="reason-box">
+                          <p style="color: var(--gray); margin-bottom: 5px;"><i class="fas fa-info-circle" style="color: var(--primary); margin-right: 5px;"></i>Reason for restriction:</p>
+                          <div class="reason-text">${data.reason}</div>
+                      </div>
+                      
+                      <p style="color: var(--gray); margin-bottom: 20px;">To restore full access to your account, please follow these steps:</p>
+                      
+                      <div class="steps-container">
+                          <div class="step">
+                              <div class="step-marker">1</div>
+                              <div class="step-content">Contact our <strong>support team</strong> to resolve this matter</div>
                           </div>
-                          <div class="step-item">
-                              <div class="step-number">2</div>
-                              <span style="color: #E5E7EB;">Provide any requested documentation</span>
+                          <div class="step">
+                              <div class="step-marker">2</div>
+                              <div class="step-content">Provide any requested <strong>documentation or information</strong></div>
                           </div>
-                          <div class="step-item">
-                              <div class="step-number">3</div>
-                              <span style="color: #E5E7EB;">Follow instructions from our compliance team</span>
+                          <div class="step">
+                              <div class="step-marker">3</div>
+                              <div class="step-content">Follow the instructions provided by our <strong>compliance team</strong></div>
                           </div>
                       </div>
                       
-                      <p style="color: #E5E7EB;">Please contact our support team immediately at <a href="mailto:support@bithashcapital.live" class="support-link">support@bithashcapital.live</a> to resolve this matter.</p>
+                      <div style="text-align: center; margin: 30px 0;">
+                          <a href="mailto:support@bithashcapital.live" class="contact-button"><i class="fas fa-envelope" style="margin-right: 8px;"></i>Contact Support</a>
+                      </div>
                       
-                      <p style="color: #FFFFFF; margin-top: 30px;">Best regards,<br><span style="color: #00D8FF;">BitHash Capital Security Team</span></p>
+                      <p style="color: var(--gray);">Our support team is available 24/7 to help you resolve this matter promptly. Please include your account details when reaching out.</p>
+                      
+                      <hr>
+                      
+                      <p style="color: var(--gray); text-align: center;">For urgent matters, call us at <strong style="color: var(--primary);">+1 606-363-2032</strong></p>
                   </div>
                   <div class="footer">
-                      <p class="footer-text">© 2024 BitHash Capital LLC. This is an important security notification.</p>
+                      <p class="footer-text">© 2024 BitHash Capital LLC • Account Notification</p>
                   </div>
               </div>
           </body>
