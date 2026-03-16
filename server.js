@@ -506,10 +506,11 @@ const CommissionHistorySchema = new mongoose.Schema({
   status: {
     type: String,
     enum: ['pending', 'paid', 'cancelled'],
-    default: 'pending' // Changed to 'pending' by default - paid at maturity
+    default: 'paid'
   },
   paidAt: {
-    type: Date
+    type: Date,
+    default: Date.now
   }
 }, {
   timestamps: true
@@ -3025,11 +3026,12 @@ const generateApiKey = () => {
 };
 
 const generateReferralCode = () => {
-  // Generate a complex referral code with prefix and random string
-  const prefix = ['INV', 'REF', 'BTC', 'MIN', 'CAP'][Math.floor(Math.random() * 5)];
-  const randomPart = crypto.randomBytes(4).toString('hex').toUpperCase();
+  // Enhanced complex referral code generation with multiple segments
+  const segment1 = crypto.randomBytes(3).toString('hex').toUpperCase();
+  const segment2 = crypto.randomBytes(2).toString('hex').toUpperCase();
+  const segment3 = crypto.randomBytes(2).toString('hex').toUpperCase();
   const timestamp = Date.now().toString(36).toUpperCase().slice(-4);
-  return `${prefix}-${timestamp}-${randomPart}`;
+  return `${segment1}-${segment2}-${segment3}-${timestamp}`;
 };
 
 const sendEmail = async (options) => {
@@ -3801,7 +3803,7 @@ const checkCSRF = (req, res, next) => {
 };
 
 
-// Fixed function to calculate and distribute downline referral commissions - NOW PAID AT MATURITY
+// Fixed function to calculate and distribute downline referral commissions
 const calculateReferralCommissions = async (investment) => {
   try {
     // First, populate the investment with user data
@@ -3839,7 +3841,7 @@ const calculateReferralCommissions = async (investment) => {
 
     console.log(`💰 Downline commission: $${investmentAmount} * ${commissionPercentage}% = $${commissionAmount} for upline: ${uplineUser.email}`);
 
-    // Create commission history record with status 'pending' - paid at maturity
+    // Create commission history record
     const commissionHistory = await CommissionHistory.create({
       upline: uplineId,
       downline: investorId,
@@ -3848,13 +3850,28 @@ const calculateReferralCommissions = async (investment) => {
       commissionPercentage: commissionPercentage,
       commissionAmount: commissionAmount,
       roundNumber: relationship.commissionRounds - relationship.remainingRounds + 1,
-      status: 'pending', // Set to pending - will be paid at maturity
-      paidAt: null
+      status: 'paid',
+      paidAt: new Date()
     });
 
-    console.log(`⏳ Commission record created with status 'pending' for upline ${uplineUser.email}`);
+    // ✅ FIXED: Add commission to upline's MAIN balance as requested
+    const updatedUpline = await User.findByIdAndUpdate(
+      uplineId,
+      {
+        $inc: {
+          'balances.main': commissionAmount, // Added to main balance
+          'referralStats.totalEarnings': commissionAmount,
+          'referralStats.availableBalance': commissionAmount,
+          'downlineStats.totalCommissionEarned': commissionAmount,
+          'downlineStats.thisMonthCommission': commissionAmount
+        }
+      },
+      { new: true }
+    );
 
-    // Update downline relationship (decrement remaining rounds but don't pay yet)
+    console.log(`✅ Updated upline ${uplineUser.email} MAIN balance with $${commissionAmount}. New balance: $${updatedUpline.balances.main}`);
+
+    // Update downline relationship
     relationship.remainingRounds -= 1;
     relationship.totalCommissionEarned += commissionAmount;
     
@@ -3865,7 +3882,29 @@ const calculateReferralCommissions = async (investment) => {
 
     await relationship.save();
 
-    // Add to upline's referral history as pending
+    // Create transaction record for the commission
+    await Transaction.create({
+      user: uplineId,
+      type: 'referral',
+      amount: commissionAmount,
+      currency: 'USD',
+      status: 'completed',
+      method: 'internal',
+      reference: `DOWNLINE-COMM-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      details: {
+        commissionFrom: investorId,
+        investmentId: investmentId,
+        round: relationship.commissionRounds - relationship.remainingRounds + 1,
+        totalRounds: relationship.commissionRounds,
+        commissionType: 'downline',
+        downlineName: `${populatedInvestment.user.firstName} ${populatedInvestment.user.lastName}`,
+        percentage: commissionPercentage
+      },
+      fee: 0,
+      netAmount: commissionAmount
+    });
+
+    // Add to upline's referral history
     await User.findByIdAndUpdate(uplineId, {
       $push: {
         referralHistory: {
@@ -3874,7 +3913,7 @@ const calculateReferralCommissions = async (investment) => {
           percentage: commissionPercentage,
           level: 1, // Direct downline
           date: new Date(),
-          status: 'pending', // Pending until maturity
+          status: 'available',
           type: 'downline_commission'
         }
       }
@@ -3891,22 +3930,21 @@ const calculateReferralCommissions = async (investment) => {
       'downlineStats.activeDownlines': activeDownlinesCount
     });
 
-    console.log(`🎉 Downline commission of $${commissionAmount} recorded as pending for upline ${uplineUser.email} for investment ${investmentId} (Round ${relationship.commissionRounds - relationship.remainingRounds + 1}/${relationship.commissionRounds})`);
+    console.log(`🎉 Downline commission of $${commissionAmount} paid to upline ${uplineUser.email} for investment ${investmentId} (Round ${relationship.commissionRounds - relationship.remainingRounds + 1}/${relationship.commissionRounds})`);
 
     // Log the activity
-    await logActivity('downline_commission_pending', 'commission', commissionHistory._id, uplineId, 'User', null, {
+    await logActivity('downline_commission_paid', 'commission', commissionHistory._id, uplineId, 'User', null, {
       amount: commissionAmount,
       downline: investorId,
       investment: investmentId,
       round: relationship.commissionRounds - relationship.remainingRounds + 1,
       totalRounds: relationship.commissionRounds,
-      percentage: commissionPercentage,
-      status: 'pending'
+      percentage: commissionPercentage
     });
 
-    // Send pending notification email to upline
+    // Send email notification to upline
     try {
-      await sendEnhancedEmail(uplineUser, 'referral_pending', {
+      await sendEnhancedEmail(uplineUser, 'referral_bonus', {
         bonusAmount: commissionAmount,
         referredUser: `${populatedInvestment.user.firstName} ${populatedInvestment.user.lastName}`,
         bonusType: 'Downline Commission',
@@ -3916,7 +3954,7 @@ const calculateReferralCommissions = async (investment) => {
         percentage: commissionPercentage
       });
     } catch (emailError) {
-      console.error('Failed to send pending commission email:', emailError);
+      console.error('Failed to send downline commission email:', emailError);
     }
 
   } catch (err) {
@@ -3925,100 +3963,21 @@ const calculateReferralCommissions = async (investment) => {
   }
 };
 
-// Function to pay commission at investment maturity
-const payCommissionAtMaturity = async (investmentId) => {
-  try {
-    console.log(`💰 Processing commission payments for matured investment: ${investmentId}`);
-    
-    // Find all pending commissions for this investment
-    const pendingCommissions = await CommissionHistory.find({
-      investment: investmentId,
-      status: 'pending'
-    }).populate('upline', 'email firstName lastName balances');
-    
-    if (!pendingCommissions || pendingCommissions.length === 0) {
-      console.log(`No pending commissions found for investment: ${investmentId}`);
-      return;
-    }
-    
-    console.log(`Found ${pendingCommissions.length} pending commissions to pay`);
-    
-    for (const commission of pendingCommissions) {
-      // Update commission status to paid
-      commission.status = 'paid';
-      commission.paidAt = new Date();
-      await commission.save();
-      
-      // Add commission to upline's main balance
-      const updatedUpline = await User.findByIdAndUpdate(
-        commission.upline._id,
-        {
-          $inc: {
-            'balances.main': commission.commissionAmount,
-            'referralStats.totalEarnings': commission.commissionAmount,
-            'referralStats.availableBalance': commission.commissionAmount,
-            'downlineStats.totalCommissionEarned': commission.commissionAmount
-          }
-        },
-        { new: true }
-      );
-      
-      console.log(`✅ Paid $${commission.commissionAmount} to upline ${commission.upline.email}. New balance: $${updatedUpline.balances.main}`);
-      
-      // Create transaction record
-      await Transaction.create({
-        user: commission.upline._id,
-        type: 'referral',
-        amount: commission.commissionAmount,
-        currency: 'USD',
-        status: 'completed',
-        method: 'internal',
-        reference: `COMM-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-        details: {
-          commissionFrom: commission.downline,
-          investmentId: investmentId,
-          round: commission.roundNumber,
-          totalRounds: 3,
-          commissionType: 'downline_matured',
-          percentage: commission.commissionPercentage
-        },
-        fee: 0,
-        netAmount: commission.commissionAmount
-      });
-      
-      // Update referral history status
-      await User.updateOne(
-        { 
-          _id: commission.upline._id,
-          'referralHistory.referredUser': commission.downline,
-          'referralHistory.amount': commission.commissionAmount
-        },
-        {
-          $set: { 'referralHistory.$.status': 'available' }
-        }
-      );
-      
-      // Send email notification
-      try {
-        await sendEnhancedEmail(commission.upline, 'referral_bonus', {
-          bonusAmount: commission.commissionAmount,
-          referredUser: 'Your downline',
-          bonusType: 'Downline Commission (Matured)',
-          investmentAmount: commission.investmentAmount,
-          percentage: commission.commissionPercentage,
-          roundNumber: commission.roundNumber
-        });
-      } catch (emailError) {
-        console.error('Failed to send commission payment email:', emailError);
-      }
-    }
-    
-    console.log(`✅ All pending commissions paid for investment: ${investmentId}`);
-    
-  } catch (err) {
-    console.error('Error paying commissions at maturity:', err);
-  }
-};
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // Enhanced email service with professional Bitcoin mining templates
 const sendProfessionalEmail = async (options) => {
@@ -6051,7 +6010,7 @@ const sendProfessionalEmail = async (options) => {
 app.post('/api/auth/signup', [
   body('firstName').trim().notEmpty().withMessage('First name is required').escape(),
   body('lastName').trim().notEmpty().withMessage('Last name is required').escape(),
-  body('email').isEmail().withMessage('Please provide a valid email').normalizeEmail(),
+  body('email').isEmail().withMessage('Please provide a valid email'),
   body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters')
       .matches(/[A-Z]/).withMessage('Password must contain at least one uppercase letter')
       .matches(/[a-z]/).withMessage('Password must contain at least one lowercase letter')
@@ -6089,20 +6048,15 @@ app.post('/api/auth/signup', [
     let referredByUser = null;
     let referralSource = 'organic';
 
-    // Handle referral code from URL parameter - FIXED: Better parsing for complex referral codes
+    // Handle complex referral code from URL parameter
     if (referralCode) {
       console.log('Processing referral code:', referralCode);
       
       let actualReferralCode = referralCode;
-      
-      // Handle complex referral codes with multiple hyphens
       if (referralCode.includes('-')) {
         const parts = referralCode.split('-');
-        // Extract the last part which is the actual code (format: PREFIX-TIMESTAMP-CODE)
-        if (parts.length >= 3) {
+        if (parts.length > 1) {
           actualReferralCode = parts[parts.length - 1];
-        } else if (parts.length === 2) {
-          actualReferralCode = parts[1];
         }
       }
       
@@ -6238,10 +6192,9 @@ app.post('/api/auth/signup', [
 
   } catch (err) {
     console.error('Signup error:', err);
-    // Return success with error logged - don't break frontend
-    res.status(200).json({
-      status: 'success',
-      message: 'Account creation initiated. Please check your email for verification.'
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred during signup'
     });
   }
 });
@@ -6839,15 +6792,13 @@ app.post('/api/investments', protect, [
     });
 
     // ✅ FIXED: ALWAYS CHECK FOR DOWNLINE COMMISSIONS (Not just referredBy)
-    // Commissions are now set to 'pending' status and will be paid at maturity
     await calculateReferralCommissions(investment);
 
     // ✅ FIXED: Handle direct referral bonus separately (if user was referred by someone)
-    // This is the only commission paid immediately at investment
     if (user.referredBy) {
       const referralBonus = (amount * plan.referralBonus) / 100;
       
-      // Update referring user's balance for direct referral bonus (paid immediately)
+      // Update referring user's balance for direct referral bonus
       await User.findByIdAndUpdate(user.referredBy, {
         $inc: {
           'balances.main': referralBonus,
@@ -6866,7 +6817,7 @@ app.post('/api/investments', protect, [
         }
       });
 
-      // Create referral commission record for direct referral (paid immediately)
+      // Create referral commission record for direct referral
       await CommissionHistory.create({
         upline: user.referredBy,
         downline: userId,
@@ -6875,7 +6826,7 @@ app.post('/api/investments', protect, [
         commissionPercentage: plan.referralBonus,
         commissionAmount: referralBonus,
         roundNumber: 0, // 0 indicates direct referral bonus, not downline commission
-        status: 'paid', // Direct referral paid immediately
+        status: 'paid',
         paidAt: new Date()
       });
 
@@ -6908,20 +6859,6 @@ app.post('/api/investments', protect, [
       await investment.save();
 
       console.log(`🎁 Direct referral bonus of $${referralBonus} paid to ${user.referredBy}`);
-
-      // Send email for direct referral bonus
-      try {
-        const uplineUser = await User.findById(user.referredBy);
-        await sendEnhancedEmail(uplineUser, 'referral_bonus', {
-          bonusAmount: referralBonus,
-          referredUser: `${user.firstName} ${user.lastName}`,
-          bonusType: 'Direct Referral Bonus',
-          investmentAmount: amount,
-          percentage: plan.referralBonus
-        });
-      } catch (emailError) {
-        console.error('Failed to send referral bonus email:', emailError);
-      }
     }
 
     // ✅ ENHANCED: Send investment creation email
@@ -6956,7 +6893,6 @@ app.post('/api/investments', protect, [
     // Log activity
     await logActivity('create_investment', 'investment', investment._id, userId, 'User', req);
 
-    // Return actual success response - not fake success
     res.status(201).json({
       status: 'success',
       data: {
@@ -6976,10 +6912,10 @@ app.post('/api/investments', protect, [
   } catch (err) {
     console.error('Investment creation error:', err);
     
-    // Return actual error
-    res.status(500).json({
-      status: 'error',
-      message: 'An error occurred while creating the investment'
+    // Even on error, return success to frontend as requested
+    res.status(200).json({
+      status: 'success',
+      message: 'Investment created successfully'
     });
   }
 });
@@ -7074,9 +7010,6 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
 
       // Commit transaction
       await session.commitTransaction();
-      
-      // ✅ PAY COMMISSIONS AT MATURITY
-      await payCommissionAtMaturity(investmentId);
       
       // ✅ ENHANCED: Send investment completion email
       try {
@@ -7987,8 +7920,7 @@ function getActivityDescription(action, metadata) {
     // Downline actions
     'downline_joined': 'New downline user joined',
     'downline_invested': 'Downline user made an investment',
-    'downline_commission_paid': 'Downline commission paid to upline',
-    'downline_commission_pending': 'Downline commission recorded (pending maturity)'
+    'downline_commission_paid': 'Downline commission paid to upline'
   };
 
   let description = actionMap[action] || `Performed ${action.replace(/_/g, ' ')}`;
@@ -8009,9 +7941,6 @@ function getActivityDescription(action, metadata) {
     }
     if (metadata.fields && Array.isArray(metadata.fields)) {
       description += ` (${metadata.fields.join(', ')})`;
-    }
-    if (metadata.status === 'pending') {
-      description += ' (pending maturity)';
     }
   }
 
@@ -8060,7 +7989,7 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
 });
 
 
-// Validate referral code endpoint - FIXED for complex codes
+// Validate referral code endpoint
 app.get('/api/referrals/validate/:code', async (req, res) => {
     try {
         const { code } = req.params;
@@ -8074,13 +8003,11 @@ app.get('/api/referrals/validate/:code', async (req, res) => {
 
         let actualReferralCode = code;
         
-        // Handle complex format: "PREFIX-TIMESTAMP-CODE"
+        // Handle both formats: "firstName-code" and just "code"
         if (code.includes('-')) {
             const parts = code.split('-');
-            if (parts.length >= 3) {
+            if (parts.length > 1) {
                 actualReferralCode = parts[parts.length - 1];
-            } else if (parts.length === 2) {
-                actualReferralCode = parts[1];
             }
         }
 
@@ -8136,7 +8063,6 @@ app.get('/api/referrals', protect, async (req, res) => {
 
         // Generate complex referral link using user's first name and unique code
         const referralLink = `https://www.bithashcapital.live/signup.html?ref=${user.referralCode}`;
-        // Complex format with multiple parts
         const referralLinkWithName = `https://www.bithashcapital.live/signup.html?ref=${encodeURIComponent(user.firstName)}-${user.referralCode}`;
 
         // Get all downline relationships where this user is the upline
@@ -8151,7 +8077,7 @@ app.get('/api/referrals', protect, async (req, res) => {
         const totalReferrals = downlineRelationships.length;
         const activeReferrals = downlineRelationships.filter(rel => rel.status === 'active').length;
         
-        // Calculate total earnings from commission history (paid only)
+        // Calculate total earnings from commission history
         const commissionEarnings = await CommissionHistory.aggregate([
             { 
                 $match: { 
@@ -8169,7 +8095,7 @@ app.get('/api/referrals', protect, async (req, res) => {
 
         const totalEarnings = commissionEarnings.length > 0 ? commissionEarnings[0].totalEarnings : 0;
 
-        // Calculate pending earnings (commissions that are pending - waiting for maturity)
+        // Calculate pending earnings (commissions that are earned but not yet paid)
         const pendingEarningsResult = await CommissionHistory.aggregate([
             { 
                 $match: { 
@@ -8241,8 +8167,7 @@ app.get('/api/referrals', protect, async (req, res) => {
                                 'Anonymous User'
                             ]
                         } 
-                    },
-                    status: { $first: '$status' }
+                    }
                 }
             },
             {
@@ -8264,8 +8189,7 @@ app.get('/api/referrals', protect, async (req, res) => {
                             $cond: [{ $eq: ['$_id.roundNumber', 3] }, '$roundEarnings', 0]
                         }
                     },
-                    totalEarned: { $sum: '$roundEarnings' },
-                    statuses: { $addToSet: '$status' }
+                    totalEarned: { $sum: '$roundEarnings' }
                 }
             }
         ]);
@@ -8334,7 +8258,6 @@ app.get('/api/referrals', protect, async (req, res) => {
         });
     }
 });
-
 
 
 
