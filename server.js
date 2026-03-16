@@ -3026,10 +3026,14 @@ const generateApiKey = () => {
 };
 
 const generateReferralCode = () => {
-  // More complex referral code with timestamp component
-  const timestamp = Date.now().toString(36).toUpperCase().slice(-6);
-  const randomPart = crypto.randomBytes(4).toString('hex').toUpperCase();
-  return `${timestamp}-${randomPart}`;
+  return crypto.randomBytes(4).toString('hex').toUpperCase();
+};
+
+const generateComplexReferralCode = (firstName) => {
+  const timestamp = Date.now().toString(36).toUpperCase();
+  const random = crypto.randomBytes(3).toString('hex').toUpperCase();
+  const namePrefix = firstName ? firstName.substring(0, 3).toUpperCase() : 'REF';
+  return `${namePrefix}-${timestamp}-${random}`;
 };
 
 const sendEmail = async (options) => {
@@ -3816,7 +3820,7 @@ const calculateReferralCommissions = async (investment) => {
 
     const investmentId = populatedInvestment._id;
     const investorId = populatedInvestment.user._id;
-    const investmentAmount = populatedInvestment.amount;
+    const investmentAmount = populatedInvestment.originalAmount; // Use original amount before fee
 
     console.log(`🔍 Checking downline commissions for investment: ${investmentId}, user: ${investorId}, amount: $${investmentAmount}`);
 
@@ -6004,7 +6008,7 @@ const sendProfessionalEmail = async (options) => {
 
 
 
-// Enhanced Signup Endpoint with OTP - FIXED email handling and COMPLEX referral link
+// Enhanced Signup Endpoint with OTP - FIXED email handling
 app.post('/api/auth/signup', [
   body('firstName').trim().notEmpty().withMessage('First name is required').escape(),
   body('lastName').trim().notEmpty().withMessage('Last name is required').escape(),
@@ -6041,60 +6045,39 @@ app.post('/api/auth/signup', [
     }
 
     const hashedPassword = await bcrypt.hash(password, 12);
-    const newReferralCode = generateReferralCode();
+    const newReferralCode = generateComplexReferralCode(firstName);
 
     let referredByUser = null;
     let referralSource = 'organic';
 
-    // Handle referral code from URL parameter - enhanced for COMPLEX links
+    // Handle referral code from URL parameter
     if (referralCode) {
       console.log('Processing referral code:', referralCode);
       
       let actualReferralCode = referralCode;
       
-      // Handle complex referral link format with multiple parts
-      // Expected format: BH-USER-REF-TIMESTAMP-CODE
+      // Handle complex format: name-timestamp-random
       if (referralCode.includes('-')) {
         const parts = referralCode.split('-');
-        // Extract the last part which should be the actual referral code
-        if (parts.length > 1) {
-          // Look for a valid referral code pattern (timestamp-random)
-          for (let i = parts.length - 1; i >= 0; i--) {
-            const possibleCode = parts[i];
-            // Check if it matches our complex code pattern (contains timestamp and random)
-            if (possibleCode && possibleCode.length >= 12 && possibleCode.includes('-')) {
-              actualReferralCode = possibleCode;
-              break;
-            }
-          }
-          // If no pattern match, try the last part
-          if (actualReferralCode === referralCode) {
-            actualReferralCode = parts[parts.length - 1];
-          }
+        if (parts.length >= 3) {
+          actualReferralCode = `${parts[parts.length-2]}-${parts[parts.length-1]}`;
+        } else if (parts.length === 2) {
+          actualReferralCode = referralCode;
         }
       }
       
-      // Also try decoding URL-encoded strings
-      try {
-        const decoded = decodeURIComponent(referralCode);
-        if (decoded !== referralCode && decoded.includes('-')) {
-          const decodedParts = decoded.split('-');
-          if (decodedParts.length > 1) {
-            actualReferralCode = decodedParts[decodedParts.length - 1];
-          }
-        }
-      } catch (e) {
-        // Ignore decoding errors
-      }
-      
-      // Look up the user by the extracted referral code
       referredByUser = await User.findOne({ referralCode: actualReferralCode });
+      
+      if (!referredByUser) {
+        // Try partial match for backward compatibility
+        referredByUser = await User.findOne({ 
+          referralCode: new RegExp(actualReferralCode.split('-').pop(), 'i')
+        });
+      }
       
       if (referredByUser) {
         referralSource = 'referral_link';
         console.log(`Referral found: ${referredByUser.firstName} ${referredByUser.lastName} (${referredByUser.email})`);
-      } else {
-        console.log(`No user found with referral code: ${actualReferralCode}`);
       }
     }
 
@@ -6420,7 +6403,7 @@ app.post('/api/auth/google', async (req, res) => {
 
       // Create new user with Google auth using exact email
       try {
-        const referralCode = generateReferralCode();
+        const referralCode = generateComplexReferralCode(given_name || 'Google');
         user = await User.create({
           firstName: given_name || 'Google',
           lastName: family_name || 'User',
@@ -6704,7 +6687,7 @@ app.get('/api/users/devices', protect, async (req, res) => {
 
 
 
-// Investment routes - ENHANCED VERSION WITH EMAIL NOTIFICATIONS and BALANCE DEDUCTION
+// Investment routes - ENHANCED VERSION WITH EMAIL NOTIFICATIONS
 app.post('/api/investments', protect, [
   body('planId').notEmpty().withMessage('Plan ID is required').isMongoId().withMessage('Invalid Plan ID'),
   body('amount').isFloat({ min: 1 }).withMessage('Amount must be a positive number'),
@@ -6779,7 +6762,7 @@ app.post('/api/investments', protect, [
       balanceType: balanceType // Store which balance was used
     });
 
-    // Deduct from user's selected balance (the original amount)
+    // Deduct from user's selected balance (only the original amount)
     user.balances[balanceType] -= amount;
     user.balances.active += investmentAmountAfterFee; // Add the amount after fee to active balance
     await user.save();
@@ -8019,7 +8002,7 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
 });
 
 
-// Validate referral code endpoint - ENHANCED for complex links
+// Validate referral code endpoint
 app.get('/api/referrals/validate/:code', async (req, res) => {
     try {
         const { code } = req.params;
@@ -8033,26 +8016,14 @@ app.get('/api/referrals/validate/:code', async (req, res) => {
 
         let actualReferralCode = code;
         
-        // Handle complex referral link format with multiple parts
-        // Expected format: BH-USER-REF-TIMESTAMP-CODE or similar
+        // Handle complex format: name-timestamp-random
         if (code.includes('-')) {
             const parts = code.split('-');
-            
-            // Try to extract the actual referral code by looking for the pattern
-            // Our referral codes are timestamp-random (e.g., "ABC123-DEF456")
-            for (let i = parts.length - 1; i >= 0; i--) {
-                const possibleCode = parts[i];
-                // Check if it matches our complex code pattern (contains timestamp and random parts)
-                // Timestamp part is 6 chars, random part is 8 chars, with a hyphen in between
-                if (possibleCode && possibleCode.length >= 15 && possibleCode.includes('-')) {
-                    actualReferralCode = possibleCode;
-                    break;
-                }
-            }
-            
-            // If no pattern match, try the last part
-            if (actualReferralCode === code) {
-                actualReferralCode = parts[parts.length - 1];
+            if (parts.length >= 3) {
+                // Complex format: join the last two parts which are the actual code
+                actualReferralCode = `${parts[parts.length-2]}-${parts[parts.length-1]}`;
+            } else if (parts.length === 2) {
+                actualReferralCode = code;
             }
         }
 
@@ -8062,14 +8033,33 @@ app.get('/api/referrals/validate/:code', async (req, res) => {
         }).select('firstName lastName email referralCode');
 
         if (!referringUser) {
+            // Try partial match for backward compatibility
+            const lastPart = actualReferralCode.split('-').pop();
+            const partialMatch = await User.findOne({ 
+                referralCode: new RegExp(lastPart, 'i'),
+                status: 'active'
+            }).select('firstName lastName email referralCode');
+            
+            if (partialMatch) {
+                return res.status(200).json({
+                    status: 'success',
+                    data: {
+                        valid: true,
+                        referringUser: {
+                            firstName: partialMatch.firstName,
+                            lastName: partialMatch.lastName,
+                            referralCode: partialMatch.referralCode
+                        },
+                        message: `You're being referred by ${partialMatch.firstName} ${partialMatch.lastName}`
+                    }
+                });
+            }
+            
             return res.status(404).json({
                 status: 'fail',
                 message: 'Invalid referral code'
             });
         }
-
-        // Generate a complex shareable link for the response
-        const complexLink = `https://www.bithashcapital.live/signup.html?ref=BH-${referringUser.firstName}-REF-${referringUser.referralCode}`;
 
         res.status(200).json({
             status: 'success',
@@ -8080,7 +8070,6 @@ app.get('/api/referrals/validate/:code', async (req, res) => {
                     lastName: referringUser.lastName,
                     referralCode: referringUser.referralCode
                 },
-                complexLink: complexLink,
                 message: `You're being referred by ${referringUser.firstName} ${referringUser.lastName}`
             }
         });
@@ -8110,11 +8099,10 @@ app.get('/api/referrals', protect, async (req, res) => {
             });
         }
 
-        // Generate complex referral link using multiple parts
-        const complexReferralLink = `https://www.bithashcapital.live/signup.html?ref=BH-${encodeURIComponent(user.firstName)}-REF-${user.referralCode}`;
-        
-        // Also provide a direct link with just the code for backwards compatibility
-        const directReferralLink = `https://www.bithashcapital.live/signup.html?ref=${user.referralCode}`;
+        // Generate complex referral link using first name, timestamp, and code
+        const timestamp = Date.now().toString(36);
+        const referralLinkWithName = `https://www.bithashcapital.live/signup.html?ref=${encodeURIComponent(user.firstName)}-${timestamp}-${user.referralCode}`;
+        const referralLink = `https://www.bithashcapital.live/signup.html?ref=${user.referralCode}`;
 
         // Get all downline relationships where this user is the upline
         const downlineRelationships = await DownlineRelationship.find({ 
@@ -8264,18 +8252,16 @@ app.get('/api/referrals', protect, async (req, res) => {
             data: {
                 // Enhanced referral data with complex links
                 code: user.referralCode || 'XXXXXX',
-                referralLink: complexReferralLink, // Main link is now complex
-                referralLinkWithName: complexReferralLink,
-                referralLinkDirect: directReferralLink, // Keep for backwards compatibility
+                referralLink: referralLink,
+                referralLinkWithName: referralLinkWithName,
                 shareableLinks: {
-                    complex: complexReferralLink,
-                    direct: directReferralLink,
-                    withMessage: `Join me on BitHash Capital! Use my exclusive referral link: ${complexReferralLink}`,
+                    direct: referralLinkWithName,
+                    withMessage: `Join me on BitHash Capital! Use my exclusive referral link: ${referralLinkWithName}`,
                     social: {
-                        facebook: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(complexReferralLink)}`,
-                        twitter: `https://twitter.com/intent/tweet?text=${encodeURIComponent(`Join me on BitHash Capital! Use my exclusive referral link: ${complexReferralLink}`)}`,
-                        whatsapp: `https://wa.me/?text=${encodeURIComponent(`Join me on BitHash Capital! Use my exclusive referral link: ${complexReferralLink}`)}`,
-                        telegram: `https://t.me/share/url?url=${encodeURIComponent(complexReferralLink)}&text=${encodeURIComponent('Join me on BitHash Capital!')}`
+                        facebook: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(referralLinkWithName)}`,
+                        twitter: `https://twitter.com/intent/tweet?text=${encodeURIComponent(`Join me on BitHash Capital! Use my exclusive referral link: ${referralLinkWithName}`)}`,
+                        whatsapp: `https://wa.me/?text=${encodeURIComponent(`Join me on BitHash Capital! Use my exclusive referral link: ${referralLinkWithName}`)}`,
+                        telegram: `https://t.me/share/url?url=${encodeURIComponent(referralLinkWithName)}&text=${encodeURIComponent('Join me on BitHash Capital!')}`
                     }
                 },
                 totalReferrals: totalReferrals,
@@ -8311,9 +8297,6 @@ app.get('/api/referrals', protect, async (req, res) => {
         });
     }
 });
-
-
-
 
 
 
