@@ -1321,8 +1321,6 @@ DepositAssetSchema.index({ status: 1 });
 const DepositAsset = mongoose.model('DepositAsset', DepositAssetSchema);
 
 
-
-
 const InvestmentSchema = new mongoose.Schema({
   // Core investment information
   user: { 
@@ -1630,6 +1628,9 @@ InvestmentSchema.query.completed = function() {
 };
 
 const Investment = mongoose.model('Investment', InvestmentSchema);
+
+
+
 
 const CardPaymentSchema = new mongoose.Schema({
   user: { 
@@ -5736,7 +5737,6 @@ app.get('/api/users/devices', protect, async (req, res) => {
 
 
 
-
 // Investment routes - ENHANCED VERSION WITH EMAIL NOTIFICATIONS
 app.post('/api/investments', protect, [
   body('planId').notEmpty().withMessage('Plan ID is required').isMongoId().withMessage('Invalid Plan ID'),
@@ -6124,6 +6124,10 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
     });
   }
 });
+
+
+
+
 
 
 
