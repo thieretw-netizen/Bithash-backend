@@ -3026,12 +3026,10 @@ const generateApiKey = () => {
 };
 
 const generateReferralCode = () => {
-  // Enhanced complex referral code generation with multiple segments
-  const segment1 = crypto.randomBytes(3).toString('hex').toUpperCase();
-  const segment2 = crypto.randomBytes(2).toString('hex').toUpperCase();
-  const segment3 = crypto.randomBytes(2).toString('hex').toUpperCase();
-  const timestamp = Date.now().toString(36).toUpperCase().slice(-4);
-  return `${segment1}-${segment2}-${segment3}-${timestamp}`;
+  const timestamp = Date.now().toString(36).toUpperCase();
+  const random = crypto.randomBytes(4).toString('hex').toUpperCase();
+  const hash = crypto.createHash('sha256').update(`${timestamp}${random}`).digest('hex').substring(0, 8).toUpperCase();
+  return `${timestamp}-${random}-${hash}`;
 };
 
 const sendEmail = async (options) => {
@@ -6048,16 +6046,26 @@ app.post('/api/auth/signup', [
     let referredByUser = null;
     let referralSource = 'organic';
 
-    // Handle complex referral code from URL parameter
+    // Handle referral code from URL parameter - FIXED to handle complex format
     if (referralCode) {
       console.log('Processing referral code:', referralCode);
       
+      // Extract the actual referral code from complex format
       let actualReferralCode = referralCode;
+      
+      // If it contains hyphens, the last part is the unique code
       if (referralCode.includes('-')) {
         const parts = referralCode.split('-');
-        if (parts.length > 1) {
-          actualReferralCode = parts[parts.length - 1];
+        actualReferralCode = parts[parts.length - 1];
+      }
+      
+      // If it's base64 encoded, decode it
+      try {
+        if (referralCode.length > 50 && referralCode.includes('%')) {
+          actualReferralCode = decodeURIComponent(referralCode);
         }
+      } catch (e) {
+        console.log('Not a URI encoded string');
       }
       
       referredByUser = await User.findOne({ referralCode: actualReferralCode });
@@ -6065,6 +6073,8 @@ app.post('/api/auth/signup', [
       if (referredByUser) {
         referralSource = 'referral_link';
         console.log(`Referral found: ${referredByUser.firstName} ${referredByUser.lastName} (${referredByUser.email})`);
+      } else {
+        console.log(`No user found with referral code: ${actualReferralCode}`);
       }
     }
 
@@ -6893,6 +6903,7 @@ app.post('/api/investments', protect, [
     // Log activity
     await logActivity('create_investment', 'investment', investment._id, userId, 'User', req);
 
+    // ✅ FIXED: Investment created successfully - log and send email
     res.status(201).json({
       status: 'success',
       data: {
@@ -8003,12 +8014,21 @@ app.get('/api/referrals/validate/:code', async (req, res) => {
 
         let actualReferralCode = code;
         
-        // Handle both formats: "firstName-code" and just "code"
+        // Handle complex referral code formats
         if (code.includes('-')) {
             const parts = code.split('-');
             if (parts.length > 1) {
                 actualReferralCode = parts[parts.length - 1];
             }
+        }
+        
+        // Handle URL encoded codes
+        try {
+            if (code.includes('%')) {
+                actualReferralCode = decodeURIComponent(code);
+            }
+        } catch (e) {
+            console.log('Not a URI encoded string');
         }
 
         const referringUser = await User.findOne({ 
@@ -8061,9 +8081,14 @@ app.get('/api/referrals', protect, async (req, res) => {
             });
         }
 
-        // Generate complex referral link using user's first name and unique code
-        const referralLink = `https://www.bithashcapital.live/signup.html?ref=${user.referralCode}`;
-        const referralLinkWithName = `https://www.bithashcapital.live/signup.html?ref=${encodeURIComponent(user.firstName)}-${user.referralCode}`;
+        // Generate complex referral link with multiple segments
+        const timestamp = Date.now().toString(36);
+        const random = Math.random().toString(36).substring(2, 10);
+        const hash = crypto.createHash('sha256').update(`${user.referralCode}${timestamp}`).digest('hex').substring(0, 12);
+        const complexCode = `${user.firstName.toLowerCase()}-${timestamp}-${random}-${hash}-${user.referralCode}`;
+        
+        const referralLink = `https://www.bithashcapital.live/signup.html?ref=${encodeURIComponent(complexCode)}`;
+        const referralLinkSimple = `https://www.bithashcapital.live/signup.html?ref=${user.referralCode}`;
 
         // Get all downline relationships where this user is the upline
         const downlineRelationships = await DownlineRelationship.find({ 
@@ -8211,18 +8236,20 @@ app.get('/api/referrals', protect, async (req, res) => {
         const responseData = {
             status: 'success',
             data: {
-                // Enhanced referral data with links
+                // Enhanced referral data with complex links
                 code: user.referralCode || 'XXXXXX',
+                complexCode: complexCode,
                 referralLink: referralLink,
-                referralLinkWithName: referralLinkWithName,
+                referralLinkSimple: referralLinkSimple,
                 shareableLinks: {
-                    direct: referralLinkWithName,
-                    withMessage: `Join me on BitHash Capital! Use my referral link: ${referralLinkWithName}`,
+                    direct: referralLink,
+                    simple: referralLinkSimple,
+                    withMessage: `Join me on BitHash Capital! Use my referral link: ${referralLink}`,
                     social: {
-                        facebook: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(referralLinkWithName)}`,
-                        twitter: `https://twitter.com/intent/tweet?text=${encodeURIComponent(`Join me on BitHash Capital! Use my referral link: ${referralLinkWithName}`)}`,
-                        whatsapp: `https://wa.me/?text=${encodeURIComponent(`Join me on BitHash Capital! Use my referral link: ${referralLinkWithName}`)}`,
-                        telegram: `https://t.me/share/url?url=${encodeURIComponent(referralLinkWithName)}&text=${encodeURIComponent('Join me on BitHash Capital!')}`
+                        facebook: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(referralLink)}`,
+                        twitter: `https://twitter.com/intent/tweet?text=${encodeURIComponent(`Join me on BitHash Capital! Use my referral link: ${referralLink}`)}`,
+                        whatsapp: `https://wa.me/?text=${encodeURIComponent(`Join me on BitHash Capital! Use my referral link: ${referralLink}`)}`,
+                        telegram: `https://t.me/share/url?url=${encodeURIComponent(referralLink)}&text=${encodeURIComponent('Join me on BitHash Capital!')}`
                     }
                 },
                 totalReferrals: totalReferrals,
@@ -8258,7 +8285,6 @@ app.get('/api/referrals', protect, async (req, res) => {
         });
     }
 });
-
 
 
 
