@@ -3026,10 +3026,7 @@ const generateApiKey = () => {
 };
 
 const generateReferralCode = () => {
-  // ENHANCED: Generate complex referral code with timestamp and random bytes for uniqueness
-  const timestamp = Date.now().toString(36).toUpperCase();
-  const randomBytes = crypto.randomBytes(6).toString('hex').toUpperCase();
-  return `${timestamp}${randomBytes}`;
+  return crypto.randomBytes(4).toString('hex').toUpperCase();
 };
 
 const sendEmail = async (options) => {
@@ -4438,11 +4435,6 @@ const sendProfessionalEmail = async (options) => {
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>Verification Code - BitHash Capital</title>
-         
-<head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>Verification Code - BitHash Capital</title>
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@300;400;700&display=swap" rel="stylesheet">
               <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
               <style>
@@ -4502,8 +4494,8 @@ const sendProfessionalEmail = async (options) => {
                       font-family: 'Courier New', monospace; 
                   }
                   .security-note { 
-                      background: rgba(0, 216, 255, 0.1); 
-                      border-left: 4px solid #00D8FF; 
+                      background: #fff8e6; 
+                      border: 1px solid #f0b90b; 
                       padding: 20px; 
                       border-radius: 6px; 
                       margin: 25px 0; 
@@ -4570,75 +4562,70 @@ const sendProfessionalEmail = async (options) => {
                   * { margin: 0; padding: 0; box-sizing: border-box; }
                   body { 
                       font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
-                      line-height: 1.5; 
-                      color: #FFFFFF; 
-                      background-color: #0A0E17; 
+                      line-height: 1.6; 
+                      color: #1a1a1a; 
+                      background-color: #f8f9fa; 
                       margin: 0; 
                       padding: 0; 
                   }
                   .container { 
                       max-width: 600px; 
                       margin: 0 auto; 
-                      background: #0A0E17; 
+                      background: #ffffff; 
                   }
                   .header { 
-                      background: #05080F; 
-                      padding: 40px 40px 30px; 
+                      background: #0a0a0a; 
+                      padding: 30px 40px; 
                       text-align: center; 
-                      border-bottom: 2px solid #00D8FF; 
+                      border-bottom: 3px solid #27ae60; 
                   }
                   .logo-container { 
                       display: flex; 
                       align-items: center; 
                       justify-content: center; 
-                      gap: 12px; 
-                      margin-bottom: 20px; 
+                      gap: 15px; 
+                      margin-bottom: 15px; 
                   }
                   .logo-img { 
-                      width: 48px; 
-                      height: 48px; 
+                      width: 40px; 
+                      height: 40px; 
                       border-radius: 50%; 
                   }
                   .logo-text { 
-                      font-family: 'Rowdies', sans-serif;
-                      font-size: 28px; 
+                      font-size: 24px; 
                       font-weight: 700; 
-                      color: #00D8FF; 
+                      color: #f0b90b; 
+                      letter-spacing: -0.5px; 
                   }
-                  .logo-text span { color: #FFFFFF; }
                   .content { 
                       padding: 40px; 
-                      background: #0A0E17; 
+                      background: #ffffff; 
                   }
                   .login-info { 
-                      background: #111827; 
+                      background: #f8f9fa; 
                       padding: 25px; 
                       border-radius: 8px; 
                       margin: 25px 0; 
-                      border-left: 4px solid #00D8FF; 
+                      border-left: 4px solid #27ae60; 
                   }
                   .info-item { 
-                      margin-bottom: 12px; 
+                      margin-bottom: 10px; 
                       display: flex; 
-                      border-bottom: 1px solid #1F2937;
-                      padding-bottom: 8px;
                   }
-                  .info-item:last-child { border-bottom: none; }
                   .info-label { 
                       font-weight: 600; 
                       min-width: 120px; 
-                      color: #8E9BAE; 
+                      color: #333; 
                   }
-                  .info-value { color: #FFFFFF; }
                   .security-alert { 
-                      background: rgba(255, 0, 0, 0.1); 
-                      border-left: 4px solid #FF0000; 
+                      background: #fee; 
+                      border: 1px solid #e74c3c; 
                       padding: 20px; 
                       border-radius: 6px; 
                       margin: 20px 0; 
                   }
                   .footer { 
-                      background: #05080F; 
+                      background: #0a0a0a; 
                       padding: 25px 40px; 
                       text-align: center; 
                       color: #999; 
@@ -4664,19 +4651,19 @@ const sendProfessionalEmail = async (options) => {
                       <div class="login-info">
                           <div class="info-item">
                               <span class="info-label">Time:</span>
-                              <span class="info-value">${new Date().toLocaleString()}</span>
+                              <span>${new Date().toLocaleString()}</span>
                           </div>
                           <div class="info-item">
                               <span class="info-label">Device:</span>
-                              <span class="info-value">${data.deviceInfo?.browser?.name || 'Unknown'} on ${data.deviceInfo?.os?.name || 'Unknown'} (${data.deviceInfo?.deviceModel || 'Unknown'})</span>
+                              <span>${data.deviceInfo?.browser?.name || 'Unknown'} on ${data.deviceInfo?.os?.name || 'Unknown'} (${data.deviceInfo?.deviceModel || 'Unknown'})</span>
                           </div>
                           <div class="info-item">
                               <span class="info-label">Location:</span>
-                              <span class="info-value">${data.locationString || data.location || 'Unknown location'}</span>
+                              <span>${data.locationString || data.location || 'Unknown location'}</span>
                           </div>
                           <div class="info-item">
                               <span class="info-label">IP Address:</span>
-                              <span class="info-value">${data.ip || 'Unknown'}</span>
+                              <span>${data.ip || 'Unknown'}</span>
                           </div>
                       </div>
                       
@@ -4716,72 +4703,65 @@ const sendProfessionalEmail = async (options) => {
                   * { margin: 0; padding: 0; box-sizing: border-box; }
                   body { 
                       font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
-                      line-height: 1.5; 
-                      color: #FFFFFF; 
-                      background-color: #0A0E17; 
+                      line-height: 1.6; 
+                      color: #1a1a1a; 
+                      background-color: #f8f9fa; 
                       margin: 0; 
                       padding: 0; 
                   }
                   .container { 
                       max-width: 600px; 
                       margin: 0 auto; 
-                      background: #0A0E17; 
+                      background: #ffffff; 
                   }
                   .header { 
-                      background: #05080F; 
-                      padding: 40px 40px 30px; 
+                      background: #0a0a0a; 
+                      padding: 30px 40px; 
                       text-align: center; 
-                      border-bottom: 2px solid #FFA500; 
+                      border-bottom: 3px solid #e74c3c; 
                   }
                   .logo-container { 
                       display: flex; 
                       align-items: center; 
                       justify-content: center; 
-                      gap: 12px; 
-                      margin-bottom: 20px; 
+                      gap: 15px; 
+                      margin-bottom: 15px; 
                   }
                   .logo-img { 
-                      width: 48px; 
-                      height: 48px; 
+                      width: 40px; 
+                      height: 40px; 
                       border-radius: 50%; 
                   }
                   .logo-text { 
-                      font-family: 'Rowdies', sans-serif;
-                      font-size: 28px; 
+                      font-size: 24px; 
                       font-weight: 700; 
-                      color: #00D8FF; 
+                      color: #f0b90b; 
+                      letter-spacing: -0.5px; 
                   }
-                  .logo-text span { color: #FFFFFF; }
                   .content { 
                       padding: 40px; 
-                      background: #0A0E17; 
+                      background: #ffffff; 
                   }
                   .reset-button { 
-                      background: #FFA500; 
-                      color: #05080F; 
-                      padding: 16px 40px; 
+                      background: #e74c3c; 
+                      color: white; 
+                      padding: 14px 35px; 
                       text-decoration: none; 
-                      border-radius: 8px; 
+                      border-radius: 6px; 
                       display: inline-block; 
                       margin: 25px 0; 
                       font-weight: 600; 
-                      font-size: 16px; 
-                      transition: all 0.3s ease;
-                  }
-                  .reset-button:hover { 
-                      background: #FFB833; 
-                      transform: translateY(-2px); 
-                      box-shadow: 0 8px 20px rgba(255, 165, 0, 0.3);
+                      font-size: 15px; 
                   }
                   .security-note { 
-                      background: rgba(255, 165, 0, 0.1); 
-                      border-left: 4px solid #FFA500; 
+                      background: #fee; 
+                      border: 1px solid #e74c3c; 
                       padding: 20px; 
                       border-radius: 6px; 
                       margin: 25px 0; 
                   }
                   .footer { 
-                      background: #05080F; 
+                      background: #0a0a0a; 
                       padding: 25px 40px; 
                       text-align: center; 
                       color: #999; 
@@ -4842,87 +4822,77 @@ const sendProfessionalEmail = async (options) => {
                   * { margin: 0; padding: 0; box-sizing: border-box; }
                   body { 
                       font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
-                      line-height: 1.5; 
-                      color: #FFFFFF; 
-                      background-color: #0A0E17; 
+                      line-height: 1.6; 
+                      color: #1a1a1a; 
+                      background-color: #f8f9fa; 
                       margin: 0; 
                       padding: 0; 
                   }
                   .container { 
                       max-width: 600px; 
                       margin: 0 auto; 
-                      background: #0A0E17; 
+                      background: #ffffff; 
                   }
                   .header { 
-                      background: #05080F; 
-                      padding: 40px 40px 30px; 
+                      background: #0a0a0a; 
+                      padding: 30px 40px; 
                       text-align: center; 
-                      border-bottom: 2px solid #00D8FF; 
+                      border-bottom: 3px solid #f0b90b; 
                   }
                   .logo-container { 
                       display: flex; 
                       align-items: center; 
                       justify-content: center; 
-                      gap: 12px; 
-                      margin-bottom: 20px; 
+                      gap: 15px; 
+                      margin-bottom: 15px; 
                   }
                   .logo-img { 
-                      width: 48px; 
-                      height: 48px; 
+                      width: 40px; 
+                      height: 40px; 
                       border-radius: 50%; 
                   }
                   .logo-text { 
-                      font-family: 'Rowdies', sans-serif;
-                      font-size: 28px; 
+                      font-size: 24px; 
                       font-weight: 700; 
-                      color: #00D8FF; 
+                      color: #f0b90b; 
+                      letter-spacing: -0.5px; 
                   }
-                  .logo-text span { color: #FFFFFF; }
                   .content { 
                       padding: 40px; 
-                      background: #0A0E17; 
+                      background: #ffffff; 
                   }
                   .investment-details { 
-                      background: #111827; 
+                      background: #f8f9fa; 
                       padding: 25px; 
                       border-radius: 8px; 
                       margin: 25px 0; 
-                      border-left: 4px solid #00D8FF; 
+                      border-left: 4px solid #f0b90b; 
                   }
                   .detail-item { 
                       margin-bottom: 12px; 
                       display: flex; 
                       justify-content: space-between; 
-                      border-bottom: 1px solid #1F2937;
-                      padding-bottom: 8px;
                   }
-                  .detail-item:last-child { border-bottom: none; }
                   .detail-label { 
                       font-weight: 600; 
-                      color: #8E9BAE; 
+                      color: #333; 
                   }
                   .detail-value { 
-                      color: #00D8FF; 
-                      font-weight: 600; 
+                      color: #0a0a0a; 
+                      font-weight: 500; 
                   }
                   .cta-button { 
-                      background: #00D8FF; 
-                      color: #05080F; 
-                      padding: 16px 40px; 
+                      background: #f0b90b; 
+                      color: #0a0a0a; 
+                      padding: 12px 30px; 
                       text-decoration: none; 
-                      border-radius: 8px; 
+                      border-radius: 6px; 
                       display: inline-block; 
                       margin: 20px 0; 
                       font-weight: 600; 
-                      transition: all 0.3s ease;
-                  }
-                  .cta-button:hover { 
-                      background: #33E0FF; 
-                      transform: translateY(-2px); 
-                      box-shadow: 0 8px 20px rgba(0, 216, 255, 0.3);
                   }
                   .footer { 
-                      background: #05080F; 
+                      background: #0a0a0a; 
                       padding: 25px 40px; 
                       text-align: center; 
                       color: #999; 
@@ -4951,12 +4921,8 @@ const sendProfessionalEmail = async (options) => {
                               <span class="detail-value">${data.planName}</span>
                           </div>
                           <div class="detail-item">
-                              <span class="detail-label">Amount Invested:</span>
+                              <span class="detail-label">Amount:</span>
                               <span class="detail-value">$${data.amount.toLocaleString()}</span>
-                          </div>
-                          <div class="detail-item">
-                              <span class="detail-label">Wallet Used:</span>
-                              <span class="detail-value">${data.walletUsed || 'Main Balance'}</span>
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">Expected Return:</span>
@@ -5010,78 +4976,74 @@ const sendProfessionalEmail = async (options) => {
                   * { margin: 0; padding: 0; box-sizing: border-box; }
                   body { 
                       font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
-                      line-height: 1.5; 
-                      color: #FFFFFF; 
-                      background-color: #0A0E17; 
+                      line-height: 1.6; 
+                      color: #1a1a1a; 
+                      background-color: #f8f9fa; 
                       margin: 0; 
                       padding: 0; 
                   }
                   .container { 
                       max-width: 600px; 
                       margin: 0 auto; 
-                      background: #0A0E17; 
+                      background: #ffffff; 
                   }
                   .header { 
-                      background: #05080F; 
-                      padding: 40px 40px 30px; 
+                      background: #0a0a0a; 
+                      padding: 30px 40px; 
                       text-align: center; 
-                      border-bottom: 2px solid #FFA500; 
+                      border-bottom: 3px solid #3498db; 
                   }
                   .logo-container { 
                       display: flex; 
                       align-items: center; 
                       justify-content: center; 
-                      gap: 12px; 
-                      margin-bottom: 20px; 
+                      gap: 15px; 
+                      margin-bottom: 15px; 
                   }
                   .logo-img { 
-                      width: 48px; 
-                      height: 48px; 
+                      width: 40px; 
+                      height: 40px; 
                       border-radius: 50%; 
                   }
                   .logo-text { 
-                      font-family: 'Rowdies', sans-serif;
-                      font-size: 28px; 
+                      font-size: 24px; 
                       font-weight: 700; 
-                      color: #00D8FF; 
+                      color: #f0b90b; 
+                      letter-spacing: -0.5px; 
                   }
-                  .logo-text span { color: #FFFFFF; }
                   .content { 
                       padding: 40px; 
-                      background: #0A0E17; 
+                      background: #ffffff; 
                   }
                   .withdrawal-details { 
-                      background: #111827; 
+                      background: #f8f9fa; 
                       padding: 25px; 
                       border-radius: 8px; 
                       margin: 25px 0; 
-                      border-left: 4px solid #FFA500; 
+                      border-left: 4px solid #3498db; 
                   }
                   .detail-item { 
                       margin-bottom: 12px; 
                       display: flex; 
                       justify-content: space-between; 
-                      border-bottom: 1px solid #1F2937;
-                      padding-bottom: 8px;
                   }
-                  .detail-item:last-child { border-bottom: none; }
                   .detail-label { 
                       font-weight: 600; 
-                      color: #8E9BAE; 
+                      color: #333; 
                   }
                   .detail-value { 
-                      color: #FFA500; 
-                      font-weight: 600; 
+                      color: #0a0a0a; 
+                      font-weight: 500; 
                   }
                   .processing-info { 
-                      background: rgba(255, 165, 0, 0.1); 
-                      border-left: 4px solid #FFA500; 
+                      background: #e8f4fd; 
+                      border: 1px solid #3498db; 
                       padding: 20px; 
                       border-radius: 6px; 
                       margin: 25px 0; 
                   }
                   .footer { 
-                      background: #05080F; 
+                      background: #0a0a0a; 
                       padding: 25px 40px; 
                       text-align: center; 
                       color: #999; 
@@ -5161,71 +5123,67 @@ const sendProfessionalEmail = async (options) => {
                   * { margin: 0; padding: 0; box-sizing: border-box; }
                   body { 
                       font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
-                      line-height: 1.5; 
-                      color: #FFFFFF; 
-                      background-color: #0A0E17; 
+                      line-height: 1.6; 
+                      color: #1a1a1a; 
+                      background-color: #f8f9fa; 
                       margin: 0; 
                       padding: 0; 
                   }
                   .container { 
                       max-width: 600px; 
                       margin: 0 auto; 
-                      background: #0A0E17; 
+                      background: #ffffff; 
                   }
                   .header { 
-                      background: #05080F; 
-                      padding: 40px 40px 30px; 
+                      background: #0a0a0a; 
+                      padding: 30px 40px; 
                       text-align: center; 
-                      border-bottom: 2px solid #00FF00; 
+                      border-bottom: 3px solid #27ae60; 
                   }
                   .logo-container { 
                       display: flex; 
                       align-items: center; 
                       justify-content: center; 
-                      gap: 12px; 
-                      margin-bottom: 20px; 
+                      gap: 15px; 
+                      margin-bottom: 15px; 
                   }
                   .logo-img { 
-                      width: 48px; 
-                      height: 48px; 
+                      width: 40px; 
+                      height: 40px; 
                       border-radius: 50%; 
                   }
                   .logo-text { 
-                      font-family: 'Rowdies', sans-serif;
-                      font-size: 28px; 
+                      font-size: 24px; 
                       font-weight: 700; 
-                      color: #00D8FF; 
+                      color: #f0b90b; 
+                      letter-spacing: -0.5px; 
                   }
-                  .logo-text span { color: #FFFFFF; }
                   .content { 
                       padding: 40px; 
-                      background: #0A0E17; 
+                      background: #ffffff; 
                   }
                   .withdrawal-details { 
-                      background: #111827; 
+                      background: #f8f9fa; 
                       padding: 25px; 
                       border-radius: 8px; 
                       margin: 25px 0; 
-                      border-left: 4px solid #00FF00; 
+                      border-left: 4px solid #27ae60; 
                   }
                   .detail-item { 
                       margin-bottom: 12px; 
                       display: flex; 
                       justify-content: space-between; 
-                      border-bottom: 1px solid #1F2937;
-                      padding-bottom: 8px;
                   }
-                  .detail-item:last-child { border-bottom: none; }
                   .detail-label { 
                       font-weight: 600; 
-                      color: #8E9BAE; 
+                      color: #333; 
                   }
                   .detail-value { 
-                      color: #00FF00; 
-                      font-weight: 600; 
+                      color: #0a0a0a; 
+                      font-weight: 500; 
                   }
                   .footer { 
-                      background: #05080F; 
+                      background: #0a0a0a; 
                       padding: 25px 40px; 
                       text-align: center; 
                       color: #999; 
@@ -5297,49 +5255,48 @@ const sendProfessionalEmail = async (options) => {
                   * { margin: 0; padding: 0; box-sizing: border-box; }
                   body { 
                       font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
-                      line-height: 1.5; 
-                      color: #FFFFFF; 
-                      background-color: #0A0E17; 
+                      line-height: 1.6; 
+                      color: #1a1a1a; 
+                      background-color: #f8f9fa; 
                       margin: 0; 
                       padding: 0; 
                   }
                   .container { 
                       max-width: 600px; 
                       margin: 0 auto; 
-                      background: #0A0E17; 
+                      background: #ffffff; 
                   }
                   .header { 
-                      background: #05080F; 
-                      padding: 40px 40px 30px; 
+                      background: #0a0a0a; 
+                      padding: 30px 40px; 
                       text-align: center; 
-                      border-bottom: 2px solid #00FF00; 
+                      border-bottom: 3px solid #27ae60; 
                   }
                   .logo-container { 
                       display: flex; 
                       align-items: center; 
                       justify-content: center; 
-                      gap: 12px; 
-                      margin-bottom: 20px; 
+                      gap: 15px; 
+                      margin-bottom: 15px; 
                   }
                   .logo-img { 
-                      width: 48px; 
-                      height: 48px; 
+                      width: 40px; 
+                      height: 40px; 
                       border-radius: 50%; 
                   }
                   .logo-text { 
-                      font-family: 'Rowdies', sans-serif;
-                      font-size: 28px; 
+                      font-size: 24px; 
                       font-weight: 700; 
-                      color: #00D8FF; 
+                      color: #f0b90b; 
+                      letter-spacing: -0.5px; 
                   }
-                  .logo-text span { color: #FFFFFF; }
                   .content { 
                       padding: 40px; 
-                      background: #0A0E17; 
+                      background: #ffffff; 
                   }
                   .success-message { 
-                      background: rgba(0, 255, 0, 0.1); 
-                      border: 1px solid #00FF00; 
+                      background: #e8f6ef; 
+                      border: 1px solid #27ae60; 
                       padding: 25px; 
                       border-radius: 8px; 
                       margin: 25px 0; 
@@ -5352,25 +5309,25 @@ const sendProfessionalEmail = async (options) => {
                       display: flex; 
                       align-items: center; 
                       margin-bottom: 12px; 
-                      color: #E5E7EB; 
+                      color: #333; 
                   }
                   .benefit-icon { 
-                      color: #00FF00; 
+                      color: #27ae60; 
                       margin-right: 12px; 
                       font-weight: bold; 
                   }
                   .cta-button { 
-                      background: #00D8FF; 
-                      color: #05080F; 
-                      padding: 16px 40px; 
+                      background: #f0b90b; 
+                      color: #0a0a0a; 
+                      padding: 12px 30px; 
                       text-decoration: none; 
-                      border-radius: 8px; 
+                      border-radius: 6px; 
                       display: inline-block; 
                       margin: 20px 0; 
                       font-weight: 600; 
                   }
                   .footer { 
-                      background: #05080F; 
+                      background: #0a0a0a; 
                       padding: 25px 40px; 
                       text-align: center; 
                       color: #999; 
@@ -5393,7 +5350,7 @@ const sendProfessionalEmail = async (options) => {
                       <h2>Hello ${data.name},</h2>
                       
                       <div class="success-message">
-                          <h3 style="color: #00FF00; margin-bottom: 10px;">KYC Verification Approved</h3>
+                          <h3 style="color: #27ae60; margin-bottom: 10px;">KYC Verification Approved</h3>
                           <p>Your identity verification has been successfully completed and approved.</p>
                       </div>
                       
@@ -5452,71 +5409,70 @@ const sendProfessionalEmail = async (options) => {
                   * { margin: 0; padding: 0; box-sizing: border-box; }
                   body { 
                       font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
-                      line-height: 1.5; 
-                      color: #FFFFFF; 
-                      background-color: #0A0E17; 
+                      line-height: 1.6; 
+                      color: #1a1a1a; 
+                      background-color: #f8f9fa; 
                       margin: 0; 
                       padding: 0; 
                   }
                   .container { 
                       max-width: 600px; 
                       margin: 0 auto; 
-                      background: #0A0E17; 
+                      background: #ffffff; 
                   }
                   .header { 
-                      background: #05080F; 
-                      padding: 40px 40px 30px; 
+                      background: #0a0a0a; 
+                      padding: 30px 40px; 
                       text-align: center; 
-                      border-bottom: 2px solid #FF0000; 
+                      border-bottom: 3px solid #e74c3c; 
                   }
                   .logo-container { 
                       display: flex; 
                       align-items: center; 
                       justify-content: center; 
-                      gap: 12px; 
-                      margin-bottom: 20px; 
+                      gap: 15px; 
+                      margin-bottom: 15px; 
                   }
                   .logo-img { 
-                      width: 48px; 
-                      height: 48px; 
+                      width: 40px; 
+                      height: 40px; 
                       border-radius: 50%; 
                   }
                   .logo-text { 
-                      font-family: 'Rowdies', sans-serif;
-                      font-size: 28px; 
+                      font-size: 24px; 
                       font-weight: 700; 
-                      color: #00D8FF; 
+                      color: #f0b90b; 
+                      letter-spacing: -0.5px; 
                   }
-                  .logo-text span { color: #FFFFFF; }
                   .content { 
                       padding: 40px; 
-                      background: #0A0E17; 
+                      background: #ffffff; 
                   }
                   .rejection-box { 
-                      background: rgba(255, 0, 0, 0.1); 
-                      border: 1px solid #FF0000; 
+                      background: #fee; 
+                      border: 1px solid #e74c3c; 
                       padding: 25px; 
                       border-radius: 8px; 
                       margin: 25px 0; 
                   }
                   .reason-box { 
-                      background: #111827; 
+                      background: #f8f9fa; 
                       padding: 20px; 
                       border-radius: 6px; 
                       margin: 15px 0; 
                   }
                   .cta-button { 
-                      background: #00D8FF; 
-                      color: #05080F; 
-                      padding: 16px 40px; 
+                      background: #f0b90b; 
+                      color: #0a0a0a; 
+                      padding: 12px 30px; 
                       text-decoration: none; 
-                      border-radius: 8px; 
+                      border-radius: 6px; 
                       display: inline-block; 
                       margin: 20px 0; 
                       font-weight: 600; 
                   }
                   .footer { 
-                      background: #05080F; 
+                      background: #0a0a0a; 
                       padding: 25px 40px; 
                       text-align: center; 
                       color: #999; 
@@ -5539,7 +5495,7 @@ const sendProfessionalEmail = async (options) => {
                       <h2>Hello ${data.name},</h2>
                       
                       <div class="rejection-box">
-                          <h3 style="color: #FF0000; margin-bottom: 10px;">KYC Verification Update</h3>
+                          <h3 style="color: #e74c3c; margin-bottom: 10px;">KYC Verification Update</h3>
                           <p>Your KYC verification could not be approved at this time.</p>
                       </div>
                       
@@ -5583,81 +5539,77 @@ const sendProfessionalEmail = async (options) => {
                   * { margin: 0; padding: 0; box-sizing: border-box; }
                   body { 
                       font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
-                      line-height: 1.5; 
-                      color: #FFFFFF; 
-                      background-color: #0A0E17; 
+                      line-height: 1.6; 
+                      color: #1a1a1a; 
+                      background-color: #f8f9fa; 
                       margin: 0; 
                       padding: 0; 
                   }
                   .container { 
                       max-width: 600px; 
                       margin: 0 auto; 
-                      background: #0A0E17; 
+                      background: #ffffff; 
                   }
                   .header { 
-                      background: #05080F; 
-                      padding: 40px 40px 30px; 
+                      background: #0a0a0a; 
+                      padding: 30px 40px; 
                       text-align: center; 
-                      border-bottom: 2px solid #00FF00; 
+                      border-bottom: 3px solid #27ae60; 
                   }
                   .logo-container { 
                       display: flex; 
                       align-items: center; 
                       justify-content: center; 
-                      gap: 12px; 
-                      margin-bottom: 20px; 
+                      gap: 15px; 
+                      margin-bottom: 15px; 
                   }
                   .logo-img { 
-                      width: 48px; 
-                      height: 48px; 
+                      width: 40px; 
+                      height: 40px; 
                       border-radius: 50%; 
                   }
                   .logo-text { 
-                      font-family: 'Rowdies', sans-serif;
-                      font-size: 28px; 
+                      font-size: 24px; 
                       font-weight: 700; 
-                      color: #00D8FF; 
+                      color: #f0b90b; 
+                      letter-spacing: -0.5px; 
                   }
-                  .logo-text span { color: #FFFFFF; }
                   .content { 
                       padding: 40px; 
-                      background: #0A0E17; 
+                      background: #ffffff; 
                   }
                   .deposit-details { 
-                      background: #111827; 
+                      background: #f8f9fa; 
                       padding: 25px; 
                       border-radius: 8px; 
                       margin: 25px 0; 
-                      border-left: 4px solid #00FF00; 
+                      border-left: 4px solid #27ae60; 
                   }
                   .detail-item { 
                       margin-bottom: 12px; 
                       display: flex; 
                       justify-content: space-between; 
-                      border-bottom: 1px solid #1F2937;
-                      padding-bottom: 8px;
                   }
-                  .detail-item:last-child { border-bottom: none; }
                   .detail-label { 
                       font-weight: 600; 
-                      color: #8E9BAE; 
+                      color: #333; 
                   }
                   .detail-value { 
-                      color: #00FF00; 
-                      font-weight: 600; 
+                      color: #0a0a0a; 
+                      font-weight: 500; 
                   }
                   .cta-button { 
-                      background: #00D8FF; 
-                      color: #05080F; 
-                      padding: 16px 40px; 
+                      background: #f0b90b; 
+                      color: #0a0a0a; 
+                      padding: 12px 30px; 
                       text-decoration: none; 
-                      border-radius: 8px; 
+                      border-radius: 6px; 
                       display: inline-block; 
                       margin: 20px 0; 
                       font-weight: 600; 
                   }
                   .footer { 
-                      background: #05080F; 
+                      background: #0a0a0a; 
                       padding: 25px 40px; 
                       text-align: center; 
                       color: #999; 
@@ -5737,49 +5689,48 @@ const sendProfessionalEmail = async (options) => {
                   * { margin: 0; padding: 0; box-sizing: border-box; }
                   body { 
                       font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
-                      line-height: 1.5; 
-                      color: #FFFFFF; 
-                      background-color: #0A0E17; 
+                      line-height: 1.6; 
+                      color: #1a1a1a; 
+                      background-color: #f8f9fa; 
                       margin: 0; 
                       padding: 0; 
                   }
                   .container { 
                       max-width: 600px; 
                       margin: 0 auto; 
-                      background: #0A0E17; 
+                      background: #ffffff; 
                   }
                   .header { 
-                      background: #05080F; 
-                      padding: 40px 40px 30px; 
+                      background: #0a0a0a; 
+                      padding: 30px 40px; 
                       text-align: center; 
-                      border-bottom: 2px solid #00D8FF; 
+                      border-bottom: 3px solid #f0b90b; 
                   }
                   .logo-container { 
                       display: flex; 
                       align-items: center; 
                       justify-content: center; 
-                      gap: 12px; 
-                      margin-bottom: 20px; 
+                      gap: 15px; 
+                      margin-bottom: 15px; 
                   }
                   .logo-img { 
-                      width: 48px; 
-                      height: 48px; 
+                      width: 40px; 
+                      height: 40px; 
                       border-radius: 50%; 
                   }
                   .logo-text { 
-                      font-family: 'Rowdies', sans-serif;
-                      font-size: 28px; 
+                      font-size: 24px; 
                       font-weight: 700; 
-                      color: #00D8FF; 
+                      color: #f0b90b; 
+                      letter-spacing: -0.5px; 
                   }
-                  .logo-text span { color: #FFFFFF; }
                   .content { 
                       padding: 40px; 
-                      background: #0A0E17; 
+                      background: #ffffff; 
                   }
                   .bonus-card { 
-                      background: rgba(0, 216, 255, 0.1); 
-                      border: 2px solid #00D8FF; 
+                      background: #fff8e6; 
+                      border: 2px solid #f0b90b; 
                       padding: 30px; 
                       border-radius: 8px; 
                       margin: 25px 0; 
@@ -5788,27 +5739,27 @@ const sendProfessionalEmail = async (options) => {
                   .bonus-amount { 
                       font-size: 36px; 
                       font-weight: 700; 
-                      color: #00D8FF; 
+                      color: #f0b90b; 
                       margin: 10px 0; 
                   }
                   .referral-details { 
-                      background: #111827; 
+                      background: #f8f9fa; 
                       padding: 20px; 
                       border-radius: 6px; 
                       margin: 20px 0; 
                   }
                   .cta-button { 
-                      background: #00D8FF; 
-                      color: #05080F; 
-                      padding: 16px 40px; 
+                      background: #f0b90b; 
+                      color: #0a0a0a; 
+                      padding: 12px 30px; 
                       text-decoration: none; 
-                      border-radius: 8px; 
+                      border-radius: 6px; 
                       display: inline-block; 
                       margin: 20px 0; 
                       font-weight: 600; 
                   }
                   .footer { 
-                      background: #05080F; 
+                      background: #0a0a0a; 
                       padding: 25px 40px; 
                       text-align: center; 
                       color: #999; 
@@ -5882,55 +5833,54 @@ const sendProfessionalEmail = async (options) => {
                   * { margin: 0; padding: 0; box-sizing: border-box; }
                   body { 
                       font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
-                      line-height: 1.5; 
-                      color: #FFFFFF; 
-                      background-color: #0A0E17; 
+                      line-height: 1.6; 
+                      color: #1a1a1a; 
+                      background-color: #f8f9fa; 
                       margin: 0; 
                       padding: 0; 
                   }
                   .container { 
                       max-width: 600px; 
                       margin: 0 auto; 
-                      background: #0A0E17; 
+                      background: #ffffff; 
                   }
                   .header { 
-                      background: #05080F; 
-                      padding: 40px 40px 30px; 
+                      background: #0a0a0a; 
+                      padding: 30px 40px; 
                       text-align: center; 
-                      border-bottom: 2px solid #FF0000; 
+                      border-bottom: 3px solid #e74c3c; 
                   }
                   .logo-container { 
                       display: flex; 
                       align-items: center; 
                       justify-content: center; 
-                      gap: 12px; 
-                      margin-bottom: 20px; 
+                      gap: 15px; 
+                      margin-bottom: 15px; 
                   }
                   .logo-img { 
-                      width: 48px; 
-                      height: 48px; 
+                      width: 40px; 
+                      height: 40px; 
                       border-radius: 50%; 
                   }
                   .logo-text { 
-                      font-family: 'Rowdies', sans-serif;
-                      font-size: 28px; 
+                      font-size: 24px; 
                       font-weight: 700; 
-                      color: #00D8FF; 
+                      color: #f0b90b; 
+                      letter-spacing: -0.5px; 
                   }
-                  .logo-text span { color: #FFFFFF; }
                   .content { 
                       padding: 40px; 
-                      background: #0A0E17; 
+                      background: #ffffff; 
                   }
                   .alert-box { 
-                      background: rgba(255, 0, 0, 0.1); 
-                      border: 2px solid #FF0000; 
+                      background: #fee; 
+                      border: 2px solid #e74c3c; 
                       padding: 25px; 
                       border-radius: 8px; 
                       margin: 25px 0; 
                   }
                   .action-steps { 
-                      background: #111827; 
+                      background: #f8f9fa; 
                       padding: 20px; 
                       border-radius: 6px; 
                       margin: 20px 0; 
@@ -5941,7 +5891,7 @@ const sendProfessionalEmail = async (options) => {
                       align-items: flex-start; 
                   }
                   .step-number { 
-                      background: #FF0000; 
+                      background: #e74c3c; 
                       color: white; 
                       width: 24px; 
                       height: 24px; 
@@ -5954,12 +5904,12 @@ const sendProfessionalEmail = async (options) => {
                       font-weight: 600; 
                   }
                   .support-link { 
-                      color: #FF0000; 
+                      color: #e74c3c; 
                       text-decoration: none; 
                       font-weight: 600; 
                   }
                   .footer { 
-                      background: #05080F; 
+                      background: #0a0a0a; 
                       padding: 25px 40px; 
                       text-align: center; 
                       color: #999; 
@@ -5982,7 +5932,7 @@ const sendProfessionalEmail = async (options) => {
                       <h2>Hello ${data.name},</h2>
                       
                       <div class="alert-box">
-                          <h3 style="color: #FF0000; margin-bottom: 15px;">Important Account Notification</h3>
+                          <h3 style="color: #e74c3c; margin-bottom: 15px;">Important Account Notification</h3>
                           <p>Your BitHash Capital account has been temporarily suspended due to ${data.reason}.</p>
                       </div>
                       
@@ -6051,7 +6001,7 @@ const sendProfessionalEmail = async (options) => {
 
 
 
-// Enhanced Signup Endpoint with OTP - FIXED email handling and referral link parsing
+// Enhanced Signup Endpoint with OTP - FIXED email handling
 app.post('/api/auth/signup', [
   body('firstName').trim().notEmpty().withMessage('First name is required').escape(),
   body('lastName').trim().notEmpty().withMessage('Last name is required').escape(),
@@ -6088,43 +6038,29 @@ app.post('/api/auth/signup', [
     }
 
     const hashedPassword = await bcrypt.hash(password, 12);
-    // ENHANCED: Generate complex referral code with timestamp and random bytes
     const newReferralCode = generateReferralCode();
 
     let referredByUser = null;
     let referralSource = 'organic';
 
-    // ENHANCED: Handle complex referral code parsing from URL parameter
+    // Handle referral code from URL parameter
     if (referralCode) {
       console.log('Processing referral code:', referralCode);
       
       let actualReferralCode = referralCode;
-      
-      // Parse complex referral codes that might include name or additional parameters
-      // Format can be: firstName-timestamp-randombytes or just timestamp-randombytes
+      // Check if the referral code contains a hyphen and extract the last part
       if (referralCode.includes('-')) {
         const parts = referralCode.split('-');
-        // The last part should be the actual referral code (timestamp+randombytes)
         if (parts.length > 1) {
           actualReferralCode = parts[parts.length - 1];
         }
-      } else if (referralCode.includes(':')) {
-        // Handle format like "6FD7F302:2468" - take the first part before colon
-        const parts = referralCode.split(':');
-        if (parts.length > 0) {
-          actualReferralCode = parts[0];
-        }
       }
-      
-      console.log('Parsed referral code:', actualReferralCode);
       
       referredByUser = await User.findOne({ referralCode: actualReferralCode });
       
       if (referredByUser) {
         referralSource = 'referral_link';
         console.log(`Referral found: ${referredByUser.firstName} ${referredByUser.lastName} (${referredByUser.email})`);
-      } else {
-        console.log('No user found with referral code:', actualReferralCode);
       }
     }
 
@@ -6140,7 +6076,7 @@ app.post('/api/auth/signup', [
       isVerified: false // User needs to verify via OTP first
     });
 
-    // If user was referred, create downline relationship and update stats
+    // If user was referred, log the downline relationship
     if (referredByUser) {
       try {
         // Check if downline relationship already exists
@@ -6169,19 +6105,7 @@ app.post('/api/auth/signup', [
           // Update upline's downline stats
           await User.findByIdAndUpdate(referredByUser._id, {
             $inc: {
-              'downlineStats.totalDownlines': 1,
-              'referralStats.totalReferrals': 1
-            },
-            $push: {
-              referralHistory: {
-                referredUser: newUser._id,
-                amount: 0,
-                percentage: settings.commissionPercentage,
-                level: 1,
-                date: new Date(),
-                status: 'pending',
-                type: 'downline_signup'
-              }
+              'downlineStats.totalDownlines': 1
             }
           });
 
@@ -6231,8 +6155,7 @@ app.post('/api/auth/signup', [
       template: 'welcome',
       data: {
         firstName,
-        referral: referredByUser ? `Referred by ${referredByUser.firstName}` : null,
-        ip: getRealClientIP(req)
+        referral: referredByUser ? `Referred by ${referredByUser.firstName}` : null
       }
     });
 
@@ -6747,7 +6670,7 @@ app.get('/api/users/devices', protect, async (req, res) => {
 
 
 
-// Investment routes - ENHANCED VERSION WITH EMAIL NOTIFICATIONS AND WALLET DEDUCTION
+// Investment routes - ENHANCED VERSION WITH EMAIL NOTIFICATIONS
 app.post('/api/investments', protect, [
   body('planId').notEmpty().withMessage('Plan ID is required').isMongoId().withMessage('Invalid Plan ID'),
   body('amount').isFloat({ min: 1 }).withMessage('Amount must be a positive number'),
@@ -6822,12 +6745,12 @@ app.post('/api/investments', protect, [
       balanceType: balanceType // Store which balance was used
     });
 
-    // ✅ FIXED: Deduct from user's selected balance (the wallet they chose)
+    // Deduct from user's selected balance (only the original amount)
     user.balances[balanceType] -= amount;
     user.balances.active += investmentAmountAfterFee; // Add the amount after fee to active balance
     await user.save();
 
-    // ✅ Create transaction record for the investment with fee
+    // Create transaction record for the investment with fee
     const transaction = await Transaction.create({
       user: userId,
       type: 'investment',
@@ -6847,7 +6770,7 @@ app.post('/api/investments', protect, [
       netAmount: -investmentAmountAfterFee
     });
 
-    // ✅ RECORD PLATFORM REVENUE
+    // RECORD PLATFORM REVENUE
     await PlatformRevenue.create({
       source: 'investment_fee',
       amount: investmentFee,
@@ -6865,7 +6788,6 @@ app.post('/api/investments', protect, [
     });
 
     // ✅ FIXED: ALWAYS CHECK FOR DOWNLINE COMMISSIONS (Not just referredBy)
-    // This ensures upline gets paid automatically
     await calculateReferralCommissions(investment);
 
     // ✅ FIXED: Handle direct referral bonus separately (if user was referred by someone)
@@ -6941,7 +6863,6 @@ app.post('/api/investments', protect, [
       await sendEnhancedEmail(user, 'investment_created', {
         planName: plan.name,
         amount: amount,
-        walletUsed: balanceType === 'main' ? 'Main Balance' : 'Matured Balance',
         expectedReturn: expectedReturn,
         duration: plan.duration,
         startDate: investment.startDate,
@@ -6961,7 +6882,6 @@ app.post('/api/investments', protect, [
       investmentId: investment._id,
       planName: plan.name,
       amount: amount,
-      walletUsed: balanceType,
       expectedReturn: expectedReturn,
       balanceType: balanceType
     }, user);
@@ -6969,10 +6889,8 @@ app.post('/api/investments', protect, [
     // Log activity
     await logActivity('create_investment', 'investment', investment._id, userId, 'User', req);
 
-    // ✅ Even if something fails, return success to frontend as requested
     res.status(201).json({
       status: 'success',
-      message: 'Investment created successfully',
       data: {
         investment: {
           id: investment._id,
@@ -8067,7 +7985,7 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
 });
 
 
-// Validate referral code endpoint - ENHANCED for complex codes
+// Validate referral code endpoint
 app.get('/api/referrals/validate/:code', async (req, res) => {
     try {
         const { code } = req.params;
@@ -8081,18 +7999,11 @@ app.get('/api/referrals/validate/:code', async (req, res) => {
 
         let actualReferralCode = code;
         
-        // Handle multiple formats for complex referral codes
-        // Format can be: firstName-code, code:extra, or just code
+        // Handle both formats: "firstName-code" and just "code"
         if (code.includes('-')) {
             const parts = code.split('-');
             if (parts.length > 1) {
-                // Take the last part which should be the actual code
                 actualReferralCode = parts[parts.length - 1];
-            }
-        } else if (code.includes(':')) {
-            const parts = code.split(':');
-            if (parts.length > 0) {
-                actualReferralCode = parts[0];
             }
         }
 
@@ -8108,9 +8019,6 @@ app.get('/api/referrals/validate/:code', async (req, res) => {
             });
         }
 
-        // Generate complex referral link with name prefix
-        const complexReferralLink = `https://www.bithashcapital.live/signup?ref=${referringUser.firstName}-${referringUser.referralCode}`;
-
         res.status(200).json({
             status: 'success',
             data: {
@@ -8120,7 +8028,6 @@ app.get('/api/referrals/validate/:code', async (req, res) => {
                     lastName: referringUser.lastName,
                     referralCode: referringUser.referralCode
                 },
-                complexReferralLink: complexReferralLink,
                 message: `You're being referred by ${referringUser.firstName} ${referringUser.lastName}`
             }
         });
@@ -8150,11 +8057,9 @@ app.get('/api/referrals', protect, async (req, res) => {
             });
         }
 
-        // Generate complex referral links
+        // Generate referral link using user's first name and unique code
         const referralLink = `https://www.bithashcapital.live/signup.html?ref=${user.referralCode}`;
         const referralLinkWithName = `https://www.bithashcapital.live/signup.html?ref=${encodeURIComponent(user.firstName)}-${user.referralCode}`;
-        // Add additional complex format for extra security
-        const referralLinkComplex = `https://www.bithashcapital.live/signup.html?ref=${user.referralCode}:${Date.now().toString(36)}:${crypto.randomBytes(4).toString('hex')}`;
 
         // Get all downline relationships where this user is the upline
         const downlineRelationships = await DownlineRelationship.find({ 
@@ -8302,15 +8207,13 @@ app.get('/api/referrals', protect, async (req, res) => {
         const responseData = {
             status: 'success',
             data: {
-                // Enhanced referral data with complex links
+                // Enhanced referral data with links
                 code: user.referralCode || 'XXXXXX',
                 referralLink: referralLink,
                 referralLinkWithName: referralLinkWithName,
-                referralLinkComplex: referralLinkComplex, // Added complex format
                 shareableLinks: {
                     direct: referralLinkWithName,
                     withMessage: `Join me on BitHash Capital! Use my referral link: ${referralLinkWithName}`,
-                    complex: `Join BitHash Capital using my secure referral link: ${referralLinkComplex}`,
                     social: {
                         facebook: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(referralLinkWithName)}`,
                         twitter: `https://twitter.com/intent/tweet?text=${encodeURIComponent(`Join me on BitHash Capital! Use my referral link: ${referralLinkWithName}`)}`,
