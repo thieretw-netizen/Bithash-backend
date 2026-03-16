@@ -36,8 +36,8 @@ app.use(helmet({
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'", "'unsafe-inline'", "https://apis.google.com"],
       styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-      imgSrc: ["'self'", "data:", "https://www.google-analytics.com"],
-      connectSrc: ["'self'", "https://api.ipinfo.io", "https://website-backendd-1.onrender.com"],
+      imgSrc: ["'self'", "data:", "https://www.google-analytics.com", "https://www.dropbox.com", "https://cryptologos.cc"],
+      connectSrc: ["'self'", "https://api.ipinfo.io", "https://website-backendd-1.onrender.com", "https://ipapi.co", "https://freeipapi.com", "http://ip-api.com", "https://api.deviceinfo.io"],
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
       objectSrc: ["'none'"],
       frameSrc: ["'self'", "https://accounts.google.com"] // Added for Google OAuth
@@ -278,7 +278,16 @@ const UserSchema = new mongoose.Schema({
   loginHistory: [{
     ip: { type: String },
     device: { type: String },
+    deviceModel: { type: String },
+    browser: { type: String },
+    os: { type: String },
     location: { type: String },
+    city: { type: String },
+    region: { type: String },
+    country: { type: String },
+    isp: { type: String },
+    latitude: { type: Number },
+    longitude: { type: Number },
     timestamp: { type: Date, default: Date.now }
   }],
   notifications: [{
@@ -689,7 +698,13 @@ const UserLogSchema = new mongoose.Schema({
     screenResolution: String,
     language: String,
     timezone: String,
-    deviceId: String
+    deviceId: String,
+    deviceModel: String,
+    deviceVendor: String,
+    isMobile: Boolean,
+    isTablet: Boolean,
+    isDesktop: Boolean,
+    isBot: Boolean
   },
 
   // Enhanced Location Information
@@ -709,7 +724,8 @@ const UserLogSchema = new mongoose.Schema({
     longitude: Number,
     timezone: String,
     isp: String,
-    asn: String
+    asn: String,
+    organization: String
   },
 
   // Status & Performance
@@ -3025,7 +3041,6 @@ const sendEmail = async (options) => {
   }
 };
 
-// Enhanced getUserDeviceInfo function with actual location and device detection
 const getUserDeviceInfo = async (req) => {
   try {
     // Enhanced IP detection with multiple header checks
@@ -3062,15 +3077,13 @@ const getUserDeviceInfo = async (req) => {
     }
 
     let location = 'Unknown Location';
-    let detailedLocation = {
-      country: 'Unknown',
-      region: 'Unknown',
-      city: 'Unknown',
-      isp: 'Unknown',
-      timezone: 'Unknown'
-    };
-    
     let isPublicIP = true;
+    let city = 'Unknown';
+    let region = 'Unknown';
+    let country = 'Unknown';
+    let isp = 'Unknown';
+    let latitude = 0;
+    let longitude = 0;
 
     // Enhanced private IP range detection
     const privateIPRanges = [
@@ -3094,6 +3107,61 @@ const getUserDeviceInfo = async (req) => {
       }
     }
 
+    // Enhanced device detection
+    const userAgent = req.headers['user-agent'] || 'Unknown';
+    let deviceType = 'unknown';
+    let os = 'Unknown';
+    let browser = 'Unknown';
+    let deviceModel = 'Unknown';
+    let deviceVendor = 'Unknown';
+    
+    // Parse user agent for device info
+    if (userAgent) {
+      if (userAgent.includes('Mobile')) {
+        deviceType = 'mobile';
+      } else if (userAgent.includes('Tablet')) {
+        deviceType = 'tablet';
+      } else {
+        deviceType = 'desktop';
+      }
+      
+      // OS detection
+      if (userAgent.includes('Windows')) os = 'Windows';
+      else if (userAgent.includes('Mac OS')) os = 'macOS';
+      else if (userAgent.includes('Linux')) os = 'Linux';
+      else if (userAgent.includes('Android')) os = 'Android';
+      else if (userAgent.includes('iOS')) os = 'iOS';
+      
+      // Browser detection
+      if (userAgent.includes('Chrome')) browser = 'Chrome';
+      else if (userAgent.includes('Firefox')) browser = 'Firefox';
+      else if (userAgent.includes('Safari')) browser = 'Safari';
+      else if (userAgent.includes('Edge')) browser = 'Edge';
+      
+      // Try to get device model from user agent
+      const modelMatch = userAgent.match(/Model\/([A-Za-z0-9]+)/) || 
+                        userAgent.match(/; ([A-Za-z0-9]+) Build/) ||
+                        userAgent.match(/\(([^)]+)\)/);
+      if (modelMatch && modelMatch[1]) {
+        deviceModel = modelMatch[1];
+      }
+    }
+
+    // Use online API for device fingerprinting
+    try {
+      const deviceResponse = await axios.get('https://api.deviceinfo.io/v1/detect', {
+        headers: { 'User-Agent': userAgent },
+        timeout: 3000
+      });
+      
+      if (deviceResponse.data) {
+        deviceVendor = deviceResponse.data.vendor || deviceVendor;
+        deviceModel = deviceResponse.data.model || deviceModel;
+      }
+    } catch (deviceError) {
+      console.log('Device info API failed, using basic detection');
+    }
+
     // Only try location lookup for public IPs
     if (isPublicIP && ip && ip !== 'Unknown') {
       try {
@@ -3109,17 +3177,18 @@ const getUserDeviceInfo = async (req) => {
           });
           
           if (response.data) {
-            const { city, region, country, loc, org, timezone } = response.data;
-            location = `${city || 'Unknown'}, ${region || 'Unknown'}, ${country || 'Unknown'}`;
+            const { city: cityName, region: regionName, country: countryCode, loc, org, timezone } = response.data;
+            city = cityName || 'Unknown';
+            region = regionName || 'Unknown';
+            country = countryCode || 'Unknown';
+            location = `${city}, ${region}, ${country}`;
+            isp = org || 'Unknown';
             
-            detailedLocation = {
-              country: country || 'Unknown',
-              region: region || 'Unknown',
-              city: city || 'Unknown',
-              isp: org || 'Unknown',
-              timezone: timezone || 'Unknown',
-              coordinates: loc || 'Unknown'
-            };
+            if (loc) {
+              const [lat, lon] = loc.split(',');
+              latitude = parseFloat(lat) || 0;
+              longitude = parseFloat(lon) || 0;
+            }
             
             console.log(`IPInfo.io location result: ${location}`);
           }
@@ -3133,17 +3202,14 @@ const getUserDeviceInfo = async (req) => {
             });
             
             if (response.data) {
-              const { city, region, country_name, country_code, org, timezone } = response.data;
-              location = `${city || 'Unknown'}, ${region || 'Unknown'}, ${country_name || country_code || 'Unknown'}`;
-              
-              detailedLocation = {
-                country: country_name || country_code || 'Unknown',
-                region: region || 'Unknown',
-                city: city || 'Unknown',
-                isp: org || 'Unknown',
-                timezone: timezone || 'Unknown'
-              };
-              
+              const { city: cityName, region: regionName, country_name, country_code, org, latitude: lat, longitude: lon } = response.data;
+              city = cityName || 'Unknown';
+              region = regionName || 'Unknown';
+              country = country_name || country_code || 'Unknown';
+              location = `${city}, ${region}, ${country}`;
+              isp = org || 'Unknown';
+              latitude = lat || 0;
+              longitude = lon || 0;
               console.log(`IPApi.co location result: ${location}`);
             }
           } catch (ipapiError) {
@@ -3154,17 +3220,14 @@ const getUserDeviceInfo = async (req) => {
               });
               
               if (response.data) {
-                const { cityName, regionName, countryName, isp, timezone } = response.data;
-                location = `${cityName || 'Unknown'}, ${regionName || 'Unknown'}, ${countryName || 'Unknown'}`;
-                
-                detailedLocation = {
-                  country: countryName || 'Unknown',
-                  region: regionName || 'Unknown',
-                  city: cityName || 'Unknown',
-                  isp: isp || 'Unknown',
-                  timezone: timezone || 'Unknown'
-                };
-                
+                const { cityName, regionName, countryName, isp, latitude: lat, longitude: lon } = response.data;
+                city = cityName || 'Unknown';
+                region = regionName || 'Unknown';
+                country = countryName || 'Unknown';
+                location = `${city}, ${region}, ${country}`;
+                isp = isp || 'Unknown';
+                latitude = lat || 0;
+                longitude = lon || 0;
                 console.log(`FreeIPAPI location result: ${location}`);
               }
             } catch (freeipapiError) {
@@ -3175,17 +3238,14 @@ const getUserDeviceInfo = async (req) => {
                 });
                 
                 if (response.data && response.data.status === 'success') {
-                  const { city, regionName, country, isp, timezone } = response.data;
-                  location = `${city || 'Unknown'}, ${regionName || 'Unknown'}, ${country || 'Unknown'}`;
-                  
-                  detailedLocation = {
-                    country: country || 'Unknown',
-                    region: regionName || 'Unknown',
-                    city: city || 'Unknown',
-                    isp: isp || 'Unknown',
-                    timezone: timezone || 'Unknown'
-                  };
-                  
+                  const { city: cityName, regionName, country, isp, lat, lon } = response.data;
+                  city = cityName || 'Unknown';
+                  region = regionName || 'Unknown';
+                  country = country || 'Unknown';
+                  location = `${city}, ${region}, ${country}`;
+                  isp = isp || 'Unknown';
+                  latitude = lat || 0;
+                  longitude = lon || 0;
                   console.log(`IP-API.com location result: ${location}`);
                 }
               } catch (ipapiComError) {
@@ -3203,126 +3263,121 @@ const getUserDeviceInfo = async (req) => {
       console.log(`Private IP detected: ${ip}, using local network location`);
     }
 
-    // Enhanced device detection
-    const userAgent = req.headers['user-agent'] || 'Unknown';
-    let deviceType = 'unknown';
-    let os = { name: 'Unknown', version: 'Unknown' };
-    let browser = { name: 'Unknown', version: 'Unknown' };
-    let deviceModel = 'Unknown';
-
-    // Detect device type
-    if (userAgent.includes('Mobile') || userAgent.includes('Android') || userAgent.includes('iPhone')) {
-      deviceType = 'mobile';
-    } else if (userAgent.includes('iPad') || userAgent.includes('Tablet')) {
-      deviceType = 'tablet';
-    } else {
-      deviceType = 'desktop';
-    }
-
-    // Detect OS
-    if (userAgent.includes('Windows')) {
-      os.name = 'Windows';
-      const match = userAgent.match(/Windows NT (\d+\.\d+)/);
-      os.version = match ? match[1] : 'Unknown';
-    } else if (userAgent.includes('Mac OS X')) {
-      os.name = 'macOS';
-      const match = userAgent.match(/Mac OS X (\d+[._]\d+[._]\d+)/);
-      os.version = match ? match[1].replace(/_/g, '.') : 'Unknown';
-    } else if (userAgent.includes('Linux')) {
-      os.name = 'Linux';
-    } else if (userAgent.includes('Android')) {
-      os.name = 'Android';
-      const match = userAgent.match(/Android (\d+(\.\d+)?)/);
-      os.version = match ? match[1] : 'Unknown';
-    } else if (userAgent.includes('iPhone') || userAgent.includes('iPad')) {
-      os.name = 'iOS';
-      const match = userAgent.match(/OS (\d+_\d+)/);
-      os.version = match ? match[1].replace(/_/g, '.') : 'Unknown';
-    }
-
-    // Detect browser
-    if (userAgent.includes('Chrome') && !userAgent.includes('Edg')) {
-      browser.name = 'Chrome';
-      const match = userAgent.match(/Chrome\/(\d+(\.\d+)?)/);
-      browser.version = match ? match[1] : 'Unknown';
-    } else if (userAgent.includes('Firefox')) {
-      browser.name = 'Firefox';
-      const match = userAgent.match(/Firefox\/(\d+(\.\d+)?)/);
-      browser.version = match ? match[1] : 'Unknown';
-    } else if (userAgent.includes('Safari') && !userAgent.includes('Chrome')) {
-      browser.name = 'Safari';
-      const match = userAgent.match(/Version\/(\d+(\.\d+)?)/);
-      browser.version = match ? match[1] : 'Unknown';
-    } else if (userAgent.includes('Edg')) {
-      browser.name = 'Edge';
-      const match = userAgent.match(/Edg\/(\d+(\.\d+)?)/);
-      browser.version = match ? match[1] : 'Unknown';
-    }
-
-    // Detect device model
-    if (userAgent.includes('iPhone')) {
-      const match = userAgent.match(/iPhone (\d+,\d+)/);
-      deviceModel = match ? `iPhone ${match[1]}` : 'iPhone';
-    } else if (userAgent.includes('iPad')) {
-      const match = userAgent.match(/iPad (\d+,\d+)/);
-      deviceModel = match ? `iPad ${match[1]}` : 'iPad';
-    } else if (userAgent.includes('Android')) {
-      const match = userAgent.match(/Android.*?; (.*?) Build/);
-      deviceModel = match ? match[1] : 'Android Device';
-    }
-
     return {
       ip: ip || 'Unknown',
       device: userAgent,
+      deviceType: deviceType,
+      os: os,
+      browser: browser,
+      deviceModel: deviceModel,
+      deviceVendor: deviceVendor,
       location: location,
-      detailedLocation: detailedLocation,
-      isPublicIP: isPublicIP,
-      deviceInfo: {
-        type: deviceType,
-        os: os,
-        browser: browser,
-        model: deviceModel,
-        userAgent: userAgent
-      }
+      city: city,
+      region: region,
+      country: country,
+      isp: isp,
+      latitude: latitude,
+      longitude: longitude,
+      isPublicIP: isPublicIP
     };
   } catch (err) {
     console.error('Error getting device info:', err);
     return {
       ip: req.ip || 'Unknown',
       device: req.headers['user-agent'] || 'Unknown',
+      deviceType: 'unknown',
+      os: 'Unknown',
+      browser: 'Unknown',
+      deviceModel: 'Unknown',
+      deviceVendor: 'Unknown',
       location: 'Unknown',
-      detailedLocation: {
-        country: 'Unknown',
-        region: 'Unknown',
-        city: 'Unknown',
-        isp: 'Unknown',
-        timezone: 'Unknown'
-      },
-      isPublicIP: false,
-      deviceInfo: {
-        type: 'unknown',
-        os: { name: 'Unknown', version: 'Unknown' },
-        browser: { name: 'Unknown', version: 'Unknown' },
-        model: 'Unknown',
-        userAgent: req.headers['user-agent'] || 'Unknown'
-      }
+      city: 'Unknown',
+      region: 'Unknown',
+      country: 'Unknown',
+      isp: 'Unknown',
+      latitude: 0,
+      longitude: 0,
+      isPublicIP: false
     };
   }
 };
 
-// Enhanced logActivity function
+const logUserActivity = async (req, action, status, metadata = {}, user = null) => {
+  try {
+    const deviceInfo = await getUserDeviceInfo(req);
+    const userId = user ? user._id : (req.user ? req.user._id : null);
+    const email = user ? user.email : (req.body ? req.body.email : 'Unknown');
+    const username = user ? `${user.firstName} ${user.lastName}` : 'Unknown';
+    
+    if (!userId) {
+      console.log('No user ID for activity logging');
+      return;
+    }
+
+    await UserLog.create({
+      user: userId,
+      username: username,
+      email: email,
+      userFullName: username,
+      action: action,
+      actionCategory: metadata.category || 'system',
+      ipAddress: deviceInfo.ip,
+      userAgent: deviceInfo.device,
+      deviceInfo: {
+        type: deviceInfo.deviceType,
+        os: { name: deviceInfo.os, version: '' },
+        browser: { name: deviceInfo.browser, version: '' },
+        platform: deviceInfo.deviceType,
+        deviceModel: deviceInfo.deviceModel,
+        deviceVendor: deviceInfo.deviceVendor
+      },
+      location: {
+        ip: deviceInfo.ip,
+        country: { name: deviceInfo.country, code: deviceInfo.country },
+        region: { name: deviceInfo.region },
+        city: deviceInfo.city,
+        latitude: deviceInfo.latitude,
+        longitude: deviceInfo.longitude,
+        isp: deviceInfo.isp
+      },
+      status: status,
+      metadata: metadata,
+      isSuspicious: metadata.isSuspicious || false,
+      riskLevel: metadata.riskLevel || 'low'
+    });
+    
+    console.log(`Activity Logged: ${action}`, {
+      userId,
+      email,
+      location: deviceInfo.location,
+      ip: deviceInfo.ip,
+      device: deviceInfo.deviceModel || deviceInfo.deviceType
+    });
+  } catch (err) {
+    console.error('Error logging user activity:', err);
+  }
+};
+
 const logActivity = async (action, entity, entityId, performedBy, performedByModel, req, changes = {}) => {
   try {
     const deviceInfo = await getUserDeviceInfo(req);
     
-    // Enhanced location data with detailed information
+    // Enhanced location data
     const locationData = {
       ip: deviceInfo.ip,
       location: deviceInfo.location,
-      detailedLocation: deviceInfo.detailedLocation,
+      city: deviceInfo.city,
+      region: deviceInfo.region,
+      country: deviceInfo.country,
+      isp: deviceInfo.isp,
+      latitude: deviceInfo.latitude,
+      longitude: deviceInfo.longitude,
       isPublicIP: deviceInfo.isPublicIP,
       userAgent: deviceInfo.device,
-      deviceInfo: deviceInfo.deviceInfo,
+      deviceType: deviceInfo.deviceType,
+      deviceModel: deviceInfo.deviceModel,
+      os: deviceInfo.os,
+      browser: deviceInfo.browser,
       detectedAt: new Date()
     };
     
@@ -3337,8 +3392,7 @@ const logActivity = async (action, entity, entityId, performedBy, performedByMod
       location: locationData.location,
       changes: {
         ...changes,
-        locationData: locationData,
-        deviceDetails: deviceInfo.deviceInfo
+        locationData: locationData
       }
     });
     
@@ -3347,8 +3401,8 @@ const logActivity = async (action, entity, entityId, performedBy, performedByMod
       entityId,
       location: locationData.location,
       ip: locationData.ip,
-      isPublicIP: locationData.isPublicIP,
-      device: deviceInfo.deviceInfo.model || deviceInfo.deviceInfo.type
+      deviceModel: locationData.deviceModel,
+      isPublicIP: locationData.isPublicIP
     });
   } catch (err) {
     console.error('Error logging activity:', err);
@@ -3735,23 +3789,6 @@ const calculateReferralCommissions = async (investment) => {
       percentage: commissionPercentage
     });
 
-    // Send email notification for referral bonus
-    try {
-      await sendProfessionalEmail({
-        email: uplineUser.email,
-        template: 'referral_bonus',
-        data: {
-          name: uplineUser.firstName,
-          bonusAmount: commissionAmount,
-          referredUser: `${populatedInvestment.user.firstName} ${populatedInvestment.user.lastName}`,
-          bonusType: 'Downline Commission'
-        }
-      });
-      console.log(`📧 Downline commission email sent to ${uplineUser.email}`);
-    } catch (emailError) {
-      console.error('Failed to send downline commission email:', emailError);
-    }
-
   } catch (err) {
     console.error('❌ Downline commission calculation error:', err);
     // Don't throw error to avoid disrupting investment process
@@ -3973,7 +4010,7 @@ const sendProfessionalEmail = async (options) => {
         `
       },
 
-      // LOGIN SUCCESS
+      // LOGIN SUCCESS (sent after OTP verification)
       login_success: {
         subject: 'BitHash Capital - Successful Login Detected',
         html: `
@@ -4020,7 +4057,15 @@ const sendProfessionalEmail = async (options) => {
                           </div>
                           <div class="info-item">
                               <span class="info-label">Device:</span>
-                              <span>${data.device || 'Unknown device'}</span>
+                              <span>${data.device || 'Unknown device'} (${data.deviceModel || 'Unknown model'})</span>
+                          </div>
+                          <div class="info-item">
+                              <span class="info-label">Browser:</span>
+                              <span>${data.browser || 'Unknown'}</span>
+                          </div>
+                          <div class="info-item">
+                              <span class="info-label">OS:</span>
+                              <span>${data.os || 'Unknown'}</span>
                           </div>
                           <div class="info-item">
                               <span class="info-label">Location:</span>
@@ -4029,6 +4074,10 @@ const sendProfessionalEmail = async (options) => {
                           <div class="info-item">
                               <span class="info-label">IP Address:</span>
                               <span>${data.ip || 'Unknown'}</span>
+                          </div>
+                          <div class="info-item">
+                              <span class="info-label">ISP:</span>
+                              <span>${data.isp || 'Unknown'}</span>
                           </div>
                       </div>
                       
@@ -4112,6 +4161,66 @@ const sendProfessionalEmail = async (options) => {
         `
       },
 
+      // PASSWORD RESET SUCCESS
+      password_reset_success: {
+        subject: 'BitHash Capital - Password Reset Successful',
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Password Reset Successful - BitHash Capital</title>
+              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <style>
+                  * { margin: 0; padding: 0; box-sizing: border-box; }
+                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
+                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
+                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #27ae60; }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
+                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
+                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
+                  .content { padding: 40px; background: #ffffff; }
+                  .success-box { background: #e8f6ef; border: 1px solid #27ae60; padding: 25px; border-radius: 8px; margin: 25px 0; text-align: center; }
+                  .cta-button { background: #f0b90b; color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 20px 0; font-weight: 600; }
+                  .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
+                  .footer-text { font-size: 12px; line-height: 1.5; }
+              </style>
+          </head>
+          <body>
+              <div class="container">
+                  <div class="header">
+                      <div class="logo-container">
+                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
+                          <div class="logo-text">BitHash Capital</div>
+                      </div>
+                  </div>
+                  <div class="content">
+                      <h2>Hello ${data.name},</h2>
+                      
+                      <div class="success-box">
+                          <h3 style="color: #27ae60; margin-bottom: 10px;">Password Reset Successful</h3>
+                          <p>Your password has been successfully changed.</p>
+                      </div>
+                      
+                      <p>If you did not perform this action, please contact our security team immediately.</p>
+                      
+                      <div style="text-align: center;">
+                          <a href="https://www.bithashcapital.live/login.html" class="cta-button">Login to Your Account</a>
+                      </div>
+                      
+                      <p>Best regards,<br><strong>BitHash Capital Security Team</strong></p>
+                  </div>
+                  <div class="footer">
+                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
+                      This is an automated security message.</p>
+                  </div>
+              </div>
+          </body>
+          </html>
+        `
+      },
+
       // INVESTMENT CREATED
       investment_created: {
         subject: 'BitHash Capital - Investment Confirmation',
@@ -4168,7 +4277,7 @@ const sendProfessionalEmail = async (options) => {
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">Duration:</span>
-                              <span class="detail-value">${data.duration}</span>
+                              <span class="detail-value">${data.duration} hours</span>
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">Start Date:</span>
@@ -4200,13 +4309,13 @@ const sendProfessionalEmail = async (options) => {
 
       // INVESTMENT COMPLETED (Matured)
       investment_completed: {
-        subject: 'BitHash Capital - Investment Matured Successfully',
+        subject: 'BitHash Capital - Investment Matured',
         html: `
           <!DOCTYPE html>
           <html>
           <head>
               <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <meta name="viewport" content="width=device-width, initial-scale-1.0">
               <title>Investment Matured - BitHash Capital</title>
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
@@ -4239,7 +4348,7 @@ const sendProfessionalEmail = async (options) => {
                   </div>
                   <div class="content">
                       <h2>Hello ${data.name},</h2>
-                      <p>Congratulations! Your investment has successfully matured and the returns have been credited to your account.</p>
+                      <p>Congratulations! Your investment has successfully matured.</p>
                       
                       <div class="investment-details">
                           <div class="detail-item">
@@ -4247,34 +4356,25 @@ const sendProfessionalEmail = async (options) => {
                               <span class="detail-value">${data.planName}</span>
                           </div>
                           <div class="detail-item">
-                              <span class="detail-label">Original Investment:</span>
+                              <span class="detail-label">Initial Investment:</span>
                               <span class="detail-value">$${data.amount}</span>
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">Total Return:</span>
                               <span class="detail-value">$${data.totalReturn}</span>
                           </div>
-                          <div class="profit-highlight">
-                              <div>Net Profit Earned</div>
-                              <div class="profit-amount">$${data.profit}</div>
-                          </div>
-                          <div class="detail-item">
-                              <span class="detail-label">Completion Date:</span>
-                              <span class="detail-value">${new Date(data.completionDate).toLocaleDateString()}</span>
-                          </div>
-                          <div class="detail-item">
-                              <span class="detail-label">New Matured Balance:</span>
-                              <span class="detail-value">$${data.newMaturedBalance}</span>
-                          </div>
                       </div>
                       
-                      <p>Your funds are now available in your matured balance. You can reinvest for more returns or withdraw to your wallet.</p>
+                      <div class="profit-highlight">
+                          <p>Your Profit:</p>
+                          <div class="profit-amount">$${data.profit}</div>
+                      </div>
+                      
+                      <p>The funds have been credited to your matured balance and are now available for withdrawal or reinvestment.</p>
                       
                       <div style="text-align: center;">
-                          <a href="https://www.bithashcapital.live/investment.html" class="cta-button">Reinvest Now</a>
+                          <a href="https://www.bithashcapital.live/dashboard.html" class="cta-button">View Your Balance</a>
                       </div>
-                      
-                      <p>Thank you for investing with BitHash Capital.</p>
                       
                       <p>Best regards,<br><strong>BitHash Capital Investment Team</strong></p>
                   </div>
@@ -4370,9 +4470,9 @@ const sendProfessionalEmail = async (options) => {
         `
       },
 
-      // WITHDRAWAL COMPLETED (Debited)
+      // WITHDRAWAL COMPLETED
       withdrawal_completed: {
-        subject: 'BitHash Capital - Withdrawal Completed Successfully',
+        subject: 'BitHash Capital - Withdrawal Completed',
         html: `
           <!DOCTYPE html>
           <html>
@@ -4408,7 +4508,7 @@ const sendProfessionalEmail = async (options) => {
                   </div>
                   <div class="content">
                       <h2>Hello ${data.name},</h2>
-                      <p>Your withdrawal has been successfully processed and the funds have been debited from your account.</p>
+                      <p>Your withdrawal has been successfully completed.</p>
                       
                       <div class="withdrawal-details">
                           <div class="detail-item">
@@ -4424,20 +4524,12 @@ const sendProfessionalEmail = async (options) => {
                               <span class="detail-value">${data.reference}</span>
                           </div>
                           <div class="detail-item">
-                              <span class="detail-label">Fee:</span>
-                              <span class="detail-value">$${data.fee}</span>
-                          </div>
-                          <div class="detail-item">
-                              <span class="detail-label">Net Amount:</span>
-                              <span class="detail-value">$${data.netAmount}</span>
-                          </div>
-                          <div class="detail-item">
-                              <span class="detail-label">Processed At:</span>
-                              <span class="detail-value">${new Date(data.processedAt).toLocaleString()}</span>
+                              <span class="detail-label">Date:</span>
+                              <span class="detail-value">${new Date().toLocaleDateString()}</span>
                           </div>
                       </div>
                       
-                      <p>Thank you for using BitHash Capital. If you have any questions, please contact our support team.</p>
+                      <p>Thank you for using BitHash Capital.</p>
                       
                       <p>Best regards,<br><strong>BitHash Capital Finance Team</strong></p>
                   </div>
@@ -4522,80 +4614,6 @@ const sendProfessionalEmail = async (options) => {
                       </div>
                       
                       <p>Thank you for completing the verification process and helping us maintain a secure platform.</p>
-                      
-                      <p>Best regards,<br><strong>BitHash Capital Compliance Team</strong></p>
-                  </div>
-                  <div class="footer">
-                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
-                      Professional Bitcoin Mining and Investment Platform</p>
-                  </div>
-              </div>
-          </body>
-          </html>
-        `
-      },
-
-      // KYC REJECTED
-      kyc_rejected: {
-        subject: 'BitHash Capital - KYC Verification Update',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>KYC Update - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-              <style>
-                  * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #e74c3c; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
-                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
-                  .content { padding: 40px; background: #ffffff; }
-                  .rejection-message { background: #fee; border: 1px solid #e74c3c; padding: 25px; border-radius: 8px; margin: 25px 0; }
-                  .reason-box { background: #f8f9fa; padding: 20px; border-radius: 6px; margin: 20px 0; }
-                  .cta-button { background: #f0b90b; color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 20px 0; font-weight: 600; }
-                  .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 12px; line-height: 1.5; }
-              </style>
-          </head>
-          <body>
-              <div class="container">
-                  <div class="header">
-                      <div class="logo-container">
-                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash Capital</div>
-                      </div>
-                  </div>
-                  <div class="content">
-                      <h2>Hello ${data.name},</h2>
-                      
-                      <div class="rejection-message">
-                          <h3 style="color: #e74c3c; margin-bottom: 10px;">KYC Verification Update</h3>
-                          <p>Your KYC verification could not be approved at this time.</p>
-                      </div>
-                      
-                      <div class="reason-box">
-                          <p><strong>Reason for Rejection:</strong></p>
-                          <p>${data.reason || 'Documents could not be verified. Please ensure all documents are clear and valid.'}</p>
-                      </div>
-                      
-                      <p>Please resubmit your documents with the following guidelines:</p>
-                      <ul style="margin: 15px 0 20px 20px; color: #333;">
-                          <li>Ensure all documents are clearly visible and not blurred</li>
-                          <li>All information must match your account details</li>
-                          <li>Documents must be valid and not expired</li>
-                          <li>Photos must be in color and well-lit</li>
-                      </ul>
-                      
-                      <div style="text-align: center;">
-                          <a href="https://www.bithashcapital.live/kyc.html" class="cta-button">Resubmit KYC</a>
-                      </div>
-                      
-                      <p>If you need assistance, please contact our support team.</p>
                       
                       <p>Best regards,<br><strong>BitHash Capital Compliance Team</strong></p>
                   </div>
@@ -4763,7 +4781,7 @@ const sendProfessionalEmail = async (options) => {
         `
       },
 
-      // ACCOUNT SUSPENDED (Admin action)
+      // ACCOUNT SUSPENDED
       account_suspended: {
         subject: 'BitHash Capital - Important Account Notification',
         html: `
@@ -4838,28 +4856,29 @@ const sendProfessionalEmail = async (options) => {
         `
       },
 
-      // ACCOUNT UNSUSPENDED (Admin action)
-      account_unsuspended: {
-        subject: 'BitHash Capital - Account Restored',
+      // ADMIN ACTION
+      admin_action: {
+        subject: 'BitHash Capital - Admin Action Notification',
         html: `
           <!DOCTYPE html>
           <html>
           <head>
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>Account Restored - BitHash Capital</title>
+              <title>Admin Action - BitHash Capital</title>
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
                   body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
                   .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #27ae60; }
+                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #3498db; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
                   .logo-img { width: 40px; height: 40px; border-radius: 50%; }
                   .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: #ffffff; }
-                  .success-box { background: #e8f6ef; border: 1px solid #27ae60; padding: 25px; border-radius: 8px; margin: 25px 0; text-align: center; }
-                  .cta-button { background: #f0b90b; color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 20px 0; font-weight: 600; }
+                  .admin-action { background: #f8f9fa; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #3498db; }
+                  .action-item { margin-bottom: 12px; }
+                  .action-label { font-weight: 600; color: #333; }
                   .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
                   .footer-text { font-size: 12px; line-height: 1.5; }
               </style>
@@ -4874,21 +4893,27 @@ const sendProfessionalEmail = async (options) => {
                   </div>
                   <div class="content">
                       <h2>Hello ${data.name},</h2>
+                      <p>An admin action has been performed on your account:</p>
                       
-                      <div class="success-box">
-                          <h3 style="color: #27ae60; margin-bottom: 15px;">Account Restored</h3>
-                          <p>Your BitHash Capital account has been restored and is now fully active.</p>
-                      </div>
-                      
-                      <p>You can now log in and access all platform features normally.</p>
-                      
-                      <div style="text-align: center;">
-                          <a href="https://www.bithashcapital.live/login.html" class="cta-button">Login to Your Account</a>
+                      <div class="admin-action">
+                          <div class="action-item">
+                              <span class="action-label">Action:</span>
+                              <span>${data.action}</span>
+                          </div>
+                          <div class="action-item">
+                              <span class="action-label">Details:</span>
+                              <span>${data.details}</span>
+                          </div>
+                          <div class="action-item">
+                              <span class="action-label">Time:</span>
+                              <span>${new Date().toLocaleString()}</span>
+                          </div>
+                          ${data.reason ? `<div class="action-item"><span class="action-label">Reason:</span><span>${data.reason}</span></div>` : ''}
                       </div>
                       
                       <p>If you have any questions, please contact our support team.</p>
                       
-                      <p>Best regards,<br><strong>BitHash Capital Security Team</strong></p>
+                      <p>Best regards,<br><strong>BitHash Capital Team</strong></p>
                   </div>
                   <div class="footer">
                       <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
@@ -4921,75 +4946,10 @@ const sendProfessionalEmail = async (options) => {
   }
 };
 
-// Helper function to send automated emails for key activities
-const sendAutomatedEmail = async (user, template, data = {}) => {
-  try {
-    if (!user || !user.email) {
-      console.error('Cannot send email: User or email missing');
-      return;
-    }
 
-    const emailData = {
-      name: user.firstName || user.fullName || 'Valued Customer',
-      ...data
-    };
 
-    await sendProfessionalEmail({
-      email: user.email,
-      template: template,
-      data: emailData
-    });
 
-    console.log(`📧 Automated email sent: ${template} to ${user.email}`);
-  } catch (error) {
-    console.error(`Failed to send automated email (${template}):`, error);
-  }
-};
 
-// Helper function to log user activity with device and location info
-const logUserActivity = async (req, action, status = 'success', metadata = {}, user = null) => {
-  try {
-    const deviceInfo = await getUserDeviceInfo(req);
-    const userId = user ? user._id : (req.user ? req.user._id : null);
-    
-    if (!userId) {
-      console.error('Cannot log activity: No user ID found');
-      return;
-    }
-
-    const userDoc = user || req.user;
-    
-    const logEntry = {
-      user: userId,
-      username: userDoc?.fullName || userDoc?.firstName || 'Unknown',
-      email: userDoc?.email || 'Unknown',
-      userFullName: userDoc?.fullName || `${userDoc?.firstName || ''} ${userDoc?.lastName || ''}`.trim() || 'Unknown',
-      action: action,
-      actionCategory: metadata.category || 'system',
-      ipAddress: deviceInfo.ip,
-      userAgent: deviceInfo.device,
-      deviceInfo: deviceInfo.deviceInfo,
-      location: {
-        ip: deviceInfo.ip,
-        country: { name: deviceInfo.detailedLocation?.country || 'Unknown' },
-        region: { name: deviceInfo.detailedLocation?.region || 'Unknown' },
-        city: deviceInfo.detailedLocation?.city || 'Unknown',
-        isp: deviceInfo.detailedLocation?.isp || 'Unknown',
-        timezone: deviceInfo.detailedLocation?.timezone || 'Unknown'
-      },
-      status: status,
-      metadata: {
-        ...metadata,
-        locationString: deviceInfo.location
-      }
-    };
-
-    await UserLog.create(logEntry);
-    console.log(`✅ User activity logged: ${action} for user ${userId}`);
-  } catch (error) {
-    console.error('Error logging user activity:', error);
-  }
-};
 
 // Enhanced Signup Endpoint with OTP - FIXED email handling
 app.post('/api/auth/signup', [
@@ -5065,16 +5025,39 @@ app.post('/api/auth/signup', [
       isVerified: false // User needs to verify via OTP first
     });
 
-    // If user was referred, log the referral relationship
+    // If user was referred, log the downline relationship automatically
     if (referredByUser) {
-      // Log referral activity
-      await logUserActivity(req, 'referral_joined', 'success', {
-        referredBy: referredByUser._id,
-        referredByEmail: referredByUser.email,
-        referralCode: referralCode
-      }, newUser);
-      
-      console.log(`✅ Referral link used: ${referredByUser.email} referred ${newUser.email}`);
+      try {
+        // Create downline relationship in database
+        const downlineRelationship = await DownlineRelationship.create({
+          upline: referredByUser._id,
+          downline: newUser._id,
+          commissionPercentage: 5,
+          commissionRounds: 3,
+          remainingRounds: 3,
+          assignedBy: referredByUser._id,
+          status: 'active'
+        });
+
+        console.log(`✅ Downline relationship created: ${referredByUser.email} -> ${newUser.email}`);
+
+        // Update upline's downline stats
+        await User.findByIdAndUpdate(referredByUser._id, {
+          $inc: {
+            'downlineStats.totalDownlines': 1,
+            'referralStats.totalReferrals': 1
+          }
+        });
+
+        await logActivity('downline_added', 'downline', downlineRelationship._id, referredByUser._id, 'User', req, {
+          downlineId: newUser._id,
+          downlineName: `${firstName} ${lastName}`,
+          downlineEmail: originalEmail
+        });
+      } catch (downlineError) {
+        console.error('Error creating downline relationship:', downlineError);
+        // Continue with signup even if downline creation fails
+      }
     }
 
     // Generate OTP with exact email
@@ -5131,10 +5114,6 @@ app.post('/api/auth/signup', [
 
     // Log activity
     await logActivity('signup_initiated', 'user', newUser._id, newUser._id, 'User', req);
-    await logUserActivity(req, 'signup', 'pending', { 
-      email: originalEmail,
-      referredBy: referredByUser ? referredByUser.email : null 
-    }, newUser);
 
   } catch (err) {
     console.error('Signup error:', err);
@@ -5170,7 +5149,7 @@ app.post('/api/auth/login', [
       await logUserActivity(req, 'login_attempt', 'failed', {
         error: 'Invalid credentials',
         email: email // Log exact email used
-      });
+      }, user);
       
       return res.status(401).json({
         status: 'fail',
@@ -5245,7 +5224,7 @@ app.post('/api/auth/login', [
     await logUserActivity(req, 'login_error', 'failed', {
       error: err.message,
       email: req.body.email // Log exact email used
-    });
+    }, null);
 
     res.status(500).json({
       status: 'error',
@@ -5257,7 +5236,8 @@ app.post('/api/auth/login', [
 
 // OTP Verification Endpoint
 app.post('/api/auth/verify-otp', [
-  body('otp').notEmpty().withMessage('OTP is required').isLength({ min: 6, max: 6 }).withMessage('OTP must be 6 digits'),
+  body('email').isEmail().withMessage('Please provide a valid email'),
+  body('otp').isLength({ min: 6, max: 6 }).withMessage('OTP must be 6 digits'),
   body('type').isIn(['signup', 'login', 'password_reset', 'withdrawal']).withMessage('Invalid OTP type')
 ], async (req, res) => {
   const errors = validationResult(req);
@@ -5269,30 +5249,7 @@ app.post('/api/auth/verify-otp', [
   }
 
   try {
-    const { otp, type } = req.body;
-    
-    // Get email from token or request
-    let email = req.body.email;
-    
-    if (!email && req.headers.authorization) {
-      try {
-        const token = req.headers.authorization.split(' ')[1];
-        const decoded = verifyJWT(token);
-        const user = await User.findById(decoded.id);
-        if (user) {
-          email = user.email;
-        }
-      } catch (tokenError) {
-        // Token invalid, continue
-      }
-    }
-
-    if (!email) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Email is required'
-      });
-    }
+    const { email, otp, type } = req.body;
 
     // Find valid OTP
     const otpRecord = await OTP.findOne({
@@ -5315,7 +5272,7 @@ app.post('/api/auth/verify-otp', [
     await otpRecord.save();
 
     // Find user
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email: email });
     if (!user) {
       return res.status(404).json({
         status: 'fail',
@@ -5323,35 +5280,49 @@ app.post('/api/auth/verify-otp', [
       });
     }
 
-    // Update based on OTP type
+    // Handle based on type
     if (type === 'signup') {
       user.isVerified = true;
       await user.save();
-      
-      // Send welcome email
+    } else if (type === 'login') {
+      // Update last login with device info
+      const deviceInfo = await getUserDeviceInfo(req);
+      user.lastLogin = new Date();
+      user.loginHistory.push({
+        ip: deviceInfo.ip,
+        device: deviceInfo.device,
+        deviceModel: deviceInfo.deviceModel,
+        browser: deviceInfo.browser,
+        os: deviceInfo.os,
+        location: deviceInfo.location,
+        city: deviceInfo.city,
+        region: deviceInfo.region,
+        country: deviceInfo.country,
+        isp: deviceInfo.isp,
+        latitude: deviceInfo.latitude,
+        longitude: deviceInfo.longitude,
+        timestamp: new Date()
+      });
+      await user.save();
+
+      // Send login success email with device and location info
       await sendProfessionalEmail({
-        email: user.email,
-        template: 'welcome',
+        email: email,
+        template: 'login_success',
         data: {
-          firstName: user.firstName
+          name: user.firstName,
+          device: deviceInfo.device,
+          deviceModel: deviceInfo.deviceModel,
+          browser: deviceInfo.browser,
+          os: deviceInfo.os,
+          location: deviceInfo.location,
+          ip: deviceInfo.ip,
+          isp: deviceInfo.isp
         }
       });
     }
 
-    // Get device info for login
-    const deviceInfo = await getUserDeviceInfo(req);
-    
-    // Update login history
-    user.lastLogin = new Date();
-    user.loginHistory.push({
-      ip: deviceInfo.ip,
-      device: deviceInfo.device,
-      location: deviceInfo.location,
-      timestamp: new Date()
-    });
-    await user.save();
-
-    // Generate full JWT
+    // Generate full token
     const token = generateJWT(user._id);
 
     // Set cookie
@@ -5362,41 +5333,23 @@ app.post('/api/auth/verify-otp', [
       sameSite: 'strict'
     });
 
-    // Send login success email with device and location info
-    await sendProfessionalEmail({
-      email: user.email,
-      template: 'login_success',
-      data: {
-        name: user.firstName,
-        device: deviceInfo.deviceInfo.model || deviceInfo.deviceInfo.type,
-        location: deviceInfo.location,
-        ip: deviceInfo.ip,
-        suspicious: false
-      }
-    });
-
     res.status(200).json({
       status: 'success',
-      message: 'OTP verified successfully',
       token,
+      message: 'OTP verified successfully',
       data: {
         user: {
           id: user._id,
           firstName: user.firstName,
           lastName: user.lastName,
           email: user.email,
-          isVerified: user.isVerified,
-          balances: user.balances
+          isVerified: user.isVerified
         }
       }
     });
 
-    // Log successful login
-    await logUserActivity(req, 'login', 'success', {
-      method: type === 'signup' ? 'signup_verification' : 'login_verification',
-      deviceType: deviceInfo.deviceInfo.type,
-      location: deviceInfo.location
-    }, user);
+    // Log activity
+    await logUserActivity(req, `${type}_otp_verified`, 'success', { type }, user);
 
   } catch (err) {
     console.error('OTP verification error:', err);
@@ -5574,7 +5527,21 @@ app.post('/api/auth/google', async (req, res) => {
     try {
       user.lastLogin = new Date();
       const deviceInfo = await getUserDeviceInfo(req);
-      user.loginHistory.push(deviceInfo);
+      user.loginHistory.push({
+        ip: deviceInfo.ip,
+        device: deviceInfo.device,
+        deviceModel: deviceInfo.deviceModel,
+        browser: deviceInfo.browser,
+        os: deviceInfo.os,
+        location: deviceInfo.location,
+        city: deviceInfo.city,
+        region: deviceInfo.region,
+        country: deviceInfo.country,
+        isp: deviceInfo.isp,
+        latitude: deviceInfo.latitude,
+        longitude: deviceInfo.longitude,
+        timestamp: new Date()
+      });
       await user.save();
     } catch (updateError) {
       console.error('User update error:', updateError);
@@ -5605,11 +5572,6 @@ app.post('/api/auth/google', async (req, res) => {
         provider: 'google',
         email: originalEmail
       });
-      
-      await logUserActivity(req, 'google_signin_initiated', 'pending', {
-        isNewUser,
-        email: originalEmail
-      }, user);
     } catch (logError) {
       console.error('Activity logging error:', logError);
     }
@@ -5656,16 +5618,7 @@ app.post('/api/auth/forgot-password', [
     await user.save();
 
     const resetURL = `https://bithhash.vercel.app/reset-password?token=${resetToken}`;
-    const message = `Forgot your password? Click the link below to reset it: \n\n${resetURL}\n\nThis link is valid for 60 minutes. If you didn't request this, please ignore this email.`;
 
-    await sendEmail({
-      email: user.email,
-      subject: 'Your password reset token (valid for 60 minutes)',
-      message,
-      html: `<p>Forgot your password? Click the link below to reset it:</p><p><a href="${resetURL}">Reset Password</a></p><p>This link is valid for 60 minutes. If you didn't request this, please ignore this email.</p>`
-    });
-
-    // Send professional password reset email
     await sendProfessionalEmail({
       email: user.email,
       template: 'password_reset',
@@ -5681,8 +5634,6 @@ app.post('/api/auth/forgot-password', [
     });
 
     await logActivity('forgot-password', 'user', user._id, user._id, 'User', req);
-    await logUserActivity(req, 'password_reset_request', 'success', { email: user.email }, user);
-
   } catch (err) {
     console.error('Forgot password error:', err);
     res.status(500).json({
@@ -5730,6 +5681,15 @@ app.post('/api/auth/reset-password', [
     user.passwordResetExpires = undefined;
     await user.save();
 
+    // Send password reset success email
+    await sendProfessionalEmail({
+      email: user.email,
+      template: 'password_reset_success',
+      data: {
+        name: user.firstName
+      }
+    });
+
     const newToken = generateJWT(user._id);
 
     // Set cookie
@@ -5746,18 +5706,7 @@ app.post('/api/auth/reset-password', [
       message: 'Password updated successfully'
     });
 
-    // Send password reset confirmation email
-    await sendProfessionalEmail({
-      email: user.email,
-      template: 'password_reset_complete',
-      data: {
-        name: user.firstName
-      }
-    });
-
     await logActivity('reset-password', 'user', user._id, user._id, 'User', req);
-    await logUserActivity(req, 'password_reset_complete', 'success', {}, user);
-
   } catch (err) {
     console.error('Reset password error:', err);
     res.status(500).json({
@@ -5913,7 +5862,7 @@ app.post('/api/investments', protect, [
       const referralBonus = (amount * plan.referralBonus) / 100;
       
       // Update referring user's balance for direct referral bonus
-      const referringUser = await User.findByIdAndUpdate(user.referredBy, {
+      await User.findByIdAndUpdate(user.referredBy, {
         $inc: {
           'balances.main': referralBonus,
           'referralStats.totalEarnings': referralBonus,
@@ -5929,7 +5878,7 @@ app.post('/api/investments', protect, [
             date: new Date()
           }
         }
-      }, { new: true });
+      });
 
       // Create referral commission record for direct referral
       await CommissionHistory.create({
@@ -5972,24 +5921,7 @@ app.post('/api/investments', protect, [
       };
       await investment.save();
 
-      console.log(`🎁 Direct referral bonus of $${referralBonus} paid to ${referringUser.email}`);
-
-      // Send email notification for referral bonus
-      try {
-        await sendProfessionalEmail({
-          email: referringUser.email,
-          template: 'referral_bonus',
-          data: {
-            name: referringUser.firstName,
-            bonusAmount: referralBonus,
-            referredUser: `${user.firstName} ${user.lastName}`,
-            bonusType: 'Direct Referral Bonus'
-          }
-        });
-        console.log(`📧 Referral bonus email sent to ${referringUser.email}`);
-      } catch (emailError) {
-        console.error('Failed to send referral bonus email:', emailError);
-      }
+      console.log(`🎁 Direct referral bonus of $${referralBonus} paid to ${user.referredBy}`);
     }
 
     // ✅ ENHANCED: Send investment creation email
@@ -6015,12 +5947,6 @@ app.post('/api/investments', protect, [
 
     // Log activity
     await logActivity('create_investment', 'investment', investment._id, userId, 'User', req);
-    await logUserActivity(req, 'investment_created', 'success', {
-      amount: amount,
-      planName: plan.name,
-      expectedReturn: expectedReturn,
-      balanceType: balanceType
-    }, user);
 
     res.status(201).json({
       status: 'success',
@@ -6181,11 +6107,6 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
       });
 
       await logActivity('complete_investment', 'investment', investment._id, userId, 'User', req);
-      await logUserActivity(req, 'investment_completed', 'success', {
-        amount: investment.originalAmount,
-        profit: totalReturn - investment.amount,
-        planName: investment.plan.name
-      }, user);
 
     } catch (transactionError) {
       // Rollback transaction on error
@@ -6204,173 +6125,6 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
   }
 });
 
-
-// Deposit Endpoint
-app.post('/api/deposits', protect, [
-  body('amount').isFloat({ min: 1 }).withMessage('Amount must be a positive number'),
-  body('method').isIn(['btc', 'eth', 'usdt', 'bank', 'card']).withMessage('Invalid deposit method')
-], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({
-      status: 'fail',
-      errors: errors.array()
-    });
-  }
-
-  try {
-    const { amount, method } = req.body;
-    const userId = req.user._id;
-    
-    // Create deposit transaction
-    const deposit = await Transaction.create({
-      user: userId,
-      type: 'deposit',
-      amount: amount,
-      currency: 'USD',
-      status: 'pending',
-      method: method,
-      reference: `DEP-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      fee: 0,
-      netAmount: amount,
-      details: {
-        requestedAt: new Date()
-      }
-    });
-    
-    // Log activity
-    await logUserActivity(req, 'deposit_created', 'pending', {
-      amount: amount,
-      method: method,
-      reference: deposit.reference
-    }, req.user);
-    
-    res.status(201).json({
-      status: 'success',
-      message: 'Deposit request created successfully',
-      data: {
-        deposit: {
-          id: deposit._id,
-          amount: deposit.amount,
-          method: deposit.method,
-          reference: deposit.reference,
-          status: deposit.status,
-          createdAt: deposit.createdAt
-        }
-      }
-    });
-    
-  } catch (err) {
-    console.error('Deposit creation error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'An error occurred while creating deposit'
-    });
-  }
-});
-
-// Withdrawal Endpoint
-app.post('/api/withdrawals', protect, [
-  body('amount').isFloat({ min: 1 }).withMessage('Amount must be a positive number'),
-  body('method').isIn(['btc', 'eth', 'usdt', 'bank']).withMessage('Invalid withdrawal method'),
-  body('address').optional().trim(),
-  body('bankDetails').optional().isObject()
-], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({
-      status: 'fail',
-      errors: errors.array()
-    });
-  }
-
-  try {
-    const { amount, method, address, bankDetails } = req.body;
-    const userId = req.user._id;
-    
-    // Check if user has sufficient matured balance
-    const user = req.user;
-    if (user.balances.matured < amount) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Insufficient matured balance'
-      });
-    }
-    
-    // Calculate fee (example: 1% fee)
-    const fee = amount * 0.01;
-    const netAmount = amount - fee;
-    
-    // Create withdrawal transaction
-    const withdrawal = await Transaction.create({
-      user: userId,
-      type: 'withdrawal',
-      amount: amount,
-      currency: 'USD',
-      status: 'pending',
-      method: method,
-      reference: `WTD-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      fee: fee,
-      netAmount: netAmount,
-      btcAddress: method === 'btc' ? address : undefined,
-      bankDetails: method === 'bank' ? bankDetails : undefined,
-      details: {
-        requestedAt: new Date()
-      }
-    });
-    
-    // Deduct from matured balance immediately
-    user.balances.matured -= amount;
-    await user.save();
-    
-    // Send withdrawal request email
-    await sendProfessionalEmail({
-      email: user.email,
-      template: 'withdrawal_request',
-      data: {
-        name: user.firstName,
-        amount: amount,
-        method: method,
-        reference: withdrawal.reference,
-        fee: fee,
-        netAmount: netAmount
-      }
-    });
-    
-    // Log activity
-    await logUserActivity(req, 'withdrawal_created', 'pending', {
-      amount: amount,
-      method: method,
-      reference: withdrawal.reference,
-      fee: fee,
-      netAmount: netAmount
-    }, user);
-    
-    res.status(201).json({
-      status: 'success',
-      message: 'Withdrawal request created successfully',
-      data: {
-        withdrawal: {
-          id: withdrawal._id,
-          amount: withdrawal.amount,
-          method: withdrawal.method,
-          reference: withdrawal.reference,
-          fee: withdrawal.fee,
-          netAmount: withdrawal.netAmount,
-          status: withdrawal.status,
-          createdAt: withdrawal.createdAt
-        }
-      }
-    });
-    
-  } catch (err) {
-    console.error('Withdrawal creation error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'An error occurred while creating withdrawal'
-    });
-  }
-});
 
 
 
@@ -6684,23 +6438,27 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
     await deposit.save();
 
     // Send deposit received email
-    await sendAutomatedEmail(user, 'deposit_received', {
-      amount: deposit.amount,
-      method: deposit.method,
-      reference: deposit.reference,
-      newBalance: user.balances.main
-    });
-    
-    await logActivity('approve-deposit', 'transaction', deposit._id, req.admin._id, 'Admin', req, {
-      amount: deposit.amount,
-      userId: user._id
+    await sendProfessionalEmail({
+      email: user.email,
+      template: 'deposit_received',
+      data: {
+        name: user.firstName,
+        amount: deposit.amount,
+        method: deposit.method,
+        reference: deposit.reference,
+        newBalance: user.balances.main
+      }
     });
     
     res.status(200).json({
       status: 'success',
       message: 'Deposit approved successfully'
     });
-
+    
+    await logActivity('approve-deposit', 'transaction', deposit._id, req.admin._id, 'Admin', req, {
+      amount: deposit.amount,
+      userId: user._id
+    });
   } catch (err) {
     console.error('Admin approve deposit error:', err);
     res.status(500).json({
@@ -6726,8 +6484,7 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
     const { rejectionReason } = req.body;
     
     // Find deposit
-    const deposit = await Transaction.findById(req.params.id)
-      .populate('user');
+    const deposit = await Transaction.findById(req.params.id);
     
     if (!deposit || deposit.type !== 'deposit') {
       return res.status(404).json({
@@ -6747,12 +6504,6 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
     deposit.status = 'failed';
     deposit.adminNotes = rejectionReason;
     await deposit.save();
-    
-    // Notify user about rejection (optional)
-    if (deposit.user) {
-      // Could send rejection email here if needed
-      console.log(`Deposit rejected for user ${deposit.user.email}: ${rejectionReason}`);
-    }
     
     res.status(200).json({
       status: 'success',
@@ -6830,18 +6581,18 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
     withdrawal.processedAt = new Date();
     withdrawal.adminNotes = notes;
     await withdrawal.save();
-    
+
     // Send withdrawal completed email
-    if (withdrawal.user) {
-      await sendAutomatedEmail(withdrawal.user, 'withdrawal_completed', {
+    await sendProfessionalEmail({
+      email: withdrawal.user.email,
+      template: 'withdrawal_completed',
+      data: {
+        name: withdrawal.user.firstName,
         amount: withdrawal.amount,
         method: withdrawal.method,
-        reference: withdrawal.reference,
-        fee: withdrawal.fee,
-        netAmount: withdrawal.netAmount,
-        processedAt: withdrawal.processedAt
-      });
-    }
+        reference: withdrawal.reference
+      }
+    });
     
     res.status(200).json({
       status: 'success',
@@ -6936,7 +6687,92 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
   }
 });
 
-// Admin Activity Endpoint - FIXED VERSION WITH ENHANCED LOCATION AND DEVICE INFO
+// Admin Suspend User Endpoint
+app.post('/api/admin/users/:id/suspend', adminProtect, [
+  body('reason').trim().notEmpty().withMessage('Suspension reason is required')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        status: 'fail',
+        errors: errors.array()
+      });
+    }
+
+    const { reason } = req.body;
+    const userId = req.params.id;
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+
+    user.status = 'suspended';
+    await user.save();
+
+    // Send account suspended email
+    await sendProfessionalEmail({
+      email: user.email,
+      template: 'account_suspended',
+      data: {
+        name: user.firstName,
+        reason: reason
+      }
+    });
+
+    res.status(200).json({
+      status: 'success',
+      message: 'User suspended successfully'
+    });
+
+    await logActivity('suspend_user', 'user', user._id, req.admin._id, 'Admin', req, {
+      reason: reason
+    });
+  } catch (err) {
+    console.error('Admin suspend user error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to suspend user'
+    });
+  }
+});
+
+// Admin Unsuspend User Endpoint
+app.post('/api/admin/users/:id/unsuspend', adminProtect, async (req, res) => {
+  try {
+    const userId = req.params.id;
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+
+    user.status = 'active';
+    await user.save();
+
+    res.status(200).json({
+      status: 'success',
+      message: 'User unsuspended successfully'
+    });
+
+    await logActivity('unsuspend_user', 'user', user._id, req.admin._id, 'Admin', req, {});
+  } catch (err) {
+    console.error('Admin unsuspend user error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to unsuspend user'
+    });
+  }
+});
+
+// Admin Activity Endpoint - FIXED VERSION with enhanced location and device info
 app.get('/api/admin/activity', adminProtect, async (req, res) => {
   try {
     const { page = 1, limit = 10, type = 'all' } = req.query;
@@ -6983,12 +6819,21 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
       let timestamp = activity.createdAt || activity.timestamp;
       let status = activity.status || 'success';
       let location = 'Unknown';
+      let city = 'Unknown';
+      let region = 'Unknown';
+      let country = 'Unknown';
       let device = 'Unknown';
-      let deviceDetails = { type: 'unknown', model: 'Unknown' };
-      let detailedLocation = { country: 'Unknown', city: 'Unknown', region: 'Unknown', isp: 'Unknown' };
+      let deviceType = 'Unknown';
+      let deviceModel = 'Unknown';
+      let browser = 'Unknown';
+      let os = 'Unknown';
+      let isp = 'Unknown';
 
       if (isUserLog) {
-        // Handle UserLog entries
+        // Handle UserLog entries with enhanced location and device info
+        console.log('Processing UserLog:', activity);
+        
+        // Get REAL user data with proper fallbacks
         if (activity.user && typeof activity.user === 'object') {
           userData = {
             id: activity.user._id || 'unknown',
@@ -7005,38 +6850,30 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
         
         ipAddress = activity.ipAddress || 'Unknown';
         
-        // Extract location from activity
+        // Extract enhanced location info
         if (activity.location) {
-          if (typeof activity.location === 'string') {
-            location = activity.location;
-          } else if (activity.location.city || activity.location.country) {
-            location = `${activity.location.city || ''}${activity.location.city && activity.location.country ? ', ' : ''}${activity.location.country || ''}`;
-            detailedLocation = {
-              country: activity.location.country?.name || activity.location.country || 'Unknown',
-              city: activity.location.city || 'Unknown',
-              region: activity.location.region?.name || activity.location.region || 'Unknown',
-              isp: activity.location.isp || 'Unknown'
-            };
-          }
-        } else if (activity.metadata?.locationString) {
-          location = activity.metadata.locationString;
+          location = activity.location.location || 
+                     `${activity.location.city || ''}, ${activity.location.region || ''}, ${activity.location.country?.name || ''}`.replace(/^,\s*|\s*,\s*$/g, '') || 
+                     'Unknown';
+          city = activity.location.city || 'Unknown';
+          region = activity.location.region?.name || 'Unknown';
+          country = activity.location.country?.name || 'Unknown';
+          isp = activity.location.isp || 'Unknown';
         }
         
-        // Extract device info
+        // Extract enhanced device info
         if (activity.deviceInfo) {
-          deviceDetails = {
-            type: activity.deviceInfo.type || 'unknown',
-            os: activity.deviceInfo.os?.name || 'Unknown',
-            browser: activity.deviceInfo.browser?.name || 'Unknown',
-            model: activity.deviceInfo.model || 'Unknown'
-          };
-          device = `${deviceDetails.model} (${deviceDetails.type})`;
-        } else {
           device = activity.userAgent || 'Unknown';
+          deviceType = activity.deviceInfo.type || 'Unknown';
+          deviceModel = activity.deviceInfo.deviceModel || 'Unknown';
+          browser = activity.deviceInfo.browser?.name || 'Unknown';
+          os = activity.deviceInfo.os?.name || 'Unknown';
         }
         
       } else {
         // Handle SystemLog entries
+        console.log('Processing SystemLog:', activity);
+        
         if (activity.performedBy && typeof activity.performedBy === 'object') {
           if (activity.performedByModel === 'User') {
             userData = {
@@ -7054,18 +6891,20 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
         }
         
         ipAddress = activity.ip || 'Unknown';
-        location = activity.location || 'Unknown';
-        device = activity.device || 'Unknown';
         
-        // Check for location data in changes
-        if (activity.changes?.locationData) {
+        // Extract location from changes metadata if available
+        if (activity.changes && activity.changes.locationData) {
           const locData = activity.changes.locationData;
-          location = locData.location || location;
-          detailedLocation = locData.detailedLocation || detailedLocation;
-          if (locData.deviceInfo) {
-            deviceDetails = locData.deviceInfo;
-            device = `${deviceDetails.model || ''} (${deviceDetails.type || 'unknown'})`.trim() || device;
-          }
+          location = locData.location || 'Unknown';
+          city = locData.city || 'Unknown';
+          region = locData.region || 'Unknown';
+          country = locData.country || 'Unknown';
+          isp = locData.isp || 'Unknown';
+          device = locData.userAgent || 'Unknown';
+          deviceType = locData.deviceType || 'Unknown';
+          deviceModel = locData.deviceModel || 'Unknown';
+          browser = locData.browser || 'Unknown';
+          os = locData.os || 'Unknown';
         }
       }
 
@@ -7086,9 +6925,15 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
         description: getActivityDescription(action, activity.metadata || activity.changes),
         ipAddress: ipAddress,
         location: location,
-        detailedLocation: detailedLocation,
+        city: city,
+        region: region,
+        country: country,
+        isp: isp,
         device: device,
-        deviceDetails: deviceDetails,
+        deviceType: deviceType,
+        deviceModel: deviceModel,
+        browser: browser,
+        os: os,
         status: status,
         type: isUserLog ? 'user_activity' : 'system_activity',
         metadata: activity.metadata || activity.changes || {}
@@ -7137,52 +6982,57 @@ function getActivityDescription(action, metadata) {
     'password_reset_request': 'Requested password reset',
     'password_reset_complete': 'Completed password reset',
     'failed_login': 'Failed login attempt',
-    'google_signin_initiated': 'Initiated Google sign-in',
-    'google_signin_otp_sent': 'Google sign-in OTP sent',
     
     // Financial actions
-    'deposit_created': 'Created deposit request',
-    'deposit_completed': 'Deposit completed',
-    'deposit_failed': 'Deposit failed',
-    'withdrawal_created': 'Created withdrawal request',
-    'withdrawal_completed': 'Withdrawal completed',
-    'withdrawal_failed': 'Withdrawal failed',
+    'deposit': 'Made a deposit',
+    'withdrawal': 'Requested a withdrawal',
+    'investment': 'Created an investment',
+    'transfer': 'Transferred funds',
+    'create-deposit': 'Created deposit request',
+    'create-withdrawal': 'Created withdrawal request',
+    'btc-withdrawal': 'Made BTC withdrawal',
+    'create-savings': 'Added to savings',
     'investment_created': 'Created new investment',
-    'investment_completed': 'Investment completed',
     'investment_matured': 'Investment matured',
-    'transfer_created': 'Created transfer',
-    'transfer_completed': 'Transfer completed',
-    'buy_created': 'Created buy order',
-    'buy_completed': 'Buy order completed',
-    'sell_created': 'Created sell order',
-    'sell_completed': 'Sell order completed',
+    'investment_completed': 'Investment completed',
     
     // Account actions
     'profile_update': 'Updated profile information',
+    'update-profile': 'Updated profile',
+    'update-address': 'Updated address',
     'kyc_submission': 'Submitted KYC documents',
-    'kyc_approved': 'KYC verification approved',
-    'kyc_rejected': 'KYC verification rejected',
+    'submit-kyc': 'Submitted KYC',
+    'settings_change': 'Changed account settings',
+    'update-preferences': 'Updated preferences',
     
     // Security actions
     '2fa_enable': 'Enabled two-factor authentication',
     '2fa_disable': 'Disabled two-factor authentication',
+    'enable-2fa': 'Enabled 2FA',
+    'disable-2fa': 'Disabled 2FA',
     'api_key_create': 'Created API key',
     'api_key_delete': 'Deleted API key',
     'device_login': 'Logged in from new device',
     
-    // Referral actions
-    'referral_joined': 'Joined via referral link',
-    'referral_bonus_earned': 'Earned referral bonus',
-    'downline_commission_paid': 'Paid downline commission',
+    // System & Admin actions
+    'session_timeout': 'Session timed out',
+    'suspicious_activity': 'Suspicious activity detected',
+    'admin-login': 'Admin logged in',
+    'user_login': 'User logged in',
+    'create_investment': 'Created investment',
+    'complete_investment': 'Completed investment',
+    'verify-admin': 'Admin session verified',
+    'admin_login': 'Admin logged in',
     
     // Admin actions
     'approve-deposit': 'Approved deposit',
     'reject-deposit': 'Rejected deposit',
     'approve-withdrawal': 'Approved withdrawal',
     'reject-withdrawal': 'Rejected withdrawal',
-    'user_suspended': 'Suspended user account',
-    'user_unsuspended': 'Unsuspended user account',
-    'admin_login': 'Admin logged in'
+    'suspend_user': 'Suspended user account',
+    'unsuspend_user': 'Unsuspended user account',
+    'create-user': 'Created user account',
+    'update-user': 'Updated user account'
   };
 
   let description = actionMap[action] || `Performed ${action.replace(/_/g, ' ')}`;
@@ -7195,11 +7045,17 @@ function getActivityDescription(action, metadata) {
     if (metadata.method) {
       description += ` via ${metadata.method}`;
     }
-    if (metadata.planName) {
-      description += ` (${metadata.planName})`;
+    if (metadata.deviceType) {
+      description += ` from ${metadata.deviceType}`;
     }
     if (metadata.location) {
-      description += ` from ${metadata.location}`;
+      description += ` in ${metadata.location}`;
+    }
+    if (metadata.reason) {
+      description += ` (Reason: ${metadata.reason})`;
+    }
+    if (metadata.fields && Array.isArray(metadata.fields)) {
+      description += ` (${metadata.fields.join(', ')})`;
     }
   }
 
@@ -7229,7 +7085,9 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
             } : { name: 'System', email: 'system' },
             action: activity.action,
             ipAddress: activity.ipAddress,
-            location: activity.location || 'Unknown',
+            location: activity.location?.location || 'Unknown',
+            device: activity.userAgent || 'Unknown',
+            deviceModel: activity.deviceInfo?.deviceModel || 'Unknown',
             status: activity.status
         }));
 
@@ -7249,217 +7107,24 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
 });
 
 
-// Admin Suspend User Endpoint
-app.post('/api/admin/users/:id/suspend', adminProtect, [
-  body('reason').trim().notEmpty().withMessage('Suspension reason is required')
-], async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        status: 'fail',
-        errors: errors.array()
-      });
-    }
-    
-    const { reason } = req.body;
-    const userId = req.params.id;
-    
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found'
-      });
-    }
-    
-    if (user.status === 'suspended') {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'User is already suspended'
-      });
-    }
-    
-    user.status = 'suspended';
-    await user.save();
-    
-    // Send suspension email
-    await sendAutomatedEmail(user, 'account_suspended', {
-      reason: reason
-    });
-    
-    await logActivity('user_suspended', 'user', userId, req.admin._id, 'Admin', req, {
-      reason: reason
-    });
-    
-    res.status(200).json({
-      status: 'success',
-      message: 'User suspended successfully'
-    });
-    
-  } catch (err) {
-    console.error('Admin suspend user error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to suspend user'
-    });
-  }
-});
 
-// Admin Unsuspend User Endpoint
-app.post('/api/admin/users/:id/unsuspend', adminProtect, async (req, res) => {
-  try {
-    const userId = req.params.id;
-    
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found'
-      });
-    }
-    
-    if (user.status !== 'suspended') {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'User is not suspended'
-      });
-    }
-    
-    user.status = 'active';
-    await user.save();
-    
-    // Send unsuspension email
-    await sendAutomatedEmail(user, 'account_unsuspended', {});
-    
-    await logActivity('user_unsuspended', 'user', userId, req.admin._id, 'Admin', req, {});
-    
-    res.status(200).json({
-      status: 'success',
-      message: 'User unsuspended successfully'
-    });
-    
-  } catch (err) {
-    console.error('Admin unsuspend user error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to unsuspend user'
-    });
-  }
-});
 
-// Admin Approve KYC Endpoint
-app.post('/api/admin/kyc/:id/approve', adminProtect, async (req, res) => {
-  try {
-    const kycId = req.params.id;
-    
-    const kyc = await KYC.findById(kycId).populate('user');
-    if (!kyc) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'KYC record not found'
-      });
-    }
-    
-    kyc.overallStatus = 'verified';
-    kyc.identity.status = 'verified';
-    kyc.address.status = 'verified';
-    kyc.facial.status = 'verified';
-    kyc.reviewedAt = new Date();
-    kyc.verifiedBy = req.admin._id;
-    await kyc.save();
-    
-    // Update user KYC status
-    if (kyc.user) {
-      await User.findByIdAndUpdate(kyc.user._id, {
-        'kycStatus.identity': 'verified',
-        'kycStatus.address': 'verified',
-        'kycStatus.facial': 'verified'
-      });
-      
-      // Send KYC approved email
-      await sendAutomatedEmail(kyc.user, 'kyc_approved', {});
-    }
-    
-    await logActivity('kyc_approved', 'kyc', kycId, req.admin._id, 'Admin', req, {});
-    
-    res.status(200).json({
-      status: 'success',
-      message: 'KYC approved successfully'
-    });
-    
-  } catch (err) {
-    console.error('Admin approve KYC error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to approve KYC'
-    });
-  }
-});
 
-// Admin Reject KYC Endpoint
-app.post('/api/admin/kyc/:id/reject', adminProtect, [
-  body('reason').trim().notEmpty().withMessage('Rejection reason is required')
-], async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        status: 'fail',
-        errors: errors.array()
-      });
-    }
-    
-    const { reason } = req.body;
-    const kycId = req.params.id;
-    
-    const kyc = await KYC.findById(kycId).populate('user');
-    if (!kyc) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'KYC record not found'
-      });
-    }
-    
-    kyc.overallStatus = 'rejected';
-    kyc.identity.status = 'rejected';
-    kyc.identity.rejectionReason = reason;
-    kyc.reviewedAt = new Date();
-    kyc.verifiedBy = req.admin._id;
-    kyc.adminNotes = reason;
-    await kyc.save();
-    
-    // Update user KYC status
-    if (kyc.user) {
-      await User.findByIdAndUpdate(kyc.user._id, {
-        'kycStatus.identity': 'rejected',
-        'kycStatus.address': 'rejected',
-        'kycStatus.facial': 'rejected'
-      });
-      
-      // Send KYC rejected email
-      await sendAutomatedEmail(kyc.user, 'kyc_rejected', {
-        reason: reason
-      });
-    }
-    
-    await logActivity('kyc_rejected', 'kyc', kycId, req.admin._id, 'Admin', req, {
-      reason: reason
-    });
-    
-    res.status(200).json({
-      status: 'success',
-      message: 'KYC rejected successfully'
-    });
-    
-  } catch (err) {
-    console.error('Admin reject KYC error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to reject KYC'
-    });
-  }
-});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
