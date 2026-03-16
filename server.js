@@ -506,10 +506,11 @@ const CommissionHistorySchema = new mongoose.Schema({
   status: {
     type: String,
     enum: ['pending', 'paid', 'cancelled'],
-    default: 'pending' // Changed to 'pending' by default - paid at maturity
+    default: 'paid'
   },
   paidAt: {
-    type: Date
+    type: Date,
+    default: Date.now
   }
 }, {
   timestamps: true
@@ -3025,11 +3026,7 @@ const generateApiKey = () => {
 };
 
 const generateReferralCode = () => {
-  // Generate a complex referral code with prefix and random string
-  const prefix = ['INV', 'REF', 'BTC', 'MIN', 'CAP'][Math.floor(Math.random() * 5)];
-  const randomPart = crypto.randomBytes(4).toString('hex').toUpperCase();
-  const timestamp = Date.now().toString(36).toUpperCase().slice(-4);
-  return `${prefix}-${timestamp}-${randomPart}`;
+  return crypto.randomBytes(4).toString('hex').toUpperCase();
 };
 
 const sendEmail = async (options) => {
@@ -3801,7 +3798,7 @@ const checkCSRF = (req, res, next) => {
 };
 
 
-// Fixed function to calculate and distribute downline referral commissions - NOW PAID AT MATURITY
+// Fixed function to calculate and distribute downline referral commissions
 const calculateReferralCommissions = async (investment) => {
   try {
     // First, populate the investment with user data
@@ -3839,7 +3836,7 @@ const calculateReferralCommissions = async (investment) => {
 
     console.log(`💰 Downline commission: $${investmentAmount} * ${commissionPercentage}% = $${commissionAmount} for upline: ${uplineUser.email}`);
 
-    // Create commission history record with status 'pending' - paid at maturity
+    // Create commission history record
     const commissionHistory = await CommissionHistory.create({
       upline: uplineId,
       downline: investorId,
@@ -3848,13 +3845,28 @@ const calculateReferralCommissions = async (investment) => {
       commissionPercentage: commissionPercentage,
       commissionAmount: commissionAmount,
       roundNumber: relationship.commissionRounds - relationship.remainingRounds + 1,
-      status: 'pending', // Set to pending - will be paid at maturity
-      paidAt: null
+      status: 'paid',
+      paidAt: new Date()
     });
 
-    console.log(`⏳ Commission record created with status 'pending' for upline ${uplineUser.email}`);
+    // ✅ FIXED: Add commission to upline's MAIN balance as requested
+    const updatedUpline = await User.findByIdAndUpdate(
+      uplineId,
+      {
+        $inc: {
+          'balances.main': commissionAmount, // Added to main balance
+          'referralStats.totalEarnings': commissionAmount,
+          'referralStats.availableBalance': commissionAmount,
+          'downlineStats.totalCommissionEarned': commissionAmount,
+          'downlineStats.thisMonthCommission': commissionAmount
+        }
+      },
+      { new: true }
+    );
 
-    // Update downline relationship (decrement remaining rounds but don't pay yet)
+    console.log(`✅ Updated upline ${uplineUser.email} MAIN balance with $${commissionAmount}. New balance: $${updatedUpline.balances.main}`);
+
+    // Update downline relationship
     relationship.remainingRounds -= 1;
     relationship.totalCommissionEarned += commissionAmount;
     
@@ -3865,7 +3877,29 @@ const calculateReferralCommissions = async (investment) => {
 
     await relationship.save();
 
-    // Add to upline's referral history as pending
+    // Create transaction record for the commission
+    await Transaction.create({
+      user: uplineId,
+      type: 'referral',
+      amount: commissionAmount,
+      currency: 'USD',
+      status: 'completed',
+      method: 'internal',
+      reference: `DOWNLINE-COMM-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      details: {
+        commissionFrom: investorId,
+        investmentId: investmentId,
+        round: relationship.commissionRounds - relationship.remainingRounds + 1,
+        totalRounds: relationship.commissionRounds,
+        commissionType: 'downline',
+        downlineName: `${populatedInvestment.user.firstName} ${populatedInvestment.user.lastName}`,
+        percentage: commissionPercentage
+      },
+      fee: 0,
+      netAmount: commissionAmount
+    });
+
+    // Add to upline's referral history
     await User.findByIdAndUpdate(uplineId, {
       $push: {
         referralHistory: {
@@ -3874,7 +3908,7 @@ const calculateReferralCommissions = async (investment) => {
           percentage: commissionPercentage,
           level: 1, // Direct downline
           date: new Date(),
-          status: 'pending', // Pending until maturity
+          status: 'available',
           type: 'downline_commission'
         }
       }
@@ -3891,22 +3925,21 @@ const calculateReferralCommissions = async (investment) => {
       'downlineStats.activeDownlines': activeDownlinesCount
     });
 
-    console.log(`🎉 Downline commission of $${commissionAmount} recorded as pending for upline ${uplineUser.email} for investment ${investmentId} (Round ${relationship.commissionRounds - relationship.remainingRounds + 1}/${relationship.commissionRounds})`);
+    console.log(`🎉 Downline commission of $${commissionAmount} paid to upline ${uplineUser.email} for investment ${investmentId} (Round ${relationship.commissionRounds - relationship.remainingRounds + 1}/${relationship.commissionRounds})`);
 
     // Log the activity
-    await logActivity('downline_commission_pending', 'commission', commissionHistory._id, uplineId, 'User', null, {
+    await logActivity('downline_commission_paid', 'commission', commissionHistory._id, uplineId, 'User', null, {
       amount: commissionAmount,
       downline: investorId,
       investment: investmentId,
       round: relationship.commissionRounds - relationship.remainingRounds + 1,
       totalRounds: relationship.commissionRounds,
-      percentage: commissionPercentage,
-      status: 'pending'
+      percentage: commissionPercentage
     });
 
-    // Send pending notification email to upline
+    // Send email notification to upline
     try {
-      await sendEnhancedEmail(uplineUser, 'referral_pending', {
+      await sendEnhancedEmail(uplineUser, 'referral_bonus', {
         bonusAmount: commissionAmount,
         referredUser: `${populatedInvestment.user.firstName} ${populatedInvestment.user.lastName}`,
         bonusType: 'Downline Commission',
@@ -3916,7 +3949,7 @@ const calculateReferralCommissions = async (investment) => {
         percentage: commissionPercentage
       });
     } catch (emailError) {
-      console.error('Failed to send pending commission email:', emailError);
+      console.error('Failed to send downline commission email:', emailError);
     }
 
   } catch (err) {
@@ -3925,100 +3958,21 @@ const calculateReferralCommissions = async (investment) => {
   }
 };
 
-// Function to pay commission at investment maturity
-const payCommissionAtMaturity = async (investmentId) => {
-  try {
-    console.log(`💰 Processing commission payments for matured investment: ${investmentId}`);
-    
-    // Find all pending commissions for this investment
-    const pendingCommissions = await CommissionHistory.find({
-      investment: investmentId,
-      status: 'pending'
-    }).populate('upline', 'email firstName lastName balances');
-    
-    if (!pendingCommissions || pendingCommissions.length === 0) {
-      console.log(`No pending commissions found for investment: ${investmentId}`);
-      return;
-    }
-    
-    console.log(`Found ${pendingCommissions.length} pending commissions to pay`);
-    
-    for (const commission of pendingCommissions) {
-      // Update commission status to paid
-      commission.status = 'paid';
-      commission.paidAt = new Date();
-      await commission.save();
-      
-      // Add commission to upline's main balance
-      const updatedUpline = await User.findByIdAndUpdate(
-        commission.upline._id,
-        {
-          $inc: {
-            'balances.main': commission.commissionAmount,
-            'referralStats.totalEarnings': commission.commissionAmount,
-            'referralStats.availableBalance': commission.commissionAmount,
-            'downlineStats.totalCommissionEarned': commission.commissionAmount
-          }
-        },
-        { new: true }
-      );
-      
-      console.log(`✅ Paid $${commission.commissionAmount} to upline ${commission.upline.email}. New balance: $${updatedUpline.balances.main}`);
-      
-      // Create transaction record
-      await Transaction.create({
-        user: commission.upline._id,
-        type: 'referral',
-        amount: commission.commissionAmount,
-        currency: 'USD',
-        status: 'completed',
-        method: 'internal',
-        reference: `COMM-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-        details: {
-          commissionFrom: commission.downline,
-          investmentId: investmentId,
-          round: commission.roundNumber,
-          totalRounds: 3,
-          commissionType: 'downline_matured',
-          percentage: commission.commissionPercentage
-        },
-        fee: 0,
-        netAmount: commission.commissionAmount
-      });
-      
-      // Update referral history status
-      await User.updateOne(
-        { 
-          _id: commission.upline._id,
-          'referralHistory.referredUser': commission.downline,
-          'referralHistory.amount': commission.commissionAmount
-        },
-        {
-          $set: { 'referralHistory.$.status': 'available' }
-        }
-      );
-      
-      // Send email notification
-      try {
-        await sendEnhancedEmail(commission.upline, 'referral_bonus', {
-          bonusAmount: commission.commissionAmount,
-          referredUser: 'Your downline',
-          bonusType: 'Downline Commission (Matured)',
-          investmentAmount: commission.investmentAmount,
-          percentage: commission.commissionPercentage,
-          roundNumber: commission.roundNumber
-        });
-      } catch (emailError) {
-        console.error('Failed to send commission payment email:', emailError);
-      }
-    }
-    
-    console.log(`✅ All pending commissions paid for investment: ${investmentId}`);
-    
-  } catch (err) {
-    console.error('Error paying commissions at maturity:', err);
-  }
-};
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // Enhanced email service with professional Bitcoin mining templates
 const sendProfessionalEmail = async (options) => {
@@ -4471,7 +4425,7 @@ const sendProfessionalEmail = async (options) => {
         `
       },
 
-      // OTP VERIFICATION - FIXED TO ENSURE OTP IS SENT
+      // OTP VERIFICATION
       otp: {
         subject: 'Your Verification Code | BitHash Capital',
         html: `
@@ -4528,7 +4482,7 @@ const sendProfessionalEmail = async (options) => {
                       background: #0A0E17; 
                   }
                   .otp-code { 
-                      background: #111827; 
+                      background: #05080F; 
                       color: #00D8FF; 
                       padding: 20px; 
                       font-size: 36px; 
@@ -4538,13 +4492,12 @@ const sendProfessionalEmail = async (options) => {
                       margin: 30px 0; 
                       border-radius: 8px; 
                       font-family: 'Courier New', monospace; 
-                      border: 1px solid #00D8FF;
                   }
                   .security-note { 
-                      background: rgba(0, 216, 255, 0.1); 
-                      border-left: 4px solid #00D8FF; 
+                      background: #fff8e6; 
+                      border: 1px solid #f0b90b; 
                       padding: 20px; 
-                      border-radius: 8px; 
+                      border-radius: 6px; 
                       margin: 25px 0; 
                   }
                   .footer { 
@@ -4568,21 +4521,20 @@ const sendProfessionalEmail = async (options) => {
                       </div>
                   </div>
                   <div class="content">
-                      <h2 style="color: #FFFFFF; margin-bottom: 20px;">Hello ${data.name || 'there'},</h2>
-                      <p style="color: #E5E7EB;">Please use the following verification code to complete your ${data.action || 'account verification'}:</p>
+                      <h2>Hello ${data.name || 'there'},</h2>
+                      <p>Please use the following verification code to complete your ${data.action || 'account verification'}:</p>
                       
                       <div class="otp-code">${data.otp}</div>
                       
-                      <p style="color: #E5E7EB;">This code will expire in <strong style="color: #00D8FF;">5 minutes</strong> for security purposes.</p>
+                      <p>This code will expire in 5 minutes for security purposes.</p>
                       
                       <div class="security-note">
-                          <strong style="color: #FFFFFF;">Security Notice:</strong> 
-                          <span style="color: #E5E7EB;">This verification code is valid for one-time use only. Do not share this code with anyone, including BitHash Capital support staff.</span>
+                          <strong>Security Notice:</strong> This verification code is valid for one-time use only. Do not share this code with anyone, including BitHash Capital support staff.
                       </div>
                       
-                      <p style="color: #8E9BAE;">If you didn't request this code, please secure your account immediately and contact our support team.</p>
+                      <p>If you didn't request this code, please secure your account immediately and contact our support team.</p>
                       
-                      <p style="color: #FFFFFF; margin-top: 30px;">Best regards,<br><strong style="color: #00D8FF;">BitHash Capital Security Team</strong></p>
+                      <p>Best regards,<br><strong>BitHash Capital Security Team</strong></p>
                   </div>
                   <div class="footer">
                       <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
@@ -5721,241 +5673,6 @@ const sendProfessionalEmail = async (options) => {
         `
       },
 
-      // DEPOSIT REJECTED - ADDED MISSING TEMPLATE
-      deposit_rejected: {
-        subject: 'Deposit Update | BitHash Capital',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>Deposit Update - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@300;400;700&display=swap" rel="stylesheet">
-              <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-              <style>
-                  * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { 
-                      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
-                      line-height: 1.6; 
-                      color: #1a1a1a; 
-                      background-color: #f8f9fa; 
-                      margin: 0; 
-                      padding: 0; 
-                  }
-                  .container { 
-                      max-width: 600px; 
-                      margin: 0 auto; 
-                      background: #ffffff; 
-                  }
-                  .header { 
-                      background: #0a0a0a; 
-                      padding: 30px 40px; 
-                      text-align: center; 
-                      border-bottom: 3px solid #e74c3c; 
-                  }
-                  .logo-container { 
-                      display: flex; 
-                      align-items: center; 
-                      justify-content: center; 
-                      gap: 15px; 
-                      margin-bottom: 15px; 
-                  }
-                  .logo-img { 
-                      width: 40px; 
-                      height: 40px; 
-                      border-radius: 50%; 
-                  }
-                  .logo-text { 
-                      font-size: 24px; 
-                      font-weight: 700; 
-                      color: #f0b90b; 
-                      letter-spacing: -0.5px; 
-                  }
-                  .content { 
-                      padding: 40px; 
-                      background: #ffffff; 
-                  }
-                  .update-box { 
-                      background: #fee; 
-                      border: 1px solid #e74c3c; 
-                      padding: 25px; 
-                      border-radius: 8px; 
-                      margin: 25px 0; 
-                  }
-                  .details-box { 
-                      background: #f8f9fa; 
-                      padding: 20px; 
-                      border-radius: 6px; 
-                      margin: 15px 0; 
-                  }
-                  .support-link { 
-                      color: #e74c3c; 
-                      text-decoration: none; 
-                      font-weight: 600; 
-                  }
-                  .footer { 
-                      background: #0a0a0a; 
-                      padding: 25px 40px; 
-                      text-align: center; 
-                      color: #999; 
-                  }
-              </style>
-          </head>
-          <body>
-              <div class="container">
-                  <div class="header">
-                      <div class="logo-container">
-                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text"><span>₿</span>itHash</div>
-                      </div>
-                  </div>
-                  <div class="content">
-                      <h2>Hello ${data.name},</h2>
-                      
-                      <div class="update-box">
-                          <h3 style="color: #e74c3c; margin-bottom: 15px;">Deposit Update</h3>
-                          <p>Your deposit could not be processed at this time.</p>
-                      </div>
-                      
-                      <div class="details-box">
-                          <p><strong>Amount:</strong> $${data.amount.toLocaleString()}</p>
-                          <p><strong>Method:</strong> ${data.method}</p>
-                          <p><strong>Reference:</strong> ${data.reference}</p>
-                          <p><strong>Reason:</strong> ${data.reason || 'Verification failed'}</p>
-                      </div>
-                      
-                      <p>Please contact our support team if you have any questions.</p>
-                      
-                      <p>Best regards,<br><strong>BitHash Capital Finance Team</strong></p>
-                  </div>
-                  <div class="footer">
-                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.</p>
-                  </div>
-              </div>
-          </body>
-          </html>
-        `
-      },
-
-      // WITHDRAWAL REJECTED - ADDED MISSING TEMPLATE
-      withdrawal_rejected: {
-        subject: 'Withdrawal Update | BitHash Capital',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>Withdrawal Update - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@300;400;700&display=swap" rel="stylesheet">
-              <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-              <style>
-                  * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { 
-                      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
-                      line-height: 1.6; 
-                      color: #1a1a1a; 
-                      background-color: #f8f9fa; 
-                      margin: 0; 
-                      padding: 0; 
-                  }
-                  .container { 
-                      max-width: 600px; 
-                      margin: 0 auto; 
-                      background: #ffffff; 
-                  }
-                  .header { 
-                      background: #0a0a0a; 
-                      padding: 30px 40px; 
-                      text-align: center; 
-                      border-bottom: 3px solid #e74c3c; 
-                  }
-                  .logo-container { 
-                      display: flex; 
-                      align-items: center; 
-                      justify-content: center; 
-                      gap: 15px; 
-                      margin-bottom: 15px; 
-                  }
-                  .logo-img { 
-                      width: 40px; 
-                      height: 40px; 
-                      border-radius: 50%; 
-                  }
-                  .logo-text { 
-                      font-size: 24px; 
-                      font-weight: 700; 
-                      color: #f0b90b; 
-                      letter-spacing: -0.5px; 
-                  }
-                  .content { 
-                      padding: 40px; 
-                      background: #ffffff; 
-                  }
-                  .update-box { 
-                      background: #fee; 
-                      border: 1px solid #e74c3c; 
-                      padding: 25px; 
-                      border-radius: 8px; 
-                      margin: 25px 0; 
-                  }
-                  .details-box { 
-                      background: #f8f9fa; 
-                      padding: 20px; 
-                      border-radius: 6px; 
-                      margin: 15px 0; 
-                  }
-                  .support-link { 
-                      color: #e74c3c; 
-                      text-decoration: none; 
-                      font-weight: 600; 
-                  }
-                  .footer { 
-                      background: #0a0a0a; 
-                      padding: 25px 40px; 
-                      text-align: center; 
-                      color: #999; 
-                  }
-              </style>
-          </head>
-          <body>
-              <div class="container">
-                  <div class="header">
-                      <div class="logo-container">
-                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text"><span>₿</span>itHash</div>
-                      </div>
-                  </div>
-                  <div class="content">
-                      <h2>Hello ${data.name},</h2>
-                      
-                      <div class="update-box">
-                          <h3 style="color: #e74c3c; margin-bottom: 15px;">Withdrawal Update</h3>
-                          <p>Your withdrawal request could not be processed at this time.</p>
-                      </div>
-                      
-                      <div class="details-box">
-                          <p><strong>Amount:</strong> $${data.amount.toLocaleString()}</p>
-                          <p><strong>Method:</strong> ${data.method}</p>
-                          <p><strong>Reference:</strong> ${data.reference}</p>
-                          <p><strong>Reason:</strong> ${data.reason || 'Unable to verify'}</p>
-                      </div>
-                      
-                      <p>The funds have been returned to your matured balance.</p>
-                      <p>Please contact our support team if you have any questions.</p>
-                      
-                      <p>Best regards,<br><strong>BitHash Capital Finance Team</strong></p>
-                  </div>
-                  <div class="footer">
-                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.</p>
-                  </div>
-              </div>
-          </body>
-          </html>
-        `
-      },
-
       // REFERRAL BONUS
       referral_bonus: {
         subject: 'Referral Bonus Earned | BitHash Capital',
@@ -6093,129 +5810,6 @@ const sendProfessionalEmail = async (options) => {
                   <div class="footer">
                       <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
                       Professional Bitcoin Mining and Investment Platform</p>
-                  </div>
-              </div>
-          </body>
-          </html>
-        `
-      },
-
-      // REFERRAL PENDING - ADDED MISSING TEMPLATE
-      referral_pending: {
-        subject: 'Referral Commission Recorded (Pending Maturity) | BitHash Capital',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>Referral Commission Pending - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@300;400;700&display=swap" rel="stylesheet">
-              <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-              <style>
-                  * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { 
-                      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
-                      line-height: 1.6; 
-                      color: #1a1a1a; 
-                      background-color: #f8f9fa; 
-                      margin: 0; 
-                      padding: 0; 
-                  }
-                  .container { 
-                      max-width: 600px; 
-                      margin: 0 auto; 
-                      background: #ffffff; 
-                  }
-                  .header { 
-                      background: #0a0a0a; 
-                      padding: 30px 40px; 
-                      text-align: center; 
-                      border-bottom: 3px solid #f39c12; 
-                  }
-                  .logo-container { 
-                      display: flex; 
-                      align-items: center; 
-                      justify-content: center; 
-                      gap: 15px; 
-                      margin-bottom: 15px; 
-                  }
-                  .logo-img { 
-                      width: 40px; 
-                      height: 40px; 
-                      border-radius: 50%; 
-                  }
-                  .logo-text { 
-                      font-size: 24px; 
-                      font-weight: 700; 
-                      color: #f0b90b; 
-                      letter-spacing: -0.5px; 
-                  }
-                  .content { 
-                      padding: 40px; 
-                      background: #ffffff; 
-                  }
-                  .pending-card { 
-                      background: #fef9e7; 
-                      border: 2px solid #f39c12; 
-                      padding: 30px; 
-                      border-radius: 8px; 
-                      margin: 25px 0; 
-                      text-align: center; 
-                  }
-                  .bonus-amount { 
-                      font-size: 36px; 
-                      font-weight: 700; 
-                      color: #f39c12; 
-                      margin: 10px 0; 
-                  }
-                  .referral-details { 
-                      background: #f8f9fa; 
-                      padding: 20px; 
-                      border-radius: 6px; 
-                      margin: 20px 0; 
-                  }
-                  .footer { 
-                      background: #0a0a0a; 
-                      padding: 25px 40px; 
-                      text-align: center; 
-                      color: #999; 
-                  }
-              </style>
-          </head>
-          <body>
-              <div class="container">
-                  <div class="header">
-                      <div class="logo-container">
-                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text"><span>₿</span>itHash</div>
-                      </div>
-                  </div>
-                  <div class="content">
-                      <h2>Hello ${data.name},</h2>
-                      <p>A referral commission has been recorded for your downline's investment and will be paid at maturity.</p>
-                      
-                      <div class="pending-card">
-                          <h3>Commission Recorded (Pending)</h3>
-                          <div class="bonus-amount">$${data.bonusAmount.toLocaleString()}</div>
-                          <p>will be credited to your account when the investment matures</p>
-                      </div>
-                      
-                      <div class="referral-details">
-                          <p><strong>Referred User:</strong> ${data.referredUser}</p>
-                          <p><strong>Bonus Type:</strong> ${data.bonusType}</p>
-                          <p><strong>Investment Amount:</strong> $${data.investmentAmount}</p>
-                          <p><strong>Commission Percentage:</strong> ${data.percentage}%</p>
-                          <p><strong>Round:</strong> ${data.roundNumber}/${data.totalRounds}</p>
-                          <p><strong>Status:</strong> <span style="color: #f39c12;">Pending Maturity</span></p>
-                      </div>
-                      
-                      <p>You will receive another notification when the investment matures and the commission is paid.</p>
-                      
-                      <p>Best regards,<br><strong>BitHash Capital Team</strong></p>
-                  </div>
-                  <div class="footer">
-                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.</p>
                   </div>
               </div>
           </body>
@@ -6386,9 +5980,9 @@ const sendProfessionalEmail = async (options) => {
     };
 
     await transporter.sendMail(mailOptions);
-    console.log(`✅ Professional email sent successfully to ${email} - Template: ${template}`);
+    console.log(`Professional email sent successfully to ${email}`);
   } catch (err) {
-    console.error('❌ Error sending professional email:', err);
+    console.error('Error sending professional email:', err);
     throw new Error('Failed to send email');
   }
 };
@@ -6411,7 +6005,7 @@ const sendProfessionalEmail = async (options) => {
 app.post('/api/auth/signup', [
   body('firstName').trim().notEmpty().withMessage('First name is required').escape(),
   body('lastName').trim().notEmpty().withMessage('Last name is required').escape(),
-  body('email').isEmail().withMessage('Please provide a valid email').normalizeEmail(),
+  body('email').isEmail().withMessage('Please provide a valid email'),
   body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters')
       .matches(/[A-Z]/).withMessage('Password must contain at least one uppercase letter')
       .matches(/[a-z]/).withMessage('Password must contain at least one lowercase letter')
@@ -6449,28 +6043,36 @@ app.post('/api/auth/signup', [
     let referredByUser = null;
     let referralSource = 'organic';
 
-    // Handle referral code from URL parameter - FIXED: Better parsing for complex referral codes
+    // Handle referral code from URL parameter - FIXED for complex referral links
     if (referralCode) {
       console.log('Processing referral code:', referralCode);
       
+      // Handle complex referral links that might contain the user's name
       let actualReferralCode = referralCode;
       
-      // Handle complex referral codes with multiple hyphens
+      // Extract the actual code from formats like "John-6FD7F302" or "John-Doe-6FD7F302"
       if (referralCode.includes('-')) {
         const parts = referralCode.split('-');
-        // Extract the last part which is the actual code (format: PREFIX-TIMESTAMP-CODE)
-        if (parts.length >= 3) {
-          actualReferralCode = parts[parts.length - 1];
-        } else if (parts.length === 2) {
-          actualReferralCode = parts[1];
+        // The actual code is the last part after all hyphens
+        actualReferralCode = parts[parts.length - 1];
+      }
+      
+      // Also handle format like "?ref=6FD7F302" (already extracted by frontend)
+      if (referralCode.includes('=')) {
+        const match = referralCode.match(/[=]([^&]+)/);
+        if (match) {
+          actualReferralCode = match[1];
         }
       }
       
+      // Find the referring user by the extracted code
       referredByUser = await User.findOne({ referralCode: actualReferralCode });
       
       if (referredByUser) {
         referralSource = 'referral_link';
-        console.log(`Referral found: ${referredByUser.firstName} ${referredByUser.lastName} (${referredByUser.email})`);
+        console.log(`Referral found: ${referredByUser.firstName} ${referredByUser.lastName} (${referredByUser.email}) with code: ${actualReferralCode}`);
+      } else {
+        console.log(`No user found with referral code: ${actualReferralCode}`);
       }
     }
 
@@ -6558,7 +6160,6 @@ app.post('/api/auth/signup', [
         action: 'account verification'
       }
     });
-    console.log(`✅ OTP email sent to ${originalEmail}`);
 
     // Send welcome email to exact email address
     await sendProfessionalEmail({
@@ -6599,10 +6200,9 @@ app.post('/api/auth/signup', [
 
   } catch (err) {
     console.error('Signup error:', err);
-    // Return success with error logged - don't break frontend
-    res.status(200).json({
-      status: 'success',
-      message: 'Account creation initiated. Please check your email for verification.'
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred during signup'
     });
   }
 });
@@ -6677,7 +6277,6 @@ app.post('/api/auth/login', [
         action: 'login'
       }
     });
-    console.log(`✅ OTP email sent to ${email}`);
 
     // Generate temporary token for OTP verification
     const tempToken = generateJWT(user._id);
@@ -6717,6 +6316,1973 @@ app.post('/api/auth/login', [
   }
 });
 
+
+
+
+app.post('/api/auth/google', async (req, res) => {
+  try {
+    console.log('Google auth request received');
+    
+    const { credential } = req.body;
+    
+    if (!credential) {
+      console.error('No credential provided');
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Google credential is required'
+      });
+    }
+
+    console.log('Verifying Google token...');
+
+    // Verify the Google token
+    let payload;
+    try {
+      const ticket = await googleClient.verifyIdToken({
+        idToken: credential,
+        audience: process.env.GOOGLE_CLIENT_ID || '634814462335-9o4t8q95c4orcsd9sijjl52374g6vm85.apps.googleusercontent.com'
+      });
+      payload = ticket.getPayload();
+      console.log('Google token verified successfully');
+    } catch (verifyError) {
+      console.error('Google token verification failed:', verifyError);
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid Google token. Please try again.'
+      });
+    }
+
+    if (!payload) {
+      console.error('No payload from Google token');
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid token payload'
+      });
+    }
+
+    const { email, given_name, family_name, sub } = payload;
+
+    if (!email) {
+      console.error('No email in Google payload');
+      return res.status(400).json({
+        status: 'fail',
+        message: 'No email found in Google account'
+      });
+    }
+
+    console.log('Google auth successful for:', email);
+
+    // Use the EXACT email from Google - no normalization
+    const originalEmail = email;
+
+    let user;
+    let isNewUser = false;
+
+    try {
+      user = await User.findOne({ email: originalEmail });
+      console.log('User lookup result:', user ? 'Found' : 'Not found');
+    } catch (dbError) {
+      console.error('Database lookup error:', dbError);
+      return res.status(500).json({
+        status: 'error',
+        message: 'Database error during user lookup'
+      });
+    }
+
+    if (!user) {
+      // Check if user exists in login records but not in users (shouldn't happen)
+      const loginRecord = await LoginRecord.findOne({ email: originalEmail });
+      if (loginRecord) {
+        console.log('User found in login records but not in users table');
+      }
+
+      // Create new user with Google auth using exact email
+      try {
+        const referralCode = generateReferralCode();
+        user = await User.create({
+          firstName: given_name || 'Google',
+          lastName: family_name || 'User',
+          email: originalEmail,
+          googleId: sub,
+          isVerified: true,
+          referralCode,
+          status: 'active'
+        });
+        isNewUser = true;
+        console.log('New user created via Google:', originalEmail);
+
+        // Send welcome email
+        try {
+          await sendProfessionalEmail({
+            email: originalEmail,
+            template: 'welcome',
+            data: {
+              firstName: given_name || 'Google User'
+            }
+          });
+        } catch (emailError) {
+          console.error('Welcome email failed:', emailError);
+          // Don't fail the request if email fails
+        }
+      } catch (createError) {
+        console.error('User creation error:', createError);
+        return res.status(500).json({
+          status: 'error',
+          message: 'Failed to create user account'
+        });
+      }
+    } else if (!user.googleId) {
+      // Existing user, add Google auth
+      try {
+        user.googleId = sub;
+        user.isVerified = true;
+        await user.save();
+        console.log('Existing user linked with Google:', originalEmail);
+      } catch (updateError) {
+        console.error('User update error:', updateError);
+        return res.status(500).json({
+          status: 'error',
+          message: 'Failed to link Google account'
+        });
+      }
+    }
+
+    // Check if user is active
+    if (user.status !== 'active') {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Your account has been suspended. Please contact support.'
+      });
+    }
+
+    // Generate OTP for Google sign-in
+    try {
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+      await OTP.create({
+        email: originalEmail,
+        otp,
+        type: 'login',
+        expiresAt,
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent']
+      });
+
+      // Send OTP email
+      await sendProfessionalEmail({
+        email: originalEmail,
+        template: 'otp',
+        data: {
+          name: user.firstName,
+          otp: otp,
+          action: 'Google sign-in verification'
+        }
+      });
+    } catch (otpError) {
+      console.error('OTP creation error:', otpError);
+      // Continue even if OTP fails for now
+    }
+
+    // Generate temporary token
+    const tempToken = generateJWT(user._id);
+
+    // Update last login with device info
+    try {
+      user.lastLogin = new Date();
+      const deviceInfo = await getUserDeviceInfo(req);
+      user.loginHistory.push({
+        ip: deviceInfo.ip,
+        device: deviceInfo.device,
+        location: deviceInfo.location,
+        timestamp: new Date()
+      });
+      await user.save();
+    } catch (updateError) {
+      console.error('User update error:', updateError);
+      // Continue even if update fails
+    }
+
+    // SUCCESS RESPONSE
+    res.status(200).json({
+      status: 'success',
+      message: 'OTP sent to your email. Please verify to complete Google sign-in.',
+      tempToken,
+      needsOtp: true,
+      isNewUser: isNewUser,
+      data: {
+        user: {
+          id: user._id,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          email: user.email
+        }
+      }
+    });
+
+    // Log activity (don't let this break the response)
+    try {
+      await logActivity('google_signin_otp_sent', 'user', user._id, user._id, 'User', req, {
+        isNewUser,
+        provider: 'google',
+        email: originalEmail
+      });
+    } catch (logError) {
+      console.error('Activity logging error:', logError);
+    }
+
+  } catch (err) {
+    console.error('Google auth UNEXPECTED error:', err);
+    console.error('Error stack:', err.stack);
+    
+    res.status(500).json({
+      status: 'error',
+      message: 'An unexpected error occurred during Google authentication'
+    });
+  }
+});
+
+
+
+app.post('/api/auth/forgot-password', [
+  body('email').isEmail().withMessage('Please provide a valid email').normalizeEmail()
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      status: 'fail',
+      errors: errors.array()
+    });
+  }
+
+  try {
+    const { email } = req.body;
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      // Return success even if user doesn't exist to prevent email enumeration
+      return res.status(200).json({
+        status: 'success',
+        message: 'If your email is registered, you will receive a password reset link'
+      });
+    }
+
+    const { resetToken, hashedToken, tokenExpires } = createPasswordResetToken();
+    user.passwordResetToken = hashedToken;
+    user.passwordResetExpires = tokenExpires;
+    await user.save();
+
+    const resetURL = `https://bithhash.vercel.app/reset-password?token=${resetToken}`;
+    const message = `Forgot your password? Click the link below to reset it: \n\n${resetURL}\n\nThis link is valid for 60 minutes. If you didn't request this, please ignore this email.`;
+
+    await sendEmail({
+      email: user.email,
+      subject: 'Your password reset token (valid for 60 minutes)',
+      message,
+      html: `<p>Forgot your password? Click the link below to reset it:</p><p><a href="${resetURL}">Reset Password</a></p><p>This link is valid for 60 minutes. If you didn't request this, please ignore this email.</p>`
+    });
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Password reset link sent to email'
+    });
+
+    await logActivity('forgot-password', 'user', user._id, user._id, 'User', req);
+  } catch (err) {
+    console.error('Forgot password error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while sending the password reset email'
+    });
+  }
+});
+
+app.post('/api/auth/reset-password', [
+  body('token').notEmpty().withMessage('Token is required'),
+  body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters')
+    .matches(/[A-Z]/).withMessage('Password must contain at least one uppercase letter')
+    .matches(/[a-z]/).withMessage('Password must contain at least one lowercase letter')
+    .matches(/[0-9]/).withMessage('Password must contain at least one number')
+    .matches(/[^A-Za-z0-9]/).withMessage('Password must contain at least one special character')
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      status: 'fail',
+      errors: errors.array()
+    });
+  }
+
+  try {
+    const { token, password } = req.body;
+    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+
+    const user = await User.findOne({
+      passwordResetToken: hashedToken,
+      passwordResetExpires: { $gt: Date.now() }
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Token is invalid or has expired'
+      });
+    }
+
+    user.password = await bcrypt.hash(password, 12);
+    user.passwordChangedAt = Date.now();
+    user.passwordResetToken = undefined;
+    user.passwordResetExpires = undefined;
+    await user.save();
+
+    const newToken = generateJWT(user._id);
+
+    // Set cookie
+    res.cookie('jwt', newToken, {
+      expires: new Date(Date.now() + JWT_COOKIE_EXPIRES * 24 * 60 * 60 * 1000),
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict'
+    });
+
+    res.status(200).json({
+      status: 'success',
+      token: newToken,
+      message: 'Password updated successfully'
+    });
+
+    await logActivity('reset-password', 'user', user._id, user._id, 'User', req);
+  } catch (err) {
+    console.error('Reset password error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while resetting the password'
+    });
+  }
+});
+
+
+app.get('/api/users/devices', protect, async (req, res) => {
+  try {
+    const devices = req.user.loginHistory;
+
+    res.status(200).json({
+      status: 'success',
+      data: devices
+    });
+  } catch (err) {
+    console.error('Get user devices error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while fetching user devices'
+    });
+  }
+});
+
+
+
+
+// Investment routes - ENHANCED VERSION WITH EMAIL NOTIFICATIONS
+app.post('/api/investments', protect, [
+  body('planId').notEmpty().withMessage('Plan ID is required').isMongoId().withMessage('Invalid Plan ID'),
+  body('amount').isFloat({ min: 1 }).withMessage('Amount must be a positive number'),
+  body('balanceType').isIn(['main', 'matured']).withMessage('Balance type must be either "main" or "matured"')
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      status: 'fail',
+      errors: errors.array()
+    });
+  }
+
+  try {
+    const { planId, amount, balanceType } = req.body;
+    const userId = req.user._id;
+
+    // Verify plan exists and is active
+    const plan = await Plan.findById(planId);
+    if (!plan || !plan.isActive) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid or inactive investment plan'
+      });
+    }
+
+    // Verify amount is within plan limits
+    if (amount < plan.minAmount || amount > plan.maxAmount) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Amount must be between $${plan.minAmount} and $${plan.maxAmount} for this plan`
+      });
+    }
+
+    // Verify user has sufficient balance in the selected balance type
+    const user = await User.findById(userId);
+    const selectedBalance = user.balances[balanceType];
+    
+    if (selectedBalance < amount) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Insufficient ${balanceType} balance`
+      });
+    }
+
+    // Calculate investment amount after 3% fee
+    const investmentFee = amount * 0.03;
+    const investmentAmountAfterFee = amount - investmentFee;
+
+    // Calculate expected return based on the amount after fee
+    const expectedReturn = investmentAmountAfterFee + (investmentAmountAfterFee * plan.percentage / 100);
+    const endDate = new Date(Date.now() + plan.duration * 60 * 60 * 1000);
+
+    // Create investment
+    const investment = await Investment.create({
+      user: userId,
+      plan: planId,
+      amount: investmentAmountAfterFee, // Store the amount after fee
+      originalAmount: amount, // Store original amount before fee
+      originalCurrency: 'USD',
+      currency: 'USD',
+      expectedReturn,
+      returnPercentage: plan.percentage,
+      endDate,
+      payoutSchedule: 'end_term',
+      status: 'active',
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent'],
+      deviceInfo: getDeviceType(req),
+      termsAccepted: true,
+      investmentFee: investmentFee, // Store the fee for record keeping
+      balanceType: balanceType // Store which balance was used
+    });
+
+    // Deduct from user's selected balance (only the original amount)
+    user.balances[balanceType] -= amount;
+    user.balances.active += investmentAmountAfterFee; // Add the amount after fee to active balance
+    await user.save();
+
+    // Create transaction record for the investment with fee
+    const transaction = await Transaction.create({
+      user: userId,
+      type: 'investment',
+      amount: -amount,
+      currency: 'USD',
+      status: 'completed',
+      method: 'internal',
+      reference: `INV-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      details: {
+        investmentId: investment._id,
+        planName: plan.name,
+        balanceType: balanceType,
+        investmentFee: investmentFee,
+        amountAfterFee: investmentAmountAfterFee
+      },
+      fee: investmentFee,
+      netAmount: -investmentAmountAfterFee
+    });
+
+    // RECORD PLATFORM REVENUE
+    await PlatformRevenue.create({
+      source: 'investment_fee',
+      amount: investmentFee,
+      currency: 'USD',
+      transactionId: transaction._id,
+      investmentId: investment._id,
+      userId: userId,
+      description: `3% investment fee for ${plan.name} investment`,
+      metadata: {
+        planName: plan.name,
+        originalAmount: amount,
+        amountAfterFee: investmentAmountAfterFee,
+        feePercentage: 3
+      }
+    });
+
+    // ✅ FIXED: ALWAYS CHECK FOR DOWNLINE COMMISSIONS (Not just referredBy)
+    await calculateReferralCommissions(investment);
+
+    // ✅ FIXED: Handle direct referral bonus separately (if user was referred by someone)
+    if (user.referredBy) {
+      const referralBonus = (amount * plan.referralBonus) / 100;
+      
+      // Update referring user's balance for direct referral bonus
+      await User.findByIdAndUpdate(user.referredBy, {
+        $inc: {
+          'balances.main': referralBonus,
+          'referralStats.totalEarnings': referralBonus,
+          'referralStats.availableBalance': referralBonus
+        },
+        $push: {
+          referralHistory: {
+            referredUser: userId,
+            amount: referralBonus,
+            percentage: plan.referralBonus,
+            level: 1,
+            status: 'available',
+            date: new Date()
+          }
+        }
+      });
+
+      // Create referral commission record for direct referral
+      await CommissionHistory.create({
+        upline: user.referredBy,
+        downline: userId,
+        investment: investment._id,
+        investmentAmount: amount,
+        commissionPercentage: plan.referralBonus,
+        commissionAmount: referralBonus,
+        roundNumber: 0, // 0 indicates direct referral bonus, not downline commission
+        status: 'paid',
+        paidAt: new Date()
+      });
+
+      // Create transaction for direct referral bonus
+      await Transaction.create({
+        user: user.referredBy,
+        type: 'referral',
+        amount: referralBonus,
+        currency: 'USD',
+        status: 'completed',
+        method: 'internal',
+        reference: `REF-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        details: {
+          referralFrom: userId,
+          investmentId: investment._id,
+          type: 'direct_referral',
+          bonusPercentage: plan.referralBonus
+        },
+        fee: 0,
+        netAmount: referralBonus
+      });
+
+      // Mark investment with referral info
+      investment.referredBy = user.referredBy;
+      investment.referralBonusAmount = referralBonus;
+      investment.referralBonusDetails = {
+        percentage: plan.referralBonus,
+        payoutDate: new Date()
+      };
+      await investment.save();
+
+      console.log(`🎁 Direct referral bonus of $${referralBonus} paid to ${user.referredBy}`);
+    }
+
+    // ✅ ENHANCED: Send investment creation email
+    try {
+      const deviceInfo = await getUserDeviceInfo(req);
+      await sendEnhancedEmail(user, 'investment_created', {
+        planName: plan.name,
+        amount: amount,
+        expectedReturn: expectedReturn,
+        duration: plan.duration,
+        startDate: investment.startDate,
+        endDate: investment.endDate,
+        locationData: deviceInfo.locationData,
+        deviceInfo: deviceInfo.deviceInfo,
+        ip: deviceInfo.ip
+      });
+      console.log(`📧 Investment creation email sent to ${user.email}`);
+    } catch (emailError) {
+      console.error('Failed to send investment creation email:', emailError);
+      // Don't fail the investment if email fails
+    }
+
+    // Log user activity
+    await logUserActivity(req, 'investment_created', 'success', {
+      investmentId: investment._id,
+      planName: plan.name,
+      amount: amount,
+      expectedReturn: expectedReturn,
+      balanceType: balanceType
+    }, user);
+
+    // Log activity
+    await logActivity('create_investment', 'investment', investment._id, userId, 'User', req);
+
+    res.status(201).json({
+      status: 'success',
+      data: {
+        investment: {
+          id: investment._id,
+          plan: plan.name,
+          amount: investment.amount, // This shows amount after fee to user
+          originalAmount: investment.originalAmount, // Original amount for reference
+          investmentFee: investmentFee,
+          expectedReturn: investment.expectedReturn,
+          endDate: investment.endDate,
+          status: investment.status,
+          balanceType: balanceType
+        }
+      }
+    });
+  } catch (err) {
+    console.error('Investment creation error:', err);
+    
+    // Even on error, return success to frontend as requested
+    res.status(200).json({
+      status: 'success',
+      message: 'Investment created successfully'
+    });
+  }
+});
+
+app.post('/api/investments/:id/complete', protect, async (req, res) => {
+  try {
+    const investmentId = req.params.id;
+    const userId = req.user._id;
+
+    // Find the investment with more comprehensive query
+    const investment = await Investment.findOne({ 
+      _id: investmentId, 
+      user: userId,
+      status: 'active' 
+    }).populate('plan');
+    
+    if (!investment) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Active investment not found'
+      });
+    }
+
+    // Enhanced completion check - ensure investment has actually matured
+    const now = new Date();
+    if (now < investment.endDate) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Investment has not matured yet'
+      });
+    }
+
+    // Find the user with proper session handling
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+
+    // Calculate total return (principal + profit) - based on amount after fee
+    const totalReturn = investment.expectedReturn;
+
+    // Enhanced balance transfer with validation
+    if (user.balances.active < investment.amount) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Insufficient active balance to complete investment'
+      });
+    }
+
+    // Use transaction to ensure atomic operation
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+      // Transfer from active to matured balance
+      user.balances.active -= investment.amount;
+      user.balances.matured += totalReturn;
+      
+      // Update investment status with completion details
+      investment.status = 'completed';
+      investment.completionDate = now;
+      investment.actualReturn = totalReturn - investment.amount;
+      investment.isProcessed = true; // Add flag to ensure it's processed
+
+      // Save changes with session
+      await user.save({ session });
+      await investment.save({ session });
+
+      // Create transaction record for the return
+      await Transaction.create([{
+        user: userId,
+        type: 'interest',
+        amount: totalReturn - investment.amount,
+        currency: 'USD',
+        status: 'completed',
+        method: 'internal',
+        reference: `RET-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        details: {
+          investmentId: investment._id,
+          planName: investment.plan.name,
+          principal: investment.amount,
+          interest: totalReturn - investment.amount,
+          originalInvestment: investment.originalAmount,
+          investmentFee: investment.investmentFee
+        },
+        fee: 0,
+        netAmount: totalReturn - investment.amount
+      }], { session });
+
+      // Commit transaction
+      await session.commitTransaction();
+      
+      // ✅ ENHANCED: Send investment completion email
+      try {
+        await sendEnhancedEmail(user, 'investment_completed', {
+          planName: investment.plan.name,
+          amount: investment.originalAmount,
+          totalReturn: totalReturn,
+          profit: totalReturn - investment.amount,
+          completionDate: investment.completionDate,
+          newMaturedBalance: user.balances.matured
+        });
+        console.log(`📧 Investment completion email sent to ${user.email}`);
+      } catch (emailError) {
+        console.error('Failed to send investment completion email:', emailError);
+        // Don't fail the investment completion if email fails
+      }
+
+      // Log user activity
+      await logUserActivity(req, 'investment_completed', 'success', {
+        investmentId: investment._id,
+        planName: investment.plan.name,
+        amount: investment.originalAmount,
+        profit: totalReturn - investment.amount,
+        totalReturn: totalReturn
+      }, user);
+
+      res.status(200).json({
+        status: 'success',
+        data: {
+          investment: {
+            id: investment._id,
+            status: investment.status,
+            completionDate: investment.completionDate,
+            amountReturned: totalReturn,
+            profit: totalReturn - investment.amount,
+            originalInvestment: investment.originalAmount,
+            investmentFee: investment.investmentFee
+          },
+          balances: {
+            active: user.balances.active,
+            matured: user.balances.matured
+          }
+        }
+      });
+
+      await logActivity('complete_investment', 'investment', investment._id, userId, 'User', req);
+
+    } catch (transactionError) {
+      // Rollback transaction on error
+      await session.abortTransaction();
+      throw transactionError;
+    } finally {
+      session.endSession();
+    }
+
+  } catch (err) {
+    console.error('Complete investment error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while completing the investment'
+    });
+  }
+});
+
+
+
+
+
+
+// Admin Pending Deposits Endpoint
+app.get('/api/admin/deposits/pending', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 5;
+    const skip = (page - 1) * limit;
+    
+    // Get pending deposits with user info
+    const deposits = await Transaction.find({
+      type: 'deposit',
+      status: 'pending'
+    })
+    .populate('user', 'firstName lastName email')
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
+    
+    // Get total count for pagination
+    const totalCount = await Transaction.countDocuments({
+      type: 'deposit',
+      status: 'pending'
+    });
+    const totalPages = Math.ceil(totalCount / limit);
+    
+    res.status(200).json({
+      status: 'success',
+      data: {
+        deposits,
+        totalCount,
+        totalPages,
+        currentPage: page
+      }
+    });
+  } catch (err) {
+    console.error('Admin pending deposits error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch pending deposits'
+    });
+  }
+});
+
+// Admin Approved Deposits Endpoint
+app.get('/api/admin/deposits/approved', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 5;
+    const skip = (page - 1) * limit;
+    
+    // Get approved deposits with user info
+    const deposits = await Transaction.find({
+      type: 'deposit',
+      status: 'completed'
+    })
+    .populate('user', 'firstName lastName email')
+    .populate('processedBy', 'name')
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
+    
+    // Get total count for pagination
+    const totalCount = await Transaction.countDocuments({
+      type: 'deposit',
+      status: 'completed'
+    });
+    const totalPages = Math.ceil(totalCount / limit);
+    
+    res.status(200).json({
+      status: 'success',
+      data: {
+        deposits,
+        totalCount,
+        totalPages,
+        currentPage: page
+      }
+    });
+  } catch (err) {
+    console.error('Admin approved deposits error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch approved deposits'
+    });
+  }
+});
+
+// Admin Rejected Deposits Endpoint
+app.get('/api/admin/deposits/rejected', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 5;
+    const skip = (page - 1) * limit;
+    
+    // Get rejected deposits with user info
+    const deposits = await Transaction.find({
+      type: 'deposit',
+      status: 'failed'
+    })
+    .populate('user', 'firstName lastName email')
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
+    
+    // Get total count for pagination
+    const totalCount = await Transaction.countDocuments({
+      type: 'deposit',
+      status: 'failed'
+    });
+    const totalPages = Math.ceil(totalCount / limit);
+    
+    res.status(200).json({
+      status: 'success',
+      data: {
+        deposits,
+        totalCount,
+        totalPages,
+        currentPage: page
+      }
+    });
+  } catch (err) {
+    console.error('Admin rejected deposits error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch rejected deposits'
+    });
+  }
+});
+
+// Admin Pending Withdrawals Endpoint
+app.get('/api/admin/withdrawals/pending', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 5;
+    const skip = (page - 1) * limit;
+    
+    // Get pending withdrawals with user info
+    const withdrawals = await Transaction.find({
+      type: 'withdrawal',
+      status: 'pending'
+    })
+    .populate('user', 'firstName lastName email')
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
+    
+    // Get total count for pagination
+    const totalCount = await Transaction.countDocuments({
+      type: 'withdrawal',
+      status: 'pending'
+    });
+    const totalPages = Math.ceil(totalCount / limit);
+    
+    res.status(200).json({
+      status: 'success',
+      data: {
+        withdrawals,
+        totalCount,
+        totalPages,
+        currentPage: page
+      }
+    });
+  } catch (err) {
+    console.error('Admin pending withdrawals error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch pending withdrawals'
+    });
+  }
+});
+
+// Admin Approved Withdrawals Endpoint
+app.get('/api/admin/withdrawals/approved', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 5;
+    const skip = (page - 1) * limit;
+    
+    // Get approved withdrawals with user info
+    const withdrawals = await Transaction.find({
+      type: 'withdrawal',
+      status: 'completed'
+    })
+    .populate('user', 'firstName lastName email')
+    .populate('processedBy', 'name')
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
+    
+    // Get total count for pagination
+    const totalCount = await Transaction.countDocuments({
+      type: 'withdrawal',
+      status: 'completed'
+    });
+    const totalPages = Math.ceil(totalCount / limit);
+    
+    res.status(200).json({
+      status: 'success',
+      data: {
+        withdrawals,
+        totalCount,
+        totalPages,
+        currentPage: page
+      }
+    });
+  } catch (err) {
+    console.error('Admin approved withdrawals error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch approved withdrawals'
+    });
+  }
+});
+
+// Admin Rejected Withdrawals Endpoint
+app.get('/api/admin/withdrawals/rejected', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 5;
+    const skip = (page - 1) * limit;
+    
+    // Get rejected withdrawals with user info
+    const withdrawals = await Transaction.find({
+      type: 'withdrawal',
+      status: 'failed'
+    })
+    .populate('user', 'firstName lastName email')
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
+    
+    // Get total count for pagination
+    const totalCount = await Transaction.countDocuments({
+      type: 'withdrawal',
+      status: 'failed'
+    });
+    const totalPages = Math.ceil(totalCount / limit);
+    
+    res.status(200).json({
+      status: 'success',
+      data: {
+        withdrawals,
+        totalCount,
+        totalPages,
+        currentPage: page
+      }
+    });
+  } catch (err) {
+    console.error('Admin rejected withdrawals error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch rejected withdrawals'
+    });
+  }
+});
+
+
+
+// Admin Approve Deposit Endpoint
+app.post('/api/admin/deposits/:id/approve', adminProtect, [
+  body('notes').optional().trim()
+], async (req, res) => {
+  try {
+    const { notes } = req.body;
+    
+    // Find deposit
+    const deposit = await Transaction.findById(req.params.id)
+      .populate('user');
+    
+    if (!deposit || deposit.type !== 'deposit') {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Deposit not found'
+      });
+    }
+    
+    if (deposit.status !== 'pending') {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Deposit is not pending approval'
+      });
+    }
+    
+    // Find user
+    const user = await User.findById(deposit.user._id);
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+    
+    // Update user balance
+    user.balances.main += deposit.amount;
+    await user.save();
+    
+    // Update deposit status
+    deposit.status = 'completed';
+    deposit.processedBy = req.admin._id;
+    deposit.processedAt = new Date();
+    deposit.adminNotes = notes;
+    await deposit.save();
+    
+    res.status(200).json({
+      status: 'success',
+      message: 'Deposit approved successfully'
+    });
+
+    // Send deposit confirmation email
+    try {
+      await sendEnhancedEmail(user, 'deposit_received', {
+        amount: deposit.amount,
+        method: deposit.method,
+        reference: deposit.reference,
+        newBalance: user.balances.main
+      });
+      console.log(`📧 Deposit confirmation email sent to ${user.email}`);
+    } catch (emailError) {
+      console.error('Failed to send deposit confirmation email:', emailError);
+    }
+
+    // Log user activity
+    await logUserActivity(req, 'deposit_completed', 'success', {
+      depositId: deposit._id,
+      amount: deposit.amount,
+      method: deposit.method,
+      reference: deposit.reference
+    }, user);
+    
+    await logActivity('approve-deposit', 'transaction', deposit._id, req.admin._id, 'Admin', req, {
+      amount: deposit.amount,
+      userId: user._id
+    });
+  } catch (err) {
+    console.error('Admin approve deposit error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to approve deposit'
+    });
+  }
+});
+
+// Admin Reject Deposit Endpoint
+app.post('/api/admin/deposits/:id/reject', adminProtect, [
+  body('rejectionReason').trim().notEmpty().withMessage('Rejection reason is required')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        status: 'fail',
+        errors: errors.array()
+      });
+    }
+    
+    const { rejectionReason } = req.body;
+    
+    // Find deposit
+    const deposit = await Transaction.findById(req.params.id)
+      .populate('user');
+    
+    if (!deposit || deposit.type !== 'deposit') {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Deposit not found'
+      });
+    }
+    
+    if (deposit.status !== 'pending') {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Deposit is not pending approval'
+      });
+    }
+    
+    // Find user
+    const user = await User.findById(deposit.user._id);
+    
+    // Update deposit status
+    deposit.status = 'failed';
+    deposit.adminNotes = rejectionReason;
+    await deposit.save();
+    
+    res.status(200).json({
+      status: 'success',
+      message: 'Deposit rejected successfully'
+    });
+
+    // Send rejection notification email
+    if (user) {
+      try {
+        await sendEnhancedEmail(user, 'deposit_rejected', {
+          amount: deposit.amount,
+          method: deposit.method,
+          reference: deposit.reference,
+          reason: rejectionReason
+        });
+        console.log(`📧 Deposit rejection email sent to ${user.email}`);
+      } catch (emailError) {
+        console.error('Failed to send deposit rejection email:', emailError);
+      }
+
+      // Log user activity
+      await logUserActivity(req, 'deposit_failed', 'failed', {
+        depositId: deposit._id,
+        amount: deposit.amount,
+        method: deposit.method,
+        reason: rejectionReason
+      }, user);
+    }
+    
+    await logActivity('reject-deposit', 'transaction', deposit._id, req.admin._id, 'Admin', req, {
+      amount: deposit.amount,
+      reason: rejectionReason
+    });
+  } catch (err) {
+    console.error('Admin reject deposit error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to reject deposit'
+    });
+  }
+});
+
+// Admin Get Withdrawal Details Endpoint
+app.get('/api/admin/withdrawals/:id', adminProtect, async (req, res) => {
+  try {
+    const withdrawal = await Transaction.findById(req.params.id)
+      .populate('user', 'firstName lastName email')
+      .lean();
+    
+    if (!withdrawal || withdrawal.type !== 'withdrawal') {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Withdrawal not found'
+      });
+    }
+    
+    res.status(200).json({
+      status: 'success',
+      data: { withdrawal }
+    });
+  } catch (err) {
+    console.error('Admin get withdrawal error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch withdrawal details'
+    });
+  }
+});
+
+// Admin Approve Withdrawal Endpoint
+app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
+  body('notes').optional().trim()
+], async (req, res) => {
+  try {
+    const { notes } = req.body;
+    
+    // Find withdrawal
+    const withdrawal = await Transaction.findById(req.params.id)
+      .populate('user');
+    
+    if (!withdrawal || withdrawal.type !== 'withdrawal') {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Withdrawal not found'
+      });
+    }
+    
+    if (withdrawal.status !== 'pending') {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Withdrawal is not pending approval'
+      });
+    }
+    
+    // Find user
+    const user = await User.findById(withdrawal.user._id);
+    
+    // Update withdrawal status
+    withdrawal.status = 'completed';
+    withdrawal.processedBy = req.admin._id;
+    withdrawal.processedAt = new Date();
+    withdrawal.adminNotes = notes;
+    await withdrawal.save();
+    
+    res.status(200).json({
+      status: 'success',
+      message: 'Withdrawal approved successfully'
+    });
+
+    // Send withdrawal completion email
+    if (user) {
+      try {
+        await sendEnhancedEmail(user, 'withdrawal_completed', {
+          amount: withdrawal.amount,
+          method: withdrawal.method,
+          reference: withdrawal.reference
+        });
+        console.log(`📧 Withdrawal completion email sent to ${user.email}`);
+      } catch (emailError) {
+        console.error('Failed to send withdrawal completion email:', emailError);
+      }
+
+      // Log user activity
+      await logUserActivity(req, 'withdrawal_completed', 'success', {
+        withdrawalId: withdrawal._id,
+        amount: withdrawal.amount,
+        method: withdrawal.method,
+        reference: withdrawal.reference
+      }, user);
+    }
+    
+    await logActivity('approve-withdrawal', 'transaction', withdrawal._id, req.admin._id, 'Admin', req, {
+      amount: withdrawal.amount,
+      userId: withdrawal.user
+    });
+  } catch (err) {
+    console.error('Admin approve withdrawal error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to approve withdrawal'
+    });
+  }
+});
+
+
+
+
+
+
+// CORRECTED Admin Reject Withdrawal Endpoint
+app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
+  body('reason').trim().notEmpty().withMessage('Rejection reason is required')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        status: 'fail',
+        errors: errors.array()
+      });
+    }
+    
+    const { reason } = req.body;
+    
+    // Find withdrawal
+    const withdrawal = await Transaction.findById(req.params.id)
+      .populate('user');
+    
+    if (!withdrawal || withdrawal.type !== 'withdrawal') {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Withdrawal not found'
+      });
+    }
+    
+    if (withdrawal.status !== 'pending') {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Withdrawal is not pending approval'
+      });
+    }
+    
+    // Find user
+    const user = await User.findById(withdrawal.user._id);
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+    
+    // Return funds to user balance
+    user.balances.matured += withdrawal.amount;
+    await user.save();
+    
+    // Update withdrawal status
+    withdrawal.status = 'failed';
+    withdrawal.adminNotes = reason; // Changed from rejectionReason to reason
+    await withdrawal.save();
+    
+    res.status(200).json({
+      status: 'success',
+      message: 'Withdrawal rejected successfully'
+    });
+
+    // Send withdrawal rejection email
+    try {
+      await sendEnhancedEmail(user, 'withdrawal_rejected', {
+        amount: withdrawal.amount,
+        method: withdrawal.method,
+        reference: withdrawal.reference,
+        reason: reason
+      });
+      console.log(`📧 Withdrawal rejection email sent to ${user.email}`);
+    } catch (emailError) {
+      console.error('Failed to send withdrawal rejection email:', emailError);
+    }
+
+    // Log user activity
+    await logUserActivity(req, 'withdrawal_failed', 'failed', {
+      withdrawalId: withdrawal._id,
+      amount: withdrawal.amount,
+      method: withdrawal.method,
+      reason: reason
+    }, user);
+    
+    await logActivity('reject-withdrawal', 'transaction', withdrawal._id, req.admin._id, 'Admin', req, {
+      amount: withdrawal.amount,
+      reason: reason,
+      userId: user._id
+    });
+  } catch (err) {
+    console.error('Admin reject withdrawal error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to reject withdrawal'
+    });
+  }
+});
+
+// Admin Activity Endpoint - FIXED VERSION
+app.get('/api/admin/activity', adminProtect, async (req, res) => {
+  try {
+    const { page = 1, limit = 10, type = 'all' } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    console.log('Fetching admin activity...', { page, limit, type });
+
+    // Get BOTH UserLog and SystemLog data
+    const [userLogs, systemLogs] = await Promise.all([
+      UserLog.find({})
+        .populate('user', 'firstName lastName email')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .lean(),
+      SystemLog.find({})
+        .populate('performedBy')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .lean()
+    ]);
+
+    console.log(`Found ${userLogs.length} user logs and ${systemLogs.length} system logs`);
+
+    // Combine and sort all activities by timestamp
+    const allActivities = [...userLogs, ...systemLogs]
+      .sort((a, b) => new Date(b.createdAt || b.timestamp) - new Date(a.createdAt || a.timestamp))
+      .slice(0, parseInt(limit));
+
+    // Transform activities with PROPER user data mapping
+    const activities = allActivities.map(activity => {
+      // Determine if it's a UserLog or SystemLog
+      const isUserLog = activity.user !== undefined;
+      
+      let userData = {
+        id: 'system',
+        name: 'System',
+        email: 'system'
+      };
+      
+      let action = activity.action;
+      let ipAddress = 'Unknown';
+      let timestamp = activity.createdAt || activity.timestamp;
+      let status = activity.status || 'success';
+      let location = 'Unknown';
+      let deviceInfo = {};
+
+      if (isUserLog) {
+        // Handle UserLog entries
+        console.log('Processing UserLog:', activity);
+        
+        // Get REAL user data with proper fallbacks
+        if (activity.user && typeof activity.user === 'object') {
+          userData = {
+            id: activity.user._id || 'unknown',
+            name: `${activity.user.firstName || ''} ${activity.user.lastName || ''}`.trim() || 'Unknown User',
+            email: activity.user.email || 'Unknown Email'
+          };
+        } else if (activity.username) {
+          userData = {
+            id: activity.user || 'unknown',
+            name: activity.username,
+            email: activity.email || 'Unknown Email'
+          };
+        }
+        
+        ipAddress = activity.ipAddress || 'Unknown';
+        location = activity.location?.city ? `${activity.location.city}, ${activity.location.country?.name || ''}` : 'Unknown';
+        deviceInfo = activity.deviceInfo || {};
+        
+      } else {
+        // Handle SystemLog entries
+        console.log('Processing SystemLog:', activity);
+        
+        if (activity.performedBy && typeof activity.performedBy === 'object') {
+          if (activity.performedByModel === 'User') {
+            userData = {
+              id: activity.performedBy._id || 'unknown',
+              name: `${activity.performedBy.firstName || ''} ${activity.performedBy.lastName || ''}`.trim() || 'Unknown User',
+              email: activity.performedBy.email || 'Unknown Email'
+            };
+          } else if (activity.performedByModel === 'Admin') {
+            userData = {
+              id: activity.performedBy._id || 'unknown',
+              name: activity.performedBy.name || 'Admin',
+              email: activity.performedBy.email || 'admin@system'
+            };
+          }
+        }
+        
+        ipAddress = activity.ip || 'Unknown';
+        location = activity.location || 'Unknown';
+      }
+
+      // Final safety check for user name
+      if (!userData.name || userData.name === ' ' || userData.name === 'undefined undefined') {
+        userData.name = 'System User';
+      }
+
+      return {
+        id: activity._id?.toString() || `activity-${Date.now()}-${Math.random()}`,
+        timestamp: timestamp,
+        user: {
+          id: userData.id,
+          name: userData.name,
+          email: userData.email
+        },
+        action: action,
+        description: getActivityDescription(action, activity.metadata || activity.changes),
+        ipAddress: ipAddress,
+        location: location,
+        deviceInfo: deviceInfo,
+        status: status,
+        type: isUserLog ? 'user_activity' : 'system_activity',
+        metadata: activity.metadata || activity.changes || {}
+      };
+    });
+
+    // Get total count for pagination
+    const totalCount = await UserLog.countDocuments() + await SystemLog.countDocuments();
+
+    console.log('Sending activities:', activities.length);
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        activities: activities,
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages: Math.ceil(totalCount / parseInt(limit)),
+          totalItems: totalCount,
+          itemsPerPage: parseInt(limit),
+          hasNextPage: parseInt(page) < Math.ceil(totalCount / parseInt(limit)),
+          hasPrevPage: parseInt(page) > 1
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Admin activity fetch error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while fetching activity data'
+    });
+  }
+});
+
+// COMPREHENSIVE activity description helper
+function getActivityDescription(action, metadata) {
+  const actionMap = {
+    // Authentication actions
+    'signup': 'Signed up for a new account',
+    'login': 'Logged into account',
+    'logout': 'Logged out of account',
+    'login_attempt': 'Attempted to log in',
+    'session_created': 'Created a new session',
+    'password_change': 'Changed password',
+    'password_reset_request': 'Requested password reset',
+    'password_reset_complete': 'Completed password reset',
+    'failed_login': 'Failed login attempt',
+    
+    // Financial actions
+    'deposit': 'Made a deposit',
+    'withdrawal': 'Requested a withdrawal',
+    'investment': 'Created an investment',
+    'transfer': 'Transferred funds',
+    'create-deposit': 'Created deposit request',
+    'create-withdrawal': 'Created withdrawal request',
+    'btc-withdrawal': 'Made BTC withdrawal',
+    'create-savings': 'Added to savings',
+    'investment_created': 'Created new investment',
+    'investment_matured': 'Investment matured',
+    'investment_completed': 'Investment completed',
+    
+    // Account actions
+    'profile_update': 'Updated profile information',
+    'update-profile': 'Updated profile',
+    'update-address': 'Updated address',
+    'kyc_submission': 'Submitted KYC documents',
+    'submit-kyc': 'Submitted KYC',
+    'settings_change': 'Changed account settings',
+    'update-preferences': 'Updated preferences',
+    
+    // Security actions
+    '2fa_enable': 'Enabled two-factor authentication',
+    '2fa_disable': 'Disabled two-factor authentication',
+    'enable-2fa': 'Enabled 2FA',
+    'disable-2fa': 'Disabled 2FA',
+    'api_key_create': 'Created API key',
+    'api_key_delete': 'Deleted API key',
+    'device_login': 'Logged in from new device',
+    
+    // System & Admin actions
+    'session_timeout': 'Session timed out',
+    'suspicious_activity': 'Suspicious activity detected',
+    'admin-login': 'Admin logged in',
+    'user_login': 'User logged in',
+    'create_investment': 'Created investment',
+    'complete_investment': 'Completed investment',
+    'verify-admin': 'Admin session verified',
+    'admin_login': 'Admin logged in',
+    
+    // Admin actions
+    'approve-deposit': 'Approved deposit',
+    'reject-deposit': 'Rejected deposit',
+    'approve-withdrawal': 'Approved withdrawal',
+    'reject-withdrawal': 'Rejected withdrawal',
+    'create-user': 'Created user account',
+    'update-user': 'Updated user account',
+    
+    // Downline actions
+    'downline_joined': 'New downline user joined',
+    'downline_invested': 'Downline user made an investment',
+    'downline_commission_paid': 'Downline commission paid to upline'
+  };
+
+  let description = actionMap[action] || `Performed ${action.replace(/_/g, ' ')}`;
+
+  // Add context from metadata if available
+  if (metadata) {
+    if (metadata.amount) {
+      description += ` of $${metadata.amount}`;
+    }
+    if (metadata.method) {
+      description += ` via ${metadata.method}`;
+    }
+    if (metadata.deviceType) {
+      description += ` from ${metadata.deviceType}`;
+    }
+    if (metadata.location) {
+      description += ` in ${metadata.location}`;
+    }
+    if (metadata.fields && Array.isArray(metadata.fields)) {
+      description += ` (${metadata.fields.join(', ')})`;
+    }
+  }
+
+  return description;
+}
+
+
+
+
+
+
+// Get latest admin activity
+app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
+    try {
+        const activities = await UserLog.find({})
+            .populate('user', 'firstName lastName email')
+            .sort({ createdAt: -1 })
+            .limit(20)
+            .lean();
+
+        const formattedActivities = activities.map(activity => ({
+            id: activity._id,
+            timestamp: activity.createdAt,
+            user: activity.user ? {
+                name: `${activity.user.firstName} ${activity.user.lastName}`,
+                email: activity.user.email
+            } : { name: 'System', email: 'system' },
+            action: activity.action,
+            ipAddress: activity.ipAddress,
+            status: activity.status
+        }));
+
+        res.status(200).json({
+            status: 'success',
+            data: {
+                activities: formattedActivities
+            }
+        });
+    } catch (err) {
+        console.error('Get latest activity error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch latest activity'
+        });
+    }
+});
+
+
+// Validate referral code endpoint - FIXED for complex referral links
+app.get('/api/referrals/validate/:code', async (req, res) => {
+    try {
+        const { code } = req.params;
+        
+        if (!code) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Referral code is required'
+            });
+        }
+
+        let actualReferralCode = code;
+        
+        // Handle complex formats: "firstName-code", "firstName-lastName-code", or "?ref=code"
+        if (code.includes('-')) {
+            const parts = code.split('-');
+            // The actual code is the last part after all hyphens
+            actualReferralCode = parts[parts.length - 1];
+        }
+        
+        // Handle format like "?ref=6FD7F302"
+        if (code.includes('=')) {
+            const match = code.match(/[=]([^&]+)/);
+            if (match) {
+                actualReferralCode = match[1];
+            }
+        }
+
+        // Also check if the code itself might be a referral code (8 character hex string)
+        if (actualReferralCode.length === 8 && /^[A-F0-9]+$/.test(actualReferralCode)) {
+            // This is likely the raw code
+            console.log('Using raw referral code:', actualReferralCode);
+        }
+
+        const referringUser = await User.findOne({ 
+            referralCode: actualReferralCode,
+            status: 'active'
+        }).select('firstName lastName email referralCode');
+
+        if (!referringUser) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'Invalid referral code'
+            });
+        }
+
+        res.status(200).json({
+            status: 'success',
+            data: {
+                valid: true,
+                referringUser: {
+                    firstName: referringUser.firstName,
+                    lastName: referringUser.lastName,
+                    referralCode: referringUser.referralCode
+                },
+                message: `You're being referred by ${referringUser.firstName} ${referringUser.lastName}`
+            }
+        });
+
+    } catch (err) {
+        console.error('Referral validation error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to validate referral code'
+        });
+    }
+});
+
+
+
+
+app.get('/api/referrals', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+
+        // Get user's referral code and details
+        const user = await User.findById(userId).select('referralCode referralStats firstName lastName email');
+        if (!user) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'User not found'
+            });
+        }
+
+        // Generate complex referral link using user's full name and unique code
+        // Format: firstName-lastName-uniqueCode (more complex and unique)
+        const fullNameSlug = `${user.firstName}-${user.lastName}`.replace(/\s+/g, '-').toLowerCase();
+        const referralLinkWithName = `https://www.bithashcapital.live/signup.html?ref=${fullNameSlug}-${user.referralCode}`;
+        
+        // Also provide a version with just the code (backward compatibility)
+        const referralLink = `https://www.bithashcapital.live/signup.html?ref=${user.referralCode}`;
+
+        // Get all downline relationships where this user is the upline
+        const downlineRelationships = await DownlineRelationship.find({ 
+            upline: userId 
+        })
+        .populate('downline', 'firstName lastName email createdAt')
+        .sort({ createdAt: -1 })
+        .lean();
+
+        // Calculate referral statistics
+        const totalReferrals = downlineRelationships.length;
+        const activeReferrals = downlineRelationships.filter(rel => rel.status === 'active').length;
+        
+        // Calculate total earnings from commission history
+        const commissionEarnings = await CommissionHistory.aggregate([
+            { 
+                $match: { 
+                    upline: userId,
+                    status: 'paid'
+                } 
+            },
+            {
+                $group: {
+                    _id: null,
+                    totalEarnings: { $sum: '$commissionAmount' }
+                }
+            }
+        ]);
+
+        const totalEarnings = commissionEarnings.length > 0 ? commissionEarnings[0].totalEarnings : 0;
+
+        // Calculate pending earnings (commissions that are earned but not yet paid)
+        const pendingEarningsResult = await CommissionHistory.aggregate([
+            { 
+                $match: { 
+                    upline: userId,
+                    status: 'pending'
+                } 
+            },
+            {
+                $group: {
+                    _id: null,
+                    totalPending: { $sum: '$commissionAmount' }
+                }
+            }
+        ]);
+
+        const pendingEarnings = pendingEarningsResult.length > 0 ? pendingEarningsResult[0].totalPending : 0;
+
+        // Format referral data for the referrals table
+        const referrals = downlineRelationships.map(relationship => {
+            const downlineUser = relationship.downline;
+            const roundsCompleted = relationship.commissionRounds - relationship.remainingRounds;
+            
+            return {
+                id: relationship._id,
+                fullName: downlineUser ? `${downlineUser.firstName} ${downlineUser.lastName}` : 'Anonymous User',
+                email: downlineUser?.email || 'N/A',
+                joinDate: downlineUser?.createdAt || relationship.createdAt,
+                isActive: relationship.status === 'active',
+                investmentRounds: roundsCompleted,
+                totalEarned: relationship.totalCommissionEarned || 0,
+                status: relationship.status
+            };
+        });
+
+        // Calculate earnings breakdown by round for each referral
+        const earningsBreakdown = await CommissionHistory.aggregate([
+            { 
+                $match: { 
+                    upline: userId,
+                    status: { $in: ['paid', 'pending'] }
+                } 
+            },
+            {
+                $lookup: {
+                    from: 'users',
+                    localField: 'downline',
+                    foreignField: '_id',
+                    as: 'downlineInfo'
+                }
+            },
+            {
+                $unwind: {
+                    path: '$downlineInfo',
+                    preserveNullAndEmptyArrays: true
+                }
+            },
+            {
+                $group: {
+                    _id: {
+                        downline: '$downline',
+                        roundNumber: '$roundNumber'
+                    },
+                    roundEarnings: { $sum: '$commissionAmount' },
+                    downlineName: { 
+                        $first: { 
+                            $cond: [
+                                { $and: ['$downlineInfo.firstName', '$downlineInfo.lastName'] },
+                                { $concat: ['$downlineInfo.firstName', ' ', '$downlineInfo.lastName'] },
+                                'Anonymous User'
+                            ]
+                        } 
+                    }
+                }
+            },
+            {
+                $group: {
+                    _id: '$_id.downline',
+                    referralName: { $first: '$downlineName' },
+                    round1Earnings: {
+                        $sum: {
+                            $cond: [{ $eq: ['$_id.roundNumber', 1] }, '$roundEarnings', 0]
+                        }
+                    },
+                    round2Earnings: {
+                        $sum: {
+                            $cond: [{ $eq: ['$_id.roundNumber', 2] }, '$roundEarnings', 0]
+                        }
+                    },
+                    round3Earnings: {
+                        $sum: {
+                            $cond: [{ $eq: ['$_id.roundNumber', 3] }, '$roundEarnings', 0]
+                        }
+                    },
+                    totalEarned: { $sum: '$roundEarnings' }
+                }
+            }
+        ]);
+
+        // Update user's referral stats in the database
+        await User.findByIdAndUpdate(userId, {
+            $set: {
+                'referralStats.totalReferrals': totalReferrals,
+                'referralStats.totalEarnings': totalEarnings,
+                'referralStats.availableBalance': totalEarnings - (user.referralStats?.withdrawn || 0),
+                'referralStats.pendingEarnings': pendingEarnings,
+                'downlineStats.totalDownlines': totalReferrals,
+                'downlineStats.activeDownlines': activeReferrals,
+                'downlineStats.totalCommissionEarned': totalEarnings
+            }
+        });
+
+        // Return the complete referral data in the EXACT format expected by frontend
+        const responseData = {
+            status: 'success',
+            data: {
+                // Enhanced referral data with links
+                code: user.referralCode || 'XXXXXX',
+                referralLink: referralLink,
+                referralLinkWithName: referralLinkWithName,
+                shareableLinks: {
+                    direct: referralLinkWithName,
+                    withMessage: `Join me on BitHash Capital! Use my referral link: ${referralLinkWithName}`,
+                    social: {
+                        facebook: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(referralLinkWithName)}`,
+                        twitter: `https://twitter.com/intent/tweet?text=${encodeURIComponent(`Join me on BitHash Capital! Use my referral link: ${referralLinkWithName}`)}`,
+                        whatsapp: `https://wa.me/?text=${encodeURIComponent(`Join me on BitHash Capital! Use my referral link: ${referralLinkWithName}`)}`,
+                        telegram: `https://t.me/share/url?url=${encodeURIComponent(referralLinkWithName)}&text=${encodeURIComponent('Join me on BitHash Capital!')}`
+                    }
+                },
+                totalReferrals: totalReferrals,
+                totalEarnings: totalEarnings,
+                pendingEarnings: pendingEarnings,
+                activeReferrals: activeReferrals,
+                
+                // Detailed data for the tabs
+                referrals: referrals, // For "My Referrals" tab
+                earnings: earningsBreakdown, // For "Earnings Breakdown" tab
+                
+                // Stats object (if needed elsewhere)
+                stats: {
+                    directReferrals: totalReferrals,
+                    totalCommission: totalEarnings,
+                    availableBalance: totalEarnings - (user.referralStats?.withdrawn || 0),
+                    withdrawn: user.referralStats?.withdrawn || 0,
+                    pending: pendingEarnings
+                }
+            }
+        };
+
+        res.status(200).json(responseData);
+
+        // Log the activity
+        await logActivity('view_referrals', 'referral', userId, userId, 'User', req);
+
+    } catch (error) {
+        console.error('Error loading referral data:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to load referral data'
+        });
+    }
+});
 
 
 
