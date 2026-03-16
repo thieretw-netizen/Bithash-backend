@@ -36,8 +36,8 @@ app.use(helmet({
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'", "'unsafe-inline'", "https://apis.google.com"],
       styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-      imgSrc: ["'self'", "data:", "https://www.google-analytics.com", "https://www.dropbox.com", "https://cryptologos.cc"],
-      connectSrc: ["'self'", "https://api.ipinfo.io", "https://website-backendd-1.onrender.com", "https://ipapi.co", "https://freeipapi.com", "http://ip-api.com", "https://api.deviceinfo.io"],
+      imgSrc: ["'self'", "data:", "https://www.google-analytics.com"],
+      connectSrc: ["'self'", "https://api.ipinfo.io", "https://website-backendd-1.onrender.com"],
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
       objectSrc: ["'none'"],
       frameSrc: ["'self'", "https://accounts.google.com"] // Added for Google OAuth
@@ -48,7 +48,7 @@ app.use(helmet({
 
 
 app.use(cors({
-  origin: ['https://www.bithashcapital.live', 'https://website-backendd-tzep.onrender.com', 'https://bithash-rental.vercel.app'],
+  origin: ['https://www.bithashcapital.live', 'https://website-backendd-tzep.onrender.com', 'https://bithhash.vercel.app', 'https://bithash-rental.vercel.app'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token', 'X-Rate-Limit']
@@ -278,16 +278,7 @@ const UserSchema = new mongoose.Schema({
   loginHistory: [{
     ip: { type: String },
     device: { type: String },
-    deviceModel: { type: String },
-    browser: { type: String },
-    os: { type: String },
     location: { type: String },
-    city: { type: String },
-    region: { type: String },
-    country: { type: String },
-    isp: { type: String },
-    latitude: { type: Number },
-    longitude: { type: Number },
     timestamp: { type: Date, default: Date.now }
   }],
   notifications: [{
@@ -653,7 +644,10 @@ const UserLogSchema = new mongoose.Schema({
       // Page Views & Navigation
       'page_visited', 'dashboard_viewed', 'investment_page_visited',
       'wallet_page_visited', 'profile_page_visited', 'settings_page_visited',
-      'support_page_visited', 'referral_page_visited'
+      'support_page_visited', 'referral_page_visited',
+      
+      // Downline Activities
+      'downline_joined', 'downline_invested', 'downline_commission_paid'
     ],
     index: true
   },
@@ -662,7 +656,7 @@ const UserLogSchema = new mongoose.Schema({
     type: String,
     enum: [
       'authentication', 'financial', 'investment', 'security', 'profile',
-      'verification', 'referral', 'support', 'system', 'navigation'
+      'verification', 'referral', 'support', 'system', 'navigation', 'downline'
     ],
     required: true,
     index: true
@@ -700,11 +694,7 @@ const UserLogSchema = new mongoose.Schema({
     timezone: String,
     deviceId: String,
     deviceModel: String,
-    deviceVendor: String,
-    isMobile: Boolean,
-    isTablet: Boolean,
-    isDesktop: Boolean,
-    isBot: Boolean
+    deviceBrand: String
   },
 
   // Enhanced Location Information
@@ -724,8 +714,7 @@ const UserLogSchema = new mongoose.Schema({
     longitude: Number,
     timezone: String,
     isp: String,
-    asn: String,
-    organization: String
+    asn: String
   },
 
   // Status & Performance
@@ -879,6 +868,9 @@ UserLogSchema.virtual('actionDescription').get(function() {
     'buy_completed': 'User completed a buy order',
     'sell_created': 'User initiated a sell order',
     'sell_completed': 'User completed a sell order',
+    'downline_joined': 'New downline user joined',
+    'downline_invested': 'Downline user made an investment',
+    'downline_commission_paid': 'Downline commission paid to upline'
     // Add more descriptions as needed
   };
   return actionDescriptions[this.action] || `User performed ${this.action.replace(/_/g, ' ')}`;
@@ -1011,6 +1003,11 @@ UserLogSchema.methods.calculateActionCategory = function(action) {
     // Security
     'password_change': 'security',
     '2fa_enable': 'security',
+    
+    // Downline
+    'downline_joined': 'downline',
+    'downline_invested': 'downline',
+    'downline_commission_paid': 'downline'
     
     // Add more mappings as needed
   };
@@ -1356,6 +1353,15 @@ const InvestmentSchema = new mongoose.Schema({
   originalCurrency: {
     type: String,
     required: true
+  },
+  investmentFee: {
+    type: Number,
+    default: 0
+  },
+  balanceType: {
+    type: String,
+    enum: ['main', 'matured'],
+    default: 'main'
   },
 
   // Investment performance tracking
@@ -3076,14 +3082,103 @@ const getUserDeviceInfo = async (req) => {
       }
     }
 
+    // Enhanced device detection with online API
+    let deviceInfo = {
+      type: 'unknown',
+      os: { name: 'unknown', version: 'unknown' },
+      browser: { name: 'unknown', version: 'unknown' },
+      platform: 'unknown',
+      deviceModel: 'unknown',
+      deviceBrand: 'unknown',
+      screenResolution: 'unknown',
+      language: 'unknown',
+      timezone: 'unknown'
+    };
+
+    try {
+      const userAgent = req.headers['user-agent'] || '';
+      
+      // Detect device type and model using user-agent parsing
+      if (userAgent.includes('iPhone')) {
+        deviceInfo.type = 'mobile';
+        deviceInfo.deviceBrand = 'Apple';
+        deviceInfo.deviceModel = 'iPhone';
+      } else if (userAgent.includes('iPad')) {
+        deviceInfo.type = 'tablet';
+        deviceInfo.deviceBrand = 'Apple';
+        deviceInfo.deviceModel = 'iPad';
+      } else if (userAgent.includes('Android')) {
+        deviceInfo.type = 'mobile';
+        deviceInfo.deviceBrand = 'Android';
+        // Extract model from Android user agent
+        const modelMatch = userAgent.match(/Android.*?;\s([^;]+)/);
+        if (modelMatch) {
+          deviceInfo.deviceModel = modelMatch[1].trim();
+        }
+      } else if (userAgent.includes('Mac OS X')) {
+        deviceInfo.type = 'desktop';
+        deviceInfo.deviceBrand = 'Apple';
+      } else if (userAgent.includes('Windows')) {
+        deviceInfo.type = 'desktop';
+        deviceInfo.deviceBrand = 'Microsoft';
+      } else if (userAgent.includes('Linux')) {
+        deviceInfo.type = 'desktop';
+        deviceInfo.deviceBrand = 'Linux';
+      }
+
+      // Detect OS
+      if (userAgent.includes('Windows NT 10.0')) {
+        deviceInfo.os = { name: 'Windows', version: '10' };
+      } else if (userAgent.includes('Windows NT 11.0')) {
+        deviceInfo.os = { name: 'Windows', version: '11' };
+      } else if (userAgent.includes('Mac OS X')) {
+        const osMatch = userAgent.match(/Mac OS X ([\d_]+)/);
+        if (osMatch) {
+          deviceInfo.os = { name: 'macOS', version: osMatch[1].replace(/_/g, '.') };
+        }
+      } else if (userAgent.includes('Android')) {
+        const osMatch = userAgent.match(/Android ([\d.]+)/);
+        if (osMatch) {
+          deviceInfo.os = { name: 'Android', version: osMatch[1] };
+        }
+      } else if (userAgent.includes('iOS') || userAgent.includes('iPhone OS')) {
+        const osMatch = userAgent.match(/iPhone OS ([\d_]+)/);
+        if (osMatch) {
+          deviceInfo.os = { name: 'iOS', version: osMatch[1].replace(/_/g, '.') };
+        }
+      } else if (userAgent.includes('Linux')) {
+        deviceInfo.os = { name: 'Linux', version: 'unknown' };
+      }
+
+      // Detect browser
+      if (userAgent.includes('Chrome') && !userAgent.includes('Edg')) {
+        const browserMatch = userAgent.match(/Chrome\/([\d.]+)/);
+        deviceInfo.browser = { name: 'Chrome', version: browserMatch ? browserMatch[1] : 'unknown' };
+      } else if (userAgent.includes('Firefox')) {
+        const browserMatch = userAgent.match(/Firefox\/([\d.]+)/);
+        deviceInfo.browser = { name: 'Firefox', version: browserMatch ? browserMatch[1] : 'unknown' };
+      } else if (userAgent.includes('Safari') && !userAgent.includes('Chrome')) {
+        const browserMatch = userAgent.match(/Version\/([\d.]+).*Safari/);
+        deviceInfo.browser = { name: 'Safari', version: browserMatch ? browserMatch[1] : 'unknown' };
+      } else if (userAgent.includes('Edg')) {
+        const browserMatch = userAgent.match(/Edg\/([\d.]+)/);
+        deviceInfo.browser = { name: 'Edge', version: browserMatch ? browserMatch[1] : 'unknown' };
+      } else if (userAgent.includes('OPR') || userAgent.includes('Opera')) {
+        const browserMatch = userAgent.match(/(OPR|Opera)\/([\d.]+)/);
+        deviceInfo.browser = { name: 'Opera', version: browserMatch ? browserMatch[2] : 'unknown' };
+      }
+
+      // Get language from headers
+      deviceInfo.language = req.headers['accept-language']?.split(',')[0] || 'unknown';
+      
+      // Get timezone from IP location (will be filled later)
+      
+    } catch (deviceErr) {
+      console.error('Device detection error:', deviceErr);
+    }
+
     let location = 'Unknown Location';
     let isPublicIP = true;
-    let city = 'Unknown';
-    let region = 'Unknown';
-    let country = 'Unknown';
-    let isp = 'Unknown';
-    let latitude = 0;
-    let longitude = 0;
 
     // Enhanced private IP range detection
     const privateIPRanges = [
@@ -3107,60 +3202,17 @@ const getUserDeviceInfo = async (req) => {
       }
     }
 
-    // Enhanced device detection
-    const userAgent = req.headers['user-agent'] || 'Unknown';
-    let deviceType = 'unknown';
-    let os = 'Unknown';
-    let browser = 'Unknown';
-    let deviceModel = 'Unknown';
-    let deviceVendor = 'Unknown';
-    
-    // Parse user agent for device info
-    if (userAgent) {
-      if (userAgent.includes('Mobile')) {
-        deviceType = 'mobile';
-      } else if (userAgent.includes('Tablet')) {
-        deviceType = 'tablet';
-      } else {
-        deviceType = 'desktop';
-      }
-      
-      // OS detection
-      if (userAgent.includes('Windows')) os = 'Windows';
-      else if (userAgent.includes('Mac OS')) os = 'macOS';
-      else if (userAgent.includes('Linux')) os = 'Linux';
-      else if (userAgent.includes('Android')) os = 'Android';
-      else if (userAgent.includes('iOS')) os = 'iOS';
-      
-      // Browser detection
-      if (userAgent.includes('Chrome')) browser = 'Chrome';
-      else if (userAgent.includes('Firefox')) browser = 'Firefox';
-      else if (userAgent.includes('Safari')) browser = 'Safari';
-      else if (userAgent.includes('Edge')) browser = 'Edge';
-      
-      // Try to get device model from user agent
-      const modelMatch = userAgent.match(/Model\/([A-Za-z0-9]+)/) || 
-                        userAgent.match(/; ([A-Za-z0-9]+) Build/) ||
-                        userAgent.match(/\(([^)]+)\)/);
-      if (modelMatch && modelMatch[1]) {
-        deviceModel = modelMatch[1];
-      }
-    }
-
-    // Use online API for device fingerprinting
-    try {
-      const deviceResponse = await axios.get('https://api.deviceinfo.io/v1/detect', {
-        headers: { 'User-Agent': userAgent },
-        timeout: 3000
-      });
-      
-      if (deviceResponse.data) {
-        deviceVendor = deviceResponse.data.vendor || deviceVendor;
-        deviceModel = deviceResponse.data.model || deviceModel;
-      }
-    } catch (deviceError) {
-      console.log('Device info API failed, using basic detection');
-    }
+    let locationData = {
+      country: { code: 'XX', name: 'Unknown' },
+      region: { code: 'XX', name: 'Unknown' },
+      city: 'Unknown',
+      postalCode: 'Unknown',
+      latitude: 0,
+      longitude: 0,
+      timezone: 'Unknown',
+      isp: 'Unknown',
+      asn: 'Unknown'
+    };
 
     // Only try location lookup for public IPs
     if (isPublicIP && ip && ip !== 'Unknown') {
@@ -3177,18 +3229,25 @@ const getUserDeviceInfo = async (req) => {
           });
           
           if (response.data) {
-            const { city: cityName, region: regionName, country: countryCode, loc, org, timezone } = response.data;
-            city = cityName || 'Unknown';
-            region = regionName || 'Unknown';
-            country = countryCode || 'Unknown';
-            location = `${city}, ${region}, ${country}`;
-            isp = org || 'Unknown';
+            const { city, region, country, loc, org, timezone, postal } = response.data;
+            location = `${city || 'Unknown'}, ${region || 'Unknown'}, ${country || 'Unknown'}`;
             
-            if (loc) {
+            // Parse location coordinates
+            if (loc && loc.includes(',')) {
               const [lat, lon] = loc.split(',');
-              latitude = parseFloat(lat) || 0;
-              longitude = parseFloat(lon) || 0;
+              locationData.latitude = parseFloat(lat);
+              locationData.longitude = parseFloat(lon);
             }
+            
+            locationData.city = city || 'Unknown';
+            locationData.region.name = region || 'Unknown';
+            locationData.country.name = country || 'Unknown';
+            locationData.country.code = country || 'XX';
+            locationData.postalCode = postal || 'Unknown';
+            locationData.timezone = timezone || 'Unknown';
+            locationData.isp = org || 'Unknown';
+            
+            deviceInfo.timezone = timezone || 'unknown';
             
             console.log(`IPInfo.io location result: ${location}`);
           }
@@ -3202,14 +3261,21 @@ const getUserDeviceInfo = async (req) => {
             });
             
             if (response.data) {
-              const { city: cityName, region: regionName, country_name, country_code, org, latitude: lat, longitude: lon } = response.data;
-              city = cityName || 'Unknown';
-              region = regionName || 'Unknown';
-              country = country_name || country_code || 'Unknown';
-              location = `${city}, ${region}, ${country}`;
-              isp = org || 'Unknown';
-              latitude = lat || 0;
-              longitude = lon || 0;
+              const { city, region, country_name, country_code, postal, latitude, longitude, timezone, org } = response.data;
+              location = `${city || 'Unknown'}, ${region || 'Unknown'}, ${country_name || country_code || 'Unknown'}`;
+              
+              locationData.city = city || 'Unknown';
+              locationData.region.name = region || 'Unknown';
+              locationData.country.name = country_name || 'Unknown';
+              locationData.country.code = country_code || 'XX';
+              locationData.postalCode = postal || 'Unknown';
+              locationData.latitude = latitude || 0;
+              locationData.longitude = longitude || 0;
+              locationData.timezone = timezone || 'Unknown';
+              locationData.isp = org || 'Unknown';
+              
+              deviceInfo.timezone = timezone || 'unknown';
+              
               console.log(`IPApi.co location result: ${location}`);
             }
           } catch (ipapiError) {
@@ -3220,14 +3286,20 @@ const getUserDeviceInfo = async (req) => {
               });
               
               if (response.data) {
-                const { cityName, regionName, countryName, isp, latitude: lat, longitude: lon } = response.data;
-                city = cityName || 'Unknown';
-                region = regionName || 'Unknown';
-                country = countryName || 'Unknown';
-                location = `${city}, ${region}, ${country}`;
-                isp = isp || 'Unknown';
-                latitude = lat || 0;
-                longitude = lon || 0;
+                const { cityName, regionName, countryName, countryCode, zipCode, latitude, longitude, timeZone } = response.data;
+                location = `${cityName || 'Unknown'}, ${regionName || 'Unknown'}, ${countryName || 'Unknown'}`;
+                
+                locationData.city = cityName || 'Unknown';
+                locationData.region.name = regionName || 'Unknown';
+                locationData.country.name = countryName || 'Unknown';
+                locationData.country.code = countryCode || 'XX';
+                locationData.postalCode = zipCode || 'Unknown';
+                locationData.latitude = latitude || 0;
+                locationData.longitude = longitude || 0;
+                locationData.timezone = timeZone || 'Unknown';
+                
+                deviceInfo.timezone = timeZone || 'unknown';
+                
                 console.log(`FreeIPAPI location result: ${location}`);
               }
             } catch (freeipapiError) {
@@ -3238,14 +3310,22 @@ const getUserDeviceInfo = async (req) => {
                 });
                 
                 if (response.data && response.data.status === 'success') {
-                  const { city: cityName, regionName, country, isp, lat, lon } = response.data;
-                  city = cityName || 'Unknown';
-                  region = regionName || 'Unknown';
-                  country = country || 'Unknown';
-                  location = `${city}, ${region}, ${country}`;
-                  isp = isp || 'Unknown';
-                  latitude = lat || 0;
-                  longitude = lon || 0;
+                  const { city, regionName, country, countryCode, zip, lat, lon, timezone, isp, as } = response.data;
+                  location = `${city || 'Unknown'}, ${regionName || 'Unknown'}, ${country || 'Unknown'}`;
+                  
+                  locationData.city = city || 'Unknown';
+                  locationData.region.name = regionName || 'Unknown';
+                  locationData.country.name = country || 'Unknown';
+                  locationData.country.code = countryCode || 'XX';
+                  locationData.postalCode = zip || 'Unknown';
+                  locationData.latitude = lat || 0;
+                  locationData.longitude = lon || 0;
+                  locationData.timezone = timezone || 'Unknown';
+                  locationData.isp = isp || 'Unknown';
+                  locationData.asn = as || 'Unknown';
+                  
+                  deviceInfo.timezone = timezone || 'unknown';
+                  
                   console.log(`IP-API.com location result: ${location}`);
                 }
               } catch (ipapiComError) {
@@ -3265,19 +3345,10 @@ const getUserDeviceInfo = async (req) => {
 
     return {
       ip: ip || 'Unknown',
-      device: userAgent,
-      deviceType: deviceType,
-      os: os,
-      browser: browser,
-      deviceModel: deviceModel,
-      deviceVendor: deviceVendor,
+      device: req.headers['user-agent'] || 'Unknown',
       location: location,
-      city: city,
-      region: region,
-      country: country,
-      isp: isp,
-      latitude: latitude,
-      longitude: longitude,
+      locationData: locationData,
+      deviceInfo: deviceInfo,
       isPublicIP: isPublicIP
     };
   } catch (err) {
@@ -3285,78 +3356,143 @@ const getUserDeviceInfo = async (req) => {
     return {
       ip: req.ip || 'Unknown',
       device: req.headers['user-agent'] || 'Unknown',
-      deviceType: 'unknown',
-      os: 'Unknown',
-      browser: 'Unknown',
-      deviceModel: 'Unknown',
-      deviceVendor: 'Unknown',
       location: 'Unknown',
-      city: 'Unknown',
-      region: 'Unknown',
-      country: 'Unknown',
-      isp: 'Unknown',
-      latitude: 0,
-      longitude: 0,
+      locationData: {
+        country: { code: 'XX', name: 'Unknown' },
+        region: { code: 'XX', name: 'Unknown' },
+        city: 'Unknown'
+      },
+      deviceInfo: {
+        type: 'unknown',
+        os: { name: 'unknown', version: 'unknown' },
+        browser: { name: 'unknown', version: 'unknown' },
+        deviceModel: 'unknown',
+        deviceBrand: 'unknown'
+      },
       isPublicIP: false
     };
   }
 };
 
+// Enhanced logUserActivity function for comprehensive logging
 const logUserActivity = async (req, action, status, metadata = {}, user = null) => {
   try {
     const deviceInfo = await getUserDeviceInfo(req);
     const userId = user ? user._id : (req.user ? req.user._id : null);
-    const email = user ? user.email : (req.body ? req.body.email : 'Unknown');
-    const username = user ? `${user.firstName} ${user.lastName}` : 'Unknown';
-    
-    if (!userId) {
-      console.log('No user ID for activity logging');
-      return;
-    }
+    const email = user ? user.email : (req.body?.email || 'system');
+    const username = user ? `${user.firstName} ${user.lastName}` : email;
 
-    await UserLog.create({
+    // Create detailed log entry
+    const logEntry = {
       user: userId,
       username: username,
       email: email,
       userFullName: username,
       action: action,
-      actionCategory: metadata.category || 'system',
+      actionCategory: determineActionCategory(action),
       ipAddress: deviceInfo.ip,
       userAgent: deviceInfo.device,
-      deviceInfo: {
-        type: deviceInfo.deviceType,
-        os: { name: deviceInfo.os, version: '' },
-        browser: { name: deviceInfo.browser, version: '' },
-        platform: deviceInfo.deviceType,
-        deviceModel: deviceInfo.deviceModel,
-        deviceVendor: deviceInfo.deviceVendor
-      },
+      deviceInfo: deviceInfo.deviceInfo,
       location: {
         ip: deviceInfo.ip,
-        country: { name: deviceInfo.country, code: deviceInfo.country },
-        region: { name: deviceInfo.region },
-        city: deviceInfo.city,
-        latitude: deviceInfo.latitude,
-        longitude: deviceInfo.longitude,
-        isp: deviceInfo.isp
+        country: deviceInfo.locationData.country,
+        region: deviceInfo.locationData.region,
+        city: deviceInfo.locationData.city,
+        postalCode: deviceInfo.locationData.postalCode,
+        latitude: deviceInfo.locationData.latitude,
+        longitude: deviceInfo.locationData.longitude,
+        timezone: deviceInfo.locationData.timezone,
+        isp: deviceInfo.locationData.isp,
+        asn: deviceInfo.locationData.asn
       },
       status: status,
       metadata: metadata,
-      isSuspicious: metadata.isSuspicious || false,
-      riskLevel: metadata.riskLevel || 'low'
-    });
-    
-    console.log(`Activity Logged: ${action}`, {
-      userId,
-      email,
-      location: deviceInfo.location,
-      ip: deviceInfo.ip,
-      device: deviceInfo.deviceModel || deviceInfo.deviceType
-    });
+      requestId: req.id || uuidv4(),
+      sessionId: req.session?.id || null,
+      riskLevel: calculateRiskLevel(action, metadata),
+      isSuspicious: checkSuspiciousActivity(action, metadata)
+    };
+
+    await UserLog.create(logEntry);
+    console.log(`User activity logged: ${action} for ${email} from ${deviceInfo.location}`);
   } catch (err) {
     console.error('Error logging user activity:', err);
   }
 };
+
+// Helper function to determine action category
+function determineActionCategory(action) {
+  const categoryMap = {
+    // Authentication
+    'signup': 'authentication',
+    'login': 'authentication',
+    'logout': 'authentication',
+    'login_attempt': 'authentication',
+    'login_otp_sent': 'authentication',
+    'login_error': 'authentication',
+    
+    // Financial
+    'deposit_created': 'financial',
+    'withdrawal_created': 'financial',
+    'transfer_created': 'financial',
+    'buy_created': 'financial',
+    'buy_completed': 'financial',
+    'sell_created': 'financial',
+    'sell_completed': 'financial',
+    
+    // Investment
+    'investment_created': 'investment',
+    'investment_completed': 'investment',
+    'investment_matured': 'investment',
+    
+    // Security
+    'password_change': 'security',
+    '2fa_enable': 'security',
+    '2fa_disable': 'security',
+    
+    // Profile
+    'profile_update': 'profile',
+    
+    // Verification
+    'kyc_submission': 'verification',
+    'kyc_approved': 'verification',
+    'kyc_rejected': 'verification',
+    
+    // Referral
+    'referral_joined': 'referral',
+    'referral_bonus_earned': 'referral',
+    'downline_joined': 'downline',
+    'downline_invested': 'downline',
+    'downline_commission_paid': 'downline'
+  };
+  
+  return categoryMap[action] || 'system';
+}
+
+// Helper function to calculate risk level
+function calculateRiskLevel(action, metadata) {
+  const highRiskActions = ['failed_login', 'suspicious_activity', 'withdrawal_created'];
+  const mediumRiskActions = ['login', 'password_change', 'deposit_created'];
+  
+  if (highRiskActions.includes(action)) return 'high';
+  if (mediumRiskActions.includes(action)) return 'medium';
+  if (metadata?.status === 'failed') return 'medium';
+  
+  return 'low';
+}
+
+// Helper function to check for suspicious activity
+function checkSuspiciousActivity(action, metadata) {
+  const suspiciousActions = ['failed_login', 'suspicious_activity'];
+  if (suspiciousActions.includes(action)) return true;
+  
+  if (metadata?.error || metadata?.status === 'failed') {
+    // Check for multiple failed attempts in short time
+    return true;
+  }
+  
+  return false;
+}
 
 const logActivity = async (action, entity, entityId, performedBy, performedByModel, req, changes = {}) => {
   try {
@@ -3366,18 +3502,8 @@ const logActivity = async (action, entity, entityId, performedBy, performedByMod
     const locationData = {
       ip: deviceInfo.ip,
       location: deviceInfo.location,
-      city: deviceInfo.city,
-      region: deviceInfo.region,
-      country: deviceInfo.country,
-      isp: deviceInfo.isp,
-      latitude: deviceInfo.latitude,
-      longitude: deviceInfo.longitude,
       isPublicIP: deviceInfo.isPublicIP,
       userAgent: deviceInfo.device,
-      deviceType: deviceInfo.deviceType,
-      deviceModel: deviceInfo.deviceModel,
-      os: deviceInfo.os,
-      browser: deviceInfo.browser,
       detectedAt: new Date()
     };
     
@@ -3401,11 +3527,33 @@ const logActivity = async (action, entity, entityId, performedBy, performedByMod
       entityId,
       location: locationData.location,
       ip: locationData.ip,
-      deviceModel: locationData.deviceModel,
       isPublicIP: locationData.isPublicIP
     });
   } catch (err) {
     console.error('Error logging activity:', err);
+  }
+};
+
+// Enhanced email sending function with real location data
+const sendEnhancedEmail = async (user, template, data) => {
+  try {
+    // Add location data if available
+    if (data.locationData) {
+      data.locationString = `${data.locationData.city || 'Unknown'}, ${data.locationData.country?.name || 'Unknown'}`;
+      data.deviceInfo = data.deviceInfo || {};
+    }
+    
+    await sendProfessionalEmail({
+      email: user.email,
+      template: template,
+      data: {
+        name: user.firstName,
+        ...data
+      }
+    });
+    console.log(`Email sent: ${template} to ${user.email}`);
+  } catch (err) {
+    console.error(`Error sending ${template} email:`, err);
   }
 };
 
@@ -3789,6 +3937,21 @@ const calculateReferralCommissions = async (investment) => {
       percentage: commissionPercentage
     });
 
+    // Send email notification to upline
+    try {
+      await sendEnhancedEmail(uplineUser, 'referral_bonus', {
+        bonusAmount: commissionAmount,
+        referredUser: `${populatedInvestment.user.firstName} ${populatedInvestment.user.lastName}`,
+        bonusType: 'Downline Commission',
+        investmentAmount: investmentAmount,
+        roundNumber: relationship.commissionRounds - relationship.remainingRounds + 1,
+        totalRounds: relationship.commissionRounds,
+        percentage: commissionPercentage
+      });
+    } catch (emailError) {
+      console.error('Failed to send downline commission email:', emailError);
+    }
+
   } catch (err) {
     console.error('❌ Downline commission calculation error:', err);
     // Don't throw error to avoid disrupting investment process
@@ -3811,24 +3974,6 @@ const calculateReferralCommissions = async (investment) => {
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    
 // Enhanced email service with professional Bitcoin mining templates
 const sendProfessionalEmail = async (options) => {
   try {
@@ -3837,7 +3982,7 @@ const sendProfessionalEmail = async (options) => {
     const emailTemplates = {
       // WELCOME EMAIL
       welcome: {
-        subject: 'Welcome to BitHash Capital - Your Mining Journey Begins',
+        subject: 'Welcome to BitHash Capital – Your Institutional Mining Journey Begins',
         html: `
           <!DOCTYPE html>
           <html>
@@ -3845,100 +3990,252 @@ const sendProfessionalEmail = async (options) => {
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>Welcome to BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@300;400;700&display=swap" rel="stylesheet">
+              <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #f0b90b; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 20px; }
-                  .logo-img { width: 50px; height: 50px; border-radius: 50%; }
-                  .logo-text { font-size: 28px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
-                  .header-title { font-size: 24px; font-weight: 600; color: #ffffff; margin-top: 10px; }
-                  .content { padding: 40px; background: #ffffff; }
-                  .greeting { font-size: 18px; color: #1a1a1a; margin-bottom: 25px; font-weight: 500; }
-                  .features-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin: 30px 0; }
-                  .feature-card { background: #f8f9fa; padding: 20px; border-radius: 8px; border-left: 3px solid #f0b90b; }
-                  .feature-title { font-weight: 600; color: #0a0a0a; margin-bottom: 8px; font-size: 14px; }
-                  .feature-desc { color: #666; font-size: 13px; line-height: 1.4; }
-                  .benefits-list { margin: 25px 0; }
-                  .benefit-item { display: flex; align-items: center; margin-bottom: 12px; color: #333; }
-                  .benefit-icon { color: #f0b90b; margin-right: 12px; font-weight: bold; }
-                  .cta-button { background: #f0b90b; color: #0a0a0a; padding: 14px 35px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 25px 0; font-weight: 600; font-size: 15px; text-align: center; }
-                  .security-note { background: #fff8e6; border: 1px solid #f0b90b; padding: 20px; border-radius: 6px; margin: 25px 0; }
-                  .footer { background: #0a0a0a; padding: 30px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 12px; line-height: 1.5; margin-bottom: 10px; }
-                  .support-link { color: #f0b90b; text-decoration: none; }
+                  body { 
+                      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
+                      line-height: 1.5; 
+                      color: #FFFFFF; 
+                      background-color: #0A0E17; 
+                      margin: 0; 
+                      padding: 0; 
+                      -webkit-font-smoothing: antialiased;
+                  }
+                  .container { 
+                      max-width: 600px; 
+                      margin: 0 auto; 
+                      background: #0A0E17; 
+                      border: none;
+                  }
+                  .header { 
+                      background: #05080F; 
+                      padding: 40px 40px 30px; 
+                      text-align: center; 
+                      border-bottom: 2px solid #00D8FF;
+                  }
+                  .logo-container { 
+                      display: flex; 
+                      align-items: center; 
+                      justify-content: center; 
+                      gap: 12px; 
+                      margin-bottom: 20px; 
+                  }
+                  .logo-img { 
+                      width: 48px; 
+                      height: 48px; 
+                      border-radius: 50%; 
+                      object-fit: cover;
+                  }
+                  .logo-text { 
+                      font-family: 'Rowdies', sans-serif;
+                      font-size: 28px; 
+                      font-weight: 700; 
+                      color: #00D8FF; 
+                      letter-spacing: -0.5px; 
+                  }
+                  .logo-text span { color: #FFFFFF; }
+                  .header-title { 
+                      font-size: 24px; 
+                      font-weight: 600; 
+                      color: #FFFFFF; 
+                      margin-top: 10px; 
+                      letter-spacing: -0.3px;
+                  }
+                  .content { 
+                      padding: 40px; 
+                      background: #0A0E17; 
+                  }
+                  .greeting { 
+                      font-size: 20px; 
+                      color: #FFFFFF; 
+                      margin-bottom: 20px; 
+                      font-weight: 500; 
+                  }
+                  .greeting span { color: #00D8FF; }
+                  .features-grid { 
+                      display: grid; 
+                      grid-template-columns: 1fr 1fr; 
+                      gap: 20px; 
+                      margin: 40px 0; 
+                  }
+                  .feature-card { 
+                      background: #111827; 
+                      padding: 24px; 
+                      border-radius: 12px; 
+                      border-left: none;
+                      transition: all 0.3s ease;
+                  }
+                  .feature-card:hover { transform: translateY(-4px); background: #1F2937; }
+                  .feature-icon { 
+                      color: #00D8FF; 
+                      font-size: 24px; 
+                      margin-bottom: 12px; 
+                  }
+                  .feature-title { 
+                      font-weight: 600; 
+                      color: #FFFFFF; 
+                      margin-bottom: 8px; 
+                      font-size: 16px; 
+                  }
+                  .feature-desc { 
+                      color: #8E9BAE; 
+                      font-size: 14px; 
+                      line-height: 1.5; 
+                  }
+                  .benefits-list { 
+                      margin: 40px 0; 
+                      background: #111827; 
+                      padding: 30px; 
+                      border-radius: 12px; 
+                  }
+                  .benefit-item { 
+                      display: flex; 
+                      align-items: center; 
+                      margin-bottom: 16px; 
+                      color: #E5E7EB; 
+                  }
+                  .benefit-icon { 
+                      color: #00D8FF; 
+                      margin-right: 16px; 
+                      width: 20px;
+                      text-align: center;
+                  }
+                  .benefit-icon i { font-size: 16px; }
+                  .cta-button { 
+                      background: #00D8FF; 
+                      color: #05080F; 
+                      padding: 16px 40px; 
+                      text-decoration: none; 
+                      border-radius: 8px; 
+                      display: inline-block; 
+                      margin: 30px 0; 
+                      font-weight: 600; 
+                      font-size: 16px; 
+                      text-align: center; 
+                      transition: all 0.3s ease;
+                      border: none;
+                  }
+                  .cta-button:hover { 
+                      background: #33E0FF; 
+                      transform: translateY(-2px); 
+                      box-shadow: 0 8px 20px rgba(0, 216, 255, 0.3);
+                  }
+                  .security-note { 
+                      background: rgba(0, 216, 255, 0.1); 
+                      border-left: 4px solid #00D8FF; 
+                      padding: 24px; 
+                      border-radius: 8px; 
+                      margin: 40px 0; 
+                  }
+                  .security-note i { color: #00D8FF; margin-right: 12px; }
+                  .footer { 
+                      background: #05080F; 
+                      padding: 40px; 
+                      text-align: center; 
+                      color: #6B7280; 
+                      border-top: 1px solid #1F2937;
+                  }
+                  .footer-text { 
+                      font-size: 13px; 
+                      line-height: 1.6; 
+                      margin-bottom: 12px; 
+                  }
+                  .support-link { 
+                      color: #00D8FF; 
+                      text-decoration: none; 
+                      font-weight: 500;
+                  }
+                  .support-link:hover { text-decoration: underline; }
+                  .divider { 
+                      width: 60px; 
+                      height: 2px; 
+                      background: #00D8FF; 
+                      margin: 20px auto; 
+                  }
               </style>
           </head>
           <body>
               <div class="container">
                   <div class="header">
                       <div class="logo-container">
-                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash Capital</div>
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Capital" class="logo-img">
+                          <div class="logo-text"><span>₿</span>itHash</div>
                       </div>
-                      <h1 class="header-title">Welcome to Professional Mining</h1>
+                      <h1 class="header-title">Welcome to Institutional Mining</h1>
                   </div>
                   <div class="content">
-                      <h2 class="greeting">Hello ${data.firstName},</h2>
-                      <p>Welcome to BitHash Capital! We're excited to have you join our community of professional Bitcoin miners and investors.</p>
+                      <div class="greeting">Hello <span>${data.firstName || 'there'}</span>,</div>
+                      <p style="color: #E5E7EB; font-size: 16px;">Welcome to BitHash Capital. You've just joined an elite community of institutional Bitcoin miners and sophisticated investors who recognize the future of digital assets.</p>
                       
                       <div class="features-grid">
                           <div class="feature-card">
-                              <div class="feature-title">Cloud Mining</div>
-                              <div class="feature-desc">Start mining Bitcoin instantly with our enterprise-grade mining infrastructure</div>
+                              <div class="feature-icon"><i class="fas fa-cloud"></i></div>
+                              <div class="feature-title">Enterprise Cloud Mining</div>
+                              <div class="feature-desc">Access institutional-grade mining infrastructure with zero hardware maintenance</div>
                           </div>
                           <div class="feature-card">
-                              <div class="feature-title">Smart Investment</div>
-                              <div class="feature-desc">Choose from optimized investment plans designed for maximum returns</div>
+                              <div class="feature-icon"><i class="fas fa-chart-line"></i></div>
+                              <div class="feature-title">Optimized Returns</div>
+                              <div class="feature-desc">Strategically structured investment plans engineered for maximum yield</div>
                           </div>
                           <div class="feature-card">
-                              <div class="feature-title">Secure Platform</div>
-                              <div class="feature-desc">Enterprise-grade security protecting your assets and mining operations</div>
+                              <div class="feature-icon"><i class="fas fa-shield-alt"></i></div>
+                              <div class="feature-title">Institutional Security</div>
+                              <div class="feature-desc">Multi-layer security with 256-bit encryption and cold storage protection</div>
                           </div>
                           <div class="feature-card">
-                              <div class="feature-title">24/7 Support</div>
-                              <div class="feature-desc">Dedicated support team available around the clock for your mining needs</div>
+                              <div class="feature-icon"><i class="fas fa-headset"></i></div>
+                              <div class="feature-title">Dedicated Support</div>
+                              <div class="feature-desc">24/7 priority support from our team of mining and investment experts</div>
                           </div>
                       </div>
                       
                       <div class="benefits-list">
                           <div class="benefit-item">
-                              <span class="benefit-icon">•</span>
-                              <span>Access enterprise-grade Bitcoin mining infrastructure</span>
+                              <span class="benefit-icon"><i class="fas fa-check-circle"></i></span>
+                              <span>Access institutional mining pools with industry-leading hashrate</span>
                           </div>
                           <div class="benefit-item">
-                              <span class="benefit-icon">•</span>
-                              <span>Invest in optimized mining plans with competitive returns</span>
+                              <span class="benefit-icon"><i class="fas fa-check-circle"></i></span>
+                              <span>Real-time performance analytics and mining dashboard</span>
                           </div>
                           <div class="benefit-item">
-                              <span class="benefit-icon">•</span>
-                              <span>Monitor your mining operations in real-time</span>
+                              <span class="benefit-icon"><i class="fas fa-check-circle"></i></span>
+                              <span>Automated daily payouts directly to your wallet</span>
                           </div>
                           <div class="benefit-item">
-                              <span class="benefit-icon">•</span>
-                              <span>Earn referral bonuses by expanding our mining community</span>
+                              <span class="benefit-icon"><i class="fas fa-check-circle"></i></span>
+                              <span>Multi-tier referral program with lifetime commissions</span>
+                          </div>
+                          <div class="benefit-item">
+                              <span class="benefit-icon"><i class="fas fa-check-circle"></i></span>
+                              <span>Transparent fee structure with no hidden charges</span>
                           </div>
                       </div>
                       
                       <div style="text-align: center;">
-                          <a href="https://www.bithashcapital.live/dashboard.html" class="cta-button">Start Mining Now</a>
+                          <a href="https://www.bithashcapital.live/dashboard" class="cta-button">Access Your Dashboard <i class="fas fa-arrow-right" style="margin-left: 8px;"></i></a>
                       </div>
                       
                       <div class="security-note">
-                          <strong>Security Notice:</strong> Your account security is our priority. We recommend enabling two-factor authentication and using strong, unique passwords.
+                          <i class="fas fa-shield-alt"></i>
+                          <strong style="color: #FFFFFF;">Security First:</strong> 
+                          <span style="color: #E5E7EB;">Enable two-factor authentication immediately to secure your account. Our system detected your registration from IP: ${data.ip || 'Unknown location'}.</span>
                       </div>
                       
-                      <p>If you have any questions about our mining operations or investment plans, our support team is available 24/7.</p>
+                      <p style="color: #8E9BAE; font-size: 15px; margin: 30px 0 0;">Questions about our mining operations? Our team is available 24/7 to assist you.</p>
                       
-                      <p>Best regards,<br><strong>The BitHash Capital Team</strong></p>
+                      <p style="color: #FFFFFF; margin-top: 40px; font-weight: 500;">Welcome to the future of mining,<br><span style="color: #00D8FF;">The BitHash Capital Team</span></p>
+                      
+                      <div class="divider"></div>
                   </div>
                   <div class="footer">
-                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
-                      Professional Bitcoin Mining and Investment Platform</p>
-                      <p class="footer-text">This email was sent to ${email}. Please do not reply to this email.<br>
-                      Need assistance? <a href="mailto:support@bithashcapital.live" class="support-link">Contact Support</a></p>
+                      <p class="footer-text">© 2024 BitHash Capital LLC. All rights reserved.<br>Registered in Delaware, USA. FINRA/SIPC Member.</p>
+                      <p class="footer-text">This message was sent to <span style="color: #00D8FF;">${email}</span>. Please do not reply to this automated message.<br>
+                      Need assistance? <a href="mailto:support@bithashcapital.live" class="support-link">Contact Support</a> | <a href="https://www.bithashcapital.live/privacy" class="support-link">Privacy Policy</a></p>
+                      <p style="font-size: 11px; margin-top: 20px; color: #4B5563;">Protected by 256-bit AES and TLS 1.3 encryption</p>
                   </div>
               </div>
           </body>
@@ -3946,13 +4243,191 @@ const sendProfessionalEmail = async (options) => {
         `
       },
 
+      // INVESTMENT COMPLETED EMAIL
+      investment_completed: {
+        subject: 'Investment Matured – Funds Available | BitHash Capital',
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Investment Matured - BitHash Capital</title>
+              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@300;400;700&display=swap" rel="stylesheet">
+              <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+              <style>
+                  * { margin: 0; padding: 0; box-sizing: border-box; }
+                  body { 
+                      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
+                      line-height: 1.5; 
+                      color: #FFFFFF; 
+                      background-color: #0A0E17; 
+                      margin: 0; 
+                      padding: 0; 
+                  }
+                  .container { 
+                      max-width: 600px; 
+                      margin: 0 auto; 
+                      background: #0A0E17; 
+                  }
+                  .header { 
+                      background: #05080F; 
+                      padding: 40px 40px 30px; 
+                      text-align: center; 
+                      border-bottom: 2px solid #00FF00;
+                  }
+                  .logo-container { 
+                      display: flex; 
+                      align-items: center; 
+                      justify-content: center; 
+                      gap: 12px; 
+                      margin-bottom: 20px; 
+                  }
+                  .logo-img { 
+                      width: 48px; 
+                      height: 48px; 
+                      border-radius: 50%; 
+                  }
+                  .logo-text { 
+                      font-family: 'Rowdies', sans-serif;
+                      font-size: 28px; 
+                      font-weight: 700; 
+                      color: #00D8FF; 
+                  }
+                  .logo-text span { color: #FFFFFF; }
+                  .content { 
+                      padding: 40px; 
+                      background: #0A0E17; 
+                  }
+                  .success-badge {
+                      background: rgba(0, 255, 0, 0.1);
+                      color: #00FF00;
+                      padding: 12px 24px;
+                      border-radius: 40px;
+                      display: inline-block;
+                      margin-bottom: 30px;
+                      font-weight: 600;
+                  }
+                  .success-badge i { margin-right: 8px; }
+                  .completion-details { 
+                      background: #111827; 
+                      padding: 30px; 
+                      border-radius: 12px; 
+                      margin: 30px 0; 
+                  }
+                  .detail-item { 
+                      margin-bottom: 16px; 
+                      display: flex; 
+                      justify-content: space-between; 
+                      align-items: center;
+                      padding-bottom: 12px;
+                      border-bottom: 1px solid #1F2937;
+                  }
+                  .detail-item:last-child { border-bottom: none; }
+                  .detail-label { 
+                      font-weight: 500; 
+                      color: #8E9BAE; 
+                  }
+                  .detail-value { 
+                      color: #FFFFFF; 
+                      font-weight: 600; 
+                  }
+                  .profit-positive { 
+                      color: #00FF00; 
+                      font-weight: 700; 
+                      font-size: 20px; 
+                  }
+                  .cta-button { 
+                      background: #00D8FF; 
+                      color: #05080F; 
+                      padding: 16px 40px; 
+                      text-decoration: none; 
+                      border-radius: 8px; 
+                      display: inline-block; 
+                      margin: 30px 0; 
+                      font-weight: 600; 
+                      transition: all 0.3s ease;
+                  }
+                  .cta-button:hover { 
+                      background: #33E0FF; 
+                      transform: translateY(-2px); 
+                      box-shadow: 0 8px 20px rgba(0, 216, 255, 0.3);
+                  }
+                  .footer { 
+                      background: #05080F; 
+                      padding: 40px; 
+                      text-align: center; 
+                      color: #6B7280; 
+                      border-top: 1px solid #1F2937;
+                  }
+              </style>
+          </head>
+          <body>
+              <div class="container">
+                  <div class="header">
+                      <div class="logo-container">
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Capital" class="logo-img">
+                          <div class="logo-text"><span>₿</span>itHash</div>
+                      </div>
+                  </div>
+                  <div class="content">
+                      <div class="success-badge">
+                          <i class="fas fa-check-circle"></i> INVESTMENT MATURED
+                      </div>
+                      
+                      <h2 style="font-size: 28px; margin-bottom: 10px;">Hello ${data.name},</h2>
+                      <p style="color: #E5E7EB; font-size: 16px;">Your mining investment has successfully reached maturity. Your returns have been calculated and funds are now available in your matured balance.</p>
+                      
+                      <div class="completion-details">
+                          <div class="detail-item">
+                              <span class="detail-label">Investment Plan:</span>
+                              <span class="detail-value">${data.planName}</span>
+                          </div>
+                          <div class="detail-item">
+                              <span class="detail-label">Initial Amount:</span>
+                              <span class="detail-value">$${data.amount.toLocaleString()}</span>
+                          </div>
+                          <div class="detail-item">
+                              <span class="detail-label">Total Return:</span>
+                              <span class="detail-value profit-positive">$${data.totalReturn.toLocaleString()}</span>
+                          </div>
+                          <div class="detail-item">
+                              <span class="detail-label">Profit Earned:</span>
+                              <span class="detail-value profit-positive">+$${data.profit.toLocaleString()}</span>
+                          </div>
+                          <div class="detail-item">
+                              <span class="detail-label">Completion Date:</span>
+                              <span class="detail-value">${new Date(data.completionDate).toLocaleDateString()}</span>
+                          </div>
+                          <div class="detail-item">
+                              <span class="detail-label">New Matured Balance:</span>
+                              <span class="detail-value">$${data.newMaturedBalance.toLocaleString()}</span>
+                          </div>
+                      </div>
+                      
+                      <p style="color: #8E9BAE;">Your funds have been moved to your matured balance and are ready for withdrawal or reinvestment.</p>
+                      
+                      <div style="text-align: center;">
+                          <a href="https://www.bithashcapital.live/dashboard" class="cta-button">View Dashboard</a>
+                      </div>
+                      
+                      <p>Thank you for mining with BitHash Capital!</p>
+                      
+                      <p>Best regards,<br><strong>BitHash Capital Investment Team</strong></p>
+                  </div>
+                  <div class="footer">
+                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
+                      Professional Bitcoin Mining and Investment Platform</p>
+                  </div>
+              </div>
+          </body>
+          </html>
+        `
+      },
 
-
-
-      
       // OTP VERIFICATION
       otp: {
-        subject: 'BitHash Capital - Verification Code Required',
+        subject: 'Your Verification Code | BitHash Capital',
         html: `
           <!DOCTYPE html>
           <html>
@@ -3960,28 +4435,89 @@ const sendProfessionalEmail = async (options) => {
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>Verification Code - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@300;400;700&display=swap" rel="stylesheet">
+              <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #f0b90b; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
-                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
-                  .content { padding: 40px; background: #ffffff; }
-                  .otp-code { background: #0a0a0a; color: #f0b90b; padding: 20px; font-size: 36px; font-weight: 700; text-align: center; letter-spacing: 8px; margin: 30px 0; border-radius: 8px; font-family: 'Courier New', monospace; }
-                  .security-note { background: #fff8e6; border: 1px solid #f0b90b; padding: 20px; border-radius: 6px; margin: 25px 0; }
-                  .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 12px; line-height: 1.5; }
+                  body { 
+                      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
+                      line-height: 1.5; 
+                      color: #FFFFFF; 
+                      background-color: #0A0E17; 
+                      margin: 0; 
+                      padding: 0; 
+                  }
+                  .container { 
+                      max-width: 600px; 
+                      margin: 0 auto; 
+                      background: #0A0E17; 
+                  }
+                  .header { 
+                      background: #05080F; 
+                      padding: 40px 40px 30px; 
+                      text-align: center; 
+                      border-bottom: 2px solid #00D8FF;
+                  }
+                  .logo-container { 
+                      display: flex; 
+                      align-items: center; 
+                      justify-content: center; 
+                      gap: 12px; 
+                      margin-bottom: 20px; 
+                  }
+                  .logo-img { 
+                      width: 48px; 
+                      height: 48px; 
+                      border-radius: 50%; 
+                  }
+                  .logo-text { 
+                      font-family: 'Rowdies', sans-serif;
+                      font-size: 28px; 
+                      font-weight: 700; 
+                      color: #00D8FF; 
+                  }
+                  .logo-text span { color: #FFFFFF; }
+                  .content { 
+                      padding: 40px; 
+                      background: #0A0E17; 
+                  }
+                  .otp-code { 
+                      background: #05080F; 
+                      color: #00D8FF; 
+                      padding: 20px; 
+                      font-size: 36px; 
+                      font-weight: 700; 
+                      text-align: center; 
+                      letter-spacing: 8px; 
+                      margin: 30px 0; 
+                      border-radius: 8px; 
+                      font-family: 'Courier New', monospace; 
+                  }
+                  .security-note { 
+                      background: #fff8e6; 
+                      border: 1px solid #f0b90b; 
+                      padding: 20px; 
+                      border-radius: 6px; 
+                      margin: 25px 0; 
+                  }
+                  .footer { 
+                      background: #05080F; 
+                      padding: 25px 40px; 
+                      text-align: center; 
+                      color: #999; 
+                  }
+                  .footer-text { 
+                      font-size: 12px; 
+                      line-height: 1.5; 
+                  }
               </style>
           </head>
           <body>
               <div class="container">
                   <div class="header">
                       <div class="logo-container">
-                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash Capital</div>
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
+                          <div class="logo-text"><span>₿</span>itHash</div>
                       </div>
                   </div>
                   <div class="content">
@@ -4010,9 +4546,9 @@ const sendProfessionalEmail = async (options) => {
         `
       },
 
-      // LOGIN SUCCESS (sent after OTP verification)
+      // LOGIN SUCCESS
       login_success: {
-        subject: 'BitHash Capital - Successful Login Detected',
+        subject: 'New Login Detected | BitHash Capital Security',
         html: `
           <!DOCTYPE html>
           <html>
@@ -4020,30 +4556,92 @@ const sendProfessionalEmail = async (options) => {
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>Login Notification - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@300;400;700&display=swap" rel="stylesheet">
+              <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #27ae60; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
-                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
-                  .content { padding: 40px; background: #ffffff; }
-                  .login-info { background: #f8f9fa; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #27ae60; }
-                  .info-item { margin-bottom: 10px; display: flex; }
-                  .info-label { font-weight: 600; min-width: 120px; color: #333; }
-                  .security-alert { background: #fee; border: 1px solid #e74c3c; padding: 20px; border-radius: 6px; margin: 20px 0; }
-                  .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 12px; line-height: 1.5; }
+                  body { 
+                      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
+                      line-height: 1.6; 
+                      color: #1a1a1a; 
+                      background-color: #f8f9fa; 
+                      margin: 0; 
+                      padding: 0; 
+                  }
+                  .container { 
+                      max-width: 600px; 
+                      margin: 0 auto; 
+                      background: #ffffff; 
+                  }
+                  .header { 
+                      background: #0a0a0a; 
+                      padding: 30px 40px; 
+                      text-align: center; 
+                      border-bottom: 3px solid #27ae60; 
+                  }
+                  .logo-container { 
+                      display: flex; 
+                      align-items: center; 
+                      justify-content: center; 
+                      gap: 15px; 
+                      margin-bottom: 15px; 
+                  }
+                  .logo-img { 
+                      width: 40px; 
+                      height: 40px; 
+                      border-radius: 50%; 
+                  }
+                  .logo-text { 
+                      font-size: 24px; 
+                      font-weight: 700; 
+                      color: #f0b90b; 
+                      letter-spacing: -0.5px; 
+                  }
+                  .content { 
+                      padding: 40px; 
+                      background: #ffffff; 
+                  }
+                  .login-info { 
+                      background: #f8f9fa; 
+                      padding: 25px; 
+                      border-radius: 8px; 
+                      margin: 25px 0; 
+                      border-left: 4px solid #27ae60; 
+                  }
+                  .info-item { 
+                      margin-bottom: 10px; 
+                      display: flex; 
+                  }
+                  .info-label { 
+                      font-weight: 600; 
+                      min-width: 120px; 
+                      color: #333; 
+                  }
+                  .security-alert { 
+                      background: #fee; 
+                      border: 1px solid #e74c3c; 
+                      padding: 20px; 
+                      border-radius: 6px; 
+                      margin: 20px 0; 
+                  }
+                  .footer { 
+                      background: #0a0a0a; 
+                      padding: 25px 40px; 
+                      text-align: center; 
+                      color: #999; 
+                  }
+                  .footer-text { 
+                      font-size: 12px; 
+                      line-height: 1.5; 
+                  }
               </style>
           </head>
           <body>
               <div class="container">
                   <div class="header">
                       <div class="logo-container">
-                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash Capital</div>
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
+                          <div class="logo-text"><span>₿</span>itHash</div>
                       </div>
                   </div>
                   <div class="content">
@@ -4057,27 +4655,15 @@ const sendProfessionalEmail = async (options) => {
                           </div>
                           <div class="info-item">
                               <span class="info-label">Device:</span>
-                              <span>${data.device || 'Unknown device'} (${data.deviceModel || 'Unknown model'})</span>
-                          </div>
-                          <div class="info-item">
-                              <span class="info-label">Browser:</span>
-                              <span>${data.browser || 'Unknown'}</span>
-                          </div>
-                          <div class="info-item">
-                              <span class="info-label">OS:</span>
-                              <span>${data.os || 'Unknown'}</span>
+                              <span>${data.deviceInfo?.browser?.name || 'Unknown'} on ${data.deviceInfo?.os?.name || 'Unknown'} (${data.deviceInfo?.deviceModel || 'Unknown'})</span>
                           </div>
                           <div class="info-item">
                               <span class="info-label">Location:</span>
-                              <span>${data.location || 'Unknown location'}</span>
+                              <span>${data.locationString || data.location || 'Unknown location'}</span>
                           </div>
                           <div class="info-item">
                               <span class="info-label">IP Address:</span>
                               <span>${data.ip || 'Unknown'}</span>
-                          </div>
-                          <div class="info-item">
-                              <span class="info-label">ISP:</span>
-                              <span>${data.isp || 'Unknown'}</span>
                           </div>
                       </div>
                       
@@ -4103,7 +4689,7 @@ const sendProfessionalEmail = async (options) => {
 
       // PASSWORD RESET
       password_reset: {
-        subject: 'BitHash Capital - Password Reset Request',
+        subject: 'Password Reset Request | BitHash Capital',
         html: `
           <!DOCTYPE html>
           <html>
@@ -4111,28 +4697,87 @@ const sendProfessionalEmail = async (options) => {
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>Password Reset - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@300;400;700&display=swap" rel="stylesheet">
+              <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #e74c3c; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
-                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
-                  .content { padding: 40px; background: #ffffff; }
-                  .reset-button { background: #e74c3c; color: white; padding: 14px 35px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 25px 0; font-weight: 600; font-size: 15px; }
-                  .security-note { background: #fee; border: 1px solid #e74c3c; padding: 20px; border-radius: 6px; margin: 25px 0; }
-                  .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 12px; line-height: 1.5; }
+                  body { 
+                      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
+                      line-height: 1.6; 
+                      color: #1a1a1a; 
+                      background-color: #f8f9fa; 
+                      margin: 0; 
+                      padding: 0; 
+                  }
+                  .container { 
+                      max-width: 600px; 
+                      margin: 0 auto; 
+                      background: #ffffff; 
+                  }
+                  .header { 
+                      background: #0a0a0a; 
+                      padding: 30px 40px; 
+                      text-align: center; 
+                      border-bottom: 3px solid #e74c3c; 
+                  }
+                  .logo-container { 
+                      display: flex; 
+                      align-items: center; 
+                      justify-content: center; 
+                      gap: 15px; 
+                      margin-bottom: 15px; 
+                  }
+                  .logo-img { 
+                      width: 40px; 
+                      height: 40px; 
+                      border-radius: 50%; 
+                  }
+                  .logo-text { 
+                      font-size: 24px; 
+                      font-weight: 700; 
+                      color: #f0b90b; 
+                      letter-spacing: -0.5px; 
+                  }
+                  .content { 
+                      padding: 40px; 
+                      background: #ffffff; 
+                  }
+                  .reset-button { 
+                      background: #e74c3c; 
+                      color: white; 
+                      padding: 14px 35px; 
+                      text-decoration: none; 
+                      border-radius: 6px; 
+                      display: inline-block; 
+                      margin: 25px 0; 
+                      font-weight: 600; 
+                      font-size: 15px; 
+                  }
+                  .security-note { 
+                      background: #fee; 
+                      border: 1px solid #e74c3c; 
+                      padding: 20px; 
+                      border-radius: 6px; 
+                      margin: 25px 0; 
+                  }
+                  .footer { 
+                      background: #0a0a0a; 
+                      padding: 25px 40px; 
+                      text-align: center; 
+                      color: #999; 
+                  }
+                  .footer-text { 
+                      font-size: 12px; 
+                      line-height: 1.5; 
+                  }
               </style>
           </head>
           <body>
               <div class="container">
                   <div class="header">
                       <div class="logo-container">
-                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash Capital</div>
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
+                          <div class="logo-text"><span>₿</span>itHash</div>
                       </div>
                   </div>
                   <div class="content">
@@ -4161,69 +4806,9 @@ const sendProfessionalEmail = async (options) => {
         `
       },
 
-      // PASSWORD RESET SUCCESS
-      password_reset_success: {
-        subject: 'BitHash Capital - Password Reset Successful',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>Password Reset Successful - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-              <style>
-                  * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #27ae60; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
-                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
-                  .content { padding: 40px; background: #ffffff; }
-                  .success-box { background: #e8f6ef; border: 1px solid #27ae60; padding: 25px; border-radius: 8px; margin: 25px 0; text-align: center; }
-                  .cta-button { background: #f0b90b; color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 20px 0; font-weight: 600; }
-                  .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 12px; line-height: 1.5; }
-              </style>
-          </head>
-          <body>
-              <div class="container">
-                  <div class="header">
-                      <div class="logo-container">
-                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash Capital</div>
-                      </div>
-                  </div>
-                  <div class="content">
-                      <h2>Hello ${data.name},</h2>
-                      
-                      <div class="success-box">
-                          <h3 style="color: #27ae60; margin-bottom: 10px;">Password Reset Successful</h3>
-                          <p>Your password has been successfully changed.</p>
-                      </div>
-                      
-                      <p>If you did not perform this action, please contact our security team immediately.</p>
-                      
-                      <div style="text-align: center;">
-                          <a href="https://www.bithashcapital.live/login.html" class="cta-button">Login to Your Account</a>
-                      </div>
-                      
-                      <p>Best regards,<br><strong>BitHash Capital Security Team</strong></p>
-                  </div>
-                  <div class="footer">
-                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
-                      This is an automated security message.</p>
-                  </div>
-              </div>
-          </body>
-          </html>
-        `
-      },
-
       // INVESTMENT CREATED
       investment_created: {
-        subject: 'BitHash Capital - Investment Confirmation',
+        subject: 'Investment Confirmed – Mining Has Started | BitHash Capital',
         html: `
           <!DOCTYPE html>
           <html>
@@ -4231,31 +4816,99 @@ const sendProfessionalEmail = async (options) => {
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>Investment Confirmation - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@300;400;700&display=swap" rel="stylesheet">
+              <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #f0b90b; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
-                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
-                  .content { padding: 40px; background: #ffffff; }
-                  .investment-details { background: #f8f9fa; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #f0b90b; }
-                  .detail-item { margin-bottom: 12px; display: flex; justify-content: space-between; }
-                  .detail-label { font-weight: 600; color: #333; }
-                  .detail-value { color: #0a0a0a; font-weight: 500; }
-                  .cta-button { background: #f0b90b; color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 20px 0; font-weight: 600; }
-                  .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 12px; line-height: 1.5; }
+                  body { 
+                      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
+                      line-height: 1.6; 
+                      color: #1a1a1a; 
+                      background-color: #f8f9fa; 
+                      margin: 0; 
+                      padding: 0; 
+                  }
+                  .container { 
+                      max-width: 600px; 
+                      margin: 0 auto; 
+                      background: #ffffff; 
+                  }
+                  .header { 
+                      background: #0a0a0a; 
+                      padding: 30px 40px; 
+                      text-align: center; 
+                      border-bottom: 3px solid #f0b90b; 
+                  }
+                  .logo-container { 
+                      display: flex; 
+                      align-items: center; 
+                      justify-content: center; 
+                      gap: 15px; 
+                      margin-bottom: 15px; 
+                  }
+                  .logo-img { 
+                      width: 40px; 
+                      height: 40px; 
+                      border-radius: 50%; 
+                  }
+                  .logo-text { 
+                      font-size: 24px; 
+                      font-weight: 700; 
+                      color: #f0b90b; 
+                      letter-spacing: -0.5px; 
+                  }
+                  .content { 
+                      padding: 40px; 
+                      background: #ffffff; 
+                  }
+                  .investment-details { 
+                      background: #f8f9fa; 
+                      padding: 25px; 
+                      border-radius: 8px; 
+                      margin: 25px 0; 
+                      border-left: 4px solid #f0b90b; 
+                  }
+                  .detail-item { 
+                      margin-bottom: 12px; 
+                      display: flex; 
+                      justify-content: space-between; 
+                  }
+                  .detail-label { 
+                      font-weight: 600; 
+                      color: #333; 
+                  }
+                  .detail-value { 
+                      color: #0a0a0a; 
+                      font-weight: 500; 
+                  }
+                  .cta-button { 
+                      background: #f0b90b; 
+                      color: #0a0a0a; 
+                      padding: 12px 30px; 
+                      text-decoration: none; 
+                      border-radius: 6px; 
+                      display: inline-block; 
+                      margin: 20px 0; 
+                      font-weight: 600; 
+                  }
+                  .footer { 
+                      background: #0a0a0a; 
+                      padding: 25px 40px; 
+                      text-align: center; 
+                      color: #999; 
+                  }
+                  .footer-text { 
+                      font-size: 12px; 
+                      line-height: 1.5; 
+                  }
               </style>
           </head>
           <body>
               <div class="container">
                   <div class="header">
                       <div class="logo-container">
-                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash Capital</div>
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
+                          <div class="logo-text"><span>₿</span>itHash</div>
                       </div>
                   </div>
                   <div class="content">
@@ -4269,11 +4922,11 @@ const sendProfessionalEmail = async (options) => {
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">Amount:</span>
-                              <span class="detail-value">$${data.amount}</span>
+                              <span class="detail-value">$${data.amount.toLocaleString()}</span>
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">Expected Return:</span>
-                              <span class="detail-value">$${data.expectedReturn}</span>
+                              <span class="detail-value">$${data.expectedReturn.toLocaleString()}</span>
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">Duration:</span>
@@ -4292,88 +4945,7 @@ const sendProfessionalEmail = async (options) => {
                       <p>You can monitor your investment performance in real-time through your dashboard.</p>
                       
                       <div style="text-align: center;">
-                          <a href="https://www.bithashcapital.live/dashboard.html" class="cta-button">View Dashboard</a>
-                      </div>
-                      
-                      <p>Best regards,<br><strong>BitHash Capital Investment Team</strong></p>
-                  </div>
-                  <div class="footer">
-                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
-                      Professional Bitcoin Mining and Investment Platform</p>
-                  </div>
-              </div>
-          </body>
-          </html>
-        `
-      },
-
-      // INVESTMENT COMPLETED (Matured)
-      investment_completed: {
-        subject: 'BitHash Capital - Investment Matured',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale-1.0">
-              <title>Investment Matured - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-              <style>
-                  * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #27ae60; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
-                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
-                  .content { padding: 40px; background: #ffffff; }
-                  .investment-details { background: #f8f9fa; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #27ae60; }
-                  .detail-item { margin-bottom: 12px; display: flex; justify-content: space-between; }
-                  .detail-label { font-weight: 600; color: #333; }
-                  .detail-value { color: #0a0a0a; font-weight: 500; }
-                  .profit-highlight { background: #e8f6ef; padding: 15px; border-radius: 6px; margin: 15px 0; text-align: center; }
-                  .profit-amount { font-size: 24px; font-weight: 700; color: #27ae60; }
-                  .cta-button { background: #f0b90b; color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 20px 0; font-weight: 600; }
-                  .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 12px; line-height: 1.5; }
-              </style>
-          </head>
-          <body>
-              <div class="container">
-                  <div class="header">
-                      <div class="logo-container">
-                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash Capital</div>
-                      </div>
-                  </div>
-                  <div class="content">
-                      <h2>Hello ${data.name},</h2>
-                      <p>Congratulations! Your investment has successfully matured.</p>
-                      
-                      <div class="investment-details">
-                          <div class="detail-item">
-                              <span class="detail-label">Investment Plan:</span>
-                              <span class="detail-value">${data.planName}</span>
-                          </div>
-                          <div class="detail-item">
-                              <span class="detail-label">Initial Investment:</span>
-                              <span class="detail-value">$${data.amount}</span>
-                          </div>
-                          <div class="detail-item">
-                              <span class="detail-label">Total Return:</span>
-                              <span class="detail-value">$${data.totalReturn}</span>
-                          </div>
-                      </div>
-                      
-                      <div class="profit-highlight">
-                          <p>Your Profit:</p>
-                          <div class="profit-amount">$${data.profit}</div>
-                      </div>
-                      
-                      <p>The funds have been credited to your matured balance and are now available for withdrawal or reinvestment.</p>
-                      
-                      <div style="text-align: center;">
-                          <a href="https://www.bithashcapital.live/dashboard.html" class="cta-button">View Your Balance</a>
+                          <a href="https://www.bithashcapital.live/dashboard" class="cta-button">View Dashboard</a>
                       </div>
                       
                       <p>Best regards,<br><strong>BitHash Capital Investment Team</strong></p>
@@ -4390,7 +4962,7 @@ const sendProfessionalEmail = async (options) => {
 
       // WITHDRAWAL REQUEST
       withdrawal_request: {
-        subject: 'BitHash Capital - Withdrawal Request Received',
+        subject: 'Withdrawal Request Received | BitHash Capital',
         html: `
           <!DOCTYPE html>
           <html>
@@ -4398,31 +4970,96 @@ const sendProfessionalEmail = async (options) => {
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>Withdrawal Request - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@300;400;700&display=swap" rel="stylesheet">
+              <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #3498db; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
-                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
-                  .content { padding: 40px; background: #ffffff; }
-                  .withdrawal-details { background: #f8f9fa; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #3498db; }
-                  .detail-item { margin-bottom: 12px; display: flex; justify-content: space-between; }
-                  .detail-label { font-weight: 600; color: #333; }
-                  .detail-value { color: #0a0a0a; font-weight: 500; }
-                  .processing-info { background: #e8f4fd; border: 1px solid #3498db; padding: 20px; border-radius: 6px; margin: 25px 0; }
-                  .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 12px; line-height: 1.5; }
+                  body { 
+                      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
+                      line-height: 1.6; 
+                      color: #1a1a1a; 
+                      background-color: #f8f9fa; 
+                      margin: 0; 
+                      padding: 0; 
+                  }
+                  .container { 
+                      max-width: 600px; 
+                      margin: 0 auto; 
+                      background: #ffffff; 
+                  }
+                  .header { 
+                      background: #0a0a0a; 
+                      padding: 30px 40px; 
+                      text-align: center; 
+                      border-bottom: 3px solid #3498db; 
+                  }
+                  .logo-container { 
+                      display: flex; 
+                      align-items: center; 
+                      justify-content: center; 
+                      gap: 15px; 
+                      margin-bottom: 15px; 
+                  }
+                  .logo-img { 
+                      width: 40px; 
+                      height: 40px; 
+                      border-radius: 50%; 
+                  }
+                  .logo-text { 
+                      font-size: 24px; 
+                      font-weight: 700; 
+                      color: #f0b90b; 
+                      letter-spacing: -0.5px; 
+                  }
+                  .content { 
+                      padding: 40px; 
+                      background: #ffffff; 
+                  }
+                  .withdrawal-details { 
+                      background: #f8f9fa; 
+                      padding: 25px; 
+                      border-radius: 8px; 
+                      margin: 25px 0; 
+                      border-left: 4px solid #3498db; 
+                  }
+                  .detail-item { 
+                      margin-bottom: 12px; 
+                      display: flex; 
+                      justify-content: space-between; 
+                  }
+                  .detail-label { 
+                      font-weight: 600; 
+                      color: #333; 
+                  }
+                  .detail-value { 
+                      color: #0a0a0a; 
+                      font-weight: 500; 
+                  }
+                  .processing-info { 
+                      background: #e8f4fd; 
+                      border: 1px solid #3498db; 
+                      padding: 20px; 
+                      border-radius: 6px; 
+                      margin: 25px 0; 
+                  }
+                  .footer { 
+                      background: #0a0a0a; 
+                      padding: 25px 40px; 
+                      text-align: center; 
+                      color: #999; 
+                  }
+                  .footer-text { 
+                      font-size: 12px; 
+                      line-height: 1.5; 
+                  }
               </style>
           </head>
           <body>
               <div class="container">
                   <div class="header">
                       <div class="logo-container">
-                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash Capital</div>
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
+                          <div class="logo-text"><span>₿</span>itHash</div>
                       </div>
                   </div>
                   <div class="content">
@@ -4432,7 +5069,7 @@ const sendProfessionalEmail = async (options) => {
                       <div class="withdrawal-details">
                           <div class="detail-item">
                               <span class="detail-label">Amount:</span>
-                              <span class="detail-value">$${data.amount}</span>
+                              <span class="detail-value">$${data.amount.toLocaleString()}</span>
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">Method:</span>
@@ -4444,11 +5081,11 @@ const sendProfessionalEmail = async (options) => {
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">Fee:</span>
-                              <span class="detail-value">$${data.fee}</span>
+                              <span class="detail-value">$${data.fee.toLocaleString()}</span>
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">Net Amount:</span>
-                              <span class="detail-value">$${data.netAmount}</span>
+                              <span class="detail-value">$${data.netAmount.toLocaleString()}</span>
                           </div>
                       </div>
                       
@@ -4472,7 +5109,7 @@ const sendProfessionalEmail = async (options) => {
 
       // WITHDRAWAL COMPLETED
       withdrawal_completed: {
-        subject: 'BitHash Capital - Withdrawal Completed',
+        subject: 'Withdrawal Completed – Funds Sent | BitHash Capital',
         html: `
           <!DOCTYPE html>
           <html>
@@ -4480,40 +5117,99 @@ const sendProfessionalEmail = async (options) => {
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>Withdrawal Completed - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@300;400;700&display=swap" rel="stylesheet">
+              <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #27ae60; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
-                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
-                  .content { padding: 40px; background: #ffffff; }
-                  .withdrawal-details { background: #f8f9fa; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #27ae60; }
-                  .detail-item { margin-bottom: 12px; display: flex; justify-content: space-between; }
-                  .detail-label { font-weight: 600; color: #333; }
-                  .detail-value { color: #0a0a0a; font-weight: 500; }
-                  .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 12px; line-height: 1.5; }
+                  body { 
+                      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
+                      line-height: 1.6; 
+                      color: #1a1a1a; 
+                      background-color: #f8f9fa; 
+                      margin: 0; 
+                      padding: 0; 
+                  }
+                  .container { 
+                      max-width: 600px; 
+                      margin: 0 auto; 
+                      background: #ffffff; 
+                  }
+                  .header { 
+                      background: #0a0a0a; 
+                      padding: 30px 40px; 
+                      text-align: center; 
+                      border-bottom: 3px solid #27ae60; 
+                  }
+                  .logo-container { 
+                      display: flex; 
+                      align-items: center; 
+                      justify-content: center; 
+                      gap: 15px; 
+                      margin-bottom: 15px; 
+                  }
+                  .logo-img { 
+                      width: 40px; 
+                      height: 40px; 
+                      border-radius: 50%; 
+                  }
+                  .logo-text { 
+                      font-size: 24px; 
+                      font-weight: 700; 
+                      color: #f0b90b; 
+                      letter-spacing: -0.5px; 
+                  }
+                  .content { 
+                      padding: 40px; 
+                      background: #ffffff; 
+                  }
+                  .withdrawal-details { 
+                      background: #f8f9fa; 
+                      padding: 25px; 
+                      border-radius: 8px; 
+                      margin: 25px 0; 
+                      border-left: 4px solid #27ae60; 
+                  }
+                  .detail-item { 
+                      margin-bottom: 12px; 
+                      display: flex; 
+                      justify-content: space-between; 
+                  }
+                  .detail-label { 
+                      font-weight: 600; 
+                      color: #333; 
+                  }
+                  .detail-value { 
+                      color: #0a0a0a; 
+                      font-weight: 500; 
+                  }
+                  .footer { 
+                      background: #0a0a0a; 
+                      padding: 25px 40px; 
+                      text-align: center; 
+                      color: #999; 
+                  }
+                  .footer-text { 
+                      font-size: 12px; 
+                      line-height: 1.5; 
+                  }
               </style>
           </head>
           <body>
               <div class="container">
                   <div class="header">
                       <div class="logo-container">
-                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash Capital</div>
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
+                          <div class="logo-text"><span>₿</span>itHash</div>
                       </div>
                   </div>
                   <div class="content">
                       <h2>Hello ${data.name},</h2>
-                      <p>Your withdrawal has been successfully completed.</p>
+                      <p>Your withdrawal has been successfully processed and completed.</p>
                       
                       <div class="withdrawal-details">
                           <div class="detail-item">
                               <span class="detail-label">Amount:</span>
-                              <span class="detail-value">$${data.amount}</span>
+                              <span class="detail-value">$${data.amount.toLocaleString()}</span>
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">Method:</span>
@@ -4529,7 +5225,7 @@ const sendProfessionalEmail = async (options) => {
                           </div>
                       </div>
                       
-                      <p>Thank you for using BitHash Capital.</p>
+                      <p>The funds have been sent to your designated account/wallet. Please check your account for confirmation.</p>
                       
                       <p>Best regards,<br><strong>BitHash Capital Finance Team</strong></p>
                   </div>
@@ -4545,7 +5241,7 @@ const sendProfessionalEmail = async (options) => {
 
       // KYC APPROVED
       kyc_approved: {
-        subject: 'BitHash Capital - KYC Verification Approved',
+        subject: 'KYC Verification Approved | BitHash Capital',
         html: `
           <!DOCTYPE html>
           <html>
@@ -4553,31 +5249,101 @@ const sendProfessionalEmail = async (options) => {
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>KYC Approved - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@300;400;700&display=swap" rel="stylesheet">
+              <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #27ae60; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
-                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
-                  .content { padding: 40px; background: #ffffff; }
-                  .success-message { background: #e8f6ef; border: 1px solid #27ae60; padding: 25px; border-radius: 8px; margin: 25px 0; text-align: center; }
-                  .benefits-list { margin: 25px 0; }
-                  .benefit-item { display: flex; align-items: center; margin-bottom: 12px; color: #333; }
-                  .benefit-icon { color: #27ae60; margin-right: 12px; font-weight: bold; }
-                  .cta-button { background: #f0b90b; color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 20px 0; font-weight: 600; }
-                  .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 12px; line-height: 1.5; }
+                  body { 
+                      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
+                      line-height: 1.6; 
+                      color: #1a1a1a; 
+                      background-color: #f8f9fa; 
+                      margin: 0; 
+                      padding: 0; 
+                  }
+                  .container { 
+                      max-width: 600px; 
+                      margin: 0 auto; 
+                      background: #ffffff; 
+                  }
+                  .header { 
+                      background: #0a0a0a; 
+                      padding: 30px 40px; 
+                      text-align: center; 
+                      border-bottom: 3px solid #27ae60; 
+                  }
+                  .logo-container { 
+                      display: flex; 
+                      align-items: center; 
+                      justify-content: center; 
+                      gap: 15px; 
+                      margin-bottom: 15px; 
+                  }
+                  .logo-img { 
+                      width: 40px; 
+                      height: 40px; 
+                      border-radius: 50%; 
+                  }
+                  .logo-text { 
+                      font-size: 24px; 
+                      font-weight: 700; 
+                      color: #f0b90b; 
+                      letter-spacing: -0.5px; 
+                  }
+                  .content { 
+                      padding: 40px; 
+                      background: #ffffff; 
+                  }
+                  .success-message { 
+                      background: #e8f6ef; 
+                      border: 1px solid #27ae60; 
+                      padding: 25px; 
+                      border-radius: 8px; 
+                      margin: 25px 0; 
+                      text-align: center; 
+                  }
+                  .benefits-list { 
+                      margin: 25px 0; 
+                  }
+                  .benefit-item { 
+                      display: flex; 
+                      align-items: center; 
+                      margin-bottom: 12px; 
+                      color: #333; 
+                  }
+                  .benefit-icon { 
+                      color: #27ae60; 
+                      margin-right: 12px; 
+                      font-weight: bold; 
+                  }
+                  .cta-button { 
+                      background: #f0b90b; 
+                      color: #0a0a0a; 
+                      padding: 12px 30px; 
+                      text-decoration: none; 
+                      border-radius: 6px; 
+                      display: inline-block; 
+                      margin: 20px 0; 
+                      font-weight: 600; 
+                  }
+                  .footer { 
+                      background: #0a0a0a; 
+                      padding: 25px 40px; 
+                      text-align: center; 
+                      color: #999; 
+                  }
+                  .footer-text { 
+                      font-size: 12px; 
+                      line-height: 1.5; 
+                  }
               </style>
           </head>
           <body>
               <div class="container">
                   <div class="header">
                       <div class="logo-container">
-                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash Capital</div>
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
+                          <div class="logo-text"><span>₿</span>itHash</div>
                       </div>
                   </div>
                   <div class="content">
@@ -4610,7 +5376,7 @@ const sendProfessionalEmail = async (options) => {
                       </div>
                       
                       <div style="text-align: center;">
-                          <a href="https://www.bithashcapital.live/dashboard.html" class="cta-button">Access Your Account</a>
+                          <a href="https://www.bithashcapital.live/dashboard" class="cta-button">Access Your Account</a>
                       </div>
                       
                       <p>Thank you for completing the verification process and helping us maintain a secure platform.</p>
@@ -4627,9 +5393,139 @@ const sendProfessionalEmail = async (options) => {
         `
       },
 
+      // KYC REJECTED
+      kyc_rejected: {
+        subject: 'KYC Verification Update | BitHash Capital',
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>KYC Update - BitHash Capital</title>
+              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@300;400;700&display=swap" rel="stylesheet">
+              <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+              <style>
+                  * { margin: 0; padding: 0; box-sizing: border-box; }
+                  body { 
+                      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
+                      line-height: 1.6; 
+                      color: #1a1a1a; 
+                      background-color: #f8f9fa; 
+                      margin: 0; 
+                      padding: 0; 
+                  }
+                  .container { 
+                      max-width: 600px; 
+                      margin: 0 auto; 
+                      background: #ffffff; 
+                  }
+                  .header { 
+                      background: #0a0a0a; 
+                      padding: 30px 40px; 
+                      text-align: center; 
+                      border-bottom: 3px solid #e74c3c; 
+                  }
+                  .logo-container { 
+                      display: flex; 
+                      align-items: center; 
+                      justify-content: center; 
+                      gap: 15px; 
+                      margin-bottom: 15px; 
+                  }
+                  .logo-img { 
+                      width: 40px; 
+                      height: 40px; 
+                      border-radius: 50%; 
+                  }
+                  .logo-text { 
+                      font-size: 24px; 
+                      font-weight: 700; 
+                      color: #f0b90b; 
+                      letter-spacing: -0.5px; 
+                  }
+                  .content { 
+                      padding: 40px; 
+                      background: #ffffff; 
+                  }
+                  .rejection-box { 
+                      background: #fee; 
+                      border: 1px solid #e74c3c; 
+                      padding: 25px; 
+                      border-radius: 8px; 
+                      margin: 25px 0; 
+                  }
+                  .reason-box { 
+                      background: #f8f9fa; 
+                      padding: 20px; 
+                      border-radius: 6px; 
+                      margin: 15px 0; 
+                  }
+                  .cta-button { 
+                      background: #f0b90b; 
+                      color: #0a0a0a; 
+                      padding: 12px 30px; 
+                      text-decoration: none; 
+                      border-radius: 6px; 
+                      display: inline-block; 
+                      margin: 20px 0; 
+                      font-weight: 600; 
+                  }
+                  .footer { 
+                      background: #0a0a0a; 
+                      padding: 25px 40px; 
+                      text-align: center; 
+                      color: #999; 
+                  }
+                  .footer-text { 
+                      font-size: 12px; 
+                      line-height: 1.5; 
+                  }
+              </style>
+          </head>
+          <body>
+              <div class="container">
+                  <div class="header">
+                      <div class="logo-container">
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
+                          <div class="logo-text"><span>₿</span>itHash</div>
+                      </div>
+                  </div>
+                  <div class="content">
+                      <h2>Hello ${data.name},</h2>
+                      
+                      <div class="rejection-box">
+                          <h3 style="color: #e74c3c; margin-bottom: 10px;">KYC Verification Update</h3>
+                          <p>Your KYC verification could not be approved at this time.</p>
+                      </div>
+                      
+                      <div class="reason-box">
+                          <p><strong>Reason:</strong> ${data.reason}</p>
+                      </div>
+                      
+                      <p>Please review the reason above and submit your KYC documents again with the required corrections.</p>
+                      
+                      <div style="text-align: center;">
+                          <a href="https://www.bithashcapital.live/kyc" class="cta-button">Resubmit KYC</a>
+                      </div>
+                      
+                      <p>If you need assistance, please contact our support team.</p>
+                      
+                      <p>Best regards,<br><strong>BitHash Capital Compliance Team</strong></p>
+                  </div>
+                  <div class="footer">
+                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
+                      Professional Bitcoin Mining and Investment Platform</p>
+                  </div>
+              </div>
+          </body>
+          </html>
+        `
+      },
+
       // DEPOSIT RECEIVED
       deposit_received: {
-        subject: 'BitHash Capital - Deposit Successfully Received',
+        subject: 'Deposit Confirmed – Funds Credited | BitHash Capital',
         html: `
           <!DOCTYPE html>
           <html>
@@ -4637,31 +5533,99 @@ const sendProfessionalEmail = async (options) => {
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>Deposit Received - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@300;400;700&display=swap" rel="stylesheet">
+              <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #27ae60; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
-                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
-                  .content { padding: 40px; background: #ffffff; }
-                  .deposit-details { background: #f8f9fa; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #27ae60; }
-                  .detail-item { margin-bottom: 12px; display: flex; justify-content: space-between; }
-                  .detail-label { font-weight: 600; color: #333; }
-                  .detail-value { color: #0a0a0a; font-weight: 500; }
-                  .cta-button { background: #f0b90b; color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 20px 0; font-weight: 600; }
-                  .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 12px; line-height: 1.5; }
+                  body { 
+                      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
+                      line-height: 1.6; 
+                      color: #1a1a1a; 
+                      background-color: #f8f9fa; 
+                      margin: 0; 
+                      padding: 0; 
+                  }
+                  .container { 
+                      max-width: 600px; 
+                      margin: 0 auto; 
+                      background: #ffffff; 
+                  }
+                  .header { 
+                      background: #0a0a0a; 
+                      padding: 30px 40px; 
+                      text-align: center; 
+                      border-bottom: 3px solid #27ae60; 
+                  }
+                  .logo-container { 
+                      display: flex; 
+                      align-items: center; 
+                      justify-content: center; 
+                      gap: 15px; 
+                      margin-bottom: 15px; 
+                  }
+                  .logo-img { 
+                      width: 40px; 
+                      height: 40px; 
+                      border-radius: 50%; 
+                  }
+                  .logo-text { 
+                      font-size: 24px; 
+                      font-weight: 700; 
+                      color: #f0b90b; 
+                      letter-spacing: -0.5px; 
+                  }
+                  .content { 
+                      padding: 40px; 
+                      background: #ffffff; 
+                  }
+                  .deposit-details { 
+                      background: #f8f9fa; 
+                      padding: 25px; 
+                      border-radius: 8px; 
+                      margin: 25px 0; 
+                      border-left: 4px solid #27ae60; 
+                  }
+                  .detail-item { 
+                      margin-bottom: 12px; 
+                      display: flex; 
+                      justify-content: space-between; 
+                  }
+                  .detail-label { 
+                      font-weight: 600; 
+                      color: #333; 
+                  }
+                  .detail-value { 
+                      color: #0a0a0a; 
+                      font-weight: 500; 
+                  }
+                  .cta-button { 
+                      background: #f0b90b; 
+                      color: #0a0a0a; 
+                      padding: 12px 30px; 
+                      text-decoration: none; 
+                      border-radius: 6px; 
+                      display: inline-block; 
+                      margin: 20px 0; 
+                      font-weight: 600; 
+                  }
+                  .footer { 
+                      background: #0a0a0a; 
+                      padding: 25px 40px; 
+                      text-align: center; 
+                      color: #999; 
+                  }
+                  .footer-text { 
+                      font-size: 12px; 
+                      line-height: 1.5; 
+                  }
               </style>
           </head>
           <body>
               <div class="container">
                   <div class="header">
                       <div class="logo-container">
-                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash Capital</div>
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
+                          <div class="logo-text"><span>₿</span>itHash</div>
                       </div>
                   </div>
                   <div class="content">
@@ -4671,7 +5635,7 @@ const sendProfessionalEmail = async (options) => {
                       <div class="deposit-details">
                           <div class="detail-item">
                               <span class="detail-label">Amount:</span>
-                              <span class="detail-value">$${data.amount}</span>
+                              <span class="detail-value">$${data.amount.toLocaleString()}</span>
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">Method:</span>
@@ -4687,14 +5651,14 @@ const sendProfessionalEmail = async (options) => {
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">New Balance:</span>
-                              <span class="detail-value">$${data.newBalance}</span>
+                              <span class="detail-value">$${data.newBalance.toLocaleString()}</span>
                           </div>
                       </div>
                       
                       <p>Your funds are now available for mining investments and other platform activities.</p>
                       
                       <div style="text-align: center;">
-                          <a href="https://www.bithashcapital.live/investment.html" class="cta-button">Start Mining</a>
+                          <a href="https://www.bithashcapital.live/investment" class="cta-button">Start Mining</a>
                       </div>
                       
                       <p>Best regards,<br><strong>BitHash Capital Finance Team</strong></p>
@@ -4711,7 +5675,7 @@ const sendProfessionalEmail = async (options) => {
 
       // REFERRAL BONUS
       referral_bonus: {
-        subject: 'BitHash Capital - Referral Bonus Earned',
+        subject: 'Referral Bonus Earned | BitHash Capital',
         html: `
           <!DOCTYPE html>
           <html>
@@ -4719,30 +5683,99 @@ const sendProfessionalEmail = async (options) => {
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>Referral Bonus - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@300;400;700&display=swap" rel="stylesheet">
+              <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #f0b90b; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
-                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
-                  .content { padding: 40px; background: #ffffff; }
-                  .bonus-card { background: #fff8e6; border: 2px solid #f0b90b; padding: 30px; border-radius: 8px; margin: 25px 0; text-align: center; }
-                  .bonus-amount { font-size: 36px; font-weight: 700; color: #f0b90b; margin: 10px 0; }
-                  .referral-details { background: #f8f9fa; padding: 20px; border-radius: 6px; margin: 20px 0; }
-                  .cta-button { background: #f0b90b; color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 20px 0; font-weight: 600; }
-                  .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 12px; line-height: 1.5; }
+                  body { 
+                      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
+                      line-height: 1.6; 
+                      color: #1a1a1a; 
+                      background-color: #f8f9fa; 
+                      margin: 0; 
+                      padding: 0; 
+                  }
+                  .container { 
+                      max-width: 600px; 
+                      margin: 0 auto; 
+                      background: #ffffff; 
+                  }
+                  .header { 
+                      background: #0a0a0a; 
+                      padding: 30px 40px; 
+                      text-align: center; 
+                      border-bottom: 3px solid #f0b90b; 
+                  }
+                  .logo-container { 
+                      display: flex; 
+                      align-items: center; 
+                      justify-content: center; 
+                      gap: 15px; 
+                      margin-bottom: 15px; 
+                  }
+                  .logo-img { 
+                      width: 40px; 
+                      height: 40px; 
+                      border-radius: 50%; 
+                  }
+                  .logo-text { 
+                      font-size: 24px; 
+                      font-weight: 700; 
+                      color: #f0b90b; 
+                      letter-spacing: -0.5px; 
+                  }
+                  .content { 
+                      padding: 40px; 
+                      background: #ffffff; 
+                  }
+                  .bonus-card { 
+                      background: #fff8e6; 
+                      border: 2px solid #f0b90b; 
+                      padding: 30px; 
+                      border-radius: 8px; 
+                      margin: 25px 0; 
+                      text-align: center; 
+                  }
+                  .bonus-amount { 
+                      font-size: 36px; 
+                      font-weight: 700; 
+                      color: #f0b90b; 
+                      margin: 10px 0; 
+                  }
+                  .referral-details { 
+                      background: #f8f9fa; 
+                      padding: 20px; 
+                      border-radius: 6px; 
+                      margin: 20px 0; 
+                  }
+                  .cta-button { 
+                      background: #f0b90b; 
+                      color: #0a0a0a; 
+                      padding: 12px 30px; 
+                      text-decoration: none; 
+                      border-radius: 6px; 
+                      display: inline-block; 
+                      margin: 20px 0; 
+                      font-weight: 600; 
+                  }
+                  .footer { 
+                      background: #0a0a0a; 
+                      padding: 25px 40px; 
+                      text-align: center; 
+                      color: #999; 
+                  }
+                  .footer-text { 
+                      font-size: 12px; 
+                      line-height: 1.5; 
+                  }
               </style>
           </head>
           <body>
               <div class="container">
                   <div class="header">
                       <div class="logo-container">
-                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash Capital</div>
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
+                          <div class="logo-text"><span>₿</span>itHash</div>
                       </div>
                   </div>
                   <div class="content">
@@ -4751,20 +5784,23 @@ const sendProfessionalEmail = async (options) => {
                       
                       <div class="bonus-card">
                           <h3>Referral Bonus Earned</h3>
-                          <div class="bonus-amount">$${data.bonusAmount}</div>
+                          <div class="bonus-amount">$${data.bonusAmount.toLocaleString()}</div>
                           <p>has been credited to your account</p>
                       </div>
                       
                       <div class="referral-details">
                           <p><strong>Referred User:</strong> ${data.referredUser}</p>
                           <p><strong>Bonus Type:</strong> ${data.bonusType}</p>
+                          <p><strong>Investment Amount:</strong> $${data.investmentAmount || 'N/A'}</p>
+                          <p><strong>Commission Percentage:</strong> ${data.percentage}%</p>
+                          <p><strong>Round:</strong> ${data.roundNumber || 1}/${data.totalRounds || 3}</p>
                           <p><strong>Date Earned:</strong> ${new Date().toLocaleDateString()}</p>
                       </div>
                       
                       <p>Keep sharing your referral link to earn more bonuses as your referrals continue their mining journey.</p>
                       
                       <div style="text-align: center;">
-                          <a href="https://www.bithashcapital.live/referral.html" class="cta-button">View Referral Program</a>
+                          <a href="https://www.bithashcapital.live/referral" class="cta-button">View Referral Program</a>
                       </div>
                       
                       <p>Thank you for being a valuable member of the BitHash Capital community.</p>
@@ -4783,7 +5819,7 @@ const sendProfessionalEmail = async (options) => {
 
       // ACCOUNT SUSPENDED
       account_suspended: {
-        subject: 'BitHash Capital - Important Account Notification',
+        subject: 'Important Account Notification | BitHash Capital',
         html: `
           <!DOCTYPE html>
           <html>
@@ -4791,31 +5827,105 @@ const sendProfessionalEmail = async (options) => {
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>Account Notification - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Rowdies:wght@300;400;700&display=swap" rel="stylesheet">
+              <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #e74c3c; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
-                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
-                  .content { padding: 40px; background: #ffffff; }
-                  .alert-box { background: #fee; border: 2px solid #e74c3c; padding: 25px; border-radius: 8px; margin: 25px 0; }
-                  .action-steps { background: #f8f9fa; padding: 20px; border-radius: 6px; margin: 20px 0; }
-                  .step-item { margin-bottom: 10px; display: flex; align-items: flex-start; }
-                  .step-number { background: #e74c3c; color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-right: 12px; font-size: 12px; font-weight: 600; }
-                  .support-link { color: #e74c3c; text-decoration: none; font-weight: 600; }
-                  .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 12px; line-height: 1.5; }
+                  body { 
+                      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
+                      line-height: 1.6; 
+                      color: #1a1a1a; 
+                      background-color: #f8f9fa; 
+                      margin: 0; 
+                      padding: 0; 
+                  }
+                  .container { 
+                      max-width: 600px; 
+                      margin: 0 auto; 
+                      background: #ffffff; 
+                  }
+                  .header { 
+                      background: #0a0a0a; 
+                      padding: 30px 40px; 
+                      text-align: center; 
+                      border-bottom: 3px solid #e74c3c; 
+                  }
+                  .logo-container { 
+                      display: flex; 
+                      align-items: center; 
+                      justify-content: center; 
+                      gap: 15px; 
+                      margin-bottom: 15px; 
+                  }
+                  .logo-img { 
+                      width: 40px; 
+                      height: 40px; 
+                      border-radius: 50%; 
+                  }
+                  .logo-text { 
+                      font-size: 24px; 
+                      font-weight: 700; 
+                      color: #f0b90b; 
+                      letter-spacing: -0.5px; 
+                  }
+                  .content { 
+                      padding: 40px; 
+                      background: #ffffff; 
+                  }
+                  .alert-box { 
+                      background: #fee; 
+                      border: 2px solid #e74c3c; 
+                      padding: 25px; 
+                      border-radius: 8px; 
+                      margin: 25px 0; 
+                  }
+                  .action-steps { 
+                      background: #f8f9fa; 
+                      padding: 20px; 
+                      border-radius: 6px; 
+                      margin: 20px 0; 
+                  }
+                  .step-item { 
+                      margin-bottom: 10px; 
+                      display: flex; 
+                      align-items: flex-start; 
+                  }
+                  .step-number { 
+                      background: #e74c3c; 
+                      color: white; 
+                      width: 24px; 
+                      height: 24px; 
+                      border-radius: 50%; 
+                      display: flex; 
+                      align-items: center; 
+                      justify-content: center; 
+                      margin-right: 12px; 
+                      font-size: 12px; 
+                      font-weight: 600; 
+                  }
+                  .support-link { 
+                      color: #e74c3c; 
+                      text-decoration: none; 
+                      font-weight: 600; 
+                  }
+                  .footer { 
+                      background: #0a0a0a; 
+                      padding: 25px 40px; 
+                      text-align: center; 
+                      color: #999; 
+                  }
+                  .footer-text { 
+                      font-size: 12px; 
+                      line-height: 1.5; 
+                  }
               </style>
           </head>
           <body>
               <div class="container">
                   <div class="header">
                       <div class="logo-container">
-                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash Capital</div>
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
+                          <div class="logo-text"><span>₿</span>itHash</div>
                       </div>
                   </div>
                   <div class="content">
@@ -4854,75 +5964,6 @@ const sendProfessionalEmail = async (options) => {
           </body>
           </html>
         `
-      },
-
-      // ADMIN ACTION
-      admin_action: {
-        subject: 'BitHash Capital - Admin Action Notification',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>Admin Action - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-              <style>
-                  * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #3498db; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
-                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
-                  .content { padding: 40px; background: #ffffff; }
-                  .admin-action { background: #f8f9fa; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #3498db; }
-                  .action-item { margin-bottom: 12px; }
-                  .action-label { font-weight: 600; color: #333; }
-                  .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 12px; line-height: 1.5; }
-              </style>
-          </head>
-          <body>
-              <div class="container">
-                  <div class="header">
-                      <div class="logo-container">
-                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash Capital</div>
-                      </div>
-                  </div>
-                  <div class="content">
-                      <h2>Hello ${data.name},</h2>
-                      <p>An admin action has been performed on your account:</p>
-                      
-                      <div class="admin-action">
-                          <div class="action-item">
-                              <span class="action-label">Action:</span>
-                              <span>${data.action}</span>
-                          </div>
-                          <div class="action-item">
-                              <span class="action-label">Details:</span>
-                              <span>${data.details}</span>
-                          </div>
-                          <div class="action-item">
-                              <span class="action-label">Time:</span>
-                              <span>${new Date().toLocaleString()}</span>
-                          </div>
-                          ${data.reason ? `<div class="action-item"><span class="action-label">Reason:</span><span>${data.reason}</span></div>` : ''}
-                      </div>
-                      
-                      <p>If you have any questions, please contact our support team.</p>
-                      
-                      <p>Best regards,<br><strong>BitHash Capital Team</strong></p>
-                  </div>
-                  <div class="footer">
-                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
-                      Professional Bitcoin Mining and Investment Platform</p>
-                  </div>
-              </div>
-          </body>
-          </html>
-        `
       }
     };
 
@@ -4945,6 +5986,15 @@ const sendProfessionalEmail = async (options) => {
     throw new Error('Failed to send email');
   }
 };
+
+
+
+
+
+
+
+
+
 
 
 
@@ -4998,6 +6048,7 @@ app.post('/api/auth/signup', [
       console.log('Processing referral code:', referralCode);
       
       let actualReferralCode = referralCode;
+      // Check if the referral code contains a hyphen and extract the last part
       if (referralCode.includes('-')) {
         const parts = referralCode.split('-');
         if (parts.length > 1) {
@@ -5025,38 +6076,52 @@ app.post('/api/auth/signup', [
       isVerified: false // User needs to verify via OTP first
     });
 
-    // If user was referred, log the downline relationship automatically
+    // If user was referred, log the downline relationship
     if (referredByUser) {
       try {
-        // Create downline relationship in database
-        const downlineRelationship = await DownlineRelationship.create({
-          upline: referredByUser._id,
-          downline: newUser._id,
-          commissionPercentage: 5,
-          commissionRounds: 3,
-          remainingRounds: 3,
-          assignedBy: referredByUser._id,
-          status: 'active'
+        // Check if downline relationship already exists
+        const existingRelationship = await DownlineRelationship.findOne({
+          downline: newUser._id
         });
 
-        console.log(`✅ Downline relationship created: ${referredByUser.email} -> ${newUser.email}`);
+        if (!existingRelationship) {
+          // Get default commission settings
+          const settings = await CommissionSettings.findOne({ isActive: true }) || {
+            commissionPercentage: 5,
+            commissionRounds: 3
+          };
 
-        // Update upline's downline stats
-        await User.findByIdAndUpdate(referredByUser._id, {
-          $inc: {
-            'downlineStats.totalDownlines': 1,
-            'referralStats.totalReferrals': 1
-          }
-        });
+          // Create downline relationship
+          await DownlineRelationship.create({
+            upline: referredByUser._id,
+            downline: newUser._id,
+            commissionPercentage: settings.commissionPercentage,
+            commissionRounds: settings.commissionRounds,
+            remainingRounds: settings.commissionRounds,
+            assignedBy: referredByUser._id, // Using upline as assigner
+            assignedAt: new Date()
+          });
 
-        await logActivity('downline_added', 'downline', downlineRelationship._id, referredByUser._id, 'User', req, {
-          downlineId: newUser._id,
-          downlineName: `${firstName} ${lastName}`,
-          downlineEmail: originalEmail
-        });
+          // Update upline's downline stats
+          await User.findByIdAndUpdate(referredByUser._id, {
+            $inc: {
+              'downlineStats.totalDownlines': 1
+            }
+          });
+
+          console.log(`✅ Downline relationship created: ${referredByUser.email} -> ${newUser.email}`);
+          
+          // Log the downline join activity
+          await logUserActivity(req, 'downline_joined', 'success', {
+            uplineId: referredByUser._id,
+            uplineEmail: referredByUser.email,
+            downlineId: newUser._id,
+            downlineEmail: newUser.email
+          }, newUser);
+        }
       } catch (downlineError) {
         console.error('Error creating downline relationship:', downlineError);
-        // Continue with signup even if downline creation fails
+        // Don't fail signup if downline creation fails
       }
     }
 
@@ -5096,6 +6161,12 @@ app.post('/api/auth/signup', [
 
     // Generate temporary token for OTP verification
     const tempToken = generateJWT(newUser._id);
+
+    // Log the signup activity
+    await logUserActivity(req, 'signup', 'pending', {
+      referralSource,
+      referredBy: referredByUser ? referredByUser.email : null
+    }, newUser);
 
     res.status(201).json({
       status: 'success',
@@ -5149,7 +6220,7 @@ app.post('/api/auth/login', [
       await logUserActivity(req, 'login_attempt', 'failed', {
         error: 'Invalid credentials',
         email: email // Log exact email used
-      }, user);
+      });
       
       return res.status(401).json({
         status: 'fail',
@@ -5224,7 +6295,7 @@ app.post('/api/auth/login', [
     await logUserActivity(req, 'login_error', 'failed', {
       error: err.message,
       email: req.body.email // Log exact email used
-    }, null);
+    });
 
     res.status(500).json({
       status: 'error',
@@ -5234,131 +6305,6 @@ app.post('/api/auth/login', [
 });
 
 
-// OTP Verification Endpoint
-app.post('/api/auth/verify-otp', [
-  body('email').isEmail().withMessage('Please provide a valid email'),
-  body('otp').isLength({ min: 6, max: 6 }).withMessage('OTP must be 6 digits'),
-  body('type').isIn(['signup', 'login', 'password_reset', 'withdrawal']).withMessage('Invalid OTP type')
-], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({
-      status: 'fail',
-      errors: errors.array()
-    });
-  }
-
-  try {
-    const { email, otp, type } = req.body;
-
-    // Find valid OTP
-    const otpRecord = await OTP.findOne({
-      email: email,
-      otp: otp,
-      type: type,
-      used: false,
-      expiresAt: { $gt: new Date() }
-    });
-
-    if (!otpRecord) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Invalid or expired OTP'
-      });
-    }
-
-    // Mark OTP as used
-    otpRecord.used = true;
-    await otpRecord.save();
-
-    // Find user
-    const user = await User.findOne({ email: email });
-    if (!user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found'
-      });
-    }
-
-    // Handle based on type
-    if (type === 'signup') {
-      user.isVerified = true;
-      await user.save();
-    } else if (type === 'login') {
-      // Update last login with device info
-      const deviceInfo = await getUserDeviceInfo(req);
-      user.lastLogin = new Date();
-      user.loginHistory.push({
-        ip: deviceInfo.ip,
-        device: deviceInfo.device,
-        deviceModel: deviceInfo.deviceModel,
-        browser: deviceInfo.browser,
-        os: deviceInfo.os,
-        location: deviceInfo.location,
-        city: deviceInfo.city,
-        region: deviceInfo.region,
-        country: deviceInfo.country,
-        isp: deviceInfo.isp,
-        latitude: deviceInfo.latitude,
-        longitude: deviceInfo.longitude,
-        timestamp: new Date()
-      });
-      await user.save();
-
-      // Send login success email with device and location info
-      await sendProfessionalEmail({
-        email: email,
-        template: 'login_success',
-        data: {
-          name: user.firstName,
-          device: deviceInfo.device,
-          deviceModel: deviceInfo.deviceModel,
-          browser: deviceInfo.browser,
-          os: deviceInfo.os,
-          location: deviceInfo.location,
-          ip: deviceInfo.ip,
-          isp: deviceInfo.isp
-        }
-      });
-    }
-
-    // Generate full token
-    const token = generateJWT(user._id);
-
-    // Set cookie
-    res.cookie('jwt', token, {
-      expires: new Date(Date.now() + JWT_COOKIE_EXPIRES * 24 * 60 * 60 * 1000),
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict'
-    });
-
-    res.status(200).json({
-      status: 'success',
-      token,
-      message: 'OTP verified successfully',
-      data: {
-        user: {
-          id: user._id,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          email: user.email,
-          isVerified: user.isVerified
-        }
-      }
-    });
-
-    // Log activity
-    await logUserActivity(req, `${type}_otp_verified`, 'success', { type }, user);
-
-  } catch (err) {
-    console.error('OTP verification error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'An error occurred during OTP verification'
-    });
-  }
-});
 
 
 app.post('/api/auth/google', async (req, res) => {
@@ -5432,6 +6378,12 @@ app.post('/api/auth/google', async (req, res) => {
     }
 
     if (!user) {
+      // Check if user exists in login records but not in users (shouldn't happen)
+      const loginRecord = await LoginRecord.findOne({ email: originalEmail });
+      if (loginRecord) {
+        console.log('User found in login records but not in users table');
+      }
+
       // Create new user with Google auth using exact email
       try {
         const referralCode = generateReferralCode();
@@ -5523,23 +6475,14 @@ app.post('/api/auth/google', async (req, res) => {
     // Generate temporary token
     const tempToken = generateJWT(user._id);
 
-    // Update last login
+    // Update last login with device info
     try {
       user.lastLogin = new Date();
       const deviceInfo = await getUserDeviceInfo(req);
       user.loginHistory.push({
         ip: deviceInfo.ip,
         device: deviceInfo.device,
-        deviceModel: deviceInfo.deviceModel,
-        browser: deviceInfo.browser,
-        os: deviceInfo.os,
         location: deviceInfo.location,
-        city: deviceInfo.city,
-        region: deviceInfo.region,
-        country: deviceInfo.country,
-        isp: deviceInfo.isp,
-        latitude: deviceInfo.latitude,
-        longitude: deviceInfo.longitude,
         timestamp: new Date()
       });
       await user.save();
@@ -5618,14 +6561,13 @@ app.post('/api/auth/forgot-password', [
     await user.save();
 
     const resetURL = `https://bithhash.vercel.app/reset-password?token=${resetToken}`;
+    const message = `Forgot your password? Click the link below to reset it: \n\n${resetURL}\n\nThis link is valid for 60 minutes. If you didn't request this, please ignore this email.`;
 
-    await sendProfessionalEmail({
+    await sendEmail({
       email: user.email,
-      template: 'password_reset',
-      data: {
-        name: user.firstName,
-        resetUrl: resetURL
-      }
+      subject: 'Your password reset token (valid for 60 minutes)',
+      message,
+      html: `<p>Forgot your password? Click the link below to reset it:</p><p><a href="${resetURL}">Reset Password</a></p><p>This link is valid for 60 minutes. If you didn't request this, please ignore this email.</p>`
     });
 
     res.status(200).json({
@@ -5680,15 +6622,6 @@ app.post('/api/auth/reset-password', [
     user.passwordResetToken = undefined;
     user.passwordResetExpires = undefined;
     await user.save();
-
-    // Send password reset success email
-    await sendProfessionalEmail({
-      email: user.email,
-      template: 'password_reset_success',
-      data: {
-        name: user.firstName
-      }
-    });
 
     const newToken = generateJWT(user._id);
 
@@ -6436,24 +7369,32 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
     deposit.processedAt = new Date();
     deposit.adminNotes = notes;
     await deposit.save();
-
-    // Send deposit received email
-    await sendProfessionalEmail({
-      email: user.email,
-      template: 'deposit_received',
-      data: {
-        name: user.firstName,
-        amount: deposit.amount,
-        method: deposit.method,
-        reference: deposit.reference,
-        newBalance: user.balances.main
-      }
-    });
     
     res.status(200).json({
       status: 'success',
       message: 'Deposit approved successfully'
     });
+
+    // Send deposit confirmation email
+    try {
+      await sendEnhancedEmail(user, 'deposit_received', {
+        amount: deposit.amount,
+        method: deposit.method,
+        reference: deposit.reference,
+        newBalance: user.balances.main
+      });
+      console.log(`📧 Deposit confirmation email sent to ${user.email}`);
+    } catch (emailError) {
+      console.error('Failed to send deposit confirmation email:', emailError);
+    }
+
+    // Log user activity
+    await logUserActivity(req, 'deposit_completed', 'success', {
+      depositId: deposit._id,
+      amount: deposit.amount,
+      method: deposit.method,
+      reference: deposit.reference
+    }, user);
     
     await logActivity('approve-deposit', 'transaction', deposit._id, req.admin._id, 'Admin', req, {
       amount: deposit.amount,
@@ -6484,7 +7425,8 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
     const { rejectionReason } = req.body;
     
     // Find deposit
-    const deposit = await Transaction.findById(req.params.id);
+    const deposit = await Transaction.findById(req.params.id)
+      .populate('user');
     
     if (!deposit || deposit.type !== 'deposit') {
       return res.status(404).json({
@@ -6500,6 +7442,9 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
       });
     }
     
+    // Find user
+    const user = await User.findById(deposit.user._id);
+    
     // Update deposit status
     deposit.status = 'failed';
     deposit.adminNotes = rejectionReason;
@@ -6509,6 +7454,29 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
       status: 'success',
       message: 'Deposit rejected successfully'
     });
+
+    // Send rejection notification email
+    if (user) {
+      try {
+        await sendEnhancedEmail(user, 'deposit_rejected', {
+          amount: deposit.amount,
+          method: deposit.method,
+          reference: deposit.reference,
+          reason: rejectionReason
+        });
+        console.log(`📧 Deposit rejection email sent to ${user.email}`);
+      } catch (emailError) {
+        console.error('Failed to send deposit rejection email:', emailError);
+      }
+
+      // Log user activity
+      await logUserActivity(req, 'deposit_failed', 'failed', {
+        depositId: deposit._id,
+        amount: deposit.amount,
+        method: deposit.method,
+        reason: rejectionReason
+      }, user);
+    }
     
     await logActivity('reject-deposit', 'transaction', deposit._id, req.admin._id, 'Admin', req, {
       amount: deposit.amount,
@@ -6575,29 +7543,42 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
       });
     }
     
+    // Find user
+    const user = await User.findById(withdrawal.user._id);
+    
     // Update withdrawal status
     withdrawal.status = 'completed';
     withdrawal.processedBy = req.admin._id;
     withdrawal.processedAt = new Date();
     withdrawal.adminNotes = notes;
     await withdrawal.save();
-
-    // Send withdrawal completed email
-    await sendProfessionalEmail({
-      email: withdrawal.user.email,
-      template: 'withdrawal_completed',
-      data: {
-        name: withdrawal.user.firstName,
-        amount: withdrawal.amount,
-        method: withdrawal.method,
-        reference: withdrawal.reference
-      }
-    });
     
     res.status(200).json({
       status: 'success',
       message: 'Withdrawal approved successfully'
     });
+
+    // Send withdrawal completion email
+    if (user) {
+      try {
+        await sendEnhancedEmail(user, 'withdrawal_completed', {
+          amount: withdrawal.amount,
+          method: withdrawal.method,
+          reference: withdrawal.reference
+        });
+        console.log(`📧 Withdrawal completion email sent to ${user.email}`);
+      } catch (emailError) {
+        console.error('Failed to send withdrawal completion email:', emailError);
+      }
+
+      // Log user activity
+      await logUserActivity(req, 'withdrawal_completed', 'success', {
+        withdrawalId: withdrawal._id,
+        amount: withdrawal.amount,
+        method: withdrawal.method,
+        reference: withdrawal.reference
+      }, user);
+    }
     
     await logActivity('approve-withdrawal', 'transaction', withdrawal._id, req.admin._id, 'Admin', req, {
       amount: withdrawal.amount,
@@ -6672,6 +7653,27 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
       status: 'success',
       message: 'Withdrawal rejected successfully'
     });
+
+    // Send withdrawal rejection email
+    try {
+      await sendEnhancedEmail(user, 'withdrawal_rejected', {
+        amount: withdrawal.amount,
+        method: withdrawal.method,
+        reference: withdrawal.reference,
+        reason: reason
+      });
+      console.log(`📧 Withdrawal rejection email sent to ${user.email}`);
+    } catch (emailError) {
+      console.error('Failed to send withdrawal rejection email:', emailError);
+    }
+
+    // Log user activity
+    await logUserActivity(req, 'withdrawal_failed', 'failed', {
+      withdrawalId: withdrawal._id,
+      amount: withdrawal.amount,
+      method: withdrawal.method,
+      reason: reason
+    }, user);
     
     await logActivity('reject-withdrawal', 'transaction', withdrawal._id, req.admin._id, 'Admin', req, {
       amount: withdrawal.amount,
@@ -6687,92 +7689,7 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
   }
 });
 
-// Admin Suspend User Endpoint
-app.post('/api/admin/users/:id/suspend', adminProtect, [
-  body('reason').trim().notEmpty().withMessage('Suspension reason is required')
-], async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        status: 'fail',
-        errors: errors.array()
-      });
-    }
-
-    const { reason } = req.body;
-    const userId = req.params.id;
-
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found'
-      });
-    }
-
-    user.status = 'suspended';
-    await user.save();
-
-    // Send account suspended email
-    await sendProfessionalEmail({
-      email: user.email,
-      template: 'account_suspended',
-      data: {
-        name: user.firstName,
-        reason: reason
-      }
-    });
-
-    res.status(200).json({
-      status: 'success',
-      message: 'User suspended successfully'
-    });
-
-    await logActivity('suspend_user', 'user', user._id, req.admin._id, 'Admin', req, {
-      reason: reason
-    });
-  } catch (err) {
-    console.error('Admin suspend user error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to suspend user'
-    });
-  }
-});
-
-// Admin Unsuspend User Endpoint
-app.post('/api/admin/users/:id/unsuspend', adminProtect, async (req, res) => {
-  try {
-    const userId = req.params.id;
-
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found'
-      });
-    }
-
-    user.status = 'active';
-    await user.save();
-
-    res.status(200).json({
-      status: 'success',
-      message: 'User unsuspended successfully'
-    });
-
-    await logActivity('unsuspend_user', 'user', user._id, req.admin._id, 'Admin', req, {});
-  } catch (err) {
-    console.error('Admin unsuspend user error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to unsuspend user'
-    });
-  }
-});
-
-// Admin Activity Endpoint - FIXED VERSION with enhanced location and device info
+// Admin Activity Endpoint - FIXED VERSION
 app.get('/api/admin/activity', adminProtect, async (req, res) => {
   try {
     const { page = 1, limit = 10, type = 'all' } = req.query;
@@ -6803,7 +7720,7 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
       .sort((a, b) => new Date(b.createdAt || b.timestamp) - new Date(a.createdAt || a.timestamp))
       .slice(0, parseInt(limit));
 
-    // Transform activities with PROPER user data mapping and enhanced location/device info
+    // Transform activities with PROPER user data mapping
     const activities = allActivities.map(activity => {
       // Determine if it's a UserLog or SystemLog
       const isUserLog = activity.user !== undefined;
@@ -6819,18 +7736,10 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
       let timestamp = activity.createdAt || activity.timestamp;
       let status = activity.status || 'success';
       let location = 'Unknown';
-      let city = 'Unknown';
-      let region = 'Unknown';
-      let country = 'Unknown';
-      let device = 'Unknown';
-      let deviceType = 'Unknown';
-      let deviceModel = 'Unknown';
-      let browser = 'Unknown';
-      let os = 'Unknown';
-      let isp = 'Unknown';
+      let deviceInfo = {};
 
       if (isUserLog) {
-        // Handle UserLog entries with enhanced location and device info
+        // Handle UserLog entries
         console.log('Processing UserLog:', activity);
         
         // Get REAL user data with proper fallbacks
@@ -6849,26 +7758,8 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
         }
         
         ipAddress = activity.ipAddress || 'Unknown';
-        
-        // Extract enhanced location info
-        if (activity.location) {
-          location = activity.location.location || 
-                     `${activity.location.city || ''}, ${activity.location.region || ''}, ${activity.location.country?.name || ''}`.replace(/^,\s*|\s*,\s*$/g, '') || 
-                     'Unknown';
-          city = activity.location.city || 'Unknown';
-          region = activity.location.region?.name || 'Unknown';
-          country = activity.location.country?.name || 'Unknown';
-          isp = activity.location.isp || 'Unknown';
-        }
-        
-        // Extract enhanced device info
-        if (activity.deviceInfo) {
-          device = activity.userAgent || 'Unknown';
-          deviceType = activity.deviceInfo.type || 'Unknown';
-          deviceModel = activity.deviceInfo.deviceModel || 'Unknown';
-          browser = activity.deviceInfo.browser?.name || 'Unknown';
-          os = activity.deviceInfo.os?.name || 'Unknown';
-        }
+        location = activity.location?.city ? `${activity.location.city}, ${activity.location.country?.name || ''}` : 'Unknown';
+        deviceInfo = activity.deviceInfo || {};
         
       } else {
         // Handle SystemLog entries
@@ -6891,21 +7782,7 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
         }
         
         ipAddress = activity.ip || 'Unknown';
-        
-        // Extract location from changes metadata if available
-        if (activity.changes && activity.changes.locationData) {
-          const locData = activity.changes.locationData;
-          location = locData.location || 'Unknown';
-          city = locData.city || 'Unknown';
-          region = locData.region || 'Unknown';
-          country = locData.country || 'Unknown';
-          isp = locData.isp || 'Unknown';
-          device = locData.userAgent || 'Unknown';
-          deviceType = locData.deviceType || 'Unknown';
-          deviceModel = locData.deviceModel || 'Unknown';
-          browser = locData.browser || 'Unknown';
-          os = locData.os || 'Unknown';
-        }
+        location = activity.location || 'Unknown';
       }
 
       // Final safety check for user name
@@ -6925,15 +7802,7 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
         description: getActivityDescription(action, activity.metadata || activity.changes),
         ipAddress: ipAddress,
         location: location,
-        city: city,
-        region: region,
-        country: country,
-        isp: isp,
-        device: device,
-        deviceType: deviceType,
-        deviceModel: deviceModel,
-        browser: browser,
-        os: os,
+        deviceInfo: deviceInfo,
         status: status,
         type: isUserLog ? 'user_activity' : 'system_activity',
         metadata: activity.metadata || activity.changes || {}
@@ -7029,10 +7898,13 @@ function getActivityDescription(action, metadata) {
     'reject-deposit': 'Rejected deposit',
     'approve-withdrawal': 'Approved withdrawal',
     'reject-withdrawal': 'Rejected withdrawal',
-    'suspend_user': 'Suspended user account',
-    'unsuspend_user': 'Unsuspended user account',
     'create-user': 'Created user account',
-    'update-user': 'Updated user account'
+    'update-user': 'Updated user account',
+    
+    // Downline actions
+    'downline_joined': 'New downline user joined',
+    'downline_invested': 'Downline user made an investment',
+    'downline_commission_paid': 'Downline commission paid to upline'
   };
 
   let description = actionMap[action] || `Performed ${action.replace(/_/g, ' ')}`;
@@ -7050,9 +7922,6 @@ function getActivityDescription(action, metadata) {
     }
     if (metadata.location) {
       description += ` in ${metadata.location}`;
-    }
-    if (metadata.reason) {
-      description += ` (Reason: ${metadata.reason})`;
     }
     if (metadata.fields && Array.isArray(metadata.fields)) {
       description += ` (${metadata.fields.join(', ')})`;
@@ -7085,9 +7954,6 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
             } : { name: 'System', email: 'system' },
             action: activity.action,
             ipAddress: activity.ipAddress,
-            location: activity.location?.location || 'Unknown',
-            device: activity.userAgent || 'Unknown',
-            deviceModel: activity.deviceInfo?.deviceModel || 'Unknown',
             status: activity.status
         }));
 
@@ -7105,51 +7971,6 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
         });
     }
 });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 // Validate referral code endpoint
@@ -7207,6 +8028,245 @@ app.get('/api/referrals/validate/:code', async (req, res) => {
         });
     }
 });
+
+
+
+
+app.get('/api/referrals', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+
+        // Get user's referral code and details
+        const user = await User.findById(userId).select('referralCode referralStats firstName lastName email');
+        if (!user) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'User not found'
+            });
+        }
+
+        // Generate referral link using user's first name and unique code
+        const referralLink = `https://www.bithashcapital.live/signup.html?ref=${user.referralCode}`;
+        const referralLinkWithName = `https://www.bithashcapital.live/signup.html?ref=${encodeURIComponent(user.firstName)}-${user.referralCode}`;
+
+        // Get all downline relationships where this user is the upline
+        const downlineRelationships = await DownlineRelationship.find({ 
+            upline: userId 
+        })
+        .populate('downline', 'firstName lastName email createdAt')
+        .sort({ createdAt: -1 })
+        .lean();
+
+        // Calculate referral statistics
+        const totalReferrals = downlineRelationships.length;
+        const activeReferrals = downlineRelationships.filter(rel => rel.status === 'active').length;
+        
+        // Calculate total earnings from commission history
+        const commissionEarnings = await CommissionHistory.aggregate([
+            { 
+                $match: { 
+                    upline: userId,
+                    status: 'paid'
+                } 
+            },
+            {
+                $group: {
+                    _id: null,
+                    totalEarnings: { $sum: '$commissionAmount' }
+                }
+            }
+        ]);
+
+        const totalEarnings = commissionEarnings.length > 0 ? commissionEarnings[0].totalEarnings : 0;
+
+        // Calculate pending earnings (commissions that are earned but not yet paid)
+        const pendingEarningsResult = await CommissionHistory.aggregate([
+            { 
+                $match: { 
+                    upline: userId,
+                    status: 'pending'
+                } 
+            },
+            {
+                $group: {
+                    _id: null,
+                    totalPending: { $sum: '$commissionAmount' }
+                }
+            }
+        ]);
+
+        const pendingEarnings = pendingEarningsResult.length > 0 ? pendingEarningsResult[0].totalPending : 0;
+
+        // Format referral data for the referrals table
+        const referrals = downlineRelationships.map(relationship => {
+            const downlineUser = relationship.downline;
+            const roundsCompleted = relationship.commissionRounds - relationship.remainingRounds;
+            
+            return {
+                id: relationship._id,
+                fullName: downlineUser ? `${downlineUser.firstName} ${downlineUser.lastName}` : 'Anonymous User',
+                email: downlineUser?.email || 'N/A',
+                joinDate: downlineUser?.createdAt || relationship.createdAt,
+                isActive: relationship.status === 'active',
+                investmentRounds: roundsCompleted,
+                totalEarned: relationship.totalCommissionEarned || 0,
+                status: relationship.status
+            };
+        });
+
+        // Calculate earnings breakdown by round for each referral
+        const earningsBreakdown = await CommissionHistory.aggregate([
+            { 
+                $match: { 
+                    upline: userId,
+                    status: { $in: ['paid', 'pending'] }
+                } 
+            },
+            {
+                $lookup: {
+                    from: 'users',
+                    localField: 'downline',
+                    foreignField: '_id',
+                    as: 'downlineInfo'
+                }
+            },
+            {
+                $unwind: {
+                    path: '$downlineInfo',
+                    preserveNullAndEmptyArrays: true
+                }
+            },
+            {
+                $group: {
+                    _id: {
+                        downline: '$downline',
+                        roundNumber: '$roundNumber'
+                    },
+                    roundEarnings: { $sum: '$commissionAmount' },
+                    downlineName: { 
+                        $first: { 
+                            $cond: [
+                                { $and: ['$downlineInfo.firstName', '$downlineInfo.lastName'] },
+                                { $concat: ['$downlineInfo.firstName', ' ', '$downlineInfo.lastName'] },
+                                'Anonymous User'
+                            ]
+                        } 
+                    }
+                }
+            },
+            {
+                $group: {
+                    _id: '$_id.downline',
+                    referralName: { $first: '$downlineName' },
+                    round1Earnings: {
+                        $sum: {
+                            $cond: [{ $eq: ['$_id.roundNumber', 1] }, '$roundEarnings', 0]
+                        }
+                    },
+                    round2Earnings: {
+                        $sum: {
+                            $cond: [{ $eq: ['$_id.roundNumber', 2] }, '$roundEarnings', 0]
+                        }
+                    },
+                    round3Earnings: {
+                        $sum: {
+                            $cond: [{ $eq: ['$_id.roundNumber', 3] }, '$roundEarnings', 0]
+                        }
+                    },
+                    totalEarned: { $sum: '$roundEarnings' }
+                }
+            }
+        ]);
+
+        // Update user's referral stats in the database
+        await User.findByIdAndUpdate(userId, {
+            $set: {
+                'referralStats.totalReferrals': totalReferrals,
+                'referralStats.totalEarnings': totalEarnings,
+                'referralStats.availableBalance': totalEarnings - (user.referralStats?.withdrawn || 0),
+                'referralStats.pendingEarnings': pendingEarnings,
+                'downlineStats.totalDownlines': totalReferrals,
+                'downlineStats.activeDownlines': activeReferrals,
+                'downlineStats.totalCommissionEarned': totalEarnings
+            }
+        });
+
+        // Return the complete referral data in the EXACT format expected by frontend
+        const responseData = {
+            status: 'success',
+            data: {
+                // Enhanced referral data with links
+                code: user.referralCode || 'XXXXXX',
+                referralLink: referralLink,
+                referralLinkWithName: referralLinkWithName,
+                shareableLinks: {
+                    direct: referralLinkWithName,
+                    withMessage: `Join me on BitHash Capital! Use my referral link: ${referralLinkWithName}`,
+                    social: {
+                        facebook: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(referralLinkWithName)}`,
+                        twitter: `https://twitter.com/intent/tweet?text=${encodeURIComponent(`Join me on BitHash Capital! Use my referral link: ${referralLinkWithName}`)}`,
+                        whatsapp: `https://wa.me/?text=${encodeURIComponent(`Join me on BitHash Capital! Use my referral link: ${referralLinkWithName}`)}`,
+                        telegram: `https://t.me/share/url?url=${encodeURIComponent(referralLinkWithName)}&text=${encodeURIComponent('Join me on BitHash Capital!')}`
+                    }
+                },
+                totalReferrals: totalReferrals,
+                totalEarnings: totalEarnings,
+                pendingEarnings: pendingEarnings,
+                activeReferrals: activeReferrals,
+                
+                // Detailed data for the tabs
+                referrals: referrals, // For "My Referrals" tab
+                earnings: earningsBreakdown, // For "Earnings Breakdown" tab
+                
+                // Stats object (if needed elsewhere)
+                stats: {
+                    directReferrals: totalReferrals,
+                    totalCommission: totalEarnings,
+                    availableBalance: totalEarnings - (user.referralStats?.withdrawn || 0),
+                    withdrawn: user.referralStats?.withdrawn || 0,
+                    pending: pendingEarnings
+                }
+            }
+        };
+
+        res.status(200).json(responseData);
+
+        // Log the activity
+        await logActivity('view_referrals', 'referral', userId, userId, 'User', req);
+
+    } catch (error) {
+        console.error('Error loading referral data:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to load referral data'
+        });
+    }
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -12163,227 +13223,6 @@ app.get('/api/users/downline', protect, async (req, res) => {
     });
   }
 });
-
-
-
-
-
-
-
-app.get('/api/referrals', protect, async (req, res) => {
-    try {
-        const userId = req.user._id;
-
-        // Get user's referral code and details
-        const user = await User.findById(userId).select('referralCode referralStats firstName lastName email');
-        if (!user) {
-            return res.status(404).json({
-                status: 'fail',
-                message: 'User not found'
-            });
-        }
-
-        // Generate referral link using user's first name and unique code
-        const referralLink = `https://www.bithashcapital.live/signup.html?ref=${user.referralCode}`;
-        const referralLinkWithName = `https://www.bithashcapital.live/signup.html?ref=${encodeURIComponent(user.firstName)}-${user.referralCode}`;
-
-        // Get all downline relationships where this user is the upline
-        const downlineRelationships = await DownlineRelationship.find({ 
-            upline: userId 
-        })
-        .populate('downline', 'firstName lastName email createdAt')
-        .sort({ createdAt: -1 })
-        .lean();
-
-        // Calculate referral statistics
-        const totalReferrals = downlineRelationships.length;
-        const activeReferrals = downlineRelationships.filter(rel => rel.status === 'active').length;
-        
-        // Calculate total earnings from commission history
-        const commissionEarnings = await CommissionHistory.aggregate([
-            { 
-                $match: { 
-                    upline: userId,
-                    status: 'paid'
-                } 
-            },
-            {
-                $group: {
-                    _id: null,
-                    totalEarnings: { $sum: '$commissionAmount' }
-                }
-            }
-        ]);
-
-        const totalEarnings = commissionEarnings.length > 0 ? commissionEarnings[0].totalEarnings : 0;
-
-        // Calculate pending earnings (commissions that are earned but not yet paid)
-        const pendingEarningsResult = await CommissionHistory.aggregate([
-            { 
-                $match: { 
-                    upline: userId,
-                    status: 'pending'
-                } 
-            },
-            {
-                $group: {
-                    _id: null,
-                    totalPending: { $sum: '$commissionAmount' }
-                }
-            }
-        ]);
-
-        const pendingEarnings = pendingEarningsResult.length > 0 ? pendingEarningsResult[0].totalPending : 0;
-
-        // Format referral data for the referrals table
-        const referrals = downlineRelationships.map(relationship => {
-            const downlineUser = relationship.downline;
-            const roundsCompleted = relationship.commissionRounds - relationship.remainingRounds;
-            
-            return {
-                id: relationship._id,
-                fullName: downlineUser ? `${downlineUser.firstName} ${downlineUser.lastName}` : 'Anonymous User',
-                email: downlineUser?.email || 'N/A',
-                joinDate: downlineUser?.createdAt || relationship.createdAt,
-                isActive: relationship.status === 'active',
-                investmentRounds: roundsCompleted,
-                totalEarned: relationship.totalCommissionEarned || 0,
-                status: relationship.status
-            };
-        });
-
-        // Calculate earnings breakdown by round for each referral
-        const earningsBreakdown = await CommissionHistory.aggregate([
-            { 
-                $match: { 
-                    upline: userId,
-                    status: { $in: ['paid', 'pending'] }
-                } 
-            },
-            {
-                $lookup: {
-                    from: 'users',
-                    localField: 'downline',
-                    foreignField: '_id',
-                    as: 'downlineInfo'
-                }
-            },
-            {
-                $unwind: {
-                    path: '$downlineInfo',
-                    preserveNullAndEmptyArrays: true
-                }
-            },
-            {
-                $group: {
-                    _id: {
-                        downline: '$downline',
-                        roundNumber: '$roundNumber'
-                    },
-                    roundEarnings: { $sum: '$commissionAmount' },
-                    downlineName: { 
-                        $first: { 
-                            $cond: [
-                                { $and: ['$downlineInfo.firstName', '$downlineInfo.lastName'] },
-                                { $concat: ['$downlineInfo.firstName', ' ', '$downlineInfo.lastName'] },
-                                'Anonymous User'
-                            ]
-                        } 
-                    }
-                }
-            },
-            {
-                $group: {
-                    _id: '$_id.downline',
-                    referralName: { $first: '$downlineName' },
-                    round1Earnings: {
-                        $sum: {
-                            $cond: [{ $eq: ['$_id.roundNumber', 1] }, '$roundEarnings', 0]
-                        }
-                    },
-                    round2Earnings: {
-                        $sum: {
-                            $cond: [{ $eq: ['$_id.roundNumber', 2] }, '$roundEarnings', 0]
-                        }
-                    },
-                    round3Earnings: {
-                        $sum: {
-                            $cond: [{ $eq: ['$_id.roundNumber', 3] }, '$roundEarnings', 0]
-                        }
-                    },
-                    totalEarned: { $sum: '$roundEarnings' }
-                }
-            }
-        ]);
-
-        // Update user's referral stats in the database
-        await User.findByIdAndUpdate(userId, {
-            $set: {
-                'referralStats.totalReferrals': totalReferrals,
-                'referralStats.totalEarnings': totalEarnings,
-                'referralStats.availableBalance': totalEarnings - (user.referralStats?.withdrawn || 0),
-                'referralStats.pendingEarnings': pendingEarnings,
-                'downlineStats.totalDownlines': totalReferrals,
-                'downlineStats.activeDownlines': activeReferrals,
-                'downlineStats.totalCommissionEarned': totalEarnings
-            }
-        });
-
-        // Return the complete referral data in the EXACT format expected by frontend
-        const responseData = {
-            status: 'success',
-            data: {
-                // Enhanced referral data with links
-                code: user.referralCode || 'XXXXXX',
-                referralLink: referralLink,
-                referralLinkWithName: referralLinkWithName,
-                shareableLinks: {
-                    direct: referralLinkWithName,
-                    withMessage: `Join me on BitHash Capital! Use my referral link: ${referralLinkWithName}`,
-                    social: {
-                        facebook: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(referralLinkWithName)}`,
-                        twitter: `https://twitter.com/intent/tweet?text=${encodeURIComponent(`Join me on BitHash Capital! Use my referral link: ${referralLinkWithName}`)}`,
-                        whatsapp: `https://wa.me/?text=${encodeURIComponent(`Join me on BitHash Capital! Use my referral link: ${referralLinkWithName}`)}`,
-                        telegram: `https://t.me/share/url?url=${encodeURIComponent(referralLinkWithName)}&text=${encodeURIComponent('Join me on BitHash Capital!')}`
-                    }
-                },
-                totalReferrals: totalReferrals,
-                totalEarnings: totalEarnings,
-                pendingEarnings: pendingEarnings,
-                activeReferrals: activeReferrals,
-                
-                // Detailed data for the tabs
-                referrals: referrals, // For "My Referrals" tab
-                earnings: earningsBreakdown, // For "Earnings Breakdown" tab
-                
-                // Stats object (if needed elsewhere)
-                stats: {
-                    directReferrals: totalReferrals,
-                    totalCommission: totalEarnings,
-                    availableBalance: totalEarnings - (user.referralStats?.withdrawn || 0),
-                    withdrawn: user.referralStats?.withdrawn || 0,
-                    pending: pendingEarnings
-                }
-            }
-        };
-
-        res.status(200).json(responseData);
-
-        // Log the activity
-        await logActivity('view_referrals', 'referral', userId, userId, 'User', req);
-
-    } catch (error) {
-        console.error('Error loading referral data:', error);
-        res.status(500).json({
-            status: 'error',
-            message: 'Failed to load referral data'
-        });
-    }
-});
-
-
-
-
 
 
 
