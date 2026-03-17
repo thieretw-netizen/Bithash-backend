@@ -47,11 +47,31 @@ app.use(helmet({
 }));
 
 
+
 app.use(cors({
-  origin: ['https://www.bithashcapital.live', 'https://website-backendd-tzep.onrender.com' , 'https://bithash-rental.vercel.app/'],
+  origin: [
+    'https://www.bithashcapital.live', 
+    'https://website-backendd-tzep.onrender.com', 
+    'https://bithash-rental.vercel.app/',
+    'https://bithash-backend.onrender.com'
+  ],
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token']
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: [
+    'Content-Type', 
+    'Authorization', 
+    'X-CSRF-Token',
+    'X-Rate-Limit',           // ← ADD THIS (fixes your error)
+    'X-Requested-With',
+    'Accept',
+    'Origin',
+    'X-2FA-Verified'
+  ],
+  exposedHeaders: [
+    'X-Rate-Limit-Limit',
+    'X-Rate-Limit-Remaining',
+    'X-Rate-Limit-Reset'
+  ]
 }));
 
 
