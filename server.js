@@ -10692,14 +10692,6 @@ const logUserActivity = async (req, action, status = 'success', metadata = {}, r
   }
 };
 
-// Helper functions for device detection
-const getDeviceType = (req) => {
-  const userAgent = req.headers['user-agent'];
-  if (/mobile/i.test(userAgent)) return 'mobile';
-  if (/tablet/i.test(userAgent)) return 'tablet';
-  if (/iPad|Android|Touch/i.test(userAgent)) return 'tablet';
-  return 'desktop';
-};
 
 const getOSFromUserAgent = (userAgent) => {
   if (!userAgent) return 'Unknown';
