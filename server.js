@@ -8002,18 +8002,6 @@ app.post('/api/admin/users', adminProtect, [
   }
 });
 
-// Helper function to get device type from user agent
-function getDeviceType(req) {
-  const ua = req.headers['user-agent'] || '';
-  if (ua.includes('Mobile')) return 'mobile';
-  if (ua.includes('Tablet')) return 'tablet';
-  return 'desktop';
-}
-
-// Note: The rest of your server code (not shown in snippet) continues here...
-// This includes server.listen() and other route handlers not included in the snippet
-
-
 
 
 
