@@ -3364,6 +3364,7 @@ const sendProfessionalEmail = async (options) => {
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>Welcome to BitHash Capital</title>
               <link href="https://fonts.googleapis.com/css2?family=Rowdies:wght@300;400;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
               <style>
                   :root {
                       --primary: #00D8FF;
@@ -3435,6 +3436,10 @@ const sendProfessionalEmail = async (options) => {
                       color: var(--primary);
                   }
                   
+                  .logo-text span {
+                      color: var(--gold);
+                  }
+                  
                   .header-title {
                       font-size: 1.8rem;
                       font-weight: 600;
@@ -3467,7 +3472,7 @@ const sendProfessionalEmail = async (options) => {
                   .features-grid {
                       display: grid;
                       grid-template-columns: 1fr 1fr;
-                      gap: 15px;
+                      gap: 20px;
                       margin: 30px 0;
                   }
                   
@@ -3475,14 +3480,19 @@ const sendProfessionalEmail = async (options) => {
                       background: transparent;
                       padding: 0;
                       border: none;
-                      border-bottom: 1px solid transparent;
+                  }
+                  
+                  .feature-icon {
+                      color: var(--primary);
+                      font-size: 1.2rem;
+                      margin-bottom: 8px;
                   }
                   
                   .feature-title {
                       font-weight: 600;
                       color: var(--dark);
                       margin-bottom: 5px;
-                      font-size: 0.95rem;
+                      font-size: 1rem;
                   }
                   
                   .feature-desc {
@@ -3491,26 +3501,36 @@ const sendProfessionalEmail = async (options) => {
                       line-height: 1.5;
                   }
                   
-                  .benefits-list {
+                  .services-list {
                       margin: 25px 0;
                   }
                   
-                  .benefit-item {
+                  .service-item {
                       display: flex;
                       align-items: center;
                       margin-bottom: 12px;
                       color: var(--gray);
                   }
                   
-                  .benefit-icon {
+                  .service-icon {
                       color: var(--primary);
                       margin-right: 12px;
                       font-size: 0.9rem;
+                      width: 20px;
+                      text-align: center;
+                  }
+                  
+                  .service-text {
+                      font-size: 0.95rem;
+                  }
+                  
+                  .service-text strong {
+                      color: var(--dark);
                   }
                   
                   .cta-button {
-                      background: transparent;
-                      color: var(--primary);
+                      background: var(--primary);
+                      color: var(--darker);
                       padding: 14px 35px;
                       text-decoration: none;
                       border-radius: 8px;
@@ -3518,13 +3538,13 @@ const sendProfessionalEmail = async (options) => {
                       margin: 25px 0;
                       font-weight: 600;
                       font-size: 1rem;
-                      border: 1px solid var(--primary);
+                      border: none;
                       transition: all 0.3s ease;
                   }
                   
                   .cta-button:hover {
-                      background: var(--primary);
-                      color: var(--darker);
+                      background: var(--primary-light);
+                      transform: translateY(-2px);
                   }
                   
                   .security-note {
@@ -3552,6 +3572,27 @@ const sendProfessionalEmail = async (options) => {
                       padding: 30px 40px;
                       text-align: center;
                       border-top: 1px solid var(--gray-light);
+                  }
+                  
+                  .footer-logo {
+                      display: flex;
+                      align-items: center;
+                      justify-content: center;
+                      gap: 8px;
+                      margin-bottom: 15px;
+                  }
+                  
+                  .footer-logo img {
+                      width: 24px;
+                      height: 24px;
+                      border-radius: 50%;
+                  }
+                  
+                  .footer-logo-text {
+                      font-family: 'Rowdies', sans-serif;
+                      font-weight: 700;
+                      font-size: 1rem;
+                      color: var(--primary);
                   }
                   
                   .footer-text {
@@ -3583,75 +3624,85 @@ const sendProfessionalEmail = async (options) => {
                   .security-badge i {
                       color: var(--security-green);
                   }
+                  
+                  .website-url {
+                      color: var(--primary);
+                      font-weight: 500;
+                      text-decoration: none;
+                  }
               </style>
           </head>
           <body>
               <div class="container">
                   <div class="header">
                       <div class="logo-container">
-                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash</div>
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
+                          <div class="logo-text"><span>₿</span>itHash</div>
                       </div>
                       <h1 class="header-title">Welcome to BitHash Capital</h1>
                   </div>
                   
                   <div class="content">
                       <div class="greeting">
-                          Hello <span>${data.firstName}</span>,
+                          Hello <span>${data.firstName || 'there'}</span>,
                       </div>
                       
                       <div class="message">
-                          Welcome to BitHash Capital! We're excited to have you join our community of professional Bitcoin miners and investors. Your institutional-grade mining journey begins now.
+                          We're excited to welcome you to BitHash Capital, your gateway to institutional-grade Bitcoin mining and investment opportunities. Your journey into professional cryptocurrency mining begins now.
                       </div>
                       
                       <div class="features-grid">
                           <div class="feature-card">
+                              <div class="feature-icon"><i class="fas fa-cloud-upload-alt"></i></div>
                               <div class="feature-title">Cloud Mining</div>
-                              <div class="feature-desc">Start mining Bitcoin instantly with enterprise-grade infrastructure</div>
+                              <div class="feature-desc">Start mining Bitcoin instantly with our enterprise-grade infrastructure</div>
                           </div>
                           <div class="feature-card">
-                              <div class="feature-title">Smart Investment</div>
+                              <div class="feature-icon"><i class="fas fa-chart-line"></i></div>
+                              <div class="feature-title">Smart Investments</div>
                               <div class="feature-desc">Choose optimized plans designed for maximum returns</div>
                           </div>
                           <div class="feature-card">
+                              <div class="feature-icon"><i class="fas fa-shield-alt"></i></div>
                               <div class="feature-title">Secure Platform</div>
-                              <div class="feature-desc">Enterprise-grade security protecting your assets</div>
+                              <div class="feature-desc">Enterprise-grade security protecting your assets 24/7</div>
                           </div>
                           <div class="feature-card">
+                              <div class="feature-icon"><i class="fas fa-headset"></i></div>
                               <div class="feature-title">24/7 Support</div>
                               <div class="feature-desc">Dedicated support team available around the clock</div>
                           </div>
                       </div>
                       
-                      <div class="benefits-list">
-                          <div class="benefit-item">
-                              <span class="benefit-icon">•</span>
-                              <span>Access enterprise-grade Bitcoin mining infrastructure</span>
+                      <div class="services-list">
+                          <div class="service-item">
+                              <span class="service-icon"><i class="fas fa-bitcoin"></i></span>
+                              <span class="service-text"><strong>Buy, Sell or Hold Crypto</strong> - Trade digital assets with ease</span>
                           </div>
-                          <div class="benefit-item">
-                              <span class="benefit-icon">•</span>
-                              <span>Invest in optimized mining plans with competitive returns</span>
+                          <div class="service-item">
+                              <span class="service-icon"><i class="fas fa-hand-holding-usd"></i></span>
+                              <span class="service-text"><strong>Bitcoin Backed Loans</strong> - Borrow against your Bitcoin holdings</span>
                           </div>
-                          <div class="benefit-item">
-                              <span class="benefit-icon">•</span>
-                              <span>Monitor your mining operations in real-time</span>
+                          <div class="service-item">
+                              <span class="service-icon"><i class="fas fa-microchip"></i></span>
+                              <span class="service-text"><strong>Remote Bitcoin Mining</strong> - Mine Bitcoin from anywhere in the world</span>
                           </div>
-                          <div class="benefit-item">
-                              <span class="benefit-icon">•</span>
-                              <span>Earn referral bonuses by expanding our mining community</span>
+                          <div class="service-item">
+                              <span class="service-icon"><i class="fas fa-chart-pie"></i></span>
+                              <span class="service-text"><strong>Institutional Investment Plans</strong> - Professional mining strategies</span>
                           </div>
                       </div>
                       
                       <div style="text-align: center;">
-                          <a href="https://www.bithashcapital.live/dashboard.html" class="cta-button">Start Mining Now</a>
+                          <a href="https://www.bithashcapital.live/dashboard" class="cta-button">Start Mining Now</a>
                       </div>
                       
                       <div class="security-note">
-                          <strong>Security Notice:</strong> Your account security is our priority. We recommend enabling two-factor authentication and using strong, unique passwords.
+                          <strong>Important Security Information:</strong> Your account security is our priority. We recommend enabling two-factor authentication and using strong, unique passwords. Never share your credentials with anyone.
                       </div>
                       
                       <div class="message">
-                          If you have any questions about our mining operations or investment plans, our support team is available 24/7.
+                          If you have any questions about our mining operations or investment plans, our support team is available 24/7 to assist you.
                       </div>
                       
                       <div class="message" style="margin-top: 30px;">
@@ -3661,12 +3712,17 @@ const sendProfessionalEmail = async (options) => {
                   </div>
                   
                   <div class="footer">
+                      <div class="footer-logo">
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo">
+                          <span class="footer-logo-text"><span>₿</span>itHash</span>
+                      </div>
                       <div class="footer-text">
                           © 2024 BitHash Capital. All rights reserved.<br>
                           Professional Bitcoin Mining and Investment Platform
                       </div>
                       <div class="footer-text">
                           This email was sent to ${email}. Please do not reply to this email.<br>
+                          Visit our website: <a href="https://www.bithashcapital.live" class="website-url">www.bithashcapital.live</a><br>
                           Need assistance? <a href="mailto:support@bithashcapital.live">Contact Support</a>
                       </div>
                       <div class="security-badge">
@@ -3691,6 +3747,7 @@ const sendProfessionalEmail = async (options) => {
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>Verification Code - BitHash Capital</title>
               <link href="https://fonts.googleapis.com/css2?family=Rowdies:wght@300;400;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
               <style>
                   :root {
                       --primary: #00D8FF;
@@ -3709,8 +3766,6 @@ const sendProfessionalEmail = async (options) => {
                       --warning: #FFB800;
                       --error: #FF0000;
                       --gold: #D4AF37;
-                      --gold-light: #FFD700;
-                      --security-blue: #1A73E8;
                       --security-green: #34A853;
                   }
                   
@@ -3760,6 +3815,10 @@ const sendProfessionalEmail = async (options) => {
                       font-weight: 700;
                       font-size: 1.5rem;
                       color: var(--primary);
+                  }
+                  
+                  .logo-text span {
+                      color: var(--gold);
                   }
                   
                   .content {
@@ -3801,31 +3860,6 @@ const sendProfessionalEmail = async (options) => {
                       display: inline-block;
                   }
                   
-                  .copy-btn {
-                      background: transparent;
-                      color: var(--primary);
-                      border: 1px solid var(--primary);
-                      border-radius: 8px;
-                      padding: 10px 20px;
-                      font-size: 0.9rem;
-                      font-weight: 600;
-                      cursor: pointer;
-                      display: inline-flex;
-                      align-items: center;
-                      gap: 8px;
-                      margin: 20px auto;
-                      transition: all 0.3s ease;
-                  }
-                  
-                  .copy-btn:hover {
-                      background: var(--primary);
-                      color: var(--darker);
-                  }
-                  
-                  .copy-btn i {
-                      font-size: 1rem;
-                  }
-                  
                   .timer-text {
                       color: var(--gray);
                       font-size: 0.9rem;
@@ -3864,6 +3898,27 @@ const sendProfessionalEmail = async (options) => {
                       border-top: 1px solid var(--gray-light);
                   }
                   
+                  .footer-logo {
+                      display: flex;
+                      align-items: center;
+                      justify-content: center;
+                      gap: 8px;
+                      margin-bottom: 15px;
+                  }
+                  
+                  .footer-logo img {
+                      width: 24px;
+                      height: 24px;
+                      border-radius: 50%;
+                  }
+                  
+                  .footer-logo-text {
+                      font-family: 'Rowdies', sans-serif;
+                      font-weight: 700;
+                      font-size: 1rem;
+                      color: var(--primary);
+                  }
+                  
                   .footer-text {
                       color: var(--gray);
                       font-size: 0.8rem;
@@ -3885,14 +3940,19 @@ const sendProfessionalEmail = async (options) => {
                       color: var(--security-green);
                       font-size: 0.8rem;
                   }
+                  
+                  .website-url {
+                      color: var(--primary);
+                      font-weight: 500;
+                  }
               </style>
           </head>
           <body>
               <div class="container">
                   <div class="header">
                       <div class="logo-container">
-                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash</div>
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
+                          <div class="logo-text"><span>₿</span>itHash</div>
                       </div>
                   </div>
                   
@@ -3902,27 +3962,23 @@ const sendProfessionalEmail = async (options) => {
                       </div>
                       
                       <div class="message">
-                          Please use the following verification code to complete your ${data.action || 'account verification'}:
+                          Please use the following verification code to complete your <strong>${data.action || 'account verification'}</strong>:
                       </div>
                       
                       <div class="otp-container">
-                          <div class="otp-code" id="otp-code">${data.otp}</div>
-                          
-                          <button class="copy-btn" onclick="copyOTP()" id="copy-btn">
-                              <i class="fas fa-copy"></i> Copy Code
-                          </button>
+                          <div class="otp-code">${data.otp}</div>
                           
                           <div class="timer-text">
-                              Code expires in: <span>5 minutes</span>
+                              <i class="fas fa-clock"></i> Code expires in: <span>5 minutes</span>
                           </div>
                       </div>
                       
                       <div class="security-note">
-                          <strong>Security Notice:</strong> This verification code is valid for one-time use only. Do not share this code with anyone, including BitHash Capital support staff.
+                          <strong>IMPORTANT SECURITY NOTICE:</strong> This verification code is valid for one-time use only. <strong>Never share this code with anyone</strong>, including BitHash Capital support staff. We will never ask for your verification code.
                       </div>
                       
                       <div class="message">
-                          If you didn't request this code, please secure your account immediately and contact our support team.
+                          If you didn't request this code, please secure your account immediately by changing your password and contact our support team.
                       </div>
                       
                       <div class="message" style="margin-top: 30px;">
@@ -3932,9 +3988,16 @@ const sendProfessionalEmail = async (options) => {
                   </div>
                   
                   <div class="footer">
+                      <div class="footer-logo">
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo">
+                          <span class="footer-logo-text"><span>₿</span>itHash</span>
+                      </div>
                       <div class="footer-text">
                           © 2024 BitHash Capital. All rights reserved.<br>
                           This is an automated security message. Please do not reply.
+                      </div>
+                      <div class="footer-text">
+                          <a href="https://www.bithashcapital.live" class="website-url">www.bithashcapital.live</a>
                       </div>
                       <div class="security-badge">
                           <i class="fas fa-shield-alt"></i>
@@ -3942,20 +4005,6 @@ const sendProfessionalEmail = async (options) => {
                       </div>
                   </div>
               </div>
-              
-              <script>
-                  function copyOTP() {
-                      const otp = document.getElementById('otp-code').innerText;
-                      navigator.clipboard.writeText(otp).then(() => {
-                          const btn = document.getElementById('copy-btn');
-                          const originalText = btn.innerHTML;
-                          btn.innerHTML = '<i class="fas fa-check"></i> Copied!';
-                          setTimeout(() => {
-                              btn.innerHTML = originalText;
-                          }, 2000);
-                      });
-                  }
-              </script>
           </body>
           </html>
         `
@@ -3972,6 +4021,7 @@ const sendProfessionalEmail = async (options) => {
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>Login Notification - BitHash Capital</title>
               <link href="https://fonts.googleapis.com/css2?family=Rowdies:wght@300;400;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
               <style>
                   :root {
                       --primary: #00D8FF;
@@ -3989,7 +4039,7 @@ const sendProfessionalEmail = async (options) => {
                       --success: #00FF00;
                       --warning: #FFB800;
                       --error: #FF0000;
-                      --security-blue: #1A73E8;
+                      --gold: #D4AF37;
                       --security-green: #34A853;
                   }
                   
@@ -4039,6 +4089,10 @@ const sendProfessionalEmail = async (options) => {
                       font-weight: 700;
                       font-size: 1.5rem;
                       color: var(--primary);
+                  }
+                  
+                  .logo-text span {
+                      color: var(--gold);
                   }
                   
                   .content {
@@ -4086,7 +4140,7 @@ const sendProfessionalEmail = async (options) => {
                       color: var(--gray);
                   }
                   
-                  .info-value span {
+                  .info-value strong {
                       color: var(--primary);
                   }
                   
@@ -4103,27 +4157,21 @@ const sendProfessionalEmail = async (options) => {
                   }
                   
                   .cta-button {
-                      background: transparent;
-                      color: var(--primary);
+                      background: var(--primary);
+                      color: var(--darker);
                       padding: 12px 30px;
                       text-decoration: none;
                       border-radius: 8px;
                       display: inline-block;
                       margin: 15px 0;
                       font-weight: 600;
-                      border: 1px solid var(--primary);
+                      border: none;
                       transition: all 0.3s ease;
                   }
                   
                   .cta-button:hover {
-                      background: var(--primary);
-                      color: var(--darker);
-                  }
-                  
-                  .divider {
-                      height: 1px;
-                      background-color: var(--gray-light);
-                      margin: 30px 0;
+                      background: var(--primary-light);
+                      transform: translateY(-2px);
                   }
                   
                   .footer {
@@ -4131,6 +4179,27 @@ const sendProfessionalEmail = async (options) => {
                       padding: 30px 40px;
                       text-align: center;
                       border-top: 1px solid var(--gray-light);
+                  }
+                  
+                  .footer-logo {
+                      display: flex;
+                      align-items: center;
+                      justify-content: center;
+                      gap: 8px;
+                      margin-bottom: 15px;
+                  }
+                  
+                  .footer-logo img {
+                      width: 24px;
+                      height: 24px;
+                      border-radius: 50%;
+                  }
+                  
+                  .footer-logo-text {
+                      font-family: 'Rowdies', sans-serif;
+                      font-weight: 700;
+                      font-size: 1rem;
+                      color: var(--primary);
                   }
                   
                   .footer-text {
@@ -4149,14 +4218,18 @@ const sendProfessionalEmail = async (options) => {
                       color: var(--security-green);
                       font-size: 0.8rem;
                   }
+                  
+                  .website-url {
+                      color: var(--primary);
+                  }
               </style>
           </head>
           <body>
               <div class="container">
                   <div class="header">
                       <div class="logo-container">
-                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash</div>
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
+                          <div class="logo-text"><span>₿</span>itHash</div>
                       </div>
                   </div>
                   
@@ -4172,19 +4245,19 @@ const sendProfessionalEmail = async (options) => {
                       <div class="info-section">
                           <div class="info-item">
                               <span class="info-label">Time:</span>
-                              <span class="info-value">${new Date().toLocaleString()}</span>
+                              <span class="info-value"><strong>${new Date().toLocaleString()}</strong></span>
                           </div>
                           <div class="info-item">
                               <span class="info-label">Device:</span>
-                              <span class="info-value">${data.device || 'Unknown device'}</span>
+                              <span class="info-value"><strong>${data.device || 'Unknown device'}</strong></span>
                           </div>
                           <div class="info-item">
                               <span class="info-label">Location:</span>
-                              <span class="info-value">${data.location || 'Unknown location'}</span>
+                              <span class="info-value"><strong>${data.location || 'Unknown location'}</strong></span>
                           </div>
                           <div class="info-item">
                               <span class="info-label">IP Address:</span>
-                              <span class="info-value">${data.ip || 'Unknown'}</span>
+                              <span class="info-value"><strong>${data.ip || 'Unknown'}</strong></span>
                           </div>
                       </div>
                       
@@ -4194,12 +4267,12 @@ const sendProfessionalEmail = async (options) => {
                       
                       ${data.suspicious ? `
                       <div class="security-alert">
-                          <strong>⚠️ Security Alert:</strong> This login attempt appears suspicious. If this wasn't you, please secure your account immediately by changing your password and enabling two-factor authentication.
+                          <strong><i class="fas fa-exclamation-triangle"></i> SECURITY ALERT:</strong> This login attempt appears suspicious. If this wasn't you, please secure your account immediately by changing your password and enabling two-factor authentication.
                       </div>
                       ` : ''}
                       
                       <div style="text-align: center;">
-                          <a href="https://www.bithashcapital.live/dashboard.html" class="cta-button">View Dashboard</a>
+                          <a href="https://www.bithashcapital.live/dashboard" class="cta-button">View Dashboard</a>
                       </div>
                       
                       <div class="message" style="margin-top: 30px;">
@@ -4209,9 +4282,16 @@ const sendProfessionalEmail = async (options) => {
                   </div>
                   
                   <div class="footer">
+                      <div class="footer-logo">
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo">
+                          <span class="footer-logo-text"><span>₿</span>itHash</span>
+                      </div>
                       <div class="footer-text">
                           © 2024 BitHash Capital. All rights reserved.<br>
                           This is an automated security notification.
+                      </div>
+                      <div class="footer-text">
+                          <a href="https://www.bithashcapital.live" class="website-url">www.bithashcapital.live</a>
                       </div>
                       <div class="security-badge">
                           <i class="fas fa-shield-alt"></i>
@@ -4235,6 +4315,7 @@ const sendProfessionalEmail = async (options) => {
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>Password Reset - BitHash Capital</title>
               <link href="https://fonts.googleapis.com/css2?family=Rowdies:wght@300;400;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
               <style>
                   :root {
                       --primary: #00D8FF;
@@ -4250,7 +4331,6 @@ const sendProfessionalEmail = async (options) => {
                       --gray-light: #1F2937;
                       --gray-lighter: #374151;
                       --warning: #FFB800;
-                      --security-blue: #1A73E8;
                       --security-green: #34A853;
                   }
                   
@@ -4302,6 +4382,10 @@ const sendProfessionalEmail = async (options) => {
                       color: var(--primary);
                   }
                   
+                  .logo-text span {
+                      color: var(--gold);
+                  }
+                  
                   .content {
                       padding: 0 40px 30px;
                       background-color: var(--darker);
@@ -4328,55 +4412,33 @@ const sendProfessionalEmail = async (options) => {
                       text-align: center;
                   }
                   
-                  .reset-link {
-                      font-family: 'Inter', monospace;
-                      font-size: 1rem;
-                      color: var(--primary);
+                  .reset-link-box {
                       background: transparent;
                       padding: 15px;
                       border: 1px solid var(--gray-light);
                       border-radius: 8px;
                       word-break: break-all;
                       margin-bottom: 20px;
+                      color: var(--primary);
+                      font-size: 0.9rem;
                   }
                   
                   .reset-button {
-                      background: transparent;
-                      color: var(--primary);
+                      background: var(--primary);
+                      color: var(--darker);
                       padding: 14px 35px;
                       text-decoration: none;
                       border-radius: 8px;
                       display: inline-block;
                       margin: 20px 0;
                       font-weight: 600;
-                      border: 1px solid var(--primary);
+                      border: none;
                       transition: all 0.3s ease;
                   }
                   
                   .reset-button:hover {
-                      background: var(--primary);
-                      color: var(--darker);
-                  }
-                  
-                  .copy-btn {
-                      background: transparent;
-                      color: var(--primary);
-                      border: 1px solid var(--primary);
-                      border-radius: 8px;
-                      padding: 10px 20px;
-                      font-size: 0.9rem;
-                      font-weight: 600;
-                      cursor: pointer;
-                      display: inline-flex;
-                      align-items: center;
-                      gap: 8px;
-                      margin: 10px auto 20px;
-                      transition: all 0.3s ease;
-                  }
-                  
-                  .copy-btn:hover {
-                      background: var(--primary);
-                      color: var(--darker);
+                      background: var(--primary-light);
+                      transform: translateY(-2px);
                   }
                   
                   .timer-text {
@@ -4411,6 +4473,27 @@ const sendProfessionalEmail = async (options) => {
                       border-top: 1px solid var(--gray-light);
                   }
                   
+                  .footer-logo {
+                      display: flex;
+                      align-items: center;
+                      justify-content: center;
+                      gap: 8px;
+                      margin-bottom: 15px;
+                  }
+                  
+                  .footer-logo img {
+                      width: 24px;
+                      height: 24px;
+                      border-radius: 50%;
+                  }
+                  
+                  .footer-logo-text {
+                      font-family: 'Rowdies', sans-serif;
+                      font-weight: 700;
+                      font-size: 1rem;
+                      color: var(--primary);
+                  }
+                  
                   .footer-text {
                       color: var(--gray);
                       font-size: 0.8rem;
@@ -4427,14 +4510,18 @@ const sendProfessionalEmail = async (options) => {
                       color: var(--security-green);
                       font-size: 0.8rem;
                   }
+                  
+                  .website-url {
+                      color: var(--primary);
+                  }
               </style>
           </head>
           <body>
               <div class="container">
                   <div class="header">
                       <div class="logo-container">
-                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash</div>
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
+                          <div class="logo-text"><span>₿</span>itHash</div>
                       </div>
                   </div>
                   
@@ -4453,20 +4540,16 @@ const sendProfessionalEmail = async (options) => {
                           </div>
                           
                           <div class="timer-text">
-                              This password reset link will expire in <span>60 minutes</span>
+                              <i class="fas fa-clock"></i> This password reset link will expire in <span>60 minutes</span>
                           </div>
                           
-                          <button class="copy-btn" onclick="copyResetLink()" id="copy-btn">
-                              <i class="fas fa-copy"></i> Copy Reset Link
-                          </button>
-                          
-                          <div class="reset-link" id="reset-link">
+                          <div class="reset-link-box">
                               ${data.resetUrl}
                           </div>
                       </div>
                       
                       <div class="security-note">
-                          <strong>Security Notice:</strong> If you didn't request this password reset, please ignore this email. Your account remains secure. For additional protection, we recommend enabling two-factor authentication.
+                          <strong>IMPORTANT:</strong> If you didn't request this password reset, please ignore this email. Your account remains secure. For additional protection, we recommend enabling two-factor authentication.
                       </div>
                       
                       <div class="message" style="margin-top: 30px;">
@@ -4476,9 +4559,16 @@ const sendProfessionalEmail = async (options) => {
                   </div>
                   
                   <div class="footer">
+                      <div class="footer-logo">
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo">
+                          <span class="footer-logo-text"><span>₿</span>itHash</span>
+                      </div>
                       <div class="footer-text">
                           © 2024 BitHash Capital. All rights reserved.<br>
                           This is an automated security message.
+                      </div>
+                      <div class="footer-text">
+                          <a href="https://www.bithashcapital.live" class="website-url">www.bithashcapital.live</a>
                       </div>
                       <div class="security-badge">
                           <i class="fas fa-shield-alt"></i>
@@ -4486,20 +4576,6 @@ const sendProfessionalEmail = async (options) => {
                       </div>
                   </div>
               </div>
-              
-              <script>
-                  function copyResetLink() {
-                      const link = document.getElementById('reset-link').innerText;
-                      navigator.clipboard.writeText(link).then(() => {
-                          const btn = document.getElementById('copy-btn');
-                          const originalText = btn.innerHTML;
-                          btn.innerHTML = '<i class="fas fa-check"></i> Copied!';
-                          setTimeout(() => {
-                              btn.innerHTML = originalText;
-                          }, 2000);
-                      });
-                  }
-              </script>
           </body>
           </html>
         `
@@ -4516,6 +4592,7 @@ const sendProfessionalEmail = async (options) => {
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>Investment Confirmation - BitHash Capital</title>
               <link href="https://fonts.googleapis.com/css2?family=Rowdies:wght@300;400;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
               <style>
                   :root {
                       --primary: #00D8FF;
@@ -4580,6 +4657,10 @@ const sendProfessionalEmail = async (options) => {
                       font-weight: 700;
                       font-size: 1.5rem;
                       color: var(--primary);
+                  }
+                  
+                  .logo-text span {
+                      color: var(--gold);
                   }
                   
                   .content {
@@ -4637,21 +4718,21 @@ const sendProfessionalEmail = async (options) => {
                   }
                   
                   .cta-button {
-                      background: transparent;
-                      color: var(--primary);
+                      background: var(--primary);
+                      color: var(--darker);
                       padding: 12px 30px;
                       text-decoration: none;
                       border-radius: 8px;
                       display: inline-block;
                       margin: 20px 0;
                       font-weight: 600;
-                      border: 1px solid var(--primary);
+                      border: none;
                       transition: all 0.3s ease;
                   }
                   
                   .cta-button:hover {
-                      background: var(--primary);
-                      color: var(--darker);
+                      background: var(--primary-light);
+                      transform: translateY(-2px);
                   }
                   
                   .footer {
@@ -4659,6 +4740,27 @@ const sendProfessionalEmail = async (options) => {
                       padding: 30px 40px;
                       text-align: center;
                       border-top: 1px solid var(--gray-light);
+                  }
+                  
+                  .footer-logo {
+                      display: flex;
+                      align-items: center;
+                      justify-content: center;
+                      gap: 8px;
+                      margin-bottom: 15px;
+                  }
+                  
+                  .footer-logo img {
+                      width: 24px;
+                      height: 24px;
+                      border-radius: 50%;
+                  }
+                  
+                  .footer-logo-text {
+                      font-family: 'Rowdies', sans-serif;
+                      font-weight: 700;
+                      font-size: 1rem;
+                      color: var(--primary);
                   }
                   
                   .footer-text {
@@ -4677,14 +4779,18 @@ const sendProfessionalEmail = async (options) => {
                       color: var(--success);
                       font-size: 0.8rem;
                   }
+                  
+                  .website-url {
+                      color: var(--primary);
+                  }
               </style>
           </head>
           <body>
               <div class="container">
                   <div class="header">
                       <div class="logo-container">
-                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash</div>
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
+                          <div class="logo-text"><span>₿</span>itHash</div>
                       </div>
                   </div>
                   
@@ -4700,36 +4806,36 @@ const sendProfessionalEmail = async (options) => {
                       <div class="investment-details">
                           <div class="detail-item">
                               <span class="detail-label">Investment Plan:</span>
-                              <span class="detail-value">${data.planName}</span>
+                              <span class="detail-value"><strong>${data.planName}</strong></span>
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">Amount:</span>
-                              <span class="detail-value gold">$${data.amount}</span>
+                              <span class="detail-value gold"><strong>$${data.amount}</strong></span>
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">Expected Return:</span>
-                              <span class="detail-value success">$${data.expectedReturn}</span>
+                              <span class="detail-value success"><strong>$${data.expectedReturn}</strong></span>
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">Duration:</span>
-                              <span class="detail-value">${data.duration} hours</span>
+                              <span class="detail-value"><strong>${data.duration} hours</strong></span>
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">Start Date:</span>
-                              <span class="detail-value">${new Date(data.startDate).toLocaleDateString()}</span>
+                              <span class="detail-value"><strong>${new Date(data.startDate).toLocaleDateString()}</strong></span>
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">End Date:</span>
-                              <span class="detail-value">${new Date(data.endDate).toLocaleDateString()}</span>
+                              <span class="detail-value"><strong>${new Date(data.endDate).toLocaleDateString()}</strong></span>
                           </div>
                       </div>
                       
                       <div class="message">
-                          You can monitor your investment performance in real-time through your dashboard.
+                          You can monitor your investment performance in real-time through your dashboard. Daily profits will be credited automatically to your account.
                       </div>
                       
                       <div style="text-align: center;">
-                          <a href="https://www.bithashcapital.live/dashboard.html" class="cta-button">View Dashboard</a>
+                          <a href="https://www.bithashcapital.live/dashboard" class="cta-button">View Dashboard</a>
                       </div>
                       
                       <div class="message" style="margin-top: 30px;">
@@ -4739,9 +4845,16 @@ const sendProfessionalEmail = async (options) => {
                   </div>
                   
                   <div class="footer">
+                      <div class="footer-logo">
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo">
+                          <span class="footer-logo-text"><span>₿</span>itHash</span>
+                      </div>
                       <div class="footer-text">
                           © 2024 BitHash Capital. All rights reserved.<br>
                           Professional Bitcoin Mining and Investment Platform
+                      </div>
+                      <div class="footer-text">
+                          <a href="https://www.bithashcapital.live" class="website-url">www.bithashcapital.live</a>
                       </div>
                       <div class="security-badge">
                           <i class="fas fa-shield-alt"></i>
@@ -4765,6 +4878,7 @@ const sendProfessionalEmail = async (options) => {
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>Withdrawal Request - BitHash Capital</title>
               <link href="https://fonts.googleapis.com/css2?family=Rowdies:wght@300;400;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
               <style>
                   :root {
                       --primary: #00D8FF;
@@ -4829,6 +4943,10 @@ const sendProfessionalEmail = async (options) => {
                       font-weight: 700;
                       font-size: 1.5rem;
                       color: var(--primary);
+                  }
+                  
+                  .logo-text span {
+                      color: var(--gold);
                   }
                   
                   .content {
@@ -4900,6 +5018,27 @@ const sendProfessionalEmail = async (options) => {
                       border-top: 1px solid var(--gray-light);
                   }
                   
+                  .footer-logo {
+                      display: flex;
+                      align-items: center;
+                      justify-content: center;
+                      gap: 8px;
+                      margin-bottom: 15px;
+                  }
+                  
+                  .footer-logo img {
+                      width: 24px;
+                      height: 24px;
+                      border-radius: 50%;
+                  }
+                  
+                  .footer-logo-text {
+                      font-family: 'Rowdies', sans-serif;
+                      font-weight: 700;
+                      font-size: 1rem;
+                      color: var(--primary);
+                  }
+                  
                   .footer-text {
                       color: var(--gray);
                       font-size: 0.8rem;
@@ -4916,14 +5055,18 @@ const sendProfessionalEmail = async (options) => {
                       color: var(--info);
                       font-size: 0.8rem;
                   }
+                  
+                  .website-url {
+                      color: var(--primary);
+                  }
               </style>
           </head>
           <body>
               <div class="container">
                   <div class="header">
                       <div class="logo-container">
-                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash</div>
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
+                          <div class="logo-text"><span>₿</span>itHash</div>
                       </div>
                   </div>
                   
@@ -4939,32 +5082,32 @@ const sendProfessionalEmail = async (options) => {
                       <div class="withdrawal-details">
                           <div class="detail-item">
                               <span class="detail-label">Amount:</span>
-                              <span class="detail-value warning">$${data.amount}</span>
+                              <span class="detail-value warning"><strong>$${data.amount}</strong></span>
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">Method:</span>
-                              <span class="detail-value">${data.method}</span>
+                              <span class="detail-value"><strong>${data.method}</strong></span>
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">Reference:</span>
-                              <span class="detail-value">${data.reference}</span>
+                              <span class="detail-value"><strong>${data.reference}</strong></span>
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">Fee:</span>
-                              <span class="detail-value">$${data.fee}</span>
+                              <span class="detail-value"><strong>$${data.fee}</strong></span>
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">Net Amount:</span>
-                              <span class="detail-value">$${data.netAmount}</span>
+                              <span class="detail-value"><strong>$${data.netAmount}</strong></span>
                           </div>
                       </div>
                       
                       <div class="processing-info">
-                          <strong>Processing Information:</strong> Withdrawals are typically processed within 24 hours. You will receive another notification once your withdrawal has been completed.
+                          <strong>PROCESSING INFORMATION:</strong> Withdrawals are typically processed within 24 hours. You will receive another notification once your withdrawal has been completed.
                       </div>
                       
                       <div class="message">
-                          If you did not initiate this withdrawal, please contact our security team immediately.
+                          <strong>If you did not initiate this withdrawal, please contact our security team immediately.</strong>
                       </div>
                       
                       <div class="message" style="margin-top: 30px;">
@@ -4974,9 +5117,16 @@ const sendProfessionalEmail = async (options) => {
                   </div>
                   
                   <div class="footer">
+                      <div class="footer-logo">
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo">
+                          <span class="footer-logo-text"><span>₿</span>itHash</span>
+                      </div>
                       <div class="footer-text">
                           © 2024 BitHash Capital. All rights reserved.<br>
                           Professional Bitcoin Mining and Investment Platform
+                      </div>
+                      <div class="footer-text">
+                          <a href="https://www.bithashcapital.live" class="website-url">www.bithashcapital.live</a>
                       </div>
                       <div class="security-badge">
                           <i class="fas fa-shield-alt"></i>
@@ -4989,7 +5139,7 @@ const sendProfessionalEmail = async (options) => {
         `
       },
 
-      // KYC SUBMITTED - NEW TEMPLATE
+      // KYC SUBMITTED - REDESIGNED to match login page
       kyc_submitted: {
         subject: 'BitHash Capital - KYC Documents Received',
         html: `
@@ -5000,6 +5150,7 @@ const sendProfessionalEmail = async (options) => {
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>KYC Submitted - BitHash Capital</title>
               <link href="https://fonts.googleapis.com/css2?family=Rowdies:wght@300;400;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
               <style>
                   :root {
                       --primary: #00D8FF;
@@ -5064,6 +5215,10 @@ const sendProfessionalEmail = async (options) => {
                       font-weight: 700;
                       font-size: 1.5rem;
                       color: var(--primary);
+                  }
+                  
+                  .logo-text span {
+                      color: var(--gold);
                   }
                   
                   .content {
@@ -5133,6 +5288,27 @@ const sendProfessionalEmail = async (options) => {
                       border-top: 1px solid var(--gray-light);
                   }
                   
+                  .footer-logo {
+                      display: flex;
+                      align-items: center;
+                      justify-content: center;
+                      gap: 8px;
+                      margin-bottom: 15px;
+                  }
+                  
+                  .footer-logo img {
+                      width: 24px;
+                      height: 24px;
+                      border-radius: 50%;
+                  }
+                  
+                  .footer-logo-text {
+                      font-family: 'Rowdies', sans-serif;
+                      font-weight: 700;
+                      font-size: 1rem;
+                      color: var(--primary);
+                  }
+                  
                   .footer-text {
                       color: var(--gray);
                       font-size: 0.8rem;
@@ -5149,14 +5325,18 @@ const sendProfessionalEmail = async (options) => {
                       color: var(--info);
                       font-size: 0.8rem;
                   }
+                  
+                  .website-url {
+                      color: var(--primary);
+                  }
               </style>
           </head>
           <body>
               <div class="container">
                   <div class="header">
                       <div class="logo-container">
-                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash</div>
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
+                          <div class="logo-text"><span>₿</span>itHash</div>
                       </div>
                   </div>
                   
@@ -5176,11 +5356,11 @@ const sendProfessionalEmail = async (options) => {
                       </div>
                       
                       <div class="message">
-                          Our compliance team will carefully review your submitted documents. This process typically takes 24-48 hours.
+                          Our compliance team will carefully review your submitted documents. This process typically takes <strong>24-48 hours</strong>.
                       </div>
                       
                       <div class="info-box">
-                          <strong>What happens next?</strong><br>
+                          <strong>WHAT HAPPENS NEXT:</strong><br>
                           • You will receive an email notification once your verification is complete<br>
                           • You can check your KYC status anytime in your dashboard<br>
                           • If additional information is needed, we will contact you directly
@@ -5197,9 +5377,16 @@ const sendProfessionalEmail = async (options) => {
                   </div>
                   
                   <div class="footer">
+                      <div class="footer-logo">
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo">
+                          <span class="footer-logo-text"><span>₿</span>itHash</span>
+                      </div>
                       <div class="footer-text">
                           © 2024 BitHash Capital. All rights reserved.<br>
                           Professional Bitcoin Mining and Investment Platform
+                      </div>
+                      <div class="footer-text">
+                          <a href="https://www.bithashcapital.live" class="website-url">www.bithashcapital.live</a>
                       </div>
                       <div class="security-badge">
                           <i class="fas fa-shield-alt"></i>
@@ -5223,6 +5410,7 @@ const sendProfessionalEmail = async (options) => {
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>KYC Approved - BitHash Capital</title>
               <link href="https://fonts.googleapis.com/css2?family=Rowdies:wght@300;400;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
               <style>
                   :root {
                       --primary: #00D8FF;
@@ -5286,6 +5474,10 @@ const sendProfessionalEmail = async (options) => {
                       font-weight: 700;
                       font-size: 1.5rem;
                       color: var(--primary);
+                  }
+                  
+                  .logo-text span {
+                      color: var(--gold);
                   }
                   
                   .content {
@@ -5348,21 +5540,21 @@ const sendProfessionalEmail = async (options) => {
                   }
                   
                   .cta-button {
-                      background: transparent;
-                      color: var(--primary);
+                      background: var(--primary);
+                      color: var(--darker);
                       padding: 12px 30px;
                       text-decoration: none;
                       border-radius: 8px;
                       display: inline-block;
                       margin: 20px 0;
                       font-weight: 600;
-                      border: 1px solid var(--primary);
+                      border: none;
                       transition: all 0.3s ease;
                   }
                   
                   .cta-button:hover {
-                      background: var(--primary);
-                      color: var(--darker);
+                      background: var(--primary-light);
+                      transform: translateY(-2px);
                   }
                   
                   .footer {
@@ -5370,6 +5562,27 @@ const sendProfessionalEmail = async (options) => {
                       padding: 30px 40px;
                       text-align: center;
                       border-top: 1px solid var(--gray-light);
+                  }
+                  
+                  .footer-logo {
+                      display: flex;
+                      align-items: center;
+                      justify-content: center;
+                      gap: 8px;
+                      margin-bottom: 15px;
+                  }
+                  
+                  .footer-logo img {
+                      width: 24px;
+                      height: 24px;
+                      border-radius: 50%;
+                  }
+                  
+                  .footer-logo-text {
+                      font-family: 'Rowdies', sans-serif;
+                      font-weight: 700;
+                      font-size: 1rem;
+                      color: var(--primary);
                   }
                   
                   .footer-text {
@@ -5388,14 +5601,18 @@ const sendProfessionalEmail = async (options) => {
                       color: var(--success);
                       font-size: 0.8rem;
                   }
+                  
+                  .website-url {
+                      color: var(--primary);
+                  }
               </style>
           </head>
           <body>
               <div class="container">
                   <div class="header">
                       <div class="logo-container">
-                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash</div>
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
+                          <div class="logo-text"><span>₿</span>itHash</div>
                       </div>
                   </div>
                   
@@ -5415,30 +5632,30 @@ const sendProfessionalEmail = async (options) => {
                       </div>
                       
                       <div class="message">
-                          With your KYC verification complete, you now have full access to all BitHash Capital features:
+                          With your KYC verification complete, you now have <strong>full access to all BitHash Capital features:</strong>
                       </div>
                       
                       <div class="benefits-list">
                           <div class="benefit-item">
-                              <span class="benefit-icon">•</span>
-                              <span>Higher withdrawal limits</span>
+                              <span class="benefit-icon"><i class="fas fa-check-circle"></i></span>
+                              <span><strong>Higher withdrawal limits</strong></span>
                           </div>
                           <div class="benefit-item">
-                              <span class="benefit-icon">•</span>
-                              <span>Access to premium investment plans</span>
+                              <span class="benefit-icon"><i class="fas fa-check-circle"></i></span>
+                              <span><strong>Access to premium investment plans</strong></span>
                           </div>
                           <div class="benefit-item">
-                              <span class="benefit-icon">•</span>
-                              <span>Enhanced security features</span>
+                              <span class="benefit-icon"><i class="fas fa-check-circle"></i></span>
+                              <span><strong>Enhanced security features</strong></span>
                           </div>
                           <div class="benefit-item">
-                              <span class="benefit-icon">•</span>
-                              <span>Priority customer support</span>
+                              <span class="benefit-icon"><i class="fas fa-check-circle"></i></span>
+                              <span><strong>Priority customer support</strong></span>
                           </div>
                       </div>
                       
                       <div style="text-align: center;">
-                          <a href="https://www.bithashcapital.live/dashboard.html" class="cta-button">Access Your Account</a>
+                          <a href="https://www.bithashcapital.live/dashboard" class="cta-button">Access Your Account</a>
                       </div>
                       
                       <div class="message" style="margin-top: 30px;">
@@ -5452,9 +5669,16 @@ const sendProfessionalEmail = async (options) => {
                   </div>
                   
                   <div class="footer">
+                      <div class="footer-logo">
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo">
+                          <span class="footer-logo-text"><span>₿</span>itHash</span>
+                      </div>
                       <div class="footer-text">
                           © 2024 BitHash Capital. All rights reserved.<br>
                           Professional Bitcoin Mining and Investment Platform
+                      </div>
+                      <div class="footer-text">
+                          <a href="https://www.bithashcapital.live" class="website-url">www.bithashcapital.live</a>
                       </div>
                       <div class="security-badge">
                           <i class="fas fa-shield-alt"></i>
@@ -5478,6 +5702,7 @@ const sendProfessionalEmail = async (options) => {
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>Deposit Received - BitHash Capital</title>
               <link href="https://fonts.googleapis.com/css2?family=Rowdies:wght@300;400;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
               <style>
                   :root {
                       --primary: #00D8FF;
@@ -5542,6 +5767,10 @@ const sendProfessionalEmail = async (options) => {
                       font-weight: 700;
                       font-size: 1.5rem;
                       color: var(--primary);
+                  }
+                  
+                  .logo-text span {
+                      color: var(--gold);
                   }
                   
                   .content {
@@ -5599,21 +5828,21 @@ const sendProfessionalEmail = async (options) => {
                   }
                   
                   .cta-button {
-                      background: transparent;
-                      color: var(--primary);
+                      background: var(--primary);
+                      color: var(--darker);
                       padding: 12px 30px;
                       text-decoration: none;
                       border-radius: 8px;
                       display: inline-block;
                       margin: 20px 0;
                       font-weight: 600;
-                      border: 1px solid var(--primary);
+                      border: none;
                       transition: all 0.3s ease;
                   }
                   
                   .cta-button:hover {
-                      background: var(--primary);
-                      color: var(--darker);
+                      background: var(--primary-light);
+                      transform: translateY(-2px);
                   }
                   
                   .footer {
@@ -5621,6 +5850,27 @@ const sendProfessionalEmail = async (options) => {
                       padding: 30px 40px;
                       text-align: center;
                       border-top: 1px solid var(--gray-light);
+                  }
+                  
+                  .footer-logo {
+                      display: flex;
+                      align-items: center;
+                      justify-content: center;
+                      gap: 8px;
+                      margin-bottom: 15px;
+                  }
+                  
+                  .footer-logo img {
+                      width: 24px;
+                      height: 24px;
+                      border-radius: 50%;
+                  }
+                  
+                  .footer-logo-text {
+                      font-family: 'Rowdies', sans-serif;
+                      font-weight: 700;
+                      font-size: 1rem;
+                      color: var(--primary);
                   }
                   
                   .footer-text {
@@ -5639,14 +5889,18 @@ const sendProfessionalEmail = async (options) => {
                       color: var(--success);
                       font-size: 0.8rem;
                   }
+                  
+                  .website-url {
+                      color: var(--primary);
+                  }
               </style>
           </head>
           <body>
               <div class="container">
                   <div class="header">
                       <div class="logo-container">
-                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash</div>
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
+                          <div class="logo-text"><span>₿</span>itHash</div>
                       </div>
                   </div>
                   
@@ -5662,23 +5916,23 @@ const sendProfessionalEmail = async (options) => {
                       <div class="deposit-details">
                           <div class="detail-item">
                               <span class="detail-label">Amount:</span>
-                              <span class="detail-value gold">$${data.amount}</span>
+                              <span class="detail-value gold"><strong>$${data.amount}</strong></span>
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">Method:</span>
-                              <span class="detail-value">${data.method}</span>
+                              <span class="detail-value"><strong>${data.method}</strong></span>
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">Reference:</span>
-                              <span class="detail-value">${data.reference}</span>
+                              <span class="detail-value"><strong>${data.reference}</strong></span>
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">Date:</span>
-                              <span class="detail-value">${new Date().toLocaleDateString()}</span>
+                              <span class="detail-value"><strong>${new Date().toLocaleDateString()}</strong></span>
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">New Balance:</span>
-                              <span class="detail-value success">$${data.newBalance}</span>
+                              <span class="detail-value success"><strong>$${data.newBalance}</strong></span>
                           </div>
                       </div>
                       
@@ -5687,7 +5941,7 @@ const sendProfessionalEmail = async (options) => {
                       </div>
                       
                       <div style="text-align: center;">
-                          <a href="https://www.bithashcapital.live/investment.html" class="cta-button">Start Mining</a>
+                          <a href="https://www.bithashcapital.live/investment" class="cta-button">Start Mining</a>
                       </div>
                       
                       <div class="message" style="margin-top: 30px;">
@@ -5697,9 +5951,16 @@ const sendProfessionalEmail = async (options) => {
                   </div>
                   
                   <div class="footer">
+                      <div class="footer-logo">
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo">
+                          <span class="footer-logo-text"><span>₿</span>itHash</span>
+                      </div>
                       <div class="footer-text">
                           © 2024 BitHash Capital. All rights reserved.<br>
                           Professional Bitcoin Mining and Investment Platform
+                      </div>
+                      <div class="footer-text">
+                          <a href="https://www.bithashcapital.live" class="website-url">www.bithashcapital.live</a>
                       </div>
                       <div class="security-badge">
                           <i class="fas fa-shield-alt"></i>
@@ -5723,6 +5984,7 @@ const sendProfessionalEmail = async (options) => {
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>Referral Bonus - BitHash Capital</title>
               <link href="https://fonts.googleapis.com/css2?family=Rowdies:wght@300;400;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
               <style>
                   :root {
                       --primary: #00D8FF;
@@ -5787,6 +6049,10 @@ const sendProfessionalEmail = async (options) => {
                       font-weight: 700;
                       font-size: 1.5rem;
                       color: var(--primary);
+                  }
+                  
+                  .logo-text span {
+                      color: var(--gold);
                   }
                   
                   .content {
@@ -5850,21 +6116,21 @@ const sendProfessionalEmail = async (options) => {
                   }
                   
                   .cta-button {
-                      background: transparent;
-                      color: var(--primary);
+                      background: var(--primary);
+                      color: var(--darker);
                       padding: 12px 30px;
                       text-decoration: none;
                       border-radius: 8px;
                       display: inline-block;
                       margin: 20px 0;
                       font-weight: 600;
-                      border: 1px solid var(--primary);
+                      border: none;
                       transition: all 0.3s ease;
                   }
                   
                   .cta-button:hover {
-                      background: var(--primary);
-                      color: var(--darker);
+                      background: var(--primary-light);
+                      transform: translateY(-2px);
                   }
                   
                   .footer {
@@ -5872,6 +6138,27 @@ const sendProfessionalEmail = async (options) => {
                       padding: 30px 40px;
                       text-align: center;
                       border-top: 1px solid var(--gray-light);
+                  }
+                  
+                  .footer-logo {
+                      display: flex;
+                      align-items: center;
+                      justify-content: center;
+                      gap: 8px;
+                      margin-bottom: 15px;
+                  }
+                  
+                  .footer-logo img {
+                      width: 24px;
+                      height: 24px;
+                      border-radius: 50%;
+                  }
+                  
+                  .footer-logo-text {
+                      font-family: 'Rowdies', sans-serif;
+                      font-weight: 700;
+                      font-size: 1rem;
+                      color: var(--primary);
                   }
                   
                   .footer-text {
@@ -5890,14 +6177,18 @@ const sendProfessionalEmail = async (options) => {
                       color: var(--gold);
                       font-size: 0.8rem;
                   }
+                  
+                  .website-url {
+                      color: var(--primary);
+                  }
               </style>
           </head>
           <body>
               <div class="container">
                   <div class="header">
                       <div class="logo-container">
-                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash</div>
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
+                          <div class="logo-text"><span>₿</span>itHash</div>
                       </div>
                   </div>
                   
@@ -5919,15 +6210,15 @@ const sendProfessionalEmail = async (options) => {
                       <div class="referral-details">
                           <div class="detail-item">
                               <span class="detail-label">Referred User:</span>
-                              <span class="detail-value">${data.referredUser}</span>
+                              <span class="detail-value"><strong>${data.referredUser}</strong></span>
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">Bonus Type:</span>
-                              <span class="detail-value">${data.bonusType}</span>
+                              <span class="detail-value"><strong>${data.bonusType}</strong></span>
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">Date Earned:</span>
-                              <span class="detail-value">${new Date().toLocaleDateString()}</span>
+                              <span class="detail-value"><strong>${new Date().toLocaleDateString()}</strong></span>
                           </div>
                       </div>
                       
@@ -5936,7 +6227,7 @@ const sendProfessionalEmail = async (options) => {
                       </div>
                       
                       <div style="text-align: center;">
-                          <a href="https://www.bithashcapital.live/referral.html" class="cta-button">View Referral Program</a>
+                          <a href="https://www.bithashcapital.live/referral" class="cta-button">View Referral Program</a>
                       </div>
                       
                       <div class="message" style="margin-top: 30px;">
@@ -5950,9 +6241,16 @@ const sendProfessionalEmail = async (options) => {
                   </div>
                   
                   <div class="footer">
+                      <div class="footer-logo">
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo">
+                          <span class="footer-logo-text"><span>₿</span>itHash</span>
+                      </div>
                       <div class="footer-text">
                           © 2024 BitHash Capital. All rights reserved.<br>
                           Professional Bitcoin Mining and Investment Platform
+                      </div>
+                      <div class="footer-text">
+                          <a href="https://www.bithashcapital.live" class="website-url">www.bithashcapital.live</a>
                       </div>
                       <div class="security-badge">
                           <i class="fas fa-shield-alt"></i>
@@ -5965,7 +6263,7 @@ const sendProfessionalEmail = async (options) => {
         `
       },
 
-      // PASSWORD CHANGED - NEW TEMPLATE
+      // PASSWORD CHANGED - REDESIGNED to match login page
       password_changed: {
         subject: 'BitHash Capital - Password Changed Successfully',
         html: `
@@ -5976,6 +6274,7 @@ const sendProfessionalEmail = async (options) => {
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>Password Changed - BitHash Capital</title>
               <link href="https://fonts.googleapis.com/css2?family=Rowdies:wght@300;400;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
               <style>
                   :root {
                       --primary: #00D8FF;
@@ -6040,6 +6339,10 @@ const sendProfessionalEmail = async (options) => {
                       font-weight: 700;
                       font-size: 1.5rem;
                       color: var(--primary);
+                  }
+                  
+                  .logo-text span {
+                      color: var(--gold);
                   }
                   
                   .content {
@@ -6127,6 +6430,27 @@ const sendProfessionalEmail = async (options) => {
                       border-top: 1px solid var(--gray-light);
                   }
                   
+                  .footer-logo {
+                      display: flex;
+                      align-items: center;
+                      justify-content: center;
+                      gap: 8px;
+                      margin-bottom: 15px;
+                  }
+                  
+                  .footer-logo img {
+                      width: 24px;
+                      height: 24px;
+                      border-radius: 50%;
+                  }
+                  
+                  .footer-logo-text {
+                      font-family: 'Rowdies', sans-serif;
+                      font-weight: 700;
+                      font-size: 1rem;
+                      color: var(--primary);
+                  }
+                  
                   .footer-text {
                       color: var(--gray);
                       font-size: 0.8rem;
@@ -6143,14 +6467,18 @@ const sendProfessionalEmail = async (options) => {
                       color: var(--success);
                       font-size: 0.8rem;
                   }
+                  
+                  .website-url {
+                      color: var(--primary);
+                  }
               </style>
           </head>
           <body>
               <div class="container">
                   <div class="header">
                       <div class="logo-container">
-                          <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash</div>
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
+                          <div class="logo-text"><span>₿</span>itHash</div>
                       </div>
                   </div>
                   
@@ -6172,24 +6500,24 @@ const sendProfessionalEmail = async (options) => {
                       <div class="info-section">
                           <div class="info-item">
                               <span class="info-label">Time:</span>
-                              <span class="info-value">${new Date().toLocaleString()}</span>
+                              <span class="info-value"><strong>${new Date().toLocaleString()}</strong></span>
                           </div>
                           <div class="info-item">
                               <span class="info-label">Device:</span>
-                              <span class="info-value">${data.device || 'Unknown device'}</span>
+                              <span class="info-value"><strong>${data.device || 'Unknown device'}</strong></span>
                           </div>
                           <div class="info-item">
                               <span class="info-label">Location:</span>
-                              <span class="info-value">${data.location || 'Unknown location'}</span>
+                              <span class="info-value"><strong>${data.location || 'Unknown location'}</strong></span>
                           </div>
                           <div class="info-item">
                               <span class="info-label">IP Address:</span>
-                              <span class="info-value">${data.ip || 'Unknown'}</span>
+                              <span class="info-value"><strong>${data.ip || 'Unknown'}</strong></span>
                           </div>
                       </div>
                       
                       <div class="security-note">
-                          <strong>⚠️ If you did not make this change,</strong> please contact our support team immediately and secure your account.
+                          <strong>⚠️ IF YOU DID NOT MAKE THIS CHANGE,</strong> please contact our support team immediately and secure your account.
                       </div>
                       
                       <div class="message" style="margin-top: 30px;">
@@ -6199,9 +6527,16 @@ const sendProfessionalEmail = async (options) => {
                   </div>
                   
                   <div class="footer">
+                      <div class="footer-logo">
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo">
+                          <span class="footer-logo-text"><span>₿</span>itHash</span>
+                      </div>
                       <div class="footer-text">
                           © 2024 BitHash Capital. All rights reserved.<br>
                           This is an automated security notification.
+                      </div>
+                      <div class="footer-text">
+                          <a href="https://www.bithashcapital.live" class="website-url">www.bithashcapital.live</a>
                       </div>
                       <div class="security-badge">
                           <i class="fas fa-shield-alt"></i>
@@ -6234,8 +6569,6 @@ const sendProfessionalEmail = async (options) => {
     throw new Error('Failed to send email');
   }
 };
-
-
 
 // Routes
 
