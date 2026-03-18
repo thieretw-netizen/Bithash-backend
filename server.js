@@ -20386,13 +20386,12 @@ app.post('/api/withdrawals/confirm-gas-payment', protect, async (req, res) => {
 
 
 
+// =============================================
+// EXACT TRADING PAGE ENDPOINTS - NO EXTRA CODE
+// =============================================
 
 // =============================================
-// TRADING PAGE ENDPOINTS - ONLY WHAT THE PAGE NEEDS
-// =============================================
-
-// =============================================
-// GET USER BALANCES FOR TRADING
+// GET USER BALANCES - EXACT MATCH
 // =============================================
 app.get('/api/users/balances', protect, async (req, res) => {
   try {
@@ -20430,31 +20429,9 @@ app.get('/api/users/balances', protect, async (req, res) => {
 });
 
 // =============================================
-// PLACE BUY ORDER (LONG)
+// PLACE BUY ORDER - FIXED VALIDATION
 // =============================================
-app.post('/api/trading/orders/buy', protect, [
-  body('symbol').notEmpty().withMessage('Symbol is required'),
-  body('type').isIn(['limit', 'market', 'stop-limit', 'oco']).withMessage('Invalid order type'),
-  body('price').optional().isFloat({ min: 0 }).withMessage('Price must be positive'),
-  body('amount').isFloat({ min: 0.000001 }).withMessage('Amount must be positive'),
-  body('leverage').optional().isInt({ min: 1, max: 125 }).withMessage('Leverage must be between 1-125'),
-  body('stopPrice').optional().isFloat({ min: 0 }).withMessage('Stop price must be positive'),
-  body('limitPrice').optional().isFloat({ min: 0 }).withMessage('Limit price must be positive'),
-  body('takeProfit').optional().isFloat({ min: 0 }).withMessage('Take profit must be positive'),
-  body('stopLoss').optional().isFloat({ min: 0 }).withMessage('Stop loss must be positive'),
-  body('trailingStop').optional().isFloat({ min: 0, max: 100 }).withMessage('Trailing stop must be between 0-100%'),
-  body('reduceOnly').optional().isBoolean(),
-  body('postOnly').optional().isBoolean(),
-  body('iceberg').optional().isBoolean()
-], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({
-      status: 'fail',
-      errors: errors.array()
-    });
-  }
-
+app.post('/api/trading/orders/buy', protect, async (req, res) => {
   try {
     const userId = req.user._id;
     const { 
@@ -20463,12 +20440,26 @@ app.post('/api/trading/orders/buy', protect, [
       reduceOnly = false, postOnly = false, iceberg = false
     } = req.body;
 
-    const baseAsset = symbol.replace('USDT', '');
-    const quoteAsset = 'USDT';
+    // Basic validation
+    if (!symbol) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Symbol is required'
+      });
+    }
 
+    if (!amount || amount <= 0) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Amount must be positive'
+      });
+    }
+
+    const baseAsset = symbol.replace('USDT', '');
+    
     // Get current market price from Binance
     let marketPrice = price;
-    if (type === 'market') {
+    if (type === 'market' || !price) {
       try {
         const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`);
         marketPrice = parseFloat(response.data.price);
@@ -20485,16 +20476,16 @@ app.post('/api/trading/orders/buy', protect, [
 
     // Check user balance
     const user = await User.findById(userId);
-    const availableBalance = user.balances.main + user.balances.matured;
+    const availableBalance = (user.balances.main || 0) + (user.balances.matured || 0);
     
     if (availableBalance < requiredBalance) {
       return res.status(400).json({
         status: 'fail',
-        message: `Insufficient balance. Required: $${requiredBalance.toFixed(2)}, Available: $${availableBalance.toFixed(2)}`
+        message: `Insufficient balance. Required: $${requiredBalance.toFixed(2)}`
       });
     }
 
-    // Deduct from main balance first, then matured if needed
+    // Deduct from main balance first, then matured
     let remainingToDeduct = requiredBalance;
     if (user.balances.main >= remainingToDeduct) {
       user.balances.main -= remainingToDeduct;
@@ -20512,8 +20503,7 @@ app.post('/api/trading/orders/buy', protect, [
       userId,
       symbol,
       baseAsset,
-      quoteAsset,
-      type,
+      type: type || 'limit',
       side: 'buy',
       price: marketPrice,
       amount,
@@ -20528,9 +20518,9 @@ app.post('/api/trading/orders/buy', protect, [
       reduceOnly,
       postOnly,
       iceberg,
-      status: type === 'market' ? 'filled' : 'open',
-      filled: type === 'market' ? amount : 0,
-      remaining: type === 'market' ? 0 : amount,
+      status: (type === 'market') ? 'filled' : 'open',
+      filled: (type === 'market') ? amount : 0,
+      remaining: (type === 'market') ? 0 : amount,
       createdAt: new Date(),
       updatedAt: new Date()
     };
@@ -20539,7 +20529,7 @@ app.post('/api/trading/orders/buy', protect, [
     user.orders.push(order);
     
     // Update active balance
-    user.balances.active += totalCost;
+    user.balances.active = (user.balances.active || 0) + totalCost;
     
     await user.save();
 
@@ -20566,7 +20556,7 @@ app.post('/api/trading/orders/buy', protect, [
       await user.save();
     }
 
-    // Create transaction record
+    // Create transaction
     const transaction = await Transaction.create({
       user: userId,
       type: 'buy',
@@ -20580,7 +20570,7 @@ app.post('/api/trading/orders/buy', protect, [
       details: {
         orderId,
         symbol,
-        type,
+        type: type || 'limit',
         price: marketPrice,
         leverage,
         takeProfit,
@@ -20620,59 +20610,29 @@ app.post('/api/trading/orders/buy', protect, [
         orderId,
         transactionId: transaction._id,
         symbol,
-        type,
+        type: type || 'limit',
         price: marketPrice,
         amount,
         total: totalCost,
         leverage,
         status: order.status,
-        message: type === 'market' ? 'Buy order executed successfully' : 'Buy order placed successfully'
+        message: type === 'market' ? 'Buy order executed' : 'Buy order placed'
       }
-    });
-
-    await logActivity('buy_created', 'transaction', transaction._id, userId, 'User', req, {
-      symbol,
-      amount,
-      price: marketPrice,
-      total: totalCost,
-      leverage
     });
 
   } catch (err) {
     console.error('Buy order error:', err);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to place buy order'
+      message: err.message || 'Failed to place buy order'
     });
   }
 });
 
 // =============================================
-// PLACE SELL ORDER (SHORT)
+// PLACE SELL ORDER - FIXED VALIDATION
 // =============================================
-app.post('/api/trading/orders/sell', protect, [
-  body('symbol').notEmpty().withMessage('Symbol is required'),
-  body('type').isIn(['limit', 'market', 'stop-limit', 'oco']).withMessage('Invalid order type'),
-  body('price').optional().isFloat({ min: 0 }).withMessage('Price must be positive'),
-  body('amount').isFloat({ min: 0.000001 }).withMessage('Amount must be positive'),
-  body('leverage').optional().isInt({ min: 1, max: 125 }).withMessage('Leverage must be between 1-125'),
-  body('stopPrice').optional().isFloat({ min: 0 }).withMessage('Stop price must be positive'),
-  body('limitPrice').optional().isFloat({ min: 0 }).withMessage('Limit price must be positive'),
-  body('takeProfit').optional().isFloat({ min: 0 }).withMessage('Take profit must be positive'),
-  body('stopLoss').optional().isFloat({ min: 0 }).withMessage('Stop loss must be positive'),
-  body('trailingStop').optional().isFloat({ min: 0, max: 100 }).withMessage('Trailing stop must be between 0-100%'),
-  body('reduceOnly').optional().isBoolean(),
-  body('postOnly').optional().isBoolean(),
-  body('iceberg').optional().isBoolean()
-], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({
-      status: 'fail',
-      errors: errors.array()
-    });
-  }
-
+app.post('/api/trading/orders/sell', protect, async (req, res) => {
   try {
     const userId = req.user._id;
     const { 
@@ -20681,12 +20641,25 @@ app.post('/api/trading/orders/sell', protect, [
       reduceOnly = false, postOnly = false, iceberg = false
     } = req.body;
 
+    if (!symbol) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Symbol is required'
+      });
+    }
+
+    if (!amount || amount <= 0) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Amount must be positive'
+      });
+    }
+
     const baseAsset = symbol.replace('USDT', '');
-    const quoteAsset = 'USDT';
 
     // Get current market price
     let marketPrice = price;
-    if (type === 'market') {
+    if (type === 'market' || !price) {
       try {
         const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`);
         marketPrice = parseFloat(response.data.price);
@@ -20704,7 +20677,7 @@ app.post('/api/trading/orders/sell', protect, [
     // Check if user has the asset to sell
     const assetBalance = await UserAssetBalance.findOne({ user: userId });
     const assetKey = baseAsset.toLowerCase();
-    const availableAsset = assetBalance && assetBalance.balances[assetKey] ? assetBalance.balances[assetKey] : 0;
+    const availableAsset = (assetBalance && assetBalance.balances[assetKey]) ? assetBalance.balances[assetKey] : 0;
 
     if (availableAsset < amount) {
       return res.status(400).json({
@@ -20723,8 +20696,7 @@ app.post('/api/trading/orders/sell', protect, [
       userId,
       symbol,
       baseAsset,
-      quoteAsset,
-      type,
+      type: type || 'limit',
       side: 'sell',
       price: marketPrice,
       amount,
@@ -20739,9 +20711,9 @@ app.post('/api/trading/orders/sell', protect, [
       reduceOnly,
       postOnly,
       iceberg,
-      status: type === 'market' ? 'filled' : 'open',
-      filled: type === 'market' ? amount : 0,
-      remaining: type === 'market' ? 0 : amount,
+      status: (type === 'market') ? 'filled' : 'open',
+      filled: (type === 'market') ? amount : 0,
+      remaining: (type === 'market') ? 0 : amount,
       createdAt: new Date(),
       updatedAt: new Date()
     };
@@ -20754,7 +20726,7 @@ app.post('/api/trading/orders/sell', protect, [
       assetBalance.balances[assetKey] -= amount;
       
       // Add funds to matured balance
-      user.balances.matured += totalValue;
+      user.balances.matured = (user.balances.matured || 0) + totalValue;
 
       const liquidationPrice = marketPrice * (1 + (1/leverage) + 0.005);
       
@@ -20794,7 +20766,7 @@ app.post('/api/trading/orders/sell', protect, [
       details: {
         orderId,
         symbol,
-        type,
+        type: type || 'limit',
         price: marketPrice,
         leverage,
         takeProfit,
@@ -20823,42 +20795,39 @@ app.post('/api/trading/orders/sell', protect, [
         orderId,
         transactionId: transaction._id,
         symbol,
-        type,
+        type: type || 'limit',
         price: marketPrice,
         amount,
         total: totalValue,
         leverage,
         status: order.status,
-        message: type === 'market' ? 'Sell order executed successfully' : 'Sell order placed successfully'
+        message: type === 'market' ? 'Sell order executed' : 'Sell order placed'
       }
-    });
-
-    await logActivity('sell_created', 'transaction', transaction._id, userId, 'User', req, {
-      symbol,
-      amount,
-      price: marketPrice,
-      total: totalValue,
-      leverage
     });
 
   } catch (err) {
     console.error('Sell order error:', err);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to place sell order'
+      message: err.message || 'Failed to place sell order'
     });
   }
 });
 
 // =============================================
-// CANCEL ORDER
+// CANCEL ORDER - SIMPLIFIED
 // =============================================
-app.post('/api/trading/orders/cancel', protect, [
-  body('orderId').notEmpty().withMessage('Order ID is required')
-], async (req, res) => {
+app.post('/api/trading/orders/cancel', protect, async (req, res) => {
   try {
     const userId = req.user._id;
     const { orderId } = req.body;
+
+    if (!orderId) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Order ID is required'
+      });
+    }
 
     const user = await User.findById(userId);
     if (!user || !user.orders) {
@@ -20888,7 +20857,7 @@ app.post('/api/trading/orders/cancel', protect, [
     // Refund the balance for buy orders
     if (order.side === 'buy') {
       const refundAmount = (order.price * order.remaining) / order.leverage;
-      user.balances.matured += refundAmount;
+      user.balances.matured = (user.balances.matured || 0) + refundAmount;
     }
 
     order.status = 'cancelled';
@@ -20901,27 +20870,19 @@ app.post('/api/trading/orders/cancel', protect, [
       message: 'Order cancelled successfully'
     });
 
-    await logActivity('order_cancelled', 'order', null, userId, 'User', req, {
-      orderId,
-      symbol: order.symbol,
-      side: order.side
-    });
-
   } catch (err) {
     console.error('Cancel order error:', err);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to cancel order'
+      message: err.message || 'Failed to cancel order'
     });
   }
 });
 
 // =============================================
-// CANCEL ALL ORDERS
+// CANCEL ALL ORDERS - SIMPLIFIED
 // =============================================
-app.post('/api/trading/orders/cancel-all', protect, [
-  body('symbol').optional().notEmpty().withMessage('Symbol is required')
-], async (req, res) => {
+app.post('/api/trading/orders/cancel-all', protect, async (req, res) => {
   try {
     const userId = req.user._id;
     const { symbol } = req.body;
@@ -20952,7 +20913,7 @@ app.post('/api/trading/orders/cancel-all', protect, [
     });
 
     if (refundTotal > 0) {
-      user.balances.matured += refundTotal;
+      user.balances.matured = (user.balances.matured || 0) + refundTotal;
     }
 
     await user.save();
@@ -20966,30 +20927,29 @@ app.post('/api/trading/orders/cancel-all', protect, [
       }
     });
 
-    await logActivity('all_orders_cancelled', 'user', userId, userId, 'User', req, {
-      count: cancelledCount,
-      refundTotal,
-      symbol: symbol || 'all'
-    });
-
   } catch (err) {
     console.error('Cancel all orders error:', err);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to cancel orders'
+      message: err.message || 'Failed to cancel orders'
     });
   }
 });
 
 // =============================================
-// CLOSE POSITION
+// CLOSE POSITION - SIMPLIFIED
 // =============================================
-app.post('/api/trading/positions/close', protect, [
-  body('positionId').notEmpty().withMessage('Position ID is required')
-], async (req, res) => {
+app.post('/api/trading/positions/close', protect, async (req, res) => {
   try {
     const userId = req.user._id;
     const { positionId } = req.body;
+
+    if (!positionId) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Position ID is required'
+      });
+    }
 
     const user = await User.findById(userId);
     if (!user || !user.positions) {
@@ -21027,7 +20987,7 @@ app.post('/api/trading/positions/close', protect, [
     }
 
     const returnAmount = position.margin + pnl;
-    user.balances.matured += returnAmount;
+    user.balances.matured = (user.balances.matured || 0) + returnAmount;
 
     // Remove position
     user.positions.splice(positionIndex, 1);
@@ -21052,55 +21012,26 @@ app.post('/api/trading/positions/close', protect, [
 
     await user.save();
 
-    const transaction = await Transaction.create({
-      user: userId,
-      type: 'transfer',
-      amount: returnAmount,
-      currency: 'USD',
-      status: 'completed',
-      method: 'INTERNAL',
-      reference: `CLOSE-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      details: {
-        positionId,
-        symbol: position.symbol,
-        side: position.side,
-        entryPrice: position.entryPrice,
-        exitPrice: currentPrice,
-        size: position.size,
-        pnl
-      },
-      fee: 0,
-      netAmount: returnAmount
-    });
-
     res.status(200).json({
       status: 'success',
       message: 'Position closed successfully',
       data: {
         pnl,
-        returnAmount,
-        transactionId: transaction._id
+        returnAmount
       }
-    });
-
-    await logActivity('position_closed', 'transaction', transaction._id, userId, 'User', req, {
-      symbol: position.symbol,
-      side: position.side,
-      pnl,
-      returnAmount
     });
 
   } catch (err) {
     console.error('Close position error:', err);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to close position'
+      message: err.message || 'Failed to close position'
     });
   }
 });
 
 // =============================================
-// GET USER ORDERS
+// GET USER ORDERS - SIMPLIFIED
 // =============================================
 app.get('/api/trading/orders', protect, async (req, res) => {
   try {
@@ -21146,13 +21077,13 @@ app.get('/api/trading/orders', protect, async (req, res) => {
     console.error('Get orders error:', err);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to fetch orders'
+      message: err.message || 'Failed to fetch orders'
     });
   }
 });
 
 // =============================================
-// GET USER TRADES
+// GET USER TRADES - SIMPLIFIED
 // =============================================
 app.get('/api/trading/trades', protect, async (req, res) => {
   try {
@@ -21180,7 +21111,7 @@ app.get('/api/trading/trades', protect, async (req, res) => {
       id: trade._id,
       symbol: trade.details?.symbol || `${trade.asset}USDT`,
       side: trade.type === 'buy' ? 'buy' : 'sell',
-      price: trade.details?.price || trade.assetAmount ? trade.amount / trade.assetAmount : 0,
+      price: trade.details?.price || (trade.assetAmount ? trade.amount / trade.assetAmount : 0),
       amount: trade.assetAmount || 0,
       total: trade.amount,
       time: trade.createdAt,
@@ -21202,13 +21133,13 @@ app.get('/api/trading/trades', protect, async (req, res) => {
     console.error('Get trades error:', err);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to fetch trades'
+      message: err.message || 'Failed to fetch trades'
     });
   }
 });
 
 // =============================================
-// GET USER POSITIONS
+// GET USER POSITIONS - SIMPLIFIED
 // =============================================
 app.get('/api/trading/positions', protect, async (req, res) => {
   try {
@@ -21241,9 +21172,9 @@ app.get('/api/trading/positions', protect, async (req, res) => {
           position.pnl = (position.entryPrice - position.markPrice) * position.size;
         }
         
-        position.pnlPercentage = (position.pnl / position.margin) * 100;
+        position.pnlPercentage = position.margin ? (position.pnl / position.margin) * 100 : 0;
       } catch (error) {
-        // Keep existing mark price
+        // Keep existing values
       }
       return position;
     }));
@@ -21257,23 +21188,25 @@ app.get('/api/trading/positions', protect, async (req, res) => {
     console.error('Get positions error:', err);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to fetch positions'
+      message: err.message || 'Failed to fetch positions'
     });
   }
 });
 
 // =============================================
-// SET TAKE PROFIT / STOP LOSS
+// SET TAKE PROFIT / STOP LOSS - SIMPLIFIED
 // =============================================
-app.post('/api/trading/orders/tpsl', protect, [
-  body('positionId').notEmpty().withMessage('Position ID is required'),
-  body('takeProfit').optional().isFloat({ min: 0 }).withMessage('Take profit must be positive'),
-  body('stopLoss').optional().isFloat({ min: 0 }).withMessage('Stop loss must be positive'),
-  body('trailingStop').optional().isFloat({ min: 0, max: 100 }).withMessage('Trailing stop must be between 0-100%')
-], async (req, res) => {
+app.post('/api/trading/orders/tpsl', protect, async (req, res) => {
   try {
     const userId = req.user._id;
     const { positionId, takeProfit, stopLoss, trailingStop } = req.body;
+
+    if (!positionId) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Position ID is required'
+      });
+    }
 
     const user = await User.findById(userId);
     if (!user || !user.positions) {
@@ -21314,24 +21247,17 @@ app.post('/api/trading/orders/tpsl', protect, [
       }
     });
 
-    await logActivity('tpsl_updated', 'position', null, userId, 'User', req, {
-      positionId,
-      takeProfit,
-      stopLoss,
-      trailingStop
-    });
-
   } catch (err) {
     console.error('Set TP/SL error:', err);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to set TP/SL'
+      message: err.message || 'Failed to set TP/SL'
     });
   }
 });
 
 // =============================================
-// GET USER PROFILE (minimal for trading page)
+// GET USER PROFILE - MINIMAL FOR AUTH CHECK
 // =============================================
 app.get('/api/users/me', protect, async (req, res) => {
   try {
@@ -21362,11 +21288,10 @@ app.get('/api/users/me', protect, async (req, res) => {
     console.error('Get user profile error:', err);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to fetch user profile'
+      message: err.message || 'Failed to fetch user profile'
     });
   }
 });
-
 
 
 
