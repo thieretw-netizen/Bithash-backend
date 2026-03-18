@@ -21304,7 +21304,6 @@ app.get('/api/users/me', protect, async (req, res) => {
 
 
 
-
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Global error handler:', err);
