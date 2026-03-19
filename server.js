@@ -44,7 +44,7 @@ app.use(helmet({
     }
   },
   crossOriginOpenerPolicy: { policy: "unsafe-none" } // FIXED: This resolves the window.postMessage block
-}));
+}]);
 
 
 app.use(cors({
@@ -4083,6 +4083,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
                   .rejection-box { background: #111827; padding: 25px; border-radius: 12px; border-left: 4px solid #f6465d; margin: 25px 0; }
                   .rejection-reason { color: #f6465d; font-size: 15px; margin-bottom: 10px; }
+                  .funds-returned { background: rgba(0, 216, 255, 0.1); border: 1px solid #00D8FF; padding: 15px; border-radius: 8px; margin: 20px 0; }
                   .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
                   .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.6; }
               </style>
@@ -4097,15 +4098,14 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   </div>
                   <div class="content">
                       <h2 class="greeting">Hello ${user.firstName || 'there'},</h2>
-                      <p class="message">We were unable to process your withdrawal request.</p>
+                      <p class="message">There was an issue with your withdrawal request.</p>
                       
                       <div class="rejection-box">
-                          <div class="rejection-reason"><strong>Reason:</strong> ${data.reason || 'Unable to process at this time'}</div>
-                          <p style="color: #8E9BAE; font-size: 14px;">The funds have been returned to your matured balance.</p>
+                          <div class="rejection-reason"><strong>Reason:</strong> ${data.reason || 'Unable to process withdrawal at this time'}</div>
                       </div>
                       
-                      <div style="text-align: center; margin: 30px 0;">
-                          <a href="https://www.bithashcapital.live/withdraw.html" style="background: #00D8FF; color: #0A0E17; padding: 14px 35px; text-decoration: none; border-radius: 8px; font-weight: 600;">Try Again</a>
+                      <div class="funds-returned">
+                          <p style="color: #00D8FF;"><strong>Funds Returned:</strong> $${data.amount?.toFixed(2) || '0.00'} has been returned to your matured balance.</p>
                       </div>
                       
                       <p class="message">If you need assistance, please contact our support team.</p>
@@ -4217,15 +4217,10 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                       <p class="message">There was an issue with your deposit request.</p>
                       
                       <div class="rejection-box">
-                          <div class="rejection-reason"><strong>Reason:</strong> ${data.reason || 'Unable to verify deposit'}</div>
-                          <p style="color: #8E9BAE; font-size: 14px;">Please contact support for assistance or try again.</p>
+                          <div class="rejection-reason"><strong>Reason:</strong> ${data.reason || 'Unable to verify deposit at this time'}</div>
                       </div>
                       
-                      <div style="text-align: center; margin: 30px 0;">
-                          <a href="https://www.bithashcapital.live/deposit.html" style="background: #00D8FF; color: #0A0E17; padding: 14px 35px; text-decoration: none; border-radius: 8px; font-weight: 600;">Try Again</a>
-                      </div>
-                      
-                      <p class="message">If you need assistance, please contact our support team.</p>
+                      <p class="message">Please contact support if you need assistance.</p>
                   </div>
                   <div class="footer">
                       <p class="footer-text">© 2024 BitHash Capital. All rights reserved.</p>
@@ -6240,7 +6235,6 @@ app.post('/api/investments', protect, [
     // ✅ ENHANCED: Send investment creation email
     try {
       await sendAutomatedEmail(user, 'investment_created', {
-        name: user.firstName,
         planName: plan.name,
         amount: amount,
         expectedReturn: expectedReturn,
@@ -6378,7 +6372,6 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
       // ✅ ENHANCED: Send investment completion email
       try {
         await sendAutomatedEmail(user, 'investment_matured', {
-          name: user.firstName,
           planName: investment.plan.name,
           amount: investment.originalAmount,
           totalReturn: totalReturn,
@@ -6801,7 +6794,7 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
 
 // Admin Reject Deposit Endpoint
 app.post('/api/admin/deposits/:id/reject', adminProtect, [
-  body('rejectionReason').trim().notEmpty().withMessage('Rejection reason is required')
+  body('reason').trim().notEmpty().withMessage('Rejection reason is required')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -6812,7 +6805,7 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
       });
     }
     
-    const { rejectionReason } = req.body;
+    const { reason } = req.body;
     
     // Find deposit
     const deposit = await Transaction.findById(req.params.id);
@@ -6833,15 +6826,20 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
     
     // Update deposit status
     deposit.status = 'failed';
-    deposit.adminNotes = rejectionReason;
+    deposit.adminNotes = reason;
     await deposit.save();
 
-    // Send email notification
-    await sendAutomatedEmail(deposit.user, 'deposit_rejected', {
-      name: deposit.user.firstName,
-      amount: deposit.amount,
-      reason: rejectionReason
-    });
+    // Find user and send email notification
+    const user = await User.findById(deposit.user);
+    if (user) {
+      await sendAutomatedEmail(user, 'deposit_rejected', {
+        name: user.firstName,
+        amount: deposit.amount,
+        reason: reason,
+        method: deposit.method,
+        reference: deposit.reference
+      });
+    }
     
     res.status(200).json({
       status: 'success',
@@ -6850,7 +6848,8 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
     
     await logActivity('reject-deposit', 'transaction', deposit._id, req.admin._id, 'Admin', req, {
       amount: deposit.amount,
-      reason: rejectionReason
+      reason: reason,
+      userId: deposit.user
     });
   } catch (err) {
     console.error('Admin reject deposit error:', err);
