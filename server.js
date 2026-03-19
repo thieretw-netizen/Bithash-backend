@@ -4059,6 +4059,175 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
         `
       },
 
+      // WITHDRAWAL REJECTED
+      withdrawal_rejected: {
+        subject: 'BitHash Capital | Withdrawal Update',
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Withdrawal Update - BitHash Capital</title>
+              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <style>
+                  * { margin: 0; padding: 0; box-sizing: border-box; }
+                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background-color: #0A0E17; margin: 0; padding: 0; }
+                  .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: 1px solid #1F2937; border-radius: 16px; overflow: hidden; }
+                  .header { background: linear-gradient(135deg, #f6465d 0%, #d13b4f 100%); padding: 30px 40px; text-align: center; }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
+                  .logo-img { width: 48px; height: 48px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
+                  .logo-text { font-family: 'Inter', sans-serif; font-size: 28px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
+                  .content { padding: 40px; background-color: #0A0E17; }
+                  .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
+                  .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
+                  .rejection-box { background: #111827; padding: 25px; border-radius: 12px; border-left: 4px solid #f6465d; margin: 25px 0; }
+                  .rejection-reason { color: #f6465d; font-size: 15px; margin-bottom: 10px; }
+                  .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
+                  .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.6; }
+              </style>
+          </head>
+          <body style="background-color: #0A0E17; padding: 20px;">
+              <div class="email-container">
+                  <div class="header">
+                      <div class="logo-container">
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
+                          <span class="logo-text">BitHash</span>
+                      </div>
+                  </div>
+                  <div class="content">
+                      <h2 class="greeting">Hello ${user.firstName || 'there'},</h2>
+                      <p class="message">We were unable to process your withdrawal request.</p>
+                      
+                      <div class="rejection-box">
+                          <div class="rejection-reason"><strong>Reason:</strong> ${data.reason || 'Unable to process at this time'}</div>
+                          <p style="color: #8E9BAE; font-size: 14px;">The funds have been returned to your matured balance.</p>
+                      </div>
+                      
+                      <p class="message">If you need assistance, please contact our support team.</p>
+                  </div>
+                  <div class="footer">
+                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.</p>
+                  </div>
+              </div>
+          </body>
+          </html>
+        `
+      },
+
+      // DEPOSIT APPROVED
+      deposit_approved: {
+        subject: 'BitHash Capital | Deposit Approved',
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Deposit Approved - BitHash Capital</title>
+              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <style>
+                  * { margin: 0; padding: 0; box-sizing: border-box; }
+                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background-color: #0A0E17; margin: 0; padding: 0; }
+                  .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: 1px solid #1F2937; border-radius: 16px; overflow: hidden; }
+                  .header { background: linear-gradient(135deg, #02c076 0%, #019e5f 100%); padding: 30px 40px; text-align: center; }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
+                  .logo-img { width: 48px; height: 48px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
+                  .logo-text { font-family: 'Inter', sans-serif; font-size: 28px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
+                  .content { padding: 40px; background-color: #0A0E17; }
+                  .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
+                  .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
+                  .approved-box { background: #111827; padding: 30px; border-radius: 12px; text-align: center; border: 2px solid #02c076; margin: 25px 0; }
+                  .approved-amount { font-size: 42px; font-weight: 700; color: #02c076; margin: 15px 0; }
+                  .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
+                  .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.6; }
+              </style>
+          </head>
+          <body style="background-color: #0A0E17; padding: 20px;">
+              <div class="email-container">
+                  <div class="header">
+                      <div class="logo-container">
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
+                          <span class="logo-text">BitHash</span>
+                      </div>
+                  </div>
+                  <div class="content">
+                      <h2 class="greeting">Hello ${user.firstName || 'there'},</h2>
+                      <p class="message">Your deposit has been approved and credited to your account.</p>
+                      
+                      <div class="approved-box">
+                          <div class="approved-label" style="color: #8E9BAE;">Amount</div>
+                          <div class="approved-amount">$${data.amount?.toFixed(2) || '0.00'}</div>
+                          <div style="color: #8E9BAE; font-size: 14px;">Reference: ${data.reference || 'N/A'}</div>
+                      </div>
+                      
+                      <p class="message">Your funds are now available for mining investments and other platform activities.</p>
+                  </div>
+                  <div class="footer">
+                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.</p>
+                  </div>
+              </div>
+          </body>
+          </html>
+        `
+      },
+
+      // DEPOSIT REJECTED
+      deposit_rejected: {
+        subject: 'BitHash Capital | Deposit Update',
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Deposit Update - BitHash Capital</title>
+              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <style>
+                  * { margin: 0; padding: 0; box-sizing: border-box; }
+                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background-color: #0A0E17; margin: 0; padding: 0; }
+                  .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: 1px solid #1F2937; border-radius: 16px; overflow: hidden; }
+                  .header { background: linear-gradient(135deg, #f6465d 0%, #d13b4f 100%); padding: 30px 40px; text-align: center; }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
+                  .logo-img { width: 48px; height: 48px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
+                  .logo-text { font-family: 'Inter', sans-serif; font-size: 28px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
+                  .content { padding: 40px; background-color: #0A0E17; }
+                  .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
+                  .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
+                  .rejection-box { background: #111827; padding: 25px; border-radius: 12px; border-left: 4px solid #f6465d; margin: 25px 0; }
+                  .rejection-reason { color: #f6465d; font-size: 15px; margin-bottom: 10px; }
+                  .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
+                  .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.6; }
+              </style>
+          </head>
+          <body style="background-color: #0A0E17; padding: 20px;">
+              <div class="email-container">
+                  <div class="header">
+                      <div class="logo-container">
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
+                          <span class="logo-text">BitHash</span>
+                      </div>
+                  </div>
+                  <div class="content">
+                      <h2 class="greeting">Hello ${user.firstName || 'there'},</h2>
+                      <p class="message">There was an issue with your deposit request.</p>
+                      
+                      <div class="rejection-box">
+                          <div class="rejection-reason"><strong>Reason:</strong> ${data.reason || 'Unable to verify payment'}</div>
+                          <p style="color: #8E9BAE; font-size: 14px;">Please contact support if you believe this is an error.</p>
+                      </div>
+                      
+                      <p class="message">If you need assistance, please contact our support team.</p>
+                  </div>
+                  <div class="footer">
+                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.</p>
+                  </div>
+              </div>
+          </body>
+          </html>
+        `
+      },
+
       // KYC SUBMITTED
       kyc_submitted: {
         subject: 'BitHash Capital | KYC Documents Received',
@@ -6595,8 +6764,8 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
     deposit.adminNotes = notes;
     await deposit.save();
 
-    // Send email notification
-    await sendAutomatedEmail(user, 'deposit_received', {
+    // Send email notification for deposit approval
+    await sendAutomatedEmail(user, 'deposit_approved', {
       name: user.firstName,
       amount: deposit.amount,
       method: deposit.method,
@@ -6658,6 +6827,17 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
     deposit.status = 'failed';
     deposit.adminNotes = rejectionReason;
     await deposit.save();
+
+    // Send email notification for deposit rejection
+    const user = await User.findById(deposit.user);
+    if (user) {
+      await sendAutomatedEmail(user, 'deposit_rejected', {
+        name: user.firstName,
+        amount: deposit.amount,
+        reason: rejectionReason,
+        method: deposit.method
+      });
+    }
     
     res.status(200).json({
       status: 'success',
@@ -6736,7 +6916,7 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
     withdrawal.adminNotes = notes;
     await withdrawal.save();
 
-    // Send email notification
+    // Send email notification for withdrawal approval
     await sendAutomatedEmail(withdrawal.user, 'withdrawal_approved', {
       name: withdrawal.user.firstName,
       amount: withdrawal.amount,
@@ -6818,7 +6998,7 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
     withdrawal.adminNotes = reason; // Changed from rejectionReason to reason
     await withdrawal.save();
 
-    // Send email notification
+    // Send email notification for withdrawal rejection
     await sendAutomatedEmail(user, 'withdrawal_rejected', {
       name: user.firstName,
       amount: withdrawal.amount,
@@ -8552,8 +8732,6 @@ app.post('/api/auth/send-otp', [
     });
   }
 });
-
-
 
 
 
