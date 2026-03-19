@@ -44,7 +44,7 @@ app.use(helmet({
     }
   },
   crossOriginOpenerPolicy: { policy: "unsafe-none" } // FIXED: This resolves the window.postMessage block
-}]);
+});
 
 
 app.use(cors({
