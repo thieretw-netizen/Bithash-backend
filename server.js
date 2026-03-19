@@ -4104,6 +4104,10 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                           <p style="color: #8E9BAE; font-size: 14px;">The funds have been returned to your matured balance.</p>
                       </div>
                       
+                      <div style="text-align: center; margin: 30px 0;">
+                          <a href="https://www.bithashcapital.live/withdraw.html" style="background: #00D8FF; color: #0A0E17; padding: 14px 35px; text-decoration: none; border-radius: 8px; font-weight: 600;">Try Again</a>
+                      </div>
+                      
                       <p class="message">If you need assistance, please contact our support team.</p>
                   </div>
                   <div class="footer">
@@ -4156,7 +4160,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                       <p class="message">Your deposit has been approved and credited to your account.</p>
                       
                       <div class="approved-box">
-                          <div class="approved-label" style="color: #8E9BAE;">Amount</div>
+                          <div class="approved-label" style="color: #8E9BAE;">Amount Approved</div>
                           <div class="approved-amount">$${data.amount?.toFixed(2) || '0.00'}</div>
                           <div style="color: #8E9BAE; font-size: 14px;">Reference: ${data.reference || 'N/A'}</div>
                       </div>
@@ -4213,8 +4217,12 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                       <p class="message">There was an issue with your deposit request.</p>
                       
                       <div class="rejection-box">
-                          <div class="rejection-reason"><strong>Reason:</strong> ${data.reason || 'Unable to verify payment'}</div>
-                          <p style="color: #8E9BAE; font-size: 14px;">Please contact support if you believe this is an error.</p>
+                          <div class="rejection-reason"><strong>Reason:</strong> ${data.reason || 'Unable to verify deposit'}</div>
+                          <p style="color: #8E9BAE; font-size: 14px;">Please contact support for assistance or try again.</p>
+                      </div>
+                      
+                      <div style="text-align: center; margin: 30px 0;">
+                          <a href="https://www.bithashcapital.live/deposit.html" style="background: #00D8FF; color: #0A0E17; padding: 14px 35px; text-decoration: none; border-radius: 8px; font-weight: 600;">Try Again</a>
                       </div>
                       
                       <p class="message">If you need assistance, please contact our support team.</p>
@@ -6764,7 +6772,7 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
     deposit.adminNotes = notes;
     await deposit.save();
 
-    // Send email notification for deposit approval
+    // Send email notification
     await sendAutomatedEmail(user, 'deposit_approved', {
       name: user.firstName,
       amount: deposit.amount,
@@ -6828,16 +6836,12 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
     deposit.adminNotes = rejectionReason;
     await deposit.save();
 
-    // Send email notification for deposit rejection
-    const user = await User.findById(deposit.user);
-    if (user) {
-      await sendAutomatedEmail(user, 'deposit_rejected', {
-        name: user.firstName,
-        amount: deposit.amount,
-        reason: rejectionReason,
-        method: deposit.method
-      });
-    }
+    // Send email notification
+    await sendAutomatedEmail(deposit.user, 'deposit_rejected', {
+      name: deposit.user.firstName,
+      amount: deposit.amount,
+      reason: rejectionReason
+    });
     
     res.status(200).json({
       status: 'success',
@@ -6916,7 +6920,7 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
     withdrawal.adminNotes = notes;
     await withdrawal.save();
 
-    // Send email notification for withdrawal approval
+    // Send email notification
     await sendAutomatedEmail(withdrawal.user, 'withdrawal_approved', {
       name: withdrawal.user.firstName,
       amount: withdrawal.amount,
@@ -6998,7 +7002,7 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
     withdrawal.adminNotes = reason; // Changed from rejectionReason to reason
     await withdrawal.save();
 
-    // Send email notification for withdrawal rejection
+    // Send email notification
     await sendAutomatedEmail(user, 'withdrawal_rejected', {
       name: user.firstName,
       amount: withdrawal.amount,
@@ -8732,6 +8736,8 @@ app.post('/api/auth/send-otp', [
     });
   }
 });
+
+
 
 
 
