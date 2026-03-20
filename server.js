@@ -18942,6 +18942,11 @@ app.get('/api/withdrawals/asset', protect, async (req, res) => {
 });
 
 
+
+
+
+
+
 app.post('/api/withdrawals/asset', protect, async (req, res) => {
     try {
         const userId = req.user._id;
@@ -19016,16 +19021,16 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
         // Calculate asset amount
         const assetAmount = amount / exchangeRate;
 
-        // Create transaction record with correct schema structure
+        // Create transaction record with all withdrawal data
         const transaction = await Transaction.create({
             user: userId,
             type: 'withdrawal',
             amount: amount,
-            asset: assetUpperCase, // Store asset in uppercase
+            asset: assetUpperCase,
             assetAmount: assetAmount,
             currency: 'USD',
             status: 'pending',
-            method: assetUpperCase, // Use method field with enum value
+            method: assetUpperCase,
             reference: reference,
             details: {
                 walletAddress: walletAddress,
@@ -19039,16 +19044,13 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 networkFee: gasFee * exchangeRate,
                 totalDebited: amount + (gasFee * exchangeRate),
                 withdrawalType: 'asset_withdrawal',
-                blockchainNetwork: getBlockchainNetwork(assetUpperCase) // Helper function to get network
-            },
-            fee: gasFee * exchangeRate,
-            netAmount: amount,
-            metadata: {
+                blockchainNetwork: getBlockchainNetwork(assetUpperCase),
                 ipAddress: req.ip || req.connection.remoteAddress,
                 userAgent: req.headers['user-agent'],
-                timestamp: new Date().toISOString(),
-                withdrawalType: 'asset_withdrawal'
-            }
+                requestTimestamp: new Date().toISOString()
+            },
+            fee: gasFee * exchangeRate,
+            netAmount: amount
         });
 
         // Deduct from user balances (immediate hold)
@@ -19072,29 +19074,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             $inc: updateQuery
         });
 
-        // Create withdrawal record in separate collection for audit
-        await WithdrawalRecord.create({
-            user: userId,
-            transactionId: transaction._id,
-            reference: reference,
-            amount: amount,
-            asset: assetUpperCase,
-            assetAmount: assetAmount,
-            walletAddress: walletAddress,
-            exchangeRate: exchangeRate,
-            gasFee: gasFee,
-            gasFeeUsd: gasFee * exchangeRate,
-            balanceSource: balanceSource,
-            mainAmountUsed: mainAmountUsed || 0,
-            maturedAmountUsed: maturedAmountUsed || 0,
-            status: 'pending',
-            requestDate: new Date(),
-            ipAddress: req.ip || req.connection.remoteAddress,
-            userAgent: req.headers['user-agent'],
-            method: assetUpperCase // Store method for consistency
-        });
-
-        // Log activity with enhanced data
+        // Log activity with all withdrawal data
         await logActivity(
             'withdrawal_created',
             'Transaction',
@@ -19115,7 +19095,9 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 gasFeeUsd: gasFee * exchangeRate,
                 totalAmount: amount,
                 timestamp: new Date().toISOString(),
-                method: assetUpperCase
+                method: assetUpperCase,
+                assetAmount: assetAmount,
+                transactionId: transaction._id
             }
         );
 
@@ -19132,7 +19114,8 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                     createdAt: transaction.createdAt,
                     gasFee: gasFee,
                     gasFeeUsd: gasFee * exchangeRate,
-                    method: assetUpperCase
+                    method: assetUpperCase,
+                    walletAddress: walletAddress
                 }
             },
             message: 'Withdrawal request submitted successfully'
@@ -19164,6 +19147,20 @@ function getBlockchainNetwork(asset) {
     };
     return networks[asset] || 'Blockchain Network';
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 /**
