@@ -18942,7 +18942,6 @@ app.get('/api/withdrawals/asset', protect, async (req, res) => {
 });
 
 
-
 app.post('/api/withdrawals/asset', protect, async (req, res) => {
     try {
         const userId = req.user._id;
@@ -18954,9 +18953,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             exchangeRate,
             balanceSource,
             mainAmountUsed,
-            maturedAmountUsed,
-            timestamp,
-            assetAmount: providedAssetAmount
+            maturedAmountUsed
         } = req.body;
 
         // Validation
@@ -18995,179 +18992,109 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
         const maturedBalance = user.balances.matured || 0;
         const totalAvailable = mainBalance + maturedBalance;
 
-        // Gas fee validation - must be taken from main balance
-        const gasFeeAmount = gasFee || 0;
-        
-        if (gasFeeAmount > 0 && mainBalance < gasFeeAmount) {
+        if (amount > totalAvailable) {
             return res.status(400).json({
                 status: 'error',
-                message: `Insufficient main balance to cover gas fee of ${gasFeeAmount.toFixed(8)} ${asset.toUpperCase()}. Please deposit gas fee first.`
+                message: 'Insufficient balance'
             });
         }
 
-        // Total amount needed (withdrawal amount + gas fee in USD equivalent)
-        const gasFeeInUSD = gasFeeAmount * exchangeRate;
-        const totalNeeded = amount + gasFeeInUSD;
-
-        if (totalNeeded > totalAvailable) {
+        // Validate asset against enum values
+        const validAssets = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'SHIB', 'TRX', 'LTC'];
+        const assetUpperCase = asset.toUpperCase();
+        
+        if (!validAssets.includes(assetUpperCase)) {
             return res.status(400).json({
                 status: 'error',
-                message: `Insufficient balance. Need $${totalNeeded.toFixed(2)} ($${amount.toFixed(2)} withdrawal + $${gasFeeInUSD.toFixed(2)} gas fee) but only have $${totalAvailable.toFixed(2)} available.`
+                message: `Invalid asset. Must be one of: ${validAssets.join(', ')}`
             });
         }
 
         // Generate unique reference
-        const reference = `WDR-${asset.toUpperCase()}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+        const reference = `WDR-${assetUpperCase}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
         // Calculate asset amount
-        const assetAmount = providedAssetAmount || (amount / exchangeRate);
-        
-        // Calculate gas fee in asset amount
-        const gasFeeAssetAmount = gasFeeAmount;
+        const assetAmount = amount / exchangeRate;
 
-        // Create transaction record with COMPLETE withdrawal details
+        // Create transaction record with correct schema structure
         const transaction = await Transaction.create({
             user: userId,
             type: 'withdrawal',
-            method: 'asset',
             amount: amount,
-            asset: asset,
+            asset: assetUpperCase, // Store asset in uppercase
             assetAmount: assetAmount,
             currency: 'USD',
             status: 'pending',
+            method: assetUpperCase, // Use method field with enum value
             reference: reference,
-            walletAddress: walletAddress,
-            exchangeRate: exchangeRate,
-            gasFee: gasFeeAmount,
-            gasFeeAssetAmount: gasFeeAssetAmount,
-            gasFeeInUSD: gasFeeInUSD,
-            balanceSource: balanceSource || 'main',
-            mainAmountUsed: mainAmountUsed || 0,
-            maturedAmountUsed: maturedAmountUsed || 0,
-            timestamp: timestamp || new Date().toISOString(),
             details: {
                 walletAddress: walletAddress,
                 exchangeRate: exchangeRate,
-                gasFee: gasFeeAmount,
-                gasFeeAssetAmount: gasFeeAssetAmount,
-                gasFeeInUSD: gasFeeInUSD,
+                gasFee: gasFee,
                 balanceSource: balanceSource,
                 mainAmountUsed: mainAmountUsed || 0,
                 maturedAmountUsed: maturedAmountUsed || 0,
                 assetAmount: assetAmount,
-                withdrawalAmount: amount,
-                totalDeducted: amount + gasFeeInUSD
+                withdrawalDate: new Date(),
+                networkFee: gasFee * exchangeRate,
+                totalDebited: amount + (gasFee * exchangeRate),
+                withdrawalType: 'asset_withdrawal',
+                blockchainNetwork: getBlockchainNetwork(assetUpperCase) // Helper function to get network
             },
-            fee: gasFeeInUSD,
-            netAmount: amount
+            fee: gasFee * exchangeRate,
+            netAmount: amount,
+            metadata: {
+                ipAddress: req.ip || req.connection.remoteAddress,
+                userAgent: req.headers['user-agent'],
+                timestamp: new Date().toISOString(),
+                withdrawalType: 'asset_withdrawal'
+            }
         });
 
-        // DEDUCT WITHDRAWAL AMOUNT from user balances based on source
-        const withdrawalUpdateQuery = {};
+        // Deduct from user balances (immediate hold)
+        const updateQuery = {};
         
-        if (balanceSource === 'main' || (mainAmountUsed > 0 && (!maturedAmountUsed || maturedAmountUsed === 0))) {
-            withdrawalUpdateQuery['balances.main'] = -amount;
-        } else if (balanceSource === 'matured' || (maturedAmountUsed > 0 && (!mainAmountUsed || mainAmountUsed === 0))) {
-            withdrawalUpdateQuery['balances.matured'] = -amount;
+        if (balanceSource === 'main' || (mainAmountUsed > 0 && maturedAmountUsed === 0)) {
+            updateQuery['balances.main'] = -amount;
+        } else if (balanceSource === 'matured' || (maturedAmountUsed > 0 && mainAmountUsed === 0)) {
+            updateQuery['balances.matured'] = -amount;
         } else if (balanceSource === 'both') {
             if (mainAmountUsed > 0) {
-                withdrawalUpdateQuery['balances.main'] = -mainAmountUsed;
+                updateQuery['balances.main'] = -mainAmountUsed;
             }
             if (maturedAmountUsed > 0) {
-                withdrawalUpdateQuery['balances.matured'] = -maturedAmountUsed;
-            }
-        } else {
-            // Default: deduct from main first, then matured
-            if (mainBalance >= amount) {
-                withdrawalUpdateQuery['balances.main'] = -amount;
-            } else {
-                const remaining = amount - mainBalance;
-                withdrawalUpdateQuery['balances.main'] = -mainBalance;
-                withdrawalUpdateQuery['balances.matured'] = -remaining;
+                updateQuery['balances.matured'] = -maturedAmountUsed;
             }
         }
 
-        // DEDUCT GAS FEE from main balance (ALWAYS from main balance)
-        const gasFeeUpdateQuery = {
-            'balances.main': -gasFeeInUSD
-        };
-
-        // Combine both deductions
-        const combinedUpdateQuery = {};
-        
-        // Merge withdrawal deductions
-        Object.keys(withdrawalUpdateQuery).forEach(key => {
-            combinedUpdateQuery[key] = (combinedUpdateQuery[key] || 0) + withdrawalUpdateQuery[key];
-        });
-        
-        // Add gas fee deduction to main balance
-        combinedUpdateQuery['balances.main'] = (combinedUpdateQuery['balances.main'] || 0) + (gasFeeUpdateQuery['balances.main'] || 0);
-
-        // Apply all deductions to user
+        // Update user balances
         await User.findByIdAndUpdate(userId, {
-            $inc: combinedUpdateQuery
+            $inc: updateQuery
         });
 
-        // ADD GAS FEE TO COMPANY REVENUE (always)
-        const companyRevenue = await CompanyRevenue.findOneAndUpdate(
-            { 
-                asset: asset,
-                date: { $gte: new Date().setHours(0,0,0,0), $lt: new Date().setHours(23,59,59,999) }
-            },
-            {
-                $inc: {
-                    gasFeesCollected: gasFeeInUSD,
-                    gasFeesCollectedAsset: gasFeeAssetAmount,
-                    totalRevenue: gasFeeInUSD
-                },
-                $push: {
-                    transactions: {
-                        transactionId: transaction._id,
-                        reference: reference,
-                        userId: userId,
-                        amount: gasFeeInUSD,
-                        assetAmount: gasFeeAssetAmount,
-                        timestamp: new Date()
-                    }
-                }
-            },
-            { upsert: true, new: true }
-        );
-
-        // Create withdrawal record in separate withdrawal collection for detailed tracking
-        const withdrawalRecord = await Withdrawal.create({
+        // Create withdrawal record in separate collection for audit
+        await WithdrawalRecord.create({
             user: userId,
             transactionId: transaction._id,
             reference: reference,
-            method: 'asset',
-            asset: asset,
             amount: amount,
+            asset: assetUpperCase,
             assetAmount: assetAmount,
             walletAddress: walletAddress,
             exchangeRate: exchangeRate,
-            gasFee: gasFeeAmount,
-            gasFeeAssetAmount: gasFeeAssetAmount,
-            gasFeeInUSD: gasFeeInUSD,
+            gasFee: gasFee,
+            gasFeeUsd: gasFee * exchangeRate,
             balanceSource: balanceSource,
             mainAmountUsed: mainAmountUsed || 0,
             maturedAmountUsed: maturedAmountUsed || 0,
             status: 'pending',
-            requestDate: timestamp || new Date(),
-            processedDate: null,
-            completedDate: null,
-            notes: `Withdrawal request for ${assetAmount.toFixed(8)} ${asset.toUpperCase()} to wallet ${walletAddress.substring(0, 10)}... Gas fee of ${gasFeeAssetAmount.toFixed(8)} ${asset.toUpperCase()} ($${gasFeeInUSD.toFixed(2)}) deducted from main balance and added to company revenue.`,
-            metadata: {
-                userEmail: user.email,
-                userName: `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email,
-                ipAddress: req.ip || req.connection.remoteAddress,
-                userAgent: req.headers['user-agent'],
-                withdrawalSource: 'web_platform',
-                gasFeeDeductedFrom: 'main_balance',
-                gasFeeAddedTo: 'company_revenue'
-            }
+            requestDate: new Date(),
+            ipAddress: req.ip || req.connection.remoteAddress,
+            userAgent: req.headers['user-agent'],
+            method: assetUpperCase // Store method for consistency
         });
 
-        // Log activity with complete details including gas fee
+        // Log activity with enhanced data
         await logActivity(
             'withdrawal_created',
             'Transaction',
@@ -19177,27 +19104,18 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             req,
             {
                 amount: amount,
-                asset: asset,
-                assetAmount: assetAmount,
+                asset: assetUpperCase,
                 reference: reference,
                 walletAddress: walletAddress,
                 balanceSource: balanceSource,
-                mainAmountUsed: mainAmountUsed,
-                maturedAmountUsed: maturedAmountUsed,
+                mainAmountUsed: mainAmountUsed || 0,
+                maturedAmountUsed: maturedAmountUsed || 0,
                 exchangeRate: exchangeRate,
-                gasFee: gasFeeAmount,
-                gasFeeAssetAmount: gasFeeAssetAmount,
-                gasFeeInUSD: gasFeeInUSD,
-                timestamp: timestamp || new Date().toISOString(),
-                transactionId: transaction._id,
-                withdrawalId: withdrawalRecord._id,
-                companyRevenueRecorded: companyRevenue._id,
-                gasFeeDeduction: {
-                    from: 'main_balance',
-                    amountUSD: gasFeeInUSD,
-                    amountAsset: gasFeeAssetAmount,
-                    addedTo: 'company_revenue'
-                }
+                gasFee: gasFee,
+                gasFeeUsd: gasFee * exchangeRate,
+                totalAmount: amount,
+                timestamp: new Date().toISOString(),
+                method: assetUpperCase
             }
         );
 
@@ -19208,27 +19126,16 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                     id: transaction._id,
                     reference: reference,
                     amount: amount,
-                    asset: asset,
+                    asset: assetUpperCase,
                     assetAmount: assetAmount,
-                    walletAddress: walletAddress,
                     status: 'pending',
                     createdAt: transaction.createdAt,
-                    timestamp: transaction.timestamp
-                },
-                withdrawal: {
-                    id: withdrawalRecord._id,
-                    reference: reference,
-                    status: 'pending'
-                },
-                gasFee: {
-                    amount: gasFeeAssetAmount,
-                    asset: asset,
-                    usdValue: gasFeeInUSD,
-                    deductedFrom: 'main_balance',
-                    addedTo: 'company_revenue'
+                    gasFee: gasFee,
+                    gasFeeUsd: gasFee * exchangeRate,
+                    method: assetUpperCase
                 }
             },
-            message: `Withdrawal request for ${assetAmount.toFixed(8)} ${asset.toUpperCase()} ($${amount.toFixed(2)}) submitted successfully. Gas fee of ${gasFeeAssetAmount.toFixed(8)} ${asset.toUpperCase()} ($${gasFeeInUSD.toFixed(2)}) was deducted from your main balance. Reference: ${reference}`
+            message: 'Withdrawal request submitted successfully'
         });
 
     } catch (err) {
@@ -19239,6 +19146,24 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
         });
     }
 });
+
+// Helper function to get blockchain network based on asset
+function getBlockchainNetwork(asset) {
+    const networks = {
+        'BTC': 'Bitcoin Network',
+        'ETH': 'Ethereum (ERC20)',
+        'USDT': 'Ethereum (ERC20) / TRC20',
+        'BNB': 'BSC (BEP20)',
+        'SOL': 'Solana Network',
+        'USDC': 'Ethereum (ERC20)',
+        'XRP': 'Ripple Network',
+        'DOGE': 'Dogecoin Network',
+        'SHIB': 'Ethereum (ERC20)',
+        'TRX': 'TRON (TRC20)',
+        'LTC': 'Litecoin Network'
+    };
+    return networks[asset] || 'Blockchain Network';
+}
 
 
 /**
