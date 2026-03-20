@@ -3335,13 +3335,6 @@ const calculateReferralCommissions = async (investment) => {
 
 
 
-
-
-
-
-
-
-
 // Enhanced email service with professional Bitcoin mining templates - Binance/Bybit style
 const sendAutomatedEmail = async (user, action, data = {}) => {
   try {
@@ -3356,31 +3349,29 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>Welcome to BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0A0E17 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
-                  .email-container { max-width: 600px; margin: 0 auto; background: rgba(17, 24, 39, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(0, 216, 255, 0.1); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
-                  .header { background: linear-gradient(135deg, #00D8FF 0%, #00A3CC 100%); padding: 24px 40px; text-align: center; position: relative; overflow: hidden; }
-                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%); animation: shimmer 3s infinite; }
-                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 8px; position: relative; z-index: 1; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
-                  .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
+                  body { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0B1120 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
+                  .email-container { max-width: 560px; margin: 0 auto; background: rgba(17, 25, 40, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(51, 65, 85, 0.5); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+                  .header { background: linear-gradient(165deg, rgba(0, 216, 255, 0.1) 0%, rgba(0, 163, 204, 0.05) 100%); padding: 32px 40px; text-align: center; border-bottom: 1px solid rgba(51, 65, 85, 0.5); }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 8px; }
+                  .logo-img { width: 40px; height: 40px; border-radius: 12px; border: 2px solid rgba(0, 216, 255, 0.3); }
+                  .logo-text { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 24px; font-weight: 700; background: linear-gradient(135deg, #FFFFFF 0%, #94A3B8 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: transparent; }
-                  .greeting { font-size: 24px; font-weight: 600; color: #FFFFFF; margin-bottom: 16px; }
-                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 24px; font-size: 15px; }
+                  .greeting { font-size: 20px; font-weight: 600; background: linear-gradient(135deg, #FFFFFF 0%, #E2E8F0 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 16px; }
+                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 24px; font-size: 15px; font-weight: 400; }
                   .feature-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 32px 0; }
-                  .feature-card { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); padding: 20px; border-radius: 20px; border: 1px solid rgba(0, 216, 255, 0.1); transition: all 0.3s ease; }
-                  .feature-card:hover { transform: translateY(-2px); border-color: #00D8FF; box-shadow: 0 10px 30px -10px #00D8FF; }
+                  .feature-card { background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(4px); padding: 20px; border-radius: 20px; border: 1px solid rgba(51, 65, 85, 0.5); transition: all 0.3s ease; }
+                  .feature-card:hover { border-color: #00D8FF; transform: translateY(-2px); }
                   .feature-icon { color: #00D8FF; font-size: 24px; margin-bottom: 12px; }
                   .feature-title { font-weight: 600; color: #FFFFFF; margin-bottom: 6px; font-size: 15px; }
-                  .feature-desc { color: #94A3B8; font-size: 13px; line-height: 1.5; }
-                  .divider { height: 1px; background: linear-gradient(90deg, transparent, #00D8FF, transparent); margin: 32px 0; }
-                  .cta-button { background: linear-gradient(135deg, #00D8FF, #0099CC); color: #0A0E17; padding: 14px 35px; text-decoration: none; border-radius: 40px; display: inline-block; font-weight: 600; font-size: 15px; border: none; box-shadow: 0 10px 20px -5px rgba(0, 216, 255, 0.3); transition: all 0.3s ease; }
-                  .cta-button:hover { transform: translateY(-2px); box-shadow: 0 15px 25px -5px rgba(0, 216, 255, 0.4); }
-                  .footer { padding: 30px 40px; background: rgba(5, 8, 15, 0.8); text-align: center; border-top: 1px solid rgba(0, 216, 255, 0.1); }
-                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.6; }
+                  .feature-desc { color: #64748B; font-size: 13px; line-height: 1.6; }
+                  .divider { height: 1px; background: linear-gradient(90deg, transparent, #334155, transparent); margin: 32px 0; }
+                  .cta-button { background: linear-gradient(135deg, #00D8FF, #00A3CC); color: #0B1120; padding: 14px 36px; text-decoration: none; border-radius: 40px; display: inline-block; font-weight: 600; font-size: 15px; border: none; box-shadow: 0 10px 20px -10px rgba(0, 216, 255, 0.3); transition: all 0.3s ease; }
+                  .cta-button:hover { transform: translateY(-2px); box-shadow: 0 20px 30px -10px rgba(0, 216, 255, 0.4); }
+                  .footer { padding: 32px 40px; background: rgba(11, 17, 32, 0.8); text-align: center; border-top: 1px solid rgba(51, 65, 85, 0.5); }
+                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.7; }
                   .support-link { color: #00D8FF; text-decoration: none; font-weight: 500; transition: color 0.3s ease; }
                   .support-link:hover { color: #FFFFFF; }
               </style>
@@ -3394,7 +3385,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                       </div>
                   </div>
                   <div class="content">
-                      <h2 class="greeting">Welcome, ${user.firstName || 'Valued Investor'}!</h2>
+                      <h2 class="greeting">Welcome, ${user.firstName || 'Valued Investor'}! 👋</h2>
                       <p class="message">Your account has been successfully created. You now have access to institutional-grade Bitcoin mining and investment opportunities.</p>
                       
                       <div class="feature-grid">
@@ -3421,7 +3412,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                       </div>
                       
                       <div style="text-align: center; margin: 35px 0;">
-                          <a href="https://www.bithashcapital.live/dashboard.html" class="cta-button">Go to Dashboard</a>
+                          <a href="https://www.bithashcapital.live/dashboard.html" class="cta-button">Go to Dashboard →</a>
                       </div>
                       
                       <p class="message" style="margin-bottom: 0;">Start your mining journey today and earn passive income with Bitcoin.</p>
@@ -3447,31 +3438,29 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>Login Notification - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0A0E17 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
-                  .email-container { max-width: 600px; margin: 0 auto; background: rgba(17, 24, 39, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(0, 216, 255, 0.1); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
-                  .header { background: linear-gradient(135deg, #00D8FF 0%, #00A3CC 100%); padding: 24px 40px; text-align: center; position: relative; overflow: hidden; }
-                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%); animation: shimmer 3s infinite; }
-                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 8px; position: relative; z-index: 1; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
-                  .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
+                  body { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0B1120 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
+                  .email-container { max-width: 560px; margin: 0 auto; background: rgba(17, 25, 40, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(51, 65, 85, 0.5); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+                  .header { background: linear-gradient(165deg, rgba(0, 216, 255, 0.1) 0%, rgba(0, 163, 204, 0.05) 100%); padding: 32px 40px; text-align: center; border-bottom: 1px solid rgba(51, 65, 85, 0.5); }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 8px; }
+                  .logo-img { width: 40px; height: 40px; border-radius: 12px; border: 2px solid rgba(0, 216, 255, 0.3); }
+                  .logo-text { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 24px; font-weight: 700; background: linear-gradient(135deg, #FFFFFF 0%, #94A3B8 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: transparent; }
-                  .greeting { font-size: 24px; font-weight: 600; color: #FFFFFF; margin-bottom: 16px; }
-                  .login-info { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); padding: 25px; border-radius: 24px; margin: 25px 0; border: 1px solid rgba(0, 216, 255, 0.1); }
-                  .info-row { display: flex; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid rgba(148, 163, 184, 0.1); }
-                  .info-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
-                  .info-label { width: 100px; color: #94A3B8; font-size: 14px; }
-                  .info-value { flex: 1; color: #FFFFFF; font-weight: 500; font-size: 14px; }
-                  .divider { height: 1px; background: linear-gradient(90deg, transparent, #00D8FF, transparent); margin: 30px 0; }
-                  .security-note { background: rgba(246, 70, 93, 0.1); backdrop-filter: blur(5px); border: 1px solid rgba(246, 70, 93, 0.3); padding: 20px; border-radius: 20px; margin: 25px 0; color: #f6465d; font-size: 14px; }
-                  .footer { padding: 30px 40px; background: rgba(5, 8, 15, 0.8); text-align: center; border-top: 1px solid rgba(0, 216, 255, 0.1); }
-                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.6; }
+                  .greeting { font-size: 20px; font-weight: 600; background: linear-gradient(135deg, #FFFFFF 0%, #E2E8F0 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 16px; }
+                  .login-info { background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(4px); padding: 28px; border-radius: 24px; margin: 25px 0; border: 1px solid rgba(51, 65, 85, 0.5); }
+                  .info-row { display: flex; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid rgba(51, 65, 85, 0.5); }
+                  .info-row:last-child { border-bottom: none; padding-bottom: 0; margin-bottom: 0; }
+                  .info-label { width: 100px; color: #94A3B8; font-size: 14px; font-weight: 500; }
+                  .info-value { flex: 1; color: #FFFFFF; font-weight: 600; font-size: 14px; }
+                  .divider { height: 1px; background: linear-gradient(90deg, transparent, #334155, transparent); margin: 30px 0; }
+                  .security-note { background: rgba(246, 70, 93, 0.1); border: 1px solid rgba(246, 70, 93, 0.3); padding: 20px; border-radius: 20px; margin: 25px 0; color: #f6465d; font-size: 14px; backdrop-filter: blur(4px); }
+                  .footer { padding: 32px 40px; background: rgba(11, 17, 32, 0.8); text-align: center; border-top: 1px solid rgba(51, 65, 85, 0.5); }
+                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.7; }
                   .support-link { color: #00D8FF; text-decoration: none; font-weight: 500; transition: color 0.3s ease; }
                   .support-link:hover { color: #FFFFFF; }
-                  .device-badge { display: inline-block; background: rgba(31, 41, 55, 0.8); padding: 6px 14px; border-radius: 30px; font-size: 12px; color: #94A3B8; border: 1px solid rgba(0, 216, 255, 0.2); }
+                  .device-badge { display: inline-block; background: rgba(51, 65, 85, 0.8); padding: 4px 12px; border-radius: 40px; font-size: 12px; color: #FFFFFF; font-weight: 500; }
               </style>
           </head>
           <body>
@@ -3532,27 +3521,24 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>Verification Code - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0A0E17 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
-                  .email-container { max-width: 600px; margin: 0 auto; background: rgba(17, 24, 39, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(0, 216, 255, 0.1); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
-                  .header { background: linear-gradient(135deg, #00D8FF 0%, #00A3CC 100%); padding: 24px 40px; text-align: center; position: relative; overflow: hidden; }
-                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%); animation: shimmer 3s infinite; }
-                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 8px; position: relative; z-index: 1; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
-                  .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
+                  body { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0B1120 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
+                  .email-container { max-width: 560px; margin: 0 auto; background: rgba(17, 25, 40, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(51, 65, 85, 0.5); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+                  .header { background: linear-gradient(165deg, rgba(0, 216, 255, 0.1) 0%, rgba(0, 163, 204, 0.05) 100%); padding: 32px 40px; text-align: center; border-bottom: 1px solid rgba(51, 65, 85, 0.5); }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 8px; }
+                  .logo-img { width: 40px; height: 40px; border-radius: 12px; border: 2px solid rgba(0, 216, 255, 0.3); }
+                  .logo-text { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 24px; font-weight: 700; background: linear-gradient(135deg, #FFFFFF 0%, #94A3B8 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: transparent; }
-                  .greeting { font-size: 24px; font-weight: 600; color: #FFFFFF; margin-bottom: 16px; }
-                  .otp-code { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); padding: 30px; font-size: 48px; font-weight: 700; text-align: center; letter-spacing: 16px; margin: 30px 0; border-radius: 24px; border: 2px dashed #00D8FF; color: #00D8FF; font-family: 'Courier New', monospace; box-shadow: 0 0 30px rgba(0, 216, 255, 0.2); }
-                  .copy-btn { background: rgba(31, 41, 55, 0.8); color: #FFFFFF; border: none; padding: 8px 20px; border-radius: 30px; font-size: 14px; cursor: pointer; margin-left: 10px; border: 1px solid #00D8FF; transition: all 0.3s ease; }
-                  .copy-btn:hover { background: #00D8FF; color: #0A0E17; }
-                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 25px; font-size: 15px; }
-                  .security-note { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); border: 1px solid rgba(255, 255, 255, 0.1); padding: 20px; border-radius: 20px; margin: 25px 0; }
+                  .greeting { font-size: 20px; font-weight: 600; background: linear-gradient(135deg, #FFFFFF 0%, #E2E8F0 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 16px; }
+                  .otp-code { background: rgba(0, 216, 255, 0.1); backdrop-filter: blur(4px); padding: 28px; font-size: 42px; font-weight: 700; text-align: center; letter-spacing: 16px; margin: 30px 0; border-radius: 24px; border: 2px solid rgba(0, 216, 255, 0.3); color: #00D8FF; font-family: 'Courier New', monospace; box-shadow: 0 10px 30px -15px rgba(0, 216, 255, 0.3); }
+                  .copy-btn { background: #1F2937; color: #FFFFFF; border: none; padding: 8px 20px; border-radius: 6px; font-size: 14px; cursor: pointer; margin-left: 10px; }
+                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 24px; font-size: 15px; }
+                  .security-note { background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(4px); border: 1px solid rgba(246, 70, 93, 0.3); padding: 24px; border-radius: 20px; margin: 25px 0; }
                   .security-note p { color: #f6465d; font-size: 14px; }
-                  .footer { padding: 30px 40px; background: rgba(5, 8, 15, 0.8); text-align: center; border-top: 1px solid rgba(0, 216, 255, 0.1); }
-                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.6; }
+                  .footer { padding: 32px 40px; background: rgba(11, 17, 32, 0.8); text-align: center; border-top: 1px solid rgba(51, 65, 85, 0.5); }
+                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.7; }
               </style>
           </head>
           <body>
@@ -3595,26 +3581,24 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>Password Reset - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0A0E17 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
-                  .email-container { max-width: 600px; margin: 0 auto; background: rgba(17, 24, 39, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(0, 216, 255, 0.1); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
-                  .header { background: linear-gradient(135deg, #00D8FF 0%, #00A3CC 100%); padding: 24px 40px; text-align: center; position: relative; overflow: hidden; }
-                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%); animation: shimmer 3s infinite; }
-                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 8px; position: relative; z-index: 1; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
-                  .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
+                  body { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0B1120 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
+                  .email-container { max-width: 560px; margin: 0 auto; background: rgba(17, 25, 40, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(51, 65, 85, 0.5); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+                  .header { background: linear-gradient(165deg, rgba(0, 216, 255, 0.1) 0%, rgba(0, 163, 204, 0.05) 100%); padding: 32px 40px; text-align: center; border-bottom: 1px solid rgba(51, 65, 85, 0.5); }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 8px; }
+                  .logo-img { width: 40px; height: 40px; border-radius: 12px; border: 2px solid rgba(0, 216, 255, 0.3); }
+                  .logo-text { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 24px; font-weight: 700; background: linear-gradient(135deg, #FFFFFF 0%, #94A3B8 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: transparent; }
-                  .greeting { font-size: 24px; font-weight: 600; color: #FFFFFF; margin-bottom: 16px; }
-                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 25px; font-size: 15px; }
-                  .reset-button { background: linear-gradient(135deg, #00D8FF, #0099CC); color: #0A0E17; padding: 14px 35px; text-decoration: none; border-radius: 40px; display: inline-block; margin: 25px 0; font-weight: 600; font-size: 15px; box-shadow: 0 10px 20px -5px rgba(0, 216, 255, 0.3); transition: all 0.3s ease; }
-                  .reset-button:hover { transform: translateY(-2px); box-shadow: 0 15px 25px -5px rgba(0, 216, 255, 0.4); }
-                  .security-note { background: rgba(246, 70, 93, 0.1); backdrop-filter: blur(5px); border: 1px solid rgba(246, 70, 93, 0.3); padding: 20px; border-radius: 20px; margin: 25px 0; }
+                  .greeting { font-size: 20px; font-weight: 600; background: linear-gradient(135deg, #FFFFFF 0%, #E2E8F0 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 16px; }
+                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 24px; font-size: 15px; }
+                  .reset-button { background: linear-gradient(135deg, #00D8FF, #00A3CC); color: #0B1120; padding: 14px 36px; text-decoration: none; border-radius: 40px; display: inline-block; margin: 25px 0; font-weight: 600; font-size: 15px; box-shadow: 0 10px 20px -10px rgba(0, 216, 255, 0.3); transition: all 0.3s ease; }
+                  .reset-button:hover { transform: translateY(-2px); box-shadow: 0 20px 30px -10px rgba(0, 216, 255, 0.4); }
+                  .security-note { background: rgba(246, 70, 93, 0.1); border: 1px solid rgba(246, 70, 93, 0.3); padding: 24px; border-radius: 20px; margin: 25px 0; backdrop-filter: blur(4px); }
                   .security-note p { color: #f6465d; font-size: 14px; }
-                  .footer { padding: 30px 40px; background: rgba(5, 8, 15, 0.8); text-align: center; border-top: 1px solid rgba(0, 216, 255, 0.1); }
-                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.6; }
+                  .footer { padding: 32px 40px; background: rgba(11, 17, 32, 0.8); text-align: center; border-top: 1px solid rgba(51, 65, 85, 0.5); }
+                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.7; }
               </style>
           </head>
           <body>
@@ -3630,7 +3614,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                       <p class="message">We received a request to reset your BitHash Capital account password.</p>
                       
                       <div style="text-align: center;">
-                          <a href="${data.resetUrl}" class="reset-button">Reset Password</a>
+                          <a href="${data.resetUrl}" class="reset-button">Reset Password →</a>
                       </div>
                       
                       <p class="message">This password reset link will expire in 60 minutes.</p>
@@ -3659,26 +3643,24 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>Password Changed - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0A0E17 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
-                  .email-container { max-width: 600px; margin: 0 auto; background: rgba(17, 24, 39, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(2, 192, 118, 0.1); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
-                  .header { background: linear-gradient(135deg, #02c076 0%, #019e5f 100%); padding: 24px 40px; text-align: center; position: relative; overflow: hidden; }
-                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%); animation: shimmer 3s infinite; }
-                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 8px; position: relative; z-index: 1; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
-                  .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
+                  body { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0B1120 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
+                  .email-container { max-width: 560px; margin: 0 auto; background: rgba(17, 25, 40, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(51, 65, 85, 0.5); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+                  .header { background: linear-gradient(165deg, rgba(2, 192, 118, 0.1) 0%, rgba(1, 158, 95, 0.05) 100%); padding: 32px 40px; text-align: center; border-bottom: 1px solid rgba(51, 65, 85, 0.5); }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 8px; }
+                  .logo-img { width: 40px; height: 40px; border-radius: 12px; border: 2px solid rgba(2, 192, 118, 0.3); }
+                  .logo-text { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 24px; font-weight: 700; background: linear-gradient(135deg, #FFFFFF 0%, #94A3B8 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: transparent; }
-                  .greeting { font-size: 24px; font-weight: 600; color: #FFFFFF; margin-bottom: 16px; }
-                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 25px; font-size: 15px; }
-                  .success-icon { text-align: center; font-size: 64px; margin: 20px 0; color: #02c076; filter: drop-shadow(0 10px 20px rgba(2, 192, 118, 0.3)); }
-                  .info-box { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); padding: 25px; border-radius: 24px; border: 1px solid rgba(2, 192, 118, 0.1); margin: 25px 0; }
-                  .info-box p { color: #FFFFFF; font-size: 14px; margin-bottom: 10px; }
+                  .greeting { font-size: 20px; font-weight: 600; background: linear-gradient(135deg, #FFFFFF 0%, #E2E8F0 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 16px; }
+                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 24px; font-size: 15px; }
+                  .success-icon { text-align: center; font-size: 52px; margin: 20px 0; color: #02c076; filter: drop-shadow(0 10px 20px rgba(2, 192, 118, 0.3)); }
+                  .info-box { background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(4px); padding: 24px; border-radius: 20px; border: 1px solid rgba(51, 65, 85, 0.5); margin: 25px 0; }
+                  .info-box p { color: #FFFFFF; font-size: 14px; margin-bottom: 12px; }
                   .info-box p:last-child { margin-bottom: 0; }
-                  .footer { padding: 30px 40px; background: rgba(5, 8, 15, 0.8); text-align: center; border-top: 1px solid rgba(2, 192, 118, 0.1); }
-                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.6; }
+                  .footer { padding: 32px 40px; background: rgba(11, 17, 32, 0.8); text-align: center; border-top: 1px solid rgba(51, 65, 85, 0.5); }
+                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.7; }
               </style>
           </head>
           <body>
@@ -3690,7 +3672,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                       </div>
                   </div>
                   <div class="content">
-                      <div class="success-icon">✅</div>
+                      <div class="success-icon">✓</div>
                       <h2 class="greeting" style="text-align: center;">Password Changed Successfully</h2>
                       <p class="message" style="text-align: center;">Hello ${user.firstName || 'there'}, your BitHash Capital account password has been changed.</p>
                       
@@ -3722,29 +3704,27 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>Investment Confirmation - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0A0E17 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
-                  .email-container { max-width: 600px; margin: 0 auto; background: rgba(17, 24, 39, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(0, 216, 255, 0.1); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
-                  .header { background: linear-gradient(135deg, #00D8FF 0%, #00A3CC 100%); padding: 24px 40px; text-align: center; position: relative; overflow: hidden; }
-                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%); animation: shimmer 3s infinite; }
-                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 8px; position: relative; z-index: 1; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
-                  .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
+                  body { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0B1120 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
+                  .email-container { max-width: 560px; margin: 0 auto; background: rgba(17, 25, 40, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(51, 65, 85, 0.5); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+                  .header { background: linear-gradient(165deg, rgba(0, 216, 255, 0.1) 0%, rgba(0, 163, 204, 0.05) 100%); padding: 32px 40px; text-align: center; border-bottom: 1px solid rgba(51, 65, 85, 0.5); }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 8px; }
+                  .logo-img { width: 40px; height: 40px; border-radius: 12px; border: 2px solid rgba(0, 216, 255, 0.3); }
+                  .logo-text { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 24px; font-weight: 700; background: linear-gradient(135deg, #FFFFFF 0%, #94A3B8 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: transparent; }
-                  .greeting { font-size: 24px; font-weight: 600; color: #FFFFFF; margin-bottom: 16px; }
-                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 25px; font-size: 15px; }
-                  .investment-details { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); padding: 25px; border-radius: 24px; margin: 25px 0; border: 1px solid rgba(0, 216, 255, 0.1); }
-                  .detail-row { display: flex; justify-content: space-between; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid rgba(148, 163, 184, 0.1); }
-                  .detail-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
-                  .detail-label { color: #94A3B8; font-size: 14px; }
+                  .greeting { font-size: 20px; font-weight: 600; background: linear-gradient(135deg, #FFFFFF 0%, #E2E8F0 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 16px; }
+                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 24px; font-size: 15px; }
+                  .investment-details { background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(4px); padding: 28px; border-radius: 24px; margin: 25px 0; border: 1px solid rgba(51, 65, 85, 0.5); }
+                  .detail-row { display: flex; justify-content: space-between; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid rgba(51, 65, 85, 0.5); }
+                  .detail-row:last-child { border-bottom: none; padding-bottom: 0; margin-bottom: 0; }
+                  .detail-label { color: #94A3B8; font-size: 14px; font-weight: 500; }
                   .detail-value { color: #FFFFFF; font-weight: 600; font-size: 16px; }
-                  .cta-button { background: linear-gradient(135deg, #00D8FF, #0099CC); color: #0A0E17; padding: 14px 35px; text-decoration: none; border-radius: 40px; display: inline-block; font-weight: 600; font-size: 15px; box-shadow: 0 10px 20px -5px rgba(0, 216, 255, 0.3); transition: all 0.3s ease; }
-                  .cta-button:hover { transform: translateY(-2px); box-shadow: 0 15px 25px -5px rgba(0, 216, 255, 0.4); }
-                  .footer { padding: 30px 40px; background: rgba(5, 8, 15, 0.8); text-align: center; border-top: 1px solid rgba(0, 216, 255, 0.1); }
-                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.6; }
+                  .cta-button { background: linear-gradient(135deg, #00D8FF, #00A3CC); color: #0B1120; padding: 14px 36px; text-decoration: none; border-radius: 40px; display: inline-block; font-weight: 600; font-size: 15px; box-shadow: 0 10px 20px -10px rgba(0, 216, 255, 0.3); transition: all 0.3s ease; }
+                  .cta-button:hover { transform: translateY(-2px); box-shadow: 0 20px 30px -10px rgba(0, 216, 255, 0.4); }
+                  .footer { padding: 32px 40px; background: rgba(11, 17, 32, 0.8); text-align: center; border-top: 1px solid rgba(51, 65, 85, 0.5); }
+                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.7; }
               </style>
           </head>
           <body>
@@ -3787,7 +3767,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                       </div>
                       
                       <div style="text-align: center;">
-                          <a href="https://www.bithashcapital.live/dashboard.html" class="cta-button">Track Investment</a>
+                          <a href="https://www.bithashcapital.live/dashboard.html" class="cta-button">Track Investment →</a>
                       </div>
                   </div>
                   <div class="footer">
@@ -3809,28 +3789,26 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>Investment Matured - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0A0E17 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
-                  .email-container { max-width: 600px; margin: 0 auto; background: rgba(17, 24, 39, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(2, 192, 118, 0.1); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
-                  .header { background: linear-gradient(135deg, #02c076 0%, #019e5f 100%); padding: 24px 40px; text-align: center; position: relative; overflow: hidden; }
-                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%); animation: shimmer 3s infinite; }
-                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 8px; position: relative; z-index: 1; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
-                  .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
+                  body { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0B1120 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
+                  .email-container { max-width: 560px; margin: 0 auto; background: rgba(17, 25, 40, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(51, 65, 85, 0.5); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+                  .header { background: linear-gradient(165deg, rgba(2, 192, 118, 0.1) 0%, rgba(1, 158, 95, 0.05) 100%); padding: 32px 40px; text-align: center; border-bottom: 1px solid rgba(51, 65, 85, 0.5); }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 8px; }
+                  .logo-img { width: 40px; height: 40px; border-radius: 12px; border: 2px solid rgba(2, 192, 118, 0.3); }
+                  .logo-text { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 24px; font-weight: 700; background: linear-gradient(135deg, #FFFFFF 0%, #94A3B8 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: transparent; }
-                  .greeting { font-size: 24px; font-weight: 600; color: #FFFFFF; margin-bottom: 16px; }
-                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 25px; font-size: 15px; }
-                  .success-box { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); padding: 30px; border-radius: 24px; text-align: center; border: 2px solid #02c076; margin: 25px 0; box-shadow: 0 0 30px rgba(2, 192, 118, 0.2); }
-                  .profit-amount { font-size: 56px; font-weight: 700; color: #02c076; margin: 15px 0; text-shadow: 0 0 20px rgba(2, 192, 118, 0.5); }
+                  .greeting { font-size: 20px; font-weight: 600; background: linear-gradient(135deg, #FFFFFF 0%, #E2E8F0 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 16px; }
+                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 24px; font-size: 15px; }
+                  .success-box { background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(4px); padding: 32px; border-radius: 24px; text-align: center; border: 2px solid rgba(2, 192, 118, 0.3); margin: 25px 0; }
+                  .profit-amount { font-size: 48px; font-weight: 700; background: linear-gradient(135deg, #02c076, #00f08a); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin: 15px 0; }
                   .profit-label { color: #94A3B8; font-size: 14px; }
                   .detail-row { display: flex; justify-content: space-between; margin-bottom: 15px; }
                   .detail-label { color: #94A3B8; font-size: 14px; }
                   .detail-value { color: #FFFFFF; font-weight: 600; font-size: 16px; }
-                  .footer { padding: 30px 40px; background: rgba(5, 8, 15, 0.8); text-align: center; border-top: 1px solid rgba(2, 192, 118, 0.1); }
-                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.6; }
+                  .footer { padding: 32px 40px; background: rgba(11, 17, 32, 0.8); text-align: center; border-top: 1px solid rgba(51, 65, 85, 0.5); }
+                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.7; }
               </style>
           </head>
           <body>
@@ -3842,7 +3820,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                       </div>
                   </div>
                   <div class="content">
-                      <h2 class="greeting">Congratulations ${user.firstName || 'there'}!</h2>
+                      <h2 class="greeting">Congratulations ${user.firstName || 'there'}! 🎉</h2>
                       <p class="message">Your investment has successfully matured. Your returns have been credited to your matured balance.</p>
                       
                       <div class="success-box">
@@ -3851,7 +3829,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                           <div class="profit-label">Profit Earned: $${data.profit?.toFixed(2) || '0.00'}</div>
                       </div>
                       
-                      <div style="background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); padding: 20px; border-radius: 20px; border: 1px solid rgba(2, 192, 118, 0.1);">
+                      <div style="background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(4px); padding: 20px; border-radius: 20px; border: 1px solid rgba(51, 65, 85, 0.5);">
                           <div class="detail-row">
                               <span class="detail-label">Plan:</span>
                               <span class="detail-value">${data.planName || 'Standard Plan'}</span>
@@ -3885,27 +3863,25 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>Deposit Received - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0A0E17 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
-                  .email-container { max-width: 600px; margin: 0 auto; background: rgba(17, 24, 39, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(2, 192, 118, 0.1); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
-                  .header { background: linear-gradient(135deg, #02c076 0%, #019e5f 100%); padding: 24px 40px; text-align: center; position: relative; overflow: hidden; }
-                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%); animation: shimmer 3s infinite; }
-                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 8px; position: relative; z-index: 1; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
-                  .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
+                  body { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0B1120 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
+                  .email-container { max-width: 560px; margin: 0 auto; background: rgba(17, 25, 40, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(51, 65, 85, 0.5); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+                  .header { background: linear-gradient(165deg, rgba(2, 192, 118, 0.1) 0%, rgba(1, 158, 95, 0.05) 100%); padding: 32px 40px; text-align: center; border-bottom: 1px solid rgba(51, 65, 85, 0.5); }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 8px; }
+                  .logo-img { width: 40px; height: 40px; border-radius: 12px; border: 2px solid rgba(2, 192, 118, 0.3); }
+                  .logo-text { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 24px; font-weight: 700; background: linear-gradient(135deg, #FFFFFF 0%, #94A3B8 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: transparent; }
-                  .greeting { font-size: 24px; font-weight: 600; color: #FFFFFF; margin-bottom: 16px; }
-                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 25px; font-size: 15px; }
-                  .deposit-details { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); padding: 25px; border-radius: 24px; margin: 25px 0; border: 1px solid rgba(2, 192, 118, 0.1); }
-                  .detail-row { display: flex; justify-content: space-between; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid rgba(148, 163, 184, 0.1); }
-                  .detail-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
-                  .detail-label { color: #94A3B8; font-size: 14px; }
+                  .greeting { font-size: 20px; font-weight: 600; background: linear-gradient(135deg, #FFFFFF 0%, #E2E8F0 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 16px; }
+                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 24px; font-size: 15px; }
+                  .deposit-details { background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(4px); padding: 28px; border-radius: 24px; margin: 25px 0; border: 1px solid rgba(51, 65, 85, 0.5); }
+                  .detail-row { display: flex; justify-content: space-between; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid rgba(51, 65, 85, 0.5); }
+                  .detail-row:last-child { border-bottom: none; padding-bottom: 0; margin-bottom: 0; }
+                  .detail-label { color: #94A3B8; font-size: 14px; font-weight: 500; }
                   .detail-value { color: #FFFFFF; font-weight: 600; font-size: 16px; }
-                  .footer { padding: 30px 40px; background: rgba(5, 8, 15, 0.8); text-align: center; border-top: 1px solid rgba(2, 192, 118, 0.1); }
-                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.6; }
+                  .footer { padding: 32px 40px; background: rgba(11, 17, 32, 0.8); text-align: center; border-top: 1px solid rgba(51, 65, 85, 0.5); }
+                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.7; }
               </style>
           </head>
           <body>
@@ -3960,28 +3936,26 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>Withdrawal Request - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0A0E17 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
-                  .email-container { max-width: 600px; margin: 0 auto; background: rgba(17, 24, 39, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(0, 216, 255, 0.1); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
-                  .header { background: linear-gradient(135deg, #00D8FF 0%, #00A3CC 100%); padding: 24px 40px; text-align: center; position: relative; overflow: hidden; }
-                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%); animation: shimmer 3s infinite; }
-                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 8px; position: relative; z-index: 1; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
-                  .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
+                  body { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0B1120 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
+                  .email-container { max-width: 560px; margin: 0 auto; background: rgba(17, 25, 40, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(51, 65, 85, 0.5); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+                  .header { background: linear-gradient(165deg, rgba(0, 216, 255, 0.1) 0%, rgba(0, 163, 204, 0.05) 100%); padding: 32px 40px; text-align: center; border-bottom: 1px solid rgba(51, 65, 85, 0.5); }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 8px; }
+                  .logo-img { width: 40px; height: 40px; border-radius: 12px; border: 2px solid rgba(0, 216, 255, 0.3); }
+                  .logo-text { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 24px; font-weight: 700; background: linear-gradient(135deg, #FFFFFF 0%, #94A3B8 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: transparent; }
-                  .greeting { font-size: 24px; font-weight: 600; color: #FFFFFF; margin-bottom: 16px; }
-                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 25px; font-size: 15px; }
-                  .withdrawal-details { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); padding: 25px; border-radius: 24px; margin: 25px 0; border: 1px solid rgba(0, 216, 255, 0.1); }
-                  .detail-row { display: flex; justify-content: space-between; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid rgba(148, 163, 184, 0.1); }
-                  .detail-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
-                  .detail-label { color: #94A3B8; font-size: 14px; }
+                  .greeting { font-size: 20px; font-weight: 600; background: linear-gradient(135deg, #FFFFFF 0%, #E2E8F0 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 16px; }
+                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 24px; font-size: 15px; }
+                  .withdrawal-details { background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(4px); padding: 28px; border-radius: 24px; margin: 25px 0; border: 1px solid rgba(51, 65, 85, 0.5); }
+                  .detail-row { display: flex; justify-content: space-between; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid rgba(51, 65, 85, 0.5); }
+                  .detail-row:last-child { border-bottom: none; padding-bottom: 0; margin-bottom: 0; }
+                  .detail-label { color: #94A3B8; font-size: 14px; font-weight: 500; }
                   .detail-value { color: #FFFFFF; font-weight: 600; font-size: 16px; }
-                  .processing-info { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); border-left: 4px solid #00D8FF; padding: 15px; border-radius: 16px; margin: 20px 0; }
-                  .footer { padding: 30px 40px; background: rgba(5, 8, 15, 0.8); text-align: center; border-top: 1px solid rgba(0, 216, 255, 0.1); }
-                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.6; }
+                  .processing-info { background: rgba(30, 41, 59, 0.8); backdrop-filter: blur(4px); border-left: 4px solid #00D8FF; padding: 20px; border-radius: 16px; margin: 20px 0; }
+                  .footer { padding: 32px 40px; background: rgba(11, 17, 32, 0.8); text-align: center; border-top: 1px solid rgba(51, 65, 85, 0.5); }
+                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.7; }
               </style>
           </head>
           <body>
@@ -4042,24 +4016,22 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>Withdrawal Approved - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0A0E17 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
-                  .email-container { max-width: 600px; margin: 0 auto; background: rgba(17, 24, 39, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(2, 192, 118, 0.1); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
-                  .header { background: linear-gradient(135deg, #02c076 0%, #019e5f 100%); padding: 24px 40px; text-align: center; position: relative; overflow: hidden; }
-                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%); animation: shimmer 3s infinite; }
-                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 8px; position: relative; z-index: 1; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
-                  .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
+                  body { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0B1120 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
+                  .email-container { max-width: 560px; margin: 0 auto; background: rgba(17, 25, 40, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(51, 65, 85, 0.5); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+                  .header { background: linear-gradient(165deg, rgba(2, 192, 118, 0.1) 0%, rgba(1, 158, 95, 0.05) 100%); padding: 32px 40px; text-align: center; border-bottom: 1px solid rgba(51, 65, 85, 0.5); }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 8px; }
+                  .logo-img { width: 40px; height: 40px; border-radius: 12px; border: 2px solid rgba(2, 192, 118, 0.3); }
+                  .logo-text { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 24px; font-weight: 700; background: linear-gradient(135deg, #FFFFFF 0%, #94A3B8 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: transparent; }
-                  .greeting { font-size: 24px; font-weight: 600; color: #FFFFFF; margin-bottom: 16px; }
-                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 25px; font-size: 15px; }
-                  .approved-box { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); padding: 30px; border-radius: 24px; text-align: center; border: 2px solid #02c076; margin: 25px 0; box-shadow: 0 0 30px rgba(2, 192, 118, 0.2); }
-                  .approved-amount { font-size: 48px; font-weight: 700; color: #02c076; margin: 15px 0; text-shadow: 0 0 20px rgba(2, 192, 118, 0.5); }
-                  .footer { padding: 30px 40px; background: rgba(5, 8, 15, 0.8); text-align: center; border-top: 1px solid rgba(2, 192, 118, 0.1); }
-                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.6; }
+                  .greeting { font-size: 20px; font-weight: 600; background: linear-gradient(135deg, #FFFFFF 0%, #E2E8F0 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 16px; }
+                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 24px; font-size: 15px; }
+                  .approved-box { background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(4px); padding: 32px; border-radius: 24px; text-align: center; border: 2px solid rgba(2, 192, 118, 0.3); margin: 25px 0; }
+                  .approved-amount { font-size: 42px; font-weight: 700; background: linear-gradient(135deg, #02c076, #00f08a); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin: 15px 0; }
+                  .footer { padding: 32px 40px; background: rgba(11, 17, 32, 0.8); text-align: center; border-top: 1px solid rgba(51, 65, 85, 0.5); }
+                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.7; }
               </style>
           </head>
           <body>
@@ -4101,25 +4073,23 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>Withdrawal Update - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0A0E17 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
-                  .email-container { max-width: 600px; margin: 0 auto; background: rgba(17, 24, 39, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(246, 70, 93, 0.1); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
-                  .header { background: linear-gradient(135deg, #f6465d 0%, #d13b4f 100%); padding: 24px 40px; text-align: center; position: relative; overflow: hidden; }
-                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%); animation: shimmer 3s infinite; }
-                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 8px; position: relative; z-index: 1; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
-                  .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
+                  body { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0B1120 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
+                  .email-container { max-width: 560px; margin: 0 auto; background: rgba(17, 25, 40, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(51, 65, 85, 0.5); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+                  .header { background: linear-gradient(165deg, rgba(246, 70, 93, 0.1) 0%, rgba(209, 59, 79, 0.05) 100%); padding: 32px 40px; text-align: center; border-bottom: 1px solid rgba(51, 65, 85, 0.5); }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 8px; }
+                  .logo-img { width: 40px; height: 40px; border-radius: 12px; border: 2px solid rgba(246, 70, 93, 0.3); }
+                  .logo-text { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 24px; font-weight: 700; background: linear-gradient(135deg, #FFFFFF 0%, #94A3B8 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: transparent; }
-                  .greeting { font-size: 24px; font-weight: 600; color: #FFFFFF; margin-bottom: 16px; }
-                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 25px; font-size: 15px; }
-                  .rejection-box { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); padding: 25px; border-radius: 24px; border-left: 4px solid #f6465d; margin: 25px 0; }
+                  .greeting { font-size: 20px; font-weight: 600; background: linear-gradient(135deg, #FFFFFF 0%, #E2E8F0 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 16px; }
+                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 24px; font-size: 15px; }
+                  .rejection-box { background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(4px); padding: 25px; border-radius: 24px; border-left: 4px solid #f6465d; margin: 25px 0; }
                   .rejection-reason { color: #f6465d; font-size: 15px; margin-bottom: 10px; }
-                  .refund-info { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); border: 1px solid rgba(255, 255, 255, 0.1); padding: 20px; border-radius: 20px; margin: 25px 0; }
-                  .footer { padding: 30px 40px; background: rgba(5, 8, 15, 0.8); text-align: center; border-top: 1px solid rgba(246, 70, 93, 0.1); }
-                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.6; }
+                  .refund-info { background: rgba(30, 41, 59, 0.8); backdrop-filter: blur(4px); border: 1px solid rgba(51, 65, 85, 0.5); padding: 20px; border-radius: 16px; margin: 25px 0; }
+                  .footer { padding: 32px 40px; background: rgba(11, 17, 32, 0.8); text-align: center; border-top: 1px solid rgba(51, 65, 85, 0.5); }
+                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.7; }
               </style>
           </head>
           <body>
@@ -4163,24 +4133,22 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>Deposit Approved - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0A0E17 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
-                  .email-container { max-width: 600px; margin: 0 auto; background: rgba(17, 24, 39, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(2, 192, 118, 0.1); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
-                  .header { background: linear-gradient(135deg, #02c076 0%, #019e5f 100%); padding: 24px 40px; text-align: center; position: relative; overflow: hidden; }
-                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%); animation: shimmer 3s infinite; }
-                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 8px; position: relative; z-index: 1; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
-                  .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
+                  body { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0B1120 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
+                  .email-container { max-width: 560px; margin: 0 auto; background: rgba(17, 25, 40, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(51, 65, 85, 0.5); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+                  .header { background: linear-gradient(165deg, rgba(2, 192, 118, 0.1) 0%, rgba(1, 158, 95, 0.05) 100%); padding: 32px 40px; text-align: center; border-bottom: 1px solid rgba(51, 65, 85, 0.5); }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 8px; }
+                  .logo-img { width: 40px; height: 40px; border-radius: 12px; border: 2px solid rgba(2, 192, 118, 0.3); }
+                  .logo-text { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 24px; font-weight: 700; background: linear-gradient(135deg, #FFFFFF 0%, #94A3B8 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: transparent; }
-                  .greeting { font-size: 24px; font-weight: 600; color: #FFFFFF; margin-bottom: 16px; }
-                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 25px; font-size: 15px; }
-                  .approved-box { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); padding: 30px; border-radius: 24px; text-align: center; border: 2px solid #02c076; margin: 25px 0; box-shadow: 0 0 30px rgba(2, 192, 118, 0.2); }
-                  .approved-amount { font-size: 48px; font-weight: 700; color: #02c076; margin: 15px 0; text-shadow: 0 0 20px rgba(2, 192, 118, 0.5); }
-                  .footer { padding: 30px 40px; background: rgba(5, 8, 15, 0.8); text-align: center; border-top: 1px solid rgba(2, 192, 118, 0.1); }
-                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.6; }
+                  .greeting { font-size: 20px; font-weight: 600; background: linear-gradient(135deg, #FFFFFF 0%, #E2E8F0 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 16px; }
+                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 24px; font-size: 15px; }
+                  .approved-box { background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(4px); padding: 32px; border-radius: 24px; text-align: center; border: 2px solid rgba(2, 192, 118, 0.3); margin: 25px 0; }
+                  .approved-amount { font-size: 42px; font-weight: 700; background: linear-gradient(135deg, #02c076, #00f08a); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin: 15px 0; }
+                  .footer { padding: 32px 40px; background: rgba(11, 17, 32, 0.8); text-align: center; border-top: 1px solid rgba(51, 65, 85, 0.5); }
+                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.7; }
               </style>
           </head>
           <body>
@@ -4222,24 +4190,22 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>Deposit Update - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0A0E17 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
-                  .email-container { max-width: 600px; margin: 0 auto; background: rgba(17, 24, 39, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(246, 70, 93, 0.1); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
-                  .header { background: linear-gradient(135deg, #f6465d 0%, #d13b4f 100%); padding: 24px 40px; text-align: center; position: relative; overflow: hidden; }
-                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%); animation: shimmer 3s infinite; }
-                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 8px; position: relative; z-index: 1; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
-                  .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
+                  body { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0B1120 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
+                  .email-container { max-width: 560px; margin: 0 auto; background: rgba(17, 25, 40, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(51, 65, 85, 0.5); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+                  .header { background: linear-gradient(165deg, rgba(246, 70, 93, 0.1) 0%, rgba(209, 59, 79, 0.05) 100%); padding: 32px 40px; text-align: center; border-bottom: 1px solid rgba(51, 65, 85, 0.5); }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 8px; }
+                  .logo-img { width: 40px; height: 40px; border-radius: 12px; border: 2px solid rgba(246, 70, 93, 0.3); }
+                  .logo-text { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 24px; font-weight: 700; background: linear-gradient(135deg, #FFFFFF 0%, #94A3B8 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: transparent; }
-                  .greeting { font-size: 24px; font-weight: 600; color: #FFFFFF; margin-bottom: 16px; }
-                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 25px; font-size: 15px; }
-                  .rejection-box { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); padding: 25px; border-radius: 24px; border-left: 4px solid #f6465d; margin: 25px 0; }
+                  .greeting { font-size: 20px; font-weight: 600; background: linear-gradient(135deg, #FFFFFF 0%, #E2E8F0 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 16px; }
+                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 24px; font-size: 15px; }
+                  .rejection-box { background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(4px); padding: 25px; border-radius: 24px; border-left: 4px solid #f6465d; margin: 25px 0; }
                   .rejection-reason { color: #f6465d; font-size: 15px; margin-bottom: 10px; }
-                  .footer { padding: 30px 40px; background: rgba(5, 8, 15, 0.8); text-align: center; border-top: 1px solid rgba(246, 70, 93, 0.1); }
-                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.6; }
+                  .footer { padding: 32px 40px; background: rgba(11, 17, 32, 0.8); text-align: center; border-top: 1px solid rgba(51, 65, 85, 0.5); }
+                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.7; }
               </style>
           </head>
           <body>
@@ -4279,24 +4245,22 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>KYC Submission - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0A0E17 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
-                  .email-container { max-width: 600px; margin: 0 auto; background: rgba(17, 24, 39, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(0, 216, 255, 0.1); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
-                  .header { background: linear-gradient(135deg, #00D8FF 0%, #00A3CC 100%); padding: 24px 40px; text-align: center; position: relative; overflow: hidden; }
-                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%); animation: shimmer 3s infinite; }
-                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 8px; position: relative; z-index: 1; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
-                  .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
+                  body { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0B1120 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
+                  .email-container { max-width: 560px; margin: 0 auto; background: rgba(17, 25, 40, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(51, 65, 85, 0.5); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+                  .header { background: linear-gradient(165deg, rgba(0, 216, 255, 0.1) 0%, rgba(0, 163, 204, 0.05) 100%); padding: 32px 40px; text-align: center; border-bottom: 1px solid rgba(51, 65, 85, 0.5); }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 8px; }
+                  .logo-img { width: 40px; height: 40px; border-radius: 12px; border: 2px solid rgba(0, 216, 255, 0.3); }
+                  .logo-text { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 24px; font-weight: 700; background: linear-gradient(135deg, #FFFFFF 0%, #94A3B8 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: transparent; }
-                  .greeting { font-size: 24px; font-weight: 600; color: #FFFFFF; margin-bottom: 16px; }
-                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 25px; font-size: 15px; }
-                  .info-box { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); padding: 20px; border-radius: 20px; border: 1px solid rgba(0, 216, 255, 0.1); margin: 25px 0; }
-                  .status-badge { display: inline-block; background: rgba(0, 216, 255, 0.1); color: #00D8FF; padding: 8px 20px; border-radius: 30px; font-size: 14px; font-weight: 500; border: 1px solid #00D8FF; }
-                  .footer { padding: 30px 40px; background: rgba(5, 8, 15, 0.8); text-align: center; border-top: 1px solid rgba(0, 216, 255, 0.1); }
-                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.6; }
+                  .greeting { font-size: 20px; font-weight: 600; background: linear-gradient(135deg, #FFFFFF 0%, #E2E8F0 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 16px; }
+                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 24px; font-size: 15px; }
+                  .info-box { background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(4px); padding: 24px; border-radius: 20px; border: 1px solid rgba(51, 65, 85, 0.5); margin: 25px 0; }
+                  .status-badge { display: inline-block; background: rgba(0, 216, 255, 0.1); color: #00D8FF; padding: 6px 16px; border-radius: 40px; font-size: 14px; font-weight: 500; border: 1px solid rgba(0, 216, 255, 0.3); }
+                  .footer { padding: 32px 40px; background: rgba(11, 17, 32, 0.8); text-align: center; border-top: 1px solid rgba(51, 65, 85, 0.5); }
+                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.7; }
               </style>
           </head>
           <body>
@@ -4343,26 +4307,24 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>KYC Approved - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0A0E17 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
-                  .email-container { max-width: 600px; margin: 0 auto; background: rgba(17, 24, 39, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(2, 192, 118, 0.1); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
-                  .header { background: linear-gradient(135deg, #02c076 0%, #019e5f 100%); padding: 24px 40px; text-align: center; position: relative; overflow: hidden; }
-                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%); animation: shimmer 3s infinite; }
-                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 8px; position: relative; z-index: 1; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
-                  .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
+                  body { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0B1120 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
+                  .email-container { max-width: 560px; margin: 0 auto; background: rgba(17, 25, 40, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(51, 65, 85, 0.5); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+                  .header { background: linear-gradient(165deg, rgba(2, 192, 118, 0.1) 0%, rgba(1, 158, 95, 0.05) 100%); padding: 32px 40px; text-align: center; border-bottom: 1px solid rgba(51, 65, 85, 0.5); }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 8px; }
+                  .logo-img { width: 40px; height: 40px; border-radius: 12px; border: 2px solid rgba(2, 192, 118, 0.3); }
+                  .logo-text { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 24px; font-weight: 700; background: linear-gradient(135deg, #FFFFFF 0%, #94A3B8 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: transparent; }
-                  .greeting { font-size: 24px; font-weight: 600; color: #FFFFFF; margin-bottom: 16px; }
-                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 25px; font-size: 15px; }
-                  .success-box { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); padding: 30px; border-radius: 24px; text-align: center; border: 2px solid #02c076; margin: 25px 0; box-shadow: 0 0 30px rgba(2, 192, 118, 0.2); }
-                  .success-icon { font-size: 64px; color: #02c076; margin-bottom: 15px; filter: drop-shadow(0 10px 20px rgba(2, 192, 118, 0.3)); }
-                  .benefits-list { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); padding: 20px; border-radius: 20px; border: 1px solid rgba(2, 192, 118, 0.1); margin: 25px 0; }
+                  .greeting { font-size: 20px; font-weight: 600; background: linear-gradient(135deg, #FFFFFF 0%, #E2E8F0 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 16px; }
+                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 24px; font-size: 15px; }
+                  .success-box { background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(4px); padding: 32px; border-radius: 24px; text-align: center; border: 2px solid rgba(2, 192, 118, 0.3); margin: 25px 0; }
+                  .success-icon { font-size: 52px; color: #02c076; margin-bottom: 15px; filter: drop-shadow(0 10px 20px rgba(2, 192, 118, 0.3)); }
+                  .benefits-list { background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(4px); padding: 24px; border-radius: 20px; border: 1px solid rgba(51, 65, 85, 0.5); margin: 25px 0; }
                   .benefit-item { color: #94A3B8; margin-bottom: 10px; font-size: 14px; }
-                  .footer { padding: 30px 40px; background: rgba(5, 8, 15, 0.8); text-align: center; border-top: 1px solid rgba(2, 192, 118, 0.1); }
-                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.6; }
+                  .footer { padding: 32px 40px; background: rgba(11, 17, 32, 0.8); text-align: center; border-top: 1px solid rgba(51, 65, 85, 0.5); }
+                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.7; }
               </style>
           </head>
           <body>
@@ -4375,7 +4337,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   </div>
                   <div class="content">
                       <div class="success-box">
-                          <div class="success-icon">✅</div>
+                          <div class="success-icon">✓</div>
                           <h2 style="color: #FFFFFF; margin-bottom: 10px;">KYC Verification Approved</h2>
                           <p style="color: #94A3B8;">Your identity has been successfully verified</p>
                       </div>
@@ -4410,24 +4372,22 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>KYC Update - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0A0E17 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
-                  .email-container { max-width: 600px; margin: 0 auto; background: rgba(17, 24, 39, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(246, 70, 93, 0.1); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
-                  .header { background: linear-gradient(135deg, #f6465d 0%, #d13b4f 100%); padding: 24px 40px; text-align: center; position: relative; overflow: hidden; }
-                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%); animation: shimmer 3s infinite; }
-                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 8px; position: relative; z-index: 1; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
-                  .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
+                  body { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0B1120 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
+                  .email-container { max-width: 560px; margin: 0 auto; background: rgba(17, 25, 40, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(51, 65, 85, 0.5); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+                  .header { background: linear-gradient(165deg, rgba(246, 70, 93, 0.1) 0%, rgba(209, 59, 79, 0.05) 100%); padding: 32px 40px; text-align: center; border-bottom: 1px solid rgba(51, 65, 85, 0.5); }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 8px; }
+                  .logo-img { width: 40px; height: 40px; border-radius: 12px; border: 2px solid rgba(246, 70, 93, 0.3); }
+                  .logo-text { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 24px; font-weight: 700; background: linear-gradient(135deg, #FFFFFF 0%, #94A3B8 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: transparent; }
-                  .greeting { font-size: 24px; font-weight: 600; color: #FFFFFF; margin-bottom: 16px; }
-                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 25px; font-size: 15px; }
-                  .rejection-box { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); padding: 25px; border-radius: 24px; border-left: 4px solid #f6465d; margin: 25px 0; }
+                  .greeting { font-size: 20px; font-weight: 600; background: linear-gradient(135deg, #FFFFFF 0%, #E2E8F0 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 16px; }
+                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 24px; font-size: 15px; }
+                  .rejection-box { background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(4px); padding: 25px; border-radius: 24px; border-left: 4px solid #f6465d; margin: 25px 0; }
                   .rejection-reason { color: #f6465d; font-size: 15px; margin-bottom: 10px; }
-                  .footer { padding: 30px 40px; background: rgba(5, 8, 15, 0.8); text-align: center; border-top: 1px solid rgba(246, 70, 93, 0.1); }
-                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.6; }
+                  .footer { padding: 32px 40px; background: rgba(11, 17, 32, 0.8); text-align: center; border-top: 1px solid rgba(51, 65, 85, 0.5); }
+                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.7; }
               </style>
           </head>
           <body>
@@ -4448,7 +4408,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                       </div>
                       
                       <div style="text-align: center; margin: 30px 0;">
-                          <a href="https://www.bithashcapital.live/kyc.html" style="background: linear-gradient(135deg, #00D8FF, #0099CC); color: #0A0E17; padding: 14px 35px; text-decoration: none; border-radius: 40px; font-weight: 600; box-shadow: 0 10px 20px -5px rgba(0, 216, 255, 0.3); transition: all 0.3s ease; display: inline-block;">Resubmit KYC</a>
+                          <a href="https://www.bithashcapital.live/kyc.html" style="background: linear-gradient(135deg, #00D8FF, #00A3CC); color: #0B1120; padding: 14px 35px; text-decoration: none; border-radius: 40px; font-weight: 600; display: inline-block; box-shadow: 0 10px 20px -10px rgba(0, 216, 255, 0.3); transition: all 0.3s ease;">Resubmit KYC →</a>
                       </div>
                       
                       <p class="message">If you need assistance, please contact our support team.</p>
@@ -4472,23 +4432,21 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>Referral Bonus - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0A0E17 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
-                  .email-container { max-width: 600px; margin: 0 auto; background: rgba(17, 24, 39, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(240, 185, 11, 0.1); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
-                  .header { background: linear-gradient(135deg, #F0B90B 0%, #D4AF37 100%); padding: 24px 40px; text-align: center; position: relative; overflow: hidden; }
-                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%); animation: shimmer 3s infinite; }
-                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 8px; position: relative; z-index: 1; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
-                  .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
+                  body { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0B1120 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
+                  .email-container { max-width: 560px; margin: 0 auto; background: rgba(17, 25, 40, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(51, 65, 85, 0.5); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+                  .header { background: linear-gradient(165deg, rgba(240, 185, 11, 0.1) 0%, rgba(212, 175, 55, 0.05) 100%); padding: 32px 40px; text-align: center; border-bottom: 1px solid rgba(51, 65, 85, 0.5); }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 8px; }
+                  .logo-img { width: 40px; height: 40px; border-radius: 12px; border: 2px solid rgba(240, 185, 11, 0.3); }
+                  .logo-text { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 24px; font-weight: 700; background: linear-gradient(135deg, #FFFFFF 0%, #94A3B8 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: transparent; }
-                  .greeting { font-size: 24px; font-weight: 600; color: #FFFFFF; margin-bottom: 16px; }
-                  .bonus-box { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); padding: 30px; border-radius: 24px; text-align: center; border: 2px solid #F0B90B; margin: 25px 0; box-shadow: 0 0 30px rgba(240, 185, 11, 0.2); }
-                  .bonus-amount { font-size: 48px; font-weight: 700; color: #F0B90B; margin: 15px 0; text-shadow: 0 0 20px rgba(240, 185, 11, 0.5); }
-                  .footer { padding: 30px 40px; background: rgba(5, 8, 15, 0.8); text-align: center; border-top: 1px solid rgba(240, 185, 11, 0.1); }
-                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.6; }
+                  .greeting { font-size: 20px; font-weight: 600; background: linear-gradient(135deg, #FFFFFF 0%, #E2E8F0 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 16px; }
+                  .bonus-box { background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(4px); padding: 32px; border-radius: 24px; text-align: center; border: 2px solid rgba(240, 185, 11, 0.3); margin: 25px 0; }
+                  .bonus-amount { font-size: 42px; font-weight: 700; background: linear-gradient(135deg, #F0B90B, #FFD700); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin: 15px 0; }
+                  .footer { padding: 32px 40px; background: rgba(11, 17, 32, 0.8); text-align: center; border-top: 1px solid rgba(51, 65, 85, 0.5); }
+                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.7; }
               </style>
           </head>
           <body>
@@ -4500,7 +4458,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                       </div>
                   </div>
                   <div class="content">
-                      <h2 class="greeting">Congratulations ${user.firstName || 'there'}!</h2>
+                      <h2 class="greeting">Congratulations ${user.firstName || 'there'}! 🎉</h2>
                       <p class="message">You've earned a referral bonus for helping grow the BitHash community.</p>
                       
                       <div class="bonus-box">
@@ -4512,7 +4470,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                       <p class="message">The bonus has been credited to your main balance. Keep sharing your referral link to earn more!</p>
                       
                       <div style="text-align: center; margin: 30px 0;">
-                          <a href="https://www.bithashcapital.live/referral.html" style="background: linear-gradient(135deg, #00D8FF, #0099CC); color: #0A0E17; padding: 14px 35px; text-decoration: none; border-radius: 40px; font-weight: 600; box-shadow: 0 10px 20px -5px rgba(0, 216, 255, 0.3); transition: all 0.3s ease; display: inline-block;">View Referrals</a>
+                          <a href="https://www.bithashcapital.live/referral.html" style="background: linear-gradient(135deg, #00D8FF, #00A3CC); color: #0B1120; padding: 14px 35px; text-decoration: none; border-radius: 40px; font-weight: 600; display: inline-block; box-shadow: 0 10px 20px -10px rgba(0, 216, 255, 0.3); transition: all 0.3s ease;">View Referrals →</a>
                       </div>
                   </div>
                   <div class="footer">
@@ -4534,23 +4492,21 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>Notification - BitHash Capital</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+              <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0A0E17 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
-                  .email-container { max-width: 600px; margin: 0 auto; background: rgba(17, 24, 39, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(0, 216, 255, 0.1); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
-                  .header { background: linear-gradient(135deg, #00D8FF 0%, #00A3CC 100%); padding: 24px 40px; text-align: center; position: relative; overflow: hidden; }
-                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%); animation: shimmer 3s infinite; }
-                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 8px; position: relative; z-index: 1; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
-                  .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
+                  body { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0B1120 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
+                  .email-container { max-width: 560px; margin: 0 auto; background: rgba(17, 25, 40, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(51, 65, 85, 0.5); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+                  .header { background: linear-gradient(165deg, rgba(0, 216, 255, 0.1) 0%, rgba(0, 163, 204, 0.05) 100%); padding: 32px 40px; text-align: center; border-bottom: 1px solid rgba(51, 65, 85, 0.5); }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 8px; }
+                  .logo-img { width: 40px; height: 40px; border-radius: 12px; border: 2px solid rgba(0, 216, 255, 0.3); }
+                  .logo-text { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 24px; font-weight: 700; background: linear-gradient(135deg, #FFFFFF 0%, #94A3B8 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: transparent; }
-                  .greeting { font-size: 24px; font-weight: 600; color: #FFFFFF; margin-bottom: 16px; }
-                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 25px; font-size: 15px; }
-                  .message-content { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); padding: 25px; border-radius: 24px; border: 1px solid rgba(0, 216, 255, 0.1); margin: 25px 0; color: #FFFFFF; }
-                  .footer { padding: 30px 40px; background: rgba(5, 8, 15, 0.8); text-align: center; border-top: 1px solid rgba(0, 216, 255, 0.1); }
-                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.6; }
+                  .greeting { font-size: 20px; font-weight: 600; background: linear-gradient(135deg, #FFFFFF 0%, #E2E8F0 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 16px; }
+                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 24px; font-size: 15px; }
+                  .message-content { background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(4px); padding: 24px; border-radius: 20px; border: 1px solid rgba(51, 65, 85, 0.5); margin: 25px 0; color: #FFFFFF; font-size: 15px; line-height: 1.7; }
+                  .footer { padding: 32px 40px; background: rgba(11, 17, 32, 0.8); text-align: center; border-top: 1px solid rgba(51, 65, 85, 0.5); }
+                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.7; }
               </style>
           </head>
           <body>
@@ -4568,7 +4524,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                       </div>
                       ${data.cta ? `
                       <div style="text-align: center; margin: 30px 0;">
-                          <a href="${data.cta.url}" style="background: linear-gradient(135deg, #00D8FF, #0099CC); color: #0A0E17; padding: 14px 35px; text-decoration: none; border-radius: 40px; font-weight: 600; box-shadow: 0 10px 20px -5px rgba(0, 216, 255, 0.3); transition: all 0.3s ease; display: inline-block;">${data.cta.text}</a>
+                          <a href="${data.cta.url}" style="background: linear-gradient(135deg, #00D8FF, #00A3CC); color: #0B1120; padding: 14px 35px; text-decoration: none; border-radius: 40px; font-weight: 600; display: inline-block; box-shadow: 0 10px 20px -10px rgba(0, 216, 255, 0.3); transition: all 0.3s ease;">${data.cta.text} →</a>
                       </div>
                       ` : ''}
                   </div>
@@ -4628,32 +4584,27 @@ const sendProfessionalEmail = async (options) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); margin: 0; padding: 30px 20px; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); }
-                  .header { background: #0a0a0a; padding: 24px 40px; text-align: center; border-bottom: 3px solid #f0b90b; position: relative; overflow: hidden; }
-                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.05) 50%, transparent 70%); animation: shimmer 3s infinite; }
-                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 15px; position: relative; z-index: 1; }
-                  .logo-img { width: 36px; height: 36px; border-radius: 50%; }
+                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
+                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
+                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #f0b90b; }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 20px; }
+                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
                   .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
-                  .header-title { font-size: 20px; font-weight: 600; color: #ffffff; margin-top: 5px; }
+                  .header-title { font-size: 24px; font-weight: 600; color: #ffffff; margin-top: 10px; }
                   .content { padding: 40px; background: #ffffff; }
-                  .greeting { font-size: 20px; color: #1a1a1a; margin-bottom: 25px; font-weight: 500; }
+                  .greeting { font-size: 18px; color: #1a1a1a; margin-bottom: 25px; font-weight: 500; }
                   .features-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin: 30px 0; }
-                  .feature-card { background: #f8f9fa; padding: 20px; border-radius: 16px; border-left: 3px solid #f0b90b; transition: all 0.3s ease; }
-                  .feature-card:hover { transform: translateY(-2px); box-shadow: 0 10px 25px -5px rgba(240, 185, 11, 0.2); }
+                  .feature-card { background: #f8f9fa; padding: 20px; border-radius: 8px; border-left: 3px solid #f0b90b; }
                   .feature-title { font-weight: 600; color: #0a0a0a; margin-bottom: 8px; font-size: 14px; }
                   .feature-desc { color: #666; font-size: 13px; line-height: 1.4; }
                   .benefits-list { margin: 25px 0; }
                   .benefit-item { display: flex; align-items: center; margin-bottom: 12px; color: #333; }
                   .benefit-icon { color: #f0b90b; margin-right: 12px; font-weight: bold; }
-                  .cta-button { background: linear-gradient(135deg, #f0b90b, #d4a107); color: #0a0a0a; padding: 14px 35px; text-decoration: none; border-radius: 40px; display: inline-block; margin: 25px 0; font-weight: 600; font-size: 15px; text-align: center; box-shadow: 0 10px 20px -5px rgba(240, 185, 11, 0.3); transition: all 0.3s ease; }
-                  .cta-button:hover { transform: translateY(-2px); box-shadow: 0 15px 25px -5px rgba(240, 185, 11, 0.4); }
-                  .security-note { background: #fff8e6; border: 1px solid #f0b90b; padding: 20px; border-radius: 20px; margin: 25px 0; }
+                  .cta-button { background: #f0b90b; color: #0a0a0a; padding: 14px 35px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 25px 0; font-weight: 600; font-size: 15px; text-align: center; }
+                  .security-note { background: #fff8e6; border: 1px solid #f0b90b; padding: 20px; border-radius: 6px; margin: 25px 0; }
                   .footer { background: #0a0a0a; padding: 30px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 13px; line-height: 1.5; margin-bottom: 10px; }
-                  .support-link { color: #f0b90b; text-decoration: none; font-weight: 500; transition: color 0.3s ease; }
-                  .support-link:hover { color: #ffffff; }
+                  .footer-text { font-size: 12px; line-height: 1.5; margin-bottom: 10px; }
+                  .support-link { color: #f0b90b; text-decoration: none; }
               </style>
           </head>
           <body>
@@ -4661,7 +4612,7 @@ const sendProfessionalEmail = async (options) => {
                   <div class="header">
                       <div class="logo-container">
                           <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash Capital</div>
+                          <div class="logo-text">BitHash</div>
                       </div>
                       <h1 class="header-title">Welcome to Professional Mining</h1>
                   </div>
@@ -4731,6 +4682,10 @@ const sendProfessionalEmail = async (options) => {
         `
       },
 
+
+
+
+      
       // OTP VERIFICATION
       otp: {
         subject: 'BitHash Capital - Verification Code Required',
@@ -4744,19 +4699,17 @@ const sendProfessionalEmail = async (options) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); margin: 0; padding: 30px 20px; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); }
-                  .header { background: #0a0a0a; padding: 24px 40px; text-align: center; border-bottom: 3px solid #f0b90b; position: relative; overflow: hidden; }
-                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.05) 50%, transparent 70%); animation: shimmer 3s infinite; }
-                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 10px; position: relative; z-index: 1; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
-                  .logo-text { font-size: 22px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
+                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
+                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
+                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #f0b90b; }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
+                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
+                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: #ffffff; }
-                  .otp-code { background: #0a0a0a; color: #f0b90b; padding: 25px; font-size: 42px; font-weight: 700; text-align: center; letter-spacing: 10px; margin: 30px 0; border-radius: 20px; font-family: 'Courier New', monospace; box-shadow: 0 0 30px rgba(240, 185, 11, 0.2); }
-                  .security-note { background: #fff8e6; border: 1px solid #f0b90b; padding: 20px; border-radius: 20px; margin: 25px 0; }
+                  .otp-code { background: #0a0a0a; color: #f0b90b; padding: 20px; font-size: 36px; font-weight: 700; text-align: center; letter-spacing: 8px; margin: 30px 0; border-radius: 8px; font-family: 'Courier New', monospace; }
+                  .security-note { background: #fff8e6; border: 1px solid #f0b90b; padding: 20px; border-radius: 6px; margin: 25px 0; }
                   .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 13px; line-height: 1.5; }
+                  .footer-text { font-size: 12px; line-height: 1.5; }
               </style>
           </head>
           <body>
@@ -4764,7 +4717,7 @@ const sendProfessionalEmail = async (options) => {
                   <div class="header">
                       <div class="logo-container">
                           <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash Capital</div>
+                          <div class="logo-text">BitHash</div>
                       </div>
                   </div>
                   <div class="content">
@@ -4806,21 +4759,19 @@ const sendProfessionalEmail = async (options) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); margin: 0; padding: 30px 20px; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); }
-                  .header { background: #0a0a0a; padding: 24px 40px; text-align: center; border-bottom: 3px solid #27ae60; position: relative; overflow: hidden; }
-                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.05) 50%, transparent 70%); animation: shimmer 3s infinite; }
-                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 10px; position: relative; z-index: 1; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
-                  .logo-text { font-size: 22px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
+                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
+                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
+                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #27ae60; }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
+                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
+                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: #ffffff; }
-                  .login-info { background: #f8f9fa; padding: 25px; border-radius: 20px; margin: 25px 0; border-left: 4px solid #27ae60; }
+                  .login-info { background: #f8f9fa; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #27ae60; }
                   .info-item { margin-bottom: 10px; display: flex; }
                   .info-label { font-weight: 600; min-width: 120px; color: #333; }
-                  .security-alert { background: #fee; border: 1px solid #e74c3c; padding: 20px; border-radius: 20px; margin: 20px 0; }
+                  .security-alert { background: #fee; border: 1px solid #e74c3c; padding: 20px; border-radius: 6px; margin: 20px 0; }
                   .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 13px; line-height: 1.5; }
+                  .footer-text { font-size: 12px; line-height: 1.5; }
               </style>
           </head>
           <body>
@@ -4828,7 +4779,7 @@ const sendProfessionalEmail = async (options) => {
                   <div class="header">
                       <div class="logo-container">
                           <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash Capital</div>
+                          <div class="logo-text">BitHash</div>
                       </div>
                   </div>
                   <div class="content">
@@ -4887,20 +4838,17 @@ const sendProfessionalEmail = async (options) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); margin: 0; padding: 30px 20px; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); }
-                  .header { background: #0a0a0a; padding: 24px 40px; text-align: center; border-bottom: 3px solid #e74c3c; position: relative; overflow: hidden; }
-                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.05) 50%, transparent 70%); animation: shimmer 3s infinite; }
-                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 10px; position: relative; z-index: 1; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
-                  .logo-text { font-size: 22px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
+                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
+                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
+                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #e74c3c; }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
+                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
+                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: #ffffff; }
-                  .reset-button { background: linear-gradient(135deg, #e74c3c, #c0392b); color: white; padding: 14px 35px; text-decoration: none; border-radius: 40px; display: inline-block; margin: 25px 0; font-weight: 600; font-size: 15px; box-shadow: 0 10px 20px -5px rgba(231, 76, 60, 0.3); transition: all 0.3s ease; }
-                  .reset-button:hover { transform: translateY(-2px); box-shadow: 0 15px 25px -5px rgba(231, 76, 60, 0.4); }
-                  .security-note { background: #fee; border: 1px solid #e74c3c; padding: 20px; border-radius: 20px; margin: 25px 0; }
+                  .reset-button { background: #e74c3c; color: white; padding: 14px 35px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 25px 0; font-weight: 600; font-size: 15px; }
+                  .security-note { background: #fee; border: 1px solid #e74c3c; padding: 20px; border-radius: 6px; margin: 25px 0; }
                   .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 13px; line-height: 1.5; }
+                  .footer-text { font-size: 12px; line-height: 1.5; }
               </style>
           </head>
           <body>
@@ -4908,7 +4856,7 @@ const sendProfessionalEmail = async (options) => {
                   <div class="header">
                       <div class="logo-container">
                           <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash Capital</div>
+                          <div class="logo-text">BitHash</div>
                       </div>
                   </div>
                   <div class="content">
@@ -4950,23 +4898,20 @@ const sendProfessionalEmail = async (options) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); margin: 0; padding: 30px 20px; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); }
-                  .header { background: #0a0a0a; padding: 24px 40px; text-align: center; border-bottom: 3px solid #f0b90b; position: relative; overflow: hidden; }
-                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.05) 50%, transparent 70%); animation: shimmer 3s infinite; }
-                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 10px; position: relative; z-index: 1; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
-                  .logo-text { font-size: 22px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
+                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
+                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
+                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #f0b90b; }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
+                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
+                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: #ffffff; }
-                  .investment-details { background: #f8f9fa; padding: 25px; border-radius: 20px; margin: 25px 0; border-left: 4px solid #f0b90b; }
+                  .investment-details { background: #f8f9fa; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #f0b90b; }
                   .detail-item { margin-bottom: 12px; display: flex; justify-content: space-between; }
                   .detail-label { font-weight: 600; color: #333; }
                   .detail-value { color: #0a0a0a; font-weight: 500; }
-                  .cta-button { background: linear-gradient(135deg, #f0b90b, #d4a107); color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 40px; display: inline-block; margin: 20px 0; font-weight: 600; box-shadow: 0 10px 20px -5px rgba(240, 185, 11, 0.3); transition: all 0.3s ease; }
-                  .cta-button:hover { transform: translateY(-2px); box-shadow: 0 15px 25px -5px rgba(240, 185, 11, 0.4); }
+                  .cta-button { background: #f0b90b; color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 20px 0; font-weight: 600; }
                   .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 13px; line-height: 1.5; }
+                  .footer-text { font-size: 12px; line-height: 1.5; }
               </style>
           </head>
           <body>
@@ -4974,7 +4919,7 @@ const sendProfessionalEmail = async (options) => {
                   <div class="header">
                       <div class="logo-container">
                           <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash Capital</div>
+                          <div class="logo-text">BitHash</div>
                       </div>
                   </div>
                   <div class="content">
@@ -5039,22 +4984,20 @@ const sendProfessionalEmail = async (options) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); margin: 0; padding: 30px 20px; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); }
-                  .header { background: #0a0a0a; padding: 24px 40px; text-align: center; border-bottom: 3px solid #3498db; position: relative; overflow: hidden; }
-                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.05) 50%, transparent 70%); animation: shimmer 3s infinite; }
-                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 10px; position: relative; z-index: 1; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
-                  .logo-text { font-size: 22px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
+                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
+                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
+                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #3498db; }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
+                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
+                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: #ffffff; }
-                  .withdrawal-details { background: #f8f9fa; padding: 25px; border-radius: 20px; margin: 25px 0; border-left: 4px solid #3498db; }
+                  .withdrawal-details { background: #f8f9fa; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #3498db; }
                   .detail-item { margin-bottom: 12px; display: flex; justify-content: space-between; }
                   .detail-label { font-weight: 600; color: #333; }
                   .detail-value { color: #0a0a0a; font-weight: 500; }
-                  .processing-info { background: #e8f4fd; border: 1px solid #3498db; padding: 20px; border-radius: 20px; margin: 25px 0; }
+                  .processing-info { background: #e8f4fd; border: 1px solid #3498db; padding: 20px; border-radius: 6px; margin: 25px 0; }
                   .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 13px; line-height: 1.5; }
+                  .footer-text { font-size: 12px; line-height: 1.5; }
               </style>
           </head>
           <body>
@@ -5062,7 +5005,7 @@ const sendProfessionalEmail = async (options) => {
                   <div class="header">
                       <div class="logo-container">
                           <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash Capital</div>
+                          <div class="logo-text">BitHash</div>
                       </div>
                   </div>
                   <div class="content">
@@ -5123,23 +5066,20 @@ const sendProfessionalEmail = async (options) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); margin: 0; padding: 30px 20px; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); }
-                  .header { background: #0a0a0a; padding: 24px 40px; text-align: center; border-bottom: 3px solid #27ae60; position: relative; overflow: hidden; }
-                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.05) 50%, transparent 70%); animation: shimmer 3s infinite; }
-                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 10px; position: relative; z-index: 1; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
-                  .logo-text { font-size: 22px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
+                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
+                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
+                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #27ae60; }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
+                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
+                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: #ffffff; }
-                  .success-message { background: #e8f6ef; border: 1px solid #27ae60; padding: 25px; border-radius: 20px; margin: 25px 0; text-align: center; }
+                  .success-message { background: #e8f6ef; border: 1px solid #27ae60; padding: 25px; border-radius: 8px; margin: 25px 0; text-align: center; }
                   .benefits-list { margin: 25px 0; }
                   .benefit-item { display: flex; align-items: center; margin-bottom: 12px; color: #333; }
                   .benefit-icon { color: #27ae60; margin-right: 12px; font-weight: bold; }
-                  .cta-button { background: linear-gradient(135deg, #f0b90b, #d4a107); color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 40px; display: inline-block; margin: 20px 0; font-weight: 600; box-shadow: 0 10px 20px -5px rgba(240, 185, 11, 0.3); transition: all 0.3s ease; }
-                  .cta-button:hover { transform: translateY(-2px); box-shadow: 0 15px 25px -5px rgba(240, 185, 11, 0.4); }
+                  .cta-button { background: #f0b90b; color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 20px 0; font-weight: 600; }
                   .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 13px; line-height: 1.5; }
+                  .footer-text { font-size: 12px; line-height: 1.5; }
               </style>
           </head>
           <body>
@@ -5147,7 +5087,7 @@ const sendProfessionalEmail = async (options) => {
                   <div class="header">
                       <div class="logo-container">
                           <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash Capital</div>
+                          <div class="logo-text">BitHash</div>
                       </div>
                   </div>
                   <div class="content">
@@ -5210,23 +5150,20 @@ const sendProfessionalEmail = async (options) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); margin: 0; padding: 30px 20px; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); }
-                  .header { background: #0a0a0a; padding: 24px 40px; text-align: center; border-bottom: 3px solid #27ae60; position: relative; overflow: hidden; }
-                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.05) 50%, transparent 70%); animation: shimmer 3s infinite; }
-                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 10px; position: relative; z-index: 1; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
-                  .logo-text { font-size: 22px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
+                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
+                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
+                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #27ae60; }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
+                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
+                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: #ffffff; }
-                  .deposit-details { background: #f8f9fa; padding: 25px; border-radius: 20px; margin: 25px 0; border-left: 4px solid #27ae60; }
+                  .deposit-details { background: #f8f9fa; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #27ae60; }
                   .detail-item { margin-bottom: 12px; display: flex; justify-content: space-between; }
                   .detail-label { font-weight: 600; color: #333; }
                   .detail-value { color: #0a0a0a; font-weight: 500; }
-                  .cta-button { background: linear-gradient(135deg, #f0b90b, #d4a107); color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 40px; display: inline-block; margin: 20px 0; font-weight: 600; box-shadow: 0 10px 20px -5px rgba(240, 185, 11, 0.3); transition: all 0.3s ease; }
-                  .cta-button:hover { transform: translateY(-2px); box-shadow: 0 15px 25px -5px rgba(240, 185, 11, 0.4); }
+                  .cta-button { background: #f0b90b; color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 20px 0; font-weight: 600; }
                   .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 13px; line-height: 1.5; }
+                  .footer-text { font-size: 12px; line-height: 1.5; }
               </style>
           </head>
           <body>
@@ -5234,7 +5171,7 @@ const sendProfessionalEmail = async (options) => {
                   <div class="header">
                       <div class="logo-container">
                           <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash Capital</div>
+                          <div class="logo-text">BitHash</div>
                       </div>
                   </div>
                   <div class="content">
@@ -5295,22 +5232,19 @@ const sendProfessionalEmail = async (options) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); margin: 0; padding: 30px 20px; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); }
-                  .header { background: #0a0a0a; padding: 24px 40px; text-align: center; border-bottom: 3px solid #f0b90b; position: relative; overflow: hidden; }
-                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.05) 50%, transparent 70%); animation: shimmer 3s infinite; }
-                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 10px; position: relative; z-index: 1; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
-                  .logo-text { font-size: 22px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
+                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
+                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
+                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #f0b90b; }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
+                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
+                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: #ffffff; }
-                  .bonus-card { background: #fff8e6; border: 2px solid #f0b90b; padding: 30px; border-radius: 20px; margin: 25px 0; text-align: center; }
-                  .bonus-amount { font-size: 42px; font-weight: 700; color: #f0b90b; margin: 10px 0; text-shadow: 0 5px 15px rgba(240, 185, 11, 0.3); }
-                  .referral-details { background: #f8f9fa; padding: 20px; border-radius: 16px; margin: 20px 0; }
-                  .cta-button { background: linear-gradient(135deg, #f0b90b, #d4a107); color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 40px; display: inline-block; margin: 20px 0; font-weight: 600; box-shadow: 0 10px 20px -5px rgba(240, 185, 11, 0.3); transition: all 0.3s ease; }
-                  .cta-button:hover { transform: translateY(-2px); box-shadow: 0 15px 25px -5px rgba(240, 185, 11, 0.4); }
+                  .bonus-card { background: #fff8e6; border: 2px solid #f0b90b; padding: 30px; border-radius: 8px; margin: 25px 0; text-align: center; }
+                  .bonus-amount { font-size: 36px; font-weight: 700; color: #f0b90b; margin: 10px 0; }
+                  .referral-details { background: #f8f9fa; padding: 20px; border-radius: 6px; margin: 20px 0; }
+                  .cta-button { background: #f0b90b; color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 20px 0; font-weight: 600; }
                   .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 13px; line-height: 1.5; }
+                  .footer-text { font-size: 12px; line-height: 1.5; }
               </style>
           </head>
           <body>
@@ -5318,7 +5252,7 @@ const sendProfessionalEmail = async (options) => {
                   <div class="header">
                       <div class="logo-container">
                           <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash Capital</div>
+                          <div class="logo-text">BitHash</div>
                       </div>
                   </div>
                   <div class="content">
@@ -5370,22 +5304,20 @@ const sendProfessionalEmail = async (options) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); margin: 0; padding: 30px 20px; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); }
-                  .header { background: #0a0a0a; padding: 24px 40px; text-align: center; border-bottom: 3px solid #e74c3c; position: relative; overflow: hidden; }
-                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.05) 50%, transparent 70%); animation: shimmer 3s infinite; }
-                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 10px; position: relative; z-index: 1; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
-                  .logo-text { font-size: 22px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
+                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
+                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
+                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #e74c3c; }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
+                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
+                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: #ffffff; }
-                  .alert-box { background: #fee; border: 2px solid #e74c3c; padding: 25px; border-radius: 20px; margin: 25px 0; }
-                  .action-steps { background: #f8f9fa; padding: 20px; border-radius: 16px; margin: 20px 0; }
+                  .alert-box { background: #fee; border: 2px solid #e74c3c; padding: 25px; border-radius: 8px; margin: 25px 0; }
+                  .action-steps { background: #f8f9fa; padding: 20px; border-radius: 6px; margin: 20px 0; }
                   .step-item { margin-bottom: 10px; display: flex; align-items: flex-start; }
                   .step-number { background: #e74c3c; color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-right: 12px; font-size: 12px; font-weight: 600; }
                   .support-link { color: #e74c3c; text-decoration: none; font-weight: 600; }
                   .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 13px; line-height: 1.5; }
+                  .footer-text { font-size: 12px; line-height: 1.5; }
               </style>
           </head>
           <body>
@@ -5393,7 +5325,7 @@ const sendProfessionalEmail = async (options) => {
                   <div class="header">
                       <div class="logo-container">
                           <img src="https://www.dropbox.com/scl/fi/1dq16nex1borvvknpcwox/circular_dark_background.png?rlkey=sq2ujl2oxxk9vyvg1j7oz0cdb&raw=1" alt="BitHash Logo" class="logo-img">
-                          <div class="logo-text">BitHash Capital</div>
+                          <div class="logo-text">BitHash</div>
                       </div>
                   </div>
                   <div class="content">
@@ -5454,6 +5386,10 @@ const sendProfessionalEmail = async (options) => {
     throw new Error('Failed to send email');
   }
 };
+
+
+
+
 
 
 // Routes
