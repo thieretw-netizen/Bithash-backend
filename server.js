@@ -3359,28 +3359,33 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background-color: #0A0E17; margin: 0; padding: 0; }
-                  .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: 1px solid #1F2937; border-radius: 16px; overflow: hidden; }
-                  .header { background: linear-gradient(135deg, #00D8FF 0%, #00A3CC 100%); padding: 30px 40px; text-align: center; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 48px; height: 48px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
-                  .logo-text { font-family: 'Inter', sans-serif; font-size: 28px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
-                  .content { padding: 40px; background-color: #0A0E17; }
-                  .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
-                  .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
-                  .feature-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 30px 0; }
-                  .feature-card { background: #111827; padding: 20px; border-radius: 12px; border: 1px solid #1F2937; }
-                  .feature-icon { color: #00D8FF; font-size: 20px; margin-bottom: 10px; }
-                  .feature-title { font-weight: 600; color: #FFFFFF; margin-bottom: 5px; font-size: 14px; }
-                  .feature-desc { color: #8E9BAE; font-size: 13px; line-height: 1.5; }
-                  .divider { height: 1px; background: #1F2937; margin: 30px 0; }
-                  .cta-button { background: #00D8FF; color: #0A0E17; padding: 14px 35px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600; font-size: 15px; border: none; }
-                  .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
-                  .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.6; }
-                  .support-link { color: #00D8FF; text-decoration: none; }
+                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0A0E17 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
+                  .email-container { max-width: 600px; margin: 0 auto; background: rgba(17, 24, 39, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(0, 216, 255, 0.1); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+                  .header { background: linear-gradient(135deg, #00D8FF 0%, #00A3CC 100%); padding: 24px 40px; text-align: center; position: relative; overflow: hidden; }
+                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%); animation: shimmer 3s infinite; }
+                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 8px; position: relative; z-index: 1; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
+                  .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
+                  .content { padding: 40px; background: transparent; }
+                  .greeting { font-size: 24px; font-weight: 600; color: #FFFFFF; margin-bottom: 16px; }
+                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 24px; font-size: 15px; }
+                  .feature-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 32px 0; }
+                  .feature-card { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); padding: 20px; border-radius: 20px; border: 1px solid rgba(0, 216, 255, 0.1); transition: all 0.3s ease; }
+                  .feature-card:hover { transform: translateY(-2px); border-color: #00D8FF; box-shadow: 0 10px 30px -10px #00D8FF; }
+                  .feature-icon { color: #00D8FF; font-size: 24px; margin-bottom: 12px; }
+                  .feature-title { font-weight: 600; color: #FFFFFF; margin-bottom: 6px; font-size: 15px; }
+                  .feature-desc { color: #94A3B8; font-size: 13px; line-height: 1.5; }
+                  .divider { height: 1px; background: linear-gradient(90deg, transparent, #00D8FF, transparent); margin: 32px 0; }
+                  .cta-button { background: linear-gradient(135deg, #00D8FF, #0099CC); color: #0A0E17; padding: 14px 35px; text-decoration: none; border-radius: 40px; display: inline-block; font-weight: 600; font-size: 15px; border: none; box-shadow: 0 10px 20px -5px rgba(0, 216, 255, 0.3); transition: all 0.3s ease; }
+                  .cta-button:hover { transform: translateY(-2px); box-shadow: 0 15px 25px -5px rgba(0, 216, 255, 0.4); }
+                  .footer { padding: 30px 40px; background: rgba(5, 8, 15, 0.8); text-align: center; border-top: 1px solid rgba(0, 216, 255, 0.1); }
+                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.6; }
+                  .support-link { color: #00D8FF; text-decoration: none; font-weight: 500; transition: color 0.3s ease; }
+                  .support-link:hover { color: #FFFFFF; }
               </style>
           </head>
-          <body style="background-color: #0A0E17; padding: 20px;">
+          <body>
               <div class="email-container">
                   <div class="header">
                       <div class="logo-container">
@@ -3445,27 +3450,31 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background-color: #0A0E17; margin: 0; padding: 0; }
-                  .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: 1px solid #1F2937; border-radius: 16px; overflow: hidden; }
-                  .header { background: linear-gradient(135deg, #00D8FF 0%, #00A3CC 100%); padding: 30px 40px; text-align: center; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 48px; height: 48px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
-                  .logo-text { font-family: 'Inter', sans-serif; font-size: 28px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
-                  .content { padding: 40px; background-color: #0A0E17; }
-                  .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
-                  .login-info { background: #111827; padding: 25px; border-radius: 12px; margin: 25px 0; border: 1px solid #1F2937; }
-                  .info-row { display: flex; margin-bottom: 15px; }
-                  .info-label { width: 100px; color: #8E9BAE; font-size: 14px; }
+                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0A0E17 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
+                  .email-container { max-width: 600px; margin: 0 auto; background: rgba(17, 24, 39, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(0, 216, 255, 0.1); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+                  .header { background: linear-gradient(135deg, #00D8FF 0%, #00A3CC 100%); padding: 24px 40px; text-align: center; position: relative; overflow: hidden; }
+                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%); animation: shimmer 3s infinite; }
+                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 8px; position: relative; z-index: 1; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
+                  .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
+                  .content { padding: 40px; background: transparent; }
+                  .greeting { font-size: 24px; font-weight: 600; color: #FFFFFF; margin-bottom: 16px; }
+                  .login-info { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); padding: 25px; border-radius: 24px; margin: 25px 0; border: 1px solid rgba(0, 216, 255, 0.1); }
+                  .info-row { display: flex; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid rgba(148, 163, 184, 0.1); }
+                  .info-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+                  .info-label { width: 100px; color: #94A3B8; font-size: 14px; }
                   .info-value { flex: 1; color: #FFFFFF; font-weight: 500; font-size: 14px; }
-                  .divider { height: 1px; background: #1F2937; margin: 30px 0; }
-                  .security-note { background: rgba(246, 70, 93, 0.1); border: 1px solid #f6465d; padding: 20px; border-radius: 8px; margin: 25px 0; color: #f6465d; font-size: 14px; }
-                  .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
-                  .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.6; }
-                  .support-link { color: #00D8FF; text-decoration: none; }
-                  .device-badge { display: inline-block; background: #1F2937; padding: 4px 10px; border-radius: 20px; font-size: 12px; color: #8E9BAE; }
+                  .divider { height: 1px; background: linear-gradient(90deg, transparent, #00D8FF, transparent); margin: 30px 0; }
+                  .security-note { background: rgba(246, 70, 93, 0.1); backdrop-filter: blur(5px); border: 1px solid rgba(246, 70, 93, 0.3); padding: 20px; border-radius: 20px; margin: 25px 0; color: #f6465d; font-size: 14px; }
+                  .footer { padding: 30px 40px; background: rgba(5, 8, 15, 0.8); text-align: center; border-top: 1px solid rgba(0, 216, 255, 0.1); }
+                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.6; }
+                  .support-link { color: #00D8FF; text-decoration: none; font-weight: 500; transition: color 0.3s ease; }
+                  .support-link:hover { color: #FFFFFF; }
+                  .device-badge { display: inline-block; background: rgba(31, 41, 55, 0.8); padding: 6px 14px; border-radius: 30px; font-size: 12px; color: #94A3B8; border: 1px solid rgba(0, 216, 255, 0.2); }
               </style>
           </head>
-          <body style="background-color: #0A0E17; padding: 20px;">
+          <body>
               <div class="email-container">
                   <div class="header">
                       <div class="logo-container">
@@ -3475,7 +3484,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   </div>
                   <div class="content">
                       <h2 class="greeting">Hello ${user.firstName || 'Valued Investor'},</h2>
-                      <p class="message" style="color: #8E9BAE;">A successful login to your BitHash Capital account was detected:</p>
+                      <p class="message" style="color: #94A3B8;">A successful login to your BitHash Capital account was detected:</p>
                       
                       <div class="login-info">
                           <div class="info-row">
@@ -3496,7 +3505,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                           </div>
                       </div>
                       
-                      <p class="message" style="color: #8E9BAE;">If this was you, no further action is required. You may continue using your account normally.</p>
+                      <p class="message" style="color: #94A3B8;">If this was you, no further action is required. You may continue using your account normally.</p>
                       
                       <div class="security-note">
                           <strong>⚠️ Not you?</strong> If you didn't perform this login, please secure your account immediately by changing your password and enabling two-factor authentication.
@@ -3526,24 +3535,27 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background-color: #0A0E17; margin: 0; padding: 0; }
-                  .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: 1px solid #1F2937; border-radius: 16px; overflow: hidden; }
-                  .header { background: linear-gradient(135deg, #00D8FF 0%, #00A3CC 100%); padding: 30px 40px; text-align: center; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 48px; height: 48px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
-                  .logo-text { font-family: 'Inter', sans-serif; font-size: 28px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
-                  .content { padding: 40px; background-color: #0A0E17; }
-                  .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
-                  .otp-code { background: #111827; padding: 25px; font-size: 42px; font-weight: 700; text-align: center; letter-spacing: 12px; margin: 30px 0; border-radius: 12px; border: 2px dashed #00D8FF; color: #00D8FF; font-family: 'Courier New', monospace; }
-                  .copy-btn { background: #1F2937; color: #FFFFFF; border: none; padding: 8px 20px; border-radius: 6px; font-size: 14px; cursor: pointer; margin-left: 10px; }
-                  .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
-                  .security-note { background: #111827; border: 1px solid #1F2937; padding: 20px; border-radius: 8px; margin: 25px 0; }
+                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0A0E17 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
+                  .email-container { max-width: 600px; margin: 0 auto; background: rgba(17, 24, 39, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(0, 216, 255, 0.1); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+                  .header { background: linear-gradient(135deg, #00D8FF 0%, #00A3CC 100%); padding: 24px 40px; text-align: center; position: relative; overflow: hidden; }
+                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%); animation: shimmer 3s infinite; }
+                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 8px; position: relative; z-index: 1; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
+                  .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
+                  .content { padding: 40px; background: transparent; }
+                  .greeting { font-size: 24px; font-weight: 600; color: #FFFFFF; margin-bottom: 16px; }
+                  .otp-code { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); padding: 30px; font-size: 48px; font-weight: 700; text-align: center; letter-spacing: 16px; margin: 30px 0; border-radius: 24px; border: 2px dashed #00D8FF; color: #00D8FF; font-family: 'Courier New', monospace; box-shadow: 0 0 30px rgba(0, 216, 255, 0.2); }
+                  .copy-btn { background: rgba(31, 41, 55, 0.8); color: #FFFFFF; border: none; padding: 8px 20px; border-radius: 30px; font-size: 14px; cursor: pointer; margin-left: 10px; border: 1px solid #00D8FF; transition: all 0.3s ease; }
+                  .copy-btn:hover { background: #00D8FF; color: #0A0E17; }
+                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 25px; font-size: 15px; }
+                  .security-note { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); border: 1px solid rgba(255, 255, 255, 0.1); padding: 20px; border-radius: 20px; margin: 25px 0; }
                   .security-note p { color: #f6465d; font-size: 14px; }
-                  .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
-                  .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.6; }
+                  .footer { padding: 30px 40px; background: rgba(5, 8, 15, 0.8); text-align: center; border-top: 1px solid rgba(0, 216, 255, 0.1); }
+                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.6; }
               </style>
           </head>
-          <body style="background-color: #0A0E17; padding: 20px;">
+          <body>
               <div class="email-container">
                   <div class="header">
                       <div class="logo-container">
@@ -3586,23 +3598,26 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background-color: #0A0E17; margin: 0; padding: 0; }
-                  .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: 1px solid #1F2937; border-radius: 16px; overflow: hidden; }
-                  .header { background: linear-gradient(135deg, #00D8FF 0%, #00A3CC 100%); padding: 30px 40px; text-align: center; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 48px; height: 48px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
-                  .logo-text { font-family: 'Inter', sans-serif; font-size: 28px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
-                  .content { padding: 40px; background-color: #0A0E17; }
-                  .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
-                  .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
-                  .reset-button { background: #00D8FF; color: #0A0E17; padding: 14px 35px; text-decoration: none; border-radius: 8px; display: inline-block; margin: 25px 0; font-weight: 600; font-size: 15px; }
-                  .security-note { background: rgba(246, 70, 93, 0.1); border: 1px solid #f6465d; padding: 20px; border-radius: 8px; margin: 25px 0; }
+                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0A0E17 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
+                  .email-container { max-width: 600px; margin: 0 auto; background: rgba(17, 24, 39, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(0, 216, 255, 0.1); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+                  .header { background: linear-gradient(135deg, #00D8FF 0%, #00A3CC 100%); padding: 24px 40px; text-align: center; position: relative; overflow: hidden; }
+                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%); animation: shimmer 3s infinite; }
+                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 8px; position: relative; z-index: 1; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
+                  .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
+                  .content { padding: 40px; background: transparent; }
+                  .greeting { font-size: 24px; font-weight: 600; color: #FFFFFF; margin-bottom: 16px; }
+                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 25px; font-size: 15px; }
+                  .reset-button { background: linear-gradient(135deg, #00D8FF, #0099CC); color: #0A0E17; padding: 14px 35px; text-decoration: none; border-radius: 40px; display: inline-block; margin: 25px 0; font-weight: 600; font-size: 15px; box-shadow: 0 10px 20px -5px rgba(0, 216, 255, 0.3); transition: all 0.3s ease; }
+                  .reset-button:hover { transform: translateY(-2px); box-shadow: 0 15px 25px -5px rgba(0, 216, 255, 0.4); }
+                  .security-note { background: rgba(246, 70, 93, 0.1); backdrop-filter: blur(5px); border: 1px solid rgba(246, 70, 93, 0.3); padding: 20px; border-radius: 20px; margin: 25px 0; }
                   .security-note p { color: #f6465d; font-size: 14px; }
-                  .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
-                  .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.6; }
+                  .footer { padding: 30px 40px; background: rgba(5, 8, 15, 0.8); text-align: center; border-top: 1px solid rgba(0, 216, 255, 0.1); }
+                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.6; }
               </style>
           </head>
-          <body style="background-color: #0A0E17; padding: 20px;">
+          <body>
               <div class="email-container">
                   <div class="header">
                       <div class="logo-container">
@@ -3647,23 +3662,26 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background-color: #0A0E17; margin: 0; padding: 0; }
-                  .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: 1px solid #1F2937; border-radius: 16px; overflow: hidden; }
-                  .header { background: linear-gradient(135deg, #02c076 0%, #019e5f 100%); padding: 30px 40px; text-align: center; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 48px; height: 48px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
-                  .logo-text { font-family: 'Inter', sans-serif; font-size: 28px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
-                  .content { padding: 40px; background-color: #0A0E17; }
-                  .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
-                  .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
-                  .success-icon { text-align: center; font-size: 48px; margin: 20px 0; color: #02c076; }
-                  .info-box { background: #111827; padding: 20px; border-radius: 12px; border: 1px solid #1F2937; margin: 25px 0; }
-                  .info-box p { color: #FFFFFF; font-size: 14px; }
-                  .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
-                  .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.6; }
+                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0A0E17 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
+                  .email-container { max-width: 600px; margin: 0 auto; background: rgba(17, 24, 39, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(2, 192, 118, 0.1); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+                  .header { background: linear-gradient(135deg, #02c076 0%, #019e5f 100%); padding: 24px 40px; text-align: center; position: relative; overflow: hidden; }
+                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%); animation: shimmer 3s infinite; }
+                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 8px; position: relative; z-index: 1; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
+                  .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
+                  .content { padding: 40px; background: transparent; }
+                  .greeting { font-size: 24px; font-weight: 600; color: #FFFFFF; margin-bottom: 16px; }
+                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 25px; font-size: 15px; }
+                  .success-icon { text-align: center; font-size: 64px; margin: 20px 0; color: #02c076; filter: drop-shadow(0 10px 20px rgba(2, 192, 118, 0.3)); }
+                  .info-box { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); padding: 25px; border-radius: 24px; border: 1px solid rgba(2, 192, 118, 0.1); margin: 25px 0; }
+                  .info-box p { color: #FFFFFF; font-size: 14px; margin-bottom: 10px; }
+                  .info-box p:last-child { margin-bottom: 0; }
+                  .footer { padding: 30px 40px; background: rgba(5, 8, 15, 0.8); text-align: center; border-top: 1px solid rgba(2, 192, 118, 0.1); }
+                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.6; }
               </style>
           </head>
-          <body style="background-color: #0A0E17; padding: 20px;">
+          <body>
               <div class="email-container">
                   <div class="header">
                       <div class="logo-container">
@@ -3707,25 +3725,29 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background-color: #0A0E17; margin: 0; padding: 0; }
-                  .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: 1px solid #1F2937; border-radius: 16px; overflow: hidden; }
-                  .header { background: linear-gradient(135deg, #00D8FF 0%, #00A3CC 100%); padding: 30px 40px; text-align: center; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 48px; height: 48px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
-                  .logo-text { font-family: 'Inter', sans-serif; font-size: 28px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
-                  .content { padding: 40px; background-color: #0A0E17; }
-                  .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
-                  .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
-                  .investment-details { background: #111827; padding: 25px; border-radius: 12px; margin: 25px 0; border: 1px solid #1F2937; }
-                  .detail-row { display: flex; justify-content: space-between; margin-bottom: 15px; }
-                  .detail-label { color: #8E9BAE; font-size: 14px; }
+                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0A0E17 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
+                  .email-container { max-width: 600px; margin: 0 auto; background: rgba(17, 24, 39, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(0, 216, 255, 0.1); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+                  .header { background: linear-gradient(135deg, #00D8FF 0%, #00A3CC 100%); padding: 24px 40px; text-align: center; position: relative; overflow: hidden; }
+                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%); animation: shimmer 3s infinite; }
+                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 8px; position: relative; z-index: 1; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
+                  .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
+                  .content { padding: 40px; background: transparent; }
+                  .greeting { font-size: 24px; font-weight: 600; color: #FFFFFF; margin-bottom: 16px; }
+                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 25px; font-size: 15px; }
+                  .investment-details { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); padding: 25px; border-radius: 24px; margin: 25px 0; border: 1px solid rgba(0, 216, 255, 0.1); }
+                  .detail-row { display: flex; justify-content: space-between; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid rgba(148, 163, 184, 0.1); }
+                  .detail-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+                  .detail-label { color: #94A3B8; font-size: 14px; }
                   .detail-value { color: #FFFFFF; font-weight: 600; font-size: 16px; }
-                  .cta-button { background: #00D8FF; color: #0A0E17; padding: 14px 35px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600; font-size: 15px; }
-                  .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
-                  .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.6; }
+                  .cta-button { background: linear-gradient(135deg, #00D8FF, #0099CC); color: #0A0E17; padding: 14px 35px; text-decoration: none; border-radius: 40px; display: inline-block; font-weight: 600; font-size: 15px; box-shadow: 0 10px 20px -5px rgba(0, 216, 255, 0.3); transition: all 0.3s ease; }
+                  .cta-button:hover { transform: translateY(-2px); box-shadow: 0 15px 25px -5px rgba(0, 216, 255, 0.4); }
+                  .footer { padding: 30px 40px; background: rgba(5, 8, 15, 0.8); text-align: center; border-top: 1px solid rgba(0, 216, 255, 0.1); }
+                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.6; }
               </style>
           </head>
-          <body style="background-color: #0A0E17; padding: 20px;">
+          <body>
               <div class="email-container">
                   <div class="header">
                       <div class="logo-container">
@@ -3790,26 +3812,28 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background-color: #0A0E17; margin: 0; padding: 0; }
-                  .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: 1px solid #1F2937; border-radius: 16px; overflow: hidden; }
-                  .header { background: linear-gradient(135deg, #02c076 0%, #019e5f 100%); padding: 30px 40px; text-align: center; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 48px; height: 48px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
-                  .logo-text { font-family: 'Inter', sans-serif; font-size: 28px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
-                  .content { padding: 40px; background-color: #0A0E17; }
-                  .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
-                  .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
-                  .success-box { background: #111827; padding: 30px; border-radius: 12px; text-align: center; border: 2px solid #02c076; margin: 25px 0; }
-                  .profit-amount { font-size: 48px; font-weight: 700; color: #02c076; margin: 15px 0; }
-                  .profit-label { color: #8E9BAE; font-size: 14px; }
+                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0A0E17 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
+                  .email-container { max-width: 600px; margin: 0 auto; background: rgba(17, 24, 39, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(2, 192, 118, 0.1); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+                  .header { background: linear-gradient(135deg, #02c076 0%, #019e5f 100%); padding: 24px 40px; text-align: center; position: relative; overflow: hidden; }
+                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%); animation: shimmer 3s infinite; }
+                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 8px; position: relative; z-index: 1; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
+                  .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
+                  .content { padding: 40px; background: transparent; }
+                  .greeting { font-size: 24px; font-weight: 600; color: #FFFFFF; margin-bottom: 16px; }
+                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 25px; font-size: 15px; }
+                  .success-box { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); padding: 30px; border-radius: 24px; text-align: center; border: 2px solid #02c076; margin: 25px 0; box-shadow: 0 0 30px rgba(2, 192, 118, 0.2); }
+                  .profit-amount { font-size: 56px; font-weight: 700; color: #02c076; margin: 15px 0; text-shadow: 0 0 20px rgba(2, 192, 118, 0.5); }
+                  .profit-label { color: #94A3B8; font-size: 14px; }
                   .detail-row { display: flex; justify-content: space-between; margin-bottom: 15px; }
-                  .detail-label { color: #8E9BAE; font-size: 14px; }
+                  .detail-label { color: #94A3B8; font-size: 14px; }
                   .detail-value { color: #FFFFFF; font-weight: 600; font-size: 16px; }
-                  .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
-                  .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.6; }
+                  .footer { padding: 30px 40px; background: rgba(5, 8, 15, 0.8); text-align: center; border-top: 1px solid rgba(2, 192, 118, 0.1); }
+                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.6; }
               </style>
           </head>
-          <body style="background-color: #0A0E17; padding: 20px;">
+          <body>
               <div class="email-container">
                   <div class="header">
                       <div class="logo-container">
@@ -3827,7 +3851,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                           <div class="profit-label">Profit Earned: $${data.profit?.toFixed(2) || '0.00'}</div>
                       </div>
                       
-                      <div style="background: #111827; padding: 20px; border-radius: 12px; border: 1px solid #1F2937;">
+                      <div style="background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); padding: 20px; border-radius: 20px; border: 1px solid rgba(2, 192, 118, 0.1);">
                           <div class="detail-row">
                               <span class="detail-label">Plan:</span>
                               <span class="detail-value">${data.planName || 'Standard Plan'}</span>
@@ -3864,24 +3888,27 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background-color: #0A0E17; margin: 0; padding: 0; }
-                  .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: 1px solid #1F2937; border-radius: 16px; overflow: hidden; }
-                  .header { background: linear-gradient(135deg, #02c076 0%, #019e5f 100%); padding: 30px 40px; text-align: center; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 48px; height: 48px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
-                  .logo-text { font-family: 'Inter', sans-serif; font-size: 28px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
-                  .content { padding: 40px; background-color: #0A0E17; }
-                  .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
-                  .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
-                  .deposit-details { background: #111827; padding: 25px; border-radius: 12px; margin: 25px 0; border: 1px solid #1F2937; }
-                  .detail-row { display: flex; justify-content: space-between; margin-bottom: 15px; }
-                  .detail-label { color: #8E9BAE; font-size: 14px; }
+                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0A0E17 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
+                  .email-container { max-width: 600px; margin: 0 auto; background: rgba(17, 24, 39, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(2, 192, 118, 0.1); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+                  .header { background: linear-gradient(135deg, #02c076 0%, #019e5f 100%); padding: 24px 40px; text-align: center; position: relative; overflow: hidden; }
+                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%); animation: shimmer 3s infinite; }
+                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 8px; position: relative; z-index: 1; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
+                  .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
+                  .content { padding: 40px; background: transparent; }
+                  .greeting { font-size: 24px; font-weight: 600; color: #FFFFFF; margin-bottom: 16px; }
+                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 25px; font-size: 15px; }
+                  .deposit-details { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); padding: 25px; border-radius: 24px; margin: 25px 0; border: 1px solid rgba(2, 192, 118, 0.1); }
+                  .detail-row { display: flex; justify-content: space-between; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid rgba(148, 163, 184, 0.1); }
+                  .detail-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+                  .detail-label { color: #94A3B8; font-size: 14px; }
                   .detail-value { color: #FFFFFF; font-weight: 600; font-size: 16px; }
-                  .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
-                  .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.6; }
+                  .footer { padding: 30px 40px; background: rgba(5, 8, 15, 0.8); text-align: center; border-top: 1px solid rgba(2, 192, 118, 0.1); }
+                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.6; }
               </style>
           </head>
-          <body style="background-color: #0A0E17; padding: 20px;">
+          <body>
               <div class="email-container">
                   <div class="header">
                       <div class="logo-container">
@@ -3936,25 +3963,28 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background-color: #0A0E17; margin: 0; padding: 0; }
-                  .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: 1px solid #1F2937; border-radius: 16px; overflow: hidden; }
-                  .header { background: linear-gradient(135deg, #00D8FF 0%, #00A3CC 100%); padding: 30px 40px; text-align: center; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 48px; height: 48px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
-                  .logo-text { font-family: 'Inter', sans-serif; font-size: 28px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
-                  .content { padding: 40px; background-color: #0A0E17; }
-                  .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
-                  .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
-                  .withdrawal-details { background: #111827; padding: 25px; border-radius: 12px; margin: 25px 0; border: 1px solid #1F2937; }
-                  .detail-row { display: flex; justify-content: space-between; margin-bottom: 15px; }
-                  .detail-label { color: #8E9BAE; font-size: 14px; }
+                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0A0E17 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
+                  .email-container { max-width: 600px; margin: 0 auto; background: rgba(17, 24, 39, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(0, 216, 255, 0.1); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+                  .header { background: linear-gradient(135deg, #00D8FF 0%, #00A3CC 100%); padding: 24px 40px; text-align: center; position: relative; overflow: hidden; }
+                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%); animation: shimmer 3s infinite; }
+                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 8px; position: relative; z-index: 1; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
+                  .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
+                  .content { padding: 40px; background: transparent; }
+                  .greeting { font-size: 24px; font-weight: 600; color: #FFFFFF; margin-bottom: 16px; }
+                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 25px; font-size: 15px; }
+                  .withdrawal-details { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); padding: 25px; border-radius: 24px; margin: 25px 0; border: 1px solid rgba(0, 216, 255, 0.1); }
+                  .detail-row { display: flex; justify-content: space-between; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid rgba(148, 163, 184, 0.1); }
+                  .detail-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+                  .detail-label { color: #94A3B8; font-size: 14px; }
                   .detail-value { color: #FFFFFF; font-weight: 600; font-size: 16px; }
-                  .processing-info { background: #111827; border-left: 4px solid #00D8FF; padding: 15px; border-radius: 8px; margin: 20px 0; }
-                  .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
-                  .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.6; }
+                  .processing-info { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); border-left: 4px solid #00D8FF; padding: 15px; border-radius: 16px; margin: 20px 0; }
+                  .footer { padding: 30px 40px; background: rgba(5, 8, 15, 0.8); text-align: center; border-top: 1px solid rgba(0, 216, 255, 0.1); }
+                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.6; }
               </style>
           </head>
-          <body style="background-color: #0A0E17; padding: 20px;">
+          <body>
               <div class="email-container">
                   <div class="header">
                       <div class="logo-container">
@@ -4015,22 +4045,24 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background-color: #0A0E17; margin: 0; padding: 0; }
-                  .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: 1px solid #1F2937; border-radius: 16px; overflow: hidden; }
-                  .header { background: linear-gradient(135deg, #02c076 0%, #019e5f 100%); padding: 30px 40px; text-align: center; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 48px; height: 48px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
-                  .logo-text { font-family: 'Inter', sans-serif; font-size: 28px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
-                  .content { padding: 40px; background-color: #0A0E17; }
-                  .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
-                  .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
-                  .approved-box { background: #111827; padding: 30px; border-radius: 12px; text-align: center; border: 2px solid #02c076; margin: 25px 0; }
-                  .approved-amount { font-size: 42px; font-weight: 700; color: #02c076; margin: 15px 0; }
-                  .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
-                  .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.6; }
+                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0A0E17 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
+                  .email-container { max-width: 600px; margin: 0 auto; background: rgba(17, 24, 39, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(2, 192, 118, 0.1); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+                  .header { background: linear-gradient(135deg, #02c076 0%, #019e5f 100%); padding: 24px 40px; text-align: center; position: relative; overflow: hidden; }
+                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%); animation: shimmer 3s infinite; }
+                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 8px; position: relative; z-index: 1; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
+                  .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
+                  .content { padding: 40px; background: transparent; }
+                  .greeting { font-size: 24px; font-weight: 600; color: #FFFFFF; margin-bottom: 16px; }
+                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 25px; font-size: 15px; }
+                  .approved-box { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); padding: 30px; border-radius: 24px; text-align: center; border: 2px solid #02c076; margin: 25px 0; box-shadow: 0 0 30px rgba(2, 192, 118, 0.2); }
+                  .approved-amount { font-size: 48px; font-weight: 700; color: #02c076; margin: 15px 0; text-shadow: 0 0 20px rgba(2, 192, 118, 0.5); }
+                  .footer { padding: 30px 40px; background: rgba(5, 8, 15, 0.8); text-align: center; border-top: 1px solid rgba(2, 192, 118, 0.1); }
+                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.6; }
               </style>
           </head>
-          <body style="background-color: #0A0E17; padding: 20px;">
+          <body>
               <div class="email-container">
                   <div class="header">
                       <div class="logo-container">
@@ -4043,9 +4075,9 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                       <p class="message">Your withdrawal request has been approved and processed successfully.</p>
                       
                       <div class="approved-box">
-                          <div class="approved-label" style="color: #8E9BAE;">Amount Withdrawn</div>
+                          <div class="approved-label" style="color: #94A3B8;">Amount Withdrawn</div>
                           <div class="approved-amount">$${data.amount?.toFixed(2) || '0.00'}</div>
-                          <div style="color: #8E9BAE; font-size: 14px;">Reference: ${data.reference || 'N/A'}</div>
+                          <div style="color: #94A3B8; font-size: 14px;">Reference: ${data.reference || 'N/A'}</div>
                       </div>
                       
                       <p class="message">The funds have been sent to your designated withdrawal method. Please allow time for the transaction to appear in your external account.</p>
@@ -4072,23 +4104,25 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background-color: #0A0E17; margin: 0; padding: 0; }
-                  .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: 1px solid #1F2937; border-radius: 16px; overflow: hidden; }
-                  .header { background: linear-gradient(135deg, #f6465d 0%, #d13b4f 100%); padding: 30px 40px; text-align: center; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 48px; height: 48px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
-                  .logo-text { font-family: 'Inter', sans-serif; font-size: 28px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
-                  .content { padding: 40px; background-color: #0A0E17; }
-                  .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
-                  .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
-                  .rejection-box { background: #111827; padding: 25px; border-radius: 12px; border-left: 4px solid #f6465d; margin: 25px 0; }
+                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0A0E17 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
+                  .email-container { max-width: 600px; margin: 0 auto; background: rgba(17, 24, 39, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(246, 70, 93, 0.1); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+                  .header { background: linear-gradient(135deg, #f6465d 0%, #d13b4f 100%); padding: 24px 40px; text-align: center; position: relative; overflow: hidden; }
+                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%); animation: shimmer 3s infinite; }
+                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 8px; position: relative; z-index: 1; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
+                  .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
+                  .content { padding: 40px; background: transparent; }
+                  .greeting { font-size: 24px; font-weight: 600; color: #FFFFFF; margin-bottom: 16px; }
+                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 25px; font-size: 15px; }
+                  .rejection-box { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); padding: 25px; border-radius: 24px; border-left: 4px solid #f6465d; margin: 25px 0; }
                   .rejection-reason { color: #f6465d; font-size: 15px; margin-bottom: 10px; }
-                  .refund-info { background: #111827; border: 1px solid #1F2937; padding: 20px; border-radius: 8px; margin: 25px 0; }
-                  .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
-                  .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.6; }
+                  .refund-info { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); border: 1px solid rgba(255, 255, 255, 0.1); padding: 20px; border-radius: 20px; margin: 25px 0; }
+                  .footer { padding: 30px 40px; background: rgba(5, 8, 15, 0.8); text-align: center; border-top: 1px solid rgba(246, 70, 93, 0.1); }
+                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.6; }
               </style>
           </head>
-          <body style="background-color: #0A0E17; padding: 20px;">
+          <body>
               <div class="email-container">
                   <div class="header">
                       <div class="logo-container">
@@ -4132,22 +4166,24 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background-color: #0A0E17; margin: 0; padding: 0; }
-                  .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: 1px solid #1F2937; border-radius: 16px; overflow: hidden; }
-                  .header { background: linear-gradient(135deg, #02c076 0%, #019e5f 100%); padding: 30px 40px; text-align: center; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 48px; height: 48px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
-                  .logo-text { font-family: 'Inter', sans-serif; font-size: 28px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
-                  .content { padding: 40px; background-color: #0A0E17; }
-                  .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
-                  .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
-                  .approved-box { background: #111827; padding: 30px; border-radius: 12px; text-align: center; border: 2px solid #02c076; margin: 25px 0; }
-                  .approved-amount { font-size: 42px; font-weight: 700; color: #02c076; margin: 15px 0; }
-                  .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
-                  .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.6; }
+                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0A0E17 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
+                  .email-container { max-width: 600px; margin: 0 auto; background: rgba(17, 24, 39, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(2, 192, 118, 0.1); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+                  .header { background: linear-gradient(135deg, #02c076 0%, #019e5f 100%); padding: 24px 40px; text-align: center; position: relative; overflow: hidden; }
+                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%); animation: shimmer 3s infinite; }
+                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 8px; position: relative; z-index: 1; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
+                  .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
+                  .content { padding: 40px; background: transparent; }
+                  .greeting { font-size: 24px; font-weight: 600; color: #FFFFFF; margin-bottom: 16px; }
+                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 25px; font-size: 15px; }
+                  .approved-box { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); padding: 30px; border-radius: 24px; text-align: center; border: 2px solid #02c076; margin: 25px 0; box-shadow: 0 0 30px rgba(2, 192, 118, 0.2); }
+                  .approved-amount { font-size: 48px; font-weight: 700; color: #02c076; margin: 15px 0; text-shadow: 0 0 20px rgba(2, 192, 118, 0.5); }
+                  .footer { padding: 30px 40px; background: rgba(5, 8, 15, 0.8); text-align: center; border-top: 1px solid rgba(2, 192, 118, 0.1); }
+                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.6; }
               </style>
           </head>
-          <body style="background-color: #0A0E17; padding: 20px;">
+          <body>
               <div class="email-container">
                   <div class="header">
                       <div class="logo-container">
@@ -4160,9 +4196,9 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                       <p class="message">Your deposit has been approved and credited to your account.</p>
                       
                       <div class="approved-box">
-                          <div class="approved-label" style="color: #8E9BAE;">Amount Approved</div>
+                          <div class="approved-label" style="color: #94A3B8;">Amount Approved</div>
                           <div class="approved-amount">$${data.amount?.toFixed(2) || '0.00'}</div>
-                          <div style="color: #8E9BAE; font-size: 14px;">Reference: ${data.reference || 'N/A'}</div>
+                          <div style="color: #94A3B8; font-size: 14px;">Reference: ${data.reference || 'N/A'}</div>
                       </div>
                       
                       <p class="message">Your funds are now available for mining investments and other platform activities.</p>
@@ -4189,22 +4225,24 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background-color: #0A0E17; margin: 0; padding: 0; }
-                  .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: 1px solid #1F2937; border-radius: 16px; overflow: hidden; }
-                  .header { background: linear-gradient(135deg, #f6465d 0%, #d13b4f 100%); padding: 30px 40px; text-align: center; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 48px; height: 48px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
-                  .logo-text { font-family: 'Inter', sans-serif; font-size: 28px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
-                  .content { padding: 40px; background-color: #0A0E17; }
-                  .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
-                  .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
-                  .rejection-box { background: #111827; padding: 25px; border-radius: 12px; border-left: 4px solid #f6465d; margin: 25px 0; }
+                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0A0E17 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
+                  .email-container { max-width: 600px; margin: 0 auto; background: rgba(17, 24, 39, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(246, 70, 93, 0.1); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+                  .header { background: linear-gradient(135deg, #f6465d 0%, #d13b4f 100%); padding: 24px 40px; text-align: center; position: relative; overflow: hidden; }
+                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%); animation: shimmer 3s infinite; }
+                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 8px; position: relative; z-index: 1; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
+                  .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
+                  .content { padding: 40px; background: transparent; }
+                  .greeting { font-size: 24px; font-weight: 600; color: #FFFFFF; margin-bottom: 16px; }
+                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 25px; font-size: 15px; }
+                  .rejection-box { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); padding: 25px; border-radius: 24px; border-left: 4px solid #f6465d; margin: 25px 0; }
                   .rejection-reason { color: #f6465d; font-size: 15px; margin-bottom: 10px; }
-                  .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
-                  .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.6; }
+                  .footer { padding: 30px 40px; background: rgba(5, 8, 15, 0.8); text-align: center; border-top: 1px solid rgba(246, 70, 93, 0.1); }
+                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.6; }
               </style>
           </head>
-          <body style="background-color: #0A0E17; padding: 20px;">
+          <body>
               <div class="email-container">
                   <div class="header">
                       <div class="logo-container">
@@ -4244,22 +4282,24 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background-color: #0A0E17; margin: 0; padding: 0; }
-                  .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: 1px solid #1F2937; border-radius: 16px; overflow: hidden; }
-                  .header { background: linear-gradient(135deg, #00D8FF 0%, #00A3CC 100%); padding: 30px 40px; text-align: center; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 48px; height: 48px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
-                  .logo-text { font-family: 'Inter', sans-serif; font-size: 28px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
-                  .content { padding: 40px; background-color: #0A0E17; }
-                  .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
-                  .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
-                  .info-box { background: #111827; padding: 20px; border-radius: 12px; border: 1px solid #1F2937; margin: 25px 0; }
-                  .status-badge { display: inline-block; background: rgba(0, 216, 255, 0.1); color: #00D8FF; padding: 5px 15px; border-radius: 20px; font-size: 14px; font-weight: 500; }
-                  .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
-                  .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.6; }
+                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0A0E17 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
+                  .email-container { max-width: 600px; margin: 0 auto; background: rgba(17, 24, 39, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(0, 216, 255, 0.1); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+                  .header { background: linear-gradient(135deg, #00D8FF 0%, #00A3CC 100%); padding: 24px 40px; text-align: center; position: relative; overflow: hidden; }
+                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%); animation: shimmer 3s infinite; }
+                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 8px; position: relative; z-index: 1; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
+                  .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
+                  .content { padding: 40px; background: transparent; }
+                  .greeting { font-size: 24px; font-weight: 600; color: #FFFFFF; margin-bottom: 16px; }
+                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 25px; font-size: 15px; }
+                  .info-box { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); padding: 20px; border-radius: 20px; border: 1px solid rgba(0, 216, 255, 0.1); margin: 25px 0; }
+                  .status-badge { display: inline-block; background: rgba(0, 216, 255, 0.1); color: #00D8FF; padding: 8px 20px; border-radius: 30px; font-size: 14px; font-weight: 500; border: 1px solid #00D8FF; }
+                  .footer { padding: 30px 40px; background: rgba(5, 8, 15, 0.8); text-align: center; border-top: 1px solid rgba(0, 216, 255, 0.1); }
+                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.6; }
               </style>
           </head>
-          <body style="background-color: #0A0E17; padding: 20px;">
+          <body>
               <div class="email-container">
                   <div class="header">
                       <div class="logo-container">
@@ -4276,7 +4316,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                       </div>
                       
                       <div class="info-box">
-                          <p style="color: #8E9BAE; margin-bottom: 10px;"><strong>What happens next?</strong></p>
+                          <p style="color: #94A3B8; margin-bottom: 10px;"><strong>What happens next?</strong></p>
                           <p style="color: #FFFFFF; font-size: 14px; margin-bottom: 5px;">• Our compliance team will review your documents</p>
                           <p style="color: #FFFFFF; font-size: 14px; margin-bottom: 5px;">• This process typically takes 1-2 business days</p>
                           <p style="color: #FFFFFF; font-size: 14px;">• You'll receive an email once verification is complete</p>
@@ -4306,24 +4346,26 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background-color: #0A0E17; margin: 0; padding: 0; }
-                  .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: 1px solid #1F2937; border-radius: 16px; overflow: hidden; }
-                  .header { background: linear-gradient(135deg, #02c076 0%, #019e5f 100%); padding: 30px 40px; text-align: center; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 48px; height: 48px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
-                  .logo-text { font-family: 'Inter', sans-serif; font-size: 28px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
-                  .content { padding: 40px; background-color: #0A0E17; }
-                  .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
-                  .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
-                  .success-box { background: #111827; padding: 30px; border-radius: 12px; text-align: center; border: 2px solid #02c076; margin: 25px 0; }
-                  .success-icon { font-size: 48px; color: #02c076; margin-bottom: 15px; }
-                  .benefits-list { background: #111827; padding: 20px; border-radius: 12px; border: 1px solid #1F2937; margin: 25px 0; }
-                  .benefit-item { color: #8E9BAE; margin-bottom: 10px; font-size: 14px; }
-                  .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
-                  .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.6; }
+                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0A0E17 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
+                  .email-container { max-width: 600px; margin: 0 auto; background: rgba(17, 24, 39, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(2, 192, 118, 0.1); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+                  .header { background: linear-gradient(135deg, #02c076 0%, #019e5f 100%); padding: 24px 40px; text-align: center; position: relative; overflow: hidden; }
+                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%); animation: shimmer 3s infinite; }
+                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 8px; position: relative; z-index: 1; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
+                  .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
+                  .content { padding: 40px; background: transparent; }
+                  .greeting { font-size: 24px; font-weight: 600; color: #FFFFFF; margin-bottom: 16px; }
+                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 25px; font-size: 15px; }
+                  .success-box { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); padding: 30px; border-radius: 24px; text-align: center; border: 2px solid #02c076; margin: 25px 0; box-shadow: 0 0 30px rgba(2, 192, 118, 0.2); }
+                  .success-icon { font-size: 64px; color: #02c076; margin-bottom: 15px; filter: drop-shadow(0 10px 20px rgba(2, 192, 118, 0.3)); }
+                  .benefits-list { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); padding: 20px; border-radius: 20px; border: 1px solid rgba(2, 192, 118, 0.1); margin: 25px 0; }
+                  .benefit-item { color: #94A3B8; margin-bottom: 10px; font-size: 14px; }
+                  .footer { padding: 30px 40px; background: rgba(5, 8, 15, 0.8); text-align: center; border-top: 1px solid rgba(2, 192, 118, 0.1); }
+                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.6; }
               </style>
           </head>
-          <body style="background-color: #0A0E17; padding: 20px;">
+          <body>
               <div class="email-container">
                   <div class="header">
                       <div class="logo-container">
@@ -4335,7 +4377,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                       <div class="success-box">
                           <div class="success-icon">✅</div>
                           <h2 style="color: #FFFFFF; margin-bottom: 10px;">KYC Verification Approved</h2>
-                          <p style="color: #8E9BAE;">Your identity has been successfully verified</p>
+                          <p style="color: #94A3B8;">Your identity has been successfully verified</p>
                       </div>
                       
                       <p class="message">Hello ${user.firstName || 'there'}, your KYC verification has been approved. You now have full access to all BitHash Capital features:</p>
@@ -4371,22 +4413,24 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background-color: #0A0E17; margin: 0; padding: 0; }
-                  .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: 1px solid #1F2937; border-radius: 16px; overflow: hidden; }
-                  .header { background: linear-gradient(135deg, #f6465d 0%, #d13b4f 100%); padding: 30px 40px; text-align: center; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 48px; height: 48px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
-                  .logo-text { font-family: 'Inter', sans-serif; font-size: 28px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
-                  .content { padding: 40px; background-color: #0A0E17; }
-                  .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
-                  .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
-                  .rejection-box { background: #111827; padding: 25px; border-radius: 12px; border-left: 4px solid #f6465d; margin: 25px 0; }
+                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0A0E17 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
+                  .email-container { max-width: 600px; margin: 0 auto; background: rgba(17, 24, 39, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(246, 70, 93, 0.1); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+                  .header { background: linear-gradient(135deg, #f6465d 0%, #d13b4f 100%); padding: 24px 40px; text-align: center; position: relative; overflow: hidden; }
+                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%); animation: shimmer 3s infinite; }
+                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 8px; position: relative; z-index: 1; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
+                  .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
+                  .content { padding: 40px; background: transparent; }
+                  .greeting { font-size: 24px; font-weight: 600; color: #FFFFFF; margin-bottom: 16px; }
+                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 25px; font-size: 15px; }
+                  .rejection-box { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); padding: 25px; border-radius: 24px; border-left: 4px solid #f6465d; margin: 25px 0; }
                   .rejection-reason { color: #f6465d; font-size: 15px; margin-bottom: 10px; }
-                  .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
-                  .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.6; }
+                  .footer { padding: 30px 40px; background: rgba(5, 8, 15, 0.8); text-align: center; border-top: 1px solid rgba(246, 70, 93, 0.1); }
+                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.6; }
               </style>
           </head>
-          <body style="background-color: #0A0E17; padding: 20px;">
+          <body>
               <div class="email-container">
                   <div class="header">
                       <div class="logo-container">
@@ -4400,11 +4444,11 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                       
                       <div class="rejection-box">
                           <div class="rejection-reason"><strong>Reason:</strong> ${data.reason || 'Documents could not be verified'}</div>
-                          <p style="color: #8E9BAE; font-size: 14px;">Please resubmit your documents with clear, legible images that show all required information.</p>
+                          <p style="color: #94A3B8; font-size: 14px;">Please resubmit your documents with clear, legible images that show all required information.</p>
                       </div>
                       
                       <div style="text-align: center; margin: 30px 0;">
-                          <a href="https://www.bithashcapital.live/kyc.html" style="background: #00D8FF; color: #0A0E17; padding: 14px 35px; text-decoration: none; border-radius: 8px; font-weight: 600;">Resubmit KYC</a>
+                          <a href="https://www.bithashcapital.live/kyc.html" style="background: linear-gradient(135deg, #00D8FF, #0099CC); color: #0A0E17; padding: 14px 35px; text-decoration: none; border-radius: 40px; font-weight: 600; box-shadow: 0 10px 20px -5px rgba(0, 216, 255, 0.3); transition: all 0.3s ease; display: inline-block;">Resubmit KYC</a>
                       </div>
                       
                       <p class="message">If you need assistance, please contact our support team.</p>
@@ -4431,21 +4475,23 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background-color: #0A0E17; margin: 0; padding: 0; }
-                  .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: 1px solid #1F2937; border-radius: 16px; overflow: hidden; }
-                  .header { background: linear-gradient(135deg, #F0B90B 0%, #D4AF37 100%); padding: 30px 40px; text-align: center; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 48px; height: 48px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
-                  .logo-text { font-family: 'Inter', sans-serif; font-size: 28px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
-                  .content { padding: 40px; background-color: #0A0E17; }
-                  .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
-                  .bonus-box { background: #111827; padding: 30px; border-radius: 12px; text-align: center; border: 2px solid #F0B90B; margin: 25px 0; }
-                  .bonus-amount { font-size: 42px; font-weight: 700; color: #F0B90B; margin: 15px 0; }
-                  .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
-                  .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.6; }
+                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0A0E17 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
+                  .email-container { max-width: 600px; margin: 0 auto; background: rgba(17, 24, 39, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(240, 185, 11, 0.1); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+                  .header { background: linear-gradient(135deg, #F0B90B 0%, #D4AF37 100%); padding: 24px 40px; text-align: center; position: relative; overflow: hidden; }
+                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%); animation: shimmer 3s infinite; }
+                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 8px; position: relative; z-index: 1; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
+                  .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
+                  .content { padding: 40px; background: transparent; }
+                  .greeting { font-size: 24px; font-weight: 600; color: #FFFFFF; margin-bottom: 16px; }
+                  .bonus-box { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); padding: 30px; border-radius: 24px; text-align: center; border: 2px solid #F0B90B; margin: 25px 0; box-shadow: 0 0 30px rgba(240, 185, 11, 0.2); }
+                  .bonus-amount { font-size: 48px; font-weight: 700; color: #F0B90B; margin: 15px 0; text-shadow: 0 0 20px rgba(240, 185, 11, 0.5); }
+                  .footer { padding: 30px 40px; background: rgba(5, 8, 15, 0.8); text-align: center; border-top: 1px solid rgba(240, 185, 11, 0.1); }
+                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.6; }
               </style>
           </head>
-          <body style="background-color: #0A0E17; padding: 20px;">
+          <body>
               <div class="email-container">
                   <div class="header">
                       <div class="logo-container">
@@ -4458,15 +4504,15 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                       <p class="message">You've earned a referral bonus for helping grow the BitHash community.</p>
                       
                       <div class="bonus-box">
-                          <div style="color: #8E9BAE; font-size: 14px;">Bonus Amount</div>
+                          <div style="color: #94A3B8; font-size: 14px;">Bonus Amount</div>
                           <div class="bonus-amount">$${data.bonusAmount?.toFixed(2) || '0.00'}</div>
-                          <div style="color: #8E9BAE; font-size: 14px;">From: ${data.referredUser || 'New User'}</div>
+                          <div style="color: #94A3B8; font-size: 14px;">From: ${data.referredUser || 'New User'}</div>
                       </div>
                       
                       <p class="message">The bonus has been credited to your main balance. Keep sharing your referral link to earn more!</p>
                       
                       <div style="text-align: center; margin: 30px 0;">
-                          <a href="https://www.bithashcapital.live/referral.html" style="background: #00D8FF; color: #0A0E17; padding: 14px 35px; text-decoration: none; border-radius: 8px; font-weight: 600;">View Referrals</a>
+                          <a href="https://www.bithashcapital.live/referral.html" style="background: linear-gradient(135deg, #00D8FF, #0099CC); color: #0A0E17; padding: 14px 35px; text-decoration: none; border-radius: 40px; font-weight: 600; box-shadow: 0 10px 20px -5px rgba(0, 216, 255, 0.3); transition: all 0.3s ease; display: inline-block;">View Referrals</a>
                       </div>
                   </div>
                   <div class="footer">
@@ -4491,21 +4537,23 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background-color: #0A0E17; margin: 0; padding: 0; }
-                  .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: 1px solid #1F2937; border-radius: 16px; overflow: hidden; }
-                  .header { background: linear-gradient(135deg, #00D8FF 0%, #00A3CC 100%); padding: 30px 40px; text-align: center; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 48px; height: 48px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
-                  .logo-text { font-family: 'Inter', sans-serif; font-size: 28px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
-                  .content { padding: 40px; background-color: #0A0E17; }
-                  .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
-                  .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
-                  .message-content { background: #111827; padding: 20px; border-radius: 12px; border: 1px solid #1F2937; margin: 25px 0; color: #FFFFFF; }
-                  .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
-                  .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.6; }
+                  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #0A0E17 0%, #0F172A 100%); margin: 0; padding: 30px 20px; }
+                  .email-container { max-width: 600px; margin: 0 auto; background: rgba(17, 24, 39, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(0, 216, 255, 0.1); border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+                  .header { background: linear-gradient(135deg, #00D8FF 0%, #00A3CC 100%); padding: 24px 40px; text-align: center; position: relative; overflow: hidden; }
+                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%); animation: shimmer 3s infinite; }
+                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 8px; position: relative; z-index: 1; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
+                  .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #0A0E17; letter-spacing: -0.5px; }
+                  .content { padding: 40px; background: transparent; }
+                  .greeting { font-size: 24px; font-weight: 600; color: #FFFFFF; margin-bottom: 16px; }
+                  .message { color: #94A3B8; line-height: 1.7; margin-bottom: 25px; font-size: 15px; }
+                  .message-content { background: rgba(31, 41, 55, 0.5); backdrop-filter: blur(5px); padding: 25px; border-radius: 24px; border: 1px solid rgba(0, 216, 255, 0.1); margin: 25px 0; color: #FFFFFF; }
+                  .footer { padding: 30px 40px; background: rgba(5, 8, 15, 0.8); text-align: center; border-top: 1px solid rgba(0, 216, 255, 0.1); }
+                  .footer-text { color: #64748B; font-size: 13px; line-height: 1.6; }
               </style>
           </head>
-          <body style="background-color: #0A0E17; padding: 20px;">
+          <body>
               <div class="email-container">
                   <div class="header">
                       <div class="logo-container">
@@ -4520,7 +4568,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                       </div>
                       ${data.cta ? `
                       <div style="text-align: center; margin: 30px 0;">
-                          <a href="${data.cta.url}" style="background: #00D8FF; color: #0A0E17; padding: 14px 35px; text-decoration: none; border-radius: 8px; font-weight: 600;">${data.cta.text}</a>
+                          <a href="${data.cta.url}" style="background: linear-gradient(135deg, #00D8FF, #0099CC); color: #0A0E17; padding: 14px 35px; text-decoration: none; border-radius: 40px; font-weight: 600; box-shadow: 0 10px 20px -5px rgba(0, 216, 255, 0.3); transition: all 0.3s ease; display: inline-block;">${data.cta.text}</a>
                       </div>
                       ` : ''}
                   </div>
@@ -4580,27 +4628,32 @@ const sendProfessionalEmail = async (options) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #f0b90b; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 20px; }
-                  .logo-img { width: 50px; height: 50px; border-radius: 50%; }
-                  .logo-text { font-size: 28px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
-                  .header-title { font-size: 24px; font-weight: 600; color: #ffffff; margin-top: 10px; }
+                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); margin: 0; padding: 30px 20px; }
+                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); }
+                  .header { background: #0a0a0a; padding: 24px 40px; text-align: center; border-bottom: 3px solid #f0b90b; position: relative; overflow: hidden; }
+                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.05) 50%, transparent 70%); animation: shimmer 3s infinite; }
+                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 15px; position: relative; z-index: 1; }
+                  .logo-img { width: 36px; height: 36px; border-radius: 50%; }
+                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
+                  .header-title { font-size: 20px; font-weight: 600; color: #ffffff; margin-top: 5px; }
                   .content { padding: 40px; background: #ffffff; }
-                  .greeting { font-size: 18px; color: #1a1a1a; margin-bottom: 25px; font-weight: 500; }
+                  .greeting { font-size: 20px; color: #1a1a1a; margin-bottom: 25px; font-weight: 500; }
                   .features-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin: 30px 0; }
-                  .feature-card { background: #f8f9fa; padding: 20px; border-radius: 8px; border-left: 3px solid #f0b90b; }
+                  .feature-card { background: #f8f9fa; padding: 20px; border-radius: 16px; border-left: 3px solid #f0b90b; transition: all 0.3s ease; }
+                  .feature-card:hover { transform: translateY(-2px); box-shadow: 0 10px 25px -5px rgba(240, 185, 11, 0.2); }
                   .feature-title { font-weight: 600; color: #0a0a0a; margin-bottom: 8px; font-size: 14px; }
                   .feature-desc { color: #666; font-size: 13px; line-height: 1.4; }
                   .benefits-list { margin: 25px 0; }
                   .benefit-item { display: flex; align-items: center; margin-bottom: 12px; color: #333; }
                   .benefit-icon { color: #f0b90b; margin-right: 12px; font-weight: bold; }
-                  .cta-button { background: #f0b90b; color: #0a0a0a; padding: 14px 35px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 25px 0; font-weight: 600; font-size: 15px; text-align: center; }
-                  .security-note { background: #fff8e6; border: 1px solid #f0b90b; padding: 20px; border-radius: 6px; margin: 25px 0; }
+                  .cta-button { background: linear-gradient(135deg, #f0b90b, #d4a107); color: #0a0a0a; padding: 14px 35px; text-decoration: none; border-radius: 40px; display: inline-block; margin: 25px 0; font-weight: 600; font-size: 15px; text-align: center; box-shadow: 0 10px 20px -5px rgba(240, 185, 11, 0.3); transition: all 0.3s ease; }
+                  .cta-button:hover { transform: translateY(-2px); box-shadow: 0 15px 25px -5px rgba(240, 185, 11, 0.4); }
+                  .security-note { background: #fff8e6; border: 1px solid #f0b90b; padding: 20px; border-radius: 20px; margin: 25px 0; }
                   .footer { background: #0a0a0a; padding: 30px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 12px; line-height: 1.5; margin-bottom: 10px; }
-                  .support-link { color: #f0b90b; text-decoration: none; }
+                  .footer-text { font-size: 13px; line-height: 1.5; margin-bottom: 10px; }
+                  .support-link { color: #f0b90b; text-decoration: none; font-weight: 500; transition: color 0.3s ease; }
+                  .support-link:hover { color: #ffffff; }
               </style>
           </head>
           <body>
@@ -4678,10 +4731,6 @@ const sendProfessionalEmail = async (options) => {
         `
       },
 
-
-
-
-      
       // OTP VERIFICATION
       otp: {
         subject: 'BitHash Capital - Verification Code Required',
@@ -4695,17 +4744,19 @@ const sendProfessionalEmail = async (options) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #f0b90b; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
-                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
+                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); margin: 0; padding: 30px 20px; }
+                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); }
+                  .header { background: #0a0a0a; padding: 24px 40px; text-align: center; border-bottom: 3px solid #f0b90b; position: relative; overflow: hidden; }
+                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.05) 50%, transparent 70%); animation: shimmer 3s infinite; }
+                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 10px; position: relative; z-index: 1; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
+                  .logo-text { font-size: 22px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: #ffffff; }
-                  .otp-code { background: #0a0a0a; color: #f0b90b; padding: 20px; font-size: 36px; font-weight: 700; text-align: center; letter-spacing: 8px; margin: 30px 0; border-radius: 8px; font-family: 'Courier New', monospace; }
-                  .security-note { background: #fff8e6; border: 1px solid #f0b90b; padding: 20px; border-radius: 6px; margin: 25px 0; }
+                  .otp-code { background: #0a0a0a; color: #f0b90b; padding: 25px; font-size: 42px; font-weight: 700; text-align: center; letter-spacing: 10px; margin: 30px 0; border-radius: 20px; font-family: 'Courier New', monospace; box-shadow: 0 0 30px rgba(240, 185, 11, 0.2); }
+                  .security-note { background: #fff8e6; border: 1px solid #f0b90b; padding: 20px; border-radius: 20px; margin: 25px 0; }
                   .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 12px; line-height: 1.5; }
+                  .footer-text { font-size: 13px; line-height: 1.5; }
               </style>
           </head>
           <body>
@@ -4755,19 +4806,21 @@ const sendProfessionalEmail = async (options) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #27ae60; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
-                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
+                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); margin: 0; padding: 30px 20px; }
+                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); }
+                  .header { background: #0a0a0a; padding: 24px 40px; text-align: center; border-bottom: 3px solid #27ae60; position: relative; overflow: hidden; }
+                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.05) 50%, transparent 70%); animation: shimmer 3s infinite; }
+                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 10px; position: relative; z-index: 1; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
+                  .logo-text { font-size: 22px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: #ffffff; }
-                  .login-info { background: #f8f9fa; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #27ae60; }
+                  .login-info { background: #f8f9fa; padding: 25px; border-radius: 20px; margin: 25px 0; border-left: 4px solid #27ae60; }
                   .info-item { margin-bottom: 10px; display: flex; }
                   .info-label { font-weight: 600; min-width: 120px; color: #333; }
-                  .security-alert { background: #fee; border: 1px solid #e74c3c; padding: 20px; border-radius: 6px; margin: 20px 0; }
+                  .security-alert { background: #fee; border: 1px solid #e74c3c; padding: 20px; border-radius: 20px; margin: 20px 0; }
                   .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 12px; line-height: 1.5; }
+                  .footer-text { font-size: 13px; line-height: 1.5; }
               </style>
           </head>
           <body>
@@ -4834,17 +4887,20 @@ const sendProfessionalEmail = async (options) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #e74c3c; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
-                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
+                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); margin: 0; padding: 30px 20px; }
+                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); }
+                  .header { background: #0a0a0a; padding: 24px 40px; text-align: center; border-bottom: 3px solid #e74c3c; position: relative; overflow: hidden; }
+                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.05) 50%, transparent 70%); animation: shimmer 3s infinite; }
+                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 10px; position: relative; z-index: 1; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
+                  .logo-text { font-size: 22px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: #ffffff; }
-                  .reset-button { background: #e74c3c; color: white; padding: 14px 35px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 25px 0; font-weight: 600; font-size: 15px; }
-                  .security-note { background: #fee; border: 1px solid #e74c3c; padding: 20px; border-radius: 6px; margin: 25px 0; }
+                  .reset-button { background: linear-gradient(135deg, #e74c3c, #c0392b); color: white; padding: 14px 35px; text-decoration: none; border-radius: 40px; display: inline-block; margin: 25px 0; font-weight: 600; font-size: 15px; box-shadow: 0 10px 20px -5px rgba(231, 76, 60, 0.3); transition: all 0.3s ease; }
+                  .reset-button:hover { transform: translateY(-2px); box-shadow: 0 15px 25px -5px rgba(231, 76, 60, 0.4); }
+                  .security-note { background: #fee; border: 1px solid #e74c3c; padding: 20px; border-radius: 20px; margin: 25px 0; }
                   .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 12px; line-height: 1.5; }
+                  .footer-text { font-size: 13px; line-height: 1.5; }
               </style>
           </head>
           <body>
@@ -4894,20 +4950,23 @@ const sendProfessionalEmail = async (options) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #f0b90b; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
-                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
+                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); margin: 0; padding: 30px 20px; }
+                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); }
+                  .header { background: #0a0a0a; padding: 24px 40px; text-align: center; border-bottom: 3px solid #f0b90b; position: relative; overflow: hidden; }
+                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.05) 50%, transparent 70%); animation: shimmer 3s infinite; }
+                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 10px; position: relative; z-index: 1; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
+                  .logo-text { font-size: 22px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: #ffffff; }
-                  .investment-details { background: #f8f9fa; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #f0b90b; }
+                  .investment-details { background: #f8f9fa; padding: 25px; border-radius: 20px; margin: 25px 0; border-left: 4px solid #f0b90b; }
                   .detail-item { margin-bottom: 12px; display: flex; justify-content: space-between; }
                   .detail-label { font-weight: 600; color: #333; }
                   .detail-value { color: #0a0a0a; font-weight: 500; }
-                  .cta-button { background: #f0b90b; color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 20px 0; font-weight: 600; }
+                  .cta-button { background: linear-gradient(135deg, #f0b90b, #d4a107); color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 40px; display: inline-block; margin: 20px 0; font-weight: 600; box-shadow: 0 10px 20px -5px rgba(240, 185, 11, 0.3); transition: all 0.3s ease; }
+                  .cta-button:hover { transform: translateY(-2px); box-shadow: 0 15px 25px -5px rgba(240, 185, 11, 0.4); }
                   .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 12px; line-height: 1.5; }
+                  .footer-text { font-size: 13px; line-height: 1.5; }
               </style>
           </head>
           <body>
@@ -4980,20 +5039,22 @@ const sendProfessionalEmail = async (options) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #3498db; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
-                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
+                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); margin: 0; padding: 30px 20px; }
+                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); }
+                  .header { background: #0a0a0a; padding: 24px 40px; text-align: center; border-bottom: 3px solid #3498db; position: relative; overflow: hidden; }
+                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.05) 50%, transparent 70%); animation: shimmer 3s infinite; }
+                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 10px; position: relative; z-index: 1; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
+                  .logo-text { font-size: 22px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: #ffffff; }
-                  .withdrawal-details { background: #f8f9fa; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #3498db; }
+                  .withdrawal-details { background: #f8f9fa; padding: 25px; border-radius: 20px; margin: 25px 0; border-left: 4px solid #3498db; }
                   .detail-item { margin-bottom: 12px; display: flex; justify-content: space-between; }
                   .detail-label { font-weight: 600; color: #333; }
                   .detail-value { color: #0a0a0a; font-weight: 500; }
-                  .processing-info { background: #e8f4fd; border: 1px solid #3498db; padding: 20px; border-radius: 6px; margin: 25px 0; }
+                  .processing-info { background: #e8f4fd; border: 1px solid #3498db; padding: 20px; border-radius: 20px; margin: 25px 0; }
                   .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 12px; line-height: 1.5; }
+                  .footer-text { font-size: 13px; line-height: 1.5; }
               </style>
           </head>
           <body>
@@ -5062,20 +5123,23 @@ const sendProfessionalEmail = async (options) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #27ae60; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
-                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
+                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); margin: 0; padding: 30px 20px; }
+                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); }
+                  .header { background: #0a0a0a; padding: 24px 40px; text-align: center; border-bottom: 3px solid #27ae60; position: relative; overflow: hidden; }
+                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.05) 50%, transparent 70%); animation: shimmer 3s infinite; }
+                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 10px; position: relative; z-index: 1; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
+                  .logo-text { font-size: 22px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: #ffffff; }
-                  .success-message { background: #e8f6ef; border: 1px solid #27ae60; padding: 25px; border-radius: 8px; margin: 25px 0; text-align: center; }
+                  .success-message { background: #e8f6ef; border: 1px solid #27ae60; padding: 25px; border-radius: 20px; margin: 25px 0; text-align: center; }
                   .benefits-list { margin: 25px 0; }
                   .benefit-item { display: flex; align-items: center; margin-bottom: 12px; color: #333; }
                   .benefit-icon { color: #27ae60; margin-right: 12px; font-weight: bold; }
-                  .cta-button { background: #f0b90b; color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 20px 0; font-weight: 600; }
+                  .cta-button { background: linear-gradient(135deg, #f0b90b, #d4a107); color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 40px; display: inline-block; margin: 20px 0; font-weight: 600; box-shadow: 0 10px 20px -5px rgba(240, 185, 11, 0.3); transition: all 0.3s ease; }
+                  .cta-button:hover { transform: translateY(-2px); box-shadow: 0 15px 25px -5px rgba(240, 185, 11, 0.4); }
                   .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 12px; line-height: 1.5; }
+                  .footer-text { font-size: 13px; line-height: 1.5; }
               </style>
           </head>
           <body>
@@ -5146,20 +5210,23 @@ const sendProfessionalEmail = async (options) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #27ae60; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
-                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
+                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); margin: 0; padding: 30px 20px; }
+                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); }
+                  .header { background: #0a0a0a; padding: 24px 40px; text-align: center; border-bottom: 3px solid #27ae60; position: relative; overflow: hidden; }
+                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.05) 50%, transparent 70%); animation: shimmer 3s infinite; }
+                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 10px; position: relative; z-index: 1; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
+                  .logo-text { font-size: 22px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: #ffffff; }
-                  .deposit-details { background: #f8f9fa; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #27ae60; }
+                  .deposit-details { background: #f8f9fa; padding: 25px; border-radius: 20px; margin: 25px 0; border-left: 4px solid #27ae60; }
                   .detail-item { margin-bottom: 12px; display: flex; justify-content: space-between; }
                   .detail-label { font-weight: 600; color: #333; }
                   .detail-value { color: #0a0a0a; font-weight: 500; }
-                  .cta-button { background: #f0b90b; color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 20px 0; font-weight: 600; }
+                  .cta-button { background: linear-gradient(135deg, #f0b90b, #d4a107); color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 40px; display: inline-block; margin: 20px 0; font-weight: 600; box-shadow: 0 10px 20px -5px rgba(240, 185, 11, 0.3); transition: all 0.3s ease; }
+                  .cta-button:hover { transform: translateY(-2px); box-shadow: 0 15px 25px -5px rgba(240, 185, 11, 0.4); }
                   .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 12px; line-height: 1.5; }
+                  .footer-text { font-size: 13px; line-height: 1.5; }
               </style>
           </head>
           <body>
@@ -5228,19 +5295,22 @@ const sendProfessionalEmail = async (options) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #f0b90b; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
-                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
+                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); margin: 0; padding: 30px 20px; }
+                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); }
+                  .header { background: #0a0a0a; padding: 24px 40px; text-align: center; border-bottom: 3px solid #f0b90b; position: relative; overflow: hidden; }
+                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.05) 50%, transparent 70%); animation: shimmer 3s infinite; }
+                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 10px; position: relative; z-index: 1; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
+                  .logo-text { font-size: 22px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: #ffffff; }
-                  .bonus-card { background: #fff8e6; border: 2px solid #f0b90b; padding: 30px; border-radius: 8px; margin: 25px 0; text-align: center; }
-                  .bonus-amount { font-size: 36px; font-weight: 700; color: #f0b90b; margin: 10px 0; }
-                  .referral-details { background: #f8f9fa; padding: 20px; border-radius: 6px; margin: 20px 0; }
-                  .cta-button { background: #f0b90b; color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 20px 0; font-weight: 600; }
+                  .bonus-card { background: #fff8e6; border: 2px solid #f0b90b; padding: 30px; border-radius: 20px; margin: 25px 0; text-align: center; }
+                  .bonus-amount { font-size: 42px; font-weight: 700; color: #f0b90b; margin: 10px 0; text-shadow: 0 5px 15px rgba(240, 185, 11, 0.3); }
+                  .referral-details { background: #f8f9fa; padding: 20px; border-radius: 16px; margin: 20px 0; }
+                  .cta-button { background: linear-gradient(135deg, #f0b90b, #d4a107); color: #0a0a0a; padding: 12px 30px; text-decoration: none; border-radius: 40px; display: inline-block; margin: 20px 0; font-weight: 600; box-shadow: 0 10px 20px -5px rgba(240, 185, 11, 0.3); transition: all 0.3s ease; }
+                  .cta-button:hover { transform: translateY(-2px); box-shadow: 0 15px 25px -5px rgba(240, 185, 11, 0.4); }
                   .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 12px; line-height: 1.5; }
+                  .footer-text { font-size: 13px; line-height: 1.5; }
               </style>
           </head>
           <body>
@@ -5300,20 +5370,22 @@ const sendProfessionalEmail = async (options) => {
               <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background-color: #f8f9fa; margin: 0; padding: 0; }
-                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; }
-                  .header { background: #0a0a0a; padding: 30px 40px; text-align: center; border-bottom: 3px solid #e74c3c; }
-                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; }
-                  .logo-img { width: 40px; height: 40px; border-radius: 50%; }
-                  .logo-text { font-size: 24px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
+                  body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); margin: 0; padding: 30px 20px; }
+                  .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 32px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); }
+                  .header { background: #0a0a0a; padding: 24px 40px; text-align: center; border-bottom: 3px solid #e74c3c; position: relative; overflow: hidden; }
+                  .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.05) 50%, transparent 70%); animation: shimmer 3s infinite; }
+                  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+                  .logo-container { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 10px; position: relative; z-index: 1; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
+                  .logo-text { font-size: 22px; font-weight: 700; color: #f0b90b; letter-spacing: -0.5px; }
                   .content { padding: 40px; background: #ffffff; }
-                  .alert-box { background: #fee; border: 2px solid #e74c3c; padding: 25px; border-radius: 8px; margin: 25px 0; }
-                  .action-steps { background: #f8f9fa; padding: 20px; border-radius: 6px; margin: 20px 0; }
+                  .alert-box { background: #fee; border: 2px solid #e74c3c; padding: 25px; border-radius: 20px; margin: 25px 0; }
+                  .action-steps { background: #f8f9fa; padding: 20px; border-radius: 16px; margin: 20px 0; }
                   .step-item { margin-bottom: 10px; display: flex; align-items: flex-start; }
                   .step-number { background: #e74c3c; color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-right: 12px; font-size: 12px; font-weight: 600; }
                   .support-link { color: #e74c3c; text-decoration: none; font-weight: 600; }
                   .footer { background: #0a0a0a; padding: 25px 40px; text-align: center; color: #999; }
-                  .footer-text { font-size: 12px; line-height: 1.5; }
+                  .footer-text { font-size: 13px; line-height: 1.5; }
               </style>
           </head>
           <body>
@@ -5382,7 +5454,6 @@ const sendProfessionalEmail = async (options) => {
     throw new Error('Failed to send email');
   }
 };
-
 
 
 // Routes
