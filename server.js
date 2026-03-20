@@ -36,8 +36,8 @@ app.use(helmet({
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'", "'unsafe-inline'", "https://apis.google.com"],
       styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-      imgSrc: ["'self'", "data:", "https://www.google-analytics.com"],
-      connectSrc: ["'self'", "https://api.ipinfo.io", "https://website-backendd-1.onrender.com"],
+      imgSrc: ["'self'", "data:", "https://www.google-analytics.com", "https://cryptologos.cc"],
+      connectSrc: ["'self'", "https://api.ipinfo.io", "https://website-backendd-1.onrender.com", "https://api.coingecko.com"],
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
       objectSrc: ["'none'"],
       frameSrc: ["'self'", "https://accounts.google.com"] // Added for Google OAuth
@@ -2732,6 +2732,43 @@ const generateReferralCode = () => {
   return `BH-${timestamp}-${randomPart}-${checksum}`;
 };
 
+// Get real-time crypto price from CoinGecko
+const getCryptoPrice = async (asset) => {
+  try {
+    const assetMap = {
+      'BTC': 'bitcoin',
+      'ETH': 'ethereum',
+      'USDT': 'tether',
+      'BNB': 'binancecoin',
+      'SOL': 'solana',
+      'USDC': 'usd-coin',
+      'XRP': 'ripple',
+      'DOGE': 'dogecoin',
+      'ADA': 'cardano',
+      'SHIB': 'shiba-inu',
+      'AVAX': 'avalanche-2',
+      'DOT': 'polkadot',
+      'TRX': 'tron',
+      'LINK': 'chainlink',
+      'MATIC': 'matic-network',
+      'LTC': 'litecoin'
+    };
+    
+    const coinId = assetMap[asset.toUpperCase()];
+    if (!coinId) return null;
+    
+    const response = await axios.get(
+      `https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd`,
+      { timeout: 5000 }
+    );
+    
+    return response.data[coinId]?.usd || null;
+  } catch (err) {
+    console.error('Error fetching crypto price:', err);
+    return null;
+  }
+};
+
 const sendEmail = async (options) => {
   try {
     const mailOptions = {
@@ -3327,66 +3364,11 @@ const calculateReferralCommissions = async (investment) => {
 
 
 
-// Helper function to get real-time crypto price from CoinGecko
-const getCryptoPrice = async (asset) => {
-  try {
-    // Map asset to CoinGecko ID
-    const assetMap = {
-      BTC: 'bitcoin',
-      ETH: 'ethereum',
-      USDT: 'tether',
-      BNB: 'binancecoin',
-      SOL: 'solana',
-      USDC: 'usd-coin',
-      XRP: 'ripple',
-      DOGE: 'dogecoin',
-      ADA: 'cardano',
-      SHIB: 'shiba-inu',
-      AVAX: 'avalanche-2',
-      DOT: 'polkadot',
-      TRX: 'tron',
-      LINK: 'chainlink',
-      MATIC: 'matic-network',
-      LTC: 'litecoin'
-    };
-    
-    const coinId = assetMap[asset.toUpperCase()] || 'bitcoin';
-    
-    const response = await axios.get(
-      `https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd`,
-      { timeout: 5000 }
-    );
-    
-    if (response.data && response.data[coinId] && response.data[coinId].usd) {
-      return response.data[coinId].usd;
-    }
-    
-    // Fallback prices if API fails
-    const fallbackPrices = {
-      BTC: 65000,
-      ETH: 3500,
-      USDT: 1,
-      BNB: 600,
-      SOL: 150,
-      USDC: 1
-    };
-    
-    return fallbackPrices[asset.toUpperCase()] || 50000;
-    
-  } catch (error) {
-    console.error('Error fetching crypto price:', error.message);
-    // Return fallback price
-    const fallbackPrices = {
-      BTC: 65000,
-      ETH: 3500,
-      USDT: 1,
-      BNB: 600,
-      SOL: 150,
-      USDC: 1
-    };
-    return fallbackPrices[asset.toUpperCase()] || 50000;
-  }
-};
+
+
+
+
+
 
 // Enhanced email service with professional, highly visible templates
 const sendAutomatedEmail = async (user, action, data = {}) => {
@@ -3440,19 +3422,6 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
       return `https://cryptologos.cc/logos/${logoMap[assetLower] || 'bitcoin-btc-logo.png'}`;
     };
 
-    // Helper function to get blockchain explorer link
-    const getExplorerLink = (txid, network) => {
-      if (!txid) return '#';
-      const explorers = {
-        BTC: `https://www.blockchain.com/btc/tx/${txid}`,
-        ETH: `https://etherscan.io/tx/${txid}`,
-        BNB: `https://bscscan.com/tx/${txid}`,
-        SOL: `https://solscan.io/tx/${txid}`,
-        TRX: `https://tronscan.org/#/transaction/${txid}`
-      };
-      return explorers[network] || `https://www.blockchain.com/btc/tx/${txid}`;
-    };
-
     const templates = {
       // WELCOME EMAIL
       welcome: {
@@ -3470,16 +3439,18 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
                   background-color: #f4f4f5;
                   margin: 0;
-                  padding: 0;
+                  padding: 20px;
                 }
                 .email-container {
                   max-width: 600px;
                   margin: 0 auto;
                   background-color: #ffffff;
+                  border-radius: 16px;
                   overflow: hidden;
+                  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
                 }
                 .header {
-                  background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+                  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                   padding: 32px 40px;
                   text-align: center;
                 }
@@ -3546,7 +3517,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   line-height: 1.4;
                 }
                 .cta-button {
-                  background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+                  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                   color: #ffffff;
                   padding: 14px 32px;
                   text-decoration: none;
@@ -3568,12 +3539,12 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   line-height: 1.5;
                 }
                 .support-link {
-                  color: #2a5298;
+                  color: #667eea;
                   text-decoration: none;
                 }
               </style>
           </head>
-          <body style="background-color: #f4f4f5; margin: 0; padding: 0;">
+          <body style="background-color: #f4f4f5; padding: 20px;">
               <div class="email-container">
                   <div class="header">
                       <div class="logo-container">
@@ -3637,9 +3608,9 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <title>Login Notification - BitHash Capital</title>
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 0; }
-                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; overflow: hidden; }
-                .header { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); padding: 32px 40px; text-align: center; }
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px; }
+                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+                .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 32px 40px; text-align: center; }
                 .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
                 .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
@@ -3656,11 +3627,11 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 .security-note p { color: #991b1b; font-size: 14px; }
                 .footer { padding: 24px 40px; background-color: #f9fafb; text-align: center; border-top: 1px solid #e5e7eb; }
                 .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
-                .support-link { color: #2a5298; text-decoration: none; }
+                .support-link { color: #667eea; text-decoration: none; }
                 .device-badge { display: inline-block; background: #e5e7eb; padding: 4px 10px; font-size: 12px; color: #374151; border-radius: 6px; }
               </style>
           </head>
-          <body style="background-color: #f4f4f5; margin: 0; padding: 0;">
+          <body style="background-color: #f4f4f5; padding: 20px;">
               <div class="email-container">
                   <div class="header">
                       <div class="logo-container">
@@ -3721,23 +3692,23 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <title>Verification Code - BitHash Capital</title>
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 0; }
-                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; overflow: hidden; }
-                .header { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); padding: 32px 40px; text-align: center; }
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px; }
+                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+                .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 32px 40px; text-align: center; }
                 .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
                 .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
                 .content { padding: 40px; background-color: #ffffff; }
                 .greeting { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
                 .message { color: #4b5563; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .otp-code { background: #f9fafb; padding: 24px; font-size: 48px; font-weight: 700; text-align: center; letter-spacing: 12px; margin: 24px 0; border: 2px solid #e5e7eb; color: #2a5298; font-family: 'Courier New', monospace; border-radius: 12px; }
+                .otp-code { background: #f9fafb; padding: 24px; font-size: 48px; font-weight: 700; text-align: center; letter-spacing: 12px; margin: 24px 0; border: 2px solid #e5e7eb; color: #667eea; font-family: 'Courier New', monospace; border-radius: 12px; }
                 .security-note { background: #fef2f2; border-left: 4px solid #ef4444; padding: 16px; margin: 24px 0; border-radius: 8px; }
                 .security-note p { color: #991b1b; font-size: 14px; }
                 .footer { padding: 24px 40px; background-color: #f9fafb; text-align: center; border-top: 1px solid #e5e7eb; }
                 .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
               </style>
           </head>
-          <body style="background-color: #f4f4f5; margin: 0; padding: 0;">
+          <body style="background-color: #f4f4f5; padding: 20px;">
               <div class="email-container">
                   <div class="header">
                       <div class="logo-container">
@@ -3779,23 +3750,23 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <title>Password Reset - BitHash Capital</title>
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 0; }
-                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; overflow: hidden; }
-                .header { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); padding: 32px 40px; text-align: center; }
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px; }
+                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+                .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 32px 40px; text-align: center; }
                 .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
                 .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
                 .content { padding: 40px; background-color: #ffffff; }
                 .greeting { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
                 .message { color: #4b5563; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .reset-button { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); color: #ffffff; padding: 14px 32px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 16px; border-radius: 8px; margin: 20px 0; }
+                .reset-button { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #ffffff; padding: 14px 32px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 16px; border-radius: 8px; margin: 20px 0; }
                 .security-note { background: #fef2f2; border-left: 4px solid #ef4444; padding: 16px; margin: 24px 0; border-radius: 8px; }
                 .security-note p { color: #991b1b; font-size: 14px; }
                 .footer { padding: 24px 40px; background-color: #f9fafb; text-align: center; border-top: 1px solid #e5e7eb; }
                 .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
               </style>
           </head>
-          <body style="background-color: #f4f4f5; margin: 0; padding: 0;">
+          <body style="background-color: #f4f4f5; padding: 20px;">
               <div class="email-container">
                   <div class="header">
                       <div class="logo-container">
@@ -3839,9 +3810,9 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <title>Password Changed - BitHash Capital</title>
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 0; }
-                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; overflow: hidden; }
-                .header { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); padding: 32px 40px; text-align: center; }
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px; }
+                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+                .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 32px 40px; text-align: center; }
                 .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
                 .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
@@ -3856,7 +3827,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
               </style>
           </head>
-          <body style="background-color: #f4f4f5; margin: 0; padding: 0;">
+          <body style="background-color: #f4f4f5; padding: 20px;">
               <div class="email-container">
                   <div class="header">
                       <div class="logo-container">
@@ -3899,9 +3870,9 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <title>Investment Confirmation - BitHash Capital</title>
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 0; }
-                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; overflow: hidden; }
-                .header { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); padding: 32px 40px; text-align: center; }
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px; }
+                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+                .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 32px 40px; text-align: center; }
                 .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
                 .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
@@ -3913,12 +3884,12 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 .detail-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
                 .detail-label { color: #6b7280; font-size: 14px; font-weight: 500; }
                 .detail-value { color: #1f2937; font-weight: 600; font-size: 16px; }
-                .cta-button { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); color: #ffffff; padding: 12px 28px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 15px; border-radius: 8px; margin: 16px 0; }
+                .cta-button { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #ffffff; padding: 12px 28px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 15px; border-radius: 8px; margin: 16px 0; }
                 .footer { padding: 24px 40px; background-color: #f9fafb; text-align: center; border-top: 1px solid #e5e7eb; }
                 .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
               </style>
           </head>
-          <body style="background-color: #f4f4f5; margin: 0; padding: 0;">
+          <body style="background-color: #f4f4f5; padding: 20px;">
               <div class="email-container">
                   <div class="header">
                       <div class="logo-container">
@@ -3986,9 +3957,9 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <title>Deposit Received - BitHash Capital</title>
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 0; }
-                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; overflow: hidden; }
-                .header { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); padding: 32px 40px; text-align: center; }
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px; }
+                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+                .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 32px 40px; text-align: center; }
                 .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
                 .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
@@ -4010,7 +3981,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
               </style>
           </head>
-          <body style="background-color: #f4f4f5; margin: 0; padding: 0;">
+          <body style="background-color: #f4f4f5; padding: 20px;">
               <div class="email-container">
                   <div class="header">
                       <div class="logo-container">
@@ -4040,10 +4011,6 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                           <div class="detail-row">
                               <span class="detail-label">USD Value:</span>
                               <span class="detail-value">$${formatAmount(data.usdValue)}</span>
-                          </div>
-                          <div class="detail-row">
-                              <span class="detail-label">Exchange Rate:</span>
-                              <span class="detail-value">1 ${(data.asset || 'BTC').toUpperCase()} = $${formatAmount(data.exchangeRate)}</span>
                           </div>
                           <div class="detail-row">
                               <span class="detail-label">Transaction Hash:</span>
@@ -4078,167 +4045,6 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
         `
       },
 
-      // DEPOSIT APPROVED - New template
-      deposit_approved: {
-        subject: 'Deposit Approved - BitHash Capital',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>Deposit Approved - BitHash Capital</title>
-              <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 0; }
-                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; overflow: hidden; }
-                .header { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); padding: 32px 40px; text-align: center; }
-                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
-                .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
-                .content { padding: 40px; background-color: #ffffff; }
-                .greeting { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
-                .message { color: #4b5563; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .approved-box { background: #f0fdf4; padding: 24px; text-align: center; border-radius: 12px; margin: 24px 0; border: 1px solid #86efac; }
-                .approved-amount { font-size: 36px; font-weight: 700; color: #22c55e; margin: 12px 0; }
-                .transaction-details { background: #f9fafb; padding: 24px; border-radius: 12px; margin: 24px 0; }
-                .detail-row { display: flex; justify-content: space-between; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #e5e7eb; }
-                .detail-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
-                .detail-label { color: #6b7280; font-size: 14px; font-weight: 500; }
-                .detail-value { color: #1f2937; font-weight: 500; font-size: 14px; }
-                .cta-button { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); color: #ffffff; padding: 12px 28px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 15px; border-radius: 8px; margin: 16px 0; }
-                .footer { padding: 24px 40px; background-color: #f9fafb; text-align: center; border-top: 1px solid #e5e7eb; }
-                .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
-              </style>
-          </head>
-          <body style="background-color: #f4f4f5; margin: 0; padding: 0;">
-              <div class="email-container">
-                  <div class="header">
-                      <div class="logo-container">
-                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
-                          <span class="logo-text">BitHash Capital</span>
-                      </div>
-                  </div>
-                  <div class="content">
-                      <h2 class="greeting">Hello ${user.firstName || 'there'},</h2>
-                      <p class="message">Your deposit has been approved and credited to your account.</p>
-                      
-                      <div class="approved-box">
-                          <div style="color: #6b7280; font-size: 14px;">Amount Credited</div>
-                          <div class="approved-amount">$${formatAmount(data.amount)}</div>
-                          <div style="color: #6b7280; font-size: 14px;">New Balance: $${formatAmount(data.newBalance)}</div>
-                      </div>
-                      
-                      <div class="transaction-details">
-                          <div class="detail-row">
-                              <span class="detail-label">Payment Method:</span>
-                              <span class="detail-value">${data.method || 'Bank Transfer'}</span>
-                          </div>
-                          <div class="detail-row">
-                              <span class="detail-label">Transaction ID:</span>
-                              <span class="detail-value">${data.reference || 'N/A'}</span>
-                          </div>
-                          <div class="detail-row">
-                              <span class="detail-label">Processed At:</span>
-                              <span class="detail-value">${formatTimestamp(data.processedAt)}</span>
-                          </div>
-                      </div>
-                      
-                      <div style="text-align: center;">
-                          <a href="https://www.bithashcapital.live/dashboard.html" class="cta-button">View Dashboard</a>
-                      </div>
-                  </div>
-                  <div class="footer">
-                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.</p>
-                  </div>
-              </div>
-          </body>
-          </html>
-        `
-      },
-
-      // DEPOSIT REJECTED - New template
-      deposit_rejected: {
-        subject: 'Deposit Rejected - BitHash Capital',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>Deposit Rejected - BitHash Capital</title>
-              <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 0; }
-                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; overflow: hidden; }
-                .header { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); padding: 32px 40px; text-align: center; }
-                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
-                .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
-                .content { padding: 40px; background-color: #ffffff; }
-                .greeting { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
-                .message { color: #4b5563; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .rejected-box { background: #fef2f2; padding: 24px; text-align: center; border-radius: 12px; margin: 24px 0; border: 1px solid #fecaca; }
-                .rejected-amount { font-size: 36px; font-weight: 700; color: #dc2626; margin: 12px 0; }
-                .reason-box { background: #fef3c7; padding: 16px; border-radius: 12px; margin: 24px 0; border-left: 4px solid #f59e0b; }
-                .reason-box p { color: #92400e; font-size: 14px; }
-                .transaction-details { background: #f9fafb; padding: 24px; border-radius: 12px; margin: 24px 0; }
-                .detail-row { display: flex; justify-content: space-between; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #e5e7eb; }
-                .detail-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
-                .detail-label { color: #6b7280; font-size: 14px; font-weight: 500; }
-                .detail-value { color: #1f2937; font-weight: 500; font-size: 14px; }
-                .cta-button { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); color: #ffffff; padding: 12px 28px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 15px; border-radius: 8px; margin: 16px 0; }
-                .footer { padding: 24px 40px; background-color: #f9fafb; text-align: center; border-top: 1px solid #e5e7eb; }
-                .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
-              </style>
-          </head>
-          <body style="background-color: #f4f4f5; margin: 0; padding: 0;">
-              <div class="email-container">
-                  <div class="header">
-                      <div class="logo-container">
-                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
-                          <span class="logo-text">BitHash Capital</span>
-                      </div>
-                  </div>
-                  <div class="content">
-                      <h2 class="greeting">Hello ${user.firstName || 'there'},</h2>
-                      <p class="message">We regret to inform you that your deposit request has been rejected.</p>
-                      
-                      <div class="rejected-box">
-                          <div style="color: #6b7280; font-size: 14px;">Amount</div>
-                          <div class="rejected-amount">$${formatAmount(data.amount)}</div>
-                      </div>
-                      
-                      <div class="reason-box">
-                          <p><strong>Rejection Reason:</strong> ${data.reason || 'Unable to verify payment details'}</p>
-                      </div>
-                      
-                      <div class="transaction-details">
-                          <div class="detail-row">
-                              <span class="detail-label">Payment Method:</span>
-                              <span class="detail-value">${data.method || 'Bank Transfer'}</span>
-                          </div>
-                          <div class="detail-row">
-                              <span class="detail-label">Transaction ID:</span>
-                              <span class="detail-value">${data.reference || 'N/A'}</span>
-                          </div>
-                      </div>
-                      
-                      <div style="text-align: center;">
-                          <a href="https://www.bithashcapital.live/deposit.html" class="cta-button">Try Again</a>
-                      </div>
-                      
-                      <p class="message">If you have any questions, please contact our support team.</p>
-                  </div>
-                  <div class="footer">
-                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.</p>
-                  </div>
-              </div>
-          </body>
-          </html>
-        `
-      },
-
       // WITHDRAWAL REQUEST - Enhanced with full transaction details
       withdrawal_request: {
         subject: `${data.asset || 'Crypto'} Withdrawal Request - BitHash Capital`,
@@ -4251,9 +4057,9 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <title>Withdrawal Request - BitHash Capital</title>
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 0; }
-                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; overflow: hidden; }
-                .header { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); padding: 32px 40px; text-align: center; }
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px; }
+                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+                .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 32px 40px; text-align: center; }
                 .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
                 .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
@@ -4277,7 +4083,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
               </style>
           </head>
-          <body style="background-color: #f4f4f5; margin: 0; padding: 0;">
+          <body style="background-color: #f4f4f5; padding: 20px;">
               <div class="email-container">
                   <div class="header">
                       <div class="logo-container">
@@ -4313,10 +4119,6 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                               <span class="detail-value">$${formatAmount(data.usdValue)}</span>
                           </div>
                           <div class="detail-row">
-                              <span class="detail-label">Exchange Rate:</span>
-                              <span class="detail-value">1 ${(data.asset || 'BTC').toUpperCase()} = $${formatAmount(data.exchangeRate)}</span>
-                          </div>
-                          <div class="detail-row">
                               <span class="detail-label">Withdrawal Address:</span>
                               <span class="detail-value address-value">${hideAddress(data.withdrawalAddress || data.address)}</span>
                           </div>
@@ -4349,7 +4151,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
         `
       },
 
-      // WITHDRAWAL APPROVED - Enhanced with full transaction details
+      // WITHDRAWAL APPROVED
       withdrawal_approved: {
         subject: `${data.asset || 'Crypto'} Withdrawal Approved - BitHash Capital`,
         html: `
@@ -4361,9 +4163,9 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <title>Withdrawal Approved - BitHash Capital</title>
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 0; }
-                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; overflow: hidden; }
-                .header { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); padding: 32px 40px; text-align: center; }
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px; }
+                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+                .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 32px 40px; text-align: center; }
                 .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
                 .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
@@ -4384,10 +4186,10 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 .address-value { font-family: monospace; background: #ffffff; padding: 4px 8px; border-radius: 6px; font-size: 12px; border: 1px solid #e5e7eb; }
                 .footer { padding: 24px 40px; background-color: #f9fafb; text-align: center; border-top: 1px solid #e5e7eb; }
                 .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
-                .explorer-link { color: #2a5298; text-decoration: none; font-weight: 500; }
+                .explorer-link { color: #667eea; text-decoration: none; font-weight: 500; }
               </style>
           </head>
-          <body style="background-color: #f4f4f5; margin: 0; padding: 0;">
+          <body style="background-color: #f4f4f5; padding: 20px;">
               <div class="email-container">
                   <div class="header">
                       <div class="logo-container">
@@ -4441,7 +4243,155 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
         `
       },
 
-      // WITHDRAWAL REJECTED - New template
+      // DEPOSIT APPROVED
+      deposit_approved: {
+        subject: 'Deposit Approved - BitHash Capital',
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Deposit Approved - BitHash Capital</title>
+              <style>
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px; }
+                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+                .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 32px 40px; text-align: center; }
+                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
+                .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
+                .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
+                .content { padding: 40px; background-color: #ffffff; }
+                .greeting { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
+                .message { color: #4b5563; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
+                .approved-box { background: #f0fdf4; padding: 24px; text-align: center; border-radius: 12px; margin: 24px 0; border: 1px solid #86efac; }
+                .approved-amount { font-size: 36px; font-weight: 700; color: #22c55e; margin: 12px 0; }
+                .transaction-details { background: #f9fafb; padding: 24px; border-radius: 12px; margin: 24px 0; }
+                .detail-row { display: flex; justify-content: space-between; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #e5e7eb; }
+                .detail-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+                .detail-label { color: #6b7280; font-size: 14px; font-weight: 500; }
+                .detail-value { color: #1f2937; font-weight: 500; font-size: 14px; word-break: break-all; }
+                .cta-button { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #ffffff; padding: 12px 28px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 15px; border-radius: 8px; margin: 16px 0; }
+                .footer { padding: 24px 40px; background-color: #f9fafb; text-align: center; border-top: 1px solid #e5e7eb; }
+                .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
+              </style>
+          </head>
+          <body style="background-color: #f4f4f5; padding: 20px;">
+              <div class="email-container">
+                  <div class="header">
+                      <div class="logo-container">
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
+                          <span class="logo-text">BitHash Capital</span>
+                      </div>
+                  </div>
+                  <div class="content">
+                      <h2 class="greeting">Hello ${user.firstName || 'there'},</h2>
+                      <p class="message">Your deposit has been approved and credited to your account.</p>
+                      
+                      <div class="approved-box">
+                          <div style="color: #6b7280; font-size: 14px;">Amount Deposited</div>
+                          <div class="approved-amount">$${formatAmount(data.amount)}</div>
+                          <div style="color: #6b7280; font-size: 14px;">Reference: ${data.reference || 'Deposit Reference'}</div>
+                      </div>
+                      
+                      <div class="transaction-details">
+                          <div class="detail-row">
+                              <span class="detail-label">Payment Method:</span>
+                              <span class="detail-value">${data.method || 'Bank Transfer'}</span>
+                          </div>
+                          <div class="detail-row">
+                              <span class="detail-label">New Balance:</span>
+                              <span class="detail-value">$${formatAmount(data.newBalance)}</span>
+                          </div>
+                          <div class="detail-row">
+                              <span class="detail-label">Processed At:</span>
+                              <span class="detail-value">${formatTimestamp(data.processedAt)}</span>
+                          </div>
+                      </div>
+                      
+                      <div style="text-align: center;">
+                          <a href="https://www.bithashcapital.live/dashboard.html" class="cta-button">View Dashboard</a>
+                      </div>
+                  </div>
+                  <div class="footer">
+                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.</p>
+                  </div>
+              </div>
+          </body>
+          </html>
+        `
+      },
+
+      // DEPOSIT REJECTED
+      deposit_rejected: {
+        subject: 'Deposit Rejected - BitHash Capital',
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Deposit Rejected - BitHash Capital</title>
+              <style>
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px; }
+                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+                .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 32px 40px; text-align: center; }
+                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
+                .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
+                .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
+                .content { padding: 40px; background-color: #ffffff; }
+                .greeting { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
+                .message { color: #4b5563; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
+                .rejected-box { background: #fef2f2; padding: 24px; text-align: center; border-radius: 12px; margin: 24px 0; border: 1px solid #fecaca; }
+                .rejected-amount { font-size: 36px; font-weight: 700; color: #dc2626; margin: 12px 0; }
+                .reason-box { background: #f9fafb; padding: 20px; border-radius: 12px; margin: 24px 0; border-left: 4px solid #ef4444; }
+                .reason-box p { color: #991b1b; font-size: 14px; line-height: 1.6; }
+                .footer { padding: 24px 40px; background-color: #f9fafb; text-align: center; border-top: 1px solid #e5e7eb; }
+                .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
+                .support-link { color: #667eea; text-decoration: none; }
+              </style>
+          </head>
+          <body style="background-color: #f4f4f5; padding: 20px;">
+              <div class="email-container">
+                  <div class="header">
+                      <div class="logo-container">
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
+                          <span class="logo-text">BitHash Capital</span>
+                      </div>
+                  </div>
+                  <div class="content">
+                      <h2 class="greeting">Hello ${user.firstName || 'there'},</h2>
+                      <p class="message">Your deposit request has been reviewed and rejected.</p>
+                      
+                      <div class="rejected-box">
+                          <div style="color: #6b7280; font-size: 14px;">Amount</div>
+                          <div class="rejected-amount">$${formatAmount(data.amount)}</div>
+                          <div style="color: #6b7280; font-size: 14px;">Method: ${data.method || 'Bank Transfer'}</div>
+                      </div>
+                      
+                      <div class="reason-box">
+                          <strong>Rejection Reason:</strong>
+                          <p>${data.reason || 'The deposit could not be processed due to verification issues. Please contact support for assistance.'}</p>
+                      </div>
+                      
+                      <p class="message">If you have any questions, please contact our support team.</p>
+                      
+                      <div style="text-align: center;">
+                          <a href="https://www.bithashcapital.live/support.html" class="support-link" style="display: inline-block; padding: 12px 24px; background: #667eea; color: white; text-decoration: none; border-radius: 8px;">Contact Support</a>
+                      </div>
+                  </div>
+                  <div class="footer">
+                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
+                      Need help? <a href="mailto:support@bithashcapital.live" class="support-link">support@bithashcapital.live</a></p>
+                  </div>
+              </div>
+          </body>
+          </html>
+        `
+      },
+
+      // WITHDRAWAL REJECTED
       withdrawal_rejected: {
         subject: 'Withdrawal Request Rejected - BitHash Capital',
         html: `
@@ -4453,9 +4403,9 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <title>Withdrawal Rejected - BitHash Capital</title>
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 0; }
-                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; overflow: hidden; }
-                .header { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); padding: 32px 40px; text-align: center; }
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px; }
+                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+                .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 32px 40px; text-align: center; }
                 .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
                 .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
@@ -4464,19 +4414,14 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 .message { color: #4b5563; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
                 .rejected-box { background: #fef2f2; padding: 24px; text-align: center; border-radius: 12px; margin: 24px 0; border: 1px solid #fecaca; }
                 .rejected-amount { font-size: 36px; font-weight: 700; color: #dc2626; margin: 12px 0; }
-                .reason-box { background: #fef3c7; padding: 16px; border-radius: 12px; margin: 24px 0; border-left: 4px solid #f59e0b; }
-                .reason-box p { color: #92400e; font-size: 14px; }
-                .transaction-details { background: #f9fafb; padding: 24px; border-radius: 12px; margin: 24px 0; }
-                .detail-row { display: flex; justify-content: space-between; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #e5e7eb; }
-                .detail-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
-                .detail-label { color: #6b7280; font-size: 14px; font-weight: 500; }
-                .detail-value { color: #1f2937; font-weight: 500; font-size: 14px; }
-                .cta-button { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); color: #ffffff; padding: 12px 28px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 15px; border-radius: 8px; margin: 16px 0; }
+                .reason-box { background: #f9fafb; padding: 20px; border-radius: 12px; margin: 24px 0; border-left: 4px solid #ef4444; }
+                .reason-box p { color: #991b1b; font-size: 14px; line-height: 1.6; }
                 .footer { padding: 24px 40px; background-color: #f9fafb; text-align: center; border-top: 1px solid #e5e7eb; }
                 .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
+                .support-link { color: #667eea; text-decoration: none; }
               </style>
           </head>
-          <body style="background-color: #f4f4f5; margin: 0; padding: 0;">
+          <body style="background-color: #f4f4f5; padding: 20px;">
               <div class="email-container">
                   <div class="header">
                       <div class="logo-container">
@@ -4486,36 +4431,28 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   </div>
                   <div class="content">
                       <h2 class="greeting">Hello ${user.firstName || 'there'},</h2>
-                      <p class="message">We regret to inform you that your withdrawal request has been rejected.</p>
+                      <p class="message">Your withdrawal request has been reviewed and rejected.</p>
                       
                       <div class="rejected-box">
-                          <div style="color: #6b7280; font-size: 14px;">Requested Amount</div>
+                          <div style="color: #6b7280; font-size: 14px;">Amount</div>
                           <div class="rejected-amount">$${formatAmount(data.amount)}</div>
+                          <div style="color: #6b7280; font-size: 14px;">Method: ${data.method || 'Crypto Withdrawal'}</div>
                       </div>
                       
                       <div class="reason-box">
-                          <p><strong>Rejection Reason:</strong> ${data.reason || 'Unable to verify withdrawal details'}</p>
+                          <strong>Rejection Reason:</strong>
+                          <p>${data.reason || 'The withdrawal could not be processed due to security verification issues. Please ensure your KYC is completed and try again.'}</p>
                       </div>
                       
-                      <div class="transaction-details">
-                          <div class="detail-row">
-                              <span class="detail-label">Payment Method:</span>
-                              <span class="detail-value">${data.method || 'Bank Transfer'}</span>
-                          </div>
-                          <div class="detail-row">
-                              <span class="detail-label">Transaction ID:</span>
-                              <span class="detail-value">${data.reference || 'N/A'}</span>
-                          </div>
-                      </div>
+                      <p class="message">The funds have been returned to your balance. If you have any questions, please contact our support team.</p>
                       
                       <div style="text-align: center;">
-                          <a href="https://www.bithashcapital.live/withdraw.html" class="cta-button">Try Again</a>
+                          <a href="https://www.bithashcapital.live/support.html" class="support-link" style="display: inline-block; padding: 12px 24px; background: #667eea; color: white; text-decoration: none; border-radius: 8px;">Contact Support</a>
                       </div>
-                      
-                      <p class="message">If you have any questions, please contact our support team.</p>
                   </div>
                   <div class="footer">
-                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.</p>
+                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
+                      Need help? <a href="mailto:support@bithashcapital.live" class="support-link">support@bithashcapital.live</a></p>
                   </div>
               </div>
           </body>
@@ -4523,7 +4460,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
         `
       },
 
-      // KYC APPROVED - New template
+      // KYC APPROVED
       kyc_approved: {
         subject: 'KYC Verification Approved - BitHash Capital',
         html: `
@@ -4535,9 +4472,9 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <title>KYC Approved - BitHash Capital</title>
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 0; }
-                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; overflow: hidden; }
-                .header { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); padding: 32px 40px; text-align: center; }
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px; }
+                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+                .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 32px 40px; text-align: center; }
                 .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
                 .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
@@ -4545,17 +4482,16 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 .greeting { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
                 .message { color: #4b5563; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
                 .success-box { background: #f0fdf4; padding: 24px; text-align: center; border-radius: 12px; margin: 24px 0; border: 1px solid #86efac; }
-                .success-icon { font-size: 48px; margin-bottom: 12px; }
-                .success-text { font-size: 20px; font-weight: 600; color: #22c55e; }
+                .check-icon { font-size: 64px; color: #22c55e; margin-bottom: 16px; }
                 .benefits-list { margin: 24px 0; }
                 .benefit-item { display: flex; align-items: center; margin-bottom: 12px; color: #4b5563; }
                 .benefit-icon { color: #22c55e; margin-right: 12px; font-weight: bold; font-size: 18px; }
-                .cta-button { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); color: #ffffff; padding: 12px 28px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 15px; border-radius: 8px; margin: 16px 0; }
+                .cta-button { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #ffffff; padding: 12px 28px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 15px; border-radius: 8px; margin: 16px 0; }
                 .footer { padding: 24px 40px; background-color: #f9fafb; text-align: center; border-top: 1px solid #e5e7eb; }
                 .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
               </style>
           </head>
-          <body style="background-color: #f4f4f5; margin: 0; padding: 0;">
+          <body style="background-color: #f4f4f5; padding: 20px;">
               <div class="email-container">
                   <div class="header">
                       <div class="logo-container">
@@ -4565,18 +4501,19 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   </div>
                   <div class="content">
                       <h2 class="greeting">Hello ${user.firstName || 'there'},</h2>
-                      <p class="message">We are pleased to inform you that your KYC verification has been approved!</p>
+                      <p class="message">Congratulations! Your KYC verification has been approved.</p>
                       
                       <div class="success-box">
-                          <div class="success-icon">✅</div>
-                          <div class="success-text">Verification Complete</div>
+                          <div class="check-icon">✓</div>
+                          <div style="font-size: 20px; font-weight: 600; color: #166534;">Identity Verified</div>
+                          <p style="color: #15803d; margin-top: 8px;">Your account is now fully verified</p>
                       </div>
                       
                       <div class="benefits-list">
-                          <div class="benefit-item"><span class="benefit-icon">✓</span> Higher withdrawal limits</div>
+                          <div class="benefit-item"><span class="benefit-icon">✓</span> Increased withdrawal limits</div>
                           <div class="benefit-item"><span class="benefit-icon">✓</span> Access to all investment plans</div>
-                          <div class="benefit-item"><span class="benefit-icon">✓</span> Priority support</div>
-                          <div class="benefit-item"><span class="benefit-icon">✓</span> Enhanced account security</div>
+                          <div class="benefit-item"><span class="benefit-icon">✓</span> Priority customer support</div>
+                          <div class="benefit-item"><span class="benefit-icon">✓</span> Faster transaction processing</div>
                       </div>
                       
                       <div style="text-align: center;">
@@ -4592,7 +4529,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
         `
       },
 
-      // KYC REJECTED - New template
+      // KYC REJECTED
       kyc_rejected: {
         subject: 'KYC Verification Update - BitHash Capital',
         html: `
@@ -4604,9 +4541,9 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <title>KYC Update - BitHash Capital</title>
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 0; }
-                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; overflow: hidden; }
-                .header { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); padding: 32px 40px; text-align: center; }
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px; }
+                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+                .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 32px 40px; text-align: center; }
                 .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
                 .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
@@ -4614,16 +4551,14 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 .greeting { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
                 .message { color: #4b5563; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
                 .rejected-box { background: #fef2f2; padding: 24px; text-align: center; border-radius: 12px; margin: 24px 0; border: 1px solid #fecaca; }
-                .rejected-icon { font-size: 48px; margin-bottom: 12px; }
-                .rejected-text { font-size: 20px; font-weight: 600; color: #dc2626; }
-                .reason-box { background: #fef3c7; padding: 16px; border-radius: 12px; margin: 24px 0; border-left: 4px solid #f59e0b; }
-                .reason-box p { color: #92400e; font-size: 14px; }
-                .cta-button { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); color: #ffffff; padding: 12px 28px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 15px; border-radius: 8px; margin: 16px 0; }
+                .reason-box { background: #f9fafb; padding: 20px; border-radius: 12px; margin: 24px 0; border-left: 4px solid #ef4444; }
+                .reason-box p { color: #991b1b; font-size: 14px; line-height: 1.6; }
+                .cta-button { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #ffffff; padding: 12px 28px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 15px; border-radius: 8px; margin: 16px 0; }
                 .footer { padding: 24px 40px; background-color: #f9fafb; text-align: center; border-top: 1px solid #e5e7eb; }
                 .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
               </style>
           </head>
-          <body style="background-color: #f4f4f5; margin: 0; padding: 0;">
+          <body style="background-color: #f4f4f5; padding: 20px;">
               <div class="email-container">
                   <div class="header">
                       <div class="logo-container">
@@ -4633,25 +4568,27 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   </div>
                   <div class="content">
                       <h2 class="greeting">Hello ${user.firstName || 'there'},</h2>
-                      <p class="message">We have reviewed your KYC submission and unfortunately it could not be approved at this time.</p>
+                      <p class="message">Your KYC verification requires attention.</p>
                       
                       <div class="rejected-box">
-                          <div class="rejected-icon">⚠️</div>
-                          <div class="rejected-text">Verification Not Approved</div>
+                          <div style="font-size: 48px; color: #dc2626;">⚠️</div>
+                          <div style="font-size: 20px; font-weight: 600; color: #991b1b; margin-top: 8px;">Verification Issue</div>
                       </div>
                       
                       <div class="reason-box">
-                          <p><strong>Reason for Rejection:</strong> ${data.reason || 'Document could not be verified. Please ensure all documents are clear and legible.'}</p>
+                          <strong>Reason for Rejection:</strong>
+                          <p>${data.reason || 'The submitted documents could not be verified. Please ensure all documents are clear, valid, and match your account information.'}</p>
                       </div>
+                      
+                      <p class="message">Please resubmit your KYC documents with the correct information to continue enjoying full platform benefits.</p>
                       
                       <div style="text-align: center;">
                           <a href="https://www.bithashcapital.live/kyc.html" class="cta-button">Resubmit KYC</a>
                       </div>
-                      
-                      <p class="message">Please review the reason above and resubmit your documents for verification. Our support team is available to assist you if needed.</p>
                   </div>
                   <div class="footer">
-                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.</p>
+                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
+                      Need help? Contact support@bithashcapital.live</p>
                   </div>
               </div>
           </body>
@@ -4671,21 +4608,21 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <title>Notification - BitHash Capital</title>
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 0; }
-                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; overflow: hidden; }
-                .header { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); padding: 32px 40px; text-align: center; }
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px; }
+                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+                .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 32px 40px; text-align: center; }
                 .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
                 .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
                 .content { padding: 40px; background-color: #ffffff; }
                 .greeting { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
                 .message-content { background: #f9fafb; padding: 24px; border-radius: 12px; margin: 24px 0; color: #1f2937; line-height: 1.6; font-size: 16px; }
-                .cta-button { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); color: #ffffff; padding: 12px 28px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 15px; border-radius: 8px; margin: 16px 0; }
+                .cta-button { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #ffffff; padding: 12px 28px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 15px; border-radius: 8px; margin: 16px 0; }
                 .footer { padding: 24px 40px; background-color: #f9fafb; text-align: center; border-top: 1px solid #e5e7eb; }
                 .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
               </style>
           </head>
-          <body style="background-color: #f4f4f5; margin: 0; padding: 0;">
+          <body style="background-color: #f4f4f5; padding: 20px;">
               <div class="email-container">
                   <div class="header">
                       <div class="logo-container">
@@ -4780,9 +4717,9 @@ const sendProfessionalEmail = async (options) => {
               <title>Welcome to BitHash Capital</title>
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 0; }
-                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; overflow: hidden; }
-                .header { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); padding: 32px 40px; text-align: center; }
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px; }
+                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+                .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 32px 40px; text-align: center; }
                 .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
                 .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
@@ -4791,19 +4728,19 @@ const sendProfessionalEmail = async (options) => {
                 .message { color: #4b5563; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
                 .features-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 32px 0; }
                 .feature-card { background: #f9fafb; padding: 20px; border-radius: 12px; text-align: center; }
-                .feature-title { font-weight: 600; color: #2a5298; margin-bottom: 8px; font-size: 16px; }
+                .feature-title { font-weight: 600; color: #667eea; margin-bottom: 8px; font-size: 16px; }
                 .feature-desc { color: #6b7280; font-size: 13px; line-height: 1.4; }
                 .benefits-list { margin: 24px 0; }
                 .benefit-item { display: flex; align-items: center; margin-bottom: 12px; color: #4b5563; }
                 .benefit-icon { color: #22c55e; margin-right: 12px; font-weight: bold; font-size: 18px; }
-                .cta-button { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); color: #ffffff; padding: 14px 32px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 16px; border-radius: 8px; margin: 20px 0; }
+                .cta-button { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #ffffff; padding: 14px 32px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 16px; border-radius: 8px; margin: 20px 0; }
                 .security-note { background: #fef3c7; padding: 16px; border-radius: 12px; margin: 24px 0; border-left: 4px solid #f59e0b; }
                 .footer { padding: 24px 40px; background-color: #f9fafb; text-align: center; border-top: 1px solid #e5e7eb; }
                 .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
-                .support-link { color: #2a5298; text-decoration: none; }
+                .support-link { color: #667eea; text-decoration: none; }
               </style>
           </head>
-          <body style="background-color: #f4f4f5; margin: 0; padding: 0;">
+          <body style="background-color: #f4f4f5; padding: 20px;">
               <div class="email-container">
                   <div class="header">
                       <div class="logo-container">
@@ -4873,23 +4810,23 @@ const sendProfessionalEmail = async (options) => {
               <title>Verification Code - BitHash Capital</title>
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 0; }
-                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; overflow: hidden; }
-                .header { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); padding: 32px 40px; text-align: center; }
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px; }
+                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+                .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 32px 40px; text-align: center; }
                 .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
                 .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
                 .content { padding: 40px; background-color: #ffffff; }
                 .greeting { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
                 .message { color: #4b5563; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .otp-code { background: #f9fafb; padding: 24px; font-size: 48px; font-weight: 700; text-align: center; letter-spacing: 12px; margin: 24px 0; border: 2px solid #e5e7eb; color: #2a5298; font-family: 'Courier New', monospace; border-radius: 12px; }
+                .otp-code { background: #f9fafb; padding: 24px; font-size: 48px; font-weight: 700; text-align: center; letter-spacing: 12px; margin: 24px 0; border: 2px solid #e5e7eb; color: #667eea; font-family: 'Courier New', monospace; border-radius: 12px; }
                 .security-note { background: #fef2f2; padding: 16px; border-radius: 12px; margin: 24px 0; border-left: 4px solid #ef4444; }
                 .security-note p { color: #991b1b; font-size: 14px; }
                 .footer { padding: 24px 40px; background-color: #f9fafb; text-align: center; border-top: 1px solid #e5e7eb; }
                 .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
               </style>
           </head>
-          <body style="background-color: #f4f4f5; margin: 0; padding: 0;">
+          <body style="background-color: #f4f4f5; padding: 20px;">
               <div class="email-container">
                   <div class="header">
                       <div class="logo-container">
@@ -6283,7 +6220,7 @@ app.get('/api/admin/deposits/:id', adminProtect, async (req, res) => {
   }
 });
 
-// Admin Approve Deposit Endpoint - FIXED with email notification
+// Admin Approve Deposit Endpoint - ENHANCED WITH EMAIL
 app.post('/api/admin/deposits/:id/approve', adminProtect, [
   body('notes').optional().trim()
 ], async (req, res) => {
@@ -6328,19 +6265,37 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
     deposit.adminNotes = notes;
     await deposit.save();
 
-    // ✅ SEND DEPOSIT APPROVED EMAIL
+    // ✅ ENHANCED: Send deposit approved email with all transaction details
     try {
+      // Get real-time crypto price if applicable
+      let cryptoPrice = null;
+      let assetAmount = null;
+      let usdValue = deposit.amount;
+      
+      if (deposit.method && deposit.method !== 'BANK' && deposit.method !== 'CARD') {
+        cryptoPrice = await getCryptoPrice(deposit.method);
+        if (cryptoPrice) {
+          assetAmount = deposit.amount / cryptoPrice;
+          usdValue = deposit.amount;
+        }
+      }
+      
       await sendAutomatedEmail(user, 'deposit_approved', {
         name: user.firstName,
         amount: deposit.amount,
         method: deposit.method,
         reference: deposit.reference,
         newBalance: user.balances.main,
-        processedAt: deposit.processedAt
+        processedAt: deposit.processedAt,
+        asset: deposit.method !== 'BANK' && deposit.method !== 'CARD' ? deposit.method : 'USD',
+        assetAmount: assetAmount,
+        usdValue: usdValue,
+        cryptoPrice: cryptoPrice
       });
-      console.log(`📧 Deposit approved email sent to ${user.email}`);
+      console.log(`📧 Deposit approval email sent to ${user.email}`);
     } catch (emailError) {
-      console.error('Failed to send deposit approved email:', emailError);
+      console.error('Failed to send deposit approval email:', emailError);
+      // Don't fail the deposit approval if email fails
     }
     
     res.status(200).json({
@@ -6361,7 +6316,7 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
   }
 });
 
-// Admin Reject Deposit Endpoint - FIXED with email notification
+// Admin Reject Deposit Endpoint - ENHANCED WITH EMAIL
 app.post('/api/admin/deposits/:id/reject', adminProtect, [
   body('reason').trim().notEmpty().withMessage('Rejection reason is required')
 ], async (req, res) => {
@@ -6399,18 +6354,18 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
     deposit.adminNotes = reason;
     await deposit.save();
 
-    // ✅ SEND DEPOSIT REJECTED EMAIL
+    // ✅ ENHANCED: Send deposit rejected email
     try {
       await sendAutomatedEmail(deposit.user, 'deposit_rejected', {
         name: deposit.user.firstName,
         amount: deposit.amount,
         method: deposit.method,
-        reason: reason,
-        reference: deposit.reference
+        reason: reason
       });
-      console.log(`📧 Deposit rejected email sent to ${deposit.user.email}`);
+      console.log(`📧 Deposit rejection email sent to ${deposit.user.email}`);
     } catch (emailError) {
-      console.error('Failed to send deposit rejected email:', emailError);
+      console.error('Failed to send deposit rejection email:', emailError);
+      // Don't fail the deposit rejection if email fails
     }
     
     res.status(200).json({
@@ -6459,12 +6414,13 @@ app.get('/api/admin/withdrawals/:id', adminProtect, async (req, res) => {
   }
 });
 
-// Admin Approve Withdrawal Endpoint - FIXED with email notification and exchange rate
+// Admin Approve Withdrawal Endpoint - ENHANCED WITH EMAIL AND REAL-TIME CRYPTO PRICE
 app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
-  body('notes').optional().trim()
+  body('notes').optional().trim(),
+  body('txid').optional().trim()
 ], async (req, res) => {
   try {
-    const { notes } = req.body;
+    const { notes, txid } = req.body;
     
     // Find withdrawal
     const withdrawal = await Transaction.findById(req.params.id)
@@ -6484,54 +6440,53 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
       });
     }
     
-    // Get real-time exchange rate from CoinGecko if crypto withdrawal
-    let exchangeRate = null;
+    // Get real-time crypto price for the withdrawal asset
+    let cryptoPrice = null;
+    let usdValue = withdrawal.amount;
+    let feeUsd = withdrawal.fee || 0;
+    
     if (withdrawal.asset && withdrawal.asset !== 'USD') {
-      try {
-        exchangeRate = await getCryptoPrice(withdrawal.asset);
-      } catch (error) {
-        console.error('Error fetching exchange rate:', error);
+      cryptoPrice = await getCryptoPrice(withdrawal.asset);
+      if (cryptoPrice) {
+        // Calculate USD value based on crypto amount
+        if (withdrawal.assetAmount) {
+          usdValue = withdrawal.assetAmount * cryptoPrice;
+        } else {
+          usdValue = withdrawal.amount;
+        }
+        feeUsd = (withdrawal.fee || 0) * cryptoPrice;
       }
     }
-    
-    // Calculate fee (network fee - deducted separately from main wallet)
-    const feePercentage = 0.01; // 1% network fee
-    const fee = withdrawal.amount * feePercentage;
-    const netAmount = withdrawal.amount - fee;
-    
-    // Calculate USD values
-    const feeUsd = exchangeRate ? fee * exchangeRate : fee;
-    const netAmountUsd = exchangeRate ? netAmount * exchangeRate : netAmount;
     
     // Update withdrawal status
     withdrawal.status = 'completed';
     withdrawal.processedBy = req.admin._id;
     withdrawal.processedAt = new Date();
     withdrawal.adminNotes = notes;
-    withdrawal.exchangeRateAtTime = exchangeRate;
-    withdrawal.fee = fee;
-    withdrawal.netAmount = netAmount;
+    if (txid) {
+      withdrawal.details = { ...withdrawal.details, txid };
+    }
     await withdrawal.save();
 
-    // ✅ SEND WITHDRAWAL APPROVED EMAIL with all transaction details
+    // ✅ ENHANCED: Send withdrawal approved email with all transaction details
     try {
       await sendAutomatedEmail(withdrawal.user, 'withdrawal_approved', {
         name: withdrawal.user.firstName,
-        amount: withdrawal.amount,
+        amount: withdrawal.assetAmount || withdrawal.amount,
         asset: withdrawal.asset || 'USD',
-        usdValue: withdrawal.amount,
-        exchangeRate: exchangeRate,
-        fee: fee,
+        usdValue: usdValue,
+        fee: withdrawal.fee || 0,
         feeUsd: feeUsd,
-        netAmount: netAmount,
+        netAmount: (withdrawal.assetAmount || withdrawal.amount) - (withdrawal.fee || 0),
         withdrawalAddress: withdrawal.details?.withdrawalAddress || withdrawal.btcAddress || 'N/A',
-        network: withdrawal.network || (withdrawal.asset === 'USDT' ? 'ERC-20' : withdrawal.asset === 'BTC' ? 'Bitcoin' : 'Mainnet'),
-        transactionId: withdrawal.reference,
-        processedAt: withdrawal.processedAt
+        processedAt: withdrawal.processedAt,
+        txid: txid || withdrawal.details?.txid,
+        method: withdrawal.method
       });
-      console.log(`📧 Withdrawal approved email sent to ${withdrawal.user.email}`);
+      console.log(`📧 Withdrawal approval email sent to ${withdrawal.user.email}`);
     } catch (emailError) {
-      console.error('Failed to send withdrawal approved email:', emailError);
+      console.error('Failed to send withdrawal approval email:', emailError);
+      // Don't fail the withdrawal approval if email fails
     }
     
     res.status(200).json({
@@ -6557,7 +6512,7 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
 
 
 
-// CORRECTED Admin Reject Withdrawal Endpoint - FIXED with email notification
+// CORRECTED Admin Reject Withdrawal Endpoint - ENHANCED WITH EMAIL
 app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
   body('reason').trim().notEmpty().withMessage('Rejection reason is required')
 ], async (req, res) => {
@@ -6608,18 +6563,19 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
     withdrawal.adminNotes = reason; // Changed from rejectionReason to reason
     await withdrawal.save();
 
-    // ✅ SEND WITHDRAWAL REJECTED EMAIL
+    // ✅ ENHANCED: Send withdrawal rejected email
     try {
       await sendAutomatedEmail(user, 'withdrawal_rejected', {
         name: user.firstName,
         amount: withdrawal.amount,
         reason: reason,
         method: withdrawal.method,
-        reference: withdrawal.reference
+        asset: withdrawal.asset || 'USD'
       });
-      console.log(`📧 Withdrawal rejected email sent to ${user.email}`);
+      console.log(`📧 Withdrawal rejection email sent to ${user.email}`);
     } catch (emailError) {
-      console.error('Failed to send withdrawal rejected email:', emailError);
+      console.error('Failed to send withdrawal rejection email:', emailError);
+      // Don't fail the withdrawal rejection if email fails
     }
     
     res.status(200).json({
@@ -7374,7 +7330,7 @@ app.get('/api/admin/kyc/submissions/:submissionId', adminProtect, restrictTo('su
   }
 });
 
-// Approve KYC submission - FIXED with email notification
+// Approve KYC submission - ENHANCED WITH EMAIL
 app.post('/api/admin/kyc/submissions/:submissionId/approve', adminProtect, restrictTo('super', 'support'), [
   body('notes').optional().trim()
 ], async (req, res) => {
@@ -7418,14 +7374,15 @@ app.post('/api/admin/kyc/submissions/:submissionId/approve', adminProtect, restr
       'kycStatus.facial': 'verified'
     });
 
-    // ✅ SEND KYC APPROVED EMAIL
+    // ✅ ENHANCED: Send KYC approved email
     try {
       await sendAutomatedEmail(kycSubmission.user, 'kyc_approved', {
         name: kycSubmission.user.firstName
       });
-      console.log(`📧 KYC approved email sent to ${kycSubmission.user.email}`);
+      console.log(`📧 KYC approval email sent to ${kycSubmission.user.email}`);
     } catch (emailError) {
-      console.error('Failed to send KYC approved email:', emailError);
+      console.error('Failed to send KYC approval email:', emailError);
+      // Don't fail the KYC approval if email fails
     }
 
     res.status(200).json({
@@ -7450,7 +7407,7 @@ app.post('/api/admin/kyc/submissions/:submissionId/approve', adminProtect, restr
   }
 });
 
-// Reject KYC submission - FIXED with email notification
+// Reject KYC submission - ENHANCED WITH EMAIL
 app.post('/api/admin/kyc/submissions/:submissionId/reject', adminProtect, restrictTo('super', 'support'), [
   body('reason').trim().notEmpty().withMessage('Rejection reason is required'),
   body('section').optional().isIn(['all', 'identity', 'address', 'facial']).withMessage('Invalid section')
@@ -7526,15 +7483,16 @@ app.post('/api/admin/kyc/submissions/:submissionId/reject', adminProtect, restri
 
     await User.findByIdAndUpdate(kycSubmission.user._id, userUpdate);
 
-    // ✅ SEND KYC REJECTED EMAIL
+    // ✅ ENHANCED: Send KYC rejected email
     try {
       await sendAutomatedEmail(kycSubmission.user, 'kyc_rejected', {
         name: kycSubmission.user.firstName,
         reason: reason
       });
-      console.log(`📧 KYC rejected email sent to ${kycSubmission.user.email}`);
+      console.log(`📧 KYC rejection email sent to ${kycSubmission.user.email}`);
     } catch (emailError) {
-      console.error('Failed to send KYC rejected email:', emailError);
+      console.error('Failed to send KYC rejection email:', emailError);
+      // Don't fail the KYC rejection if email fails
     }
 
     res.status(200).json({
@@ -8358,6 +8316,10 @@ app.post('/api/auth/send-otp', [
     });
   }
 });
+
+
+
+
 
 
 
@@ -19037,3 +18999,4 @@ processMaturedInvestments();
 httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
