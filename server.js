@@ -3333,10 +3333,58 @@ const calculateReferralCommissions = async (investment) => {
 
 
 
-
-// Enhanced email service with professional Bitcoin mining templates - Binance/Bybit style
+// Enhanced email service with professional Bitcoin mining templates
 const sendAutomatedEmail = async (user, action, data = {}) => {
   try {
+    // Helper function to hide wallet address (show first 6 and last 6 characters)
+    const hideAddress = (address) => {
+      if (!address || address === 'N/A' || address === 'Unknown' || address === '') {
+        return 'Not Provided';
+      }
+      if (address.length <= 12) return address;
+      return address.substring(0, 6) + '*************' + address.substring(address.length - 6);
+    };
+
+    // Helper function to format timestamp
+    const formatTimestamp = (timestamp) => {
+      if (!timestamp) return new Date().toLocaleString('en-US', { timeZone: 'UTC', dateStyle: 'full', timeStyle: 'medium' }) + ' UTC';
+      return new Date(timestamp).toLocaleString('en-US', { timeZone: 'UTC', dateStyle: 'full', timeStyle: 'medium' }) + ' UTC';
+    };
+
+    // Helper function to format amount with proper decimals
+    const formatAmount = (amount, asset) => {
+      if (!amount && amount !== 0) return '0.00';
+      const isCrypto = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'ADA', 'SHIB', 'AVAX', 'DOT', 'TRX', 'LINK', 'MATIC', 'LTC'].includes(asset?.toUpperCase());
+      if (isCrypto) {
+        return amount.toFixed(8);
+      }
+      return amount.toFixed(2);
+    };
+
+    // Helper function to get crypto logo URL
+    const getCryptoLogo = (asset) => {
+      const assetLower = (asset || 'btc').toLowerCase();
+      const logoMap = {
+        btc: 'bitcoin-btc-logo.png',
+        eth: 'ethereum-eth-logo.png',
+        usdt: 'tether-usdt-logo.png',
+        bnb: 'binance-coin-bnb-logo.png',
+        sol: 'solana-sol-logo.png',
+        usdc: 'usd-coin-usdc-logo.png',
+        xrp: 'xrp-xrp-logo.png',
+        doge: 'dogecoin-doge-logo.png',
+        ada: 'cardano-ada-logo.png',
+        shib: 'shiba-inu-shib-logo.png',
+        avax: 'avalanche-avax-logo.png',
+        dot: 'polkadot-new-dot-logo.png',
+        trx: 'tron-trx-logo.png',
+        link: 'chainlink-link-logo.png',
+        matic: 'polygon-matic-logo.png',
+        ltc: 'litecoin-ltc-logo.png'
+      };
+      return `https://cryptologos.cc/logos/${logoMap[assetLower] || 'bitcoin-btc-logo.png'}`;
+    };
+
     const templates = {
       // WELCOME EMAIL
       welcome: {
@@ -3355,7 +3403,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: none; border-radius: 0; overflow: hidden; }
                   .header { background-color: #0A0E17; padding: 30px 40px 20px 40px; text-align: center; border-bottom: 1px solid #1F2937; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
                   .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
                   .content { padding: 40px; background-color: #0A0E17; }
                   .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
@@ -3365,8 +3413,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   .feature-icon { color: #00D8FF; font-size: 20px; margin-bottom: 10px; }
                   .feature-title { font-weight: 600; color: #FFFFFF; margin-bottom: 5px; font-size: 14px; }
                   .feature-desc { color: #8E9BAE; font-size: 13px; line-height: 1.5; }
-                  .divider { height: 1px; background: #1F2937; margin: 30px 0; }
-                  .cta-button { background: #00D8FF; color: #0A0E17; padding: 14px 35px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 15px; border: none; }
+                  .cta-button { background: #00D8FF; color: #0A0E17; padding: 14px 35px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 15px; border: none; border-radius: 4px; }
                   .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
                   .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.6; }
                   .support-link { color: #00D8FF; text-decoration: none; }
@@ -3411,7 +3458,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                           <a href="https://www.bithashcapital.live/dashboard.html" class="cta-button">Go to Dashboard</a>
                       </div>
                       
-                      <p class="message" style="margin-bottom: 0;">Start your mining journey today and earn passive income with Bitcoin.</p>
+                      <p class="message">Start your mining journey today and earn passive income with Bitcoin.</p>
                   </div>
                   <div class="footer">
                       <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
@@ -3441,20 +3488,20 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: none; border-radius: 0; overflow: hidden; }
                   .header { background-color: #0A0E17; padding: 30px 40px 20px 40px; text-align: center; border-bottom: 1px solid #1F2937; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
                   .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
                   .content { padding: 40px; background-color: #0A0E17; }
                   .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
+                  .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
                   .login-info { background: transparent; padding: 0; margin: 25px 0; border-bottom: 1px solid #1F2937; }
                   .info-row { display: flex; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #1F2937; }
                   .info-label { width: 100px; color: #8E9BAE; font-size: 14px; }
                   .info-value { flex: 1; color: #FFFFFF; font-weight: 500; font-size: 14px; }
-                  .divider { height: 1px; background: #1F2937; margin: 30px 0; }
                   .security-note { background: transparent; border-left: 2px solid #f6465d; padding: 20px; margin: 25px 0; color: #f6465d; font-size: 14px; }
                   .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
                   .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.6; }
                   .support-link { color: #00D8FF; text-decoration: none; }
-                  .device-badge { display: inline-block; background: transparent; padding: 4px 10px; font-size: 12px; color: #8E9BAE; border: 1px solid #1F2937; }
+                  .device-badge { display: inline-block; background: transparent; padding: 4px 10px; font-size: 12px; color: #8E9BAE; border: 1px solid #1F2937; border-radius: 4px; }
               </style>
           </head>
           <body style="background-color: #0A0E17; padding: 20px;">
@@ -3467,28 +3514,28 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   </div>
                   <div class="content">
                       <h2 class="greeting">Hello ${user.firstName || 'Valued Investor'},</h2>
-                      <p class="message" style="color: #8E9BAE;">A successful login to your BitHash Capital account was detected:</p>
+                      <p class="message">A successful login to your BitHash Capital account was detected:</p>
                       
                       <div class="login-info">
                           <div class="info-row">
                               <span class="info-label">Time:</span>
-                              <span class="info-value">${new Date().toLocaleString('en-US', { timeZone: 'UTC', dateStyle: 'full', timeStyle: 'medium' })} UTC</span>
+                              <span class="info-value">${formatTimestamp(data.timestamp)}</span>
                           </div>
                           <div class="info-row">
                               <span class="info-label">Device:</span>
-                              <span class="info-value"><span class="device-badge">${data.device || 'Unknown Device'}</span></span>
+                              <span class="info-value"><span class="device-badge">${data.device || 'Desktop Device'}</span></span>
                           </div>
                           <div class="info-row">
                               <span class="info-label">Location:</span>
-                              <span class="info-value">${data.location || 'Unknown Location'}</span>
+                              <span class="info-value">${data.location || 'Location Detected'}</span>
                           </div>
                           <div class="info-row">
                               <span class="info-label">IP Address:</span>
-                              <span class="info-value">${data.ip || 'Unknown'}</span>
+                              <span class="info-value">${data.ip || 'IP Address Recorded'}</span>
                           </div>
                       </div>
                       
-                      <p class="message" style="color: #8E9BAE;">If this was you, no further action is required. You may continue using your account normally.</p>
+                      <p class="message">If this was you, no further action is required. You may continue using your account normally.</p>
                       
                       <div class="security-note">
                           <strong>⚠️ Not you?</strong> If you didn't perform this login, please secure your account immediately by changing your password and enabling two-factor authentication.
@@ -3522,12 +3569,11 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: none; border-radius: 0; overflow: hidden; }
                   .header { background-color: #0A0E17; padding: 30px 40px 20px 40px; text-align: center; border-bottom: 1px solid #1F2937; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
                   .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
                   .content { padding: 40px; background-color: #0A0E17; }
                   .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
-                  .otp-code { background: transparent; padding: 25px; font-size: 42px; font-weight: 700; text-align: center; letter-spacing: 12px; margin: 30px 0; border-bottom: 1px solid #00D8FF; color: #00D8FF; font-family: 'Courier New', monospace; }
-                  .copy-btn { background: transparent; color: #FFFFFF; border: 1px solid #1F2937; padding: 8px 20px; font-size: 14px; cursor: pointer; margin-left: 10px; }
+                  .otp-code { background: #111827; padding: 25px; font-size: 42px; font-weight: 700; text-align: center; letter-spacing: 12px; margin: 30px 0; border: 1px solid #00D8FF; color: #00D8FF; font-family: 'Courier New', monospace; border-radius: 8px; }
                   .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
                   .security-note { background: transparent; border-left: 2px solid #f6465d; padding: 20px; margin: 25px 0; }
                   .security-note p { color: #f6465d; font-size: 14px; }
@@ -3547,7 +3593,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                       <h2 class="greeting">Hello ${user.firstName || 'there'},</h2>
                       <p class="message">Please use the following verification code to complete your ${data.action || 'account verification'}:</p>
                       
-                      <div class="otp-code" id="otp-code">${data.otp}</div>
+                      <div class="otp-code">${data.otp}</div>
                       
                       <p class="message" style="text-align: center;">This code will expire in 5 minutes.</p>
                       
@@ -3582,12 +3628,12 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: none; border-radius: 0; overflow: hidden; }
                   .header { background-color: #0A0E17; padding: 30px 40px 20px 40px; text-align: center; border-bottom: 1px solid #1F2937; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
                   .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
                   .content { padding: 40px; background-color: #0A0E17; }
                   .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
                   .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
-                  .reset-button { background: #00D8FF; color: #0A0E17; padding: 14px 35px; text-decoration: none; display: inline-block; margin: 25px 0; font-weight: 600; font-size: 15px; }
+                  .reset-button { background: #00D8FF; color: #0A0E17; padding: 14px 35px; text-decoration: none; display: inline-block; margin: 25px 0; font-weight: 600; font-size: 15px; border-radius: 4px; }
                   .security-note { background: transparent; border-left: 2px solid #f6465d; padding: 20px; margin: 25px 0; }
                   .security-note p { color: #f6465d; font-size: 14px; }
                   .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
@@ -3643,14 +3689,15 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: none; border-radius: 0; overflow: hidden; }
                   .header { background-color: #0A0E17; padding: 30px 40px 20px 40px; text-align: center; border-bottom: 1px solid #1F2937; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
                   .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
                   .content { padding: 40px; background-color: #0A0E17; }
                   .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
                   .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
                   .success-icon { text-align: center; font-size: 48px; margin: 20px 0; color: #00D8FF; }
-                  .info-box { background: transparent; padding: 0; border-bottom: 1px solid #1F2937; margin: 25px 0; }
-                  .info-box p { color: #FFFFFF; font-size: 14px; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #1F2937; }
+                  .info-box { background: #111827; padding: 20px; border-radius: 8px; margin: 25px 0; }
+                  .info-box p { color: #FFFFFF; font-size: 14px; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid #1F2937; }
+                  .info-box p:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
                   .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
                   .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.6; }
               </style>
@@ -3669,9 +3716,9 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                       <p class="message" style="text-align: center;">Hello ${user.firstName || 'there'}, your BitHash Capital account password has been changed.</p>
                       
                       <div class="info-box">
-                          <p><strong>Time:</strong> ${new Date().toLocaleString('en-US', { timeZone: 'UTC', dateStyle: 'full', timeStyle: 'medium' })} UTC</p>
-                          <p><strong>IP Address:</strong> ${data.ip || 'Unknown'}</p>
-                          <p><strong>Device:</strong> ${data.device || 'Unknown Device'}</p>
+                          <p><strong>Time:</strong> ${formatTimestamp(data.timestamp)}</p>
+                          <p><strong>IP Address:</strong> ${data.ip || 'IP Address Recorded'}</p>
+                          <p><strong>Device:</strong> ${data.device || 'Device Information Recorded'}</p>
                       </div>
                       
                       <p class="message">If you did not make this change, please contact our support team immediately.</p>
@@ -3703,16 +3750,17 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: none; border-radius: 0; overflow: hidden; }
                   .header { background-color: #0A0E17; padding: 30px 40px 20px 40px; text-align: center; border-bottom: 1px solid #1F2937; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
                   .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
                   .content { padding: 40px; background-color: #0A0E17; }
                   .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
                   .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
-                  .investment-details { background: transparent; padding: 0; margin: 25px 0; border-bottom: 1px solid #1F2937; }
+                  .investment-details { background: #111827; padding: 20px; border-radius: 8px; margin: 25px 0; }
                   .detail-row { display: flex; justify-content: space-between; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #1F2937; }
+                  .detail-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
                   .detail-label { color: #8E9BAE; font-size: 14px; }
-                  .detail-value { color: #FFFFFF; font-weight: 600; font-size: 16px; }
-                  .cta-button { background: #00D8FF; color: #0A0E17; padding: 14px 35px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 15px; }
+                  .detail-value { color: #00D8FF; font-weight: 600; font-size: 16px; }
+                  .cta-button { background: #00D8FF; color: #0A0E17; padding: 14px 35px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 15px; border-radius: 4px; }
                   .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
                   .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.6; }
               </style>
@@ -3736,11 +3784,15 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                           </div>
                           <div class="detail-row">
                               <span class="detail-label">Amount Invested:</span>
-                              <span class="detail-value">$${data.amount?.toFixed(2) || '0.00'}</span>
+                              <span class="detail-value">$${formatAmount(data.amount)}</span>
                           </div>
                           <div class="detail-row">
                               <span class="detail-label">Expected Return:</span>
-                              <span class="detail-value">$${data.expectedReturn?.toFixed(2) || '0.00'}</span>
+                              <span class="detail-value">$${formatAmount(data.expectedReturn)}</span>
+                          </div>
+                          <div class="detail-row">
+                              <span class="detail-label">ROI Percentage:</span>
+                              <span class="detail-value">${data.roiPercentage || data.percentage || '0'}%</span>
                           </div>
                           <div class="detail-row">
                               <span class="detail-label">Duration:</span>
@@ -3748,11 +3800,11 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                           </div>
                           <div class="detail-row">
                               <span class="detail-label">Start Date:</span>
-                              <span class="detail-value">${new Date(data.startDate).toLocaleDateString()}</span>
+                              <span class="detail-value">${formatTimestamp(data.startDate)}</span>
                           </div>
                           <div class="detail-row">
                               <span class="detail-label">End Date:</span>
-                              <span class="detail-value">${new Date(data.endDate).toLocaleDateString()}</span>
+                              <span class="detail-value">${formatTimestamp(data.endDate)}</span>
                           </div>
                       </div>
                       
@@ -3786,15 +3838,17 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: none; border-radius: 0; overflow: hidden; }
                   .header { background-color: #0A0E17; padding: 30px 40px 20px 40px; text-align: center; border-bottom: 1px solid #1F2937; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
                   .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
                   .content { padding: 40px; background-color: #0A0E17; }
                   .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
                   .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
-                  .success-box { background: transparent; padding: 30px; text-align: center; border-bottom: 1px solid #00D8FF; margin: 25px 0; }
+                  .success-box { background: #111827; padding: 30px; text-align: center; border-radius: 8px; margin: 25px 0; border: 1px solid #00D8FF; }
                   .profit-amount { font-size: 48px; font-weight: 700; color: #00D8FF; margin: 15px 0; }
                   .profit-label { color: #8E9BAE; font-size: 14px; }
-                  .detail-row { display: flex; justify-content: space-between; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #1F2937; }
+                  .investment-summary { background: #111827; padding: 20px; border-radius: 8px; margin: 25px 0; }
+                  .detail-row { display: flex; justify-content: space-between; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #1F2937; }
+                  .detail-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
                   .detail-label { color: #8E9BAE; font-size: 14px; }
                   .detail-value { color: #FFFFFF; font-weight: 600; font-size: 16px; }
                   .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
@@ -3811,26 +3865,34 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   </div>
                   <div class="content">
                       <h2 class="greeting">Congratulations ${user.firstName || 'there'}!</h2>
-                      <p class="message">Your investment has successfully matured. Your returns have been credited to your matured balance.</p>
+                      <p class="message">Your investment has successfully matured. Your returns have been credited to your account.</p>
                       
                       <div class="success-box">
                           <div class="profit-label">Total Return</div>
-                          <div class="profit-amount">$${data.totalReturn?.toFixed(2) || '0.00'}</div>
-                          <div class="profit-label">Profit Earned: $${data.profit?.toFixed(2) || '0.00'}</div>
+                          <div class="profit-amount">$${formatAmount(data.totalReturn)}</div>
+                          <div class="profit-label">Profit Earned: $${formatAmount(data.profit)}</div>
                       </div>
                       
-                      <div style="background: transparent; padding: 0; border-bottom: 1px solid #1F2937;">
+                      <div class="investment-summary">
                           <div class="detail-row">
-                              <span class="detail-label">Plan:</span>
+                              <span class="detail-label">Investment Plan:</span>
                               <span class="detail-value">${data.planName || 'Standard Plan'}</span>
                           </div>
                           <div class="detail-row">
                               <span class="detail-label">Initial Investment:</span>
-                              <span class="detail-value">$${data.amount?.toFixed(2) || '0.00'}</span>
+                              <span class="detail-value">$${formatAmount(data.amount)}</span>
                           </div>
                           <div class="detail-row">
-                              <span class="detail-label">New Matured Balance:</span>
-                              <span class="detail-value">$${data.newMaturedBalance?.toFixed(2) || '0.00'}</span>
+                              <span class="detail-label">ROI Earned:</span>
+                              <span class="detail-value">${data.roiPercentage || '0'}%</span>
+                          </div>
+                          <div class="detail-row">
+                              <span class="detail-label">Maturity Date:</span>
+                              <span class="detail-value">${formatTimestamp(data.maturityDate)}</span>
+                          </div>
+                          <div class="detail-row">
+                              <span class="detail-label">New Balance:</span>
+                              <span class="detail-value">$${formatAmount(data.newBalance)}</span>
                           </div>
                       </div>
                   </div>
@@ -3843,9 +3905,9 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
         `
       },
 
-      // DEPOSIT RECEIVED - Enhanced with crypto details, logo, and hidden address
+      // DEPOSIT RECEIVED - Enhanced with full transaction details
       deposit_received: {
-        subject: `BitHash Capital | ${data.asset || 'Crypto'} Deposit Received`,
+        subject: `${data.asset || 'Crypto'} Deposit Received - BitHash Capital`,
         html: `
           <!DOCTYPE html>
           <html>
@@ -3860,7 +3922,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: none; border-radius: 0; overflow: hidden; }
                   .header { background-color: #0A0E17; padding: 30px 40px 20px 40px; text-align: center; border-bottom: 1px solid #1F2937; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
                   .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
                   .content { padding: 40px; background-color: #0A0E17; }
                   .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
@@ -3870,11 +3932,12 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   .crypto-icon img { width: 32px; height: 32px; }
                   .crypto-name { font-size: 20px; font-weight: 600; color: #FFFFFF; }
                   .crypto-network { font-size: 12px; color: #8E9BAE; }
-                  .deposit-details { background: transparent; padding: 0; margin: 25px 0; border-bottom: 1px solid #1F2937; }
-                  .detail-row { display: flex; justify-content: space-between; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #1F2937; }
+                  .transaction-details { background: #111827; padding: 20px; border-radius: 8px; margin: 25px 0; }
+                  .detail-row { display: flex; justify-content: space-between; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #1F2937; }
+                  .detail-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
                   .detail-label { color: #8E9BAE; font-size: 14px; }
-                  .detail-value { color: #FFFFFF; font-weight: 600; font-size: 16px; word-break: break-all; }
-                  .address-hidden { font-family: monospace; background: #111827; padding: 8px 12px; border-radius: 4px; font-size: 14px; letter-spacing: 0.5px; }
+                  .detail-value { color: #FFFFFF; font-weight: 500; font-size: 14px; word-break: break-all; font-family: monospace; }
+                  .address-value { font-family: monospace; background: #0A0E17; padding: 8px 12px; border-radius: 6px; font-size: 13px; letter-spacing: 0.3px; }
                   .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
                   .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.6; }
               </style>
@@ -3893,46 +3956,46 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                       
                       <div class="crypto-header">
                           <div class="crypto-icon">
-                              <img src="https://cryptologos.cc/logos/${(data.asset || 'bitcoin').toLowerCase()}-${(data.asset || 'btc').toLowerCase()}-logo.png" alt="${data.asset || 'BTC'}" onerror="this.src='https://cryptologos.cc/logos/bitcoin-btc-logo.png'">
+                              <img src="${getCryptoLogo(data.asset)}" alt="${data.asset || 'BTC'}" onerror="this.style.display='none'">
                           </div>
                           <div>
                               <div class="crypto-name">${(data.asset || 'Bitcoin').toUpperCase()}</div>
-                              <div class="crypto-network">Network: ${data.network || 'Bitcoin'}</div>
+                              <div class="crypto-network">Network: ${data.network || (data.asset === 'USDT' ? 'ERC-20' : data.asset === 'BTC' ? 'Bitcoin' : 'Mainnet')}</div>
                           </div>
                       </div>
                       
-                      <div class="deposit-details">
+                      <div class="transaction-details">
                           <div class="detail-row">
                               <span class="detail-label">Amount:</span>
-                              <span class="detail-value">${data.amount?.toFixed(8) || '0.00000000'} ${(data.asset || 'BTC').toUpperCase()}</span>
+                              <span class="detail-value">${formatAmount(data.amount, data.asset)} ${(data.asset || 'BTC').toUpperCase()}</span>
                           </div>
                           <div class="detail-row">
                               <span class="detail-label">USD Value:</span>
-                              <span class="detail-value">$${data.usdValue?.toFixed(2) || '0.00'}</span>
+                              <span class="detail-value">$${formatAmount(data.usdValue)}</span>
                           </div>
                           <div class="detail-row">
-                              <span class="detail-label">Transaction ID:</span>
-                              <span class="detail-value address-hidden">${data.txid || data.transactionId || 'N/A'}</span>
+                              <span class="detail-label">Transaction Hash:</span>
+                              <span class="detail-value address-value">${data.txid || data.transactionHash || data.transactionId || 'Recorded on Blockchain'}</span>
                           </div>
                           <div class="detail-row">
                               <span class="detail-label">Sent From:</span>
-                              <span class="detail-value address-hidden">${data.fromAddress ? data.fromAddress.substring(0, 6) + '*************' + data.fromAddress.substring(data.fromAddress.length - 6) : 'N/A'}</span>
+                              <span class="detail-value address-value">${hideAddress(data.fromAddress || data.senderAddress)}</span>
                           </div>
                           <div class="detail-row">
                               <span class="detail-label">Received At:</span>
-                              <span class="detail-value address-hidden">${data.toAddress ? data.toAddress.substring(0, 6) + '*************' + data.toAddress.substring(data.toAddress.length - 6) : 'N/A'}</span>
+                              <span class="detail-value address-value">${hideAddress(data.toAddress || data.recipientAddress)}</span>
                           </div>
                           <div class="detail-row">
                               <span class="detail-label">Timestamp:</span>
-                              <span class="detail-value">${new Date(data.timestamp || Date.now()).toLocaleString('en-US', { timeZone: 'UTC', dateStyle: 'full', timeStyle: 'medium' })} UTC</span>
+                              <span class="detail-value">${formatTimestamp(data.timestamp)}</span>
                           </div>
                           <div class="detail-row">
                               <span class="detail-label">Confirmations:</span>
-                              <span class="detail-value">${data.confirmations || '3+'}</span>
+                              <span class="detail-value">${data.confirmations || '6'} confirmations</span>
                           </div>
                           <div class="detail-row">
-                              <span class="detail-label">New Balance:</span>
-                              <span class="detail-value">$${data.newBalance?.toFixed(2) || '0.00'}</span>
+                              <span class="detail-label">Exchange Rate:</span>
+                              <span class="detail-value">1 ${(data.asset || 'BTC').toUpperCase()} = $${formatAmount(data.exchangeRate)}</span>
                           </div>
                       </div>
                       
@@ -3947,9 +4010,9 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
         `
       },
 
-      // WITHDRAWAL REQUEST - Enhanced with crypto details, logo, and hidden address
+      // WITHDRAWAL REQUEST - Enhanced with full transaction details
       withdrawal_request: {
-        subject: `BitHash Capital | ${data.asset || 'Crypto'} Withdrawal Request`,
+        subject: `${data.asset || 'Crypto'} Withdrawal Request - BitHash Capital`,
         html: `
           <!DOCTYPE html>
           <html>
@@ -3964,7 +4027,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: none; border-radius: 0; overflow: hidden; }
                   .header { background-color: #0A0E17; padding: 30px 40px 20px 40px; text-align: center; border-bottom: 1px solid #1F2937; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
                   .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
                   .content { padding: 40px; background-color: #0A0E17; }
                   .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
@@ -3974,12 +4037,14 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   .crypto-icon img { width: 32px; height: 32px; }
                   .crypto-name { font-size: 20px; font-weight: 600; color: #FFFFFF; }
                   .crypto-network { font-size: 12px; color: #8E9BAE; }
-                  .withdrawal-details { background: transparent; padding: 0; margin: 25px 0; border-bottom: 1px solid #1F2937; }
-                  .detail-row { display: flex; justify-content: space-between; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #1F2937; }
+                  .transaction-details { background: #111827; padding: 20px; border-radius: 8px; margin: 25px 0; }
+                  .detail-row { display: flex; justify-content: space-between; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #1F2937; }
+                  .detail-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
                   .detail-label { color: #8E9BAE; font-size: 14px; }
-                  .detail-value { color: #FFFFFF; font-weight: 600; font-size: 16px; word-break: break-all; }
-                  .address-hidden { font-family: monospace; background: #111827; padding: 8px 12px; border-radius: 4px; font-size: 14px; letter-spacing: 0.5px; }
-                  .processing-info { background: transparent; border-left: 2px solid #00D8FF; padding: 15px; margin: 20px 0; }
+                  .detail-value { color: #FFFFFF; font-weight: 500; font-size: 14px; word-break: break-all; }
+                  .address-value { font-family: monospace; background: #0A0E17; padding: 8px 12px; border-radius: 6px; font-size: 13px; }
+                  .processing-info { background: #111827; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 3px solid #00D8FF; }
+                  .processing-info p { color: #FFFFFF; font-size: 14px; }
                   .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
                   .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.6; }
               </style>
@@ -3998,48 +4063,50 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                       
                       <div class="crypto-header">
                           <div class="crypto-icon">
-                              <img src="https://cryptologos.cc/logos/${(data.asset || 'bitcoin').toLowerCase()}-${(data.asset || 'btc').toLowerCase()}-logo.png" alt="${data.asset || 'BTC'}" onerror="this.src='https://cryptologos.cc/logos/bitcoin-btc-logo.png'">
+                              <img src="${getCryptoLogo(data.asset)}" alt="${data.asset || 'BTC'}" onerror="this.style.display='none'">
                           </div>
                           <div>
                               <div class="crypto-name">${(data.asset || 'Bitcoin').toUpperCase()}</div>
-                              <div class="crypto-network">Network: ${data.network || 'Bitcoin'}</div>
+                              <div class="crypto-network">Network: ${data.network || (data.asset === 'USDT' ? 'ERC-20' : data.asset === 'BTC' ? 'Bitcoin' : 'Mainnet')}</div>
                           </div>
                       </div>
                       
-                      <div class="withdrawal-details">
+                      <div class="transaction-details">
+                          <div class="detail-row">
+                              <span class="detail-label">Request ID:</span>
+                              <span class="detail-value">${data.requestId || data.withdrawalId || data.transactionId || 'BHC-' + Math.floor(Date.now() / 1000)}</span>
+                          </div>
                           <div class="detail-row">
                               <span class="detail-label">Amount:</span>
-                              <span class="detail-value">${data.amount?.toFixed(8) || '0.00000000'} ${(data.asset || 'BTC').toUpperCase()}</span>
+                              <span class="detail-value">${formatAmount(data.amount, data.asset)} ${(data.asset || 'BTC').toUpperCase()}</span>
                           </div>
                           <div class="detail-row">
                               <span class="detail-label">USD Value:</span>
-                              <span class="detail-value">$${data.usdValue?.toFixed(2) || '0.00'}</span>
+                              <span class="detail-value">$${formatAmount(data.usdValue)}</span>
                           </div>
                           <div class="detail-row">
                               <span class="detail-label">Withdrawal Address:</span>
-                              <span class="detail-value address-hidden">${data.withdrawalAddress ? data.withdrawalAddress.substring(0, 6) + '*************' + data.withdrawalAddress.substring(data.withdrawalAddress.length - 6) : 'N/A'}</span>
+                              <span class="detail-value address-value">${hideAddress(data.withdrawalAddress || data.address)}</span>
                           </div>
                           <div class="detail-row">
-                              <span class="detail-label">Request ID:</span>
-                              <span class="detail-value">${data.requestId || 'N/A'}</span>
-                          </div>
-                          <div class="detail-row">
-                              <span class="detail-label">Timestamp:</span>
-                              <span class="detail-value">${new Date(data.timestamp || Date.now()).toLocaleString('en-US', { timeZone: 'UTC', dateStyle: 'full', timeStyle: 'medium' })} UTC</span>
-                          </div>
-                          <div class="detail-row">
-                              <span class="detail-label">Fee:</span>
-                              <span class="detail-value">${data.fee?.toFixed(8) || '0.00000000'} ${(data.asset || 'BTC').toUpperCase()} (≈ $${data.feeUsd?.toFixed(2) || '0.00'})</span>
+                              <span class="detail-label">Network Fee:</span>
+                              <span class="detail-value">${formatAmount(data.fee, data.asset)} ${(data.asset || 'BTC').toUpperCase()} (≈ $${formatAmount(data.feeUsd)})</span>
                           </div>
                           <div class="detail-row">
                               <span class="detail-label">Net Amount:</span>
-                              <span class="detail-value">${data.netAmount?.toFixed(8) || '0.00000000'} ${(data.asset || 'BTC').toUpperCase()}</span>
+                              <span class="detail-value">${formatAmount(data.netAmount, data.asset)} ${(data.asset || 'BTC').toUpperCase()}</span>
+                          </div>
+                          <div class="detail-row">
+                              <span class="detail-label">Request Time:</span>
+                              <span class="detail-value">${formatTimestamp(data.timestamp)}</span>
                           </div>
                       </div>
                       
                       <div class="processing-info">
-                          <p style="color: #FFFFFF; font-size: 14px;"><strong>Processing Time:</strong> Withdrawals are typically processed within 24 hours. You will receive another notification once completed.</p>
+                          <p><strong>⏳ Processing Information:</strong> Withdrawals are typically processed within 24 hours. You will receive another notification once your withdrawal has been completed.</p>
                       </div>
+                      
+                      <p class="message">If you did not initiate this withdrawal, please contact our security team immediately.</p>
                   </div>
                   <div class="footer">
                       <p class="footer-text">© 2024 BitHash Capital. All rights reserved.</p>
@@ -4050,9 +4117,9 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
         `
       },
 
-      // WITHDRAWAL APPROVED - Enhanced with crypto details, logo, and hidden address
+      // WITHDRAWAL APPROVED - Enhanced with full transaction details
       withdrawal_approved: {
-        subject: `BitHash Capital | ${data.asset || 'Crypto'} Withdrawal Approved`,
+        subject: `${data.asset || 'Crypto'} Withdrawal Approved - BitHash Capital`,
         html: `
           <!DOCTYPE html>
           <html>
@@ -4067,7 +4134,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: none; border-radius: 0; overflow: hidden; }
                   .header { background-color: #0A0E17; padding: 30px 40px 20px 40px; text-align: center; border-bottom: 1px solid #1F2937; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
                   .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
                   .content { padding: 40px; background-color: #0A0E17; }
                   .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
@@ -4076,12 +4143,14 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   .crypto-icon { width: 48px; height: 48px; border-radius: 50%; background: #1F2937; display: flex; align-items: center; justify-content: center; }
                   .crypto-icon img { width: 32px; height: 32px; }
                   .crypto-name { font-size: 20px; font-weight: 600; color: #FFFFFF; }
-                  .approved-box { background: transparent; padding: 30px; text-align: center; border-bottom: 1px solid #00D8FF; margin: 25px 0; }
+                  .approved-box { background: #111827; padding: 30px; text-align: center; border-radius: 8px; margin: 25px 0; border: 1px solid #00D8FF; }
                   .approved-amount { font-size: 42px; font-weight: 700; color: #00D8FF; margin: 15px 0; }
-                  .detail-row { display: flex; justify-content: space-between; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #1F2937; }
+                  .transaction-details { background: #111827; padding: 20px; border-radius: 8px; margin: 25px 0; }
+                  .detail-row { display: flex; justify-content: space-between; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #1F2937; }
+                  .detail-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
                   .detail-label { color: #8E9BAE; font-size: 14px; }
-                  .detail-value { color: #FFFFFF; font-weight: 600; font-size: 16px; word-break: break-all; }
-                  .address-hidden { font-family: monospace; background: #111827; padding: 8px 12px; border-radius: 4px; font-size: 14px; }
+                  .detail-value { color: #FFFFFF; font-weight: 500; font-size: 14px; word-break: break-all; }
+                  .address-value { font-family: monospace; background: #0A0E17; padding: 8px 12px; border-radius: 6px; font-size: 13px; }
                   .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
                   .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.6; }
               </style>
@@ -4100,32 +4169,36 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                       
                       <div class="crypto-header">
                           <div class="crypto-icon">
-                              <img src="https://cryptologos.cc/logos/${(data.asset || 'bitcoin').toLowerCase()}-${(data.asset || 'btc').toLowerCase()}-logo.png" alt="${data.asset || 'BTC'}" onerror="this.src='https://cryptologos.cc/logos/bitcoin-btc-logo.png'">
+                              <img src="${getCryptoLogo(data.asset)}" alt="${data.asset || 'BTC'}" onerror="this.style.display='none'">
                           </div>
                           <div>
                               <div class="crypto-name">${(data.asset || 'Bitcoin').toUpperCase()}</div>
-                              <div class="crypto-network">Network: ${data.network || 'Bitcoin'}</div>
+                              <div class="crypto-network">Network: ${data.network || (data.asset === 'USDT' ? 'ERC-20' : data.asset === 'BTC' ? 'Bitcoin' : 'Mainnet')}</div>
                           </div>
                       </div>
                       
                       <div class="approved-box">
-                          <div class="approved-label" style="color: #8E9BAE;">Amount Withdrawn</div>
-                          <div class="approved-amount">${data.amount?.toFixed(8) || '0.00000000'} ${(data.asset || 'BTC').toUpperCase()}</div>
-                          <div style="color: #8E9BAE; font-size: 14px;">Transaction ID: ${data.txid || 'N/A'}</div>
+                          <div style="color: #8E9BAE; font-size: 14px;">Amount Withdrawn</div>
+                          <div class="approved-amount">${formatAmount(data.amount, data.asset)} ${(data.asset || 'BTC').toUpperCase()}</div>
+                          <div style="color: #8E9BAE; font-size: 14px;">Transaction ID: ${data.txid || data.transactionHash || data.transactionId || data.txHash || 'Broadcasted to Network'}</div>
                       </div>
                       
-                      <div style="background: transparent; padding: 0; border-bottom: 1px solid #1F2937;">
+                      <div class="transaction-details">
                           <div class="detail-row">
-                              <span class="detail-label">Sent To:</span>
-                              <span class="detail-value address-hidden">${data.withdrawalAddress ? data.withdrawalAddress.substring(0, 6) + '*************' + data.withdrawalAddress.substring(data.withdrawalAddress.length - 6) : 'N/A'}</span>
+                              <span class="detail-label">Withdrawal Address:</span>
+                              <span class="detail-value address-value">${hideAddress(data.withdrawalAddress || data.address)}</span>
                           </div>
                           <div class="detail-row">
-                              <span class="detail-label">Network:</span>
-                              <span class="detail-value">${data.network || 'Bitcoin'}</span>
+                              <span class="detail-label">Network Fee:</span>
+                              <span class="detail-value">${formatAmount(data.fee, data.asset)} ${(data.asset || 'BTC').toUpperCase()} (≈ $${formatAmount(data.feeUsd)})</span>
                           </div>
                           <div class="detail-row">
-                              <span class="detail-label">Processed:</span>
-                              <span class="detail-value">${new Date(data.processedAt || Date.now()).toLocaleString('en-US', { timeZone: 'UTC', dateStyle: 'full', timeStyle: 'medium' })} UTC</span>
+                              <span class="detail-label">Processed At:</span>
+                              <span class="detail-value">${formatTimestamp(data.processedAt)}</span>
+                          </div>
+                          <div class="detail-row">
+                              <span class="detail-label">Block Explorer:</span>
+                              <span class="detail-value"><a href="https://www.blockchain.com/explorer/search?search=${data.txid || data.transactionHash}" style="color: #00D8FF; text-decoration: none;">View on Explorer →</a></span>
                           </div>
                       </div>
                       
@@ -4142,7 +4215,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
 
       // WITHDRAWAL REJECTED
       withdrawal_rejected: {
-        subject: 'BitHash Capital | Withdrawal Update',
+        subject: 'Withdrawal Update - BitHash Capital',
         html: `
           <!DOCTYPE html>
           <html>
@@ -4157,14 +4230,14 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: none; border-radius: 0; overflow: hidden; }
                   .header { background-color: #0A0E17; padding: 30px 40px 20px 40px; text-align: center; border-bottom: 1px solid #1F2937; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
                   .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
                   .content { padding: 40px; background-color: #0A0E17; }
                   .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
                   .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
-                  .rejection-box { background: transparent; padding: 25px; border-left: 2px solid #f6465d; margin: 25px 0; }
-                  .rejection-reason { color: #f6465d; font-size: 15px; margin-bottom: 10px; }
-                  .refund-info { background: transparent; border-bottom: 1px solid #1F2937; padding: 20px 0; margin: 25px 0; }
+                  .rejection-box { background: #111827; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 3px solid #f6465d; }
+                  .rejection-reason { color: #f6465d; font-size: 15px; margin-bottom: 10px; font-weight: 600; }
+                  .refund-info { background: #111827; padding: 20px; border-radius: 8px; margin: 25px 0; }
                   .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
                   .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.6; }
               </style>
@@ -4182,14 +4255,16 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                       <p class="message">Your withdrawal request could not be processed at this time.</p>
                       
                       <div class="rejection-box">
-                          <div class="rejection-reason"><strong>Reason:</strong> ${data.reason || 'Unable to process withdrawal'}</div>
+                          <div class="rejection-reason">Reason: ${data.reason || 'Unable to process withdrawal'}</div>
+                          <p style="color: #8E9BAE; font-size: 14px; margin-top: 10px;">Please review the reason above and submit a new withdrawal request with corrected details.</p>
                       </div>
                       
                       <div class="refund-info">
-                          <p style="color: #FFFFFF; font-size: 14px;"><strong>Funds Refunded:</strong> ${data.amount?.toFixed(8) || '0.00000000'} ${data.asset || 'BTC'} have been returned to your matured balance.</p>
+                          <p style="color: #FFFFFF; font-size: 14px;"><strong>Funds Refunded:</strong> ${formatAmount(data.amount, data.asset)} ${(data.asset || 'BTC').toUpperCase()} have been returned to your account balance.</p>
+                          <p style="color: #8E9BAE; font-size: 13px; margin-top: 10px;">Refund Time: ${formatTimestamp(data.refundTime)}</p>
                       </div>
                       
-                      <p class="message">Please review your withdrawal details and try again. If you need assistance, contact our support team.</p>
+                      <p class="message">If you need assistance, please contact our support team at support@bithashcapital.live</p>
                   </div>
                   <div class="footer">
                       <p class="footer-text">© 2024 BitHash Capital. All rights reserved.</p>
@@ -4202,7 +4277,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
 
       // DEPOSIT APPROVED
       deposit_approved: {
-        subject: `BitHash Capital | ${data.asset || 'Crypto'} Deposit Approved`,
+        subject: `${data.asset || 'Crypto'} Deposit Approved - BitHash Capital`,
         html: `
           <!DOCTYPE html>
           <html>
@@ -4217,12 +4292,12 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: none; border-radius: 0; overflow: hidden; }
                   .header { background-color: #0A0E17; padding: 30px 40px 20px 40px; text-align: center; border-bottom: 1px solid #1F2937; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
                   .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
                   .content { padding: 40px; background-color: #0A0E17; }
                   .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
                   .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
-                  .approved-box { background: transparent; padding: 30px; text-align: center; border-bottom: 1px solid #00D8FF; margin: 25px 0; }
+                  .approved-box { background: #111827; padding: 30px; text-align: center; border-radius: 8px; margin: 25px 0; border: 1px solid #00D8FF; }
                   .approved-amount { font-size: 42px; font-weight: 700; color: #00D8FF; margin: 15px 0; }
                   .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
                   .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.6; }
@@ -4241,9 +4316,9 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                       <p class="message">Your deposit has been approved and credited to your account.</p>
                       
                       <div class="approved-box">
-                          <div class="approved-label" style="color: #8E9BAE;">Amount Approved</div>
-                          <div class="approved-amount">${data.amount?.toFixed(8) || '0.00000000'} ${data.asset || 'BTC'}</div>
-                          <div style="color: #8E9BAE; font-size: 14px;">Transaction ID: ${data.txid || 'N/A'}</div>
+                          <div style="color: #8E9BAE; font-size: 14px;">Amount Approved</div>
+                          <div class="approved-amount">${formatAmount(data.amount, data.asset)} ${(data.asset || 'BTC').toUpperCase()}</div>
+                          <div style="color: #8E9BAE; font-size: 14px;">Transaction ID: ${data.txid || data.transactionHash || 'Confirmed'}</div>
                       </div>
                       
                       <p class="message">Your funds are now available for mining investments and other platform activities.</p>
@@ -4259,7 +4334,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
 
       // DEPOSIT REJECTED
       deposit_rejected: {
-        subject: 'BitHash Capital | Deposit Update',
+        subject: 'Deposit Update - BitHash Capital',
         html: `
           <!DOCTYPE html>
           <html>
@@ -4274,13 +4349,13 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: none; border-radius: 0; overflow: hidden; }
                   .header { background-color: #0A0E17; padding: 30px 40px 20px 40px; text-align: center; border-bottom: 1px solid #1F2937; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
                   .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
                   .content { padding: 40px; background-color: #0A0E17; }
                   .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
                   .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
-                  .rejection-box { background: transparent; padding: 25px; border-left: 2px solid #f6465d; margin: 25px 0; }
-                  .rejection-reason { color: #f6465d; font-size: 15px; margin-bottom: 10px; }
+                  .rejection-box { background: #111827; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 3px solid #f6465d; }
+                  .rejection-reason { color: #f6465d; font-size: 15px; margin-bottom: 10px; font-weight: 600; }
                   .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
                   .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.6; }
               </style>
@@ -4298,10 +4373,11 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                       <p class="message">Your deposit request could not be processed.</p>
                       
                       <div class="rejection-box">
-                          <div class="rejection-reason"><strong>Reason:</strong> ${data.reason || 'Unable to process deposit'}</div>
+                          <div class="rejection-reason">Reason: ${data.reason || 'Unable to process deposit'}</div>
+                          <p style="color: #8E9BAE; font-size: 14px; margin-top: 10px;">Please verify your payment details and submit a new deposit request.</p>
                       </div>
                       
-                      <p class="message">Please verify your payment details and try again. If you need assistance, contact our support team.</p>
+                      <p class="message">If you need assistance, please contact our support team at support@bithashcapital.live</p>
                   </div>
                   <div class="footer">
                       <p class="footer-text">© 2024 BitHash Capital. All rights reserved.</p>
@@ -4329,13 +4405,14 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: none; border-radius: 0; overflow: hidden; }
                   .header { background-color: #0A0E17; padding: 30px 40px 20px 40px; text-align: center; border-bottom: 1px solid #1F2937; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
                   .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
                   .content { padding: 40px; background-color: #0A0E17; }
                   .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
                   .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
-                  .info-box { background: transparent; padding: 0; border-bottom: 1px solid #1F2937; margin: 25px 0; }
-                  .status-badge { display: inline-block; background: transparent; color: #00D8FF; padding: 5px 15px; font-size: 14px; font-weight: 500; border: 1px solid #00D8FF; }
+                  .status-badge { display: inline-block; background: #111827; color: #00D8FF; padding: 8px 20px; font-size: 14px; font-weight: 500; border: 1px solid #00D8FF; border-radius: 20px; }
+                  .info-box { background: #111827; padding: 20px; border-radius: 8px; margin: 25px 0; }
+                  .info-box p { color: #FFFFFF; font-size: 14px; margin-bottom: 10px; }
                   .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
                   .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.6; }
               </style>
@@ -4357,10 +4434,10 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                       </div>
                       
                       <div class="info-box">
-                          <p style="color: #8E9BAE; margin-bottom: 10px;"><strong>What happens next?</strong></p>
-                          <p style="color: #FFFFFF; font-size: 14px; margin-bottom: 5px;">• Our compliance team will review your documents</p>
-                          <p style="color: #FFFFFF; font-size: 14px; margin-bottom: 5px;">• This process typically takes 1-2 business days</p>
-                          <p style="color: #FFFFFF; font-size: 14px;">• You'll receive an email once verification is complete</p>
+                          <p><strong>What happens next?</strong></p>
+                          <p>• Our compliance team will review your documents</p>
+                          <p>• This process typically takes 1-2 business days</p>
+                          <p>• You'll receive an email once verification is complete</p>
                       </div>
                       
                       <p class="message">Thank you for helping us maintain a secure platform.</p>
@@ -4391,15 +4468,15 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: none; border-radius: 0; overflow: hidden; }
                   .header { background-color: #0A0E17; padding: 30px 40px 20px 40px; text-align: center; border-bottom: 1px solid #1F2937; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
                   .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
                   .content { padding: 40px; background-color: #0A0E17; }
                   .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
                   .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
-                  .success-box { background: transparent; padding: 30px; text-align: center; border-bottom: 1px solid #00D8FF; margin: 25px 0; }
+                  .success-box { background: #111827; padding: 30px; text-align: center; border-radius: 8px; margin: 25px 0; border: 1px solid #00D8FF; }
                   .success-icon { font-size: 48px; color: #00D8FF; margin-bottom: 15px; }
-                  .benefits-list { background: transparent; padding: 0; border-bottom: 1px solid #1F2937; margin: 25px 0; }
-                  .benefit-item { color: #8E9BAE; margin-bottom: 10px; font-size: 14px; }
+                  .benefits-list { background: #111827; padding: 20px; border-radius: 8px; margin: 25px 0; }
+                  .benefit-item { color: #8E9BAE; margin-bottom: 10px; font-size: 14px; padding: 5px 0; }
                   .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
                   .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.6; }
               </style>
@@ -4456,13 +4533,14 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: none; border-radius: 0; overflow: hidden; }
                   .header { background-color: #0A0E17; padding: 30px 40px 20px 40px; text-align: center; border-bottom: 1px solid #1F2937; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
                   .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
                   .content { padding: 40px; background-color: #0A0E17; }
                   .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
                   .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
-                  .rejection-box { background: transparent; padding: 25px; border-left: 2px solid #f6465d; margin: 25px 0; }
-                  .rejection-reason { color: #f6465d; font-size: 15px; margin-bottom: 10px; }
+                  .rejection-box { background: #111827; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 3px solid #f6465d; }
+                  .rejection-reason { color: #f6465d; font-size: 15px; margin-bottom: 10px; font-weight: 600; }
+                  .resubmit-button { background: #00D8FF; color: #0A0E17; padding: 14px 35px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 15px; border-radius: 4px; margin: 20px 0; }
                   .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
                   .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.6; }
               </style>
@@ -4480,15 +4558,15 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                       <p class="message">There was an issue with your KYC verification submission.</p>
                       
                       <div class="rejection-box">
-                          <div class="rejection-reason"><strong>Reason:</strong> ${data.reason || 'Documents could not be verified'}</div>
-                          <p style="color: #8E9BAE; font-size: 14px;">Please resubmit your documents with clear, legible images that show all required information.</p>
+                          <div class="rejection-reason">Reason: ${data.reason || 'Documents could not be verified'}</div>
+                          <p style="color: #8E9BAE; font-size: 14px; margin-top: 10px;">Please resubmit your documents with clear, legible images that show all required information.</p>
                       </div>
                       
-                      <div style="text-align: center; margin: 30px 0;">
-                          <a href="https://www.bithashcapital.live/kyc.html" style="background: #00D8FF; color: #0A0E17; padding: 14px 35px; text-decoration: none; font-weight: 600;">Resubmit KYC</a>
+                      <div style="text-align: center;">
+                          <a href="https://www.bithashcapital.live/kyc.html" class="resubmit-button">Resubmit KYC Documents</a>
                       </div>
                       
-                      <p class="message">If you need assistance, please contact our support team.</p>
+                      <p class="message">If you need assistance, please contact our support team at support@bithashcapital.live</p>
                   </div>
                   <div class="footer">
                       <p class="footer-text">© 2024 BitHash Capital. All rights reserved.</p>
@@ -4516,12 +4594,14 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: none; border-radius: 0; overflow: hidden; }
                   .header { background-color: #0A0E17; padding: 30px 40px 20px 40px; text-align: center; border-bottom: 1px solid #1F2937; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
                   .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
                   .content { padding: 40px; background-color: #0A0E17; }
                   .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
-                  .bonus-box { background: transparent; padding: 30px; text-align: center; border-bottom: 1px solid #00D8FF; margin: 25px 0; }
-                  .bonus-amount { font-size: 42px; font-weight: 700; color: #00D8FF; margin: 15px 0; }
+                  .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
+                  .bonus-box { background: #111827; padding: 30px; text-align: center; border-radius: 8px; margin: 25px 0; border: 1px solid #00D8FF; }
+                  .bonus-amount { font-size: 48px; font-weight: 700; color: #00D8FF; margin: 15px 0; }
+                  .referral-info { background: #111827; padding: 20px; border-radius: 8px; margin: 20px 0; }
                   .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
                   .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.6; }
               </style>
@@ -4540,14 +4620,21 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                       
                       <div class="bonus-box">
                           <div style="color: #8E9BAE; font-size: 14px;">Bonus Amount</div>
-                          <div class="bonus-amount">$${data.bonusAmount?.toFixed(2) || '0.00'}</div>
-                          <div style="color: #8E9BAE; font-size: 14px;">From: ${data.referredUser || 'New User'}</div>
+                          <div class="bonus-amount">$${formatAmount(data.bonusAmount)}</div>
+                          <div style="color: #8E9BAE; font-size: 14px;">From: ${data.referredUser || 'Your Referral'}</div>
+                      </div>
+                      
+                      <div class="referral-info">
+                          <p><strong>Referral Details:</strong></p>
+                          <p>• Referral Code: ${data.referralCode || user.referralCode || 'BHC-' + user._id?.toString().substring(0, 8)}</p>
+                          <p>• Bonus Type: ${data.bonusType || 'Direct Referral'}</p>
+                          <p>• Date Earned: ${formatTimestamp(data.timestamp)}</p>
                       </div>
                       
                       <p class="message">The bonus has been credited to your main balance. Keep sharing your referral link to earn more!</p>
                       
                       <div style="text-align: center; margin: 30px 0;">
-                          <a href="https://www.bithashcapital.live/referral.html" style="background: #00D8FF; color: #0A0E17; padding: 14px 35px; text-decoration: none; font-weight: 600;">View Referrals</a>
+                          <a href="https://www.bithashcapital.live/referral.html" style="background: #00D8FF; color: #0A0E17; padding: 14px 35px; text-decoration: none; font-weight: 600; border-radius: 4px;">View Referrals</a>
                       </div>
                   </div>
                   <div class="footer">
@@ -4576,12 +4663,13 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: none; border-radius: 0; overflow: hidden; }
                   .header { background-color: #0A0E17; padding: 30px 40px 20px 40px; text-align: center; border-bottom: 1px solid #1F2937; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
                   .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
                   .content { padding: 40px; background-color: #0A0E17; }
                   .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
                   .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
-                  .message-content { background: transparent; padding: 0; border-bottom: 1px solid #1F2937; margin: 25px 0; color: #FFFFFF; }
+                  .message-content { background: #111827; padding: 20px; border-radius: 8px; margin: 25px 0; color: #FFFFFF; line-height: 1.6; }
+                  .cta-button { background: #00D8FF; color: #0A0E17; padding: 14px 35px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 15px; border-radius: 4px; margin: 20px 0; }
                   .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
                   .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.6; }
               </style>
@@ -4600,13 +4688,14 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                           ${data.message || 'This is an important notification regarding your BitHash Capital account.'}
                       </div>
                       ${data.cta ? `
-                      <div style="text-align: center; margin: 30px 0;">
-                          <a href="${data.cta.url}" style="background: #00D8FF; color: #0A0E17; padding: 14px 35px; text-decoration: none; font-weight: 600;">${data.cta.text}</a>
+                      <div style="text-align: center;">
+                          <a href="${data.cta.url}" class="cta-button">${data.cta.text}</a>
                       </div>
                       ` : ''}
                   </div>
                   <div class="footer">
-                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.</p>
+                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
+                      Need help? Contact us at support@bithashcapital.live</p>
                   </div>
               </div>
           </body>
@@ -4647,8 +4736,30 @@ const sendProfessionalEmail = async (options) => {
   try {
     const { email, subject, template, data } = options;
     
+    // Helper functions
+    const hideAddress = (address) => {
+      if (!address || address === 'N/A' || address === 'Unknown' || address === '') {
+        return 'Not Provided';
+      }
+      if (address.length <= 12) return address;
+      return address.substring(0, 6) + '*************' + address.substring(address.length - 6);
+    };
+
+    const formatTimestamp = (timestamp) => {
+      if (!timestamp) return new Date().toLocaleString('en-US', { timeZone: 'UTC', dateStyle: 'full', timeStyle: 'medium' }) + ' UTC';
+      return new Date(timestamp).toLocaleString('en-US', { timeZone: 'UTC', dateStyle: 'full', timeStyle: 'medium' }) + ' UTC';
+    };
+
+    const formatAmount = (amount, asset) => {
+      if (!amount && amount !== 0) return '0.00';
+      const isCrypto = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'ADA'].includes(asset?.toUpperCase());
+      if (isCrypto) {
+        return amount.toFixed(8);
+      }
+      return amount.toFixed(2);
+    };
+
     const emailTemplates = {
-      // WELCOME EMAIL
       welcome: {
         subject: 'Welcome to BitHash Capital - Your Mining Journey Begins',
         html: `
@@ -4665,22 +4776,22 @@ const sendProfessionalEmail = async (options) => {
                   .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: none; border-radius: 0; overflow: hidden; }
                   .header { background-color: #0A0E17; padding: 30px 40px 20px 40px; text-align: center; border-bottom: 1px solid #1F2937; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
                   .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
                   .content { padding: 40px; background-color: #0A0E17; }
                   .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
                   .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
                   .features-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 30px 0; }
-                  .feature-card { background: transparent; padding: 0; border-bottom: 1px solid #1F2937; }
-                  .feature-title { font-weight: 600; color: #FFFFFF; margin-bottom: 5px; font-size: 14px; }
+                  .feature-card { background: #111827; padding: 20px; border-radius: 8px; }
+                  .feature-title { font-weight: 600; color: #00D8FF; margin-bottom: 8px; font-size: 16px; }
                   .feature-desc { color: #8E9BAE; font-size: 13px; line-height: 1.4; }
                   .benefits-list { margin: 25px 0; }
                   .benefit-item { display: flex; align-items: center; margin-bottom: 12px; color: #8E9BAE; }
                   .benefit-icon { color: #00D8FF; margin-right: 12px; font-weight: bold; }
-                  .cta-button { background: #00D8FF; color: #0A0E17; padding: 14px 35px; text-decoration: none; display: inline-block; margin: 25px 0; font-weight: 600; font-size: 15px; text-align: center; }
-                  .security-note { background: transparent; border-left: 2px solid #00D8FF; padding: 20px; margin: 25px 0; }
+                  .cta-button { background: #00D8FF; color: #0A0E17; padding: 14px 35px; text-decoration: none; display: inline-block; margin: 25px 0; font-weight: 600; font-size: 15px; border-radius: 4px; }
+                  .security-note { background: #111827; padding: 20px; border-radius: 8px; margin: 25px 0; border-left: 3px solid #00D8FF; }
                   .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
-                  .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.5; margin-bottom: 10px; }
+                  .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.5; }
                   .support-link { color: #00D8FF; text-decoration: none; }
               </style>
           </head>
@@ -4693,45 +4804,33 @@ const sendProfessionalEmail = async (options) => {
                       </div>
                   </div>
                   <div class="content">
-                      <h2 class="greeting">Hello ${data.firstName},</h2>
+                      <h2 class="greeting">Hello ${data.firstName || 'Valued Investor'}!</h2>
                       <p class="message">Welcome to BitHash Capital! We're excited to have you join our community of professional Bitcoin miners and investors.</p>
                       
                       <div class="features-grid">
                           <div class="feature-card">
-                              <div class="feature-title">Cloud Mining</div>
+                              <div class="feature-title">⚡ Cloud Mining</div>
                               <div class="feature-desc">Start mining Bitcoin instantly with our enterprise-grade mining infrastructure</div>
                           </div>
                           <div class="feature-card">
-                              <div class="feature-title">Smart Investment</div>
+                              <div class="feature-title">📈 Smart Investment</div>
                               <div class="feature-desc">Choose from optimized investment plans designed for maximum returns</div>
                           </div>
                           <div class="feature-card">
-                              <div class="feature-title">Secure Platform</div>
+                              <div class="feature-title">🔒 Secure Platform</div>
                               <div class="feature-desc">Enterprise-grade security protecting your assets and mining operations</div>
                           </div>
                           <div class="feature-card">
-                              <div class="feature-title">24/7 Support</div>
+                              <div class="feature-title">🎯 24/7 Support</div>
                               <div class="feature-desc">Dedicated support team available around the clock for your mining needs</div>
                           </div>
                       </div>
                       
                       <div class="benefits-list">
-                          <div class="benefit-item">
-                              <span class="benefit-icon">•</span>
-                              <span>Access enterprise-grade Bitcoin mining infrastructure</span>
-                          </div>
-                          <div class="benefit-item">
-                              <span class="benefit-icon">•</span>
-                              <span>Invest in optimized mining plans with competitive returns</span>
-                          </div>
-                          <div class="benefit-item">
-                              <span class="benefit-icon">•</span>
-                              <span>Monitor your mining operations in real-time</span>
-                          </div>
-                          <div class="benefit-item">
-                              <span class="benefit-icon">•</span>
-                              <span>Earn referral bonuses by expanding our mining community</span>
-                          </div>
+                          <div class="benefit-item"><span class="benefit-icon">✓</span> Access enterprise-grade Bitcoin mining infrastructure</div>
+                          <div class="benefit-item"><span class="benefit-icon">✓</span> Invest in optimized mining plans with competitive returns</div>
+                          <div class="benefit-item"><span class="benefit-icon">✓</span> Monitor your mining operations in real-time</div>
+                          <div class="benefit-item"><span class="benefit-icon">✓</span> Earn referral bonuses by expanding our mining community</div>
                       </div>
                       
                       <div style="text-align: center;">
@@ -4739,7 +4838,7 @@ const sendProfessionalEmail = async (options) => {
                       </div>
                       
                       <div class="security-note">
-                          <strong>Security Notice:</strong> Your account security is our priority. We recommend enabling two-factor authentication and using strong, unique passwords.
+                          <strong>🔐 Security Notice:</strong> Your account security is our priority. We recommend enabling two-factor authentication and using strong, unique passwords.
                       </div>
                       
                       <p class="message">If you have any questions about our mining operations or investment plans, our support team is available 24/7.</p>
@@ -4758,7 +4857,6 @@ const sendProfessionalEmail = async (options) => {
         `
       },
 
-      // OTP VERIFICATION
       otp: {
         subject: 'BitHash Capital - Verification Code Required',
         html: `
@@ -4775,11 +4873,13 @@ const sendProfessionalEmail = async (options) => {
                   .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: none; border-radius: 0; overflow: hidden; }
                   .header { background-color: #0A0E17; padding: 30px 40px 20px 40px; text-align: center; border-bottom: 1px solid #1F2937; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
                   .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
                   .content { padding: 40px; background-color: #0A0E17; }
-                  .otp-code { background: transparent; padding: 25px; font-size: 42px; font-weight: 700; text-align: center; letter-spacing: 12px; margin: 30px 0; border-bottom: 1px solid #00D8FF; color: #00D8FF; font-family: 'Courier New', monospace; }
-                  .security-note { background: transparent; border-left: 2px solid #f6465d; padding: 20px; margin: 25px 0; }
+                  .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
+                  .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
+                  .otp-code { background: #111827; padding: 25px; font-size: 42px; font-weight: 700; text-align: center; letter-spacing: 12px; margin: 30px 0; border: 1px solid #00D8FF; color: #00D8FF; font-family: 'Courier New', monospace; border-radius: 8px; }
+                  .security-note { background: #111827; padding: 20px; border-radius: 8px; margin: 25px 0; border-left: 3px solid #f6465d; }
                   .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
                   .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.5; }
               </style>
@@ -4801,7 +4901,7 @@ const sendProfessionalEmail = async (options) => {
                       <p class="message">This code will expire in 5 minutes for security purposes.</p>
                       
                       <div class="security-note">
-                          <strong>Security Notice:</strong> This verification code is valid for one-time use only. Do not share this code with anyone, including BitHash Capital support staff.
+                          <strong>⚠️ Security Notice:</strong> This verification code is valid for one-time use only. Do not share this code with anyone, including BitHash Capital support staff.
                       </div>
                       
                       <p class="message">If you didn't request this code, please secure your account immediately and contact our support team.</p>
@@ -4818,7 +4918,6 @@ const sendProfessionalEmail = async (options) => {
         `
       },
 
-      // LOGIN SUCCESS
       login_success: {
         subject: 'BitHash Capital - Successful Login Detected',
         html: `
@@ -4835,14 +4934,17 @@ const sendProfessionalEmail = async (options) => {
                   .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: none; border-radius: 0; overflow: hidden; }
                   .header { background-color: #0A0E17; padding: 30px 40px 20px 40px; text-align: center; border-bottom: 1px solid #1F2937; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
                   .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
                   .content { padding: 40px; background-color: #0A0E17; }
-                  .login-info { background: transparent; padding: 0; margin: 25px 0; border-bottom: 1px solid #1F2937; }
-                  .info-item { margin-bottom: 10px; display: flex; padding-bottom: 10px; border-bottom: 1px solid #1F2937; }
-                  .info-label { font-weight: 600; min-width: 120px; color: #8E9BAE; }
+                  .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
+                  .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
+                  .login-info { background: #111827; padding: 20px; border-radius: 8px; margin: 25px 0; }
+                  .info-item { margin-bottom: 12px; display: flex; padding-bottom: 8px; border-bottom: 1px solid #1F2937; }
+                  .info-item:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+                  .info-label { font-weight: 600; min-width: 100px; color: #8E9BAE; }
                   .info-value { color: #FFFFFF; }
-                  .security-alert { background: transparent; border-left: 2px solid #f6465d; padding: 20px; margin: 20px 0; }
+                  .security-alert { background: #111827; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 3px solid #f6465d; }
                   .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
                   .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.5; }
               </style>
@@ -4856,25 +4958,25 @@ const sendProfessionalEmail = async (options) => {
                       </div>
                   </div>
                   <div class="content">
-                      <h2 class="greeting">Hello ${data.name},</h2>
+                      <h2 class="greeting">Hello ${data.name || 'there'},</h2>
                       <p class="message">A successful login to your BitHash Capital account was detected:</p>
                       
                       <div class="login-info">
                           <div class="info-item">
                               <span class="info-label">Time:</span>
-                              <span class="info-value">${new Date().toLocaleString()}</span>
+                              <span class="info-value">${formatTimestamp(data.timestamp)}</span>
                           </div>
                           <div class="info-item">
                               <span class="info-label">Device:</span>
-                              <span class="info-value">${data.device || 'Unknown device'}</span>
+                              <span class="info-value">${data.device || 'Desktop Device'}</span>
                           </div>
                           <div class="info-item">
                               <span class="info-label">Location:</span>
-                              <span class="info-value">${data.location || 'Unknown location'}</span>
+                              <span class="info-value">${data.location || 'Location Detected'}</span>
                           </div>
                           <div class="info-item">
                               <span class="info-label">IP Address:</span>
-                              <span class="info-value">${data.ip || 'Unknown'}</span>
+                              <span class="info-value">${data.ip || 'IP Address Recorded'}</span>
                           </div>
                       </div>
                       
@@ -4882,7 +4984,7 @@ const sendProfessionalEmail = async (options) => {
                       
                       ${data.suspicious ? `
                       <div class="security-alert">
-                          <strong>Security Alert:</strong> This login attempt appears suspicious. If this wasn't you, please secure your account immediately by changing your password and enabling two-factor authentication.
+                          <strong>⚠️ Security Alert:</strong> This login attempt appears suspicious. If this wasn't you, please secure your account immediately by changing your password and enabling two-factor authentication.
                       </div>
                       ` : ''}
                       
@@ -4898,7 +5000,6 @@ const sendProfessionalEmail = async (options) => {
         `
       },
 
-      // PASSWORD RESET
       password_reset: {
         subject: 'BitHash Capital - Password Reset Request',
         html: `
@@ -4915,11 +5016,13 @@ const sendProfessionalEmail = async (options) => {
                   .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: none; border-radius: 0; overflow: hidden; }
                   .header { background-color: #0A0E17; padding: 30px 40px 20px 40px; text-align: center; border-bottom: 1px solid #1F2937; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
                   .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
                   .content { padding: 40px; background-color: #0A0E17; }
-                  .reset-button { background: #00D8FF; color: #0A0E17; padding: 14px 35px; text-decoration: none; display: inline-block; margin: 25px 0; font-weight: 600; font-size: 15px; }
-                  .security-note { background: transparent; border-left: 2px solid #f6465d; padding: 20px; margin: 25px 0; }
+                  .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
+                  .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
+                  .reset-button { background: #00D8FF; color: #0A0E17; padding: 14px 35px; text-decoration: none; display: inline-block; margin: 25px 0; font-weight: 600; font-size: 15px; border-radius: 4px; }
+                  .security-note { background: #111827; padding: 20px; border-radius: 8px; margin: 25px 0; border-left: 3px solid #f6465d; }
                   .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
                   .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.5; }
               </style>
@@ -4933,7 +5036,7 @@ const sendProfessionalEmail = async (options) => {
                       </div>
                   </div>
                   <div class="content">
-                      <h2 class="greeting">Hello ${data.name},</h2>
+                      <h2 class="greeting">Hello ${data.name || 'there'},</h2>
                       <p class="message">We received a request to reset your BitHash Capital account password.</p>
                       
                       <div style="text-align: center;">
@@ -4943,7 +5046,7 @@ const sendProfessionalEmail = async (options) => {
                       <p class="message">This password reset link will expire in 60 minutes for security reasons.</p>
                       
                       <div class="security-note">
-                          <strong>Security Notice:</strong> If you didn't request this password reset, please ignore this email. Your account remains secure. For additional protection, we recommend enabling two-factor authentication.
+                          <strong>⚠️ Security Notice:</strong> If you didn't request this password reset, please ignore this email. Your account remains secure. For additional protection, we recommend enabling two-factor authentication.
                       </div>
                       
                       <p class="message">Best regards,<br><strong>BitHash Capital Security Team</strong></p>
@@ -4958,7 +5061,6 @@ const sendProfessionalEmail = async (options) => {
         `
       },
 
-      // INVESTMENT CREATED
       investment_created: {
         subject: 'BitHash Capital - Investment Confirmation',
         html: `
@@ -4975,14 +5077,17 @@ const sendProfessionalEmail = async (options) => {
                   .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: none; border-radius: 0; overflow: hidden; }
                   .header { background-color: #0A0E17; padding: 30px 40px 20px 40px; text-align: center; border-bottom: 1px solid #1F2937; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
                   .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
                   .content { padding: 40px; background-color: #0A0E17; }
-                  .investment-details { background: transparent; padding: 0; margin: 25px 0; border-bottom: 1px solid #1F2937; }
-                  .detail-item { margin-bottom: 12px; display: flex; justify-content: space-between; padding-bottom: 10px; border-bottom: 1px solid #1F2937; }
+                  .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
+                  .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
+                  .investment-details { background: #111827; padding: 20px; border-radius: 8px; margin: 25px 0; }
+                  .detail-item { margin-bottom: 12px; display: flex; justify-content: space-between; padding-bottom: 8px; border-bottom: 1px solid #1F2937; }
+                  .detail-item:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
                   .detail-label { font-weight: 600; color: #8E9BAE; }
-                  .detail-value { color: #FFFFFF; font-weight: 500; }
-                  .cta-button { background: #00D8FF; color: #0A0E17; padding: 12px 30px; text-decoration: none; display: inline-block; margin: 20px 0; font-weight: 600; }
+                  .detail-value { color: #00D8FF; font-weight: 500; }
+                  .cta-button { background: #00D8FF; color: #0A0E17; padding: 12px 30px; text-decoration: none; display: inline-block; margin: 20px 0; font-weight: 600; border-radius: 4px; }
                   .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
                   .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.5; }
               </style>
@@ -4996,33 +5101,33 @@ const sendProfessionalEmail = async (options) => {
                       </div>
                   </div>
                   <div class="content">
-                      <h2 class="greeting">Hello ${data.name},</h2>
+                      <h2 class="greeting">Hello ${data.name || 'there'},</h2>
                       <p class="message">Your investment has been successfully created and is now active.</p>
                       
                       <div class="investment-details">
                           <div class="detail-item">
                               <span class="detail-label">Investment Plan:</span>
-                              <span class="detail-value">${data.planName}</span>
+                              <span class="detail-value">${data.planName || 'Standard Plan'}</span>
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">Amount:</span>
-                              <span class="detail-value">$${data.amount}</span>
+                              <span class="detail-value">$${formatAmount(data.amount)}</span>
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">Expected Return:</span>
-                              <span class="detail-value">$${data.expectedReturn}</span>
+                              <span class="detail-value">$${formatAmount(data.expectedReturn)}</span>
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">Duration:</span>
-                              <span class="detail-value">${data.duration}</span>
+                              <span class="detail-value">${data.duration || '24'} hours</span>
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">Start Date:</span>
-                              <span class="detail-value">${new Date(data.startDate).toLocaleDateString()}</span>
+                              <span class="detail-value">${formatTimestamp(data.startDate)}</span>
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">End Date:</span>
-                              <span class="detail-value">${new Date(data.endDate).toLocaleDateString()}</span>
+                              <span class="detail-value">${formatTimestamp(data.endDate)}</span>
                           </div>
                       </div>
                       
@@ -5044,7 +5149,6 @@ const sendProfessionalEmail = async (options) => {
         `
       },
 
-      // WITHDRAWAL REQUEST
       withdrawal_request: {
         subject: 'BitHash Capital - Withdrawal Request Received',
         html: `
@@ -5061,14 +5165,18 @@ const sendProfessionalEmail = async (options) => {
                   .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: none; border-radius: 0; overflow: hidden; }
                   .header { background-color: #0A0E17; padding: 30px 40px 20px 40px; text-align: center; border-bottom: 1px solid #1F2937; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
                   .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
                   .content { padding: 40px; background-color: #0A0E17; }
-                  .withdrawal-details { background: transparent; padding: 0; margin: 25px 0; border-bottom: 1px solid #1F2937; }
-                  .detail-item { margin-bottom: 12px; display: flex; justify-content: space-between; padding-bottom: 10px; border-bottom: 1px solid #1F2937; }
+                  .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
+                  .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
+                  .withdrawal-details { background: #111827; padding: 20px; border-radius: 8px; margin: 25px 0; }
+                  .detail-item { margin-bottom: 12px; display: flex; justify-content: space-between; padding-bottom: 8px; border-bottom: 1px solid #1F2937; }
+                  .detail-item:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
                   .detail-label { font-weight: 600; color: #8E9BAE; }
                   .detail-value { color: #FFFFFF; font-weight: 500; }
-                  .processing-info { background: transparent; border-left: 2px solid #00D8FF; padding: 15px; margin: 20px 0; }
+                  .address-value { font-family: monospace; background: #0A0E17; padding: 4px 8px; border-radius: 4px; font-size: 12px; }
+                  .processing-info { background: #111827; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 3px solid #00D8FF; }
                   .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
                   .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.5; }
               </style>
@@ -5082,34 +5190,38 @@ const sendProfessionalEmail = async (options) => {
                       </div>
                   </div>
                   <div class="content">
-                      <h2 class="greeting">Hello ${data.name},</h2>
+                      <h2 class="greeting">Hello ${data.name || 'there'},</h2>
                       <p class="message">Your withdrawal request has been received and is being processed.</p>
                       
                       <div class="withdrawal-details">
                           <div class="detail-item">
                               <span class="detail-label">Amount:</span>
-                              <span class="detail-value">$${data.amount}</span>
+                              <span class="detail-value">${formatAmount(data.amount, data.asset)} ${(data.asset || 'USD').toUpperCase()}</span>
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">Method:</span>
-                              <span class="detail-value">${data.method}</span>
+                              <span class="detail-value">${data.method || (data.asset ? data.asset.toUpperCase() : 'Crypto')}</span>
                           </div>
                           <div class="detail-item">
-                              <span class="detail-label">Reference:</span>
-                              <span class="detail-value">${data.reference}</span>
+                              <span class="detail-label">Withdrawal Address:</span>
+                              <span class="detail-value address-value">${hideAddress(data.withdrawalAddress || data.address)}</span>
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">Fee:</span>
-                              <span class="detail-value">$${data.fee}</span>
+                              <span class="detail-value">${formatAmount(data.fee, data.asset)} ${(data.asset || 'USD').toUpperCase()}</span>
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">Net Amount:</span>
-                              <span class="detail-value">$${data.netAmount}</span>
+                              <span class="detail-value">${formatAmount(data.netAmount, data.asset)} ${(data.asset || 'USD').toUpperCase()}</span>
+                          </div>
+                          <div class="detail-item">
+                              <span class="detail-label">Request Time:</span>
+                              <span class="detail-value">${formatTimestamp(data.timestamp)}</span>
                           </div>
                       </div>
                       
                       <div class="processing-info">
-                          <strong>Processing Information:</strong> Withdrawals are typically processed within 24 hours. You will receive another notification once your withdrawal has been completed.
+                          <strong>⏳ Processing Information:</strong> Withdrawals are typically processed within 24 hours. You will receive another notification once completed.
                       </div>
                       
                       <p class="message">If you did not initiate this withdrawal, please contact our security team immediately.</p>
@@ -5126,7 +5238,6 @@ const sendProfessionalEmail = async (options) => {
         `
       },
 
-      // KYC APPROVED
       kyc_approved: {
         subject: 'BitHash Capital - KYC Verification Approved',
         html: `
@@ -5143,14 +5254,16 @@ const sendProfessionalEmail = async (options) => {
                   .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: none; border-radius: 0; overflow: hidden; }
                   .header { background-color: #0A0E17; padding: 30px 40px 20px 40px; text-align: center; border-bottom: 1px solid #1F2937; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
                   .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
                   .content { padding: 40px; background-color: #0A0E17; }
-                  .success-message { background: transparent; border-bottom: 1px solid #00D8FF; padding: 25px; margin: 25px 0; text-align: center; }
-                  .benefits-list { margin: 25px 0; }
+                  .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
+                  .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
+                  .success-message { background: #111827; padding: 25px; border-radius: 8px; margin: 25px 0; text-align: center; border: 1px solid #00D8FF; }
+                  .benefits-list { background: #111827; padding: 20px; border-radius: 8px; margin: 25px 0; }
                   .benefit-item { display: flex; align-items: center; margin-bottom: 12px; color: #8E9BAE; }
                   .benefit-icon { color: #00D8FF; margin-right: 12px; font-weight: bold; }
-                  .cta-button { background: #00D8FF; color: #0A0E17; padding: 12px 30px; text-decoration: none; display: inline-block; margin: 20px 0; font-weight: 600; }
+                  .cta-button { background: #00D8FF; color: #0A0E17; padding: 12px 30px; text-decoration: none; display: inline-block; margin: 20px 0; font-weight: 600; border-radius: 4px; }
                   .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
                   .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.5; }
               </style>
@@ -5164,32 +5277,20 @@ const sendProfessionalEmail = async (options) => {
                       </div>
                   </div>
                   <div class="content">
-                      <h2 class="greeting">Hello ${data.name},</h2>
+                      <h2 class="greeting">Hello ${data.name || 'there'},</h2>
                       
                       <div class="success-message">
-                          <h3 style="color: #00D8FF; margin-bottom: 10px;">KYC Verification Approved</h3>
+                          <h3 style="color: #00D8FF; margin-bottom: 10px;">✅ KYC Verification Approved</h3>
                           <p class="message">Your identity verification has been successfully completed and approved.</p>
                       </div>
                       
                       <p class="message">With your KYC verification complete, you now have full access to all BitHash Capital features:</p>
                       
                       <div class="benefits-list">
-                          <div class="benefit-item">
-                              <span class="benefit-icon">•</span>
-                              <span>Higher withdrawal limits</span>
-                          </div>
-                          <div class="benefit-item">
-                              <span class="benefit-icon">•</span>
-                              <span>Access to premium investment plans</span>
-                          </div>
-                          <div class="benefit-item">
-                              <span class="benefit-icon">•</span>
-                              <span>Enhanced security features</span>
-                          </div>
-                          <div class="benefit-item">
-                              <span class="benefit-icon">•</span>
-                              <span>Priority customer support</span>
-                          </div>
+                          <div class="benefit-item"><span class="benefit-icon">✓</span> Higher withdrawal limits</div>
+                          <div class="benefit-item"><span class="benefit-icon">✓</span> Access to premium investment plans</div>
+                          <div class="benefit-item"><span class="benefit-icon">✓</span> Enhanced security features</div>
+                          <div class="benefit-item"><span class="benefit-icon">✓</span> Priority customer support</div>
                       </div>
                       
                       <div style="text-align: center;">
@@ -5210,7 +5311,6 @@ const sendProfessionalEmail = async (options) => {
         `
       },
 
-      // DEPOSIT RECEIVED
       deposit_received: {
         subject: 'BitHash Capital - Deposit Successfully Received',
         html: `
@@ -5227,15 +5327,18 @@ const sendProfessionalEmail = async (options) => {
                   .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: none; border-radius: 0; overflow: hidden; }
                   .header { background-color: #0A0E17; padding: 30px 40px 20px 40px; text-align: center; border-bottom: 1px solid #1F2937; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
                   .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
                   .content { padding: 40px; background-color: #0A0E17; }
-                  .deposit-details { background: transparent; padding: 0; margin: 25px 0; border-bottom: 1px solid #1F2937; }
-                  .detail-item { margin-bottom: 12px; display: flex; justify-content: space-between; padding-bottom: 10px; border-bottom: 1px solid #1F2937; }
+                  .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
+                  .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
+                  .deposit-details { background: #111827; padding: 20px; border-radius: 8px; margin: 25px 0; }
+                  .detail-item { margin-bottom: 12px; display: flex; justify-content: space-between; padding-bottom: 8px; border-bottom: 1px solid #1F2937; }
+                  .detail-item:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
                   .detail-label { font-weight: 600; color: #8E9BAE; }
-                  .detail-value { color: #FFFFFF; font-weight: 500; word-break: break-all; }
-                  .address-hidden { font-family: monospace; background: #111827; padding: 8px 12px; border-radius: 4px; font-size: 14px; }
-                  .cta-button { background: #00D8FF; color: #0A0E17; padding: 12px 30px; text-decoration: none; display: inline-block; margin: 20px 0; font-weight: 600; }
+                  .detail-value { color: #00D8FF; font-weight: 500; word-break: break-all; }
+                  .address-value { font-family: monospace; background: #0A0E17; padding: 4px 8px; border-radius: 4px; font-size: 12px; color: #FFFFFF; }
+                  .cta-button { background: #00D8FF; color: #0A0E17; padding: 12px 30px; text-decoration: none; display: inline-block; margin: 20px 0; font-weight: 600; border-radius: 4px; }
                   .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
                   .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.5; }
               </style>
@@ -5249,29 +5352,37 @@ const sendProfessionalEmail = async (options) => {
                       </div>
                   </div>
                   <div class="content">
-                      <h2 class="greeting">Hello ${data.name},</h2>
+                      <h2 class="greeting">Hello ${data.name || 'there'},</h2>
                       <p class="message">Your deposit has been successfully received and credited to your account.</p>
                       
                       <div class="deposit-details">
                           <div class="detail-item">
                               <span class="detail-label">Amount:</span>
-                              <span class="detail-value">$${data.amount}</span>
+                              <span class="detail-value">${formatAmount(data.amount, data.asset)} ${(data.asset || 'USD').toUpperCase()}</span>
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">Method:</span>
-                              <span class="detail-value">${data.method}</span>
+                              <span class="detail-value">${data.method || (data.asset ? data.asset.toUpperCase() : 'Crypto')}</span>
                           </div>
                           <div class="detail-item">
-                              <span class="detail-label">Reference:</span>
-                              <span class="detail-value">${data.reference}</span>
+                              <span class="detail-label">Transaction ID:</span>
+                              <span class="detail-value">${data.txid || data.transactionId || data.reference || 'Confirmed'}</span>
+                          </div>
+                          <div class="detail-item">
+                              <span class="detail-label">From Address:</span>
+                              <span class="detail-value address-value">${hideAddress(data.fromAddress)}</span>
+                          </div>
+                          <div class="detail-item">
+                              <span class="detail-label">To Address:</span>
+                              <span class="detail-value address-value">${hideAddress(data.toAddress)}</span>
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">Date:</span>
-                              <span class="detail-value">${new Date().toLocaleDateString()}</span>
+                              <span class="detail-value">${formatTimestamp(data.timestamp)}</span>
                           </div>
                           <div class="detail-item">
                               <span class="detail-label">New Balance:</span>
-                              <span class="detail-value">$${data.newBalance}</span>
+                              <span class="detail-value">$${formatAmount(data.newBalance)}</span>
                           </div>
                       </div>
                       
@@ -5293,7 +5404,6 @@ const sendProfessionalEmail = async (options) => {
         `
       },
 
-      // REFERRAL BONUS
       referral_bonus: {
         subject: 'BitHash Capital - Referral Bonus Earned',
         html: `
@@ -5310,14 +5420,15 @@ const sendProfessionalEmail = async (options) => {
                   .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: none; border-radius: 0; overflow: hidden; }
                   .header { background-color: #0A0E17; padding: 30px 40px 20px 40px; text-align: center; border-bottom: 1px solid #1F2937; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
                   .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
                   .content { padding: 40px; background-color: #0A0E17; }
-                  .bonus-card { background: transparent; padding: 30px; border-bottom: 1px solid #00D8FF; margin: 25px 0; text-align: center; }
-                  .bonus-amount { font-size: 36px; font-weight: 700; color: #00D8FF; margin: 10px 0; }
-                  .referral-details { background: transparent; padding: 0; border-bottom: 1px solid #1F2937; margin: 20px 0; }
-                  .referral-details p { color: #8E9BAE; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid #1F2937; }
-                  .cta-button { background: #00D8FF; color: #0A0E17; padding: 12px 30px; text-decoration: none; display: inline-block; margin: 20px 0; font-weight: 600; }
+                  .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
+                  .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
+                  .bonus-card { background: #111827; padding: 30px; border-radius: 8px; margin: 25px 0; text-align: center; border: 1px solid #00D8FF; }
+                  .bonus-amount { font-size: 48px; font-weight: 700; color: #00D8FF; margin: 15px 0; }
+                  .referral-details { background: #111827; padding: 20px; border-radius: 8px; margin: 20px 0; }
+                  .cta-button { background: #00D8FF; color: #0A0E17; padding: 12px 30px; text-decoration: none; display: inline-block; margin: 20px 0; font-weight: 600; border-radius: 4px; }
                   .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
                   .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.5; }
               </style>
@@ -5331,19 +5442,19 @@ const sendProfessionalEmail = async (options) => {
                       </div>
                   </div>
                   <div class="content">
-                      <h2 class="greeting">Hello ${data.name},</h2>
+                      <h2 class="greeting">Hello ${data.name || 'there'},</h2>
                       <p class="message">Congratulations! You've earned a referral bonus for helping grow our mining community.</p>
                       
                       <div class="bonus-card">
-                          <h3 class="message" style="margin-bottom: 10px;">Referral Bonus Earned</h3>
-                          <div class="bonus-amount">$${data.bonusAmount}</div>
+                          <h3 style="margin-bottom: 10px; color: #FFFFFF;">Referral Bonus Earned</h3>
+                          <div class="bonus-amount">$${formatAmount(data.bonusAmount)}</div>
                           <p class="message">has been credited to your account</p>
                       </div>
                       
                       <div class="referral-details">
-                          <p><strong>Referred User:</strong> ${data.referredUser}</p>
-                          <p><strong>Bonus Type:</strong> ${data.bonusType}</p>
-                          <p><strong>Date Earned:</strong> ${new Date().toLocaleDateString()}</p>
+                          <p><strong>Referred User:</strong> ${data.referredUser || 'Your Referral'}</p>
+                          <p><strong>Bonus Type:</strong> ${data.bonusType || 'Direct Referral'}</p>
+                          <p><strong>Date Earned:</strong> ${formatTimestamp(data.timestamp)}</p>
                       </div>
                       
                       <p class="message">Keep sharing your referral link to earn more bonuses as your referrals continue their mining journey.</p>
@@ -5366,7 +5477,6 @@ const sendProfessionalEmail = async (options) => {
         `
       },
 
-      // ACCOUNT SUSPENDED
       account_suspended: {
         subject: 'BitHash Capital - Important Account Notification',
         html: `
@@ -5383,13 +5493,15 @@ const sendProfessionalEmail = async (options) => {
                   .email-container { max-width: 600px; margin: 0 auto; background-color: #0A0E17; border: none; border-radius: 0; overflow: hidden; }
                   .header { background-color: #0A0E17; padding: 30px 40px 20px 40px; text-align: center; border-bottom: 1px solid #1F2937; }
                   .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                  .logo-img { width: 32px; height: 32px; border-radius: 50%; }
+                  .logo-img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
                   .logo-text { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: #00D8FF; letter-spacing: -0.5px; }
                   .content { padding: 40px; background-color: #0A0E17; }
-                  .alert-box { background: transparent; border-left: 2px solid #f6465d; padding: 25px; margin: 25px 0; }
-                  .action-steps { background: transparent; padding: 0; border-bottom: 1px solid #1F2937; margin: 20px 0; }
-                  .step-item { margin-bottom: 10px; display: flex; align-items: flex-start; }
-                  .step-number { background: #f6465d; color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-right: 12px; font-size: 12px; font-weight: 600; }
+                  .greeting { font-size: 20px; font-weight: 600; color: #FFFFFF; margin-bottom: 20px; }
+                  .message { color: #8E9BAE; line-height: 1.6; margin-bottom: 25px; font-size: 15px; }
+                  .alert-box { background: #111827; padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 3px solid #f6465d; }
+                  .action-steps { background: #111827; padding: 20px; border-radius: 8px; margin: 20px 0; }
+                  .step-item { margin-bottom: 12px; display: flex; align-items: flex-start; }
+                  .step-number { background: #f6465d; color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-right: 12px; font-size: 12px; font-weight: 600; flex-shrink: 0; }
                   .support-link { color: #00D8FF; text-decoration: none; font-weight: 600; }
                   .footer { padding: 30px 40px; background-color: #05080F; text-align: center; border-top: 1px solid #1F2937; }
                   .footer-text { color: #8E9BAE; font-size: 12px; line-height: 1.5; }
@@ -5404,11 +5516,11 @@ const sendProfessionalEmail = async (options) => {
                       </div>
                   </div>
                   <div class="content">
-                      <h2 class="greeting">Hello ${data.name},</h2>
+                      <h2 class="greeting">Hello ${data.name || 'there'},</h2>
                       
                       <div class="alert-box">
-                          <h3 style="color: #f6465d; margin-bottom: 15px;">Important Account Notification</h3>
-                          <p class="message">Your BitHash Capital account has been temporarily suspended due to ${data.reason}.</p>
+                          <h3 style="color: #f6465d; margin-bottom: 15px;">⚠️ Important Account Notification</h3>
+                          <p class="message">Your BitHash Capital account has been temporarily suspended due to ${data.reason || 'security review'}.</p>
                       </div>
                       
                       <div class="action-steps">
@@ -5461,9 +5573,6 @@ const sendProfessionalEmail = async (options) => {
     throw new Error('Failed to send email');
   }
 };
-
-
-
 
 
 
