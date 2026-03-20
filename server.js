@@ -3337,6 +3337,9 @@ const calculateReferralCommissions = async (investment) => {
 
 
 
+
+
+
 // Enhanced email service with professional Bitcoin mining templates - Binance/Bybit style
 const sendAutomatedEmail = async (user, action, data = {}) => {
   try {
