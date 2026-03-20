@@ -3342,7 +3342,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
         return 'Not Provided';
       }
       if (address.length <= 12) return address;
-      return address.substring(0, 6) + '***************' + address.substring(address.length - 6);
+      return address.substring(0, 6) + '*************' + address.substring(address.length - 6);
     };
 
     // Helper function to format timestamp
@@ -4206,6 +4206,106 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
         `
       },
 
+      // WITHDRAWAL REJECTED
+      withdrawal_rejected: {
+        subject: `${data.asset || 'Crypto'} Withdrawal Rejected - BitHash Capital`,
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Withdrawal Rejected - BitHash Capital</title>
+              <style>
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px; }
+                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+                .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 32px 40px; text-align: center; }
+                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
+                .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
+                .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
+                .content { padding: 40px; background-color: #ffffff; }
+                .greeting { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
+                .message { color: #4b5563; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
+                .crypto-header { display: flex; align-items: center; gap: 16px; margin: 24px 0; padding: 16px; background: #fef2f2; border-radius: 12px; border-left: 4px solid #ef4444; }
+                .crypto-icon { width: 48px; height: 48px; border-radius: 50%; background: #ffffff; display: flex; align-items: center; justify-content: center; }
+                .crypto-icon img { width: 32px; height: 32px; }
+                .crypto-name { font-size: 20px; font-weight: 700; color: #1f2937; }
+                .rejected-box { background: #fef2f2; padding: 24px; text-align: center; border-radius: 12px; margin: 24px 0; border: 1px solid #fecaca; }
+                .rejected-amount { font-size: 36px; font-weight: 700; color: #dc2626; margin: 12px 0; }
+                .reason-box { background: #fef2f2; padding: 20px; border-radius: 12px; margin: 20px 0; border-left: 4px solid #dc2626; }
+                .reason-box p { color: #991b1b; font-size: 14px; line-height: 1.5; }
+                .transaction-details { background: #f9fafb; padding: 24px; border-radius: 12px; margin: 24px 0; }
+                .detail-row { display: flex; justify-content: space-between; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #e5e7eb; }
+                .detail-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+                .detail-label { color: #6b7280; font-size: 14px; font-weight: 500; }
+                .detail-value { color: #1f2937; font-weight: 500; font-size: 14px; word-break: break-all; }
+                .address-value { font-family: monospace; background: #ffffff; padding: 4px 8px; border-radius: 6px; font-size: 12px; border: 1px solid #e5e7eb; }
+                .footer { padding: 24px 40px; background-color: #f9fafb; text-align: center; border-top: 1px solid #e5e7eb; }
+                .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
+              </style>
+          </head>
+          <body style="background-color: #f4f4f5; padding: 20px;">
+              <div class="email-container">
+                  <div class="header">
+                      <div class="logo-container">
+                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
+                          <span class="logo-text">BitHash Capital</span>
+                      </div>
+                  </div>
+                  <div class="content">
+                      <h2 class="greeting">Hello ${user.firstName || 'there'},</h2>
+                      <p class="message">Your ${data.asset || 'crypto'} withdrawal request has been rejected.</p>
+                      
+                      <div class="crypto-header">
+                          <div class="crypto-icon">
+                              <img src="${getCryptoLogo(data.asset)}" alt="${data.asset || 'BTC'}" onerror="this.style.display='none'">
+                          </div>
+                          <div>
+                              <div class="crypto-name">${(data.asset || 'Bitcoin').toUpperCase()}</div>
+                              <div class="crypto-network">Network: ${data.network || (data.asset === 'USDT' ? 'ERC-20' : data.asset === 'BTC' ? 'Bitcoin' : 'Mainnet')}</div>
+                          </div>
+                      </div>
+                      
+                      <div class="rejected-box">
+                          <div style="color: #6b7280; font-size: 14px;">Requested Amount</div>
+                          <div class="rejected-amount">${formatAmount(data.amount, data.asset)} ${(data.asset || 'BTC').toUpperCase()}</div>
+                          <div style="color: #6b7280; font-size: 14px;">($${formatAmount(data.usdValue)} USD)</div>
+                      </div>
+                      
+                      ${data.reason ? `
+                      <div class="reason-box">
+                          <strong style="color: #dc2626;">Rejection Reason:</strong>
+                          <p>${data.reason}</p>
+                      </div>
+                      ` : ''}
+                      
+                      <div class="transaction-details">
+                          <div class="detail-row">
+                              <span class="detail-label">Withdrawal Address:</span>
+                              <span class="detail-value address-value">${hideAddress(data.withdrawalAddress || data.address)}</span>
+                          </div>
+                          <div class="detail-row">
+                              <span class="detail-label">Request Time:</span>
+                              <span class="detail-value">${formatTimestamp(data.timestamp)}</span>
+                          </div>
+                      </div>
+                      
+                      <p class="message">Your funds have been returned to your account balance. If you have any questions, please contact our support team.</p>
+                      
+                      <div style="text-align: center; margin-top: 24px;">
+                          <a href="https://www.bithashcapital.live/dashboard.html" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #ffffff; padding: 12px 28px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 15px; border-radius: 8px;">View Account</a>
+                      </div>
+                  </div>
+                  <div class="footer">
+                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.</p>
+                  </div>
+              </div>
+          </body>
+          </html>
+        `
+      },
+
       // DEPOSIT APPROVED
       deposit_approved: {
         subject: `${data.asset || 'Crypto'} Deposit Approved - BitHash Capital`,
@@ -4268,7 +4368,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                       <div class="approved-box">
                           <div style="color: #6b7280; font-size: 14px;">Amount Deposited</div>
                           <div class="approved-amount">${formatAmount(data.amount, data.asset)} ${(data.asset || 'BTC').toUpperCase()}</div>
-                          <div style="color: #6b7280; font-size: 14px;">USD Value: $${formatAmount(data.usdValue)}</div>
+                          <div style="color: #6b7280; font-size: 14px;">($${formatAmount(data.usdValue)} USD)</div>
                       </div>
                       
                       <div class="transaction-details">
@@ -4277,20 +4377,16 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                               <span class="detail-value address-value">${data.txid || data.transactionHash || data.transactionId || 'Confirmed on Blockchain'}</span>
                           </div>
                           <div class="detail-row">
-                              <span class="detail-label">Sent From:</span>
-                              <span class="detail-value address-value">${hideAddress(data.fromAddress || data.senderAddress)}</span>
-                          </div>
-                          <div class="detail-row">
-                              <span class="detail-label">Received At:</span>
-                              <span class="detail-value address-value">${hideAddress(data.toAddress || data.recipientAddress)}</span>
-                          </div>
-                          <div class="detail-row">
-                              <span class="detail-label">Approved At:</span>
-                              <span class="detail-value">${formatTimestamp(data.approvedAt)}</span>
+                              <span class="detail-label">Processed At:</span>
+                              <span class="detail-value">${formatTimestamp(data.processedAt)}</span>
                           </div>
                       </div>
                       
                       <p class="message">Your funds are now available for mining investments and other platform activities.</p>
+                      
+                      <div style="text-align: center; margin-top: 24px;">
+                          <a href="https://www.bithashcapital.live/dashboard.html" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #ffffff; padding: 12px 28px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 15px; border-radius: 8px;">Start Investing</a>
+                      </div>
                   </div>
                   <div class="footer">
                       <p class="footer-text">© 2024 BitHash Capital. All rights reserved.</p>
@@ -4322,10 +4418,19 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 .content { padding: 40px; background-color: #ffffff; }
                 .greeting { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
                 .message { color: #4b5563; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .rejection-box { background: #fef2f2; padding: 24px; text-align: center; border-radius: 12px; margin: 24px 0; border: 1px solid #fecaca; }
-                .rejection-amount { font-size: 36px; font-weight: 700; color: #dc2626; margin: 12px 0; }
-                .reason-box { background: #fef2f2; padding: 16px; border-radius: 12px; margin: 24px 0; border-left: 4px solid #dc2626; }
-                .reason-box p { color: #991b1b; font-size: 14px; }
+                .crypto-header { display: flex; align-items: center; gap: 16px; margin: 24px 0; padding: 16px; background: #fef2f2; border-radius: 12px; border-left: 4px solid #ef4444; }
+                .crypto-icon { width: 48px; height: 48px; border-radius: 50%; background: #ffffff; display: flex; align-items: center; justify-content: center; }
+                .crypto-icon img { width: 32px; height: 32px; }
+                .crypto-name { font-size: 20px; font-weight: 700; color: #1f2937; }
+                .rejected-box { background: #fef2f2; padding: 24px; text-align: center; border-radius: 12px; margin: 24px 0; border: 1px solid #fecaca; }
+                .rejected-amount { font-size: 36px; font-weight: 700; color: #dc2626; margin: 12px 0; }
+                .reason-box { background: #fef2f2; padding: 20px; border-radius: 12px; margin: 20px 0; border-left: 4px solid #dc2626; }
+                .reason-box p { color: #991b1b; font-size: 14px; line-height: 1.5; }
+                .transaction-details { background: #f9fafb; padding: 24px; border-radius: 12px; margin: 24px 0; }
+                .detail-row { display: flex; justify-content: space-between; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #e5e7eb; }
+                .detail-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+                .detail-label { color: #6b7280; font-size: 14px; font-weight: 500; }
+                .detail-value { color: #1f2937; font-weight: 500; font-size: 14px; word-break: break-all; }
                 .footer { padding: 24px 40px; background-color: #f9fafb; text-align: center; border-top: 1px solid #e5e7eb; }
                 .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
               </style>
@@ -4342,81 +4447,41 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                       <h2 class="greeting">Hello ${user.firstName || 'there'},</h2>
                       <p class="message">Your ${data.asset || 'crypto'} deposit request has been rejected.</p>
                       
-                      <div class="rejection-box">
-                          <div style="color: #6b7280; font-size: 14px;">Amount</div>
-                          <div class="rejection-amount">${formatAmount(data.amount, data.asset)} ${(data.asset || 'BTC').toUpperCase()}</div>
-                          <div style="color: #6b7280; font-size: 14px;">USD Value: $${formatAmount(data.usdValue)}</div>
+                      <div class="crypto-header">
+                          <div class="crypto-icon">
+                              <img src="${getCryptoLogo(data.asset)}" alt="${data.asset || 'BTC'}" onerror="this.style.display='none'">
+                          </div>
+                          <div>
+                              <div class="crypto-name">${(data.asset || 'Bitcoin').toUpperCase()}</div>
+                              <div class="crypto-network">Network: ${data.network || (data.asset === 'USDT' ? 'ERC-20' : data.asset === 'BTC' ? 'Bitcoin' : 'Mainnet')}</div>
+                          </div>
                       </div>
                       
+                      <div class="rejected-box">
+                          <div style="color: #6b7280; font-size: 14px;">Requested Amount</div>
+                          <div class="rejected-amount">${formatAmount(data.amount, data.asset)} ${(data.asset || 'BTC').toUpperCase()}</div>
+                          <div style="color: #6b7280; font-size: 14px;">($${formatAmount(data.usdValue)} USD)</div>
+                      </div>
+                      
+                      ${data.reason ? `
                       <div class="reason-box">
-                          <p><strong>Rejection Reason:</strong></p>
-                          <p>${data.reason || 'Your deposit could not be processed. Please contact support for more information.'}</p>
+                          <strong style="color: #dc2626;">Rejection Reason:</strong>
+                          <p>${data.reason}</p>
+                      </div>
+                      ` : ''}
+                      
+                      <div class="transaction-details">
+                          <div class="detail-row">
+                              <span class="detail-label">Request Time:</span>
+                              <span class="detail-value">${formatTimestamp(data.timestamp)}</span>
+                          </div>
                       </div>
                       
-                      <p class="message">If you believe this is an error or have any questions, please contact our support team.</p>
-                  </div>
-                  <div class="footer">
-                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.</p>
-                  </div>
-              </div>
-          </body>
-          </html>
-        `
-      },
-
-      // WITHDRAWAL REJECTED
-      withdrawal_rejected: {
-        subject: `${data.asset || 'Crypto'} Withdrawal Rejected - BitHash Capital`,
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>Withdrawal Rejected - BitHash Capital</title>
-              <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px; }
-                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-                .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 32px 40px; text-align: center; }
-                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
-                .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
-                .content { padding: 40px; background-color: #ffffff; }
-                .greeting { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
-                .message { color: #4b5563; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .rejection-box { background: #fef2f2; padding: 24px; text-align: center; border-radius: 12px; margin: 24px 0; border: 1px solid #fecaca; }
-                .rejection-amount { font-size: 36px; font-weight: 700; color: #dc2626; margin: 12px 0; }
-                .reason-box { background: #fef2f2; padding: 16px; border-radius: 12px; margin: 24px 0; border-left: 4px solid #dc2626; }
-                .reason-box p { color: #991b1b; font-size: 14px; }
-                .footer { padding: 24px 40px; background-color: #f9fafb; text-align: center; border-top: 1px solid #e5e7eb; }
-                .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
-              </style>
-          </head>
-          <body style="background-color: #f4f4f5; padding: 20px;">
-              <div class="email-container">
-                  <div class="header">
-                      <div class="logo-container">
-                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
-                          <span class="logo-text">BitHash Capital</span>
-                      </div>
-                  </div>
-                  <div class="content">
-                      <h2 class="greeting">Hello ${user.firstName || 'there'},</h2>
-                      <p class="message">Your ${data.asset || 'crypto'} withdrawal request has been rejected.</p>
+                      <p class="message">If you have any questions about this decision, please contact our support team.</p>
                       
-                      <div class="rejection-box">
-                          <div style="color: #6b7280; font-size: 14px;">Amount Requested</div>
-                          <div class="rejection-amount">${formatAmount(data.amount, data.asset)} ${(data.asset || 'BTC').toUpperCase()}</div>
-                          <div style="color: #6b7280; font-size: 14px;">USD Value: $${formatAmount(data.usdValue)}</div>
+                      <div style="text-align: center; margin-top: 24px;">
+                          <a href="https://www.bithashcapital.live/dashboard.html" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #ffffff; padding: 12px 28px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 15px; border-radius: 8px;">Contact Support</a>
                       </div>
-                      
-                      <div class="reason-box">
-                          <p><strong>Rejection Reason:</strong></p>
-                          <p>${data.reason || 'Your withdrawal could not be processed. Please contact support for more information.'}</p>
-                      </div>
-                      
-                      <p class="message">Your funds have been returned to your account balance. If you have any questions, please contact our support team.</p>
                   </div>
                   <div class="footer">
                       <p class="footer-text">© 2024 BitHash Capital. All rights reserved.</p>
@@ -4448,9 +4513,13 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 .content { padding: 40px; background-color: #ffffff; }
                 .greeting { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
                 .message { color: #4b5563; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .success-box { background: #f0fdf4; padding: 24px; text-align: center; border-radius: 12px; margin: 24px 0; border: 1px solid #86efac; }
-                .success-icon { font-size: 64px; margin-bottom: 16px; }
-                .success-text { font-size: 24px; font-weight: 600; color: #22c55e; }
+                .success-icon { text-align: center; font-size: 64px; margin: 20px 0; }
+                .kyc-approved-box { background: #f0fdf4; padding: 24px; text-align: center; border-radius: 12px; margin: 24px 0; border: 1px solid #86efac; }
+                .kyc-status { font-size: 24px; font-weight: 700; color: #22c55e; margin: 12px 0; }
+                .benefits-list { margin: 24px 0; }
+                .benefit-item { display: flex; align-items: center; margin-bottom: 12px; color: #4b5563; }
+                .benefit-icon { color: #22c55e; margin-right: 12px; font-weight: bold; font-size: 18px; }
+                .cta-button { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #ffffff; padding: 14px 32px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 16px; border-radius: 8px; margin: 20px 0; }
                 .footer { padding: 24px 40px; background-color: #f9fafb; text-align: center; border-top: 1px solid #e5e7eb; }
                 .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
               </style>
@@ -4464,22 +4533,33 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                       </div>
                   </div>
                   <div class="content">
-                      <h2 class="greeting">Hello ${user.firstName || 'there'},</h2>
-                      <p class="message">Congratulations! Your KYC verification has been approved.</p>
+                      <div class="success-icon">✅</div>
+                      <h2 class="greeting">Congratulations ${user.firstName || 'Valued Investor'}!</h2>
+                      <p class="message">Your KYC verification has been successfully approved. You now have full access to all BitHash Capital features and higher transaction limits.</p>
                       
-                      <div class="success-box">
-                          <div class="success-icon">✓</div>
-                          <div class="success-text">KYC Verified</div>
+                      <div class="kyc-approved-box">
+                          <div style="color: #6b7280; font-size: 14px;">Verification Status</div>
+                          <div class="kyc-status">VERIFIED</div>
+                          <div style="color: #6b7280; font-size: 12px;">Approved on ${formatTimestamp(data.verifiedAt || new Date())}</div>
                       </div>
                       
-                      <p class="message">Your account is now fully verified. You now have access to all platform features including higher withdrawal limits and exclusive investment opportunities.</p>
-                      
-                      <div style="text-align: center; margin-top: 24px;">
-                          <a href="https://www.bithashcapital.live/dashboard.html" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #ffffff; padding: 12px 28px; text-decoration: none; display: inline-block; font-weight: 600; border-radius: 8px;">Go to Dashboard</a>
+                      <div class="benefits-list">
+                          <div class="benefit-item"><span class="benefit-icon">✓</span> Increased withdrawal limits</div>
+                          <div class="benefit-item"><span class="benefit-icon">✓</span> Priority support access</div>
+                          <div class="benefit-item"><span class="benefit-icon">✓</span> Higher investment limits</div>
+                          <div class="benefit-item"><span class="benefit-icon">✓</span> Faster transaction processing</div>
+                          <div class="benefit-item"><span class="benefit-icon">✓</span> Access to exclusive investment opportunities</div>
                       </div>
+                      
+                      <div style="text-align: center;">
+                          <a href="https://www.bithashcapital.live/dashboard.html" class="cta-button">Go to Dashboard</a>
+                      </div>
+                      
+                      <p class="message">Thank you for completing your verification. Start exploring all the premium features available to verified users.</p>
                   </div>
                   <div class="footer">
-                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.</p>
+                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
+                      This is an automated verification notification.</p>
                   </div>
               </div>
           </body>
@@ -4508,11 +4588,16 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 .content { padding: 40px; background-color: #ffffff; }
                 .greeting { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
                 .message { color: #4b5563; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .rejection-box { background: #fef2f2; padding: 24px; text-align: center; border-radius: 12px; margin: 24px 0; border: 1px solid #fecaca; }
-                .rejection-icon { font-size: 64px; margin-bottom: 16px; }
-                .rejection-text { font-size: 24px; font-weight: 600; color: #dc2626; }
-                .reason-box { background: #fef2f2; padding: 16px; border-radius: 12px; margin: 24px 0; border-left: 4px solid #dc2626; }
-                .reason-box p { color: #991b1b; font-size: 14px; }
+                .warning-icon { text-align: center; font-size: 64px; margin: 20px 0; }
+                .kyc-rejected-box { background: #fef2f2; padding: 24px; text-align: center; border-radius: 12px; margin: 24px 0; border: 1px solid #fecaca; }
+                .kyc-status { font-size: 24px; font-weight: 700; color: #dc2626; margin: 12px 0; }
+                .reason-box { background: #fef2f2; padding: 20px; border-radius: 12px; margin: 20px 0; border-left: 4px solid #dc2626; }
+                .reason-box p { color: #991b1b; font-size: 14px; line-height: 1.5; }
+                .steps-list { margin: 24px 0; background: #f9fafb; padding: 20px; border-radius: 12px; }
+                .step-item { display: flex; align-items: flex-start; margin-bottom: 12px; }
+                .step-number { background: #667eea; color: white; width: 24px; height: 24px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold; margin-right: 12px; flex-shrink: 0; }
+                .step-text { color: #4b5563; font-size: 14px; line-height: 1.4; }
+                .cta-button { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #ffffff; padding: 14px 32px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 16px; border-radius: 8px; margin: 20px 0; }
                 .footer { padding: 24px 40px; background-color: #f9fafb; text-align: center; border-top: 1px solid #e5e7eb; }
                 .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
               </style>
@@ -4526,27 +4611,47 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                       </div>
                   </div>
                   <div class="content">
+                      <div class="warning-icon">⚠️</div>
                       <h2 class="greeting">Hello ${user.firstName || 'there'},</h2>
-                      <p class="message">We have reviewed your KYC application and unfortunately it could not be approved at this time.</p>
+                      <p class="message">We have reviewed your KYC submission and unfortunately, it could not be approved at this time.</p>
                       
-                      <div class="rejection-box">
-                          <div class="rejection-icon">⚠️</div>
-                          <div class="rejection-text">KYC Rejected</div>
+                      <div class="kyc-rejected-box">
+                          <div style="color: #6b7280; font-size: 14px;">Verification Status</div>
+                          <div class="kyc-status">REJECTED</div>
                       </div>
                       
+                      ${data.reason ? `
                       <div class="reason-box">
-                          <p><strong>Reason:</strong></p>
-                          <p>${data.reason || 'Please contact support for more information about your KYC status.'}</p>
+                          <strong style="color: #dc2626;">Reason for Rejection:</strong>
+                          <p>${data.reason}</p>
+                      </div>
+                      ` : ''}
+                      
+                      <div class="steps-list">
+                          <strong style="color: #1f2937; display: block; margin-bottom: 12px;">Next Steps:</strong>
+                          <div class="step-item">
+                              <span class="step-number">1</span>
+                              <span class="step-text">Review the reason provided above</span>
+                          </div>
+                          <div class="step-item">
+                              <span class="step-number">2</span>
+                              <span class="step-text">Gather clear, legible copies of your documents</span>
+                          </div>
+                          <div class="step-item">
+                              <span class="step-number">3</span>
+                              <span class="step-text">Resubmit your KYC application with corrected documents</span>
+                          </div>
                       </div>
                       
-                      <p class="message">You can submit a new KYC application with the correct documents. Please ensure all documents are clear and valid.</p>
-                      
-                      <div style="text-align: center; margin-top: 24px;">
-                          <a href="https://www.bithashcapital.live/kyc.html" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #ffffff; padding: 12px 28px; text-decoration: none; display: inline-block; font-weight: 600; border-radius: 8px;">Resubmit KYC</a>
+                      <div style="text-align: center;">
+                          <a href="https://www.bithashcapital.live/kyc.html" class="cta-button">Resubmit KYC</a>
                       </div>
+                      
+                      <p class="message">If you need assistance, our support team is here to help. Contact us at support@bithashcapital.live for guidance.</p>
                   </div>
                   <div class="footer">
-                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.</p>
+                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
+                      This is an automated verification notification.</p>
                   </div>
               </div>
           </body>
@@ -4646,7 +4751,7 @@ const sendProfessionalEmail = async (options) => {
         return 'Not Provided';
       }
       if (address.length <= 12) return address;
-      return address.substring(0, 6) + '***************' + address.substring(address.length - 6);
+      return address.substring(0, 6) + '*************' + address.substring(address.length - 6);
     };
 
     const formatTimestamp = (timestamp) => {
@@ -6178,7 +6283,7 @@ app.get('/api/admin/deposits/:id', adminProtect, async (req, res) => {
   }
 });
 
-// Admin Approve Deposit Endpoint - WITH EMAIL NOTIFICATION
+// Admin Approve Deposit Endpoint - FIXED WITH EMAIL
 app.post('/api/admin/deposits/:id/approve', adminProtect, [
   body('notes').optional().trim()
 ], async (req, res) => {
@@ -6223,17 +6328,15 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
     deposit.adminNotes = notes;
     await deposit.save();
 
-    // Send email notification with all key transaction details
+    // Send email notification with full transaction details
     await sendAutomatedEmail(user, 'deposit_approved', {
       name: user.firstName,
       amount: deposit.amount,
-      asset: deposit.method || 'Crypto',
       usdValue: deposit.amount,
-      txid: deposit.reference,
-      fromAddress: deposit.details?.fromAddress || deposit.btcAddress || 'N/A',
-      toAddress: deposit.details?.toAddress || 'BitHash Capital Wallet',
+      asset: deposit.method || 'USD',
       network: deposit.network || (deposit.method === 'USDT' ? 'ERC-20' : deposit.method === 'BTC' ? 'Bitcoin' : 'Mainnet'),
-      approvedAt: new Date(),
+      transactionHash: deposit.details?.txid || deposit.details?.transactionHash || deposit.reference,
+      processedAt: deposit.processedAt,
       newBalance: user.balances.main
     });
     
@@ -6255,7 +6358,7 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
   }
 });
 
-// Admin Reject Deposit Endpoint - WITH EMAIL NOTIFICATION
+// Admin Reject Deposit Endpoint - FIXED WITH EMAIL
 app.post('/api/admin/deposits/:id/reject', adminProtect, [
   body('reason').trim().notEmpty().withMessage('Rejection reason is required')
 ], async (req, res) => {
@@ -6293,13 +6396,14 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
     deposit.adminNotes = reason;
     await deposit.save();
 
-    // Send email notification with rejection reason
+    // Send email notification with full transaction details
     await sendAutomatedEmail(deposit.user, 'deposit_rejected', {
       name: deposit.user.firstName,
       amount: deposit.amount,
-      asset: deposit.method || 'Crypto',
       usdValue: deposit.amount,
-      reason: reason
+      asset: deposit.method || 'USD',
+      reason: reason,
+      timestamp: deposit.createdAt
     });
     
     res.status(200).json({
@@ -6348,7 +6452,7 @@ app.get('/api/admin/withdrawals/:id', adminProtect, async (req, res) => {
   }
 });
 
-// Admin Approve Withdrawal Endpoint - WITH EMAIL NOTIFICATION
+// Admin Approve Withdrawal Endpoint - FIXED WITH EMAIL
 app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
   body('notes').optional().trim()
 ], async (req, res) => {
@@ -6380,19 +6484,19 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
     withdrawal.adminNotes = notes;
     await withdrawal.save();
 
-    // Send email notification with all key transaction details
+    // Send email notification with full transaction details
     await sendAutomatedEmail(withdrawal.user, 'withdrawal_approved', {
       name: withdrawal.user.firstName,
       amount: withdrawal.amount,
-      asset: withdrawal.method || 'Crypto',
       usdValue: withdrawal.amount,
-      withdrawalAddress: withdrawal.btcAddress || withdrawal.details?.withdrawalAddress || 'N/A',
+      asset: withdrawal.method || 'USD',
+      withdrawalAddress: withdrawal.details?.address || withdrawal.btcAddress || withdrawal.details?.walletAddress || 'N/A',
       fee: withdrawal.fee || 0,
       feeUsd: withdrawal.fee || 0,
       netAmount: withdrawal.netAmount || withdrawal.amount,
-      txid: withdrawal.reference,
-      processedAt: new Date(),
-      network: withdrawal.network || (withdrawal.method === 'USDT' ? 'ERC-20' : withdrawal.method === 'BTC' ? 'Bitcoin' : 'Mainnet')
+      processedAt: withdrawal.processedAt,
+      network: withdrawal.network || (withdrawal.method === 'USDT' ? 'ERC-20' : withdrawal.method === 'BTC' ? 'Bitcoin' : 'Mainnet'),
+      txid: withdrawal.details?.txid || withdrawal.details?.transactionHash || withdrawal.reference
     });
     
     res.status(200).json({
@@ -6418,7 +6522,7 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
 
 
 
-// CORRECTED Admin Reject Withdrawal Endpoint - WITH EMAIL NOTIFICATION
+// CORRECTED Admin Reject Withdrawal Endpoint - FIXED WITH EMAIL
 app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
   body('reason').trim().notEmpty().withMessage('Rejection reason is required')
 ], async (req, res) => {
@@ -6469,14 +6573,16 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
     withdrawal.adminNotes = reason; // Changed from rejectionReason to reason
     await withdrawal.save();
 
-    // Send email notification with rejection reason
+    // Send email notification with full transaction details
     await sendAutomatedEmail(user, 'withdrawal_rejected', {
       name: user.firstName,
       amount: withdrawal.amount,
-      asset: withdrawal.method || 'Crypto',
       usdValue: withdrawal.amount,
+      asset: withdrawal.method || 'USD',
+      withdrawalAddress: withdrawal.details?.address || withdrawal.btcAddress || withdrawal.details?.walletAddress || 'N/A',
       reason: reason,
-      method: withdrawal.method
+      timestamp: withdrawal.createdAt,
+      network: withdrawal.network || (withdrawal.method === 'USDT' ? 'ERC-20' : withdrawal.method === 'BTC' ? 'Bitcoin' : 'Mainnet')
     });
     
     res.status(200).json({
@@ -7231,7 +7337,7 @@ app.get('/api/admin/kyc/submissions/:submissionId', adminProtect, restrictTo('su
   }
 });
 
-// Approve KYC submission - WITH EMAIL NOTIFICATION
+// Approve KYC submission - FIXED WITH EMAIL
 app.post('/api/admin/kyc/submissions/:submissionId/approve', adminProtect, restrictTo('super', 'support'), [
   body('notes').optional().trim()
 ], async (req, res) => {
@@ -7277,7 +7383,8 @@ app.post('/api/admin/kyc/submissions/:submissionId/approve', adminProtect, restr
 
     // Send KYC approved email
     await sendAutomatedEmail(kycSubmission.user, 'kyc_approved', {
-      name: kycSubmission.user.firstName
+      name: kycSubmission.user.firstName,
+      verifiedAt: new Date()
     });
 
     res.status(200).json({
@@ -7302,7 +7409,7 @@ app.post('/api/admin/kyc/submissions/:submissionId/approve', adminProtect, restr
   }
 });
 
-// Reject KYC submission - WITH EMAIL NOTIFICATION
+// Reject KYC submission - FIXED WITH EMAIL
 app.post('/api/admin/kyc/submissions/:submissionId/reject', adminProtect, restrictTo('super', 'support'), [
   body('reason').trim().notEmpty().withMessage('Rejection reason is required'),
   body('section').optional().isIn(['all', 'identity', 'address', 'facial']).withMessage('Invalid section')
@@ -8206,8 +8313,16 @@ app.post('/api/auth/send-otp', [
   }
 });
 
+// Add investment_matured template to the sendAutomatedEmail function
+// (This was missing - I've added it to the templates object above)
 
-
+// Also need to add getDeviceType function if not already defined
+const getDeviceType = (req) => {
+  const userAgent = req.headers['user-agent'];
+  if (/mobile/i.test(userAgent)) return 'mobile';
+  if (/tablet/i.test(userAgent)) return 'tablet';
+  return 'desktop';
+};
 
 
 
@@ -18356,8 +18471,9 @@ app.get('/api/withdrawals/asset', protect, async (req, res) => {
     }
 });
 
-
-
+/**
+ * POST /api/withdrawals/asset - Process asset withdrawal
+ */
 app.post('/api/withdrawals/asset', protect, async (req, res) => {
     try {
         const userId = req.user._id;
@@ -18415,33 +18531,22 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             });
         }
 
-        // Validate asset against enum values
-        const validAssets = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'SHIB', 'TRX', 'LTC'];
-        const assetUpperCase = asset.toUpperCase();
-        
-        if (!validAssets.includes(assetUpperCase)) {
-            return res.status(400).json({
-                status: 'error',
-                message: `Invalid asset. Must be one of: ${validAssets.join(', ')}`
-            });
-        }
-
         // Generate unique reference
-        const reference = `WDR-${assetUpperCase}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+        const reference = `WDR-${asset.toUpperCase()}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
         // Calculate asset amount
         const assetAmount = amount / exchangeRate;
 
-        // Create transaction record with all withdrawal data
+        // Create transaction record
         const transaction = await Transaction.create({
             user: userId,
             type: 'withdrawal',
             amount: amount,
-            asset: assetUpperCase,
+            asset: asset,
             assetAmount: assetAmount,
             currency: 'USD',
             status: 'pending',
-            method: assetUpperCase,
+            method: asset,
             reference: reference,
             details: {
                 walletAddress: walletAddress,
@@ -18450,17 +18555,9 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 balanceSource: balanceSource,
                 mainAmountUsed: mainAmountUsed || 0,
                 maturedAmountUsed: maturedAmountUsed || 0,
-                assetAmount: assetAmount,
-                withdrawalDate: new Date(),
-                networkFee: gasFee * exchangeRate,
-                totalDebited: amount + (gasFee * exchangeRate),
-                withdrawalType: 'asset_withdrawal',
-                blockchainNetwork: getBlockchainNetwork(assetUpperCase),
-                ipAddress: req.ip || req.connection.remoteAddress,
-                userAgent: req.headers['user-agent'],
-                requestTimestamp: new Date().toISOString()
+                assetAmount: assetAmount
             },
-            fee: gasFee * exchangeRate,
+            fee: 0,
             netAmount: amount
         });
 
@@ -18480,12 +18577,11 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             }
         }
 
-        // Update user balances
         await User.findByIdAndUpdate(userId, {
             $inc: updateQuery
         });
 
-        // Log activity with all withdrawal data
+        // Log activity
         await logActivity(
             'withdrawal_created',
             'Transaction',
@@ -18495,20 +18591,10 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             req,
             {
                 amount: amount,
-                asset: assetUpperCase,
+                asset: asset,
                 reference: reference,
                 walletAddress: walletAddress,
-                balanceSource: balanceSource,
-                mainAmountUsed: mainAmountUsed || 0,
-                maturedAmountUsed: maturedAmountUsed || 0,
-                exchangeRate: exchangeRate,
-                gasFee: gasFee,
-                gasFeeUsd: gasFee * exchangeRate,
-                totalAmount: amount,
-                timestamp: new Date().toISOString(),
-                method: assetUpperCase,
-                assetAmount: assetAmount,
-                transactionId: transaction._id
+                balanceSource: balanceSource
             }
         );
 
@@ -18519,14 +18605,9 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                     id: transaction._id,
                     reference: reference,
                     amount: amount,
-                    asset: assetUpperCase,
-                    assetAmount: assetAmount,
+                    asset: asset,
                     status: 'pending',
-                    createdAt: transaction.createdAt,
-                    gasFee: gasFee,
-                    gasFeeUsd: gasFee * exchangeRate,
-                    method: assetUpperCase,
-                    walletAddress: walletAddress
+                    createdAt: transaction.createdAt
                 }
             },
             message: 'Withdrawal request submitted successfully'
@@ -18541,23 +18622,6 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
     }
 });
 
-// Helper function to get blockchain network based on asset
-function getBlockchainNetwork(asset) {
-    const networks = {
-        'BTC': 'Bitcoin Network',
-        'ETH': 'Ethereum (ERC20)',
-        'USDT': 'Ethereum (ERC20) / TRC20',
-        'BNB': 'BSC (BEP20)',
-        'SOL': 'Solana Network',
-        'USDC': 'Ethereum (ERC20)',
-        'XRP': 'Ripple Network',
-        'DOGE': 'Dogecoin Network',
-        'SHIB': 'Ethereum (ERC20)',
-        'TRX': 'TRON (TRC20)',
-        'LTC': 'Litecoin Network'
-    };
-    return networks[asset] || 'Blockchain Network';
-}
 /**
  * POST /api/withdrawals/bank - Process bank withdrawal
  */
