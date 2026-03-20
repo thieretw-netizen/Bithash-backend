@@ -18941,9 +18941,7 @@ app.get('/api/withdrawals/asset', protect, async (req, res) => {
     }
 });
 
-/**
- * POST /api/withdrawals/asset - Process asset withdrawal
- */
+
 app.post('/api/withdrawals/asset', protect, async (req, res) => {
     try {
         const userId = req.user._id;
@@ -18955,7 +18953,9 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             exchangeRate,
             balanceSource,
             mainAmountUsed,
-            maturedAmountUsed
+            maturedAmountUsed,
+            timestamp,
+            assetAmount: providedAssetAmount
         } = req.body;
 
         // Validation
@@ -18994,10 +18994,24 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
         const maturedBalance = user.balances.matured || 0;
         const totalAvailable = mainBalance + maturedBalance;
 
-        if (amount > totalAvailable) {
+        // Gas fee validation - must be taken from main balance
+        const gasFeeAmount = gasFee || 0;
+        
+        if (gasFeeAmount > 0 && mainBalance < gasFeeAmount) {
             return res.status(400).json({
                 status: 'error',
-                message: 'Insufficient balance'
+                message: `Insufficient main balance to cover gas fee of ${gasFeeAmount.toFixed(8)} ${asset.toUpperCase()}. Please deposit gas fee first.`
+            });
+        }
+
+        // Total amount needed (withdrawal amount + gas fee in USD equivalent)
+        const gasFeeInUSD = gasFeeAmount * exchangeRate;
+        const totalNeeded = amount + gasFeeInUSD;
+
+        if (totalNeeded > totalAvailable) {
+            return res.status(400).json({
+                status: 'error',
+                message: `Insufficient balance. Need $${totalNeeded.toFixed(2)} ($${amount.toFixed(2)} withdrawal + $${gasFeeInUSD.toFixed(2)} gas fee) but only have $${totalAvailable.toFixed(2)} available.`
             });
         }
 
@@ -19005,53 +19019,154 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
         const reference = `WDR-${asset.toUpperCase()}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
         // Calculate asset amount
-        const assetAmount = amount / exchangeRate;
+        const assetAmount = providedAssetAmount || (amount / exchangeRate);
+        
+        // Calculate gas fee in asset amount
+        const gasFeeAssetAmount = gasFeeAmount;
 
-        // Create transaction record
+        // Create transaction record with COMPLETE withdrawal details
         const transaction = await Transaction.create({
             user: userId,
             type: 'withdrawal',
+            method: 'asset',
             amount: amount,
             asset: asset,
             assetAmount: assetAmount,
             currency: 'USD',
             status: 'pending',
-            method: asset,
             reference: reference,
+            walletAddress: walletAddress,
+            exchangeRate: exchangeRate,
+            gasFee: gasFeeAmount,
+            gasFeeAssetAmount: gasFeeAssetAmount,
+            gasFeeInUSD: gasFeeInUSD,
+            balanceSource: balanceSource || 'main',
+            mainAmountUsed: mainAmountUsed || 0,
+            maturedAmountUsed: maturedAmountUsed || 0,
+            timestamp: timestamp || new Date().toISOString(),
             details: {
                 walletAddress: walletAddress,
                 exchangeRate: exchangeRate,
-                gasFee: gasFee,
+                gasFee: gasFeeAmount,
+                gasFeeAssetAmount: gasFeeAssetAmount,
+                gasFeeInUSD: gasFeeInUSD,
                 balanceSource: balanceSource,
                 mainAmountUsed: mainAmountUsed || 0,
                 maturedAmountUsed: maturedAmountUsed || 0,
-                assetAmount: assetAmount
+                assetAmount: assetAmount,
+                withdrawalAmount: amount,
+                totalDeducted: amount + gasFeeInUSD
             },
-            fee: 0,
+            fee: gasFeeInUSD,
             netAmount: amount
         });
 
-        // Deduct from user balances (immediate hold)
-        const updateQuery = {};
+        // DEDUCT WITHDRAWAL AMOUNT from user balances based on source
+        const withdrawalUpdateQuery = {};
         
-        if (balanceSource === 'main' || (mainAmountUsed > 0 && maturedAmountUsed === 0)) {
-            updateQuery['balances.main'] = -amount;
-        } else if (balanceSource === 'matured' || (maturedAmountUsed > 0 && mainAmountUsed === 0)) {
-            updateQuery['balances.matured'] = -amount;
+        if (balanceSource === 'main' || (mainAmountUsed > 0 && (!maturedAmountUsed || maturedAmountUsed === 0))) {
+            withdrawalUpdateQuery['balances.main'] = -amount;
+        } else if (balanceSource === 'matured' || (maturedAmountUsed > 0 && (!mainAmountUsed || mainAmountUsed === 0))) {
+            withdrawalUpdateQuery['balances.matured'] = -amount;
         } else if (balanceSource === 'both') {
             if (mainAmountUsed > 0) {
-                updateQuery['balances.main'] = -mainAmountUsed;
+                withdrawalUpdateQuery['balances.main'] = -mainAmountUsed;
             }
             if (maturedAmountUsed > 0) {
-                updateQuery['balances.matured'] = -maturedAmountUsed;
+                withdrawalUpdateQuery['balances.matured'] = -maturedAmountUsed;
+            }
+        } else {
+            // Default: deduct from main first, then matured
+            if (mainBalance >= amount) {
+                withdrawalUpdateQuery['balances.main'] = -amount;
+            } else {
+                const remaining = amount - mainBalance;
+                withdrawalUpdateQuery['balances.main'] = -mainBalance;
+                withdrawalUpdateQuery['balances.matured'] = -remaining;
             }
         }
 
+        // DEDUCT GAS FEE from main balance (ALWAYS from main balance)
+        const gasFeeUpdateQuery = {
+            'balances.main': -gasFeeInUSD
+        };
+
+        // Combine both deductions
+        const combinedUpdateQuery = {};
+        
+        // Merge withdrawal deductions
+        Object.keys(withdrawalUpdateQuery).forEach(key => {
+            combinedUpdateQuery[key] = (combinedUpdateQuery[key] || 0) + withdrawalUpdateQuery[key];
+        });
+        
+        // Add gas fee deduction to main balance
+        combinedUpdateQuery['balances.main'] = (combinedUpdateQuery['balances.main'] || 0) + (gasFeeUpdateQuery['balances.main'] || 0);
+
+        // Apply all deductions to user
         await User.findByIdAndUpdate(userId, {
-            $inc: updateQuery
+            $inc: combinedUpdateQuery
         });
 
-        // Log activity
+        // ADD GAS FEE TO COMPANY REVENUE (always)
+        const companyRevenue = await CompanyRevenue.findOneAndUpdate(
+            { 
+                asset: asset,
+                date: { $gte: new Date().setHours(0,0,0,0), $lt: new Date().setHours(23,59,59,999) }
+            },
+            {
+                $inc: {
+                    gasFeesCollected: gasFeeInUSD,
+                    gasFeesCollectedAsset: gasFeeAssetAmount,
+                    totalRevenue: gasFeeInUSD
+                },
+                $push: {
+                    transactions: {
+                        transactionId: transaction._id,
+                        reference: reference,
+                        userId: userId,
+                        amount: gasFeeInUSD,
+                        assetAmount: gasFeeAssetAmount,
+                        timestamp: new Date()
+                    }
+                }
+            },
+            { upsert: true, new: true }
+        );
+
+        // Create withdrawal record in separate withdrawal collection for detailed tracking
+        const withdrawalRecord = await Withdrawal.create({
+            user: userId,
+            transactionId: transaction._id,
+            reference: reference,
+            method: 'asset',
+            asset: asset,
+            amount: amount,
+            assetAmount: assetAmount,
+            walletAddress: walletAddress,
+            exchangeRate: exchangeRate,
+            gasFee: gasFeeAmount,
+            gasFeeAssetAmount: gasFeeAssetAmount,
+            gasFeeInUSD: gasFeeInUSD,
+            balanceSource: balanceSource,
+            mainAmountUsed: mainAmountUsed || 0,
+            maturedAmountUsed: maturedAmountUsed || 0,
+            status: 'pending',
+            requestDate: timestamp || new Date(),
+            processedDate: null,
+            completedDate: null,
+            notes: `Withdrawal request for ${assetAmount.toFixed(8)} ${asset.toUpperCase()} to wallet ${walletAddress.substring(0, 10)}... Gas fee of ${gasFeeAssetAmount.toFixed(8)} ${asset.toUpperCase()} ($${gasFeeInUSD.toFixed(2)}) deducted from main balance and added to company revenue.`,
+            metadata: {
+                userEmail: user.email,
+                userName: `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email,
+                ipAddress: req.ip || req.connection.remoteAddress,
+                userAgent: req.headers['user-agent'],
+                withdrawalSource: 'web_platform',
+                gasFeeDeductedFrom: 'main_balance',
+                gasFeeAddedTo: 'company_revenue'
+            }
+        });
+
+        // Log activity with complete details including gas fee
         await logActivity(
             'withdrawal_created',
             'Transaction',
@@ -19062,9 +19177,26 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             {
                 amount: amount,
                 asset: asset,
+                assetAmount: assetAmount,
                 reference: reference,
                 walletAddress: walletAddress,
-                balanceSource: balanceSource
+                balanceSource: balanceSource,
+                mainAmountUsed: mainAmountUsed,
+                maturedAmountUsed: maturedAmountUsed,
+                exchangeRate: exchangeRate,
+                gasFee: gasFeeAmount,
+                gasFeeAssetAmount: gasFeeAssetAmount,
+                gasFeeInUSD: gasFeeInUSD,
+                timestamp: timestamp || new Date().toISOString(),
+                transactionId: transaction._id,
+                withdrawalId: withdrawalRecord._id,
+                companyRevenueRecorded: companyRevenue._id,
+                gasFeeDeduction: {
+                    from: 'main_balance',
+                    amountUSD: gasFeeInUSD,
+                    amountAsset: gasFeeAssetAmount,
+                    addedTo: 'company_revenue'
+                }
             }
         );
 
@@ -19076,11 +19208,26 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                     reference: reference,
                     amount: amount,
                     asset: asset,
+                    assetAmount: assetAmount,
+                    walletAddress: walletAddress,
                     status: 'pending',
-                    createdAt: transaction.createdAt
+                    createdAt: transaction.createdAt,
+                    timestamp: transaction.timestamp
+                },
+                withdrawal: {
+                    id: withdrawalRecord._id,
+                    reference: reference,
+                    status: 'pending'
+                },
+                gasFee: {
+                    amount: gasFeeAssetAmount,
+                    asset: asset,
+                    usdValue: gasFeeInUSD,
+                    deductedFrom: 'main_balance',
+                    addedTo: 'company_revenue'
                 }
             },
-            message: 'Withdrawal request submitted successfully'
+            message: `Withdrawal request for ${assetAmount.toFixed(8)} ${asset.toUpperCase()} ($${amount.toFixed(2)}) submitted successfully. Gas fee of ${gasFeeAssetAmount.toFixed(8)} ${asset.toUpperCase()} ($${gasFeeInUSD.toFixed(2)}) was deducted from your main balance. Reference: ${reference}`
         });
 
     } catch (err) {
@@ -19091,6 +19238,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
         });
     }
 });
+
 
 /**
  * POST /api/withdrawals/bank - Process bank withdrawal
