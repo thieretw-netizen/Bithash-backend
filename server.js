@@ -18787,80 +18787,195 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
         // Calculate gas fee based on withdrawal amount and asset
         const btcGasFee = amount < 10000 ? 0.0056 : 0.0072;
         let gasFee = 0;
+        let btcPrice = null;
+        let targetAssetPrice = null;
         
+        // Asset mapping for different APIs
+        const assetMap = {
+            'btc': { coingecko: 'bitcoin', binance: 'BTCUSDT', cryptocompare: 'BTC' },
+            'eth': { coingecko: 'ethereum', binance: 'ETHUSDT', cryptocompare: 'ETH' },
+            'usdt': { coingecko: 'tether', binance: 'USDTUSDT', cryptocompare: 'USDT' },
+            'bnb': { coingecko: 'binancecoin', binance: 'BNBUSDT', cryptocompare: 'BNB' },
+            'sol': { coingecko: 'solana', binance: 'SOLUSDT', cryptocompare: 'SOL' },
+            'usdc': { coingecko: 'usd-coin', binance: 'USDCUSDT', cryptocompare: 'USDC' },
+            'xrp': { coingecko: 'ripple', binance: 'XRPUSDT', cryptocompare: 'XRP' },
+            'doge': { coingecko: 'dogecoin', binance: 'DOGEUSDT', cryptocompare: 'DOGE' },
+            'shib': { coingecko: 'shiba-inu', binance: 'SHIBUSDT', cryptocompare: 'SHIB' },
+            'trx': { coingecko: 'tron', binance: 'TRXUSDT', cryptocompare: 'TRX' },
+            'ltc': { coingecko: 'litecoin', binance: 'LTCUSDT', cryptocompare: 'LTC' },
+            'ada': { coingecko: 'cardano', binance: 'ADAUSDT', cryptocompare: 'ADA' },
+            'avax': { coingecko: 'avalanche-2', binance: 'AVAXUSDT', cryptocompare: 'AVAX' },
+            'dot': { coingecko: 'polkadot', binance: 'DOTUSDT', cryptocompare: 'DOT' },
+            'matic': { coingecko: 'matic-network', binance: 'MATICUSDT', cryptocompare: 'MATIC' },
+            'link': { coingecko: 'chainlink', binance: 'LINKUSDT', cryptocompare: 'LINK' }
+        };
+        
+        // Function to fetch BTC price with multiple fallbacks
+        const fetchBTCPrice = async () => {
+            const errors = [];
+            
+            // Try CoinGecko first
+            try {
+                const response = await axios.get(
+                    'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd',
+                    { timeout: 8000 }
+                );
+                if (response.data && response.data.bitcoin && response.data.bitcoin.usd) {
+                    return response.data.bitcoin.usd;
+                }
+                errors.push('CoinGecko: Invalid response');
+            } catch (err) {
+                errors.push(`CoinGecko: ${err.message}`);
+            }
+            
+            // Try Binance as first fallback
+            try {
+                const response = await axios.get(
+                    'https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT',
+                    { timeout: 8000 }
+                );
+                if (response.data && response.data.price) {
+                    return parseFloat(response.data.price);
+                }
+                errors.push('Binance: Invalid response');
+            } catch (err) {
+                errors.push(`Binance: ${err.message}`);
+            }
+            
+            // Try CryptoCompare as second fallback
+            try {
+                const response = await axios.get(
+                    'https://min-api.cryptocompare.com/data/price?fsym=BTC&tsyms=USD',
+                    { timeout: 8000 }
+                );
+                if (response.data && response.data.USD) {
+                    return response.data.USD;
+                }
+                errors.push('CryptoCompare: Invalid response');
+            } catch (err) {
+                errors.push(`CryptoCompare: ${err.message}`);
+            }
+            
+            // Try Kraken as third fallback
+            try {
+                const response = await axios.get(
+                    'https://api.kraken.com/0/public/Ticker?pair=XBTUSD',
+                    { timeout: 8000 }
+                );
+                if (response.data && response.data.result && response.data.result.XXBTZUSD) {
+                    return parseFloat(response.data.result.XXBTZUSD.c[0]);
+                }
+                errors.push('Kraken: Invalid response');
+            } catch (err) {
+                errors.push(`Kraken: ${err.message}`);
+            }
+            
+            throw new Error(`All price APIs failed for BTC: ${errors.join('; ')}`);
+        };
+        
+        // Function to fetch target asset price with multiple fallbacks
+        const fetchAssetPrice = async (assetSymbol) => {
+            const errors = [];
+            const assetIds = assetMap[assetSymbol.toLowerCase()];
+            
+            if (!assetIds) {
+                throw new Error(`Unsupported asset: ${assetSymbol}`);
+            }
+            
+            // Try CoinGecko first
+            try {
+                const response = await axios.get(
+                    `https://api.coingecko.com/api/v3/simple/price?ids=${assetIds.coingecko}&vs_currencies=usd`,
+                    { timeout: 8000 }
+                );
+                if (response.data && response.data[assetIds.coingecko] && response.data[assetIds.coingecko].usd) {
+                    return response.data[assetIds.coingecko].usd;
+                }
+                errors.push('CoinGecko: Invalid response');
+            } catch (err) {
+                errors.push(`CoinGecko: ${err.message}`);
+            }
+            
+            // Try Binance as first fallback
+            try {
+                const response = await axios.get(
+                    `https://api.binance.com/api/v3/ticker/price?symbol=${assetIds.binance}`,
+                    { timeout: 8000 }
+                );
+                if (response.data && response.data.price) {
+                    return parseFloat(response.data.price);
+                }
+                errors.push('Binance: Invalid response');
+            } catch (err) {
+                errors.push(`Binance: ${err.message}`);
+            }
+            
+            // Try CryptoCompare as second fallback
+            try {
+                const response = await axios.get(
+                    `https://min-api.cryptocompare.com/data/price?fsym=${assetIds.cryptocompare}&tsyms=USD`,
+                    { timeout: 8000 }
+                );
+                if (response.data && response.data.USD) {
+                    return response.data.USD;
+                }
+                errors.push('CryptoCompare: Invalid response');
+            } catch (err) {
+                errors.push(`CryptoCompare: ${err.message}`);
+            }
+            
+            // Try KuCoin as third fallback
+            try {
+                const response = await axios.get(
+                    `https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=${assetSymbol.toUpperCase()}-USDT`,
+                    { timeout: 8000 }
+                );
+                if (response.data && response.data.data && response.data.data.price) {
+                    return parseFloat(response.data.data.price);
+                }
+                errors.push('KuCoin: Invalid response');
+            } catch (err) {
+                errors.push(`KuCoin: ${err.message}`);
+            }
+            
+            throw new Error(`All price APIs failed for ${assetSymbol}: ${errors.join('; ')}`);
+        };
+        
+        try {
+            // Fetch BTC price with fallbacks
+            btcPrice = await fetchBTCPrice();
+            
+            if (asset.toLowerCase() !== 'btc') {
+                // Fetch target asset price with fallbacks
+                targetAssetPrice = await fetchAssetPrice(asset);
+            }
+        } catch (error) {
+            console.error('Price fetch error:', error);
+            return res.status(503).json({
+                status: 'error',
+                message: error.message || 'Unable to fetch current cryptocurrency prices. Please try again.'
+            });
+        }
+        
+        // Calculate gas fee
         if (asset.toLowerCase() === 'btc') {
             gasFee = btcGasFee;
         } else {
-            // Get real-time BTC price from CoinGecko
-            const btcPriceResponse = await axios.get(
-                'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd',
-                { timeout: 10000 }
-            );
-            
-            if (!btcPriceResponse.data || !btcPriceResponse.data.bitcoin || !btcPriceResponse.data.bitcoin.usd) {
-                return res.status(503).json({
-                    status: 'error',
-                    message: 'Unable to fetch current BTC price. Please try again.'
-                });
-            }
-            
-            const btcPrice = btcPriceResponse.data.bitcoin.usd;
             const gasFeeUsd = btcGasFee * btcPrice;
-            
-            // Get real-time target asset price from CoinGecko
-            const assetMap = {
-                'btc': 'bitcoin',
-                'eth': 'ethereum',
-                'usdt': 'tether',
-                'bnb': 'binancecoin',
-                'sol': 'solana',
-                'usdc': 'usd-coin',
-                'xrp': 'ripple',
-                'doge': 'dogecoin',
-                'shib': 'shiba-inu',
-                'trx': 'tron',
-                'ltc': 'litecoin',
-                'ada': 'cardano',
-                'avax': 'avalanche-2',
-                'dot': 'polkadot',
-                'matic': 'matic-network',
-                'link': 'chainlink'
-            };
-            
-            const coinId = assetMap[asset.toLowerCase()];
-            if (!coinId) {
-                return res.status(400).json({
-                    status: 'error',
-                    message: `Unsupported asset: ${asset}`
-                });
-            }
-            
-            const assetPriceResponse = await axios.get(
-                `https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd`,
-                { timeout: 10000 }
-            );
-            
-            if (!assetPriceResponse.data || !assetPriceResponse.data[coinId] || !assetPriceResponse.data[coinId].usd) {
-                return res.status(503).json({
-                    status: 'error',
-                    message: `Unable to fetch current ${asset.toUpperCase()} price. Please try again.`
-                });
-            }
-            
-            const targetAssetPrice = assetPriceResponse.data[coinId].usd;
             gasFee = gasFeeUsd / targetAssetPrice;
         }
         
         // Check if user has enough main balance for gas fee
-        if (user.balances.main < (asset.toLowerCase() === 'btc' ? gasFee * exchangeRate : gasFee * exchangeRate)) {
+        const gasFeeInUsd = gasFee * (asset.toLowerCase() === 'btc' ? btcPrice : targetAssetPrice);
+        
+        if (user.balances.main < gasFeeInUsd) {
             return res.status(400).json({
                 status: 'error',
-                message: `Insufficient main balance for gas fee. Required: ${gasFee.toFixed(8)} ${asset.toUpperCase()} in main wallet.`
+                message: `Insufficient main balance for gas fee. Required: ${gasFee.toFixed(8)} ${asset.toUpperCase()} (≈$${gasFeeInUsd.toFixed(2)}) in main wallet.`
             });
         }
         
         // Deduct gas fee from main wallet
-        const gasFeeInUsd = asset.toLowerCase() === 'btc' ? gasFee * exchangeRate : gasFee * exchangeRate;
         await User.findByIdAndUpdate(userId, {
             $inc: {
                 'balances.main': -gasFeeInUsd
@@ -18879,7 +18994,10 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 withdrawalAmount: amount,
                 gasFeeInAsset: gasFee,
                 gasFeeInUsd: gasFeeInUsd,
-                btcGasFeeUsed: btcGasFee
+                btcGasFeeUsed: btcGasFee,
+                btcPriceAtTime: btcPrice,
+                assetPriceAtTime: targetAssetPrice,
+                priceSource: 'multi-source'
             }
         });
 
@@ -18911,7 +19029,9 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 assetAmount: assetAmount,
                 requestedAt: new Date(),
                 withdrawalType: 'asset',
-                btcGasFeeUsed: btcGasFee
+                btcGasFeeUsed: btcGasFee,
+                btcPriceAtTime: btcPrice,
+                assetPriceAtTime: targetAssetPrice
             },
             fee: gasFeeInUsd,
             netAmount: amount,
@@ -18958,7 +19078,9 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 gasFeeInUsd: gasFeeInUsd,
                 exchangeRate: exchangeRate,
                 timestamp: new Date().toISOString(),
-                btcGasFeeUsed: btcGasFee
+                btcGasFeeUsed: btcGasFee,
+                btcPriceAtTime: btcPrice,
+                assetPriceAtTime: targetAssetPrice
             }
         );
 
@@ -18976,7 +19098,9 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                     walletAddress: walletAddress,
                     exchangeRate: exchangeRate,
                     gasFee: gasFee,
-                    gasFeeInUsd: gasFeeInUsd
+                    gasFeeInUsd: gasFeeInUsd,
+                    btcPrice: btcPrice,
+                    assetPrice: targetAssetPrice
                 }
             },
             message: `Withdrawal request submitted successfully. Gas fee of ${gasFee.toFixed(8)} ${asset.toUpperCase()} ($${gasFeeInUsd.toFixed(2)}) deducted from main wallet.`
@@ -18985,7 +19109,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
     } catch (err) {
         console.error('Asset withdrawal error:', err);
         
-        // Handle CoinGecko API errors specifically
+        // Handle API errors specifically
         if (err.code === 'ECONNABORTED' || err.message.includes('timeout')) {
             return res.status(503).json({
                 status: 'error',
@@ -19006,7 +19130,6 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
         });
     }
 });
-
 
 
 
