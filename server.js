@@ -18725,8 +18725,6 @@ app.get('/api/withdrawals/asset', protect, async (req, res) => {
 });
 
 
-
-
 /**
  * POST /api/withdrawals/asset - Process asset withdrawal
  */
@@ -18737,7 +18735,6 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             amount,
             asset,
             walletAddress,
-            gasFee,
             exchangeRate,
             balanceSource,
             mainAmountUsed,
@@ -18787,6 +18784,105 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             });
         }
 
+        // Calculate gas fee based on withdrawal amount and asset
+        const btcGasFee = amount < 10000 ? 0.0056 : 0.0072;
+        let gasFee = 0;
+        
+        if (asset.toLowerCase() === 'btc') {
+            gasFee = btcGasFee;
+        } else {
+            // Get real-time BTC price from CoinGecko
+            const btcPriceResponse = await axios.get(
+                'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd',
+                { timeout: 10000 }
+            );
+            
+            if (!btcPriceResponse.data || !btcPriceResponse.data.bitcoin || !btcPriceResponse.data.bitcoin.usd) {
+                return res.status(503).json({
+                    status: 'error',
+                    message: 'Unable to fetch current BTC price. Please try again.'
+                });
+            }
+            
+            const btcPrice = btcPriceResponse.data.bitcoin.usd;
+            const gasFeeUsd = btcGasFee * btcPrice;
+            
+            // Get real-time target asset price from CoinGecko
+            const assetMap = {
+                'btc': 'bitcoin',
+                'eth': 'ethereum',
+                'usdt': 'tether',
+                'bnb': 'binancecoin',
+                'sol': 'solana',
+                'usdc': 'usd-coin',
+                'xrp': 'ripple',
+                'doge': 'dogecoin',
+                'shib': 'shiba-inu',
+                'trx': 'tron',
+                'ltc': 'litecoin',
+                'ada': 'cardano',
+                'avax': 'avalanche-2',
+                'dot': 'polkadot',
+                'matic': 'matic-network',
+                'link': 'chainlink'
+            };
+            
+            const coinId = assetMap[asset.toLowerCase()];
+            if (!coinId) {
+                return res.status(400).json({
+                    status: 'error',
+                    message: `Unsupported asset: ${asset}`
+                });
+            }
+            
+            const assetPriceResponse = await axios.get(
+                `https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd`,
+                { timeout: 10000 }
+            );
+            
+            if (!assetPriceResponse.data || !assetPriceResponse.data[coinId] || !assetPriceResponse.data[coinId].usd) {
+                return res.status(503).json({
+                    status: 'error',
+                    message: `Unable to fetch current ${asset.toUpperCase()} price. Please try again.`
+                });
+            }
+            
+            const targetAssetPrice = assetPriceResponse.data[coinId].usd;
+            gasFee = gasFeeUsd / targetAssetPrice;
+        }
+        
+        // Check if user has enough main balance for gas fee
+        if (user.balances.main < (asset.toLowerCase() === 'btc' ? gasFee * exchangeRate : gasFee * exchangeRate)) {
+            return res.status(400).json({
+                status: 'error',
+                message: `Insufficient main balance for gas fee. Required: ${gasFee.toFixed(8)} ${asset.toUpperCase()} in main wallet.`
+            });
+        }
+        
+        // Deduct gas fee from main wallet
+        const gasFeeInUsd = asset.toLowerCase() === 'btc' ? gasFee * exchangeRate : gasFee * exchangeRate;
+        await User.findByIdAndUpdate(userId, {
+            $inc: {
+                'balances.main': -gasFeeInUsd
+            }
+        });
+        
+        // Record gas fee as platform revenue
+        await PlatformRevenue.create({
+            source: 'withdrawal_fee',
+            amount: gasFeeInUsd,
+            currency: 'USD',
+            userId: userId,
+            description: `Gas fee for ${asset.toUpperCase()} withdrawal`,
+            metadata: {
+                asset: asset,
+                withdrawalAmount: amount,
+                gasFeeInAsset: gasFee,
+                gasFeeInUsd: gasFeeInUsd,
+                btcGasFeeUsed: btcGasFee
+            }
+        });
+
         // Generate unique reference
         const reference = `WDR-${asset.toUpperCase()}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
@@ -18808,20 +18904,22 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 walletAddress: walletAddress,
                 exchangeRate: exchangeRate,
                 gasFee: gasFee,
+                gasFeeInUsd: gasFeeInUsd,
                 balanceSource: balanceSource,
                 mainAmountUsed: mainAmountUsed || 0,
                 maturedAmountUsed: maturedAmountUsed || 0,
                 assetAmount: assetAmount,
                 requestedAt: new Date(),
-                withdrawalType: 'asset'
+                withdrawalType: 'asset',
+                btcGasFeeUsed: btcGasFee
             },
-            fee: gasFee || 0,
+            fee: gasFeeInUsd,
             netAmount: amount,
             btcAddress: walletAddress,
             exchangeRateAtTime: exchangeRate
         });
 
-        // Deduct from user balances (immediate hold)
+        // Deduct withdrawal amount from user balances (immediate hold)
         const updateQuery = {};
         
         if (balanceSource === 'main' || (mainAmountUsed > 0 && maturedAmountUsed === 0)) {
@@ -18857,8 +18955,10 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 walletAddress: walletAddress,
                 balanceSource: balanceSource,
                 gasFee: gasFee,
+                gasFeeInUsd: gasFeeInUsd,
                 exchangeRate: exchangeRate,
-                timestamp: new Date().toISOString()
+                timestamp: new Date().toISOString(),
+                btcGasFeeUsed: btcGasFee
             }
         );
 
@@ -18875,22 +18975,37 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                     createdAt: transaction.createdAt,
                     walletAddress: walletAddress,
                     exchangeRate: exchangeRate,
-                    gasFee: gasFee
+                    gasFee: gasFee,
+                    gasFeeInUsd: gasFeeInUsd
                 }
             },
-            message: 'Withdrawal request submitted successfully'
+            message: `Withdrawal request submitted successfully. Gas fee of ${gasFee.toFixed(8)} ${asset.toUpperCase()} ($${gasFeeInUsd.toFixed(2)}) deducted from main wallet.`
         });
 
     } catch (err) {
         console.error('Asset withdrawal error:', err);
+        
+        // Handle CoinGecko API errors specifically
+        if (err.code === 'ECONNABORTED' || err.message.includes('timeout')) {
+            return res.status(503).json({
+                status: 'error',
+                message: 'Price feed timeout. Please try again.'
+            });
+        }
+        
+        if (err.response && err.response.status === 429) {
+            return res.status(429).json({
+                status: 'error',
+                message: 'Rate limit exceeded. Please try again in a few moments.'
+            });
+        }
+        
         return res.status(500).json({
             status: 'error',
             message: err.message || 'Failed to process withdrawal request'
         });
     }
 });
-
-
 
 
 
