@@ -3368,7 +3368,6 @@ const calculateReferralCommissions = async (investment) => {
 
 
 
-
 // Enhanced email service with professional, highly visible templates
 const sendAutomatedEmail = async (user, action, data = {}) => {
   try {
@@ -3463,9 +3462,6 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   max-width: 600px;
                   margin: 0 auto;
                   background-color: #ffffff;
-                  border-radius: 16px;
-                  overflow: hidden;
-                  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
                 }
                 .header {
                   background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%);
@@ -3637,7 +3633,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
                 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px; }
-                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; }
                 .header { background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); padding: 32px 40px; text-align: center; }
                 .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
@@ -3728,7 +3724,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
                 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px; }
-                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; }
                 .header { background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); padding: 32px 40px; text-align: center; }
                 .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
@@ -3793,7 +3789,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
                 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px; }
-                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; }
                 .header { background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); padding: 32px 40px; text-align: center; }
                 .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
@@ -3859,7 +3855,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
                 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px; }
-                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; }
                 .header { background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); padding: 32px 40px; text-align: center; }
                 .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
@@ -3925,7 +3921,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
                 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px; }
-                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; }
                 .header { background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); padding: 32px 40px; text-align: center; }
                 .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
@@ -4019,7 +4015,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
                 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px; }
-                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; }
                 .header { background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); padding: 32px 40px; text-align: center; }
                 .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
@@ -4127,7 +4123,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
                 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px; }
-                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; }
                 .header { background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); padding: 32px 40px; text-align: center; }
                 .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
@@ -4241,7 +4237,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
                 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px; }
-                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; }
                 .header { background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); padding: 32px 40px; text-align: center; }
                 .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
@@ -4341,7 +4337,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
                 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px; }
-                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; }
                 .header { background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); padding: 32px 40px; text-align: center; }
                 .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
@@ -4427,7 +4423,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
                 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px; }
-                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; }
                 .header { background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); padding: 32px 40px; text-align: center; }
                 .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
@@ -4502,7 +4498,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
                 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px; }
-                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; }
                 .header { background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); padding: 32px 40px; text-align: center; }
                 .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
@@ -4577,7 +4573,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
                 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px; }
-                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; }
                 .header { background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); padding: 32px 40px; text-align: center; }
                 .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
@@ -4652,7 +4648,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
                 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px; }
-                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; }
                 .header { background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); padding: 32px 40px; text-align: center; }
                 .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
@@ -4725,7 +4721,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
                 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px; }
-                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; }
                 .header { background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); padding: 32px 40px; text-align: center; }
                 .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
@@ -4799,224 +4795,6 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
     console.error(`❌ Error sending ${action} email:`, err);
   }
 };
-
-// Keep the sendProfessionalEmail function with the same professional styling
-const sendProfessionalEmail = async (options) => {
-  try {
-    const { email, subject, template, data } = options;
-    
-    const hideAddress = (address) => {
-      if (!address || address === 'N/A' || address === 'Unknown' || address === '') {
-        return 'Not Provided';
-      }
-      if (address.length <= 12) return address;
-      return address.substring(0, 6) + '*************' + address.substring(address.length - 6);
-    };
-
-    const formatTimestamp = (timestamp) => {
-      if (!timestamp) return new Date().toLocaleString('en-US', { timeZone: 'UTC', dateStyle: 'full', timeStyle: 'medium' }) + ' UTC';
-      return new Date(timestamp).toLocaleString('en-US', { timeZone: 'UTC', dateStyle: 'full', timeStyle: 'medium' }) + ' UTC';
-    };
-
-    const formatAmount = (amount, asset) => {
-      if (!amount && amount !== 0) return '0.00';
-      const isCrypto = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'ADA'].includes(asset?.toUpperCase());
-      if (isCrypto) {
-        return amount.toFixed(8);
-      }
-      return amount.toFixed(2);
-    };
-
-    const emailTemplates = {
-      welcome: {
-        subject: 'Welcome to BitHash Capital - Your Mining Journey Begins',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-              <title>Welcome to BitHash Capital</title>
-              <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px; }
-                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-                .header { background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); padding: 32px 40px; text-align: center; }
-                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
-                .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
-                .content { padding: 40px; background-color: #ffffff; }
-                .greeting { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
-                .message { color: #4b5563; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .features-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 32px 0; }
-                .feature-card { background: #f9fafb; padding: 20px; border-radius: 12px; text-align: center; border: 1px solid #fbbf24; }
-                .feature-title { font-weight: 600; color: #1e3a8a; margin-bottom: 8px; font-size: 16px; }
-                .feature-desc { color: #6b7280; font-size: 13px; line-height: 1.4; }
-                .benefits-list { margin: 24px 0; }
-                .benefit-item { display: flex; align-items: center; margin-bottom: 12px; color: #4b5563; }
-                .benefit-icon { color: #22c55e; margin-right: 12px; font-weight: bold; font-size: 18px; }
-                .cta-button { background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); color: #ffffff; padding: 14px 32px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 16px; border-radius: 8px; margin: 20px 0; border: 1px solid #fbbf24; }
-                .security-note { background: #fef3c7; padding: 16px; border-radius: 12px; margin: 24px 0; border-left: 4px solid #fbbf24; }
-                .footer { padding: 24px 40px; background-color: #f9fafb; text-align: center; border-top: 2px solid #fbbf24; }
-                .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
-                .support-link { color: #2563eb; text-decoration: none; }
-                @media only screen and (max-width: 600px) {
-                  body { padding: 10px; }
-                  .header { padding: 20px; }
-                  .content { padding: 20px; }
-                  .features-grid { grid-template-columns: 1fr; gap: 12px; }
-                  .greeting { font-size: 20px; }
-                  .logo-text { font-size: 24px; }
-                }
-              </style>
-          </head>
-          <body style="background-color: #f4f4f5; padding: 20px;">
-              <div class="email-container">
-                  <div class="header">
-                      <div class="logo-container">
-                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
-                          <span class="logo-text">BitHash Capital</span>
-                      </div>
-                  </div>
-                  <div class="content">
-                      <h2 class="greeting">Hello ${data.firstName || 'Valued Investor'}!</h2>
-                      <p class="message">Welcome to BitHash Capital! We're excited to have you join our community of professional Bitcoin miners and investors.</p>
-                      
-                      <div class="features-grid">
-                          <div class="feature-card">
-                              <div class="feature-title">⚡ Cloud Mining</div>
-                              <div class="feature-desc">Start mining Bitcoin instantly with enterprise-grade infrastructure</div>
-                          </div>
-                          <div class="feature-card">
-                              <div class="feature-title">📈 Smart Investment</div>
-                              <div class="feature-desc">Optimized mining plans with competitive returns</div>
-                          </div>
-                          <div class="feature-card">
-                              <div class="feature-title">🔒 Secure Platform</div>
-                              <div class="feature-desc">Enterprise-grade security protecting your assets</div>
-                          </div>
-                          <div class="feature-card">
-                              <div class="feature-title">🎯 24/7 Support</div>
-                              <div class="feature-desc">Dedicated support team always available</div>
-                          </div>
-                      </div>
-                      
-                      <div class="benefits-list">
-                          <div class="benefit-item"><span class="benefit-icon">✓</span> Access enterprise-grade Bitcoin mining infrastructure</div>
-                          <div class="benefit-item"><span class="benefit-icon">✓</span> Invest in optimized mining plans with competitive returns</div>
-                          <div class="benefit-item"><span class="benefit-icon">✓</span> Monitor your mining operations in real-time</div>
-                          <div class="benefit-item"><span class="benefit-icon">✓</span> Earn referral bonuses by expanding our mining community</div>
-                      </div>
-                      
-                      <div style="text-align: center;">
-                          <a href="https://www.bithashcapital.live/dashboard.html" class="cta-button">Start Mining Now</a>
-                      </div>
-                      
-                      <div class="security-note">
-                          <strong>🔐 Security Notice:</strong> Enable two-factor authentication and use strong, unique passwords to protect your account.
-                      </div>
-                      
-                      <p class="message">Best regards,<br><strong>The BitHash Capital Team</strong></p>
-                  </div>
-                  <div class="footer">
-                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
-                      Professional Bitcoin Mining and Investment Platform</p>
-                      <p class="footer-text">This email was sent to ${email}. Need assistance? <a href="mailto:support@bithashcapital.live" class="support-link">Contact Support</a></p>
-                  </div>
-              </div>
-          </body>
-          </html>
-        `
-      },
-      
-      otp: {
-        subject: 'BitHash Capital - Verification Code Required',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-              <title>Verification Code - BitHash Capital</title>
-              <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px; }
-                .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-                .header { background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); padding: 32px 40px; text-align: center; }
-                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
-                .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
-                .content { padding: 40px; background-color: #ffffff; }
-                .greeting { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
-                .message { color: #4b5563; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .otp-code { background: #f9fafb; padding: 24px; font-size: 48px; font-weight: 700; text-align: center; letter-spacing: 12px; margin: 24px 0; border: 2px solid #fbbf24; color: #2563eb; font-family: 'Courier New', monospace; border-radius: 12px; }
-                .security-note { background: #fef2f2; padding: 16px; border-radius: 12px; margin: 24px 0; border-left: 4px solid #ef4444; }
-                .security-note p { color: #991b1b; font-size: 14px; }
-                .footer { padding: 24px 40px; background-color: #f9fafb; text-align: center; border-top: 2px solid #fbbf24; }
-                .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
-                @media only screen and (max-width: 600px) {
-                  body { padding: 10px; }
-                  .header { padding: 20px; }
-                  .content { padding: 20px; }
-                  .otp-code { font-size: 32px; letter-spacing: 8px; padding: 16px; }
-                  .greeting { font-size: 20px; }
-                }
-              </style>
-          </head>
-          <body style="background-color: #f4f4f5; padding: 20px;">
-              <div class="email-container">
-                  <div class="header">
-                      <div class="logo-container">
-                          <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
-                          <span class="logo-text">BitHash Capital</span>
-                      </div>
-                  </div>
-                  <div class="content">
-                      <h2 class="greeting">Hello ${data.name || 'there'},</h2>
-                      <p class="message">Please use the following verification code to complete your ${data.action || 'account verification'}:</p>
-                      
-                      <div class="otp-code">${data.otp}</div>
-                      
-                      <p class="message">This code will expire in 5 minutes for security purposes.</p>
-                      
-                      <div class="security-note">
-                          <p><strong>⚠️ Security Notice:</strong> This verification code is valid for one-time use only. Do not share this code with anyone, including BitHash Capital support staff.</p>
-                      </div>
-                      
-                      <p class="message">If you didn't request this code, please secure your account immediately and contact our support team.</p>
-                      
-                      <p class="message">Best regards,<br><strong>BitHash Capital Security Team</strong></p>
-                  </div>
-                  <div class="footer">
-                      <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>This is an automated security message. Please do not reply.</p>
-                  </div>
-              </div>
-          </body>
-          </html>
-        `
-      }
-    };
-
-    const templateData = emailTemplates[template];
-    if (!templateData) {
-      throw new Error(`Template ${template} not found`);
-    }
-
-    const mailOptions = {
-      from: `"BitHash Capital" <info@bithashcapital.live>`,
-      to: email,
-      subject: templateData.subject,
-      html: templateData.html
-    };
-
-    await transporter.sendMail(mailOptions);
-    console.log(`Professional email sent successfully to ${email}`);
-  } catch (err) {
-    console.error('Error sending professional email:', err);
-    throw new Error('Failed to send email');
-  }
-};
-
 
 
 // Routes
