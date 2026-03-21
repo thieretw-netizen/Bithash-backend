@@ -18724,6 +18724,9 @@ app.get('/api/withdrawals/asset', protect, async (req, res) => {
     }
 });
 
+
+
+
 /**
  * POST /api/withdrawals/asset - Process asset withdrawal
  */
@@ -18790,7 +18793,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
         // Calculate asset amount
         const assetAmount = amount / exchangeRate;
 
-        // Create transaction record
+        // Create transaction record with all withdrawal details
         const transaction = await Transaction.create({
             user: userId,
             type: 'withdrawal',
@@ -18808,10 +18811,14 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 balanceSource: balanceSource,
                 mainAmountUsed: mainAmountUsed || 0,
                 maturedAmountUsed: maturedAmountUsed || 0,
-                assetAmount: assetAmount
+                assetAmount: assetAmount,
+                requestedAt: new Date(),
+                withdrawalType: 'asset'
             },
-            fee: 0,
-            netAmount: amount
+            fee: gasFee || 0,
+            netAmount: amount,
+            btcAddress: walletAddress,
+            exchangeRateAtTime: exchangeRate
         });
 
         // Deduct from user balances (immediate hold)
@@ -18834,7 +18841,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             $inc: updateQuery
         });
 
-        // Log activity
+        // Log activity with all withdrawal details
         await logActivity(
             'withdrawal_created',
             'Transaction',
@@ -18845,9 +18852,13 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             {
                 amount: amount,
                 asset: asset,
+                assetAmount: assetAmount,
                 reference: reference,
                 walletAddress: walletAddress,
-                balanceSource: balanceSource
+                balanceSource: balanceSource,
+                gasFee: gasFee,
+                exchangeRate: exchangeRate,
+                timestamp: new Date().toISOString()
             }
         );
 
@@ -18859,8 +18870,12 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                     reference: reference,
                     amount: amount,
                     asset: asset,
+                    assetAmount: assetAmount,
                     status: 'pending',
-                    createdAt: transaction.createdAt
+                    createdAt: transaction.createdAt,
+                    walletAddress: walletAddress,
+                    exchangeRate: exchangeRate,
+                    gasFee: gasFee
                 }
             },
             message: 'Withdrawal request submitted successfully'
@@ -18874,6 +18889,12 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
         });
     }
 });
+
+
+
+
+
+
 
 /**
  * POST /api/withdrawals/bank - Process bank withdrawal
