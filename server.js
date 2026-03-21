@@ -8771,7 +8771,6 @@ app.post('/api/auth/send-otp', [
   }
 });
 
-
 /**
  * POST /api/withdrawals/asset - Process asset withdrawal
  */
@@ -8831,57 +8830,49 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             });
         }
 
-        // Calculate gas fee based on withdrawal amount and asset (matches HTML logic)
-        const btcGasFee = amount < 10000 ? 0.0056 : 0.0072;
-        let gasFee = 0;
+        // =============================================
+        // GAS FEE CALCULATION (FIXED)
+        // Base gas fee in BTC: 0.0056 BTC for amounts <= $10,000, 0.0072 BTC for > $10,000
+        // =============================================
+        const btcGasFeeAmount = amount < 10000 ? 0.0056 : 0.0072;
+        
         let btcPrice = null;
         let targetAssetPrice = null;
+        let gasFeeInAsset = 0;
+        let gasFeeInUsd = 0;
         
-        // Asset mapping for different APIs
+        // Asset mapping for API calls (NO COINGECKO)
         const assetMap = {
-            'btc': { coingecko: 'bitcoin', binance: 'BTCUSDT', cryptocompare: 'BTC' },
-            'eth': { coingecko: 'ethereum', binance: 'ETHUSDT', cryptocompare: 'ETH' },
-            'usdt': { coingecko: 'tether', binance: 'USDTUSDT', cryptocompare: 'USDT' },
-            'bnb': { coingecko: 'binancecoin', binance: 'BNBUSDT', cryptocompare: 'BNB' },
-            'sol': { coingecko: 'solana', binance: 'SOLUSDT', cryptocompare: 'SOL' },
-            'usdc': { coingecko: 'usd-coin', binance: 'USDCUSDT', cryptocompare: 'USDC' },
-            'xrp': { coingecko: 'ripple', binance: 'XRPUSDT', cryptocompare: 'XRP' },
-            'doge': { coingecko: 'dogecoin', binance: 'DOGEUSDT', cryptocompare: 'DOGE' },
-            'shib': { coingecko: 'shiba-inu', binance: 'SHIBUSDT', cryptocompare: 'SHIB' },
-            'trx': { coingecko: 'tron', binance: 'TRXUSDT', cryptocompare: 'TRX' },
-            'ltc': { coingecko: 'litecoin', binance: 'LTCUSDT', cryptocompare: 'LTC' },
-            'ada': { coingecko: 'cardano', binance: 'ADAUSDT', cryptocompare: 'ADA' },
-            'avax': { coingecko: 'avalanche-2', binance: 'AVAXUSDT', cryptocompare: 'AVAX' },
-            'dot': { coingecko: 'polkadot', binance: 'DOTUSDT', cryptocompare: 'DOT' },
-            'matic': { coingecko: 'matic-network', binance: 'MATICUSDT', cryptocompare: 'MATIC' },
-            'link': { coingecko: 'chainlink', binance: 'LINKUSDT', cryptocompare: 'LINK' }
+            'btc': { binance: 'BTCUSDT', cryptocompare: 'BTC', kraken: 'XBTUSD', kucoin: 'BTC-USDT' },
+            'eth': { binance: 'ETHUSDT', cryptocompare: 'ETH', kraken: 'ETHUSD', kucoin: 'ETH-USDT' },
+            'usdt': { binance: 'USDTUSDT', cryptocompare: 'USDT', kraken: 'USDTUSD', kucoin: 'USDT-USDT' },
+            'bnb': { binance: 'BNBUSDT', cryptocompare: 'BNB', kraken: 'BNBUSD', kucoin: 'BNB-USDT' },
+            'sol': { binance: 'SOLUSDT', cryptocompare: 'SOL', kraken: 'SOLUSD', kucoin: 'SOL-USDT' },
+            'usdc': { binance: 'USDCUSDT', cryptocompare: 'USDC', kraken: 'USDCUSD', kucoin: 'USDC-USDT' },
+            'xrp': { binance: 'XRPUSDT', cryptocompare: 'XRP', kraken: 'XRPUSD', kucoin: 'XRP-USDT' },
+            'doge': { binance: 'DOGEUSDT', cryptocompare: 'DOGE', kraken: 'DOGEUSD', kucoin: 'DOGE-USDT' },
+            'shib': { binance: 'SHIBUSDT', cryptocompare: 'SHIB', kraken: 'SHIBUSD', kucoin: 'SHIB-USDT' },
+            'trx': { binance: 'TRXUSDT', cryptocompare: 'TRX', kraken: 'TRXUSD', kucoin: 'TRX-USDT' },
+            'ltc': { binance: 'LTCUSDT', cryptocompare: 'LTC', kraken: 'LTCUSD', kucoin: 'LTC-USDT' },
+            'ada': { binance: 'ADAUSDT', cryptocompare: 'ADA', kraken: 'ADAUSD', kucoin: 'ADA-USDT' },
+            'avax': { binance: 'AVAXUSDT', cryptocompare: 'AVAX', kraken: 'AVAXUSD', kucoin: 'AVAX-USDT' },
+            'dot': { binance: 'DOTUSDT', cryptocompare: 'DOT', kraken: 'DOTUSD', kucoin: 'DOT-USDT' },
+            'matic': { binance: 'MATICUSDT', cryptocompare: 'MATIC', kraken: 'MATICUSD', kucoin: 'MATIC-USDT' },
+            'link': { binance: 'LINKUSDT', cryptocompare: 'LINK', kraken: 'LINKUSD', kucoin: 'LINK-USDT' }
         };
         
-        // Function to fetch BTC price with multiple fallbacks
+        // Function to fetch BTC price with multiple fallback APIs (NO COINGECKO)
         const fetchBTCPrice = async () => {
             const errors = [];
             
-            // Try CoinGecko first
-            try {
-                const response = await axios.get(
-                    'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd',
-                    { timeout: 8000 }
-                );
-                if (response.data && response.data.bitcoin && response.data.bitcoin.usd) {
-                    return response.data.bitcoin.usd;
-                }
-                errors.push('CoinGecko: Invalid response');
-            } catch (err) {
-                errors.push(`CoinGecko: ${err.message}`);
-            }
-            
-            // Try Binance as first fallback
+            // Try Binance first (most reliable)
             try {
                 const response = await axios.get(
                     'https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT',
                     { timeout: 8000 }
                 );
                 if (response.data && response.data.price) {
+                    console.log(`Fetched BTC price from Binance: $${response.data.price}`);
                     return parseFloat(response.data.price);
                 }
                 errors.push('Binance: Invalid response');
@@ -8889,13 +8880,14 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 errors.push(`Binance: ${err.message}`);
             }
             
-            // Try CryptoCompare as second fallback
+            // Try CryptoCompare as first fallback
             try {
                 const response = await axios.get(
                     'https://min-api.cryptocompare.com/data/price?fsym=BTC&tsyms=USD',
                     { timeout: 8000 }
                 );
                 if (response.data && response.data.USD) {
+                    console.log(`Fetched BTC price from CryptoCompare: $${response.data.USD}`);
                     return response.data.USD;
                 }
                 errors.push('CryptoCompare: Invalid response');
@@ -8903,24 +8895,42 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 errors.push(`CryptoCompare: ${err.message}`);
             }
             
-            // Try Kraken as third fallback
+            // Try Kraken as second fallback
             try {
                 const response = await axios.get(
                     'https://api.kraken.com/0/public/Ticker?pair=XBTUSD',
                     { timeout: 8000 }
                 );
                 if (response.data && response.data.result && response.data.result.XXBTZUSD) {
-                    return parseFloat(response.data.result.XXBTZUSD.c[0]);
+                    const price = parseFloat(response.data.result.XXBTZUSD.c[0]);
+                    console.log(`Fetched BTC price from Kraken: $${price}`);
+                    return price;
                 }
                 errors.push('Kraken: Invalid response');
             } catch (err) {
                 errors.push(`Kraken: ${err.message}`);
             }
             
+            // Try KuCoin as third fallback
+            try {
+                const response = await axios.get(
+                    'https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=BTC-USDT',
+                    { timeout: 8000 }
+                );
+                if (response.data && response.data.data && response.data.data.price) {
+                    const price = parseFloat(response.data.data.price);
+                    console.log(`Fetched BTC price from KuCoin: $${price}`);
+                    return price;
+                }
+                errors.push('KuCoin: Invalid response');
+            } catch (err) {
+                errors.push(`KuCoin: ${err.message}`);
+            }
+            
             throw new Error(`All price APIs failed for BTC: ${errors.join('; ')}`);
         };
         
-        // Function to fetch target asset price with multiple fallbacks
+        // Function to fetch target asset price with multiple fallback APIs (NO COINGECKO)
         const fetchAssetPrice = async (assetSymbol) => {
             const errors = [];
             const assetIds = assetMap[assetSymbol.toLowerCase()];
@@ -8929,27 +8939,14 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 throw new Error(`Unsupported asset: ${assetSymbol}`);
             }
             
-            // Try CoinGecko first
-            try {
-                const response = await axios.get(
-                    `https://api.coingecko.com/api/v3/simple/price?ids=${assetIds.coingecko}&vs_currencies=usd`,
-                    { timeout: 8000 }
-                );
-                if (response.data && response.data[assetIds.coingecko] && response.data[assetIds.coingecko].usd) {
-                    return response.data[assetIds.coingecko].usd;
-                }
-                errors.push('CoinGecko: Invalid response');
-            } catch (err) {
-                errors.push(`CoinGecko: ${err.message}`);
-            }
-            
-            // Try Binance as first fallback
+            // Try Binance first
             try {
                 const response = await axios.get(
                     `https://api.binance.com/api/v3/ticker/price?symbol=${assetIds.binance}`,
                     { timeout: 8000 }
                 );
                 if (response.data && response.data.price) {
+                    console.log(`Fetched ${assetSymbol} price from Binance: $${response.data.price}`);
                     return parseFloat(response.data.price);
                 }
                 errors.push('Binance: Invalid response');
@@ -8957,13 +8954,14 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 errors.push(`Binance: ${err.message}`);
             }
             
-            // Try CryptoCompare as second fallback
+            // Try CryptoCompare as first fallback
             try {
                 const response = await axios.get(
                     `https://min-api.cryptocompare.com/data/price?fsym=${assetIds.cryptocompare}&tsyms=USD`,
                     { timeout: 8000 }
                 );
                 if (response.data && response.data.USD) {
+                    console.log(`Fetched ${assetSymbol} price from CryptoCompare: $${response.data.USD}`);
                     return response.data.USD;
                 }
                 errors.push('CryptoCompare: Invalid response');
@@ -8971,14 +8969,37 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 errors.push(`CryptoCompare: ${err.message}`);
             }
             
+            // Try Kraken as second fallback (if supported)
+            if (assetIds.kraken) {
+                try {
+                    const response = await axios.get(
+                        `https://api.kraken.com/0/public/Ticker?pair=${assetIds.kraken}`,
+                        { timeout: 8000 }
+                    );
+                    if (response.data && response.data.result) {
+                        const pairKey = Object.keys(response.data.result)[0];
+                        if (pairKey && response.data.result[pairKey]) {
+                            const price = parseFloat(response.data.result[pairKey].c[0]);
+                            console.log(`Fetched ${assetSymbol} price from Kraken: $${price}`);
+                            return price;
+                        }
+                    }
+                    errors.push('Kraken: Invalid response');
+                } catch (err) {
+                    errors.push(`Kraken: ${err.message}`);
+                }
+            }
+            
             // Try KuCoin as third fallback
             try {
                 const response = await axios.get(
-                    `https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=${assetSymbol.toUpperCase()}-USDT`,
+                    `https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=${assetIds.kucoin}`,
                     { timeout: 8000 }
                 );
                 if (response.data && response.data.data && response.data.data.price) {
-                    return parseFloat(response.data.data.price);
+                    const price = parseFloat(response.data.data.price);
+                    console.log(`Fetched ${assetSymbol} price from KuCoin: $${price}`);
+                    return price;
                 }
                 errors.push('KuCoin: Invalid response');
             } catch (err) {
@@ -8992,10 +9013,23 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             // Fetch BTC price with fallbacks
             btcPrice = await fetchBTCPrice();
             
-            if (asset.toLowerCase() !== 'btc') {
-                // Fetch target asset price with fallbacks
+            if (asset.toLowerCase() === 'btc') {
+                // For BTC withdrawals, gas fee is directly in BTC
+                gasFeeInAsset = btcGasFeeAmount;
+                gasFeeInUsd = btcGasFeeAmount * btcPrice;
+            } else {
+                // For other assets, fetch target asset price
                 targetAssetPrice = await fetchAssetPrice(asset);
+                
+                // Calculate gas fee in target asset:
+                // 1. Convert BTC gas fee to USD: btcGasFeeAmount * btcPrice
+                // 2. Convert USD to target asset amount: (btcGasFeeAmount * btcPrice) / targetAssetPrice
+                gasFeeInUsd = btcGasFeeAmount * btcPrice;
+                gasFeeInAsset = gasFeeInUsd / targetAssetPrice;
             }
+            
+            console.log(`Gas fee calculation: BTC fee: ${btcGasFeeAmount} BTC, BTC price: $${btcPrice}, Gas fee in USD: $${gasFeeInUsd.toFixed(2)}, Gas fee in ${asset.toUpperCase()}: ${gasFeeInAsset.toFixed(8)}`);
+            
         } catch (error) {
             console.error('Price fetch error:', error);
             return res.status(503).json({
@@ -9004,30 +9038,15 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             });
         }
         
-        // Calculate gas fee - THIS IS THE FIXED PART
-        if (asset.toLowerCase() === 'btc') {
-            // For BTC withdrawals, gas fee is in BTC directly
-            gasFee = btcGasFee;
-        } else {
-            // For other assets, convert BTC gas fee to target asset amount
-            // First convert BTC gas fee to USD
-            const gasFeeUsd = btcGasFee * btcPrice;
-            // Then convert USD to target asset amount
-            gasFee = gasFeeUsd / targetAssetPrice;
-        }
-        
-        // Gas fee in USD for checking main balance
-        const gasFeeInUsd = gasFee * (asset.toLowerCase() === 'btc' ? btcPrice : targetAssetPrice);
-        
-        // Check if user has enough main balance for gas fee
+        // Check if user has enough main balance for gas fee (in USD)
         if (user.balances.main < gasFeeInUsd) {
             return res.status(400).json({
                 status: 'error',
-                message: `Insufficient main balance for gas fee. Required: ${gasFee.toFixed(8)} ${asset.toUpperCase()} (≈$${gasFeeInUsd.toFixed(2)}) in main wallet.`
+                message: `Insufficient main balance for gas fee. Required: ${gasFeeInAsset.toFixed(8)} ${asset.toUpperCase()} (≈$${gasFeeInUsd.toFixed(2)}) in main wallet.`
             });
         }
         
-        // Deduct gas fee from main wallet
+        // Deduct gas fee from main wallet (in USD)
         await User.findByIdAndUpdate(userId, {
             $inc: {
                 'balances.main': -gasFeeInUsd
@@ -9044,19 +9063,19 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             metadata: {
                 asset: asset,
                 withdrawalAmount: amount,
-                gasFeeInAsset: gasFee,
+                gasFeeInAsset: gasFeeInAsset,
                 gasFeeInUsd: gasFeeInUsd,
-                btcGasFeeUsed: btcGasFee,
+                btcGasFeeUsed: btcGasFeeAmount,
                 btcPriceAtTime: btcPrice,
                 assetPriceAtTime: targetAssetPrice,
-                priceSource: 'multi-source'
+                priceSource: 'multi-source (Binance, CryptoCompare, Kraken, KuCoin)'
             }
         });
 
         // Generate unique reference
         const reference = `WDR-${asset.toUpperCase()}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
-        // Calculate asset amount
+        // Calculate asset amount (withdrawal amount in target asset)
         const assetAmount = amount / exchangeRate;
 
         // Create transaction record with all withdrawal details
@@ -9073,7 +9092,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             details: {
                 walletAddress: walletAddress,
                 exchangeRate: exchangeRate,
-                gasFee: gasFee,
+                gasFee: gasFeeInAsset,
                 gasFeeInUsd: gasFeeInUsd,
                 balanceSource: balanceSource,
                 mainAmountUsed: mainAmountUsed || 0,
@@ -9081,7 +9100,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 assetAmount: assetAmount,
                 requestedAt: new Date(),
                 withdrawalType: 'asset',
-                btcGasFeeUsed: btcGasFee,
+                btcGasFeeUsed: btcGasFeeAmount,
                 btcPriceAtTime: btcPrice,
                 assetPriceAtTime: targetAssetPrice
             },
@@ -9126,11 +9145,11 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 reference: reference,
                 walletAddress: walletAddress,
                 balanceSource: balanceSource,
-                gasFee: gasFee,
+                gasFee: gasFeeInAsset,
                 gasFeeInUsd: gasFeeInUsd,
                 exchangeRate: exchangeRate,
                 timestamp: new Date().toISOString(),
-                btcGasFeeUsed: btcGasFee,
+                btcGasFeeUsed: btcGasFeeAmount,
                 btcPriceAtTime: btcPrice,
                 assetPriceAtTime: targetAssetPrice
             }
@@ -9149,13 +9168,13 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                     createdAt: transaction.createdAt,
                     walletAddress: walletAddress,
                     exchangeRate: exchangeRate,
-                    gasFee: gasFee,
+                    gasFee: gasFeeInAsset,
                     gasFeeInUsd: gasFeeInUsd,
                     btcPrice: btcPrice,
                     assetPrice: targetAssetPrice
                 }
             },
-            message: `Withdrawal request submitted successfully. Gas fee of ${gasFee.toFixed(8)} ${asset.toUpperCase()} (≈$${gasFeeInUsd.toFixed(2)}) deducted from main wallet.`
+            message: `Withdrawal request submitted successfully. Gas fee of ${gasFeeInAsset.toFixed(8)} ${asset.toUpperCase()} (≈$${gasFeeInUsd.toFixed(2)}) deducted from main wallet.`
         });
 
     } catch (err) {
@@ -9182,10 +9201,6 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
         });
     }
 });
-
-
-
-
 
 
 
