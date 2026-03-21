@@ -18724,7 +18724,6 @@ app.get('/api/withdrawals/asset', protect, async (req, res) => {
     }
 });
 
-
 /**
  * POST /api/withdrawals/asset - Process asset withdrawal
  */
@@ -19135,7 +19134,6 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
         });
     }
 });
-
 
 /**
  * POST /api/withdrawals/bank - Process bank withdrawal
