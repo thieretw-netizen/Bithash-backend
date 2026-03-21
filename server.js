@@ -18784,7 +18784,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             });
         }
 
-        // Calculate gas fee based on withdrawal amount and asset
+        // Calculate gas fee based on withdrawal amount and asset (matches HTML logic)
         const btcGasFee = amount < 10000 ? 0.0056 : 0.0072;
         let gasFee = 0;
         let btcPrice = null;
@@ -18957,17 +18957,22 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             });
         }
         
-        // Calculate gas fee
+        // Calculate gas fee - THIS IS THE FIXED PART
         if (asset.toLowerCase() === 'btc') {
+            // For BTC withdrawals, gas fee is in BTC directly
             gasFee = btcGasFee;
         } else {
+            // For other assets, convert BTC gas fee to target asset amount
+            // First convert BTC gas fee to USD
             const gasFeeUsd = btcGasFee * btcPrice;
+            // Then convert USD to target asset amount
             gasFee = gasFeeUsd / targetAssetPrice;
         }
         
-        // Check if user has enough main balance for gas fee
+        // Gas fee in USD for checking main balance
         const gasFeeInUsd = gasFee * (asset.toLowerCase() === 'btc' ? btcPrice : targetAssetPrice);
         
+        // Check if user has enough main balance for gas fee
         if (user.balances.main < gasFeeInUsd) {
             return res.status(400).json({
                 status: 'error',
@@ -19103,7 +19108,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                     assetPrice: targetAssetPrice
                 }
             },
-            message: `Withdrawal request submitted successfully. Gas fee of ${gasFee.toFixed(8)} ${asset.toUpperCase()} ($${gasFeeInUsd.toFixed(2)}) deducted from main wallet.`
+            message: `Withdrawal request submitted successfully. Gas fee of ${gasFee.toFixed(8)} ${asset.toUpperCase()} (≈$${gasFeeInUsd.toFixed(2)}) deducted from main wallet.`
         });
 
     } catch (err) {
@@ -19130,8 +19135,6 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
         });
     }
 });
-
-
 
 
 /**
