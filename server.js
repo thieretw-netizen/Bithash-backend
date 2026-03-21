@@ -37,7 +37,7 @@ app.use(helmet({
       scriptSrc: ["'self'", "'unsafe-inline'", "https://apis.google.com"],
       styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
       imgSrc: ["'self'", "data:", "https://www.google-analytics.com", "https://cryptologos.cc"],
-      connectSrc: ["'self'", "https://api.ipinfo.io", "https://website-backendd-1.onrender.com"],
+      connectSrc: ["'self'", "https://api.ipinfo.io", "https://website-backendd-1.onrender.com", "https://api.coingecko.com"],
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
       objectSrc: ["'none'"],
       frameSrc: ["'self'", "https://accounts.google.com"] // Added for Google OAuth
@@ -49,16 +49,16 @@ app.use(helmet({
 
 app.use(cors({
   origin: [
-    'https://www.bithashcapital.live', 
-    'https://website-backendd-tzep.onrender.com', 
+    'https://www.bithashcapital.live',
+    'https://website-backendd-tzep.onrender.com',
     'https://bithash-rental.vercel.app/',
     'https://bithash-backend.onrender.com'
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: [
-    'Content-Type', 
-    'Authorization', 
+    'Content-Type',
+    'Authorization',
     'X-CSRF-Token',
     'X-Rate-Limit',           // ← ADD THIS (fixes your error)
     'X-Requested-With',
@@ -765,6 +765,10 @@ const UserLogSchema = new mongoose.Schema({
     usdValue: Number,
     
     // Buy/Sell (Replacing Conversion)
+    asset: String,
+    assetAmount: Number,
+    assetPrice: Number,
+    usdValue: Number,
     profitLoss: Number,
     profitLossPercentage: Number,
     tradeType: String, // 'buy' or 'sell'
@@ -2728,7 +2732,116 @@ const generateReferralCode = () => {
   return `BH-${timestamp}-${randomPart}-${checksum}`;
 };
 
-// Helper functions removed - no longer using CoinGecko
+// --- NEW: Multi-source price fetching function ---
+const getRealTimePriceWithFallbacks = async (assetSymbol) => {
+  // Normalize asset symbol to uppercase
+  const asset = assetSymbol.toUpperCase();
+  
+  // Asset mapping for different APIs
+  const assetMap = {
+    'BTC': { coingecko: 'bitcoin', binance: 'BTCUSDT', cryptocompare: 'BTC', kraken: 'XBTUSD' },
+    'ETH': { coingecko: 'ethereum', binance: 'ETHUSDT', cryptocompare: 'ETH', kraken: 'ETHUSD' },
+    'USDT': { coingecko: 'tether', binance: 'USDTUSDT', cryptocompare: 'USDT', kraken: 'USDTUSD' },
+    'BNB': { coingecko: 'binancecoin', binance: 'BNBUSDT', cryptocompare: 'BNB', kraken: 'BNBUSD' },
+    'SOL': { coingecko: 'solana', binance: 'SOLUSDT', cryptocompare: 'SOL', kraken: 'SOLUSD' },
+    'USDC': { coingecko: 'usd-coin', binance: 'USDCUSDT', cryptocompare: 'USDC', kraken: 'USDCUSD' },
+    'XRP': { coingecko: 'ripple', binance: 'XRPUSDT', cryptocompare: 'XRP', kraken: 'XRPUSD' },
+    'DOGE': { coingecko: 'dogecoin', binance: 'DOGEUSDT', cryptocompare: 'DOGE', kraken: 'DOGEUSD' },
+    'ADA': { coingecko: 'cardano', binance: 'ADAUSDT', cryptocompare: 'ADA', kraken: 'ADAUSD' },
+    'SHIB': { coingecko: 'shiba-inu', binance: 'SHIBUSDT', cryptocompare: 'SHIB', kraken: 'SHIBUSD' },
+    'AVAX': { coingecko: 'avalanche-2', binance: 'AVAXUSDT', cryptocompare: 'AVAX', kraken: 'AVAXUSD' },
+    'DOT': { coingecko: 'polkadot', binance: 'DOTUSDT', cryptocompare: 'DOT', kraken: 'DOTUSD' },
+    'TRX': { coingecko: 'tron', binance: 'TRXUSDT', cryptocompare: 'TRX', kraken: 'TRXUSD' },
+    'LINK': { coingecko: 'chainlink', binance: 'LINKUSDT', cryptocompare: 'LINK', kraken: 'LINKUSD' },
+    'MATIC': { coingecko: 'matic-network', binance: 'MATICUSDT', cryptocompare: 'MATIC', kraken: 'MATICUSD' },
+    'LTC': { coingecko: 'litecoin', binance: 'LTCUSDT', cryptocompare: 'LTC', kraken: 'LTCUSD' }
+  };
+  
+  const ids = assetMap[asset];
+  if (!ids) {
+    throw new Error(`Unsupported asset: ${asset}`);
+  }
+  
+  const errors = [];
+  
+  // 1. Try CoinGecko
+  try {
+    const response = await axios.get(
+      `https://api.coingecko.com/api/v3/simple/price?ids=${ids.coingecko}&vs_currencies=usd`,
+      { timeout: 5000 }
+    );
+    const price = response.data?.[ids.coingecko]?.usd;
+    if (price) {
+      return price;
+    }
+    errors.push('CoinGecko: No price in response');
+  } catch (err) {
+    errors.push(`CoinGecko: ${err.message}`);
+  }
+  
+  // 2. Try Binance
+  try {
+    const response = await axios.get(
+      `https://api.binance.com/api/v3/ticker/price?symbol=${ids.binance}`,
+      { timeout: 5000 }
+    );
+    const price = response.data?.price;
+    if (price) {
+      return parseFloat(price);
+    }
+    errors.push('Binance: No price in response');
+  } catch (err) {
+    errors.push(`Binance: ${err.message}`);
+  }
+  
+  // 3. Try CryptoCompare
+  try {
+    const response = await axios.get(
+      `https://min-api.cryptocompare.com/data/price?fsym=${ids.cryptocompare}&tsyms=USD`,
+      { timeout: 5000 }
+    );
+    const price = response.data?.USD;
+    if (price) {
+      return price;
+    }
+    errors.push('CryptoCompare: No price in response');
+  } catch (err) {
+    errors.push(`CryptoCompare: ${err.message}`);
+  }
+  
+  // 4. Try Kraken
+  try {
+    const response = await axios.get(
+      `https://api.kraken.com/0/public/Ticker?pair=${ids.kraken}`,
+      { timeout: 5000 }
+    );
+    const ticker = response.data?.result?.[ids.kraken];
+    if (ticker && ticker.c) {
+      return parseFloat(ticker.c[0]);
+    }
+    errors.push('Kraken: No price in response');
+  } catch (err) {
+    errors.push(`Kraken: ${err.message}`);
+  }
+  
+  throw new Error(`All price APIs failed for ${asset}: ${errors.join('; ')}`);
+};
+
+// Get real-time exchange rate (kept for compatibility but will use the new function)
+const getExchangeRate = async (asset, fiat = 'usd') => {
+  try {
+    return await getRealTimePriceWithFallbacks(asset);
+  } catch (err) {
+    console.error('Error fetching exchange rate:', err);
+    return null;
+  }
+};
+
+// Convert crypto amount to fiat using real-time rate
+const convertToFiat = async (cryptoAmount, asset) => {
+  const rate = await getExchangeRate(asset);
+  return cryptoAmount * rate;
+};
 
 const sendEmail = async (options) => {
   try {
@@ -3330,37 +3443,10 @@ const calculateReferralCommissions = async (investment) => {
 
 
 
-// Enhanced email service with professional, highly visible templates - Mobile Optimized (no boxes/blocks, smooth flowing like Binance)
-// All data displayed directly from database - no external API calls
+// Enhanced email service with modern, clean, flowing design (no boxes/blocks)
 const sendAutomatedEmail = async (user, action, data = {}) => {
   try {
-    // Helper function to hide wallet address (show first 6 and last 6 characters)
-    const hideAddress = (address) => {
-      if (!address || address === 'N/A' || address === 'Unknown' || address === '') {
-        return 'Not Provided';
-      }
-      if (address.length <= 12) return address;
-      return address.substring(0, 6) + '*************' + address.substring(address.length - 6);
-    };
-
-    // Helper function to format timestamp
-    const formatTimestamp = (timestamp) => {
-      if (!timestamp) return new Date().toLocaleString('en-US', { timeZone: 'UTC', dateStyle: 'full', timeStyle: 'medium' }) + ' UTC';
-      return new Date(timestamp).toLocaleString('en-US', { timeZone: 'UTC', dateStyle: 'full', timeStyle: 'medium' }) + ' UTC';
-    };
-
-    // Helper function to format amount with proper decimals and commas for fiat
-    const formatAmount = (amount, asset) => {
-      if (!amount && amount !== 0) return '0.00';
-      const isCrypto = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'ADA', 'SHIB', 'AVAX', 'DOT', 'TRX', 'LINK', 'MATIC', 'LTC'].includes(asset?.toUpperCase());
-      if (isCrypto) {
-        return amount.toFixed(8);
-      }
-      // For fiat, use commas for thousands
-      return amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    };
-
-    // Helper function to get asset display name
+    // Helper function to get asset display name (kept for email display)
     const getAssetDisplayName = (asset) => {
       const assetMap = {
         'BTC': 'Bitcoin',
@@ -3383,7 +3469,24 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
       return assetMap[asset?.toUpperCase()] || asset || 'Bitcoin';
     };
 
-    // Helper function to get crypto logo URL (using static logos from database storage)
+    // Helper function to format timestamp
+    const formatTimestamp = (timestamp) => {
+      if (!timestamp) return new Date().toLocaleString('en-US', { timeZone: 'UTC', dateStyle: 'full', timeStyle: 'medium' }) + ' UTC';
+      return new Date(timestamp).toLocaleString('en-US', { timeZone: 'UTC', dateStyle: 'full', timeStyle: 'medium' }) + ' UTC';
+    };
+
+    // Helper function to format amount with proper decimals and commas for fiat
+    const formatAmount = (amount, asset) => {
+      if (!amount && amount !== 0) return '0.00';
+      const isCrypto = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'ADA', 'SHIB', 'AVAX', 'DOT', 'TRX', 'LINK', 'MATIC', 'LTC'].includes(asset?.toUpperCase());
+      if (isCrypto) {
+        return amount.toFixed(8);
+      }
+      // For fiat, use commas for thousands
+      return amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    };
+
+    // Helper function to get crypto logo URL (for email display)
     const getCryptoLogo = (asset) => {
       const assetLower = (asset || 'btc').toLowerCase();
       const logoMap = {
@@ -3407,8 +3510,17 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
       return `https://cryptologos.cc/logos/${logoMap[assetLower] || 'bitcoin-btc-logo.png'}`;
     };
 
+    // Helper function to hide wallet address (show first 6 and last 6 characters)
+    const hideAddress = (address) => {
+      if (!address || address === 'N/A' || address === 'Unknown' || address === '') {
+        return 'Not Provided';
+      }
+      if (address.length <= 12) return address;
+      return address.substring(0, 6) + '*************' + address.substring(address.length - 6);
+    };
+
     const templates = {
-      // WELCOME EMAIL
+      // WELCOME EMAIL - Modern, flowing design
       welcome: {
         subject: 'Welcome to BitHash Capital | Account Created Successfully',
         html: `
@@ -3421,25 +3533,26 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
                 body { 
-                  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-                  background-color: #ffffff;
+                  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+                  background-color: #f5f7fb;
                   margin: 0;
                   padding: 0;
+                  line-height: 1.5;
                 }
-                .email-wrapper {
-                  max-width: 100%;
+                .container {
+                  max-width: 560px;
                   margin: 0 auto;
                   background-color: #ffffff;
+                  border-radius: 0;
                 }
                 .header {
                   background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
-                  padding: 32px 20px;
+                  padding: 32px 24px;
                   text-align: center;
                 }
                 .logo-container {
-                  display: flex;
+                  display: inline-flex;
                   align-items: center;
-                  justify-content: center;
                   gap: 12px;
                 }
                 .logo-img {
@@ -3456,63 +3569,51 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   letter-spacing: -0.5px;
                 }
                 .content {
-                  padding: 40px 20px;
+                  padding: 40px 24px;
                   background-color: #ffffff;
                 }
                 .greeting {
-                  font-size: 24px;
-                  font-weight: 600;
-                  color: #1f2937;
+                  font-size: 28px;
+                  font-weight: 700;
+                  color: #111827;
                   margin-bottom: 16px;
+                  line-height: 1.2;
                 }
                 .message {
                   color: #4b5563;
-                  line-height: 1.6;
-                  margin-bottom: 24px;
+                  margin-bottom: 32px;
                   font-size: 16px;
                 }
-                .feature-grid {
-                  display: grid;
-                  grid-template-columns: 1fr 1fr;
-                  gap: 20px;
-                  margin: 32px 0;
-                }
-                .feature-card {
-                  background: #f9fafb;
-                  padding: 20px;
-                  border-radius: 12px;
-                  text-align: center;
-                }
-                .feature-icon {
-                  font-size: 32px;
-                  margin-bottom: 12px;
+                .feature-item {
+                  margin-bottom: 24px;
                 }
                 .feature-title {
                   font-weight: 600;
                   color: #1e40af;
                   margin-bottom: 8px;
-                  font-size: 16px;
+                  font-size: 18px;
                 }
                 .feature-desc {
                   color: #6b7280;
-                  font-size: 13px;
-                  line-height: 1.4;
+                  font-size: 15px;
                 }
                 .cta-button {
                   background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
                   color: #ffffff;
-                  padding: 14px 32px;
+                  padding: 12px 28px;
                   text-decoration: none;
                   display: inline-block;
                   font-weight: 600;
                   font-size: 16px;
-                  border-radius: 8px;
-                  margin: 20px 0;
+                  border-radius: 30px;
+                  margin: 16px 0 32px;
+                  text-align: center;
                 }
                 .footer {
-                  padding: 24px 20px;
+                  padding: 32px 24px;
                   background-color: #f9fafb;
                   text-align: center;
+                  border-top: 1px solid #e5e7eb;
                 }
                 .footer-text {
                   color: #6b7280;
@@ -3524,18 +3625,19 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   text-decoration: none;
                 }
                 @media only screen and (max-width: 600px) {
-                  .header { padding: 20px; }
-                  .content { padding: 24px 16px; }
-                  .feature-grid { grid-template-columns: 1fr; gap: 12px; }
-                  .greeting { font-size: 20px; }
+                  .container { max-width: 100%; }
+                  .header { padding: 24px 20px; }
+                  .content { padding: 32px 20px; }
+                  .greeting { font-size: 24px; }
                   .logo-text { font-size: 24px; }
-                  .cta-button { padding: 12px 24px; font-size: 14px; }
-                  .feature-card { padding: 16px; }
+                  .cta-button { padding: 10px 24px; font-size: 14px; }
+                  .feature-title { font-size: 16px; }
+                  .feature-desc { font-size: 14px; }
                 }
               </style>
           </head>
-          <body style="background-color: #ffffff; margin: 0; padding: 0;">
-            <div class="email-wrapper">
+          <body style="background-color: #f5f7fb; margin: 0; padding: 20px 0;">
+            <div class="container">
               <div class="header">
                 <div class="logo-container">
                   <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
@@ -3543,30 +3645,24 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 </div>
               </div>
               <div class="content">
-                <h2 class="greeting">Welcome, ${user.firstName || 'Valued Investor'}!</h2>
+                <h1 class="greeting">Welcome, ${user.firstName || 'Valued Investor'}!</h1>
                 <p class="message">Your account has been successfully created. You now have access to institutional-grade Bitcoin mining and investment opportunities.</p>
                 
-                <div class="feature-grid">
-                  <div class="feature-card">
-                    <div class="feature-icon">⚡</div>
-                    <div class="feature-title">Cloud Mining</div>
-                    <div class="feature-desc">Start mining Bitcoin instantly with our enterprise infrastructure</div>
-                  </div>
-                  <div class="feature-card">
-                    <div class="feature-icon">📈</div>
-                    <div class="feature-title">Smart Investment</div>
-                    <div class="feature-desc">Optimized mining plans with competitive returns</div>
-                  </div>
-                  <div class="feature-card">
-                    <div class="feature-icon">🔒</div>
-                    <div class="feature-title">Secure Platform</div>
-                    <div class="feature-desc">Enterprise-grade security protecting your assets</div>
-                  </div>
-                  <div class="feature-card">
-                    <div class="feature-icon">🎯</div>
-                    <div class="feature-title">24/7 Support</div>
-                    <div class="feature-desc">Dedicated support team always available</div>
-                  </div>
+                <div class="feature-item">
+                  <div class="feature-title">⚡ Cloud Mining</div>
+                  <div class="feature-desc">Start mining Bitcoin instantly with our enterprise infrastructure</div>
+                </div>
+                <div class="feature-item">
+                  <div class="feature-title">📈 Smart Investment</div>
+                  <div class="feature-desc">Optimized mining plans with competitive returns</div>
+                </div>
+                <div class="feature-item">
+                  <div class="feature-title">🔒 Secure Platform</div>
+                  <div class="feature-desc">Enterprise-grade security protecting your assets</div>
+                </div>
+                <div class="feature-item">
+                  <div class="feature-title">🎯 24/7 Support</div>
+                  <div class="feature-desc">Dedicated support team always available</div>
                 </div>
                 
                 <div style="text-align: center;">
@@ -3586,7 +3682,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
         `
       },
 
-      // LOGIN SUCCESS
+      // LOGIN SUCCESS - Clean and flowing
       login_success: {
         subject: 'BitHash Capital | New Login Detected',
         html: `
@@ -3598,38 +3694,38 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <title>Login Notification - BitHash Capital</title>
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #ffffff; margin: 0; padding: 0; }
-                .email-wrapper { max-width: 100%; margin: 0 auto; background-color: #ffffff; }
-                .header { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); padding: 32px 20px; text-align: center; }
-                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f5f7fb; margin: 0; padding: 20px 0; }
+                .container { max-width: 560px; margin: 0 auto; background-color: #ffffff; border-radius: 0; }
+                .header { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); padding: 32px 24px; text-align: center; }
+                .logo-container { display: inline-flex; align-items: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
                 .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
-                .content { padding: 40px 20px; background-color: #ffffff; }
-                .greeting { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
+                .content { padding: 40px 24px; background-color: #ffffff; }
+                .greeting { font-size: 28px; font-weight: 700; color: #111827; margin-bottom: 16px; }
                 .message { color: #4b5563; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .login-info { background: #f9fafb; padding: 20px; border-radius: 12px; margin: 24px 0; }
+                .info-group { margin: 24px 0; }
                 .info-row { display: flex; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #e5e7eb; }
-                .info-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
                 .info-label { width: 100px; color: #6b7280; font-size: 14px; font-weight: 500; }
                 .info-value { flex: 1; color: #1f2937; font-weight: 500; font-size: 14px; word-break: break-word; }
-                .security-note { background: #fef2f2; padding: 16px; margin: 24px 0; border-radius: 8px; }
+                .security-note { background-color: #fef2f2; padding: 16px; margin: 24px 0; border-radius: 8px; }
                 .security-note strong { color: #dc2626; }
                 .security-note p { color: #991b1b; font-size: 14px; }
-                .footer { padding: 24px 20px; background-color: #f9fafb; text-align: center; }
+                .footer { padding: 32px 24px; background-color: #f9fafb; text-align: center; border-top: 1px solid #e5e7eb; }
                 .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
                 .support-link { color: #3b82f6; text-decoration: none; }
                 .device-badge { display: inline-block; background: #e5e7eb; padding: 4px 10px; font-size: 12px; color: #374151; border-radius: 6px; }
                 @media only screen and (max-width: 600px) {
-                  .header { padding: 20px; }
-                  .content { padding: 24px 16px; }
+                  .container { max-width: 100%; }
+                  .header { padding: 24px 20px; }
+                  .content { padding: 32px 20px; }
                   .info-label { width: 80px; font-size: 12px; }
-                  .greeting { font-size: 20px; }
+                  .greeting { font-size: 24px; }
                   .info-row { flex-direction: column; gap: 4px; }
                 }
               </style>
           </head>
-          <body style="background-color: #ffffff; margin: 0; padding: 0;">
-            <div class="email-wrapper">
+          <body style="background-color: #f5f7fb; margin: 0; padding: 20px 0;">
+            <div class="container">
               <div class="header">
                 <div class="logo-container">
                   <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
@@ -3637,10 +3733,10 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 </div>
               </div>
               <div class="content">
-                <h2 class="greeting">Hello ${user.firstName || 'Valued Investor'},</h2>
+                <h1 class="greeting">Hello ${user.firstName || 'Valued Investor'},</h1>
                 <p class="message">A successful login to your BitHash Capital account was detected:</p>
                 
-                <div class="login-info">
+                <div class="info-group">
                   <div class="info-row">
                     <span class="info-label">Time:</span>
                     <span class="info-value">${formatTimestamp(data.timestamp)}</span>
@@ -3677,7 +3773,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
         `
       },
 
-      // OTP VERIFICATION
+      // OTP VERIFICATION - Clean and simple
       otp: {
         subject: 'BitHash Capital | Verification Code',
         html: `
@@ -3689,30 +3785,31 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <title>Verification Code - BitHash Capital</title>
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #ffffff; margin: 0; padding: 0; }
-                .email-wrapper { max-width: 100%; margin: 0 auto; background-color: #ffffff; }
-                .header { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); padding: 32px 20px; text-align: center; }
-                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f5f7fb; margin: 0; padding: 20px 0; }
+                .container { max-width: 560px; margin: 0 auto; background-color: #ffffff; border-radius: 0; }
+                .header { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); padding: 32px 24px; text-align: center; }
+                .logo-container { display: inline-flex; align-items: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
                 .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
-                .content { padding: 40px 20px; background-color: #ffffff; }
-                .greeting { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
+                .content { padding: 40px 24px; background-color: #ffffff; }
+                .greeting { font-size: 28px; font-weight: 700; color: #111827; margin-bottom: 16px; }
                 .message { color: #4b5563; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .otp-code { background: #f9fafb; padding: 24px; font-size: 48px; font-weight: 700; text-align: center; letter-spacing: 12px; margin: 24px 0; color: #3b82f6; font-family: 'Courier New', monospace; border-radius: 12px; }
-                .security-note { background: #fef2f2; padding: 16px; margin: 24px 0; border-radius: 8px; }
+                .otp-code { background-color: #f3f4f6; padding: 20px; font-size: 48px; font-weight: 700; text-align: center; letter-spacing: 8px; margin: 24px 0; color: #3b82f6; font-family: 'Courier New', monospace; border-radius: 12px; }
+                .security-note { background-color: #fef2f2; padding: 16px; margin: 24px 0; border-radius: 8px; }
                 .security-note p { color: #991b1b; font-size: 14px; }
-                .footer { padding: 24px 20px; background-color: #f9fafb; text-align: center; }
+                .footer { padding: 32px 24px; background-color: #f9fafb; text-align: center; border-top: 1px solid #e5e7eb; }
                 .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
                 @media only screen and (max-width: 600px) {
-                  .header { padding: 20px; }
-                  .content { padding: 24px 16px; }
-                  .otp-code { font-size: 32px; letter-spacing: 8px; padding: 16px; }
-                  .greeting { font-size: 20px; }
+                  .container { max-width: 100%; }
+                  .header { padding: 24px 20px; }
+                  .content { padding: 32px 20px; }
+                  .otp-code { font-size: 32px; letter-spacing: 6px; padding: 16px; }
+                  .greeting { font-size: 24px; }
                 }
               </style>
           </head>
-          <body style="background-color: #ffffff; margin: 0; padding: 0;">
-            <div class="email-wrapper">
+          <body style="background-color: #f5f7fb; margin: 0; padding: 20px 0;">
+            <div class="container">
               <div class="header">
                 <div class="logo-container">
                   <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
@@ -3720,7 +3817,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 </div>
               </div>
               <div class="content">
-                <h2 class="greeting">Hello ${user.firstName || 'there'},</h2>
+                <h1 class="greeting">Hello ${user.firstName || 'there'},</h1>
                 <p class="message">Please use the following verification code to complete your ${data.action || 'account verification'}:</p>
                 
                 <div class="otp-code">${data.otp}</div>
@@ -3753,30 +3850,31 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <title>Password Reset - BitHash Capital</title>
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #ffffff; margin: 0; padding: 0; }
-                .email-wrapper { max-width: 100%; margin: 0 auto; background-color: #ffffff; }
-                .header { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); padding: 32px 20px; text-align: center; }
-                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f5f7fb; margin: 0; padding: 20px 0; }
+                .container { max-width: 560px; margin: 0 auto; background-color: #ffffff; border-radius: 0; }
+                .header { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); padding: 32px 24px; text-align: center; }
+                .logo-container { display: inline-flex; align-items: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
                 .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
-                .content { padding: 40px 20px; background-color: #ffffff; }
-                .greeting { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
+                .content { padding: 40px 24px; background-color: #ffffff; }
+                .greeting { font-size: 28px; font-weight: 700; color: #111827; margin-bottom: 16px; }
                 .message { color: #4b5563; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .reset-button { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); color: #ffffff; padding: 14px 32px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 16px; border-radius: 8px; margin: 20px 0; }
-                .security-note { background: #fef2f2; padding: 16px; margin: 24px 0; border-radius: 8px; }
+                .reset-button { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); color: #ffffff; padding: 12px 28px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 16px; border-radius: 30px; margin: 20px 0; text-align: center; }
+                .security-note { background-color: #fef2f2; padding: 16px; margin: 24px 0; border-radius: 8px; }
                 .security-note p { color: #991b1b; font-size: 14px; }
-                .footer { padding: 24px 20px; background-color: #f9fafb; text-align: center; }
+                .footer { padding: 32px 24px; background-color: #f9fafb; text-align: center; border-top: 1px solid #e5e7eb; }
                 .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
                 @media only screen and (max-width: 600px) {
-                  .header { padding: 20px; }
-                  .content { padding: 24px 16px; }
-                  .greeting { font-size: 20px; }
-                  .reset-button { padding: 12px 24px; font-size: 14px; }
+                  .container { max-width: 100%; }
+                  .header { padding: 24px 20px; }
+                  .content { padding: 32px 20px; }
+                  .greeting { font-size: 24px; }
+                  .reset-button { padding: 10px 24px; font-size: 14px; }
                 }
               </style>
           </head>
-          <body style="background-color: #ffffff; margin: 0; padding: 0;">
-            <div class="email-wrapper">
+          <body style="background-color: #f5f7fb; margin: 0; padding: 20px 0;">
+            <div class="container">
               <div class="header">
                 <div class="logo-container">
                   <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
@@ -3784,7 +3882,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 </div>
               </div>
               <div class="content">
-                <h2 class="greeting">Hello ${user.firstName || 'there'},</h2>
+                <h1 class="greeting">Hello ${user.firstName || 'there'},</h1>
                 <p class="message">We received a request to reset your BitHash Capital account password.</p>
                 
                 <div style="text-align: center;">
@@ -3819,30 +3917,31 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <title>Password Changed - BitHash Capital</title>
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #ffffff; margin: 0; padding: 0; }
-                .email-wrapper { max-width: 100%; margin: 0 auto; background-color: #ffffff; }
-                .header { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); padding: 32px 20px; text-align: center; }
-                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f5f7fb; margin: 0; padding: 20px 0; }
+                .container { max-width: 560px; margin: 0 auto; background-color: #ffffff; border-radius: 0; }
+                .header { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); padding: 32px 24px; text-align: center; }
+                .logo-container { display: inline-flex; align-items: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
                 .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
-                .content { padding: 40px 20px; background-color: #ffffff; }
-                .greeting { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 16px; text-align: center; }
-                .message { color: #4b5563; line-height: 1.6; margin-bottom: 24px; font-size: 16px; text-align: center; }
-                .success-icon { text-align: center; font-size: 64px; margin: 20px 0; }
-                .info-box { background: #f0fdf4; padding: 20px; border-radius: 12px; margin: 24px 0; }
+                .content { padding: 40px 24px; background-color: #ffffff; text-align: center; }
+                .greeting { font-size: 28px; font-weight: 700; color: #111827; margin-bottom: 16px; }
+                .message { color: #4b5563; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
+                .success-icon { font-size: 64px; margin-bottom: 16px; color: #22c55e; }
+                .info-box { background-color: #f0fdf4; padding: 20px; border-radius: 12px; margin: 24px 0; text-align: left; }
                 .info-box p { color: #166534; font-size: 14px; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #bbf7d0; }
                 .info-box p:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
-                .footer { padding: 24px 20px; background-color: #f9fafb; text-align: center; }
+                .footer { padding: 32px 24px; background-color: #f9fafb; text-align: center; border-top: 1px solid #e5e7eb; }
                 .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
                 @media only screen and (max-width: 600px) {
-                  .header { padding: 20px; }
-                  .content { padding: 24px 16px; }
-                  .greeting { font-size: 20px; }
+                  .container { max-width: 100%; }
+                  .header { padding: 24px 20px; }
+                  .content { padding: 32px 20px; }
+                  .greeting { font-size: 24px; }
                 }
               </style>
           </head>
-          <body style="background-color: #ffffff; margin: 0; padding: 0;">
-            <div class="email-wrapper">
+          <body style="background-color: #f5f7fb; margin: 0; padding: 20px 0;">
+            <div class="container">
               <div class="header">
                 <div class="logo-container">
                   <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
@@ -3851,7 +3950,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               </div>
               <div class="content">
                 <div class="success-icon">✓</div>
-                <h2 class="greeting">Password Changed Successfully</h2>
+                <h1 class="greeting">Password Changed Successfully</h1>
                 <p class="message">Hello ${user.firstName || 'there'}, your BitHash Capital account password has been changed.</p>
                 
                 <div class="info-box">
@@ -3872,7 +3971,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
         `
       },
 
-      // INVESTMENT CREATED - With all data from database
+      // INVESTMENT CREATED
       investment_created: {
         subject: 'BitHash Capital | Investment Confirmed',
         html: `
@@ -3884,34 +3983,35 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <title>Investment Confirmation - BitHash Capital</title>
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #ffffff; margin: 0; padding: 0; }
-                .email-wrapper { max-width: 100%; margin: 0 auto; background-color: #ffffff; }
-                .header { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); padding: 32px 20px; text-align: center; }
-                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f5f7fb; margin: 0; padding: 20px 0; }
+                .container { max-width: 560px; margin: 0 auto; background-color: #ffffff; border-radius: 0; }
+                .header { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); padding: 32px 24px; text-align: center; }
+                .logo-container { display: inline-flex; align-items: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
                 .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
-                .content { padding: 40px 20px; background-color: #ffffff; }
-                .greeting { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
+                .content { padding: 40px 24px; background-color: #ffffff; }
+                .greeting { font-size: 28px; font-weight: 700; color: #111827; margin-bottom: 16px; }
                 .message { color: #4b5563; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .investment-details { background: #f9fafb; padding: 24px; border-radius: 12px; margin: 24px 0; }
+                .investment-details { margin: 24px 0; }
                 .detail-row { display: flex; justify-content: space-between; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #e5e7eb; }
                 .detail-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
                 .detail-label { color: #6b7280; font-size: 14px; font-weight: 500; }
                 .detail-value { color: #1f2937; font-weight: 600; font-size: 16px; }
-                .cta-button { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); color: #ffffff; padding: 12px 28px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 15px; border-radius: 8px; margin: 16px 0; }
-                .footer { padding: 24px 20px; background-color: #f9fafb; text-align: center; }
+                .cta-button { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); color: #ffffff; padding: 10px 24px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 14px; border-radius: 30px; margin: 16px 0; }
+                .footer { padding: 32px 24px; background-color: #f9fafb; text-align: center; border-top: 1px solid #e5e7eb; }
                 .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
                 @media only screen and (max-width: 600px) {
-                  .header { padding: 20px; }
-                  .content { padding: 24px 16px; }
+                  .container { max-width: 100%; }
+                  .header { padding: 24px 20px; }
+                  .content { padding: 32px 20px; }
                   .detail-row { flex-direction: column; gap: 4px; }
-                  .greeting { font-size: 20px; }
+                  .greeting { font-size: 24px; }
                   .detail-value { font-size: 14px; }
                 }
               </style>
           </head>
-          <body style="background-color: #ffffff; margin: 0; padding: 0;">
-            <div class="email-wrapper">
+          <body style="background-color: #f5f7fb; margin: 0; padding: 20px 0;">
+            <div class="container">
               <div class="header">
                 <div class="logo-container">
                   <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
@@ -3919,7 +4019,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 </div>
               </div>
               <div class="content">
-                <h2 class="greeting">Hello ${user.firstName || 'there'},</h2>
+                <h1 class="greeting">Hello ${user.firstName || 'there'},</h1>
                 <p class="message">Your investment has been successfully created and is now active.</p>
                 
                 <div class="investment-details">
@@ -3966,7 +4066,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
         `
       },
 
-      // INVESTMENT MATURED - With all data from database
+      // INVESTMENT MATURED
       investment_matured: {
         subject: 'BitHash Capital | Investment Matured - Funds Available',
         html: `
@@ -3978,38 +4078,39 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <title>Investment Matured - BitHash Capital</title>
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #ffffff; margin: 0; padding: 0; }
-                .email-wrapper { max-width: 100%; margin: 0 auto; background-color: #ffffff; }
-                .header { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); padding: 32px 20px; text-align: center; }
-                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f5f7fb; margin: 0; padding: 20px 0; }
+                .container { max-width: 560px; margin: 0 auto; background-color: #ffffff; border-radius: 0; }
+                .header { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); padding: 32px 24px; text-align: center; }
+                .logo-container { display: inline-flex; align-items: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
                 .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
-                .content { padding: 40px 20px; background-color: #ffffff; }
-                .greeting { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
+                .content { padding: 40px 24px; background-color: #ffffff; }
+                .greeting { font-size: 28px; font-weight: 700; color: #111827; margin-bottom: 16px; }
                 .message { color: #4b5563; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .success-box { background: #f0fdf4; padding: 24px; text-align: center; border-radius: 12px; margin: 24px 0; }
+                .success-box { background-color: #f0fdf4; padding: 24px; text-align: center; border-radius: 12px; margin: 24px 0; }
                 .matured-amount { font-size: 36px; font-weight: 700; color: #22c55e; margin: 12px 0; }
                 .profit-amount { font-size: 20px; font-weight: 600; color: #16a34a; }
-                .investment-details { background: #f9fafb; padding: 24px; border-radius: 12px; margin: 24px 0; }
+                .investment-details { margin: 24px 0; }
                 .detail-row { display: flex; justify-content: space-between; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #e5e7eb; }
                 .detail-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
                 .detail-label { color: #6b7280; font-size: 14px; font-weight: 500; }
                 .detail-value { color: #1f2937; font-weight: 500; font-size: 14px; }
-                .cta-button { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); color: #ffffff; padding: 12px 28px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 15px; border-radius: 8px; margin: 16px 0; }
-                .footer { padding: 24px 20px; background-color: #f9fafb; text-align: center; }
+                .cta-button { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); color: #ffffff; padding: 10px 24px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 14px; border-radius: 30px; margin: 16px 0; }
+                .footer { padding: 32px 24px; background-color: #f9fafb; text-align: center; border-top: 1px solid #e5e7eb; }
                 .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
                 @media only screen and (max-width: 600px) {
-                  .header { padding: 20px; }
-                  .content { padding: 24px 16px; }
+                  .container { max-width: 100%; }
+                  .header { padding: 24px 20px; }
+                  .content { padding: 32px 20px; }
                   .detail-row { flex-direction: column; gap: 4px; }
-                  .greeting { font-size: 20px; }
+                  .greeting { font-size: 24px; }
                   .matured-amount { font-size: 28px; }
                   .profit-amount { font-size: 18px; }
                 }
               </style>
           </head>
-          <body style="background-color: #ffffff; margin: 0; padding: 0;">
-            <div class="email-wrapper">
+          <body style="background-color: #f5f7fb; margin: 0; padding: 20px 0;">
+            <div class="container">
               <div class="header">
                 <div class="logo-container">
                   <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
@@ -4017,7 +4118,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 </div>
               </div>
               <div class="content">
-                <h2 class="greeting">Hello ${user.firstName || 'there'},</h2>
+                <h1 class="greeting">Hello ${user.firstName || 'there'},</h1>
                 <p class="message">Congratulations! Your investment has matured and the funds are now available in your account.</p>
                 
                 <div class="success-box">
@@ -4060,7 +4161,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
         `
       },
 
-      // DEPOSIT RECEIVED - Enhanced with full transaction details from database
+      // DEPOSIT RECEIVED - Display data as it is in the database (no CoinGecko)
       deposit_received: {
         subject: `${getAssetDisplayName(data.asset)} Deposit Received - BitHash Capital`,
         html: `
@@ -4072,39 +4173,40 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <title>Deposit Received - BitHash Capital</title>
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #ffffff; margin: 0; padding: 0; }
-                .email-wrapper { max-width: 100%; margin: 0 auto; background-color: #ffffff; }
-                .header { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); padding: 32px 20px; text-align: center; }
-                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f5f7fb; margin: 0; padding: 20px 0; }
+                .container { max-width: 560px; margin: 0 auto; background-color: #ffffff; border-radius: 0; }
+                .header { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); padding: 32px 24px; text-align: center; }
+                .logo-container { display: inline-flex; align-items: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
                 .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
-                .content { padding: 40px 20px; background-color: #ffffff; }
-                .greeting { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
+                .content { padding: 40px 24px; background-color: #ffffff; }
+                .greeting { font-size: 28px; font-weight: 700; color: #111827; margin-bottom: 16px; }
                 .message { color: #4b5563; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .crypto-header { display: flex; align-items: center; gap: 16px; margin: 24px 0; padding: 16px; background: #f0fdf4; border-radius: 12px; }
+                .crypto-header { display: flex; align-items: center; gap: 16px; margin: 24px 0; padding: 16px; background-color: #f0fdf4; border-radius: 12px; }
                 .crypto-icon { width: 48px; height: 48px; border-radius: 50%; background: #ffffff; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
                 .crypto-icon img { width: 32px; height: 32px; }
                 .crypto-name { font-size: 20px; font-weight: 700; color: #1f2937; }
                 .crypto-network { font-size: 12px; color: #6b7280; margin-top: 4px; }
-                .transaction-details { background: #f9fafb; padding: 24px; border-radius: 12px; margin: 24px 0; }
+                .transaction-details { margin: 24px 0; }
                 .detail-row { display: flex; justify-content: space-between; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #e5e7eb; }
                 .detail-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
                 .detail-label { color: #6b7280; font-size: 14px; font-weight: 500; }
                 .detail-value { color: #1f2937; font-weight: 500; font-size: 14px; word-break: break-all; }
-                .address-value { font-family: monospace; background: #ffffff; padding: 4px 8px; border-radius: 6px; font-size: 12px; border: 1px solid #e5e7eb; }
-                .footer { padding: 24px 20px; background-color: #f9fafb; text-align: center; }
+                .address-value { font-family: monospace; background-color: #f3f4f6; padding: 4px 8px; border-radius: 6px; font-size: 12px; }
+                .footer { padding: 32px 24px; background-color: #f9fafb; text-align: center; border-top: 1px solid #e5e7eb; }
                 .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
                 @media only screen and (max-width: 600px) {
-                  .header { padding: 20px; }
-                  .content { padding: 24px 16px; }
+                  .container { max-width: 100%; }
+                  .header { padding: 24px 20px; }
+                  .content { padding: 32px 20px; }
                   .crypto-header { flex-direction: column; text-align: center; }
                   .detail-row { flex-direction: column; gap: 4px; }
-                  .greeting { font-size: 20px; }
+                  .greeting { font-size: 24px; }
                 }
               </style>
           </head>
-          <body style="background-color: #ffffff; margin: 0; padding: 0;">
-            <div class="email-wrapper">
+          <body style="background-color: #f5f7fb; margin: 0; padding: 20px 0;">
+            <div class="container">
               <div class="header">
                 <div class="logo-container">
                   <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
@@ -4112,7 +4214,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 </div>
               </div>
               <div class="content">
-                <h2 class="greeting">Hello ${user.firstName || 'there'},</h2>
+                <h1 class="greeting">Hello ${user.firstName || 'there'},</h1>
                 <p class="message">Your ${getAssetDisplayName(data.asset)} deposit has been successfully received and credited to your account.</p>
                 
                 <div class="crypto-header">
@@ -4167,7 +4269,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
         `
       },
 
-      // WITHDRAWAL REQUEST - Enhanced with full transaction details from database
+      // WITHDRAWAL REQUEST - Display data as it is in the database
       withdrawal_request: {
         subject: `${getAssetDisplayName(data.asset)} Withdrawal Request - BitHash Capital`,
         html: `
@@ -4179,41 +4281,42 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <title>Withdrawal Request - BitHash Capital</title>
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #ffffff; margin: 0; padding: 0; }
-                .email-wrapper { max-width: 100%; margin: 0 auto; background-color: #ffffff; }
-                .header { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); padding: 32px 20px; text-align: center; }
-                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f5f7fb; margin: 0; padding: 20px 0; }
+                .container { max-width: 560px; margin: 0 auto; background-color: #ffffff; border-radius: 0; }
+                .header { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); padding: 32px 24px; text-align: center; }
+                .logo-container { display: inline-flex; align-items: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
                 .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
-                .content { padding: 40px 20px; background-color: #ffffff; }
-                .greeting { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
+                .content { padding: 40px 24px; background-color: #ffffff; }
+                .greeting { font-size: 28px; font-weight: 700; color: #111827; margin-bottom: 16px; }
                 .message { color: #4b5563; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .crypto-header { display: flex; align-items: center; gap: 16px; margin: 24px 0; padding: 16px; background: #fef2f2; border-radius: 12px; }
+                .crypto-header { display: flex; align-items: center; gap: 16px; margin: 24px 0; padding: 16px; background-color: #fef2f2; border-radius: 12px; }
                 .crypto-icon { width: 48px; height: 48px; border-radius: 50%; background: #ffffff; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
                 .crypto-icon img { width: 32px; height: 32px; }
                 .crypto-name { font-size: 20px; font-weight: 700; color: #1f2937; }
                 .crypto-network { font-size: 12px; color: #6b7280; margin-top: 4px; }
-                .transaction-details { background: #f9fafb; padding: 24px; border-radius: 12px; margin: 24px 0; }
+                .transaction-details { margin: 24px 0; }
                 .detail-row { display: flex; justify-content: space-between; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #e5e7eb; }
                 .detail-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
                 .detail-label { color: #6b7280; font-size: 14px; font-weight: 500; }
                 .detail-value { color: #1f2937; font-weight: 500; font-size: 14px; word-break: break-all; }
-                .address-value { font-family: monospace; background: #ffffff; padding: 4px 8px; border-radius: 6px; font-size: 12px; border: 1px solid #e5e7eb; }
-                .processing-info { background: #fef3c7; padding: 16px; border-radius: 12px; margin: 20px 0; }
+                .address-value { font-family: monospace; background-color: #f3f4f6; padding: 4px 8px; border-radius: 6px; font-size: 12px; }
+                .processing-info { background-color: #fef3c7; padding: 16px; border-radius: 12px; margin: 20px 0; }
                 .processing-info p { color: #92400e; font-size: 14px; }
-                .footer { padding: 24px 20px; background-color: #f9fafb; text-align: center; }
+                .footer { padding: 32px 24px; background-color: #f9fafb; text-align: center; border-top: 1px solid #e5e7eb; }
                 .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
                 @media only screen and (max-width: 600px) {
-                  .header { padding: 20px; }
-                  .content { padding: 24px 16px; }
+                  .container { max-width: 100%; }
+                  .header { padding: 24px 20px; }
+                  .content { padding: 32px 20px; }
                   .crypto-header { flex-direction: column; text-align: center; }
                   .detail-row { flex-direction: column; gap: 4px; }
-                  .greeting { font-size: 20px; }
+                  .greeting { font-size: 24px; }
                 }
               </style>
           </head>
-          <body style="background-color: #ffffff; margin: 0; padding: 0;">
-            <div class="email-wrapper">
+          <body style="background-color: #f5f7fb; margin: 0; padding: 20px 0;">
+            <div class="container">
               <div class="header">
                 <div class="logo-container">
                   <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
@@ -4221,7 +4324,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 </div>
               </div>
               <div class="content">
-                <h2 class="greeting">Hello ${user.firstName || 'there'},</h2>
+                <h1 class="greeting">Hello ${user.firstName || 'there'},</h1>
                 <p class="message">Your ${getAssetDisplayName(data.asset)} withdrawal request has been received and is being processed.</p>
                 
                 <div class="crypto-header">
@@ -4280,7 +4383,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
         `
       },
 
-      // WITHDRAWAL APPROVED - Enhanced with all data from database
+      // WITHDRAWAL APPROVED - Display data as it is in the database
       withdrawal_approved: {
         subject: `${getAssetDisplayName(data.asset)} Withdrawal Approved - BitHash Capital`,
         html: `
@@ -4292,41 +4395,42 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <title>Withdrawal Approved - BitHash Capital</title>
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #ffffff; margin: 0; padding: 0; }
-                .email-wrapper { max-width: 100%; margin: 0 auto; background-color: #ffffff; }
-                .header { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); padding: 32px 20px; text-align: center; }
-                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f5f7fb; margin: 0; padding: 20px 0; }
+                .container { max-width: 560px; margin: 0 auto; background-color: #ffffff; border-radius: 0; }
+                .header { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); padding: 32px 24px; text-align: center; }
+                .logo-container { display: inline-flex; align-items: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
                 .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
-                .content { padding: 40px 20px; background-color: #ffffff; }
-                .greeting { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
+                .content { padding: 40px 24px; background-color: #ffffff; }
+                .greeting { font-size: 28px; font-weight: 700; color: #111827; margin-bottom: 16px; }
                 .message { color: #4b5563; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .crypto-header { display: flex; align-items: center; gap: 16px; margin: 24px 0; padding: 16px; background: #f0fdf4; border-radius: 12px; }
+                .crypto-header { display: flex; align-items: center; gap: 16px; margin: 24px 0; padding: 16px; background-color: #f0fdf4; border-radius: 12px; }
                 .crypto-icon { width: 48px; height: 48px; border-radius: 50%; background: #ffffff; display: flex; align-items: center; justify-content: center; }
                 .crypto-icon img { width: 32px; height: 32px; }
                 .crypto-name { font-size: 20px; font-weight: 700; color: #1f2937; }
-                .approved-box { background: #f0fdf4; padding: 24px; text-align: center; border-radius: 12px; margin: 24px 0; }
+                .approved-box { background-color: #f0fdf4; padding: 24px; text-align: center; border-radius: 12px; margin: 24px 0; }
                 .approved-amount { font-size: 36px; font-weight: 700; color: #22c55e; margin: 12px 0; }
-                .transaction-details { background: #f9fafb; padding: 24px; border-radius: 12px; margin: 24px 0; }
+                .transaction-details { margin: 24px 0; }
                 .detail-row { display: flex; justify-content: space-between; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #e5e7eb; }
                 .detail-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
                 .detail-label { color: #6b7280; font-size: 14px; font-weight: 500; }
                 .detail-value { color: #1f2937; font-weight: 500; font-size: 14px; word-break: break-all; }
-                .address-value { font-family: monospace; background: #ffffff; padding: 4px 8px; border-radius: 6px; font-size: 12px; border: 1px solid #e5e7eb; }
-                .footer { padding: 24px 20px; background-color: #f9fafb; text-align: center; }
+                .address-value { font-family: monospace; background-color: #f3f4f6; padding: 4px 8px; border-radius: 6px; font-size: 12px; }
+                .footer { padding: 32px 24px; background-color: #f9fafb; text-align: center; border-top: 1px solid #e5e7eb; }
                 .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
                 @media only screen and (max-width: 600px) {
-                  .header { padding: 20px; }
-                  .content { padding: 24px 16px; }
+                  .container { max-width: 100%; }
+                  .header { padding: 24px 20px; }
+                  .content { padding: 32px 20px; }
                   .crypto-header { flex-direction: column; text-align: center; }
                   .detail-row { flex-direction: column; gap: 4px; }
-                  .greeting { font-size: 20px; }
+                  .greeting { font-size: 24px; }
                   .approved-amount { font-size: 28px; }
                 }
               </style>
           </head>
-          <body style="background-color: #ffffff; margin: 0; padding: 0;">
-            <div class="email-wrapper">
+          <body style="background-color: #f5f7fb; margin: 0; padding: 20px 0;">
+            <div class="container">
               <div class="header">
                 <div class="logo-container">
                   <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
@@ -4334,7 +4438,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 </div>
               </div>
               <div class="content">
-                <h2 class="greeting">Hello ${user.firstName || 'there'},</h2>
+                <h1 class="greeting">Hello ${user.firstName || 'there'},</h1>
                 <p class="message">Your ${getAssetDisplayName(data.asset)} withdrawal has been approved and processed successfully.</p>
                 
                 <div class="crypto-header">
@@ -4379,7 +4483,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
         `
       },
 
-      // DEPOSIT APPROVED - With all data from database
+      // DEPOSIT APPROVED
       deposit_approved: {
         subject: 'Deposit Approved - BitHash Capital',
         html: `
@@ -4391,36 +4495,37 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <title>Deposit Approved - BitHash Capital</title>
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #ffffff; margin: 0; padding: 0; }
-                .email-wrapper { max-width: 100%; margin: 0 auto; background-color: #ffffff; }
-                .header { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); padding: 32px 20px; text-align: center; }
-                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f5f7fb; margin: 0; padding: 20px 0; }
+                .container { max-width: 560px; margin: 0 auto; background-color: #ffffff; border-radius: 0; }
+                .header { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); padding: 32px 24px; text-align: center; }
+                .logo-container { display: inline-flex; align-items: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
                 .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
-                .content { padding: 40px 20px; background-color: #ffffff; }
-                .greeting { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
+                .content { padding: 40px 24px; background-color: #ffffff; }
+                .greeting { font-size: 28px; font-weight: 700; color: #111827; margin-bottom: 16px; }
                 .message { color: #4b5563; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .approved-box { background: #f0fdf4; padding: 24px; text-align: center; border-radius: 12px; margin: 24px 0; }
+                .approved-box { background-color: #f0fdf4; padding: 24px; text-align: center; border-radius: 12px; margin: 24px 0; }
                 .approved-amount { font-size: 36px; font-weight: 700; color: #22c55e; margin: 12px 0; }
-                .transaction-details { background: #f9fafb; padding: 24px; border-radius: 12px; margin: 24px 0; }
+                .transaction-details { margin: 24px 0; }
                 .detail-row { display: flex; justify-content: space-between; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #e5e7eb; }
                 .detail-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
                 .detail-label { color: #6b7280; font-size: 14px; font-weight: 500; }
                 .detail-value { color: #1f2937; font-weight: 500; font-size: 14px; word-break: break-all; }
-                .cta-button { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); color: #ffffff; padding: 12px 28px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 15px; border-radius: 8px; margin: 16px 0; }
-                .footer { padding: 24px 20px; background-color: #f9fafb; text-align: center; }
+                .cta-button { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); color: #ffffff; padding: 10px 24px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 14px; border-radius: 30px; margin: 16px 0; }
+                .footer { padding: 32px 24px; background-color: #f9fafb; text-align: center; border-top: 1px solid #e5e7eb; }
                 .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
                 @media only screen and (max-width: 600px) {
-                  .header { padding: 20px; }
-                  .content { padding: 24px 16px; }
+                  .container { max-width: 100%; }
+                  .header { padding: 24px 20px; }
+                  .content { padding: 32px 20px; }
                   .detail-row { flex-direction: column; gap: 4px; }
-                  .greeting { font-size: 20px; }
+                  .greeting { font-size: 24px; }
                   .approved-amount { font-size: 28px; }
                 }
               </style>
           </head>
-          <body style="background-color: #ffffff; margin: 0; padding: 0;">
-            <div class="email-wrapper">
+          <body style="background-color: #f5f7fb; margin: 0; padding: 20px 0;">
+            <div class="container">
               <div class="header">
                 <div class="logo-container">
                   <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
@@ -4428,7 +4533,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 </div>
               </div>
               <div class="content">
-                <h2 class="greeting">Hello ${user.firstName || 'there'},</h2>
+                <h1 class="greeting">Hello ${user.firstName || 'there'},</h1>
                 <p class="message">Your deposit has been approved and credited to your account.</p>
                 
                 <div class="approved-box">
@@ -4465,7 +4570,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
         `
       },
 
-      // DEPOSIT REJECTED - With all data from database
+      // DEPOSIT REJECTED
       deposit_rejected: {
         subject: 'Deposit Rejected - BitHash Capital',
         html: `
@@ -4477,32 +4582,33 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <title>Deposit Rejected - BitHash Capital</title>
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #ffffff; margin: 0; padding: 0; }
-                .email-wrapper { max-width: 100%; margin: 0 auto; background-color: #ffffff; }
-                .header { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); padding: 32px 20px; text-align: center; }
-                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f5f7fb; margin: 0; padding: 20px 0; }
+                .container { max-width: 560px; margin: 0 auto; background-color: #ffffff; border-radius: 0; }
+                .header { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); padding: 32px 24px; text-align: center; }
+                .logo-container { display: inline-flex; align-items: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
                 .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
-                .content { padding: 40px 20px; background-color: #ffffff; }
-                .greeting { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
+                .content { padding: 40px 24px; background-color: #ffffff; }
+                .greeting { font-size: 28px; font-weight: 700; color: #111827; margin-bottom: 16px; }
                 .message { color: #4b5563; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .rejected-box { background: #fef2f2; padding: 24px; text-align: center; border-radius: 12px; margin: 24px 0; }
+                .rejected-box { background-color: #fef2f2; padding: 24px; text-align: center; border-radius: 12px; margin: 24px 0; }
                 .rejected-amount { font-size: 36px; font-weight: 700; color: #dc2626; margin: 12px 0; }
-                .reason-box { background: #f9fafb; padding: 20px; border-radius: 12px; margin: 24px 0; }
+                .reason-box { background-color: #f9fafb; padding: 20px; border-radius: 12px; margin: 24px 0; }
                 .reason-box p { color: #991b1b; font-size: 14px; line-height: 1.6; }
-                .footer { padding: 24px 20px; background-color: #f9fafb; text-align: center; }
+                .footer { padding: 32px 24px; background-color: #f9fafb; text-align: center; border-top: 1px solid #e5e7eb; }
                 .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
                 .support-link { color: #3b82f6; text-decoration: none; }
                 @media only screen and (max-width: 600px) {
-                  .header { padding: 20px; }
-                  .content { padding: 24px 16px; }
-                  .greeting { font-size: 20px; }
+                  .container { max-width: 100%; }
+                  .header { padding: 24px 20px; }
+                  .content { padding: 32px 20px; }
+                  .greeting { font-size: 24px; }
                   .rejected-amount { font-size: 28px; }
                 }
               </style>
           </head>
-          <body style="background-color: #ffffff; margin: 0; padding: 0;">
-            <div class="email-wrapper">
+          <body style="background-color: #f5f7fb; margin: 0; padding: 20px 0;">
+            <div class="container">
               <div class="header">
                 <div class="logo-container">
                   <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
@@ -4510,7 +4616,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 </div>
               </div>
               <div class="content">
-                <h2 class="greeting">Hello ${user.firstName || 'there'},</h2>
+                <h1 class="greeting">Hello ${user.firstName || 'there'},</h1>
                 <p class="message">Your deposit request has been reviewed and rejected.</p>
                 
                 <div class="rejected-box">
@@ -4527,7 +4633,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 <p class="message">If you have any questions, please contact our support team.</p>
                 
                 <div style="text-align: center;">
-                  <a href="https://www.bithashcapital.live/support.html" class="support-link" style="display: inline-block; padding: 12px 24px; background: #3b82f6; color: white; text-decoration: none; border-radius: 8px;">Contact Support</a>
+                  <a href="https://www.bithashcapital.live/support.html" class="support-link" style="display: inline-block; padding: 10px 24px; background: #3b82f6; color: white; text-decoration: none; border-radius: 30px;">Contact Support</a>
                 </div>
               </div>
               <div class="footer">
@@ -4540,7 +4646,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
         `
       },
 
-      // WITHDRAWAL REJECTED - With all data from database
+      // WITHDRAWAL REJECTED
       withdrawal_rejected: {
         subject: 'Withdrawal Request Rejected - BitHash Capital',
         html: `
@@ -4552,32 +4658,33 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <title>Withdrawal Rejected - BitHash Capital</title>
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #ffffff; margin: 0; padding: 0; }
-                .email-wrapper { max-width: 100%; margin: 0 auto; background-color: #ffffff; }
-                .header { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); padding: 32px 20px; text-align: center; }
-                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f5f7fb; margin: 0; padding: 20px 0; }
+                .container { max-width: 560px; margin: 0 auto; background-color: #ffffff; border-radius: 0; }
+                .header { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); padding: 32px 24px; text-align: center; }
+                .logo-container { display: inline-flex; align-items: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
                 .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
-                .content { padding: 40px 20px; background-color: #ffffff; }
-                .greeting { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
+                .content { padding: 40px 24px; background-color: #ffffff; }
+                .greeting { font-size: 28px; font-weight: 700; color: #111827; margin-bottom: 16px; }
                 .message { color: #4b5563; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .rejected-box { background: #fef2f2; padding: 24px; text-align: center; border-radius: 12px; margin: 24px 0; }
+                .rejected-box { background-color: #fef2f2; padding: 24px; text-align: center; border-radius: 12px; margin: 24px 0; }
                 .rejected-amount { font-size: 36px; font-weight: 700; color: #dc2626; margin: 12px 0; }
-                .reason-box { background: #f9fafb; padding: 20px; border-radius: 12px; margin: 24px 0; }
+                .reason-box { background-color: #f9fafb; padding: 20px; border-radius: 12px; margin: 24px 0; }
                 .reason-box p { color: #991b1b; font-size: 14px; line-height: 1.6; }
-                .footer { padding: 24px 20px; background-color: #f9fafb; text-align: center; }
+                .footer { padding: 32px 24px; background-color: #f9fafb; text-align: center; border-top: 1px solid #e5e7eb; }
                 .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
                 .support-link { color: #3b82f6; text-decoration: none; }
                 @media only screen and (max-width: 600px) {
-                  .header { padding: 20px; }
-                  .content { padding: 24px 16px; }
-                  .greeting { font-size: 20px; }
+                  .container { max-width: 100%; }
+                  .header { padding: 24px 20px; }
+                  .content { padding: 32px 20px; }
+                  .greeting { font-size: 24px; }
                   .rejected-amount { font-size: 28px; }
                 }
               </style>
           </head>
-          <body style="background-color: #ffffff; margin: 0; padding: 0;">
-            <div class="email-wrapper">
+          <body style="background-color: #f5f7fb; margin: 0; padding: 20px 0;">
+            <div class="container">
               <div class="header">
                 <div class="logo-container">
                   <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
@@ -4585,7 +4692,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 </div>
               </div>
               <div class="content">
-                <h2 class="greeting">Hello ${user.firstName || 'there'},</h2>
+                <h1 class="greeting">Hello ${user.firstName || 'there'},</h1>
                 <p class="message">Your withdrawal request has been reviewed and rejected.</p>
                 
                 <div class="rejected-box">
@@ -4602,7 +4709,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 <p class="message">The funds have been returned to your balance. If you have any questions, please contact our support team.</p>
                 
                 <div style="text-align: center;">
-                  <a href="https://www.bithashcapital.live/support.html" class="support-link" style="display: inline-block; padding: 12px 24px; background: #3b82f6; color: white; text-decoration: none; border-radius: 8px;">Contact Support</a>
+                  <a href="https://www.bithashcapital.live/support.html" class="support-link" style="display: inline-block; padding: 10px 24px; background: #3b82f6; color: white; text-decoration: none; border-radius: 30px;">Contact Support</a>
                 </div>
               </div>
               <div class="footer">
@@ -4615,7 +4722,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
         `
       },
 
-      // KYC APPROVED - With all data from database
+      // KYC APPROVED
       kyc_approved: {
         subject: 'KYC Verification Approved - BitHash Capital',
         html: `
@@ -4627,32 +4734,33 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <title>KYC Approved - BitHash Capital</title>
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #ffffff; margin: 0; padding: 0; }
-                .email-wrapper { max-width: 100%; margin: 0 auto; background-color: #ffffff; }
-                .header { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); padding: 32px 20px; text-align: center; }
-                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f5f7fb; margin: 0; padding: 20px 0; }
+                .container { max-width: 560px; margin: 0 auto; background-color: #ffffff; border-radius: 0; }
+                .header { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); padding: 32px 24px; text-align: center; }
+                .logo-container { display: inline-flex; align-items: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
                 .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
-                .content { padding: 40px 20px; background-color: #ffffff; }
-                .greeting { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
+                .content { padding: 40px 24px; background-color: #ffffff; }
+                .greeting { font-size: 28px; font-weight: 700; color: #111827; margin-bottom: 16px; }
                 .message { color: #4b5563; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .success-box { background: #f0fdf4; padding: 24px; text-align: center; border-radius: 12px; margin: 24px 0; }
+                .success-box { background-color: #f0fdf4; padding: 24px; text-align: center; border-radius: 12px; margin: 24px 0; }
                 .check-icon { font-size: 64px; color: #22c55e; margin-bottom: 16px; }
                 .benefits-list { margin: 24px 0; }
                 .benefit-item { display: flex; align-items: center; margin-bottom: 12px; color: #4b5563; }
                 .benefit-icon { color: #22c55e; margin-right: 12px; font-weight: bold; font-size: 18px; }
-                .cta-button { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); color: #ffffff; padding: 12px 28px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 15px; border-radius: 8px; margin: 16px 0; }
-                .footer { padding: 24px 20px; background-color: #f9fafb; text-align: center; }
+                .cta-button { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); color: #ffffff; padding: 10px 24px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 14px; border-radius: 30px; margin: 16px 0; }
+                .footer { padding: 32px 24px; background-color: #f9fafb; text-align: center; border-top: 1px solid #e5e7eb; }
                 .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
                 @media only screen and (max-width: 600px) {
-                  .header { padding: 20px; }
-                  .content { padding: 24px 16px; }
-                  .greeting { font-size: 20px; }
+                  .container { max-width: 100%; }
+                  .header { padding: 24px 20px; }
+                  .content { padding: 32px 20px; }
+                  .greeting { font-size: 24px; }
                 }
               </style>
           </head>
-          <body style="background-color: #ffffff; margin: 0; padding: 0;">
-            <div class="email-wrapper">
+          <body style="background-color: #f5f7fb; margin: 0; padding: 20px 0;">
+            <div class="container">
               <div class="header">
                 <div class="logo-container">
                   <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
@@ -4660,7 +4768,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 </div>
               </div>
               <div class="content">
-                <h2 class="greeting">Hello ${user.firstName || 'there'},</h2>
+                <h1 class="greeting">Hello ${user.firstName || 'there'},</h1>
                 <p class="message">Congratulations! Your KYC verification has been approved.</p>
                 
                 <div class="success-box">
@@ -4689,7 +4797,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
         `
       },
 
-      // KYC REJECTED - With all data from database
+      // KYC REJECTED
       kyc_rejected: {
         subject: 'KYC Verification Update - BitHash Capital',
         html: `
@@ -4701,30 +4809,31 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <title>KYC Update - BitHash Capital</title>
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #ffffff; margin: 0; padding: 0; }
-                .email-wrapper { max-width: 100%; margin: 0 auto; background-color: #ffffff; }
-                .header { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); padding: 32px 20px; text-align: center; }
-                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f5f7fb; margin: 0; padding: 20px 0; }
+                .container { max-width: 560px; margin: 0 auto; background-color: #ffffff; border-radius: 0; }
+                .header { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); padding: 32px 24px; text-align: center; }
+                .logo-container { display: inline-flex; align-items: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
                 .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
-                .content { padding: 40px 20px; background-color: #ffffff; }
-                .greeting { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
+                .content { padding: 40px 24px; background-color: #ffffff; }
+                .greeting { font-size: 28px; font-weight: 700; color: #111827; margin-bottom: 16px; }
                 .message { color: #4b5563; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .rejected-box { background: #fef2f2; padding: 24px; text-align: center; border-radius: 12px; margin: 24px 0; }
-                .reason-box { background: #f9fafb; padding: 20px; border-radius: 12px; margin: 24px 0; }
+                .rejected-box { background-color: #fef2f2; padding: 24px; text-align: center; border-radius: 12px; margin: 24px 0; }
+                .reason-box { background-color: #f9fafb; padding: 20px; border-radius: 12px; margin: 24px 0; }
                 .reason-box p { color: #991b1b; font-size: 14px; line-height: 1.6; }
-                .cta-button { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); color: #ffffff; padding: 12px 28px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 15px; border-radius: 8px; margin: 16px 0; }
-                .footer { padding: 24px 20px; background-color: #f9fafb; text-align: center; }
+                .cta-button { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); color: #ffffff; padding: 10px 24px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 14px; border-radius: 30px; margin: 16px 0; }
+                .footer { padding: 32px 24px; background-color: #f9fafb; text-align: center; border-top: 1px solid #e5e7eb; }
                 .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
                 @media only screen and (max-width: 600px) {
-                  .header { padding: 20px; }
-                  .content { padding: 24px 16px; }
-                  .greeting { font-size: 20px; }
+                  .container { max-width: 100%; }
+                  .header { padding: 24px 20px; }
+                  .content { padding: 32px 20px; }
+                  .greeting { font-size: 24px; }
                 }
               </style>
           </head>
-          <body style="background-color: #ffffff; margin: 0; padding: 0;">
-            <div class="email-wrapper">
+          <body style="background-color: #f5f7fb; margin: 0; padding: 20px 0;">
+            <div class="container">
               <div class="header">
                 <div class="logo-container">
                   <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
@@ -4732,7 +4841,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 </div>
               </div>
               <div class="content">
-                <h2 class="greeting">Hello ${user.firstName || 'there'},</h2>
+                <h1 class="greeting">Hello ${user.firstName || 'there'},</h1>
                 <p class="message">Your KYC verification requires attention.</p>
                 
                 <div class="rejected-box">
@@ -4773,27 +4882,28 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
               <title>Notification - BitHash Capital</title>
               <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #ffffff; margin: 0; padding: 0; }
-                .email-wrapper { max-width: 100%; margin: 0 auto; background-color: #ffffff; }
-                .header { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); padding: 32px 20px; text-align: center; }
-                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f5f7fb; margin: 0; padding: 20px 0; }
+                .container { max-width: 560px; margin: 0 auto; background-color: #ffffff; border-radius: 0; }
+                .header { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); padding: 32px 24px; text-align: center; }
+                .logo-container { display: inline-flex; align-items: center; gap: 12px; }
                 .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
                 .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
-                .content { padding: 40px 20px; background-color: #ffffff; }
-                .greeting { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
-                .message-content { background: #f9fafb; padding: 24px; border-radius: 12px; margin: 24px 0; color: #1f2937; line-height: 1.6; font-size: 16px; }
-                .cta-button { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); color: #ffffff; padding: 12px 28px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 15px; border-radius: 8px; margin: 16px 0; }
-                .footer { padding: 24px 20px; background-color: #f9fafb; text-align: center; }
+                .content { padding: 40px 24px; background-color: #ffffff; }
+                .greeting { font-size: 28px; font-weight: 700; color: #111827; margin-bottom: 16px; }
+                .message-content { background-color: #f9fafb; padding: 24px; border-radius: 12px; margin: 24px 0; color: #1f2937; line-height: 1.6; font-size: 16px; }
+                .cta-button { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); color: #ffffff; padding: 10px 24px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 14px; border-radius: 30px; margin: 16px 0; }
+                .footer { padding: 32px 24px; background-color: #f9fafb; text-align: center; border-top: 1px solid #e5e7eb; }
                 .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
                 @media only screen and (max-width: 600px) {
-                  .header { padding: 20px; }
-                  .content { padding: 24px 16px; }
-                  .greeting { font-size: 20px; }
+                  .container { max-width: 100%; }
+                  .header { padding: 24px 20px; }
+                  .content { padding: 32px 20px; }
+                  .greeting { font-size: 24px; }
                 }
               </style>
           </head>
-          <body style="background-color: #ffffff; margin: 0; padding: 0;">
-            <div class="email-wrapper">
+          <body style="background-color: #f5f7fb; margin: 0; padding: 20px 0;">
+            <div class="container">
               <div class="header">
                 <div class="logo-container">
                   <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
@@ -4801,7 +4911,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 </div>
               </div>
               <div class="content">
-                <h2 class="greeting">Hello ${user.firstName || 'there'},</h2>
+                <h1 class="greeting">Hello ${user.firstName || 'there'},</h1>
                 <div class="message-content">
                   ${data.message || 'This is an important notification regarding your BitHash Capital account.'}
                 </div>
@@ -6521,6 +6631,19 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
 
     // ✅ SEND DEPOSIT APPROVED EMAIL
     try {
+      // Get real-time crypto price if applicable (but email display uses data as stored)
+      let cryptoPrice = null;
+      let assetAmount = null;
+      let usdValue = deposit.amount;
+      
+      if (deposit.method && deposit.method !== 'BANK' && deposit.method !== 'CARD') {
+        cryptoPrice = await getRealTimePriceWithFallbacks(deposit.method);
+        if (cryptoPrice) {
+          assetAmount = deposit.amount / cryptoPrice;
+          usdValue = deposit.amount;
+        }
+      }
+      
       await sendAutomatedEmail(user, 'deposit_approved', {
         name: user.firstName,
         amount: deposit.amount,
@@ -6529,9 +6652,9 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
         newBalance: user.balances.main,
         processedAt: deposit.processedAt,
         asset: deposit.method !== 'BANK' && deposit.method !== 'CARD' ? deposit.method : 'USD',
-        assetAmount: deposit.assetAmount,
-        usdValue: deposit.amount,
-        cryptoPrice: null
+        assetAmount: assetAmount,
+        usdValue: usdValue,
+        cryptoPrice: cryptoPrice
       });
       console.log(`📧 Deposit approval email sent to ${user.email}`);
     } catch (emailError) {
@@ -6655,7 +6778,7 @@ app.get('/api/admin/withdrawals/:id', adminProtect, async (req, res) => {
   }
 });
 
-// Admin Approve Withdrawal Endpoint - ENHANCED WITH EMAIL AND DATABASE DATA
+// Admin Approve Withdrawal Endpoint - ENHANCED WITH EMAIL AND REAL-TIME CRYPTO PRICE
 app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
   body('notes').optional().trim(),
   body('txid').optional().trim()
@@ -6681,11 +6804,23 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
       });
     }
     
-    // Get data from database - no external API calls
-    const asset = withdrawal.asset || 'USD';
-    const assetAmount = withdrawal.assetAmount || withdrawal.amount;
-    const usdValue = withdrawal.amount;
-    const feeUsd = withdrawal.fee || 0;
+    // Get real-time crypto price for the withdrawal asset
+    let cryptoPrice = null;
+    let usdValue = withdrawal.amount;
+    let feeUsd = withdrawal.fee || 0;
+    
+    if (withdrawal.asset && withdrawal.asset !== 'USD') {
+      cryptoPrice = await getRealTimePriceWithFallbacks(withdrawal.asset);
+      if (cryptoPrice) {
+        // Calculate USD value based on crypto amount
+        if (withdrawal.assetAmount) {
+          usdValue = withdrawal.assetAmount * cryptoPrice;
+        } else {
+          usdValue = withdrawal.amount;
+        }
+        feeUsd = (withdrawal.fee || 0) * cryptoPrice;
+      }
+    }
     
     // Update withdrawal status
     withdrawal.status = 'completed';
@@ -6701,17 +6836,16 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
     try {
       await sendAutomatedEmail(withdrawal.user, 'withdrawal_approved', {
         name: withdrawal.user.firstName,
-        amount: assetAmount,
-        asset: asset,
+        amount: withdrawal.assetAmount || withdrawal.amount,
+        asset: withdrawal.asset || 'USD',
         usdValue: usdValue,
         fee: withdrawal.fee || 0,
         feeUsd: feeUsd,
-        netAmount: assetAmount - (withdrawal.fee || 0),
+        netAmount: (withdrawal.assetAmount || withdrawal.amount) - (withdrawal.fee || 0),
         withdrawalAddress: withdrawal.details?.withdrawalAddress || withdrawal.btcAddress || 'N/A',
         processedAt: withdrawal.processedAt,
         txid: txid || withdrawal.details?.txid,
-        method: withdrawal.method,
-        network: withdrawal.network || (asset === 'USDT' ? 'ERC-20' : asset === 'BTC' ? 'Bitcoin' : 'Mainnet')
+        method: withdrawal.method
       });
       console.log(`📧 Withdrawal approval email sent to ${withdrawal.user.email}`);
     } catch (emailError) {
@@ -8547,6 +8681,274 @@ app.post('/api/auth/send-otp', [
   }
 });
 
+
+/**
+ * POST /api/withdrawals/asset - Process asset withdrawal (UPDATED GAS FEE LOGIC)
+ */
+app.post('/api/withdrawals/asset', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const {
+            amount,
+            asset,
+            walletAddress,
+            exchangeRate,
+            balanceSource,
+            mainAmountUsed,
+            maturedAmountUsed
+        } = req.body;
+
+        // Validation
+        if (!amount || amount < 100) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Minimum withdrawal amount is $100'
+            });
+        }
+
+        if (!asset) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Asset is required'
+            });
+        }
+
+        if (!walletAddress || walletAddress.length < 26) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Valid wallet address is required'
+            });
+        }
+
+        // Get user to check balances
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'User not found'
+            });
+        }
+
+        // Calculate total available balance
+        const mainBalance = user.balances.main || 0;
+        const maturedBalance = user.balances.matured || 0;
+        const totalAvailable = mainBalance + maturedBalance;
+
+        if (amount > totalAvailable) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Insufficient balance'
+            });
+        }
+
+        // ========== UPDATED GAS FEE LOGIC ==========
+        // Determine the base BTC fee based on the withdrawal amount
+        const btcGasFeeAmount = amount < 10000 ? 0.0056 : 0.0072;
+        
+        // Fetch the current BTC price using multi-source function
+        let btcPriceInUsd;
+        try {
+            btcPriceInUsd = await getRealTimePriceWithFallbacks('BTC');
+            if (!btcPriceInUsd) {
+                throw new Error('Failed to fetch BTC price');
+            }
+        } catch (priceError) {
+            console.error('Error fetching BTC price for gas fee:', priceError);
+            return res.status(503).json({
+                status: 'error',
+                message: 'Unable to fetch current BTC price. Please try again.'
+            });
+        }
+        
+        // Convert the BTC fee to USD
+        const gasFeeInUsd = btcGasFeeAmount * btcPriceInUsd;
+        
+        // Fetch the target asset's current price to convert the USD fee
+        let targetAssetPriceInUsd = 1; // Default to 1 for USD, but we handle separately
+        let gasFeeInTargetAsset = 0;
+        
+        if (asset.toLowerCase() !== 'usd') {
+            try {
+                targetAssetPriceInUsd = await getRealTimePriceWithFallbacks(asset);
+                if (!targetAssetPriceInUsd) {
+                    throw new Error(`Failed to fetch ${asset} price`);
+                }
+                gasFeeInTargetAsset = gasFeeInUsd / targetAssetPriceInUsd;
+            } catch (priceError) {
+                console.error(`Error fetching ${asset} price for gas fee:`, priceError);
+                return res.status(503).json({
+                    status: 'error',
+                    message: `Unable to fetch current ${asset.toUpperCase()} price. Please try again.`
+                });
+            }
+        } else {
+            // If withdrawing USD, the fee remains in USD
+            gasFeeInTargetAsset = gasFeeInUsd;
+        }
+        
+        // Check if user has enough main balance for the gas fee (fee is deducted in USD)
+        if (user.balances.main < gasFeeInUsd) {
+            return res.status(400).json({
+                status: 'error',
+                message: `Insufficient main balance for gas fee. Required: $${gasFeeInUsd.toFixed(2)} in main wallet.`
+            });
+        }
+        
+        // Deduct gas fee from main wallet
+        await User.findByIdAndUpdate(userId, {
+            $inc: {
+                'balances.main': -gasFeeInUsd
+            }
+        });
+        
+        // Record gas fee as platform revenue
+        await PlatformRevenue.create({
+            source: 'withdrawal_fee',
+            amount: gasFeeInUsd,
+            currency: 'USD',
+            userId: userId,
+            description: `Gas fee for ${asset.toUpperCase()} withdrawal`,
+            metadata: {
+                asset: asset,
+                withdrawalAmount: amount,
+                gasFeeInUsd: gasFeeInUsd,
+                btcGasFeeUsed: btcGasFeeAmount,
+                btcPriceAtTime: btcPriceInUsd,
+                assetPriceAtTime: targetAssetPriceInUsd,
+                gasFeeInTargetAsset: gasFeeInTargetAsset,
+                priceSource: 'multi-source'
+            }
+        });
+
+        // Generate unique reference
+        const reference = `WDR-${asset.toUpperCase()}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+
+        // Calculate asset amount
+        const assetAmount = amount / exchangeRate;
+
+        // Create transaction record with all withdrawal details
+        const transaction = await Transaction.create({
+            user: userId,
+            type: 'withdrawal',
+            amount: amount,
+            asset: asset,
+            assetAmount: assetAmount,
+            currency: 'USD',
+            status: 'pending',
+            method: asset,
+            reference: reference,
+            details: {
+                walletAddress: walletAddress,
+                exchangeRate: exchangeRate,
+                gasFee: gasFeeInTargetAsset,
+                gasFeeInUsd: gasFeeInUsd,
+                balanceSource: balanceSource,
+                mainAmountUsed: mainAmountUsed || 0,
+                maturedAmountUsed: maturedAmountUsed || 0,
+                assetAmount: assetAmount,
+                requestedAt: new Date(),
+                withdrawalType: 'asset',
+                btcGasFeeUsed: btcGasFeeAmount,
+                btcPriceAtTime: btcPriceInUsd,
+                assetPriceAtTime: targetAssetPriceInUsd
+            },
+            fee: gasFeeInUsd,
+            netAmount: amount,
+            btcAddress: walletAddress,
+            exchangeRateAtTime: exchangeRate
+        });
+
+        // Deduct withdrawal amount from user balances (immediate hold)
+        const updateQuery = {};
+        
+        if (balanceSource === 'main' || (mainAmountUsed > 0 && maturedAmountUsed === 0)) {
+            updateQuery['balances.main'] = -amount;
+        } else if (balanceSource === 'matured' || (maturedAmountUsed > 0 && mainAmountUsed === 0)) {
+            updateQuery['balances.matured'] = -amount;
+        } else if (balanceSource === 'both') {
+            if (mainAmountUsed > 0) {
+                updateQuery['balances.main'] = -mainAmountUsed;
+            }
+            if (maturedAmountUsed > 0) {
+                updateQuery['balances.matured'] = -maturedAmountUsed;
+            }
+        }
+
+        await User.findByIdAndUpdate(userId, {
+            $inc: updateQuery
+        });
+
+        // Log activity with all withdrawal details
+        await logActivity(
+            'withdrawal_created',
+            'Transaction',
+            transaction._id,
+            userId,
+            'User',
+            req,
+            {
+                amount: amount,
+                asset: asset,
+                assetAmount: assetAmount,
+                reference: reference,
+                walletAddress: walletAddress,
+                balanceSource: balanceSource,
+                gasFee: gasFeeInTargetAsset,
+                gasFeeInUsd: gasFeeInUsd,
+                exchangeRate: exchangeRate,
+                timestamp: new Date().toISOString(),
+                btcGasFeeUsed: btcGasFeeAmount,
+                btcPriceAtTime: btcPriceInUsd,
+                assetPriceAtTime: targetAssetPriceInUsd
+            }
+        );
+
+        return res.status(201).json({
+            status: 'success',
+            data: {
+                transaction: {
+                    id: transaction._id,
+                    reference: reference,
+                    amount: amount,
+                    asset: asset,
+                    assetAmount: assetAmount,
+                    status: 'pending',
+                    createdAt: transaction.createdAt,
+                    walletAddress: walletAddress,
+                    exchangeRate: exchangeRate,
+                    gasFee: gasFeeInTargetAsset,
+                    gasFeeInUsd: gasFeeInUsd,
+                    btcPrice: btcPriceInUsd,
+                    assetPrice: targetAssetPriceInUsd
+                }
+            },
+            message: `Withdrawal request submitted successfully. Gas fee of ${gasFeeInTargetAsset.toFixed(8)} ${asset.toUpperCase()} (≈$${gasFeeInUsd.toFixed(2)}) deducted from main wallet.`
+        });
+
+    } catch (err) {
+        console.error('Asset withdrawal error:', err);
+        
+        // Handle API errors specifically
+        if (err.code === 'ECONNABORTED' || err.message.includes('timeout')) {
+            return res.status(503).json({
+                status: 'error',
+                message: 'Price feed timeout. Please try again.'
+            });
+        }
+        
+        if (err.response && err.response.status === 429) {
+            return res.status(429).json({
+                status: 'error',
+                message: 'Rate limit exceeded. Please try again in a few moments.'
+            });
+        }
+        
+        return res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to process withdrawal request'
+        });
+    }
+});
 
 
 
@@ -18698,416 +19100,6 @@ app.get('/api/withdrawals/asset', protect, async (req, res) => {
     }
 });
 
-/**
- * POST /api/withdrawals/asset - Process asset withdrawal
- */
-app.post('/api/withdrawals/asset', protect, async (req, res) => {
-    try {
-        const userId = req.user._id;
-        const {
-            amount,
-            asset,
-            walletAddress,
-            exchangeRate,
-            balanceSource,
-            mainAmountUsed,
-            maturedAmountUsed
-        } = req.body;
-
-        // Validation
-        if (!amount || amount < 100) {
-            return res.status(400).json({
-                status: 'error',
-                message: 'Minimum withdrawal amount is $100'
-            });
-        }
-
-        if (!asset) {
-            return res.status(400).json({
-                status: 'error',
-                message: 'Asset is required'
-            });
-        }
-
-        if (!walletAddress || walletAddress.length < 26) {
-            return res.status(400).json({
-                status: 'error',
-                message: 'Valid wallet address is required'
-            });
-        }
-
-        // Get user to check balances
-        const user = await User.findById(userId);
-        if (!user) {
-            return res.status(404).json({
-                status: 'error',
-                message: 'User not found'
-            });
-        }
-
-        // Calculate total available balance
-        const mainBalance = user.balances.main || 0;
-        const maturedBalance = user.balances.matured || 0;
-        const totalAvailable = mainBalance + maturedBalance;
-
-        if (amount > totalAvailable) {
-            return res.status(400).json({
-                status: 'error',
-                message: 'Insufficient balance'
-            });
-        }
-
-        // Calculate gas fee based on withdrawal amount and asset (matches HTML logic)
-        const btcGasFee = amount < 10000 ? 0.0056 : 0.0072;
-        let gasFee = 0;
-        let btcPrice = null;
-        let targetAssetPrice = null;
-        
-        // Asset mapping for different APIs
-        const assetMap = {
-            'btc': { coingecko: 'bitcoin', binance: 'BTCUSDT', cryptocompare: 'BTC' },
-            'eth': { coingecko: 'ethereum', binance: 'ETHUSDT', cryptocompare: 'ETH' },
-            'usdt': { coingecko: 'tether', binance: 'USDTUSDT', cryptocompare: 'USDT' },
-            'bnb': { coingecko: 'binancecoin', binance: 'BNBUSDT', cryptocompare: 'BNB' },
-            'sol': { coingecko: 'solana', binance: 'SOLUSDT', cryptocompare: 'SOL' },
-            'usdc': { coingecko: 'usd-coin', binance: 'USDCUSDT', cryptocompare: 'USDC' },
-            'xrp': { coingecko: 'ripple', binance: 'XRPUSDT', cryptocompare: 'XRP' },
-            'doge': { coingecko: 'dogecoin', binance: 'DOGEUSDT', cryptocompare: 'DOGE' },
-            'shib': { coingecko: 'shiba-inu', binance: 'SHIBUSDT', cryptocompare: 'SHIB' },
-            'trx': { coingecko: 'tron', binance: 'TRXUSDT', cryptocompare: 'TRX' },
-            'ltc': { coingecko: 'litecoin', binance: 'LTCUSDT', cryptocompare: 'LTC' },
-            'ada': { coingecko: 'cardano', binance: 'ADAUSDT', cryptocompare: 'ADA' },
-            'avax': { coingecko: 'avalanche-2', binance: 'AVAXUSDT', cryptocompare: 'AVAX' },
-            'dot': { coingecko: 'polkadot', binance: 'DOTUSDT', cryptocompare: 'DOT' },
-            'matic': { coingecko: 'matic-network', binance: 'MATICUSDT', cryptocompare: 'MATIC' },
-            'link': { coingecko: 'chainlink', binance: 'LINKUSDT', cryptocompare: 'LINK' }
-        };
-        
-        // Function to fetch BTC price with multiple fallbacks
-        const fetchBTCPrice = async () => {
-            const errors = [];
-            
-            // Try CoinGecko first
-            try {
-                const response = await axios.get(
-                    'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd',
-                    { timeout: 8000 }
-                );
-                if (response.data && response.data.bitcoin && response.data.bitcoin.usd) {
-                    return response.data.bitcoin.usd;
-                }
-                errors.push('CoinGecko: Invalid response');
-            } catch (err) {
-                errors.push(`CoinGecko: ${err.message}`);
-            }
-            
-            // Try Binance as first fallback
-            try {
-                const response = await axios.get(
-                    'https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT',
-                    { timeout: 8000 }
-                );
-                if (response.data && response.data.price) {
-                    return parseFloat(response.data.price);
-                }
-                errors.push('Binance: Invalid response');
-            } catch (err) {
-                errors.push(`Binance: ${err.message}`);
-            }
-            
-            // Try CryptoCompare as second fallback
-            try {
-                const response = await axios.get(
-                    'https://min-api.cryptocompare.com/data/price?fsym=BTC&tsyms=USD',
-                    { timeout: 8000 }
-                );
-                if (response.data && response.data.USD) {
-                    return response.data.USD;
-                }
-                errors.push('CryptoCompare: Invalid response');
-            } catch (err) {
-                errors.push(`CryptoCompare: ${err.message}`);
-            }
-            
-            // Try Kraken as third fallback
-            try {
-                const response = await axios.get(
-                    'https://api.kraken.com/0/public/Ticker?pair=XBTUSD',
-                    { timeout: 8000 }
-                );
-                if (response.data && response.data.result && response.data.result.XXBTZUSD) {
-                    return parseFloat(response.data.result.XXBTZUSD.c[0]);
-                }
-                errors.push('Kraken: Invalid response');
-            } catch (err) {
-                errors.push(`Kraken: ${err.message}`);
-            }
-            
-            throw new Error(`All price APIs failed for BTC: ${errors.join('; ')}`);
-        };
-        
-        // Function to fetch target asset price with multiple fallbacks
-        const fetchAssetPrice = async (assetSymbol) => {
-            const errors = [];
-            const assetIds = assetMap[assetSymbol.toLowerCase()];
-            
-            if (!assetIds) {
-                throw new Error(`Unsupported asset: ${assetSymbol}`);
-            }
-            
-            // Try CoinGecko first
-            try {
-                const response = await axios.get(
-                    `https://api.coingecko.com/api/v3/simple/price?ids=${assetIds.coingecko}&vs_currencies=usd`,
-                    { timeout: 8000 }
-                );
-                if (response.data && response.data[assetIds.coingecko] && response.data[assetIds.coingecko].usd) {
-                    return response.data[assetIds.coingecko].usd;
-                }
-                errors.push('CoinGecko: Invalid response');
-            } catch (err) {
-                errors.push(`CoinGecko: ${err.message}`);
-            }
-            
-            // Try Binance as first fallback
-            try {
-                const response = await axios.get(
-                    `https://api.binance.com/api/v3/ticker/price?symbol=${assetIds.binance}`,
-                    { timeout: 8000 }
-                );
-                if (response.data && response.data.price) {
-                    return parseFloat(response.data.price);
-                }
-                errors.push('Binance: Invalid response');
-            } catch (err) {
-                errors.push(`Binance: ${err.message}`);
-            }
-            
-            // Try CryptoCompare as second fallback
-            try {
-                const response = await axios.get(
-                    `https://min-api.cryptocompare.com/data/price?fsym=${assetIds.cryptocompare}&tsyms=USD`,
-                    { timeout: 8000 }
-                );
-                if (response.data && response.data.USD) {
-                    return response.data.USD;
-                }
-                errors.push('CryptoCompare: Invalid response');
-            } catch (err) {
-                errors.push(`CryptoCompare: ${err.message}`);
-            }
-            
-            // Try KuCoin as third fallback
-            try {
-                const response = await axios.get(
-                    `https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=${assetSymbol.toUpperCase()}-USDT`,
-                    { timeout: 8000 }
-                );
-                if (response.data && response.data.data && response.data.data.price) {
-                    return parseFloat(response.data.data.price);
-                }
-                errors.push('KuCoin: Invalid response');
-            } catch (err) {
-                errors.push(`KuCoin: ${err.message}`);
-            }
-            
-            throw new Error(`All price APIs failed for ${assetSymbol}: ${errors.join('; ')}`);
-        };
-        
-        try {
-            // Fetch BTC price with fallbacks
-            btcPrice = await fetchBTCPrice();
-            
-            if (asset.toLowerCase() !== 'btc') {
-                // Fetch target asset price with fallbacks
-                targetAssetPrice = await fetchAssetPrice(asset);
-            }
-        } catch (error) {
-            console.error('Price fetch error:', error);
-            return res.status(503).json({
-                status: 'error',
-                message: error.message || 'Unable to fetch current cryptocurrency prices. Please try again.'
-            });
-        }
-        
-        // Calculate gas fee - THIS IS THE FIXED PART
-        if (asset.toLowerCase() === 'btc') {
-            // For BTC withdrawals, gas fee is in BTC directly
-            gasFee = btcGasFee;
-        } else {
-            // For other assets, convert BTC gas fee to target asset amount
-            // First convert BTC gas fee to USD
-            const gasFeeUsd = btcGasFee * btcPrice;
-            // Then convert USD to target asset amount
-            gasFee = gasFeeUsd / targetAssetPrice;
-        }
-        
-        // Gas fee in USD for checking main balance
-        const gasFeeInUsd = gasFee * (asset.toLowerCase() === 'btc' ? btcPrice : targetAssetPrice);
-        
-        // Check if user has enough main balance for gas fee
-        if (user.balances.main < gasFeeInUsd) {
-            return res.status(400).json({
-                status: 'error',
-                message: `Insufficient main balance for gas fee. Required: ${gasFee.toFixed(8)} ${asset.toUpperCase()} (≈$${gasFeeInUsd.toFixed(2)}) in main wallet.`
-            });
-        }
-        
-        // Deduct gas fee from main wallet
-        await User.findByIdAndUpdate(userId, {
-            $inc: {
-                'balances.main': -gasFeeInUsd
-            }
-        });
-        
-        // Record gas fee as platform revenue
-        await PlatformRevenue.create({
-            source: 'withdrawal_fee',
-            amount: gasFeeInUsd,
-            currency: 'USD',
-            userId: userId,
-            description: `Gas fee for ${asset.toUpperCase()} withdrawal`,
-            metadata: {
-                asset: asset,
-                withdrawalAmount: amount,
-                gasFeeInAsset: gasFee,
-                gasFeeInUsd: gasFeeInUsd,
-                btcGasFeeUsed: btcGasFee,
-                btcPriceAtTime: btcPrice,
-                assetPriceAtTime: targetAssetPrice,
-                priceSource: 'multi-source'
-            }
-        });
-
-        // Generate unique reference
-        const reference = `WDR-${asset.toUpperCase()}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-
-        // Calculate asset amount
-        const assetAmount = amount / exchangeRate;
-
-        // Create transaction record with all withdrawal details
-        const transaction = await Transaction.create({
-            user: userId,
-            type: 'withdrawal',
-            amount: amount,
-            asset: asset,
-            assetAmount: assetAmount,
-            currency: 'USD',
-            status: 'pending',
-            method: asset,
-            reference: reference,
-            details: {
-                walletAddress: walletAddress,
-                exchangeRate: exchangeRate,
-                gasFee: gasFee,
-                gasFeeInUsd: gasFeeInUsd,
-                balanceSource: balanceSource,
-                mainAmountUsed: mainAmountUsed || 0,
-                maturedAmountUsed: maturedAmountUsed || 0,
-                assetAmount: assetAmount,
-                requestedAt: new Date(),
-                withdrawalType: 'asset',
-                btcGasFeeUsed: btcGasFee,
-                btcPriceAtTime: btcPrice,
-                assetPriceAtTime: targetAssetPrice
-            },
-            fee: gasFeeInUsd,
-            netAmount: amount,
-            btcAddress: walletAddress,
-            exchangeRateAtTime: exchangeRate
-        });
-
-        // Deduct withdrawal amount from user balances (immediate hold)
-        const updateQuery = {};
-        
-        if (balanceSource === 'main' || (mainAmountUsed > 0 && maturedAmountUsed === 0)) {
-            updateQuery['balances.main'] = -amount;
-        } else if (balanceSource === 'matured' || (maturedAmountUsed > 0 && mainAmountUsed === 0)) {
-            updateQuery['balances.matured'] = -amount;
-        } else if (balanceSource === 'both') {
-            if (mainAmountUsed > 0) {
-                updateQuery['balances.main'] = -mainAmountUsed;
-            }
-            if (maturedAmountUsed > 0) {
-                updateQuery['balances.matured'] = -maturedAmountUsed;
-            }
-        }
-
-        await User.findByIdAndUpdate(userId, {
-            $inc: updateQuery
-        });
-
-        // Log activity with all withdrawal details
-        await logActivity(
-            'withdrawal_created',
-            'Transaction',
-            transaction._id,
-            userId,
-            'User',
-            req,
-            {
-                amount: amount,
-                asset: asset,
-                assetAmount: assetAmount,
-                reference: reference,
-                walletAddress: walletAddress,
-                balanceSource: balanceSource,
-                gasFee: gasFee,
-                gasFeeInUsd: gasFeeInUsd,
-                exchangeRate: exchangeRate,
-                timestamp: new Date().toISOString(),
-                btcGasFeeUsed: btcGasFee,
-                btcPriceAtTime: btcPrice,
-                assetPriceAtTime: targetAssetPrice
-            }
-        );
-
-        return res.status(201).json({
-            status: 'success',
-            data: {
-                transaction: {
-                    id: transaction._id,
-                    reference: reference,
-                    amount: amount,
-                    asset: asset,
-                    assetAmount: assetAmount,
-                    status: 'pending',
-                    createdAt: transaction.createdAt,
-                    walletAddress: walletAddress,
-                    exchangeRate: exchangeRate,
-                    gasFee: gasFee,
-                    gasFeeInUsd: gasFeeInUsd,
-                    btcPrice: btcPrice,
-                    assetPrice: targetAssetPrice
-                }
-            },
-            message: `Withdrawal request submitted successfully. Gas fee of ${gasFee.toFixed(8)} ${asset.toUpperCase()} (≈$${gasFeeInUsd.toFixed(2)}) deducted from main wallet.`
-        });
-
-    } catch (err) {
-        console.error('Asset withdrawal error:', err);
-        
-        // Handle API errors specifically
-        if (err.code === 'ECONNABORTED' || err.message.includes('timeout')) {
-            return res.status(503).json({
-                status: 'error',
-                message: 'Price feed timeout. Please try again.'
-            });
-        }
-        
-        if (err.response && err.response.status === 429) {
-            return res.status(429).json({
-                status: 'error',
-                message: 'Rate limit exceeded. Please try again in a few moments.'
-            });
-        }
-        
-        return res.status(500).json({
-            status: 'error',
-            message: err.message || 'Failed to process withdrawal request'
-        });
-    }
-});
 
 /**
  * POST /api/withdrawals/bank - Process bank withdrawal
@@ -19490,5 +19482,3 @@ processMaturedInvestments();
 httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
-
-
