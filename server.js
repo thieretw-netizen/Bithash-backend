@@ -7053,6 +7053,10 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
 
 
 
+
+
+
+
 // Admin Activity Endpoint - FIXED VERSION with Real User IP and Location from Database
 app.get('/api/admin/activity', adminProtect, async (req, res) => {
   try {
@@ -7099,18 +7103,17 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
       let ipAddress = 'Unknown';
       let timestamp = activity.createdAt || activity.timestamp;
       let status = activity.status || 'success';
+      let locationDisplay = 'N/A';
       let locationData = {
         city: '',
         region: '',
         country: '',
-        fullLocation: 'N/A',
-        lat: null,
-        lon: null
+        fullLocation: 'N/A'
       };
 
       if (isUserLog) {
         // Handle UserLog entries - EXTRACT REAL IP AND LOCATION FROM DATABASE
-        console.log('Processing UserLog:', activity);
+        console.log('Processing UserLog:', JSON.stringify(activity, null, 2));
         
         // Get REAL user data with proper fallbacks
         if (activity.user && typeof activity.user === 'object') {
@@ -7130,43 +7133,68 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
         // EXTRACT REAL IP ADDRESS FROM DATABASE
         ipAddress = activity.ipAddress || activity.ip || 'Unknown';
         
-        // EXTRACT REAL LOCATION DATA FROM DATABASE (should have been captured at activity time)
+        // EXTRACT REAL LOCATION DATA FROM DATABASE
+        // The location is stored in the 'location' field as an object
         if (activity.location) {
-          // Location is stored as an object in the database
-          locationData.city = activity.location.city || '';
-          locationData.region = activity.location.region?.name || activity.location.region || '';
-          locationData.country = activity.location.country?.name || activity.location.country || '';
+          console.log('Found location data:', activity.location);
           
-          // Build full location string
-          const locationParts = [];
-          if (locationData.city) locationParts.push(locationData.city);
-          if (locationData.region) locationParts.push(locationData.region);
-          if (locationData.country) locationParts.push(locationData.country);
-          
-          locationData.fullLocation = locationParts.length > 0 ? locationParts.join(', ') : 'Unknown Location';
-          locationData.lat = activity.location.latitude || null;
-          locationData.lon = activity.location.longitude || null;
+          // Handle different location structures
+          if (typeof activity.location === 'object') {
+            // Extract city, region, country
+            const city = activity.location.city || '';
+            const region = activity.location.region || (activity.location.regionName) || (activity.location.region?.name) || '';
+            const country = activity.location.country || (activity.location.countryName) || (activity.location.country?.name) || '';
+            
+            locationData = {
+              city: city,
+              region: region,
+              country: country,
+              fullLocation: [city, region, country].filter(p => p && p !== 'Unknown').join(', ')
+            };
+            
+            locationDisplay = locationData.fullLocation || 'N/A';
+            
+            console.log(`Formatted location: ${locationDisplay}`);
+          }
         } else if (activity.metadata?.locationData) {
           // Fallback: check metadata for location
           const metaLoc = activity.metadata.locationData;
-          locationData.city = metaLoc.city || '';
-          locationData.region = metaLoc.region || '';
-          locationData.country = metaLoc.country || '';
+          const city = metaLoc.city || '';
+          const region = metaLoc.region || '';
+          const country = metaLoc.country || '';
           
-          const locationParts = [];
-          if (locationData.city) locationParts.push(locationData.city);
-          if (locationData.region) locationParts.push(locationData.region);
-          if (locationData.country) locationParts.push(locationData.country);
+          locationData = {
+            city: city,
+            region: region,
+            country: country,
+            fullLocation: [city, region, country].filter(p => p && p !== 'Unknown').join(', ')
+          };
           
-          locationData.fullLocation = locationParts.length > 0 ? locationParts.join(', ') : 'Unknown Location';
+          locationDisplay = locationData.fullLocation || 'N/A';
+        } else if (activity.changes?.locationData) {
+          // Another fallback location storage
+          const metaLoc = activity.changes.locationData;
+          const city = metaLoc.city || '';
+          const region = metaLoc.region || '';
+          const country = metaLoc.country || '';
+          
+          locationData = {
+            city: city,
+            region: region,
+            country: country,
+            fullLocation: [city, region, country].filter(p => p && p !== 'Unknown').join(', ')
+          };
+          
+          locationDisplay = locationData.fullLocation || 'N/A';
         } else {
-          // No location data in database - mark as unknown
-          locationData.fullLocation = 'Location not recorded';
+          // No location data in database - log the structure to debug
+          console.log('No location data found in activity. Activity keys:', Object.keys(activity));
+          locationDisplay = 'Location not recorded';
         }
         
       } else {
         // Handle SystemLog entries
-        console.log('Processing SystemLog:', activity);
+        console.log('Processing SystemLog:', JSON.stringify(activity, null, 2));
         
         if (activity.performedBy && typeof activity.performedBy === 'object') {
           if (activity.performedByModel === 'User') {
@@ -7188,22 +7216,50 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
         
         // Extract location from system log if available
         if (activity.location) {
-          locationData.city = activity.location.city || '';
-          locationData.region = activity.location.region || '';
-          locationData.country = activity.location.country || '';
+          const city = activity.location.city || '';
+          const region = activity.location.region || '';
+          const country = activity.location.country || '';
           
-          const locationParts = [];
-          if (locationData.city) locationParts.push(locationData.city);
-          if (locationData.region) locationParts.push(locationData.region);
-          if (locationData.country) locationParts.push(locationData.country);
+          locationData = {
+            city: city,
+            region: region,
+            country: country,
+            fullLocation: [city, region, country].filter(p => p && p !== 'Unknown').join(', ')
+          };
           
-          locationData.fullLocation = locationParts.length > 0 ? locationParts.join(', ') : 'Unknown Location';
+          locationDisplay = locationData.fullLocation || 'N/A';
+        } else if (activity.changes?.location) {
+          const city = activity.changes.location.city || '';
+          const region = activity.changes.location.region || '';
+          const country = activity.changes.location.country || '';
+          
+          locationData = {
+            city: city,
+            region: region,
+            country: country,
+            fullLocation: [city, region, country].filter(p => p && p !== 'Unknown').join(', ')
+          };
+          
+          locationDisplay = locationData.fullLocation || 'N/A';
         }
       }
 
       // Final safety check for user name
       if (!userData.name || userData.name === ' ' || userData.name === 'undefined undefined') {
         userData.name = 'System User';
+      }
+
+      // Determine activity type for styling
+      let activityType = getActivityType(action);
+      
+      // For admin-login actions, set proper type
+      if (action === 'admin-login' || action === 'admin_login') {
+        activityType = 'login';
+        // Ensure user name is set properly for admin
+        if (userData.name === 'System User' && currentAdmin) {
+          userData.name = currentAdmin.name || 'Admin';
+          userData.email = currentAdmin.email || 'admin@bithash.com';
+        }
       }
 
       return {
@@ -7215,16 +7271,11 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
           email: userData.email
         },
         action: action,
+        activityType: activityType,
         description: getActivityDescription(action, activity.metadata || activity.changes),
         ipAddress: ipAddress,
-        location: {
-          city: locationData.city,
-          region: locationData.region,
-          country: locationData.country,
-          fullLocation: locationData.fullLocation,
-          lat: locationData.lat,
-          lon: locationData.lon
-        },
+        location: locationDisplay,
+        locationData: locationData,
         status: status,
         type: isUserLog ? 'user_activity' : 'system_activity',
         metadata: activity.metadata || activity.changes || {}
@@ -7234,7 +7285,7 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
     // Get total count for pagination
     const totalCount = await UserLog.countDocuments() + await SystemLog.countDocuments();
 
-    console.log('Sending activities with location data:', activities.length);
+    console.log('Sending activities with location data:', activities.map(a => ({ action: a.action, location: a.location, user: a.user.name })));
 
     res.status(200).json({
       status: 'success',
@@ -7260,6 +7311,21 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
   }
 });
 
+// Helper function to get activity type for styling
+function getActivityType(action) {
+  const actionLower = (action || '').toLowerCase();
+  
+  if (actionLower.includes('login')) return 'login';
+  if (actionLower.includes('signup') || actionLower.includes('register')) return 'signup';
+  if (actionLower.includes('deposit')) return 'deposit';
+  if (actionLower.includes('withdrawal') || actionLower.includes('withdraw')) return 'withdrawal';
+  if (actionLower.includes('investment') && actionLower.includes('create')) return 'investment';
+  if (actionLower.includes('matured') || actionLower.includes('complete')) return 'matured';
+  if (actionLower.includes('logout')) return 'logout';
+  
+  return 'other';
+}
+
 // COMPREHENSIVE activity description helper
 function getActivityDescription(action, metadata) {
   const actionMap = {
@@ -7273,6 +7339,8 @@ function getActivityDescription(action, metadata) {
     'password_reset_request': 'Requested password reset',
     'password_reset_complete': 'Completed password reset',
     'failed_login': 'Failed login attempt',
+    'admin-login': 'Admin logged into dashboard',
+    'admin_login': 'Admin logged into dashboard',
     
     // Financial actions
     'deposit': 'Made a deposit',
@@ -7313,7 +7381,6 @@ function getActivityDescription(action, metadata) {
     'create_investment': 'Created investment',
     'complete_investment': 'Completed investment',
     'verify-admin': 'Admin session verified',
-    'admin_login': 'Admin logged in',
     
     // Admin actions
     'approve-deposit': 'Approved deposit',
@@ -7324,7 +7391,7 @@ function getActivityDescription(action, metadata) {
     'update-user': 'Updated user account'
   };
 
-  let description = actionMap[action] || `Performed ${action.replace(/_/g, ' ')}`;
+  let description = actionMap[action] || `Performed ${String(action || '').replace(/_/g, ' ')}`;
 
   // Add context from metadata if available
   if (metadata) {
@@ -7357,23 +7424,30 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
             .limit(20)
             .lean();
 
-        const formattedActivities = activities.map(activity => ({
-            id: activity._id,
-            timestamp: activity.createdAt,
-            user: activity.user ? {
-                name: `${activity.user.firstName} ${activity.user.lastName}`,
-                email: activity.user.email
-            } : { name: 'System', email: 'system' },
-            action: activity.action,
-            ipAddress: activity.ipAddress,
-            location: activity.location ? {
-                city: activity.location.city,
-                region: activity.location.region?.name || activity.location.region,
-                country: activity.location.country?.name || activity.location.country,
-                fullLocation: `${activity.location.city || ''} ${activity.location.region?.name || activity.location.region || ''} ${activity.location.country?.name || activity.location.country || ''}`.trim() || 'Unknown'
-            } : { fullLocation: 'Unknown' },
-            status: activity.status
-        }));
+        const formattedActivities = activities.map(activity => {
+            let locationDisplay = 'N/A';
+            
+            // Extract location from activity
+            if (activity.location) {
+                const city = activity.location.city || '';
+                const region = activity.location.region || (activity.location.regionName) || (activity.location.region?.name) || '';
+                const country = activity.location.country || (activity.location.countryName) || (activity.location.country?.name) || '';
+                locationDisplay = [city, region, country].filter(p => p && p !== 'Unknown').join(', ') || 'N/A';
+            }
+            
+            return {
+                id: activity._id,
+                timestamp: activity.createdAt,
+                user: activity.user ? {
+                    name: `${activity.user.firstName} ${activity.user.lastName}`,
+                    email: activity.user.email
+                } : { name: 'System', email: 'system' },
+                action: activity.action,
+                ipAddress: activity.ipAddress,
+                location: locationDisplay,
+                status: activity.status
+            };
+        });
 
         res.status(200).json({
             status: 'success',
@@ -7389,6 +7463,17 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
         });
     }
 });
+
+
+
+
+
+
+
+
+
+
+
 
 // Downline Management Endpoints
 
