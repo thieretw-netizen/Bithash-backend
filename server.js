@@ -7055,494 +7055,6 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
 
 
 
-// Admin Activity Endpoint - FIXED VERSION with REAL-TIME IP LOCATION
-app.get('/api/admin/activity', adminProtect, async (req, res) => {
-  try {
-    const { page = 1, limit = 10, type = 'all' } = req.query;
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-
-    console.log('Fetching admin activity...', { page, limit, type });
-
-    // Get BOTH UserLog and SystemLog data
-    const [userLogs, systemLogs] = await Promise.all([
-      UserLog.find({})
-        .populate('user', 'firstName lastName email')
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(parseInt(limit))
-        .lean(),
-      SystemLog.find({})
-        .populate('performedBy')
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(parseInt(limit))
-        .lean()
-    ]);
-
-    console.log(`Found ${userLogs.length} user logs and ${systemLogs.length} system logs`);
-
-    // Function to get real location from IP address using online APIs
-    const getLocationFromIP = async (ipAddress) => {
-      if (!ipAddress || ipAddress === 'Unknown' || ipAddress === '0.0.0.0' || ipAddress === '::1') {
-        return {
-          country: 'Unknown',
-          city: 'Unknown',
-          village: 'Unknown',
-          fullLocation: 'Unknown',
-          latitude: null,
-          longitude: null,
-          timezone: null,
-          isp: null
-        };
-      }
-
-      try {
-        console.log(`Looking up location for IP: ${ipAddress}`);
-        
-        // Try multiple IP geolocation services with fallbacks
-        const services = [
-          // ipinfo.io (primary)
-          async () => {
-            const token = process.env.IPINFO_TOKEN || 'b56ce6e91d732d';
-            const response = await axios.get(`https://ipinfo.io/${ipAddress}?token=${token}`, { timeout: 5000 });
-            if (response.data) {
-              const { city, region, country, loc, org, timezone } = response.data;
-              const [latitude, longitude] = loc ? loc.split(',').map(Number) : [null, null];
-              return {
-                country: country || 'Unknown',
-                city: city || 'Unknown',
-                village: city || 'Unknown', // ipinfo doesn't have village, use city
-                fullLocation: `${city || 'Unknown'}, ${region || 'Unknown'}, ${country || 'Unknown'}`,
-                latitude,
-                longitude,
-                timezone,
-                isp: org || null
-              };
-            }
-            return null;
-          },
-          // ipapi.co (fallback 1)
-          async () => {
-            const response = await axios.get(`https://ipapi.co/${ipAddress}/json/`, { timeout: 5000 });
-            if (response.data && !response.data.error) {
-              const { city, region, country_name, country_code, latitude, longitude, timezone, org } = response.data;
-              return {
-                country: country_name || country_code || 'Unknown',
-                city: city || 'Unknown',
-                village: city || 'Unknown',
-                fullLocation: `${city || 'Unknown'}, ${region || 'Unknown'}, ${country_name || country_code || 'Unknown'}`,
-                latitude: latitude || null,
-                longitude: longitude || null,
-                timezone: timezone || null,
-                isp: org || null
-              };
-            }
-            return null;
-          },
-          // freeipapi.com (fallback 2)
-          async () => {
-            const response = await axios.get(`https://freeipapi.com/api/json/${ipAddress}`, { timeout: 5000 });
-            if (response.data && response.data.ipAddress) {
-              const { cityName, regionName, countryName, latitude, longitude, timeZone, isp } = response.data;
-              return {
-                country: countryName || 'Unknown',
-                city: cityName || 'Unknown',
-                village: cityName || 'Unknown',
-                fullLocation: `${cityName || 'Unknown'}, ${regionName || 'Unknown'}, ${countryName || 'Unknown'}`,
-                latitude: latitude || null,
-                longitude: longitude || null,
-                timezone: timeZone || null,
-                isp: isp || null
-              };
-            }
-            return null;
-          },
-          // ip-api.com (fallback 3)
-          async () => {
-            const response = await axios.get(`http://ip-api.com/json/${ipAddress}`, { timeout: 5000 });
-            if (response.data && response.data.status === 'success') {
-              const { city, regionName, country, lat, lon, timezone, isp } = response.data;
-              return {
-                country: country || 'Unknown',
-                city: city || 'Unknown',
-                village: city || 'Unknown',
-                fullLocation: `${city || 'Unknown'}, ${regionName || 'Unknown'}, ${country || 'Unknown'}`,
-                latitude: lat || null,
-                longitude: lon || null,
-                timezone: timezone || null,
-                isp: isp || null
-              };
-            }
-            return null;
-          }
-        ];
-
-        // Try each service until one succeeds
-        for (const service of services) {
-          try {
-            const locationData = await service();
-            if (locationData && locationData.country !== 'Unknown') {
-              console.log(`Location found for IP ${ipAddress}:`, locationData.fullLocation);
-              return locationData;
-            }
-          } catch (err) {
-            console.log(`Service failed for IP ${ipAddress}:`, err.message);
-            continue;
-          }
-        }
-
-        console.log(`No location data found for IP ${ipAddress}, using defaults`);
-        return {
-          country: 'Unknown',
-          city: 'Unknown',
-          village: 'Unknown',
-          fullLocation: 'Unknown',
-          latitude: null,
-          longitude: null,
-          timezone: null,
-          isp: null
-        };
-      } catch (err) {
-        console.error(`Error getting location for IP ${ipAddress}:`, err.message);
-        return {
-          country: 'Unknown',
-          city: 'Unknown',
-          village: 'Unknown',
-          fullLocation: 'Unknown',
-          latitude: null,
-          longitude: null,
-          timezone: null,
-          isp: null
-        };
-      }
-    };
-
-    // Process each user log to get real-time location from IP
-    const enhancedUserLogs = [];
-    for (const log of userLogs) {
-      const ipAddress = log.ipAddress || 'Unknown';
-      let locationData = null;
-      
-      // Check if we already have location data stored in the log
-      if (log.location && log.location.country && log.location.country !== 'Unknown') {
-        // Use existing location data from database
-        locationData = {
-          country: log.location.country?.name || log.location.country || 'Unknown',
-          city: log.location.city || 'Unknown',
-          village: log.location.city || 'Unknown',
-          fullLocation: `${log.location.city || 'Unknown'}, ${log.location.region?.name || log.location.region || 'Unknown'}, ${log.location.country?.name || log.location.country || 'Unknown'}`,
-          latitude: log.location.latitude || null,
-          longitude: log.location.longitude || null,
-          timezone: log.location.timezone || null,
-          isp: log.location.isp || null
-        };
-        console.log(`Using existing location data from database for IP ${ipAddress}:`, locationData.fullLocation);
-      } else {
-        // Fetch real-time location from online API
-        locationData = await getLocationFromIP(ipAddress);
-        
-        // Optionally update the log with the fetched location data for future use
-        if (locationData.country !== 'Unknown') {
-          try {
-            await UserLog.updateOne(
-              { _id: log._id },
-              {
-                $set: {
-                  'location.country': { name: locationData.country, code: locationData.country.substring(0, 2) },
-                  'location.city': locationData.city,
-                  'location.region': { name: locationData.city, code: '' },
-                  'location.latitude': locationData.latitude,
-                  'location.longitude': locationData.longitude,
-                  'location.timezone': locationData.timezone,
-                  'location.isp': locationData.isp
-                }
-              }
-            );
-            console.log(`Updated location data for log ${log._id}`);
-          } catch (updateErr) {
-            console.error(`Failed to update location data for log ${log._id}:`, updateErr.message);
-          }
-        }
-      }
-      
-      enhancedUserLogs.push({ log, locationData });
-    }
-
-    // Combine and sort all activities by timestamp
-    const allActivities = [...enhancedUserLogs.map(({ log, locationData }) => ({ ...log, locationData })), ...systemLogs]
-      .sort((a, b) => new Date(b.createdAt || b.timestamp) - new Date(a.createdAt || a.timestamp))
-      .slice(0, parseInt(limit));
-
-    // Transform activities with PROPER user data mapping and enhanced location info
-    const activities = allActivities.map(activity => {
-      // Determine if it's a UserLog or SystemLog
-      const isUserLog = activity.user !== undefined;
-      const locationData = activity.locationData || {};
-      
-      let userData = {
-        id: 'system',
-        name: 'System',
-        email: 'system'
-      };
-      
-      let action = activity.action;
-      let ipAddress = 'Unknown';
-      let timestamp = activity.createdAt || activity.timestamp;
-      let status = activity.status || 'success';
-
-      if (isUserLog) {
-        // Handle UserLog entries
-        console.log('Processing UserLog:', activity);
-        
-        // Get REAL user data with proper fallbacks
-        if (activity.user && typeof activity.user === 'object') {
-          userData = {
-            id: activity.user._id || 'unknown',
-            name: `${activity.user.firstName || ''} ${activity.user.lastName || ''}`.trim() || 'Unknown User',
-            email: activity.user.email || 'Unknown Email'
-          };
-        } else if (activity.username) {
-          userData = {
-            id: activity.user || 'unknown',
-            name: activity.username,
-            email: activity.email || 'Unknown Email'
-          };
-        }
-        
-        ipAddress = activity.ipAddress || 'Unknown';
-        
-        // Build location information from fetched data
-        const locationInfo = {
-          ip: ipAddress,
-          country: locationData.country || 'Unknown',
-          city: locationData.city || 'Unknown',
-          village: locationData.village || locationData.city || 'Unknown',
-          fullLocation: locationData.fullLocation || 'Unknown',
-          latitude: locationData.latitude,
-          longitude: locationData.longitude,
-          timezone: locationData.timezone,
-          isp: locationData.isp
-        };
-        
-        // Store enhanced location data back to activity
-        activity.enhancedLocation = locationInfo;
-        
-      } else {
-        // Handle SystemLog entries
-        console.log('Processing SystemLog:', activity);
-        
-        if (activity.performedBy && typeof activity.performedBy === 'object') {
-          if (activity.performedByModel === 'User') {
-            userData = {
-              id: activity.performedBy._id || 'unknown',
-              name: `${activity.performedBy.firstName || ''} ${activity.performedBy.lastName || ''}`.trim() || 'Unknown User',
-              email: activity.performedBy.email || 'Unknown Email'
-            };
-          } else if (activity.performedByModel === 'Admin') {
-            userData = {
-              id: activity.performedBy._id || 'unknown',
-              name: activity.performedBy.name || 'Admin',
-              email: activity.performedBy.email || 'admin@system'
-            };
-          }
-        }
-        
-        ipAddress = activity.ip || 'Unknown';
-        
-        // For system logs, we might also want to get location if IP is available
-        let locationInfo = {
-          ip: ipAddress,
-          country: 'Unknown',
-          city: 'Unknown',
-          village: 'Unknown',
-          fullLocation: 'Unknown',
-          latitude: null,
-          longitude: null,
-          timezone: null,
-          isp: null
-        };
-        
-        if (ipAddress && ipAddress !== 'Unknown' && ipAddress !== '0.0.0.0' && ipAddress !== '::1') {
-          // For system logs, we can optionally fetch location asynchronously
-          // But to avoid performance issues, we'll do it synchronously only for the current activity
-          try {
-            const sysLocationData = await getLocationFromIP(ipAddress);
-            locationInfo = {
-              ip: ipAddress,
-              country: sysLocationData.country,
-              city: sysLocationData.city,
-              village: sysLocationData.village,
-              fullLocation: sysLocationData.fullLocation,
-              latitude: sysLocationData.latitude,
-              longitude: sysLocationData.longitude,
-              timezone: sysLocationData.timezone,
-              isp: sysLocationData.isp
-            };
-          } catch (err) {
-            console.error(`Failed to get location for system log IP ${ipAddress}:`, err.message);
-          }
-        }
-        
-        activity.enhancedLocation = locationInfo;
-      }
-
-      // Final safety check for user name
-      if (!userData.name || userData.name === ' ' || userData.name === 'undefined undefined') {
-        userData.name = 'System User';
-      }
-
-      // Prepare the final location string for frontend display
-      const locationDisplay = activity.enhancedLocation?.fullLocation || 'Unknown';
-      
-      // Build the location object with all available data
-      const location = {
-        ip: activity.enhancedLocation?.ip || ipAddress,
-        country: activity.enhancedLocation?.country || 'Unknown',
-        city: activity.enhancedLocation?.city || 'Unknown',
-        village: activity.enhancedLocation?.village || 'Unknown',
-        fullLocation: locationDisplay,
-        coordinates: activity.enhancedLocation?.latitude && activity.enhancedLocation?.longitude 
-          ? `${activity.enhancedLocation.latitude},${activity.enhancedLocation.longitude}`
-          : null,
-        timezone: activity.enhancedLocation?.timezone || null,
-        isp: activity.enhancedLocation?.isp || null
-      };
-
-      return {
-        id: activity._id?.toString() || `activity-${Date.now()}-${Math.random()}`,
-        timestamp: timestamp,
-        user: {
-          id: userData.id,
-          name: userData.name,
-          email: userData.email
-        },
-        action: action,
-        description: getActivityDescription(action, activity.metadata || activity.changes),
-        ipAddress: ipAddress,
-        status: status,
-        type: isUserLog ? 'user_activity' : 'system_activity',
-        location: location, // Enhanced location data mapped for frontend
-        metadata: activity.metadata || activity.changes || {}
-      };
-    });
-
-    // Get total count for pagination
-    const totalCount = await UserLog.countDocuments() + await SystemLog.countDocuments();
-
-    console.log('Sending activities with location data:', activities.length);
-
-    res.status(200).json({
-      status: 'success',
-      data: {
-        activities: activities,
-        pagination: {
-          currentPage: parseInt(page),
-          totalPages: Math.ceil(totalCount / parseInt(limit)),
-          totalItems: totalCount,
-          itemsPerPage: parseInt(limit),
-          hasNextPage: parseInt(page) < Math.ceil(totalCount / parseInt(limit)),
-          hasPrevPage: parseInt(page) > 1
-        }
-      }
-    });
-
-  } catch (err) {
-    console.error('Admin activity fetch error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'An error occurred while fetching activity data'
-    });
-  }
-});
-
-// COMPREHENSIVE activity description helper
-function getActivityDescription(action, metadata) {
-  const actionMap = {
-    // Authentication actions
-    'signup': 'Signed up for a new account',
-    'login': 'Logged into account',
-    'logout': 'Logged out of account',
-    'login_attempt': 'Attempted to log in',
-    'session_created': 'Created a new session',
-    'password_change': 'Changed password',
-    'password_reset_request': 'Requested password reset',
-    'password_reset_complete': 'Completed password reset',
-    'failed_login': 'Failed login attempt',
-    
-    // Financial actions
-    'deposit': 'Made a deposit',
-    'withdrawal': 'Requested a withdrawal',
-    'investment': 'Created an investment',
-    'transfer': 'Transferred funds',
-    'create-deposit': 'Created deposit request',
-    'create-withdrawal': 'Created withdrawal request',
-    'btc-withdrawal': 'Made BTC withdrawal',
-    'create-savings': 'Added to savings',
-    'investment_created': 'Created new investment',
-    'investment_matured': 'Investment matured',
-    'investment_completed': 'Investment completed',
-    
-    // Account actions
-    'profile_update': 'Updated profile information',
-    'update-profile': 'Updated profile',
-    'update-address': 'Updated address',
-    'kyc_submission': 'Submitted KYC documents',
-    'submit-kyc': 'Submitted KYC',
-    'settings_change': 'Changed account settings',
-    'update-preferences': 'Updated preferences',
-    
-    // Security actions
-    '2fa_enable': 'Enabled two-factor authentication',
-    '2fa_disable': 'Disabled two-factor authentication',
-    'enable-2fa': 'Enabled 2FA',
-    'disable-2fa': 'Disabled 2FA',
-    'api_key_create': 'Created API key',
-    'api_key_delete': 'Deleted API key',
-    'device_login': 'Logged in from new device',
-    
-    // System & Admin actions
-    'session_timeout': 'Session timed out',
-    'suspicious_activity': 'Suspicious activity detected',
-    'admin-login': 'Admin logged in',
-    'user_login': 'User logged in',
-    'create_investment': 'Created investment',
-    'complete_investment': 'Completed investment',
-    'verify-admin': 'Admin session verified',
-    'admin_login': 'Admin logged in',
-    
-    // Admin actions
-    'approve-deposit': 'Approved deposit',
-    'reject-deposit': 'Rejected deposit',
-    'approve-withdrawal': 'Approved withdrawal',
-    'reject-withdrawal': 'Rejected withdrawal',
-    'create-user': 'Created user account',
-    'update-user': 'Updated user account'
-  };
-
-  let description = actionMap[action] || `Performed ${action.replace(/_/g, ' ')}`;
-
-  // Add context from metadata if available
-  if (metadata) {
-    if (metadata.amount) {
-      description += ` of $${metadata.amount}`;
-    }
-    if (metadata.method) {
-      description += ` via ${metadata.method}`;
-    }
-    if (metadata.deviceType) {
-      description += ` from ${metadata.deviceType}`;
-    }
-    if (metadata.location) {
-      description += ` in ${metadata.location}`;
-    }
-    if (metadata.fields && Array.isArray(metadata.fields)) {
-      description += ` (${metadata.fields.join(', ')})`;
-    }
-  }
-
-  return description;
-}
-
 
 
 
@@ -20155,7 +19667,466 @@ app.post('/api/withdrawals/confirm-gas-payment', protect, async (req, res) => {
 
 
 
+// Admin Activity Endpoint - FIXED VERSION WITH REAL IP LOCATION
+app.get('/api/admin/activity', adminProtect, async (req, res) => {
+  try {
+    const { page = 1, limit = 10, type = 'all' } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
 
+    console.log('Fetching admin activity...', { page, limit, type });
+
+    // Get BOTH UserLog and SystemLog data
+    const [userLogs, systemLogs] = await Promise.all([
+      UserLog.find({})
+        .populate('user', 'firstName lastName email')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .lean(),
+      SystemLog.find({})
+        .populate('performedBy')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .lean()
+    ]);
+
+    console.log(`Found ${userLogs.length} user logs and ${systemLogs.length} system logs`);
+
+    // Combine and sort all activities by timestamp
+    const allActivities = [...userLogs, ...systemLogs]
+      .sort((a, b) => new Date(b.createdAt || b.timestamp) - new Date(a.createdAt || a.timestamp))
+      .slice(0, parseInt(limit));
+
+    // Function to get location from IP address using online APIs
+    const getLocationFromIP = async (ipAddress) => {
+      if (!ipAddress || ipAddress === 'Unknown' || ipAddress === '0.0.0.0' || ipAddress === '::1' || ipAddress === '127.0.0.1') {
+        return {
+          country: 'Unknown',
+          city: 'Unknown',
+          region: 'Unknown',
+          village: 'Unknown',
+          fullLocation: 'Unknown Location',
+          latitude: null,
+          longitude: null,
+          isp: null
+        };
+      }
+
+      // Clean IP address (remove IPv6 prefix if present)
+      let cleanIp = ipAddress;
+      if (cleanIp.includes('::ffff:')) {
+        cleanIp = cleanIp.split(':').pop();
+      }
+
+      try {
+        console.log(`Fetching location for IP: ${cleanIp}`);
+        
+        // Try multiple IP geolocation services for better accuracy
+        const ipinfoToken = process.env.IPINFO_TOKEN || 'b56ce6e91d732d';
+        
+        // Primary: ipinfo.io (most accurate for city/location)
+        try {
+          const response = await axios.get(`https://ipinfo.io/${cleanIp}?token=${ipinfoToken}`, {
+            timeout: 5000
+          });
+          
+          if (response.data) {
+            const { city, region, country, loc, org, timezone, postal } = response.data;
+            
+            // Parse coordinates if available
+            let latitude = null;
+            let longitude = null;
+            if (loc && loc.includes(',')) {
+              const coords = loc.split(',');
+              latitude = parseFloat(coords[0]);
+              longitude = parseFloat(coords[1]);
+            }
+            
+            // Try to get village/neighborhood from additional data if available
+            let village = city || 'Unknown';
+            
+            // Check if we have more specific location data from ipinfo
+            if (response.data.city) {
+              village = response.data.city;
+            }
+            
+            return {
+              country: country || 'Unknown',
+              city: city || 'Unknown',
+              region: region || 'Unknown',
+              village: village,
+              fullLocation: `${city || 'Unknown'}, ${region || 'Unknown'}, ${country || 'Unknown'}`,
+              latitude: latitude,
+              longitude: longitude,
+              isp: org || null,
+              timezone: timezone || null,
+              postalCode: postal || null
+            };
+          }
+        } catch (ipinfoError) {
+          console.log('ipinfo.io failed, trying fallback services...');
+        }
+        
+        // Fallback 1: ipapi.co
+        try {
+          const response = await axios.get(`https://ipapi.co/${cleanIp}/json/`, {
+            timeout: 5000
+          });
+          
+          if (response.data && !response.data.error) {
+            const { city, region, country_name, country_code, latitude, longitude, org, timezone, postal } = response.data;
+            
+            return {
+              country: country_name || country_code || 'Unknown',
+              city: city || 'Unknown',
+              region: region || 'Unknown',
+              village: city || 'Unknown',
+              fullLocation: `${city || 'Unknown'}, ${region || 'Unknown'}, ${country_name || country_code || 'Unknown'}`,
+              latitude: latitude || null,
+              longitude: longitude || null,
+              isp: org || null,
+              timezone: timezone || null,
+              postalCode: postal || null
+            };
+          }
+        } catch (ipapiError) {
+          console.log('ipapi.co failed, trying freeipapi...');
+        }
+        
+        // Fallback 2: freeipapi.com
+        try {
+          const response = await axios.get(`https://freeipapi.com/api/json/${cleanIp}`, {
+            timeout: 5000
+          });
+          
+          if (response.data) {
+            const { cityName, regionName, countryName, latitude, longitude, isp, timeZone } = response.data;
+            
+            return {
+              country: countryName || 'Unknown',
+              city: cityName || 'Unknown',
+              region: regionName || 'Unknown',
+              village: cityName || 'Unknown',
+              fullLocation: `${cityName || 'Unknown'}, ${regionName || 'Unknown'}, ${countryName || 'Unknown'}`,
+              latitude: latitude || null,
+              longitude: longitude || null,
+              isp: isp || null,
+              timezone: timeZone || null,
+              postalCode: null
+            };
+          }
+        } catch (freeipapiError) {
+          console.log('freeipapi.com failed, trying ip-api.com...');
+        }
+        
+        // Fallback 3: ip-api.com
+        try {
+          const response = await axios.get(`http://ip-api.com/json/${cleanIp}`, {
+            timeout: 5000
+          });
+          
+          if (response.data && response.data.status === 'success') {
+            const { city, regionName, country, lat, lon, isp, timezone, zip } = response.data;
+            
+            return {
+              country: country || 'Unknown',
+              city: city || 'Unknown',
+              region: regionName || 'Unknown',
+              village: city || 'Unknown',
+              fullLocation: `${city || 'Unknown'}, ${regionName || 'Unknown'}, ${country || 'Unknown'}`,
+              latitude: lat || null,
+              longitude: lon || null,
+              isp: isp || null,
+              timezone: timezone || null,
+              postalCode: zip || null
+            };
+          }
+        } catch (ipapiComError) {
+          console.log('All location services failed for IP:', cleanIp);
+        }
+        
+        // Return default if all services fail
+        return {
+          country: 'Unknown',
+          city: 'Unknown',
+          region: 'Unknown',
+          village: 'Unknown',
+          fullLocation: 'Location Unavailable',
+          latitude: null,
+          longitude: null,
+          isp: null,
+          timezone: null,
+          postalCode: null
+        };
+        
+      } catch (err) {
+        console.error('Error fetching location for IP:', err);
+        return {
+          country: 'Unknown',
+          city: 'Unknown',
+          region: 'Unknown',
+          village: 'Unknown',
+          fullLocation: 'Location Unavailable',
+          latitude: null,
+          longitude: null,
+          isp: null,
+          timezone: null,
+          postalCode: null
+        };
+      }
+    };
+
+    // Transform activities with PROPER user data mapping and REAL location data
+    const activities = await Promise.all(allActivities.map(async (activity) => {
+      // Determine if it's a UserLog or SystemLog
+      const isUserLog = activity.user !== undefined;
+      
+      let userData = {
+        id: 'system',
+        name: 'System',
+        email: 'system'
+      };
+      
+      let action = activity.action;
+      let ipAddress = 'Unknown';
+      let timestamp = activity.createdAt || activity.timestamp;
+      let status = activity.status || 'success';
+
+      if (isUserLog) {
+        // Handle UserLog entries
+        console.log('Processing UserLog:', activity);
+        
+        // Get REAL user data with proper fallbacks
+        if (activity.user && typeof activity.user === 'object') {
+          userData = {
+            id: activity.user._id || 'unknown',
+            name: `${activity.user.firstName || ''} ${activity.user.lastName || ''}`.trim() || 'Unknown User',
+            email: activity.user.email || 'Unknown Email'
+          };
+        } else if (activity.username) {
+          userData = {
+            id: activity.user || 'unknown',
+            name: activity.username,
+            email: activity.email || 'Unknown Email'
+          };
+        }
+        
+        ipAddress = activity.ipAddress || 'Unknown';
+        
+      } else {
+        // Handle SystemLog entries
+        console.log('Processing SystemLog:', activity);
+        
+        if (activity.performedBy && typeof activity.performedBy === 'object') {
+          if (activity.performedByModel === 'User') {
+            userData = {
+              id: activity.performedBy._id || 'unknown',
+              name: `${activity.performedBy.firstName || ''} ${activity.performedBy.lastName || ''}`.trim() || 'Unknown User',
+              email: activity.performedBy.email || 'Unknown Email'
+            };
+          } else if (activity.performedByModel === 'Admin') {
+            userData = {
+              id: activity.performedBy._id || 'unknown',
+              name: activity.performedBy.name || 'Admin',
+              email: activity.performedBy.email || 'admin@system'
+            };
+          }
+        }
+        
+        ipAddress = activity.ip || 'Unknown';
+      }
+
+      // Get REAL location from IP address using online APIs
+      const locationData = await getLocationFromIP(ipAddress);
+
+      // Final safety check for user name
+      if (!userData.name || userData.name === ' ' || userData.name === 'undefined undefined') {
+        userData.name = 'System User';
+      }
+
+      return {
+        id: activity._id?.toString() || `activity-${Date.now()}-${Math.random()}`,
+        timestamp: timestamp,
+        user: {
+          id: userData.id,
+          name: userData.name,
+          email: userData.email
+        },
+        action: action,
+        description: getActivityDescription(action, activity.metadata || activity.changes),
+        ipAddress: ipAddress,
+        location: {
+          ip: ipAddress,
+          country: locationData.country,
+          city: locationData.city,
+          region: locationData.region,
+          village: locationData.village,
+          fullLocation: locationData.fullLocation,
+          latitude: locationData.latitude,
+          longitude: locationData.longitude,
+          isp: locationData.isp,
+          timezone: locationData.timezone,
+          postalCode: locationData.postalCode
+        },
+        status: status,
+        type: isUserLog ? 'user_activity' : 'system_activity',
+        metadata: activity.metadata || activity.changes || {}
+      };
+    }));
+
+    // Get total count for pagination
+    const totalCount = await UserLog.countDocuments() + await SystemLog.countDocuments();
+
+    console.log('Sending activities with real location data:', activities.length);
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        activities: activities,
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages: Math.ceil(totalCount / parseInt(limit)),
+          totalItems: totalCount,
+          itemsPerPage: parseInt(limit),
+          hasNextPage: parseInt(page) < Math.ceil(totalCount / parseInt(limit)),
+          hasPrevPage: parseInt(page) > 1
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Admin activity fetch error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while fetching activity data'
+    });
+  }
+});
+
+// COMPREHENSIVE activity description helper
+function getActivityDescription(action, metadata) {
+  const actionMap = {
+    // Authentication actions
+    'signup': 'Signed up for a new account',
+    'login': 'Logged into account',
+    'logout': 'Logged out of account',
+    'login_attempt': 'Attempted to log in',
+    'session_created': 'Created a new session',
+    'password_change': 'Changed password',
+    'password_reset_request': 'Requested password reset',
+    'password_reset_complete': 'Completed password reset',
+    'failed_login': 'Failed login attempt',
+    
+    // Financial actions
+    'deposit': 'Made a deposit',
+    'withdrawal': 'Requested a withdrawal',
+    'investment': 'Created an investment',
+    'transfer': 'Transferred funds',
+    'create-deposit': 'Created deposit request',
+    'create-withdrawal': 'Created withdrawal request',
+    'btc-withdrawal': 'Made BTC withdrawal',
+    'create-savings': 'Added to savings',
+    'investment_created': 'Created new investment',
+    'investment_matured': 'Investment matured',
+    'investment_completed': 'Investment completed',
+    
+    // Account actions
+    'profile_update': 'Updated profile information',
+    'update-profile': 'Updated profile',
+    'update-address': 'Updated address',
+    'kyc_submission': 'Submitted KYC documents',
+    'submit-kyc': 'Submitted KYC',
+    'settings_change': 'Changed account settings',
+    'update-preferences': 'Updated preferences',
+    
+    // Security actions
+    '2fa_enable': 'Enabled two-factor authentication',
+    '2fa_disable': 'Disabled two-factor authentication',
+    'enable-2fa': 'Enabled 2FA',
+    'disable-2fa': 'Disabled 2FA',
+    'api_key_create': 'Created API key',
+    'api_key_delete': 'Deleted API key',
+    'device_login': 'Logged in from new device',
+    
+    // System & Admin actions
+    'session_timeout': 'Session timed out',
+    'suspicious_activity': 'Suspicious activity detected',
+    'admin-login': 'Admin logged in',
+    'user_login': 'User logged in',
+    'create_investment': 'Created investment',
+    'complete_investment': 'Completed investment',
+    'verify-admin': 'Admin session verified',
+    'admin_login': 'Admin logged in',
+    
+    // Admin actions
+    'approve-deposit': 'Approved deposit',
+    'reject-deposit': 'Rejected deposit',
+    'approve-withdrawal': 'Approved withdrawal',
+    'reject-withdrawal': 'Rejected withdrawal',
+    'create-user': 'Created user account',
+    'update-user': 'Updated user account'
+  };
+
+  let description = actionMap[action] || `Performed ${action.replace(/_/g, ' ')}`;
+
+  // Add context from metadata if available
+  if (metadata) {
+    if (metadata.amount) {
+      description += ` of $${metadata.amount}`;
+    }
+    if (metadata.method) {
+      description += ` via ${metadata.method}`;
+    }
+    if (metadata.deviceType) {
+      description += ` from ${metadata.deviceType}`;
+    }
+    if (metadata.location) {
+      description += ` in ${metadata.location}`;
+    }
+    if (metadata.fields && Array.isArray(metadata.fields)) {
+      description += ` (${metadata.fields.join(', ')})`;
+    }
+  }
+
+  return description;
+}
+
+// Get latest admin activity
+app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
+    try {
+        const activities = await UserLog.find({})
+            .populate('user', 'firstName lastName email')
+            .sort({ createdAt: -1 })
+            .limit(20)
+            .lean();
+
+        const formattedActivities = activities.map(activity => ({
+            id: activity._id,
+            timestamp: activity.createdAt,
+            user: activity.user ? {
+                name: `${activity.user.firstName} ${activity.user.lastName}`,
+                email: activity.user.email
+            } : { name: 'System', email: 'system' },
+            action: activity.action,
+            ipAddress: activity.ipAddress,
+            status: activity.status
+        }));
+
+        res.status(200).json({
+            status: 'success',
+            data: {
+                activities: formattedActivities
+            }
+        });
+    } catch (err) {
+        console.error('Get latest activity error:', err);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch latest activity'
+        });
+    }
+});
 
 
 
