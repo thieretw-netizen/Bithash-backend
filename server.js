@@ -7055,9 +7055,83 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
 
 
 
+// Helper function to get activity description
+function getActivityDescription(action, metadata) {
+  const actionMap = {
+    'signup': 'Signed up for a new account',
+    'login': 'Logged into account',
+    'logout': 'Logged out of account',
+    'login_attempt': 'Attempted to log in',
+    'session_created': 'Created a new session',
+    'password_change': 'Changed password',
+    'password_reset_request': 'Requested password reset',
+    'password_reset_complete': 'Completed password reset',
+    'failed_login': 'Failed login attempt',
+    'deposit': 'Made a deposit',
+    'withdrawal': 'Requested a withdrawal',
+    'investment': 'Created an investment',
+    'transfer': 'Transferred funds',
+    'create-deposit': 'Created deposit request',
+    'create-withdrawal': 'Created withdrawal request',
+    'btc-withdrawal': 'Made BTC withdrawal',
+    'create-savings': 'Added to savings',
+    'investment_created': 'Created new investment',
+    'investment_matured': 'Investment matured',
+    'investment_completed': 'Investment completed',
+    'profile_update': 'Updated profile information',
+    'update-profile': 'Updated profile',
+    'update-address': 'Updated address',
+    'kyc_submission': 'Submitted KYC documents',
+    'submit-kyc': 'Submitted KYC',
+    'settings_change': 'Changed account settings',
+    'update-preferences': 'Updated preferences',
+    '2fa_enable': 'Enabled two-factor authentication',
+    '2fa_disable': 'Disabled two-factor authentication',
+    'enable-2fa': 'Enabled 2FA',
+    'disable-2fa': 'Disabled 2FA',
+    'api_key_create': 'Created API key',
+    'api_key_delete': 'Deleted API key',
+    'device_login': 'Logged in from new device',
+    'session_timeout': 'Session timed out',
+    'suspicious_activity': 'Suspicious activity detected',
+    'admin-login': 'Admin logged in',
+    'user_login': 'User logged in',
+    'create_investment': 'Created investment',
+    'complete_investment': 'Completed investment',
+    'verify-admin': 'Admin session verified',
+    'admin_login': 'Admin logged in',
+    'approve-deposit': 'Approved deposit',
+    'reject-deposit': 'Rejected deposit',
+    'approve-withdrawal': 'Approved withdrawal',
+    'reject-withdrawal': 'Rejected withdrawal',
+    'create-user': 'Created user account',
+    'update-user': 'Updated user account'
+  };
 
+  let description = actionMap[action] || `Performed ${action.replace(/_/g, ' ')}`;
 
-// Admin Activity Endpoint - FIXED VERSION with Real User IP and Location from Database
+  if (metadata) {
+    if (metadata.amount) {
+      description += ` of $${metadata.amount}`;
+    }
+    if (metadata.method) {
+      description += ` via ${metadata.method}`;
+    }
+    if (metadata.deviceType) {
+      description += ` from ${metadata.deviceType}`;
+    }
+    if (metadata.location) {
+      description += ` in ${metadata.location}`;
+    }
+    if (metadata.fields && Array.isArray(metadata.fields)) {
+      description += ` (${metadata.fields.join(', ')})`;
+    }
+  }
+
+  return description;
+}
+
+// Admin Activity Endpoint - Fetches real user IP from database and gets location from online APIs
 app.get('/api/admin/activity', adminProtect, async (req, res) => {
   try {
     const { page = 1, limit = 10, type = 'all' } = req.query;
@@ -7065,34 +7139,111 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
 
     console.log('Fetching admin activity...', { page, limit, type });
 
-    // Get BOTH UserLog and SystemLog data
-    const [userLogs, systemLogs] = await Promise.all([
-      UserLog.find({})
-        .populate('user', 'firstName lastName email')
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(parseInt(limit))
-        .lean(),
-      SystemLog.find({})
-        .populate('performedBy')
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(parseInt(limit))
-        .lean()
-    ]);
+    // Helper function to get location from IP using multiple online APIs
+    const getLocationFromIP = async (ip) => {
+      if (!ip || ip === 'Unknown' || ip === '0.0.0.0' || ip === '::1' || ip === '127.0.0.1') {
+        return { country: 'Unknown', city: 'Unknown', region: 'Unknown', fullLocation: 'Unknown' };
+      }
 
-    console.log(`Found ${userLogs.length} user logs and ${systemLogs.length} system logs`);
-
-    // Combine and sort all activities by timestamp
-    const allActivities = [...userLogs, ...systemLogs]
-      .sort((a, b) => new Date(b.createdAt || b.timestamp) - new Date(a.createdAt || a.timestamp))
-      .slice(0, parseInt(limit));
-
-    // Transform activities with PROPER user data mapping and REAL location data
-    const activities = allActivities.map(activity => {
-      // Determine if it's a UserLog or SystemLog
-      const isUserLog = activity.user !== undefined;
+      // Check for private IP ranges
+      const privateIPRanges = [
+        /^10\./, /^172\.(1[6-9]|2[0-9]|3[0-1])\./, /^192\.168\./, /^127\./, /^169\.254\./, /^::1$/, /^fc00::/, /^fd00::/, /^fe80::/
+      ];
       
+      for (const range of privateIPRanges) {
+        if (range.test(ip)) {
+          return { country: 'Local', city: 'Local Network', region: 'Private IP', fullLocation: 'Local Network' };
+        }
+      }
+
+      // Try multiple IP geolocation services with fallbacks
+      const services = [
+        {
+          name: 'ipinfo.io',
+          url: `https://ipinfo.io/${ip}?token=${process.env.IPINFO_TOKEN || 'b56ce6e91d732d'}`,
+          parser: (data) => ({ 
+            country: data.country, 
+            city: data.city, 
+            region: data.region, 
+            fullLocation: `${data.city || 'Unknown'}, ${data.region || 'Unknown'}, ${data.country || 'Unknown'}`,
+            postal: data.postal,
+            timezone: data.timezone,
+            isp: data.org
+          })
+        },
+        {
+          name: 'ipapi.co',
+          url: `https://ipapi.co/${ip}/json/`,
+          parser: (data) => ({ 
+            country: data.country_name, 
+            city: data.city, 
+            region: data.region, 
+            fullLocation: `${data.city || 'Unknown'}, ${data.region || 'Unknown'}, ${data.country_name || 'Unknown'}`,
+            postal: data.postal,
+            timezone: data.timezone,
+            isp: data.org
+          })
+        },
+        {
+          name: 'freeipapi.com',
+          url: `https://freeipapi.com/api/json/${ip}`,
+          parser: (data) => ({ 
+            country: data.countryName, 
+            city: data.cityName, 
+            region: data.regionName, 
+            fullLocation: `${data.cityName || 'Unknown'}, ${data.regionName || 'Unknown'}, ${data.countryName || 'Unknown'}`,
+            postal: null,
+            timezone: null,
+            isp: null
+          })
+        },
+        {
+          name: 'ip-api.com',
+          url: `http://ip-api.com/json/${ip}`,
+          parser: (data) => data.status === 'success' ? { 
+            country: data.country, 
+            city: data.city, 
+            region: data.regionName, 
+            fullLocation: `${data.city || 'Unknown'}, ${data.regionName || 'Unknown'}, ${data.country || 'Unknown'}`,
+            postal: data.zip,
+            timezone: data.timezone,
+            isp: data.isp
+          } : null
+        }
+      ];
+
+      for (const service of services) {
+        try {
+          const response = await axios.get(service.url, { timeout: 5000 });
+          if (response.data) {
+            const result = service.parser(response.data);
+            if (result && result.country && result.country !== 'Unknown' && result.country !== null) {
+              console.log(`Location found for IP ${ip} via ${service.name}:`, result);
+              return result;
+            }
+          }
+        } catch (err) {
+          console.log(`Service ${service.name} failed for IP ${ip}:`, err.message);
+        }
+      }
+
+      return { country: 'Unknown', city: 'Unknown', region: 'Unknown', fullLocation: 'Unknown', postal: null, timezone: null, isp: null };
+    };
+
+    // Get UserLog data with user population
+    const userLogs = await UserLog.find({})
+      .populate('user', 'firstName lastName email')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit))
+      .lean();
+
+    console.log(`Found ${userLogs.length} user logs`);
+
+    // Process each activity and get location data for IPs
+    const activities = [];
+    
+    for (const activity of userLogs) {
       let userData = {
         id: 'system',
         name: 'System',
@@ -7103,145 +7254,40 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
       let ipAddress = 'Unknown';
       let timestamp = activity.createdAt || activity.timestamp;
       let status = activity.status || 'success';
-      let locationDisplay = 'N/A';
-      let locationData = {
-        city: '',
-        region: '',
-        country: '',
-        fullLocation: 'N/A'
-      };
+      let locationInfo = { country: 'Unknown', city: 'Unknown', region: 'Unknown', fullLocation: 'Unknown', postal: null, timezone: null, isp: null };
 
-      if (isUserLog) {
-        // Handle UserLog entries - EXTRACT REAL IP AND LOCATION FROM DATABASE
-        console.log('Processing UserLog:', JSON.stringify(activity, null, 2));
-        
-        // Get REAL user data with proper fallbacks
-        if (activity.user && typeof activity.user === 'object') {
-          userData = {
-            id: activity.user._id || 'unknown',
-            name: `${activity.user.firstName || ''} ${activity.user.lastName || ''}`.trim() || 'Unknown User',
-            email: activity.user.email || 'Unknown Email'
-          };
-        } else if (activity.username) {
-          userData = {
-            id: activity.user || 'unknown',
-            name: activity.username,
-            email: activity.email || 'Unknown Email'
-          };
-        }
-        
-        // EXTRACT REAL IP ADDRESS FROM DATABASE
-        ipAddress = activity.ipAddress || activity.ip || 'Unknown';
-        
-        // EXTRACT REAL LOCATION DATA FROM DATABASE
-        // The location is stored in the 'location' field as an object
-        if (activity.location) {
-          console.log('Found location data:', activity.location);
-          
-          // Handle different location structures
-          if (typeof activity.location === 'object') {
-            // Extract city, region, country
-            const city = activity.location.city || '';
-            const region = activity.location.region || (activity.location.regionName) || (activity.location.region?.name) || '';
-            const country = activity.location.country || (activity.location.countryName) || (activity.location.country?.name) || '';
-            
-            locationData = {
-              city: city,
-              region: region,
-              country: country,
-              fullLocation: [city, region, country].filter(p => p && p !== 'Unknown').join(', ')
-            };
-            
-            locationDisplay = locationData.fullLocation || 'N/A';
-            
-            console.log(`Formatted location: ${locationDisplay}`);
-          }
-        } else if (activity.metadata?.locationData) {
-          // Fallback: check metadata for location
-          const metaLoc = activity.metadata.locationData;
-          const city = metaLoc.city || '';
-          const region = metaLoc.region || '';
-          const country = metaLoc.country || '';
-          
-          locationData = {
-            city: city,
-            region: region,
-            country: country,
-            fullLocation: [city, region, country].filter(p => p && p !== 'Unknown').join(', ')
-          };
-          
-          locationDisplay = locationData.fullLocation || 'N/A';
-        } else if (activity.changes?.locationData) {
-          // Another fallback location storage
-          const metaLoc = activity.changes.locationData;
-          const city = metaLoc.city || '';
-          const region = metaLoc.region || '';
-          const country = metaLoc.country || '';
-          
-          locationData = {
-            city: city,
-            region: region,
-            country: country,
-            fullLocation: [city, region, country].filter(p => p && p !== 'Unknown').join(', ')
-          };
-          
-          locationDisplay = locationData.fullLocation || 'N/A';
-        } else {
-          // No location data in database - log the structure to debug
-          console.log('No location data found in activity. Activity keys:', Object.keys(activity));
-          locationDisplay = 'Location not recorded';
-        }
-        
-      } else {
-        // Handle SystemLog entries
-        console.log('Processing SystemLog:', JSON.stringify(activity, null, 2));
-        
-        if (activity.performedBy && typeof activity.performedBy === 'object') {
-          if (activity.performedByModel === 'User') {
-            userData = {
-              id: activity.performedBy._id || 'unknown',
-              name: `${activity.performedBy.firstName || ''} ${activity.performedBy.lastName || ''}`.trim() || 'Unknown User',
-              email: activity.performedBy.email || 'Unknown Email'
-            };
-          } else if (activity.performedByModel === 'Admin') {
-            userData = {
-              id: activity.performedBy._id || 'unknown',
-              name: activity.performedBy.name || 'Admin',
-              email: activity.performedBy.email || 'admin@system'
-            };
-          }
-        }
-        
-        ipAddress = activity.ip || 'Unknown';
-        
-        // Extract location from system log if available
-        if (activity.location) {
-          const city = activity.location.city || '';
-          const region = activity.location.region || '';
-          const country = activity.location.country || '';
-          
-          locationData = {
-            city: city,
-            region: region,
-            country: country,
-            fullLocation: [city, region, country].filter(p => p && p !== 'Unknown').join(', ')
-          };
-          
-          locationDisplay = locationData.fullLocation || 'N/A';
-        } else if (activity.changes?.location) {
-          const city = activity.changes.location.city || '';
-          const region = activity.changes.location.region || '';
-          const country = activity.changes.location.country || '';
-          
-          locationData = {
-            city: city,
-            region: region,
-            country: country,
-            fullLocation: [city, region, country].filter(p => p && p !== 'Unknown').join(', ')
-          };
-          
-          locationDisplay = locationData.fullLocation || 'N/A';
-        }
+      // Handle UserLog entries - fetch real user IP from database
+      if (activity.user && typeof activity.user === 'object') {
+        userData = {
+          id: activity.user._id || 'unknown',
+          name: `${activity.user.firstName || ''} ${activity.user.lastName || ''}`.trim() || 'Unknown User',
+          email: activity.user.email || 'Unknown Email'
+        };
+      } else if (activity.username) {
+        userData = {
+          id: activity.user || 'unknown',
+          name: activity.username,
+          email: activity.email || 'Unknown Email'
+        };
+      }
+      
+      // Get the real IP address from the UserLog (not Cloudflare)
+      ipAddress = activity.ipAddress || 'Unknown';
+      
+      // Get location from IP address using online APIs
+      if (ipAddress && ipAddress !== 'Unknown' && ipAddress !== '0.0.0.0' && ipAddress !== '::1' && ipAddress !== '127.0.0.1') {
+        locationInfo = await getLocationFromIP(ipAddress);
+      } else if (activity.location && activity.location.country) {
+        // Use existing location data if available as fallback
+        locationInfo = {
+          country: activity.location.country?.name || activity.location.country,
+          city: activity.location.city,
+          region: activity.location.region?.name,
+          fullLocation: activity.location.city ? `${activity.location.city}, ${activity.location.country?.name || activity.location.country}` : activity.location.country?.name || 'Unknown',
+          postal: activity.location.postalCode,
+          timezone: activity.location.timezone,
+          isp: activity.location.isp
+        };
       }
 
       // Final safety check for user name
@@ -7249,20 +7295,7 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
         userData.name = 'System User';
       }
 
-      // Determine activity type for styling
-      let activityType = getActivityType(action);
-      
-      // For admin-login actions, set proper type
-      if (action === 'admin-login' || action === 'admin_login') {
-        activityType = 'login';
-        // Ensure user name is set properly for admin
-        if (userData.name === 'System User' && currentAdmin) {
-          userData.name = currentAdmin.name || 'Admin';
-          userData.email = currentAdmin.email || 'admin@bithash.com';
-        }
-      }
-
-      return {
+      activities.push({
         id: activity._id?.toString() || `activity-${Date.now()}-${Math.random()}`,
         timestamp: timestamp,
         user: {
@@ -7271,21 +7304,27 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
           email: userData.email
         },
         action: action,
-        activityType: activityType,
         description: getActivityDescription(action, activity.metadata || activity.changes),
         ipAddress: ipAddress,
-        location: locationDisplay,
-        locationData: locationData,
+        location: {
+          country: locationInfo.country,
+          city: locationInfo.city,
+          region: locationInfo.region,
+          fullLocation: locationInfo.fullLocation,
+          postalCode: locationInfo.postal,
+          timezone: locationInfo.timezone,
+          isp: locationInfo.isp
+        },
         status: status,
-        type: isUserLog ? 'user_activity' : 'system_activity',
+        type: 'user_activity',
         metadata: activity.metadata || activity.changes || {}
-      };
-    });
+      });
+    }
 
     // Get total count for pagination
-    const totalCount = await UserLog.countDocuments() + await SystemLog.countDocuments();
+    const totalCount = await UserLog.countDocuments();
 
-    console.log('Sending activities with location data:', activities.map(a => ({ action: a.action, location: a.location, user: a.user.name })));
+    console.log(`Sending ${activities.length} activities with location data`);
 
     res.status(200).json({
       status: 'success',
@@ -7311,158 +7350,386 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
   }
 });
 
-// Helper function to get activity type for styling
-function getActivityType(action) {
-  const actionLower = (action || '').toLowerCase();
-  
-  if (actionLower.includes('login')) return 'login';
-  if (actionLower.includes('signup') || actionLower.includes('register')) return 'signup';
-  if (actionLower.includes('deposit')) return 'deposit';
-  if (actionLower.includes('withdrawal') || actionLower.includes('withdraw')) return 'withdrawal';
-  if (actionLower.includes('investment') && actionLower.includes('create')) return 'investment';
-  if (actionLower.includes('matured') || actionLower.includes('complete')) return 'matured';
-  if (actionLower.includes('logout')) return 'logout';
-  
-  return 'other';
-}
-
-// COMPREHENSIVE activity description helper
-function getActivityDescription(action, metadata) {
-  const actionMap = {
-    // Authentication actions
-    'signup': 'Signed up for a new account',
-    'login': 'Logged into account',
-    'logout': 'Logged out of account',
-    'login_attempt': 'Attempted to log in',
-    'session_created': 'Created a new session',
-    'password_change': 'Changed password',
-    'password_reset_request': 'Requested password reset',
-    'password_reset_complete': 'Completed password reset',
-    'failed_login': 'Failed login attempt',
-    'admin-login': 'Admin logged into dashboard',
-    'admin_login': 'Admin logged into dashboard',
-    
-    // Financial actions
-    'deposit': 'Made a deposit',
-    'withdrawal': 'Requested a withdrawal',
-    'investment': 'Created an investment',
-    'transfer': 'Transferred funds',
-    'create-deposit': 'Created deposit request',
-    'create-withdrawal': 'Created withdrawal request',
-    'btc-withdrawal': 'Made BTC withdrawal',
-    'create-savings': 'Added to savings',
-    'investment_created': 'Created new investment',
-    'investment_matured': 'Investment matured',
-    'investment_completed': 'Investment completed',
-    
-    // Account actions
-    'profile_update': 'Updated profile information',
-    'update-profile': 'Updated profile',
-    'update-address': 'Updated address',
-    'kyc_submission': 'Submitted KYC documents',
-    'submit-kyc': 'Submitted KYC',
-    'settings_change': 'Changed account settings',
-    'update-preferences': 'Updated preferences',
-    
-    // Security actions
-    '2fa_enable': 'Enabled two-factor authentication',
-    '2fa_disable': 'Disabled two-factor authentication',
-    'enable-2fa': 'Enabled 2FA',
-    'disable-2fa': 'Disabled 2FA',
-    'api_key_create': 'Created API key',
-    'api_key_delete': 'Deleted API key',
-    'device_login': 'Logged in from new device',
-    
-    // System & Admin actions
-    'session_timeout': 'Session timed out',
-    'suspicious_activity': 'Suspicious activity detected',
-    'admin-login': 'Admin logged in',
-    'user_login': 'User logged in',
-    'create_investment': 'Created investment',
-    'complete_investment': 'Completed investment',
-    'verify-admin': 'Admin session verified',
-    
-    // Admin actions
-    'approve-deposit': 'Approved deposit',
-    'reject-deposit': 'Rejected deposit',
-    'approve-withdrawal': 'Approved withdrawal',
-    'reject-withdrawal': 'Rejected withdrawal',
-    'create-user': 'Created user account',
-    'update-user': 'Updated user account'
-  };
-
-  let description = actionMap[action] || `Performed ${String(action || '').replace(/_/g, ' ')}`;
-
-  // Add context from metadata if available
-  if (metadata) {
-    if (metadata.amount) {
-      description += ` of $${metadata.amount}`;
-    }
-    if (metadata.method) {
-      description += ` via ${metadata.method}`;
-    }
-    if (metadata.deviceType) {
-      description += ` from ${metadata.deviceType}`;
-    }
-    if (metadata.location) {
-      description += ` in ${metadata.location}`;
-    }
-    if (metadata.fields && Array.isArray(metadata.fields)) {
-      description += ` (${metadata.fields.join(', ')})`;
-    }
-  }
-
-  return description;
-}
-
-// Get latest admin activity
+// Get latest admin activity for polling
 app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
-    try {
-        const activities = await UserLog.find({})
-            .populate('user', 'firstName lastName email')
-            .sort({ createdAt: -1 })
-            .limit(20)
-            .lean();
-
-        const formattedActivities = activities.map(activity => {
-            let locationDisplay = 'N/A';
-            
-            // Extract location from activity
-            if (activity.location) {
-                const city = activity.location.city || '';
-                const region = activity.location.region || (activity.location.regionName) || (activity.location.region?.name) || '';
-                const country = activity.location.country || (activity.location.countryName) || (activity.location.country?.name) || '';
-                locationDisplay = [city, region, country].filter(p => p && p !== 'Unknown').join(', ') || 'N/A';
-            }
-            
-            return {
-                id: activity._id,
-                timestamp: activity.createdAt,
-                user: activity.user ? {
-                    name: `${activity.user.firstName} ${activity.user.lastName}`,
-                    email: activity.user.email
-                } : { name: 'System', email: 'system' },
-                action: activity.action,
-                ipAddress: activity.ipAddress,
-                location: locationDisplay,
-                status: activity.status
-            };
-        });
-
-        res.status(200).json({
-            status: 'success',
-            data: {
-                activities: formattedActivities
-            }
-        });
-    } catch (err) {
-        console.error('Get latest activity error:', err);
-        res.status(500).json({
-            status: 'error',
-            message: 'Failed to fetch latest activity'
-        });
+  try {
+    const { since } = req.query;
+    
+    let query = {};
+    if (since) {
+      query.createdAt = { $gt: new Date(since) };
     }
+    
+    const activities = await UserLog.find(query)
+      .populate('user', 'firstName lastName email')
+      .sort({ createdAt: -1 })
+      .limit(20)
+      .lean();
+
+    const formattedActivities = activities.map(activity => ({
+      id: activity._id,
+      timestamp: activity.createdAt,
+      user: activity.user ? {
+        name: `${activity.user.firstName} ${activity.user.lastName}`,
+        email: activity.user.email
+      } : { name: 'System', email: 'system' },
+      action: activity.action,
+      ipAddress: activity.ipAddress,
+      status: activity.status
+    }));
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        activities: formattedActivities,
+        lastTimestamp: activities.length > 0 ? activities[0].createdAt : null
+      }
+    });
+  } catch (err) {
+    console.error('Get latest activity error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch latest activity'
+    });
+  }
 });
+
+
+
+
+// Admin Delete User Endpoint - Complete user deletion with cascade
+app.delete('/api/admin/users/:userId', adminProtect, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    // Validate userId format
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid user ID format'
+      });
+    }
+    
+    // Find the user first to get their details for logging
+    const userToDelete = await User.findById(userId);
+    
+    if (!userToDelete) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+    
+    // Check if trying to delete yourself
+    if (req.admin && req.admin._id && req.admin._id.toString() === userId) {
+      return res.status(403).json({
+        status: 'fail',
+        message: 'You cannot delete your own admin account through this endpoint'
+      });
+    }
+    
+    // Store user info for logging before deletion
+    const userInfo = {
+      id: userToDelete._id,
+      name: `${userToDelete.firstName} ${userToDelete.lastName}`,
+      email: userToDelete.email,
+      status: userToDelete.status
+    };
+    
+    console.log(`Admin ${req.admin.email} is deleting user: ${userInfo.email}`);
+    
+    // Delete all related data in the correct order to avoid foreign key constraints
+    
+    // 1. Delete all user logs
+    const userLogsDeleted = await UserLog.deleteMany({ user: userId });
+    console.log(`Deleted ${userLogsDeleted.deletedCount} user logs`);
+    
+    // 2. Delete all investments
+    const investmentsDeleted = await Investment.deleteMany({ user: userId });
+    console.log(`Deleted ${investmentsDeleted.deletedCount} investments`);
+    
+    // 3. Delete all transactions
+    const transactionsDeleted = await Transaction.deleteMany({ user: userId });
+    console.log(`Deleted ${transactionsDeleted.deletedCount} transactions`);
+    
+    // 4. Delete all deposit assets
+    const depositAssetsDeleted = await DepositAsset.deleteMany({ user: userId });
+    console.log(`Deleted ${depositAssetsDeleted.deletedCount} deposit assets`);
+    
+    // 5. Delete all buy records
+    const buysDeleted = await Buy.deleteMany({ user: userId });
+    console.log(`Deleted ${buysDeleted.deletedCount} buy records`);
+    
+    // 6. Delete all sell records
+    const sellsDeleted = await Sell.deleteMany({ user: userId });
+    console.log(`Deleted ${sellsDeleted.deletedCount} sell records`);
+    
+    // 7. Delete user asset balances
+    const userAssetBalanceDeleted = await UserAssetBalance.deleteOne({ user: userId });
+    console.log(`Deleted user asset balance: ${userAssetBalanceDeleted.deletedCount > 0 ? 'Yes' : 'No'}`);
+    
+    // 8. Delete user preferences
+    const userPreferenceDeleted = await UserPreference.deleteOne({ user: userId });
+    console.log(`Deleted user preferences: ${userPreferenceDeleted.deletedCount > 0 ? 'Yes' : 'No'}`);
+    
+    // 9. Delete KYC records
+    const kycDeleted = await KYC.deleteOne({ user: userId });
+    console.log(`Deleted KYC record: ${kycDeleted.deletedCount > 0 ? 'Yes' : 'No'}`);
+    
+    // 10. Delete card payments
+    const cardsDeleted = await CardPayment.deleteMany({ user: userId });
+    console.log(`Deleted ${cardsDeleted.deletedCount} saved cards`);
+    
+    // 11. Delete loans
+    const loansDeleted = await Loan.deleteMany({ user: userId });
+    console.log(`Deleted ${loansDeleted.deletedCount} loans`);
+    
+    // 12. Delete OTP records
+    const otpsDeleted = await OTP.deleteMany({ email: userToDelete.email });
+    console.log(`Deleted ${otpsDeleted.deletedCount} OTP records`);
+    
+    // 13. Delete downline relationships where user is downline
+    const downlineRelationshipsDeleted = await DownlineRelationship.deleteMany({ downline: userId });
+    console.log(`Deleted ${downlineRelationshipsDeleted.deletedCount} downline relationships (as downline)`);
+    
+    // 14. Delete downline relationships where user is upline
+    const uplineRelationshipsDeleted = await DownlineRelationship.deleteMany({ upline: userId });
+    console.log(`Deleted ${uplineRelationshipsDeleted.deletedCount} downline relationships (as upline)`);
+    
+    // 15. Delete commission history where user is upline
+    const commissionHistoryDeleted = await CommissionHistory.deleteMany({ upline: userId });
+    console.log(`Deleted ${commissionHistoryDeleted.deletedCount} commission history records (as upline)`);
+    
+    // 16. Delete commission history where user is downline
+    const downlineCommissionDeleted = await CommissionHistory.deleteMany({ downline: userId });
+    console.log(`Deleted ${downlineCommissionDeleted.deletedCount} commission history records (as downline)`);
+    
+    // 17. Update referral history in other users (remove references)
+    await User.updateMany(
+      { 'referralHistory.referredUser': userId },
+      { $pull: { referralHistory: { referredUser: userId } } }
+    );
+    console.log('Removed referral history references');
+    
+    // 18. Update referredBy references in other users
+    await User.updateMany(
+      { referredBy: userId },
+      { $unset: { referredBy: '' } }
+    );
+    console.log('Removed referredBy references');
+    
+    // 19. Update notifications (remove user references)
+    await Notification.deleteMany({ specificUserId: userId });
+    console.log('Deleted user-specific notifications');
+    
+    // 20. Finally delete the user
+    const deletedUser = await User.findByIdAndDelete(userId);
+    
+    if (!deletedUser) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found during deletion'
+      });
+    }
+    
+    // Log the deletion activity
+    await logActivity(
+      'delete_user',
+      'User',
+      userId,
+      req.admin._id,
+      'Admin',
+      req,
+      {
+        deletedUser: userInfo,
+        deletedCounts: {
+          userLogs: userLogsDeleted.deletedCount,
+          investments: investmentsDeleted.deletedCount,
+          transactions: transactionsDeleted.deletedCount,
+          depositAssets: depositAssetsDeleted.deletedCount,
+          buys: buysDeleted.deletedCount,
+          sells: sellsDeleted.deletedCount,
+          cards: cardsDeleted.deletedCount,
+          loans: loansDeleted.deletedCount,
+          downlineRelationships: downlineRelationshipsDeleted.deletedCount,
+          commissionHistory: commissionHistoryDeleted.deletedCount
+        }
+      }
+    );
+    
+    console.log(`User ${userInfo.email} successfully deleted by admin ${req.admin.email}`);
+    
+    res.status(200).json({
+      status: 'success',
+      message: `User ${userInfo.name} (${userInfo.email}) has been permanently deleted`,
+      data: {
+        deletedUser: {
+          id: userInfo.id,
+          name: userInfo.name,
+          email: userInfo.email
+        },
+        deletedRecords: {
+          userLogs: userLogsDeleted.deletedCount,
+          investments: investmentsDeleted.deletedCount,
+          transactions: transactionsDeleted.deletedCount,
+          depositAssets: depositAssetsDeleted.deletedCount,
+          buys: buysDeleted.deletedCount,
+          sells: sellsDeleted.deletedCount,
+          cards: cardsDeleted.deletedCount,
+          loans: loansDeleted.deletedCount,
+          downlineRelationships: downlineRelationshipsDeleted.deletedCount,
+          commissionHistory: commissionHistoryDeleted.deletedCount
+        }
+      }
+    });
+    
+  } catch (err) {
+    console.error('Admin delete user error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while deleting the user',
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+  }
+});
+
+// Alternative: Soft delete user (suspend instead of permanent delete)
+app.put('/api/admin/users/:userId/suspend', adminProtect, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { reason } = req.body;
+    
+    // Validate userId format
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid user ID format'
+      });
+    }
+    
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+    
+    // Check if trying to suspend yourself
+    if (req.admin && req.admin._id && req.admin._id.toString() === userId) {
+      return res.status(403).json({
+        status: 'fail',
+        message: 'You cannot suspend your own admin account'
+      });
+    }
+    
+    // Update user status to suspended
+    user.status = 'suspended';
+    await user.save();
+    
+    // Log the suspension activity
+    await logActivity(
+      'suspend_user',
+      'User',
+      userId,
+      req.admin._id,
+      'Admin',
+      req,
+      {
+        reason: reason || 'No reason provided',
+        previousStatus: user.status,
+        newStatus: 'suspended'
+      }
+    );
+    
+    res.status(200).json({
+      status: 'success',
+      message: `User ${user.firstName} ${user.lastName} has been suspended`,
+      data: {
+        user: {
+          id: user._id,
+          name: `${user.firstName} ${user.lastName}`,
+          email: user.email,
+          status: user.status
+        }
+      }
+    });
+    
+  } catch (err) {
+    console.error('Admin suspend user error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while suspending the user'
+    });
+  }
+});
+
+// Reactivate a suspended user
+app.put('/api/admin/users/:userId/reactivate', adminProtect, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    // Validate userId format
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid user ID format'
+      });
+    }
+    
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+    
+    // Update user status to active
+    user.status = 'active';
+    await user.save();
+    
+    // Log the reactivation activity
+    await logActivity(
+      'reactivate_user',
+      'User',
+      userId,
+      req.admin._id,
+      'Admin',
+      req,
+      {
+        previousStatus: user.status,
+        newStatus: 'active'
+      }
+    );
+    
+    res.status(200).json({
+      status: 'success',
+      message: `User ${user.firstName} ${user.lastName} has been reactivated`,
+      data: {
+        user: {
+          id: user._id,
+          name: `${user.firstName} ${user.lastName}`,
+          email: user.email,
+          status: user.status
+        }
+      }
+    });
+    
+  } catch (err) {
+    console.error('Admin reactivate user error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while reactivating the user'
+    });
+  }
+});
+
+
+
+
 
 
 
