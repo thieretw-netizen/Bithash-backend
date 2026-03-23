@@ -7056,26 +7056,18 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
 
 
 
-
 // Helper function to get activity description
-function getActivityDescription(action, metadata) {
+const getActivityDescription = (action, metadata) => {
   const actionMap = {
     'signup': 'Signed up for a new account',
     'login': 'Logged into account',
     'logout': 'Logged out of account',
-    'login_attempt': 'Attempted to log in',
-    'session_created': 'Created a new session',
-    'password_change': 'Changed password',
-    'password_reset_request': 'Requested password reset',
-    'password_reset_complete': 'Completed password reset',
-    'failed_login': 'Failed login attempt',
     'deposit_created': 'Created a deposit request',
     'deposit_completed': 'Completed a deposit',
     'withdrawal_created': 'Created a withdrawal request',
     'withdrawal_completed': 'Completed a withdrawal',
     'investment_created': 'Created an investment',
     'investment_completed': 'Investment completed',
-    'investment_matured': 'Investment matured',
     'profile_update': 'Updated profile information',
     'kyc_submission': 'Submitted KYC documents',
     '2fa_enable': 'Enabled two-factor authentication',
@@ -7084,292 +7076,186 @@ function getActivityDescription(action, metadata) {
     'approve_deposit': 'Approved deposit',
     'reject_deposit': 'Rejected deposit',
     'approve_withdrawal': 'Approved withdrawal',
-    'reject_withdrawal': 'Rejected withdrawal',
-    'create_user': 'Created user account',
-    'update_user': 'Updated user account',
-    'delete_user': 'Deleted user account',
-    'suspend_user': 'Suspended user account',
-    'reactivate_user': 'Reactivated user account'
+    'reject_withdrawal': 'Rejected withdrawal'
   };
 
   let description = actionMap[action] || `Performed ${action.replace(/_/g, ' ')}`;
-
-  if (metadata) {
-    if (metadata.amount) {
-      description += ` of $${metadata.amount}`;
-    }
-    if (metadata.method) {
-      description += ` via ${metadata.method}`;
-    }
-    if (metadata.reason) {
-      description += ` - Reason: ${metadata.reason}`;
-    }
+  if (metadata && metadata.amount) {
+    description += ` of $${metadata.amount}`;
   }
-
   return description;
-}
-
-// Helper function to get location from IP using multiple online APIs
-const getLocationFromIP = async (ip) => {
-  if (!ip || ip === 'Unknown' || ip === '0.0.0.0' || ip === '::1' || ip === '127.0.0.1') {
-    return { country: 'Unknown', city: 'Unknown', region: 'Unknown', fullLocation: 'Unknown' };
-  }
-
-  // Check for private IP ranges
-  const privateIPRanges = [
-    /^10\./, /^172\.(1[6-9]|2[0-9]|3[0-1])\./, /^192\.168\./, /^127\./, /^169\.254\./, /^::1$/, /^fc00::/, /^fd00::/, /^fe80::/
-  ];
-  
-  for (const range of privateIPRanges) {
-    if (range.test(ip)) {
-      return { country: 'Local', city: 'Local Network', region: 'Private IP', fullLocation: 'Local Network' };
-    }
-  }
-
-  // Try multiple IP geolocation services with fallbacks
-  const services = [
-    {
-      name: 'ipinfo.io',
-      url: `https://ipinfo.io/${ip}?token=${process.env.IPINFO_TOKEN || 'b56ce6e91d732d'}`,
-      parser: (data) => ({ 
-        country: data.country, 
-        city: data.city, 
-        region: data.region, 
-        fullLocation: `${data.city || 'Unknown'}, ${data.region || 'Unknown'}, ${data.country || 'Unknown'}`
-      })
-    },
-    {
-      name: 'ipapi.co',
-      url: `https://ipapi.co/${ip}/json/`,
-      parser: (data) => ({ 
-        country: data.country_name, 
-        city: data.city, 
-        region: data.region, 
-        fullLocation: `${data.city || 'Unknown'}, ${data.region || 'Unknown'}, ${data.country_name || 'Unknown'}`
-      })
-    },
-    {
-      name: 'freeipapi.com',
-      url: `https://freeipapi.com/api/json/${ip}`,
-      parser: (data) => ({ 
-        country: data.countryName, 
-        city: data.cityName, 
-        region: data.regionName, 
-        fullLocation: `${data.cityName || 'Unknown'}, ${data.regionName || 'Unknown'}, ${data.countryName || 'Unknown'}`
-      })
-    },
-    {
-      name: 'ip-api.com',
-      url: `http://ip-api.com/json/${ip}`,
-      parser: (data) => data.status === 'success' ? { 
-        country: data.country, 
-        city: data.city, 
-        region: data.regionName, 
-        fullLocation: `${data.city || 'Unknown'}, ${data.regionName || 'Unknown'}, ${data.country || 'Unknown'}`
-      } : null
-    }
-  ];
-
-  for (const service of services) {
-    try {
-      const response = await axios.get(service.url, { timeout: 5000 });
-      if (response.data) {
-        const result = service.parser(response.data);
-        if (result && result.country && result.country !== 'Unknown' && result.country !== null) {
-          console.log(`Location found for IP ${ip} via ${service.name}:`, result);
-          return result;
-        }
-      }
-    } catch (err) {
-      console.log(`Service ${service.name} failed for IP ${ip}:`, err.message);
-    }
-  }
-
-  return { country: 'Unknown', city: 'Unknown', region: 'Unknown', fullLocation: 'Unknown' };
 };
 
-// Admin Activity Endpoint - Fetches real user IP and gets location from online APIs
+// Helper function to get location from IP
+const getLocationFromIP = async (ip) => {
+  if (!ip || ip === 'Unknown' || ip === '0.0.0.0' || ip === '::1' || ip === '127.0.0.1') {
+    return 'Unknown';
+  }
+
+  // Check private IP
+  const privateRanges = [/^10\./, /^172\.(1[6-9]|2[0-9]|3[0-1])\./, /^192\.168\./, /^127\./, /^169\.254\./];
+  for (const range of privateRanges) {
+    if (range.test(ip)) {
+      return 'Local Network';
+    }
+  }
+
+  try {
+    const response = await axios.get(`https://ipinfo.io/${ip}?token=${process.env.IPINFO_TOKEN || 'b56ce6e91d732d'}`, { timeout: 3000 });
+    if (response.data) {
+      const { city, region, country } = response.data;
+      return `${city || 'Unknown'}, ${region || 'Unknown'}, ${country || 'Unknown'}`;
+    }
+  } catch (err) {
+    console.log('IP lookup failed:', err.message);
+  }
+  
+  return 'Location Unknown';
+};
+
+// Admin Activity Endpoint
 app.get('/api/admin/activity', adminProtect, async (req, res) => {
   try {
-    const { page = 1, limit = 20, type = 'all' } = req.query;
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
 
-    console.log('Fetching admin activity...', { page, limit, type });
-
-    // Build query based on type
-    let query = {};
-    if (type !== 'all') {
-      query.actionCategory = type;
-    }
-
-    // Fetch user logs with proper population
-    const userLogs = await UserLog.find(query)
+    // Get user logs
+    const userLogs = await UserLog.find()
       .populate('user', 'firstName lastName email')
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(parseInt(limit))
-      .lean();
+      .limit(limit);
 
-    console.log(`Found ${userLogs.length} user logs`);
+    const total = await UserLog.countDocuments();
 
-    // Process activities and get location data
+    // Process activities
     const activities = [];
-    
     for (const log of userLogs) {
-      try {
-        // Get user data
-        let userData = {
-          id: 'system',
-          name: 'System User',
-          email: 'system@bithash.com'
-        };
-        
-        if (log.user) {
-          userData = {
-            id: log.user._id || 'unknown',
-            name: log.user.firstName && log.user.lastName 
-              ? `${log.user.firstName} ${log.user.lastName}`.trim() 
-              : log.username || 'Unknown User',
-            email: log.user.email || log.email || 'unknown@email.com'
-          };
-        } else if (log.username) {
-          userData = {
-            id: log.user || 'unknown',
-            name: log.username,
-            email: log.email || 'unknown@email.com'
-          };
-        }
-        
-        // Get IP address
-        const ipAddress = log.ipAddress || 'Unknown';
-        
-        // Get location from IP (with timeout to not block response)
-        let locationInfo = { country: 'Unknown', city: 'Unknown', region: 'Unknown', fullLocation: 'Unknown' };
-        
-        if (ipAddress && ipAddress !== 'Unknown' && ipAddress !== '0.0.0.0') {
-          try {
-            locationInfo = await getLocationFromIP(ipAddress);
-          } catch (locErr) {
-            console.error(`Location fetch failed for IP ${ipAddress}:`, locErr.message);
-          }
-        }
-        
-        // Determine status badge color
-        let statusClass = 'badge-success';
-        if (log.status === 'failed') statusClass = 'badge-danger';
-        else if (log.status === 'pending') statusClass = 'badge-warning';
-        
-        activities.push({
-          id: log._id.toString(),
-          timestamp: log.createdAt,
-          user: {
-            id: userData.id,
-            name: userData.name,
-            email: userData.email
-          },
-          action: log.action,
-          description: getActivityDescription(log.action, log.metadata),
-          ipAddress: ipAddress,
-          location: {
-            country: locationInfo.country,
-            city: locationInfo.city,
-            region: locationInfo.region,
-            fullLocation: locationInfo.fullLocation
-          },
-          status: log.status || 'success',
-          statusClass: statusClass,
-          type: log.actionCategory || 'user_activity',
-          metadata: log.metadata || {}
-        });
-      } catch (err) {
-        console.error('Error processing log:', err);
-        // Continue with next log if one fails
+      // Get user info
+      let userName = 'System';
+      let userEmail = '';
+      
+      if (log.user) {
+        userName = `${log.user.firstName || ''} ${log.user.lastName || ''}`.trim() || log.username || 'User';
+        userEmail = log.user.email || log.email || '';
+      } else if (log.username) {
+        userName = log.username;
+        userEmail = log.email || '';
       }
+
+      // Get location from IP
+      let location = 'Unknown';
+      if (log.ipAddress && log.ipAddress !== 'Unknown') {
+        location = await getLocationFromIP(log.ipAddress);
+      }
+
+      // Determine activity type class
+      let typeClass = 'other';
+      const action = (log.action || '').toLowerCase();
+      if (action.includes('login')) typeClass = 'login';
+      else if (action.includes('signup')) typeClass = 'signup';
+      else if (action.includes('deposit')) typeClass = 'deposit';
+      else if (action.includes('withdrawal')) typeClass = 'withdrawal';
+      else if (action.includes('investment')) typeClass = 'investment';
+
+      activities.push({
+        id: log._id,
+        timestamp: log.createdAt,
+        user: {
+          id: log.user?._id || 'system',
+          name: userName,
+          email: userEmail
+        },
+        action: log.action || 'Unknown Action',
+        description: getActivityDescription(log.action, log.metadata),
+        ipAddress: log.ipAddress || 'Unknown',
+        location: location,
+        status: log.status || 'success',
+        typeClass: typeClass,
+        metadata: log.metadata || {}
+      });
     }
 
-    // Get total count for pagination
-    const totalCount = await UserLog.countDocuments(query);
-
-    console.log(`Sending ${activities.length} activities with location data`);
-
-    res.status(200).json({
+    res.json({
       status: 'success',
       data: {
         activities: activities,
         pagination: {
-          currentPage: parseInt(page),
-          totalPages: Math.ceil(totalCount / parseInt(limit)),
-          totalItems: totalCount,
-          itemsPerPage: parseInt(limit),
-          hasNextPage: parseInt(page) < Math.ceil(totalCount / parseInt(limit)),
-          hasPrevPage: parseInt(page) > 1
+          currentPage: page,
+          totalPages: Math.ceil(total / limit),
+          totalItems: total,
+          itemsPerPage: limit,
+          hasNextPage: page < Math.ceil(total / limit),
+          hasPrevPage: page > 1
         }
       }
     });
 
   } catch (err) {
-    console.error('Admin activity fetch error:', err);
+    console.error('Activity fetch error:', err);
     res.status(500).json({
       status: 'error',
-      message: 'An error occurred while fetching activity data',
-      error: process.env.NODE_ENV === 'development' ? err.message : undefined
+      message: 'Failed to fetch activity data'
     });
   }
 });
 
-// Get latest admin activity for real-time polling
+// Get latest admin activity for polling
 app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
   try {
-    const { since, limit = 10 } = req.query;
-    
-    // Build query
+    const limit = parseInt(req.query.limit) || 20;
+    const since = req.query.since ? new Date(req.query.since) : null;
+
     let query = {};
     if (since) {
-      query.createdAt = { $gt: new Date(since) };
+      query.createdAt = { $gt: since };
     }
-    
-    // Fetch latest user logs
+
     const userLogs = await UserLog.find(query)
       .populate('user', 'firstName lastName email')
       .sort({ createdAt: -1 })
-      .limit(parseInt(limit))
-      .lean();
+      .limit(limit);
 
-    console.log(`Found ${userLogs.length} latest activities`);
-
-    // Format activities
     const activities = userLogs.map(log => {
-      let userName = 'System User';
-      let userEmail = 'system@bithash.com';
+      let userName = 'System';
+      let userEmail = '';
       
       if (log.user) {
-        userName = log.user.firstName && log.user.lastName 
-          ? `${log.user.firstName} ${log.user.lastName}`.trim() 
-          : log.username || 'Unknown User';
-        userEmail = log.user.email || log.email || 'unknown@email.com';
+        userName = `${log.user.firstName || ''} ${log.user.lastName || ''}`.trim() || log.username || 'User';
+        userEmail = log.user.email || log.email || '';
       } else if (log.username) {
         userName = log.username;
-        userEmail = log.email || 'unknown@email.com';
+        userEmail = log.email || '';
       }
-      
+
+      let typeClass = 'other';
+      const action = (log.action || '').toLowerCase();
+      if (action.includes('login')) typeClass = 'login';
+      else if (action.includes('signup')) typeClass = 'signup';
+      else if (action.includes('deposit')) typeClass = 'deposit';
+      else if (action.includes('withdrawal')) typeClass = 'withdrawal';
+      else if (action.includes('investment')) typeClass = 'investment';
+
       return {
         id: log._id,
         timestamp: log.createdAt,
         user: {
+          id: log.user?._id || 'system',
           name: userName,
           email: userEmail
         },
-        action: log.action,
+        action: log.action || 'Unknown Action',
         description: getActivityDescription(log.action, log.metadata),
         ipAddress: log.ipAddress || 'Unknown',
-        status: log.status || 'success'
+        status: log.status || 'success',
+        typeClass: typeClass
       };
     });
 
-    // Get the latest timestamp for next poll
     const lastTimestamp = activities.length > 0 ? activities[0].timestamp : null;
 
-    res.status(200).json({
+    res.json({
       status: 'success',
       data: {
         activities: activities,
@@ -7377,69 +7263,15 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
         count: activities.length
       }
     });
-    
+
   } catch (err) {
-    console.error('Get latest activity error:', err);
+    console.error('Latest activity error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch latest activity'
     });
   }
 });
-
-// Get activity stats for dashboard
-app.get('/api/admin/activity/stats', adminProtect, async (req, res) => {
-  try {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-    
-    const lastWeek = new Date(today);
-    lastWeek.setDate(lastWeek.getDate() - 7);
-    
-    // Get counts for different time periods
-    const [todayCount, yesterdayCount, weekCount, totalCount, actionTypes] = await Promise.all([
-      UserLog.countDocuments({ createdAt: { $gte: today } }),
-      UserLog.countDocuments({ createdAt: { $gte: yesterday, $lt: today } }),
-      UserLog.countDocuments({ createdAt: { $gte: lastWeek } }),
-      UserLog.countDocuments(),
-      UserLog.aggregate([
-        { $group: { _id: '$actionCategory', count: { $sum: 1 } } },
-        { $sort: { count: -1 } },
-        { $limit: 5 }
-      ])
-    ]);
-    
-    // Calculate percentage change
-    const percentageChange = yesterdayCount === 0 
-      ? (todayCount > 0 ? 100 : 0)
-      : ((todayCount - yesterdayCount) / yesterdayCount) * 100;
-    
-    res.status(200).json({
-      status: 'success',
-      data: {
-        stats: {
-          today: todayCount,
-          yesterday: yesterdayCount,
-          week: weekCount,
-          total: totalCount,
-          percentageChange: percentageChange.toFixed(1),
-          topActions: actionTypes
-        }
-      }
-    });
-    
-  } catch (err) {
-    console.error('Activity stats error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch activity stats'
-    });
-  }
-});
-
 
 
 
