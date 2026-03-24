@@ -8903,7 +8903,6 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
         // =============================================
         // GAS FEE CALCULATION (FIXED)
         // Base gas fee in BTC: 0.0056 BTC for amounts <= $10,000, 0.0072 BTC for > $10,000
-        // Convert to USD first and store in database
         // =============================================
         const btcGasFeeAmount = amount < 10000 ? 0.0056 : 0.0072;
         
@@ -9084,17 +9083,18 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             // Fetch BTC price with fallbacks
             btcPrice = await fetchBTCPrice();
             
-            // Calculate gas fee in USD first
-            gasFeeInUsd = btcGasFeeAmount * btcPrice;
-            
             if (asset.toLowerCase() === 'btc') {
                 // For BTC withdrawals, gas fee is directly in BTC
                 gasFeeInAsset = btcGasFeeAmount;
+                gasFeeInUsd = btcGasFeeAmount * btcPrice;
             } else {
                 // For other assets, fetch target asset price
                 targetAssetPrice = await fetchAssetPrice(asset);
                 
-                // Calculate gas fee in target asset: (BTC gas fee in USD) / target asset price
+                // Calculate gas fee in target asset:
+                // 1. Convert BTC gas fee to USD: btcGasFeeAmount * btcPrice
+                // 2. Convert USD to target asset amount: (btcGasFeeAmount * btcPrice) / targetAssetPrice
+                gasFeeInUsd = btcGasFeeAmount * btcPrice;
                 gasFeeInAsset = gasFeeInUsd / targetAssetPrice;
             }
             
@@ -9112,7 +9112,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
         if (user.balances.main < gasFeeInUsd) {
             return res.status(400).json({
                 status: 'error',
-                message: `Insufficient main balance for gas fee. Required: $${gasFeeInUsd.toFixed(2)} (${gasFeeInAsset.toFixed(8)} ${asset.toUpperCase()}) in main wallet.`
+                message: `Insufficient main balance for gas fee. Required: ${gasFeeInAsset.toFixed(8)} ${asset.toUpperCase()} (≈$${gasFeeInUsd.toFixed(2)}) in main wallet.`
             });
         }
         
@@ -9123,7 +9123,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             }
         });
         
-        // Record gas fee as platform revenue (store in USD in database)
+        // Record gas fee as platform revenue
         await PlatformRevenue.create({
             source: 'withdrawal_fee',
             amount: gasFeeInUsd,
@@ -9224,28 +9224,6 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 assetPriceAtTime: targetAssetPrice
             }
         );
-
-        // Send withdrawal request email with gas fee in both USD and asset
-        try {
-            await sendAutomatedEmail(user, 'withdrawal_request', {
-                name: user.firstName,
-                amount: assetAmount,
-                asset: asset,
-                usdValue: amount,
-                withdrawalAddress: walletAddress,
-                requestId: reference,
-                fee: gasFeeInAsset,
-                feeUsd: gasFeeInUsd,
-                netAmount: assetAmount - gasFeeInAsset,
-                timestamp: new Date(),
-                exchangeRate: exchangeRate,
-                network: asset === 'USDT' ? 'ERC-20' : asset === 'BTC' ? 'Bitcoin' : 'Mainnet'
-            });
-            console.log(`📧 Withdrawal request email sent to ${user.email}`);
-        } catch (emailError) {
-            console.error('Failed to send withdrawal request email:', emailError);
-            // Don't fail the withdrawal request if email fails
-        }
 
         return res.status(201).json({
             status: 'success',
@@ -9758,6 +9736,8 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
     }
 });
 
+
+
 // =============================================
 // ENDPOINT 1: USER LOCATION - ROBUST ENTERPRISE VERSION
 // =============================================
@@ -9939,8 +9919,7 @@ app.post('/api/users/cookie-preferences', protect, async (req, res) => {
 });
 
 // =============================================
-// ENDPOINT 3: ADMIN GET USER LOCATION - REAL LOCATION (NOT CLOUDFLARE)
-// Admin can request location anytime
+// ENDPOINT 3: ADMIN GET USER LOCATION - ON DEMAND
 // =============================================
 app.get('/api/admin/user-location/:userId', adminProtect, async (req, res) => {
   try {
@@ -9954,8 +9933,8 @@ app.get('/api/admin/user-location/:userId', adminProtect, async (req, res) => {
       });
     }
     
-    // Find the user
-    const user = await User.findById(userId).select('firstName lastName email location lastLogin');
+    // Find user with location data
+    const user = await User.findById(userId).select('firstName lastName email location lastLogin loginHistory');
     
     if (!user) {
       return res.status(404).json({
@@ -9964,287 +9943,142 @@ app.get('/api/admin/user-location/:userId', adminProtect, async (req, res) => {
       });
     }
     
-    // Get the most recent login history entries to find location
-    const loginHistory = user.loginHistory || [];
-    const recentLogins = loginHistory.slice(-5).reverse();
-    
-    // Also check if user has granted location access via GPS
-    const userLocation = user.location?.lastKnown || null;
-    
-    // Try to get real IP location from the most recent activity
-    let realLocation = null;
-    let realIP = null;
-    
-    // Fetch from UserLogs for this user to get real IP locations
-    const userLogs = await UserLog.find({ user: userId })
-      .sort({ createdAt: -1 })
-      .limit(10)
-      .lean();
-    
-    // Extract unique IPs from logs
-    const ips = [...new Set(userLogs.map(log => log.ipAddress).filter(ip => ip && ip !== 'Unknown' && ip !== '0.0.0.0'))];
-    
-    if (ips.length > 0) {
-      // Get location for the most recent IP
-      const latestIP = ips[0];
-      realIP = latestIP;
-      
-      // Function to get location from IP using online APIs
-      const getLocationFromIP = async (ipAddress) => {
-        if (!ipAddress || ipAddress === 'Unknown' || ipAddress === '0.0.0.0' || ipAddress === '::1' || ipAddress === '127.0.0.1') {
-          return null;
-        }
-        
-        // Clean IP address
-        let cleanIp = ipAddress;
-        if (cleanIp.includes('::ffff:')) {
-          cleanIp = cleanIp.split(':').pop();
-        }
-        
-        try {
-          // Try multiple IP geolocation services
-          const ipinfoToken = process.env.IPINFO_TOKEN || 'b56ce6e91d732d';
-          
-          // Primary: ipinfo.io
-          try {
-            const response = await axios.get(`https://ipinfo.io/${cleanIp}?token=${ipinfoToken}`, {
-              timeout: 5000
-            });
-            
-            if (response.data) {
-              const { city, region, country, loc, org, timezone, postal } = response.data;
-              
-              let latitude = null;
-              let longitude = null;
-              if (loc && loc.includes(',')) {
-                const coords = loc.split(',');
-                latitude = parseFloat(coords[0]);
-                longitude = parseFloat(coords[1]);
-              }
-              
-              return {
-                ip: cleanIp,
-                country: country || 'Unknown',
-                city: city || 'Unknown',
-                region: region || 'Unknown',
-                fullLocation: `${city || 'Unknown'}, ${region || 'Unknown'}, ${country || 'Unknown'}`,
-                latitude: latitude,
-                longitude: longitude,
-                isp: org || null,
-                timezone: timezone || null,
-                postalCode: postal || null,
-                source: 'ipinfo.io'
-              };
-            }
-          } catch (e) {
-            // Fallback to ipapi.co
-            try {
-              const response = await axios.get(`https://ipapi.co/${cleanIp}/json/`, {
-                timeout: 5000
-              });
-              
-              if (response.data && !response.data.error) {
-                const { city, region, country_name, country_code, latitude, longitude, org, timezone, postal } = response.data;
-                
-                return {
-                  ip: cleanIp,
-                  country: country_name || country_code || 'Unknown',
-                  city: city || 'Unknown',
-                  region: region || 'Unknown',
-                  fullLocation: `${city || 'Unknown'}, ${region || 'Unknown'}, ${country_name || country_code || 'Unknown'}`,
-                  latitude: latitude || null,
-                  longitude: longitude || null,
-                  isp: org || null,
-                  timezone: timezone || null,
-                  postalCode: postal || null,
-                  source: 'ipapi.co'
-                };
-              }
-            } catch (e2) {
-              // Final fallback to ip-api.com
-              try {
-                const response = await axios.get(`http://ip-api.com/json/${cleanIp}`, {
-                  timeout: 5000
-                });
-                
-                if (response.data && response.data.status === 'success') {
-                  const { city, regionName, country, lat, lon, isp, timezone, zip } = response.data;
-                  
-                  return {
-                    ip: cleanIp,
-                    country: country || 'Unknown',
-                    city: city || 'Unknown',
-                    region: regionName || 'Unknown',
-                    fullLocation: `${city || 'Unknown'}, ${regionName || 'Unknown'}, ${country || 'Unknown'}`,
-                    latitude: lat || null,
-                    longitude: lon || null,
-                    isp: isp || null,
-                    timezone: timezone || null,
-                    postalCode: zip || null,
-                    source: 'ip-api.com'
-                  };
-                }
-              } catch (e3) {
-                console.log('All location services failed for IP:', cleanIp);
-              }
-            }
-          }
-        } catch (err) {
-          console.error('Error fetching location for IP:', err);
-        }
-        
-        return null;
-      };
-      
-      realLocation = await getLocationFromIP(latestIP);
-    }
-    
-    // Get GPS location if user shared it
-    const gpsLocation = userLocation ? {
-      lat: userLocation.lat,
-      lng: userLocation.lng,
-      country: userLocation.country,
-      city: userLocation.city,
-      region: userLocation.region,
-      updatedAt: userLocation.updatedAt,
-      source: 'gps'
-    } : null;
-    
-    // Format recent login locations
-    const recentLoginLocations = await Promise.all(recentLogins.map(async (login) => {
-      let loginLocation = login.location || 'Unknown';
-      
-      // If we have IP, try to get detailed location
-      if (login.ip && login.ip !== 'Unknown' && login.ip !== '0.0.0.0') {
-        const ipLocation = await (async () => {
-          if (!login.ip || login.ip === 'Unknown') return null;
-          let cleanIp = login.ip;
-          if (cleanIp.includes('::ffff:')) cleanIp = cleanIp.split(':').pop();
-          try {
-            const response = await axios.get(`https://ipinfo.io/${cleanIp}?token=${process.env.IPINFO_TOKEN || 'b56ce6e91d732d'}`, { timeout: 3000 });
-            if (response.data) {
-              return `${response.data.city || 'Unknown'}, ${response.data.region || 'Unknown'}, ${response.data.country || 'Unknown'}`;
-            }
-          } catch (e) {}
-          return null;
-        })();
-        
-        if (ipLocation) {
-          loginLocation = ipLocation;
-        }
-      }
-      
-      return {
-        timestamp: login.timestamp,
+    // Get location data from user's login history (most recent) and last known location
+    const locationData = {
+      user: {
+        id: user._id,
+        name: `${user.firstName} ${user.lastName}`,
+        email: user.email
+      },
+      lastKnownLocation: user.location?.lastKnown || null,
+      locationHistory: user.locationHistory || [],
+      recentLogins: user.loginHistory?.slice(-5).map(login => ({
         ip: login.ip,
+        location: login.location,
         device: login.device,
-        location: loginLocation,
-        isPublicIP: login.ip && !login.ip.startsWith('10.') && !login.ip.startsWith('192.168.') && !login.ip.startsWith('172.') && login.ip !== '127.0.0.1' && login.ip !== '::1'
-      };
-    }));
+        timestamp: login.timestamp
+      })) || [],
+      status: user.status
+    };
     
-    // Log admin access to user location
-    await logActivity('admin_view_user_location', 'User', userId, req.admin._id, 'Admin', req, {
-      userId: userId,
-      userEmail: user.email,
-      realIP: realIP,
-      hasGPS: !!gpsLocation
-    });
-    
-    res.status(200).json({
-      status: 'success',
-      data: {
-        user: {
-          id: user._id,
-          name: `${user.firstName} ${user.lastName}`,
-          email: user.email
-        },
-        currentLocation: {
-          realIP: realIP || null,
-          realLocation: realLocation || null,
-          gpsLocation: gpsLocation || null,
-          lastLoginLocation: recentLoginLocations[0]?.location || 'Unknown',
-          lastLoginIP: recentLoginLocations[0]?.ip || 'Unknown',
-          lastLoginTime: recentLoginLocations[0]?.timestamp || null
-        },
-        locationHistory: {
-          recentLogins: recentLoginLocations,
-          gpsHistory: user.location?.history || [],
-          ipLogs: userLogs.slice(0, 5).map(log => ({
-            timestamp: log.createdAt,
-            ip: log.ipAddress,
-            action: log.action,
-            location: log.location?.fullLocation || 'Unknown'
-          }))
+    // If user has no location data stored, try to get it from IP
+    if (!locationData.lastKnownLocation && user.loginHistory && user.loginHistory.length > 0) {
+      const lastLogin = user.loginHistory[user.loginHistory.length - 1];
+      if (lastLogin && lastLogin.ip && lastLogin.ip !== 'Unknown') {
+        try {
+          const ipLocation = await getLocationFromIP(lastLogin.ip);
+          locationData.ipLocation = ipLocation;
+        } catch (err) {
+          console.log('Could not fetch location from IP:', err.message);
         }
       }
-    });
-    
-  } catch (err) {
-    console.error('Admin get user location error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch user location information'
-    });
-  }
-});
-
-// =============================================
-// ENDPOINT 4: ADMIN REQUEST USER LOCATION (force refresh)
-// Admin can request user to share location
-// =============================================
-app.post('/api/admin/user-location/:userId/request', adminProtect, async (req, res) => {
-  try {
-    const { userId } = req.params;
-    const adminId = req.admin._id;
-    
-    // Validate userId format
-    if (!mongoose.Types.ObjectId.isValid(userId)) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Invalid user ID format'
-      });
     }
     
-    const user = await User.findById(userId);
-    
-    if (!user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found'
-      });
-    }
-    
-    // Log the location request
-    await logActivity('admin_request_user_location', 'User', userId, adminId, 'Admin', req, {
-      userId: userId,
+    // Log admin activity
+    await logActivity('admin_view_user_location', 'User', userId, req.admin._id, 'Admin', req, {
       userEmail: user.email
     });
     
-    // Send notification to user (you can implement WebSocket or notification system)
-    // For now, just return success
-    
     res.status(200).json({
       status: 'success',
-      message: `Location request sent to user ${user.firstName} ${user.lastName}`,
-      data: {
-        requestedAt: new Date(),
-        userId: user._id,
-        userEmail: user.email
-      }
+      data: locationData
     });
     
-  } catch (err) {
-    console.error('Admin request user location error:', err);
+  } catch (error) {
+    console.error('Admin get user location error:', error);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to request user location'
+      message: 'Failed to fetch user location'
     });
   }
 });
 
-
-
+// =============================================
+// HELPER FUNCTION: GET LOCATION FROM IP
+// =============================================
+async function getLocationFromIP(ipAddress) {
+  if (!ipAddress || ipAddress === 'Unknown' || ipAddress === '0.0.0.0' || ipAddress === '::1' || ipAddress === '127.0.0.1') {
+    return {
+      country: 'Unknown',
+      city: 'Unknown',
+      region: 'Unknown',
+      fullLocation: 'Unknown Location',
+      latitude: null,
+      longitude: null,
+      isp: null
+    };
+  }
+  
+  // Clean IP address
+  let cleanIp = ipAddress;
+  if (cleanIp.includes('::ffff:')) {
+    cleanIp = cleanIp.split(':').pop();
+  }
+  
+  try {
+    // Try ipapi.co first
+    try {
+      const response = await axios.get(`https://ipapi.co/${cleanIp}/json/`, { timeout: 5000 });
+      if (response.data && !response.data.error) {
+        const { city, region, country_name, country_code, latitude, longitude, org } = response.data;
+        return {
+          country: country_name || country_code || 'Unknown',
+          city: city || 'Unknown',
+          region: region || 'Unknown',
+          fullLocation: `${city || 'Unknown'}, ${region || 'Unknown'}, ${country_name || country_code || 'Unknown'}`,
+          latitude: latitude || null,
+          longitude: longitude || null,
+          isp: org || null
+        };
+      }
+    } catch (err) {
+      console.log('ipapi.co failed, trying ipinfo.io...');
+    }
+    
+    // Try ipinfo.io as fallback
+    const ipinfoToken = process.env.IPINFO_TOKEN || 'b56ce6e91d732d';
+    const response = await axios.get(`https://ipinfo.io/${cleanIp}?token=${ipinfoToken}`, { timeout: 5000 });
+    if (response.data) {
+      const { city, region, country, loc, org } = response.data;
+      let latitude = null, longitude = null;
+      if (loc && loc.includes(',')) {
+        const coords = loc.split(',');
+        latitude = parseFloat(coords[0]);
+        longitude = parseFloat(coords[1]);
+      }
+      return {
+        country: country || 'Unknown',
+        city: city || 'Unknown',
+        region: region || 'Unknown',
+        fullLocation: `${city || 'Unknown'}, ${region || 'Unknown'}, ${country || 'Unknown'}`,
+        latitude: latitude,
+        longitude: longitude,
+        isp: org || null
+      };
+    }
+    
+    return {
+      country: 'Unknown',
+      city: 'Unknown',
+      region: 'Unknown',
+      fullLocation: 'Location Unavailable',
+      latitude: null,
+      longitude: null,
+      isp: null
+    };
+  } catch (err) {
+    console.error('Error fetching location from IP:', err);
+    return {
+      country: 'Unknown',
+      city: 'Unknown',
+      region: 'Unknown',
+      fullLocation: 'Location Unavailable',
+      latitude: null,
+      longitude: null,
+      isp: null
+    };
+  }
+}
 
 
 
