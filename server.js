@@ -8,7 +8,6 @@ const RedisStore = require('rate-limit-redis');
 const mongoSanitize = require('express-mongo-sanitize');
 const xss = require('xss-clean');
 const hpp = require('hpp');
-const csrf = require('csurf');
 const cookieParser = require('cookie-parser');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
@@ -60,7 +59,7 @@ app.use(cors({
     'Content-Type', 
     'Authorization', 
     'X-CSRF-Token',
-    'X-Rate-Limit',           // ← ADD THIS (fixes your error)
+    'X-Rate-Limit',
     'X-Requested-With',
     'Accept',
     'Origin',
@@ -129,6 +128,18 @@ const getRealClientIP = (req) => {
   if (forwardedFor) {
     // Get the first IP in the list (the real client IP)
     return forwardedFor.split(',')[0].trim();
+  }
+  
+  // Check Cloudflare headers
+  const cfConnectingIp = req.headers['cf-connecting-ip'];
+  if (cfConnectingIp) {
+    return cfConnectingIp;
+  }
+  
+  // Check other common proxy headers
+  const realIp = req.headers['x-real-ip'];
+  if (realIp) {
+    return realIp;
   }
   
   // Fallback to other headers or remote address
@@ -319,7 +330,7 @@ const UserSchema = new mongoose.Schema({
     },
     theme: { type: String, enum: ['light', 'dark'], default: 'dark' }
   },
-  // ADDED: Location tracking fields for admin
+  // NEW: Location tracking fields
   location: {
     lastKnown: {
       lat: { type: Number },
@@ -327,9 +338,7 @@ const UserSchema = new mongoose.Schema({
       country: { type: String },
       city: { type: String },
       region: { type: String },
-      accuracy: { type: Number },
-      source: { type: String, enum: ['gps', 'ip', 'unknown'], default: 'unknown' },
-      updatedAt: { type: Date, default: Date.now },
+      updatedAt: { type: Date },
       ipAddress: { type: String },
       userAgent: { type: String }
     },
@@ -343,9 +352,20 @@ const UserSchema = new mongoose.Schema({
       },
       ipAddress: String,
       userAgent: String,
-      source: { type: String, enum: ['gps', 'ip', 'unknown'] },
       timestamp: { type: Date, default: Date.now }
     }]
+  },
+  // NEW: Cookie preferences
+  cookiePreferences: {
+    consent: { type: String, enum: ['all', 'essential', 'functional', 'analytics', 'custom', 'reject'], default: 'essential' },
+    settings: {
+      essential: { type: Boolean, default: true },
+      functional: { type: Boolean, default: false },
+      analytics: { type: Boolean, default: false },
+      marketing: { type: Boolean, default: false }
+    },
+    updatedAt: { type: Date },
+    ipAddress: { type: String }
   }
 }, { 
   timestamps: true,
@@ -760,8 +780,7 @@ const UserLogSchema = new mongoose.Schema({
     longitude: Number,
     timezone: String,
     isp: String,
-    asn: String,
-    source: { type: String, enum: ['gps', 'ip', 'unknown'], default: 'unknown' }
+    asn: String
   },
 
   // Status & Performance
@@ -2761,7 +2780,7 @@ const generateReferralCode = () => {
   return `BH-${timestamp}-${randomPart}-${checksum}`;
 };
 
-// NEW FUNCTION: Get real-time crypto price with multiple fallback APIs (No CoinGecko)
+// NEW FUNCTION: Get real-time crypto price with multiple fallback APIs
 const getCryptoPrice = async (asset) => {
   try {
     const assetMap = {
@@ -2963,37 +2982,7 @@ const sendEmail = async (options) => {
 const getUserDeviceInfo = async (req) => {
   try {
     // Enhanced IP detection with multiple header checks to get REAL client IP (not Cloudflare)
-    let ip = req.ip || 
-             req.connection?.remoteAddress || 
-             req.socket?.remoteAddress ||
-             req.connection?.socket?.remoteAddress ||
-             req.headers['x-forwarded-for'] || 
-             req.headers['x-real-ip'] ||
-             req.headers['x-client-ip'] ||
-             req.headers['cf-connecting-ip'] || // Cloudflare
-             req.headers['fastly-client-ip'] || // Fastly
-             req.headers['true-client-ip'] || // Akamai and Cloudflare
-             req.headers['x-cluster-client-ip'] ||
-             'Unknown';
-
-    // Handle array format (x-forwarded-for can be comma-separated)
-    if (Array.isArray(ip)) {
-      ip = ip[0];
-    } else if (typeof ip === 'string' && ip.includes(',')) {
-      ip = ip.split(',')[0].trim();
-    }
-
-    // Clean up IP address
-    if (ip) {
-      // Remove IPv6 prefix
-      if (ip.includes('::ffff:')) {
-        ip = ip.split(':').pop();
-      }
-      // Remove port numbers
-      if (ip.includes(':')) {
-        ip = ip.split(':')[0];
-      }
-    }
+    let ip = getRealClientIP(req);
 
     let location = 'Unknown Location';
     let isPublicIP = true;
@@ -3021,7 +3010,7 @@ const getUserDeviceInfo = async (req) => {
     }
 
     // Only try location lookup for public IPs
-    if (isPublicIP && ip && ip !== 'Unknown') {
+    if (isPublicIP && ip && ip !== 'Unknown' && ip !== '0.0.0.0') {
       try {
         console.log(`Looking up location for IP: ${ip}`);
         
@@ -9772,30 +9761,27 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
 // =============================================
 app.post('/api/users/location', protect, async (req, res) => {
   try {
-    const { lat, lng, source } = req.body;
+    const { lat, lng } = req.body;
     const userId = req.user._id;
     const ipAddress = getRealClientIP(req);
     const userAgent = req.headers['user-agent'] || 'Unknown';
-    const locationSource = source === 'gps' ? 'gps' : 'ip';
     
-    // Validate coordinates if provided via GPS
-    if (locationSource === 'gps') {
-      if (!lat || !lng || typeof lat !== 'number' || typeof lng !== 'number') {
-        return res.status(400).json({
-          status: 'fail',
-          message: 'Valid latitude and longitude are required for GPS location'
-        });
-      }
-      
-      if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-        return res.status(400).json({
-          status: 'fail',
-          message: 'Invalid coordinate range'
-        });
-      }
+    // Validate coordinates
+    if (!lat || !lng || typeof lat !== 'number' || typeof lng !== 'number') {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Valid latitude and longitude are required'
+      });
     }
     
-    // Get location details from IP (always get for IP-based location or as fallback)
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid coordinate range'
+      });
+    }
+    
+    // Get location details from IP
     let locationDetails = {
       country: 'Unknown',
       city: 'Unknown',
@@ -9803,43 +9789,27 @@ app.post('/api/users/location', protect, async (req, res) => {
     };
     
     try {
-      const ipinfoToken = process.env.IPINFO_TOKEN || 'b56ce6e91d732d';
-      const response = await axios.get(`https://ipinfo.io/${ipAddress}?token=${ipinfoToken}`, { timeout: 3000 });
-      if (response.data) {
+      const geoResponse = await axios.get(`https://ipapi.co/${ipAddress}/json/`, { timeout: 3000 });
+      if (geoResponse.data && !geoResponse.data.error) {
         locationDetails = {
-          country: response.data.country || 'Unknown',
-          city: response.data.city || 'Unknown',
-          region: response.data.region || 'Unknown'
+          country: geoResponse.data.country_name || 'Unknown',
+          city: geoResponse.data.city || 'Unknown',
+          region: geoResponse.data.region || 'Unknown'
         };
       }
     } catch (geoError) {
       console.log('Geolocation failed:', geoError.message);
-      // Try fallback services
-      try {
-        const response = await axios.get(`https://ipapi.co/${ipAddress}/json/`, { timeout: 3000 });
-        if (response.data && !response.data.error) {
-          locationDetails = {
-            country: response.data.country_name || 'Unknown',
-            city: response.data.city || 'Unknown',
-            region: response.data.region || 'Unknown'
-          };
-        }
-      } catch (fallbackError) {
-        console.log('Fallback geolocation also failed');
-      }
     }
     
     // Update user with location
     await User.findByIdAndUpdate(userId, {
       $set: {
         'location.lastKnown': {
-          lat: locationSource === 'gps' ? lat : null,
-          lng: locationSource === 'gps' ? lng : null,
+          lat: lat,
+          lng: lng,
           country: locationDetails.country,
           city: locationDetails.city,
           region: locationDetails.region,
-          source: locationSource,
-          accuracy: req.body.accuracy || null,
           updatedAt: new Date(),
           ipAddress: ipAddress,
           userAgent: userAgent
@@ -9848,12 +9818,11 @@ app.post('/api/users/location', protect, async (req, res) => {
       $push: {
         locationHistory: {
           $each: [{
-            lat: locationSource === 'gps' ? lat : null,
-            lng: locationSource === 'gps' ? lng : null,
+            lat: lat,
+            lng: lng,
             locationDetails: locationDetails,
             ipAddress: ipAddress,
             userAgent: userAgent,
-            source: locationSource,
             timestamp: new Date()
           }],
           $slice: -100
@@ -9861,23 +9830,13 @@ app.post('/api/users/location', protect, async (req, res) => {
       }
     });
     
-    // Log activity with source information
-    await logActivity('location_updated', 'User', userId, userId, 'User', req, { 
-      lat: locationSource === 'gps' ? lat : null, 
-      lng: locationSource === 'gps' ? lng : null, 
-      locationDetails,
-      source: locationSource,
-      ip: ipAddress
-    });
+    // Log activity
+    await logActivity('location_updated', 'User', userId, userId, 'User', req, { lat, lng, locationDetails });
     
     res.status(200).json({
       status: 'success',
       message: 'Location updated successfully',
-      data: { 
-        location: locationDetails, 
-        coordinates: locationSource === 'gps' ? { lat, lng } : null,
-        source: locationSource
-      }
+      data: { location: locationDetails, coordinates: { lat, lng } }
     });
     
   } catch (error) {
@@ -9923,10 +9882,10 @@ app.post('/api/users/cookie-preferences', protect, async (req, res) => {
     // Update user preferences
     await User.findByIdAndUpdate(userId, {
       $set: {
-        'preferences.cookieConsent': cookieConsent,
-        'preferences.cookieConsentUpdatedAt': new Date(),
-        'preferences.cookieConsentIp': ipAddress,
-        'preferences.cookieSettings': validatedSettings
+        'cookiePreferences.consent': cookieConsent,
+        'cookiePreferences.updatedAt': new Date(),
+        'cookiePreferences.ipAddress': ipAddress,
+        'cookiePreferences.settings': validatedSettings
       }
     });
     
