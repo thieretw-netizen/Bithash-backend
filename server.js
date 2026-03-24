@@ -122,25 +122,13 @@ redis.on('connect', () => {
   console.log('Redis connected successfully');
 });
 
-// Helper function to get real client IP from request (bypass Cloudflare)
+// Helper function to get real client IP from request
 const getRealClientIP = (req) => {
-  // Check Cloudflare headers first (cf-connecting-ip is the real visitor IP)
-  const cfConnectingIp = req.headers['cf-connecting-ip'];
-  if (cfConnectingIp) {
-    return cfConnectingIp.trim();
-  }
-  
-  // Check X-Forwarded-For header (this is what Render and other proxies use)
+  // Check X-Forwarded-For header first (this is what Render uses)
   const forwardedFor = req.headers['x-forwarded-for'];
   if (forwardedFor) {
     // Get the first IP in the list (the real client IP)
     return forwardedFor.split(',')[0].trim();
-  }
-  
-  // Check X-Real-IP header
-  const realIp = req.headers['x-real-ip'];
-  if (realIp) {
-    return realIp.trim();
   }
   
   // Fallback to other headers or remote address
@@ -149,171 +137,6 @@ const getRealClientIP = (req) => {
          req.socket?.remoteAddress || 
          req.connection?.socket?.remoteAddress ||
          '0.0.0.0';
-};
-
-// Enhanced location detection function with multiple API fallbacks
-const getRealLocationFromIP = async (ipAddress) => {
-  if (!ipAddress || ipAddress === 'Unknown' || ipAddress === '0.0.0.0' || ipAddress === '::1' || ipAddress === '127.0.0.1') {
-    return {
-      country: 'Unknown',
-      city: 'Unknown',
-      region: 'Unknown',
-      fullLocation: 'Unknown Location',
-      latitude: null,
-      longitude: null,
-      isp: null,
-      timezone: null,
-      postalCode: null
-    };
-  }
-
-  // Clean IP address (remove IPv6 prefix if present)
-  let cleanIp = ipAddress;
-  if (cleanIp.includes('::ffff:')) {
-    cleanIp = cleanIp.split(':').pop();
-  }
-
-  try {
-    console.log(`Fetching location for IP: ${cleanIp}`);
-    
-    // Try multiple IP geolocation services for better accuracy
-    const ipinfoToken = process.env.IPINFO_TOKEN || 'b56ce6e91d732d';
-    
-    // Primary: ipinfo.io (most accurate for city/location)
-    try {
-      const response = await axios.get(`https://ipinfo.io/${cleanIp}?token=${ipinfoToken}`, {
-        timeout: 5000
-      });
-      
-      if (response.data) {
-        const { city, region, country, loc, org, timezone, postal } = response.data;
-        
-        // Parse coordinates if available
-        let latitude = null;
-        let longitude = null;
-        if (loc && loc.includes(',')) {
-          const coords = loc.split(',');
-          latitude = parseFloat(coords[0]);
-          longitude = parseFloat(coords[1]);
-        }
-        
-        return {
-          country: country || 'Unknown',
-          city: city || 'Unknown',
-          region: region || 'Unknown',
-          fullLocation: `${city || 'Unknown'}, ${region || 'Unknown'}, ${country || 'Unknown'}`,
-          latitude: latitude,
-          longitude: longitude,
-          isp: org || null,
-          timezone: timezone || null,
-          postalCode: postal || null
-        };
-      }
-    } catch (ipinfoError) {
-      console.log('ipinfo.io failed, trying fallback services...');
-    }
-    
-    // Fallback 1: ipapi.co
-    try {
-      const response = await axios.get(`https://ipapi.co/${cleanIp}/json/`, {
-        timeout: 5000
-      });
-      
-      if (response.data && !response.data.error) {
-        const { city, region, country_name, country_code, latitude, longitude, org, timezone, postal } = response.data;
-        
-        return {
-          country: country_name || country_code || 'Unknown',
-          city: city || 'Unknown',
-          region: region || 'Unknown',
-          fullLocation: `${city || 'Unknown'}, ${region || 'Unknown'}, ${country_name || country_code || 'Unknown'}`,
-          latitude: latitude || null,
-          longitude: longitude || null,
-          isp: org || null,
-          timezone: timezone || null,
-          postalCode: postal || null
-        };
-      }
-    } catch (ipapiError) {
-      console.log('ipapi.co failed, trying freeipapi...');
-    }
-    
-    // Fallback 2: freeipapi.com
-    try {
-      const response = await axios.get(`https://freeipapi.com/api/json/${cleanIp}`, {
-        timeout: 5000
-      });
-      
-      if (response.data) {
-        const { cityName, regionName, countryName, latitude, longitude, isp, timeZone } = response.data;
-        
-        return {
-          country: countryName || 'Unknown',
-          city: cityName || 'Unknown',
-          region: regionName || 'Unknown',
-          fullLocation: `${cityName || 'Unknown'}, ${regionName || 'Unknown'}, ${countryName || 'Unknown'}`,
-          latitude: latitude || null,
-          longitude: longitude || null,
-          isp: isp || null,
-          timezone: timeZone || null,
-          postalCode: null
-        };
-      }
-    } catch (freeipapiError) {
-      console.log('freeipapi.com failed, trying ip-api.com...');
-    }
-    
-    // Fallback 3: ip-api.com
-    try {
-      const response = await axios.get(`http://ip-api.com/json/${cleanIp}`, {
-        timeout: 5000
-      });
-      
-      if (response.data && response.data.status === 'success') {
-        const { city, regionName, country, lat, lon, isp, timezone, zip } = response.data;
-        
-        return {
-          country: country || 'Unknown',
-          city: city || 'Unknown',
-          region: regionName || 'Unknown',
-          fullLocation: `${city || 'Unknown'}, ${regionName || 'Unknown'}, ${country || 'Unknown'}`,
-          latitude: lat || null,
-          longitude: lon || null,
-          isp: isp || null,
-          timezone: timezone || null,
-          postalCode: zip || null
-        };
-      }
-    } catch (ipapiComError) {
-      console.log('All location services failed for IP:', cleanIp);
-    }
-    
-    return {
-      country: 'Unknown',
-      city: 'Unknown',
-      region: 'Unknown',
-      fullLocation: 'Location Unavailable',
-      latitude: null,
-      longitude: null,
-      isp: null,
-      timezone: null,
-      postalCode: null
-    };
-    
-  } catch (err) {
-    console.error('Error fetching location for IP:', err);
-    return {
-      country: 'Unknown',
-      city: 'Unknown',
-      region: 'Unknown',
-      fullLocation: 'Location Unavailable',
-      latitude: null,
-      longitude: null,
-      isp: null,
-      timezone: null,
-      postalCode: null
-    };
-  }
 };
 
 // Rate limiting with Redis store (required for autoscaling)
@@ -495,32 +318,6 @@ const UserSchema = new mongoose.Schema({
       push: { type: Boolean, default: true }
     },
     theme: { type: String, enum: ['light', 'dark'], default: 'dark' }
-  },
-  // Enhanced location tracking for admin
-  location: {
-    lastKnown: {
-      lat: { type: Number },
-      lng: { type: Number },
-      country: { type: String },
-      city: { type: String },
-      region: { type: String },
-      updatedAt: { type: Date },
-      ipAddress: { type: String },
-      userAgent: { type: String }
-    },
-    locationHistory: [{
-      lat: Number,
-      lng: Number,
-      locationDetails: {
-        country: String,
-        city: String,
-        region: String,
-        fullLocation: String
-      },
-      ipAddress: String,
-      userAgent: String,
-      timestamp: { type: Date, default: Date.now }
-    }]
   }
 }, { 
   timestamps: true,
@@ -781,7 +578,7 @@ const CommissionSettings = mongoose.model('CommissionSettings', CommissionSettin
 
 
 
-// Enhanced User Log Schema - Comprehensive Activity Tracking with Real Location
+// Enhanced User Log Schema - Comprehensive Activity Tracking
 const UserLogSchema = new mongoose.Schema({
   // Core User Information
   user: {
@@ -885,7 +682,7 @@ const UserLogSchema = new mongoose.Schema({
     index: true
   },
 
-  // Technical Details - REAL IP (not Cloudflare)
+  // Technical Details
   ipAddress: {
     type: String,
     required: true,
@@ -918,7 +715,7 @@ const UserLogSchema = new mongoose.Schema({
     deviceId: String
   },
 
-  // Enhanced Location Information - REAL Location from IP
+  // Enhanced Location Information
   location: {
     ip: String,
     country: {
@@ -935,8 +732,7 @@ const UserLogSchema = new mongoose.Schema({
     longitude: Number,
     timezone: String,
     isp: String,
-    asn: String,
-    fullLocation: String
+    asn: String
   },
 
   // Status & Performance
@@ -3117,6 +2913,606 @@ const convertToFiat = async (cryptoAmount, asset) => {
   return cryptoAmount * rate;
 };
 
+const sendEmail = async (options) => {
+  try {
+    const mailOptions = {
+      from: `BitHash <${process.env.EMAIL_FROM || 'no-reply@bithash.com'}>`,
+      to: options.email,
+      subject: options.subject,
+      text: options.message,
+      html: options.html
+    };
+
+    await transporter.sendMail(mailOptions);
+    console.log('Email sent successfully');
+  } catch (err) {
+    console.error('Error sending email:', err);
+    throw new Error('Failed to send email');
+  }
+};
+
+const getUserDeviceInfo = async (req) => {
+  try {
+    // Enhanced IP detection with multiple header checks to get REAL client IP (not Cloudflare)
+    let ip = req.ip || 
+             req.connection?.remoteAddress || 
+             req.socket?.remoteAddress ||
+             req.connection?.socket?.remoteAddress ||
+             req.headers['x-forwarded-for'] || 
+             req.headers['x-real-ip'] ||
+             req.headers['x-client-ip'] ||
+             req.headers['cf-connecting-ip'] || // Cloudflare
+             req.headers['fastly-client-ip'] || // Fastly
+             req.headers['true-client-ip'] || // Akamai and Cloudflare
+             req.headers['x-cluster-client-ip'] ||
+             'Unknown';
+
+    // Handle array format (x-forwarded-for can be comma-separated)
+    if (Array.isArray(ip)) {
+      ip = ip[0];
+    } else if (typeof ip === 'string' && ip.includes(',')) {
+      ip = ip.split(',')[0].trim();
+    }
+
+    // Clean up IP address
+    if (ip) {
+      // Remove IPv6 prefix
+      if (ip.includes('::ffff:')) {
+        ip = ip.split(':').pop();
+      }
+      // Remove port numbers
+      if (ip.includes(':')) {
+        ip = ip.split(':')[0];
+      }
+    }
+
+    let location = 'Unknown Location';
+    let isPublicIP = true;
+
+    // Enhanced private IP range detection
+    const privateIPRanges = [
+      /^10\./, // 10.0.0.0/8
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\./, // 172.16.0.0/12
+      /^192\.168\./, // 192.168.0.0/16
+      /^127\./, // localhost
+      /^169\.254\./, // link-local
+      /^::1$/, // IPv6 localhost
+      /^fc00::/, // IPv6 private
+      /^fd00::/, // IPv6 private
+      /^fe80::/ // IPv6 link-local
+    ];
+
+    // Check if IP is private
+    for (const range of privateIPRanges) {
+      if (range.test(ip)) {
+        isPublicIP = false;
+        location = 'Local Network';
+        break;
+      }
+    }
+
+    // Only try location lookup for public IPs
+    if (isPublicIP && ip && ip !== 'Unknown') {
+      try {
+        console.log(`Looking up location for IP: ${ip}`);
+        
+        // Try multiple IP geolocation services as fallback
+        const ipinfoToken = process.env.IPINFO_TOKEN || 'b56ce6e91d732d';
+        
+        // First try ipinfo.io
+        try {
+          const response = await axios.get(`https://ipinfo.io/${ip}?token=${ipinfoToken}`, {
+            timeout: 5000
+          });
+          
+          if (response.data) {
+            const { city, region, country, loc, org, timezone } = response.data;
+            location = `${city || 'Unknown'}, ${region || 'Unknown'}, ${country || 'Unknown'}`;
+            
+            console.log(`IPInfo.io location result: ${location}`);
+          }
+        } catch (ipinfoError) {
+          console.log('IPInfo.io failed, trying fallback services...');
+          
+          // Fallback 1: ipapi.co
+          try {
+            const response = await axios.get(`https://ipapi.co/${ip}/json/`, {
+              timeout: 5000
+            });
+            
+            if (response.data) {
+              const { city, region, country_name, country_code } = response.data;
+              location = `${city || 'Unknown'}, ${region || 'Unknown'}, ${country_name || country_code || 'Unknown'}`;
+              console.log(`IPApi.co location result: ${location}`);
+            }
+          } catch (ipapiError) {
+            // Fallback 2: freeipapi.com
+            try {
+              const response = await axios.get(`https://freeipapi.com/api/json/${ip}`, {
+                timeout: 5000
+              });
+              
+              if (response.data) {
+                const { cityName, regionName, countryName } = response.data;
+                location = `${cityName || 'Unknown'}, ${regionName || 'Unknown'}, ${countryName || 'Unknown'}`;
+                console.log(`FreeIPAPI location result: ${location}`);
+              }
+            } catch (freeipapiError) {
+              // Final fallback: ip-api.com
+              try {
+                const response = await axios.get(`http://ip-api.com/json/${ip}`, {
+                  timeout: 5000
+                });
+                
+                if (response.data && response.data.status === 'success') {
+                  const { city, regionName, country } = response.data;
+                  location = `${city || 'Unknown'}, ${regionName || 'Unknown'}, ${country || 'Unknown'}`;
+                  console.log(`IP-API.com location result: ${location}`);
+                }
+              } catch (ipapiComError) {
+                location = 'Location Service Unavailable';
+                console.log('All location services failed');
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error('All location lookup services failed:', err.message);
+        location = 'Location Unavailable';
+      }
+    } else if (!isPublicIP) {
+      console.log(`Private IP detected: ${ip}, using local network location`);
+    }
+
+    return {
+      ip: ip || 'Unknown',
+      device: req.headers['user-agent'] || 'Unknown',
+      location: location,
+      isPublicIP: isPublicIP
+    };
+  } catch (err) {
+    console.error('Error getting device info:', err);
+    return {
+      ip: req.ip || 'Unknown',
+      device: req.headers['user-agent'] || 'Unknown',
+      location: 'Unknown',
+      isPublicIP: false
+    };
+  }
+};
+const logActivity = async (action, entity, entityId, performedBy, performedByModel, req, changes = {}) => {
+  try {
+    const deviceInfo = await getUserDeviceInfo(req);
+    
+    // Enhanced location data
+    const locationData = {
+      ip: deviceInfo.ip,
+      location: deviceInfo.location,
+      isPublicIP: deviceInfo.isPublicIP,
+      userAgent: deviceInfo.device,
+      detectedAt: new Date()
+    };
+    
+    await SystemLog.create({
+      action,
+      entity,
+      entityId,
+      performedBy,
+      performedByModel,
+      ip: locationData.ip,
+      device: locationData.userAgent,
+      location: locationData.location,
+      changes: {
+        ...changes,
+        locationData: locationData
+      }
+    });
+    
+    console.log(`Activity Logged: ${action}`, {
+      entity,
+      entityId,
+      location: locationData.location,
+      ip: locationData.ip,
+      isPublicIP: locationData.isPublicIP
+    });
+  } catch (err) {
+    console.error('Error logging activity:', err);
+  }
+};
+
+const generateTOTPSecret = () => {
+  return speakeasy.generateSecret({
+    length: 20,
+    name: 'BitHash',
+    issuer: 'BitHash LLC'
+  });
+};
+
+const verifyTOTP = (token, secret) => {
+  return speakeasy.totp.verify({
+    secret,
+    encoding: 'base32',
+    token,
+    window: 2
+  });
+};
+
+
+
+// Initialize default admin and plans
+const initializeAdmin = async () => {
+  try {
+    const adminExists = await Admin.findOne({ email: 'admin@bithash.com' });
+    if (!adminExists) {
+      const hashedPassword = await bcrypt.hash(process.env.DEFAULT_ADMIN_PASSWORD || 'SecureAdminPassword123!', 12);
+      await Admin.create({
+        email: 'admin@bithash.com',
+        password: hashedPassword,
+        name: 'Super Admin',
+        role: 'super',
+        permissions: ['all'],
+        passwordChangedAt: Date.now()
+      });
+      console.log('Default admin created');
+    }
+  } catch (err) {
+    console.error('Error initializing admin:', err);
+  }
+};
+
+const initializePlans = async () => {
+  try {
+    const plans = [
+      {
+        name: 'Starter Plan',
+        description: '12% After 10 hours',
+        percentage: 12,
+        duration: 10,
+        minAmount: 50,
+        maxAmount: 499,
+        referralBonus: 5
+      },
+      {
+        name: 'Gold Plan',
+        description: '20% After 24 hours',
+        percentage: 20,
+        duration: 24,
+        minAmount: 500,
+        maxAmount: 1999,
+        referralBonus: 5
+      },
+      {
+        name: 'Advance Plan',
+        description: '35% After 48 hours',
+        percentage: 35,
+        duration: 48,
+        minAmount: 2000,
+        maxAmount: 9999,
+        referralBonus: 5
+      },
+      {
+        name: 'Exclusive Plan',
+        description: '40% After 72 hours',
+        percentage: 40,
+        duration: 72,
+        minAmount: 10000,
+        maxAmount: 49999,
+        referralBonus: 5
+      },
+      {
+        name: 'Expert Plan',
+        description: '50% After 96 hours',
+        percentage: 50,
+        duration: 96,
+        minAmount: 50000,
+        maxAmount: 1000000,
+        referralBonus: 5
+      }
+    ];
+
+    for (const plan of plans) {
+      const existingPlan = await Plan.findOne({ name: plan.name });
+      if (!existingPlan) {
+        await Plan.create(plan);
+      }
+    }
+  } catch (err) {
+    console.error('Error initializing plans:', err);
+  }
+};
+
+initializeAdmin();
+initializePlans();
+
+// Middleware with enhanced security
+const protect = async (req, res, next) => {
+  try {
+    let token;
+    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+      token = req.headers.authorization.split(' ')[1];
+    } else if (req.cookies.jwt) {
+      token = req.cookies.jwt;
+    }
+
+    if (!token) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'You are not logged in! Please log in to get access.'
+      });
+    }
+
+    const decoded = verifyJWT(token);
+    const currentUser = await User.findById(decoded.id).select('+passwordChangedAt +twoFactorAuth.secret');
+
+    if (!currentUser) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'The user belonging to this token no longer exists.'
+      });
+    }
+
+    if (currentUser.passwordChangedAt && decoded.iat < currentUser.passwordChangedAt.getTime() / 1000) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'User recently changed password! Please log in again.'
+      });
+    }
+
+    if (currentUser.status !== 'active') {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Your account has been suspended. Please contact support.'
+      });
+    }
+
+    // Check if 2FA is required
+    if (currentUser.twoFactorAuth.enabled && !req.headers['x-2fa-verified']) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Two-factor authentication required'
+      });
+    }
+
+    req.user = currentUser;
+    next();
+  } catch (err) {
+    return res.status(401).json({
+      status: 'fail',
+      message: err.message || 'Invalid token. Please log in again.'
+    });
+  }
+};
+
+const adminProtect = async (req, res, next) => {
+  try {
+    let token;
+    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+      token = req.headers.authorization.split(' ')[1];
+    } else if (req.cookies.admin_jwt) {
+      token = req.cookies.admin_jwt;
+    }
+
+    if (!token) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'You are not logged in! Please log in to get access.'
+      });
+    }
+
+    const decoded = verifyJWT(token);
+    if (!decoded.isAdmin) {
+      return res.status(403).json({
+        status: 'fail',
+        message: 'You do not have permission to access this resource'
+      });
+    }
+
+    const currentAdmin = await Admin.findById(decoded.id).select('+passwordChangedAt +twoFactorAuth.secret');
+    if (!currentAdmin) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'The admin belonging to this token no longer exists.'
+      });
+    }
+
+    // Check if 2FA is required
+    if (currentAdmin.twoFactorAuth.enabled && !req.headers['x-2fa-verified']) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Two-factor authentication required'
+      });
+    }
+
+    req.admin = currentAdmin;
+    next();
+  } catch (err) {
+    return res.status(401).json({
+      status: 'fail',
+      message: err.message || 'Invalid token. Please log in again.'
+    });
+  }
+};
+
+const restrictTo = (...roles) => {
+  return (req, res, next) => {
+    if (!roles.includes(req.admin.role)) {
+      return res.status(403).json({
+        status: 'fail',
+        message: 'You do not have permission to perform this action'
+      });
+    }
+    next();
+  };
+};
+
+const checkCSRF = (req, res, next) => {
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') {
+    return next();
+  }
+
+  const csrfToken = req.headers['x-csrf-token'] || req.body._csrf;
+  if (!csrfToken || !req.session.csrfToken || csrfToken !== req.session.csrfToken) {
+    return res.status(403).json({
+      status: 'fail',
+      message: 'Invalid CSRF token'
+    });
+  }
+  next();
+};
+
+
+// Fixed function to calculate and distribute downline referral commissions
+const calculateReferralCommissions = async (investment) => {
+  try {
+    // First, populate the investment with user data
+    const populatedInvestment = await Investment.findById(investment._id)
+      .populate('user', 'firstName lastName email')
+      .populate('plan');
+
+    if (!populatedInvestment) {
+      console.log(`❌ Investment not found: ${investment._id}`);
+      return;
+    }
+
+    const investmentId = populatedInvestment._id;
+    const investorId = populatedInvestment.user._id;
+    const investmentAmount = populatedInvestment.amount;
+
+    console.log(`🔍 Checking downline commissions for investment: ${investmentId}, user: ${investorId}, amount: $${investmentAmount}`);
+
+    // Find the downline relationship for this investor (check if they have an upline)
+    const relationship = await DownlineRelationship.findOne({
+      downline: investorId,
+      status: 'active',
+      remainingRounds: { $gt: 0 }
+    }).populate('upline', 'firstName lastName email balances referralStats downlineStats');
+
+    if (!relationship) {
+      console.log(`❌ No active downline relationship found for user: ${investorId}`);
+      return; // No upline found or no commission rounds remaining
+    }
+
+    const uplineId = relationship.upline._id;
+    const uplineUser = relationship.upline;
+    const commissionPercentage = relationship.commissionPercentage;
+    const commissionAmount = (investmentAmount * commissionPercentage) / 100;
+
+    console.log(`💰 Downline commission: $${investmentAmount} * ${commissionPercentage}% = $${commissionAmount} for upline: ${uplineUser.email}`);
+
+    // Create commission history record
+    const commissionHistory = await CommissionHistory.create({
+      upline: uplineId,
+      downline: investorId,
+      investment: investmentId,
+      investmentAmount: investmentAmount,
+      commissionPercentage: commissionPercentage,
+      commissionAmount: commissionAmount,
+      roundNumber: relationship.commissionRounds - relationship.remainingRounds + 1,
+      status: 'paid',
+      paidAt: new Date()
+    });
+
+    // ✅ FIXED: Add commission to upline's MAIN balance as requested
+    const updatedUpline = await User.findByIdAndUpdate(
+      uplineId,
+      {
+        $inc: {
+          'balances.main': commissionAmount, // Added to main balance
+          'referralStats.totalEarnings': commissionAmount,
+          'referralStats.availableBalance': commissionAmount,
+          'downlineStats.totalCommissionEarned': commissionAmount,
+          'downlineStats.thisMonthCommission': commissionAmount
+        }
+      },
+      { new: true }
+    );
+
+    console.log(`✅ Updated upline ${uplineUser.email} MAIN balance with $${commissionAmount}. New balance: $${updatedUpline.balances.main}`);
+
+    // Update downline relationship
+    relationship.remainingRounds -= 1;
+    relationship.totalCommissionEarned += commissionAmount;
+    
+    if (relationship.remainingRounds === 0) {
+      relationship.status = 'completed';
+      console.log(`🎯 Commission rounds completed for relationship: ${relationship._id}`);
+    }
+
+    await relationship.save();
+
+    // Create transaction record for the commission
+    await Transaction.create({
+      user: uplineId,
+      type: 'referral',
+      amount: commissionAmount,
+      currency: 'USD',
+      status: 'completed',
+      method: 'INTERNAL',
+      reference: `DOWNLINE-COMM-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      details: {
+        commissionFrom: investorId,
+        investmentId: investmentId,
+        round: relationship.commissionRounds - relationship.remainingRounds + 1,
+        totalRounds: relationship.commissionRounds,
+        commissionType: 'downline',
+        downlineName: `${populatedInvestment.user.firstName} ${populatedInvestment.user.lastName}`,
+        percentage: commissionPercentage
+      },
+      fee: 0,
+      netAmount: commissionAmount
+    });
+
+    // Add to upline's referral history
+    await User.findByIdAndUpdate(uplineId, {
+      $push: {
+        referralHistory: {
+          referredUser: investorId,
+          amount: commissionAmount,
+          percentage: commissionPercentage,
+          level: 1, // Direct downline
+          date: new Date(),
+          status: 'available',
+          type: 'downline_commission'
+        }
+      }
+    });
+
+    // Update downline stats count
+    const activeDownlinesCount = await DownlineRelationship.countDocuments({ 
+      upline: uplineId, 
+      status: 'active',
+      remainingRounds: { $gt: 0 }
+    });
+
+    await User.findByIdAndUpdate(uplineId, {
+      'downlineStats.activeDownlines': activeDownlinesCount
+    });
+
+    console.log(`🎉 Downline commission of $${commissionAmount} paid to upline ${uplineUser.email} for investment ${investmentId} (Round ${relationship.commissionRounds - relationship.remainingRounds + 1}/${relationship.commissionRounds})`);
+
+    // Log the activity
+    await logActivity('downline_commission_paid', 'commission', commissionHistory._id, uplineId, 'User', null, {
+      amount: commissionAmount,
+      downline: investorId,
+      investment: investmentId,
+      round: relationship.commissionRounds - relationship.remainingRounds + 1,
+      totalRounds: relationship.commissionRounds,
+      percentage: commissionPercentage
+    });
+
+  } catch (err) {
+    console.error('❌ Downline commission calculation error:', err);
+    // Don't throw error to avoid disrupting investment process
+  }
+};
+
+
+
+
+
+
+
+
 // Enhanced email service with professional, highly visible templates - Mobile Optimized (no boxes/blocks, smooth flowing like Binance)
 const sendAutomatedEmail = async (user, action, data = {}) => {
   try {
@@ -3390,7 +3786,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
         `
       },
 
-      // LOGIN SUCCESS - ONLY for login, NOT for signup or withdrawal
+      // LOGIN SUCCESS
       login_success: {
         subject: 'BitHash Capital | New Login Detected',
         html: `
@@ -8507,7 +8903,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
         // =============================================
         // GAS FEE CALCULATION (FIXED)
         // Base gas fee in BTC: 0.0056 BTC for amounts <= $10,000, 0.0072 BTC for > $10,000
-        // Store BTC gas fee in USD to database, display in both USD and asset being transacted
+        // Convert to USD first and store in database
         // =============================================
         const btcGasFeeAmount = amount < 10000 ? 0.0056 : 0.0072;
         
@@ -8688,7 +9084,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             // Fetch BTC price with fallbacks
             btcPrice = await fetchBTCPrice();
             
-            // Store BTC gas fee in USD to database
+            // Calculate gas fee in USD first
             gasFeeInUsd = btcGasFeeAmount * btcPrice;
             
             if (asset.toLowerCase() === 'btc') {
@@ -8698,8 +9094,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 // For other assets, fetch target asset price
                 targetAssetPrice = await fetchAssetPrice(asset);
                 
-                // Calculate gas fee in target asset:
-                // Convert USD to target asset amount: gasFeeInUsd / targetAssetPrice
+                // Calculate gas fee in target asset: (BTC gas fee in USD) / target asset price
                 gasFeeInAsset = gasFeeInUsd / targetAssetPrice;
             }
             
@@ -8717,7 +9112,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
         if (user.balances.main < gasFeeInUsd) {
             return res.status(400).json({
                 status: 'error',
-                message: `Insufficient main balance for gas fee. Required: ${gasFeeInAsset.toFixed(8)} ${asset.toUpperCase()} (≈$${gasFeeInUsd.toFixed(2)}) in main wallet.`
+                message: `Insufficient main balance for gas fee. Required: $${gasFeeInUsd.toFixed(2)} (${gasFeeInAsset.toFixed(8)} ${asset.toUpperCase()}) in main wallet.`
             });
         }
         
@@ -8728,7 +9123,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             }
         });
         
-        // Record gas fee as platform revenue with both USD and asset amounts
+        // Record gas fee as platform revenue (store in USD in database)
         await PlatformRevenue.create({
             source: 'withdrawal_fee',
             amount: gasFeeInUsd,
@@ -8837,17 +9232,19 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 amount: assetAmount,
                 asset: asset,
                 usdValue: amount,
+                withdrawalAddress: walletAddress,
+                requestId: reference,
                 fee: gasFeeInAsset,
                 feeUsd: gasFeeInUsd,
                 netAmount: assetAmount - gasFeeInAsset,
-                withdrawalAddress: walletAddress,
-                requestId: reference,
                 timestamp: new Date(),
                 exchangeRate: exchangeRate,
-                network: asset === 'BTC' ? 'Bitcoin' : asset === 'USDT' ? 'ERC-20' : 'Mainnet'
+                network: asset === 'USDT' ? 'ERC-20' : asset === 'BTC' ? 'Bitcoin' : 'Mainnet'
             });
+            console.log(`📧 Withdrawal request email sent to ${user.email}`);
         } catch (emailError) {
             console.error('Failed to send withdrawal request email:', emailError);
+            // Don't fail the withdrawal request if email fails
         }
 
         return res.status(201).json({
@@ -8931,7 +9328,7 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
       .sort((a, b) => new Date(b.createdAt || b.timestamp) - new Date(a.createdAt || a.timestamp))
       .slice(0, parseInt(limit));
 
-    // Function to get location from IP address using online APIs (real location, not Cloudflare)
+    // Function to get location from IP address using online APIs
     const getLocationFromIP = async (ipAddress) => {
       if (!ipAddress || ipAddress === 'Unknown' || ipAddress === '0.0.0.0' || ipAddress === '::1' || ipAddress === '127.0.0.1') {
         return {
@@ -9170,7 +9567,7 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
         ipAddress = activity.ip || 'Unknown';
       }
 
-      // Get REAL location from IP address using online APIs (bypass Cloudflare)
+      // Get REAL location from IP address using online APIs
       const locationData = await getLocationFromIP(ipAddress);
 
       // Final safety check for user name
@@ -9361,8 +9758,6 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
     }
 });
 
-
-
 // =============================================
 // ENDPOINT 1: USER LOCATION - ROBUST ENTERPRISE VERSION
 // =============================================
@@ -9542,6 +9937,316 @@ app.post('/api/users/cookie-preferences', protect, async (req, res) => {
     });
   }
 });
+
+// =============================================
+// ENDPOINT 3: ADMIN GET USER LOCATION - REAL LOCATION (NOT CLOUDFLARE)
+// Admin can request location anytime
+// =============================================
+app.get('/api/admin/user-location/:userId', adminProtect, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    // Validate userId format
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid user ID format'
+      });
+    }
+    
+    // Find the user
+    const user = await User.findById(userId).select('firstName lastName email location lastLogin');
+    
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+    
+    // Get the most recent login history entries to find location
+    const loginHistory = user.loginHistory || [];
+    const recentLogins = loginHistory.slice(-5).reverse();
+    
+    // Also check if user has granted location access via GPS
+    const userLocation = user.location?.lastKnown || null;
+    
+    // Try to get real IP location from the most recent activity
+    let realLocation = null;
+    let realIP = null;
+    
+    // Fetch from UserLogs for this user to get real IP locations
+    const userLogs = await UserLog.find({ user: userId })
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .lean();
+    
+    // Extract unique IPs from logs
+    const ips = [...new Set(userLogs.map(log => log.ipAddress).filter(ip => ip && ip !== 'Unknown' && ip !== '0.0.0.0'))];
+    
+    if (ips.length > 0) {
+      // Get location for the most recent IP
+      const latestIP = ips[0];
+      realIP = latestIP;
+      
+      // Function to get location from IP using online APIs
+      const getLocationFromIP = async (ipAddress) => {
+        if (!ipAddress || ipAddress === 'Unknown' || ipAddress === '0.0.0.0' || ipAddress === '::1' || ipAddress === '127.0.0.1') {
+          return null;
+        }
+        
+        // Clean IP address
+        let cleanIp = ipAddress;
+        if (cleanIp.includes('::ffff:')) {
+          cleanIp = cleanIp.split(':').pop();
+        }
+        
+        try {
+          // Try multiple IP geolocation services
+          const ipinfoToken = process.env.IPINFO_TOKEN || 'b56ce6e91d732d';
+          
+          // Primary: ipinfo.io
+          try {
+            const response = await axios.get(`https://ipinfo.io/${cleanIp}?token=${ipinfoToken}`, {
+              timeout: 5000
+            });
+            
+            if (response.data) {
+              const { city, region, country, loc, org, timezone, postal } = response.data;
+              
+              let latitude = null;
+              let longitude = null;
+              if (loc && loc.includes(',')) {
+                const coords = loc.split(',');
+                latitude = parseFloat(coords[0]);
+                longitude = parseFloat(coords[1]);
+              }
+              
+              return {
+                ip: cleanIp,
+                country: country || 'Unknown',
+                city: city || 'Unknown',
+                region: region || 'Unknown',
+                fullLocation: `${city || 'Unknown'}, ${region || 'Unknown'}, ${country || 'Unknown'}`,
+                latitude: latitude,
+                longitude: longitude,
+                isp: org || null,
+                timezone: timezone || null,
+                postalCode: postal || null,
+                source: 'ipinfo.io'
+              };
+            }
+          } catch (e) {
+            // Fallback to ipapi.co
+            try {
+              const response = await axios.get(`https://ipapi.co/${cleanIp}/json/`, {
+                timeout: 5000
+              });
+              
+              if (response.data && !response.data.error) {
+                const { city, region, country_name, country_code, latitude, longitude, org, timezone, postal } = response.data;
+                
+                return {
+                  ip: cleanIp,
+                  country: country_name || country_code || 'Unknown',
+                  city: city || 'Unknown',
+                  region: region || 'Unknown',
+                  fullLocation: `${city || 'Unknown'}, ${region || 'Unknown'}, ${country_name || country_code || 'Unknown'}`,
+                  latitude: latitude || null,
+                  longitude: longitude || null,
+                  isp: org || null,
+                  timezone: timezone || null,
+                  postalCode: postal || null,
+                  source: 'ipapi.co'
+                };
+              }
+            } catch (e2) {
+              // Final fallback to ip-api.com
+              try {
+                const response = await axios.get(`http://ip-api.com/json/${cleanIp}`, {
+                  timeout: 5000
+                });
+                
+                if (response.data && response.data.status === 'success') {
+                  const { city, regionName, country, lat, lon, isp, timezone, zip } = response.data;
+                  
+                  return {
+                    ip: cleanIp,
+                    country: country || 'Unknown',
+                    city: city || 'Unknown',
+                    region: regionName || 'Unknown',
+                    fullLocation: `${city || 'Unknown'}, ${regionName || 'Unknown'}, ${country || 'Unknown'}`,
+                    latitude: lat || null,
+                    longitude: lon || null,
+                    isp: isp || null,
+                    timezone: timezone || null,
+                    postalCode: zip || null,
+                    source: 'ip-api.com'
+                  };
+                }
+              } catch (e3) {
+                console.log('All location services failed for IP:', cleanIp);
+              }
+            }
+          }
+        } catch (err) {
+          console.error('Error fetching location for IP:', err);
+        }
+        
+        return null;
+      };
+      
+      realLocation = await getLocationFromIP(latestIP);
+    }
+    
+    // Get GPS location if user shared it
+    const gpsLocation = userLocation ? {
+      lat: userLocation.lat,
+      lng: userLocation.lng,
+      country: userLocation.country,
+      city: userLocation.city,
+      region: userLocation.region,
+      updatedAt: userLocation.updatedAt,
+      source: 'gps'
+    } : null;
+    
+    // Format recent login locations
+    const recentLoginLocations = await Promise.all(recentLogins.map(async (login) => {
+      let loginLocation = login.location || 'Unknown';
+      
+      // If we have IP, try to get detailed location
+      if (login.ip && login.ip !== 'Unknown' && login.ip !== '0.0.0.0') {
+        const ipLocation = await (async () => {
+          if (!login.ip || login.ip === 'Unknown') return null;
+          let cleanIp = login.ip;
+          if (cleanIp.includes('::ffff:')) cleanIp = cleanIp.split(':').pop();
+          try {
+            const response = await axios.get(`https://ipinfo.io/${cleanIp}?token=${process.env.IPINFO_TOKEN || 'b56ce6e91d732d'}`, { timeout: 3000 });
+            if (response.data) {
+              return `${response.data.city || 'Unknown'}, ${response.data.region || 'Unknown'}, ${response.data.country || 'Unknown'}`;
+            }
+          } catch (e) {}
+          return null;
+        })();
+        
+        if (ipLocation) {
+          loginLocation = ipLocation;
+        }
+      }
+      
+      return {
+        timestamp: login.timestamp,
+        ip: login.ip,
+        device: login.device,
+        location: loginLocation,
+        isPublicIP: login.ip && !login.ip.startsWith('10.') && !login.ip.startsWith('192.168.') && !login.ip.startsWith('172.') && login.ip !== '127.0.0.1' && login.ip !== '::1'
+      };
+    }));
+    
+    // Log admin access to user location
+    await logActivity('admin_view_user_location', 'User', userId, req.admin._id, 'Admin', req, {
+      userId: userId,
+      userEmail: user.email,
+      realIP: realIP,
+      hasGPS: !!gpsLocation
+    });
+    
+    res.status(200).json({
+      status: 'success',
+      data: {
+        user: {
+          id: user._id,
+          name: `${user.firstName} ${user.lastName}`,
+          email: user.email
+        },
+        currentLocation: {
+          realIP: realIP || null,
+          realLocation: realLocation || null,
+          gpsLocation: gpsLocation || null,
+          lastLoginLocation: recentLoginLocations[0]?.location || 'Unknown',
+          lastLoginIP: recentLoginLocations[0]?.ip || 'Unknown',
+          lastLoginTime: recentLoginLocations[0]?.timestamp || null
+        },
+        locationHistory: {
+          recentLogins: recentLoginLocations,
+          gpsHistory: user.location?.history || [],
+          ipLogs: userLogs.slice(0, 5).map(log => ({
+            timestamp: log.createdAt,
+            ip: log.ipAddress,
+            action: log.action,
+            location: log.location?.fullLocation || 'Unknown'
+          }))
+        }
+      }
+    });
+    
+  } catch (err) {
+    console.error('Admin get user location error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch user location information'
+    });
+  }
+});
+
+// =============================================
+// ENDPOINT 4: ADMIN REQUEST USER LOCATION (force refresh)
+// Admin can request user to share location
+// =============================================
+app.post('/api/admin/user-location/:userId/request', adminProtect, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const adminId = req.admin._id;
+    
+    // Validate userId format
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid user ID format'
+      });
+    }
+    
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+    
+    // Log the location request
+    await logActivity('admin_request_user_location', 'User', userId, adminId, 'Admin', req, {
+      userId: userId,
+      userEmail: user.email
+    });
+    
+    // Send notification to user (you can implement WebSocket or notification system)
+    // For now, just return success
+    
+    res.status(200).json({
+      status: 'success',
+      message: `Location request sent to user ${user.firstName} ${user.lastName}`,
+      data: {
+        requestedAt: new Date(),
+        userId: user._id,
+        userEmail: user.email
+      }
+    });
+    
+  } catch (err) {
+    console.error('Admin request user location error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to request user location'
+    });
+  }
+});
+
+
+
+
+
 
 
 
