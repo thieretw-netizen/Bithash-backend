@@ -122,53 +122,21 @@ redis.on('connect', () => {
   console.log('Redis connected successfully');
 });
 
-// Helper function to get real client IP from request (bypass Cloudflare)
+// Helper function to get real client IP from request
 const getRealClientIP = (req) => {
-  // Check multiple headers for real client IP (Cloudflare, proxies, etc.)
-  const headers = [
-    'cf-connecting-ip',        // Cloudflare
-    'x-forwarded-for',         // Standard proxy header
-    'x-real-ip',               // Nginx proxy header
-    'x-client-ip',             // Some proxies
-    'fastly-client-ip',        // Fastly
-    'true-client-ip',          // Akamai
-    'x-cluster-client-ip',     // Rackspace
-    'x-forwarded',             // Generic
-    'forwarded-for',           // Generic
-    'forwarded'                // Generic
-  ];
-  
-  for (const header of headers) {
-    const value = req.headers[header];
-    if (value) {
-      // Handle comma-separated lists (take the first one - the real client IP)
-      if (typeof value === 'string' && value.includes(',')) {
-        const firstIp = value.split(',')[0].trim();
-        if (firstIp && firstIp !== 'unknown') {
-          console.log(`Real IP found via ${header}: ${firstIp}`);
-          return firstIp;
-        }
-      } else if (value && value !== 'unknown') {
-        console.log(`Real IP found via ${header}: ${value}`);
-        return value;
-      }
-    }
+  // Check X-Forwarded-For header first (this is what Render uses)
+  const forwardedFor = req.headers['x-forwarded-for'];
+  if (forwardedFor) {
+    // Get the first IP in the list (the real client IP)
+    return forwardedFor.split(',')[0].trim();
   }
   
-  // Fallback to req.ip if no headers found
-  let ip = req.ip || 
-           req.connection?.remoteAddress || 
-           req.socket?.remoteAddress || 
-           req.connection?.socket?.remoteAddress ||
-           '0.0.0.0';
-  
-  // Clean IPv6 prefix
-  if (ip && ip.includes('::ffff:')) {
-    ip = ip.split(':').pop();
-  }
-  
-  console.log(`Fallback IP: ${ip}`);
-  return ip;
+  // Fallback to other headers or remote address
+  return req.ip || 
+         req.connection?.remoteAddress || 
+         req.socket?.remoteAddress || 
+         req.connection?.socket?.remoteAddress ||
+         '0.0.0.0';
 };
 
 // Rate limiting with Redis store (required for autoscaling)
@@ -2966,7 +2934,25 @@ const sendEmail = async (options) => {
 const getUserDeviceInfo = async (req) => {
   try {
     // Enhanced IP detection with multiple header checks to get REAL client IP (not Cloudflare)
-    let ip = getRealClientIP(req);
+    let ip = req.ip || 
+             req.connection?.remoteAddress || 
+             req.socket?.remoteAddress ||
+             req.connection?.socket?.remoteAddress ||
+             req.headers['x-forwarded-for'] || 
+             req.headers['x-real-ip'] ||
+             req.headers['x-client-ip'] ||
+             req.headers['cf-connecting-ip'] || // Cloudflare
+             req.headers['fastly-client-ip'] || // Fastly
+             req.headers['true-client-ip'] || // Akamai and Cloudflare
+             req.headers['x-cluster-client-ip'] ||
+             'Unknown';
+
+    // Handle array format (x-forwarded-for can be comma-separated)
+    if (Array.isArray(ip)) {
+      ip = ip[0];
+    } else if (typeof ip === 'string' && ip.includes(',')) {
+      ip = ip.split(',')[0].trim();
+    }
 
     // Clean up IP address
     if (ip) {
@@ -3006,7 +2992,7 @@ const getUserDeviceInfo = async (req) => {
     }
 
     // Only try location lookup for public IPs
-    if (isPublicIP && ip && ip !== 'Unknown' && ip !== '0.0.0.0' && ip !== '::1') {
+    if (isPublicIP && ip && ip !== 'Unknown') {
       try {
         console.log(`Looking up location for IP: ${ip}`);
         
@@ -3034,7 +3020,7 @@ const getUserDeviceInfo = async (req) => {
               timeout: 5000
             });
             
-            if (response.data && !response.data.error) {
+            if (response.data) {
               const { city, region, country_name, country_code } = response.data;
               location = `${city || 'Unknown'}, ${region || 'Unknown'}, ${country_name || country_code || 'Unknown'}`;
               console.log(`IPApi.co location result: ${location}`);
@@ -3087,7 +3073,7 @@ const getUserDeviceInfo = async (req) => {
   } catch (err) {
     console.error('Error getting device info:', err);
     return {
-      ip: getRealClientIP(req) || 'Unknown',
+      ip: req.ip || 'Unknown',
       device: req.headers['user-agent'] || 'Unknown',
       location: 'Unknown',
       isPublicIP: false
@@ -6208,6 +6194,7 @@ app.post('/api/investments', protect, [
   }
 });
 
+// FIXED: Enhanced Investment Completion Endpoint with Log Creation and Email
 app.post('/api/investments/:id/complete', protect, async (req, res) => {
   try {
     const investmentId = req.params.id;
@@ -6247,6 +6234,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
 
     // Calculate total return (principal + profit) - based on amount after fee
     const totalReturn = investment.expectedReturn;
+    const profit = totalReturn - investment.amount;
 
     // Enhanced balance transfer with validation
     if (user.balances.active < investment.amount) {
@@ -6279,7 +6267,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
       await Transaction.create([{
         user: userId,
         type: 'interest',
-        amount: totalReturn - investment.amount,
+        amount: profit,
         currency: 'USD',
         status: 'completed',
         method: 'INTERNAL',
@@ -6288,16 +6276,16 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
           investmentId: investment._id,
           planName: investment.plan.name,
           principal: investment.amount,
-          interest: totalReturn - investment.amount,
+          interest: profit,
           originalInvestment: investment.originalAmount,
           investmentFee: investment.investmentFee
         },
         fee: 0,
-        netAmount: totalReturn - investment.amount
+        netAmount: profit
       }], { session });
 
-      // ✅ CREATE LOG IN DATABASE FOR INVESTMENT MATURITY
-      await UserLog.create({
+      // ✅ CREATE LOG IN DATABASE FOR INVESTMENT MATURITY (CRITICAL FIX)
+      await UserLog.create([{
         user: userId,
         username: user.email,
         email: user.email,
@@ -6324,32 +6312,32 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
           investmentFee: investment.investmentFee,
           expectedReturn: investment.expectedReturn,
           actualReturn: totalReturn,
-          profit: totalReturn - investment.amount,
+          profit: profit,
           startDate: investment.startDate,
           endDate: investment.endDate,
           completionDate: investment.completionDate
         },
         relatedEntity: investment._id,
         relatedEntityModel: 'Investment'
-      });
+      }], { session });
 
       // Commit transaction
       await session.commitTransaction();
       
-      // ✅ SEND INVESTMENT COMPLETION EMAIL
+      // ✅ SEND INVESTMENT MATURITY EMAIL (CRITICAL FIX)
       try {
         await sendAutomatedEmail(user, 'investment_matured', {
           name: user.firstName,
           planName: investment.plan.name,
           amount: investment.originalAmount,
           totalReturn: totalReturn,
-          profit: totalReturn - investment.amount,
+          profit: profit,
           completionDate: investment.completionDate,
           newMaturedBalance: user.balances.matured
         });
-        console.log(`📧 Investment completion email sent to ${user.email}`);
+        console.log(`📧 Investment maturity email sent to ${user.email}`);
       } catch (emailError) {
-        console.error('Failed to send investment completion email:', emailError);
+        console.error('Failed to send investment maturity email:', emailError);
         // Don't fail the investment completion if email fails
       }
 
@@ -6361,7 +6349,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
             status: investment.status,
             completionDate: investment.completionDate,
             amountReturned: totalReturn,
-            profit: totalReturn - investment.amount,
+            profit: profit,
             originalInvestment: investment.originalAmount,
             investmentFee: investment.investmentFee
           },
