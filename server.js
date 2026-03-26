@@ -10015,15 +10015,6 @@ app.post('/api/users/cookie-preferences', protect, async (req, res) => {
   }
 });
 
-// Start the server
-const PORT = process.env.PORT || 5000;
-const server = app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
-
-// Initialize WebSocket server
-setupWebSocketServer(server);
-
 
 
 
