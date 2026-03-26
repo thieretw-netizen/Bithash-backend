@@ -2065,7 +2065,195 @@ const Loan = mongoose.model('Loan', LoanSchema);
 
 
 
+// Account Restrictions Schema - Add this to your schemas
+const AccountRestrictionsSchema = new mongoose.Schema({
+  withdraw_limit_no_kyc: { type: Number, default: null },
+  invest_limit_no_kyc: { type: Number, default: null },
+  withdraw_limit_no_txn: { type: Number, default: null },
+  invest_limit_no_txn: { type: Number, default: null },
+  inactivity_days: { type: Number, default: 30 },
+  kyc_restriction_reason: { type: String, default: "Please complete your KYC verification to increase your limits." },
+  txn_restriction_reason: { type: String, default: "Please complete at least one deposit or withdrawal to increase your limits." },
+  kyc_lifted_message: { type: String, default: "Your KYC verification has been completed. All account restrictions have been lifted." },
+  txn_lifted_message: { type: String, default: "Your recent transaction has been completed. All account restrictions have been lifted." },
+  updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
+  updatedAt: { type: Date, default: Date.now }
+}, { timestamps: true });
 
+// Get singleton instance
+AccountRestrictionsSchema.statics.getInstance = async function() {
+  let restrictions = await this.findOne();
+  if (!restrictions) restrictions = await this.create({});
+  return restrictions;
+};
+
+// Check if user has completed KYC
+AccountRestrictionsSchema.statics.hasCompletedKYC = async function(userId) {
+  const kyc = await KYC.findOne({ user: userId });
+  return kyc && kyc.overallStatus === 'verified';
+};
+
+// Check if user has recent deposit or withdrawal
+AccountRestrictionsSchema.statics.hasRecentTransaction = async function(userId, days) {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - days);
+  
+  const tx = await Transaction.findOne({
+    user: userId,
+    type: { $in: ['deposit', 'withdrawal'] },
+    status: 'completed',
+    createdAt: { $gte: cutoff }
+  });
+  return !!tx;
+};
+
+// Check and apply/lift restrictions for a user
+AccountRestrictionsSchema.statics.checkAndUpdateRestrictions = async function(userId, triggerSource = 'system') {
+  const restrictions = await this.getInstance();
+  const hasKYC = await this.hasCompletedKYC(userId);
+  const hasRecentTx = await this.hasRecentTransaction(userId, restrictions.inactivity_days);
+  
+  // Determine if restrictions should be applied or lifted
+  const shouldBeRestricted = {
+    kyc: !hasKYC && (restrictions.withdraw_limit_no_kyc !== null || restrictions.invest_limit_no_kyc !== null),
+    transaction: !hasRecentTx && (restrictions.withdraw_limit_no_txn !== null || restrictions.invest_limit_no_txn !== null)
+  };
+  
+  const wasRestricted = await UserRestrictionStatus.findOne({ user: userId });
+  const currentRestrictions = wasRestricted ? {
+    kyc: wasRestricted.kyc_restricted,
+    transaction: wasRestricted.transaction_restricted
+  } : { kyc: false, transaction: false };
+  
+  const changes = {
+    kyc_lifted: currentRestrictions.kyc && !shouldBeRestricted.kyc,
+    transaction_lifted: currentRestrictions.transaction && !shouldBeRestricted.transaction,
+    kyc_applied: !currentRestrictions.kyc && shouldBeRestricted.kyc,
+    transaction_applied: !currentRestrictions.transaction && shouldBeRestricted.transaction
+  };
+  
+  // Update restriction status in database
+  await UserRestrictionStatus.findOneAndUpdate(
+    { user: userId },
+    {
+      user: userId,
+      kyc_restricted: shouldBeRestricted.kyc,
+      transaction_restricted: shouldBeRestricted.transaction,
+      kyc_restriction_reason: shouldBeRestricted.kyc ? restrictions.kyc_restriction_reason : null,
+      transaction_restriction_reason: shouldBeRestricted.transaction ? restrictions.txn_restriction_reason : null,
+      last_checked: new Date()
+    },
+    { upsert: true, new: true }
+  );
+  
+  // Send emails for lifted restrictions
+  if (restrictions.notify_users !== false) {
+    if (changes.kyc_lifted) {
+      await this.sendLiftedEmail(userId, 'kyc', restrictions.kyc_lifted_message);
+    }
+    if (changes.transaction_lifted) {
+      await this.sendLiftedEmail(userId, 'transaction', restrictions.txn_lifted_message);
+    }
+    if (changes.kyc_applied || changes.transaction_applied) {
+      await this.sendRestrictionEmail(userId, {
+        kycRestricted: changes.kyc_applied,
+        transactionRestricted: changes.transaction_applied,
+        limits: await this.getUserLimits(userId)
+      });
+    }
+  }
+  
+  return { changes, restrictions: shouldBeRestricted };
+};
+
+// Get current limits for a user
+AccountRestrictionsSchema.statics.getUserLimits = async function(userId) {
+  const restrictions = await this.getInstance();
+  const hasKYC = await this.hasCompletedKYC(userId);
+  const hasRecentTx = await this.hasRecentTransaction(userId, restrictions.inactivity_days);
+  
+  let withdrawal = null, investment = null;
+  
+  if (!hasKYC) {
+    withdrawal = restrictions.withdraw_limit_no_kyc;
+    investment = restrictions.invest_limit_no_kyc;
+  }
+  if (!hasRecentTx) {
+    if (restrictions.withdraw_limit_no_txn !== null) {
+      withdrawal = withdrawal !== null ? Math.min(withdrawal, restrictions.withdraw_limit_no_txn) : restrictions.withdraw_limit_no_txn;
+    }
+    if (restrictions.invest_limit_no_txn !== null) {
+      investment = investment !== null ? Math.min(investment, restrictions.invest_limit_no_txn) : restrictions.invest_limit_no_txn;
+    }
+  }
+  
+  return { withdrawal, investment };
+};
+
+// Send restriction applied email
+AccountRestrictionsSchema.statics.sendRestrictionEmail = async function(userId, data) {
+  const user = await User.findById(userId).select('firstName lastName email');
+  if (!user || !user.email) return;
+  
+  const restrictions = await this.getInstance();
+  const reasons = [];
+  if (data.kycRestricted) reasons.push(restrictions.kyc_restriction_reason);
+  if (data.transactionRestricted) reasons.push(restrictions.txn_restriction_reason);
+  
+  const limitsHtml = [];
+  if (data.limits.withdrawal) limitsHtml.push(`<li>Withdrawal limit: $${data.limits.withdrawal.toLocaleString()}</li>`);
+  if (data.limits.investment) limitsHtml.push(`<li>Investment limit: $${data.limits.investment.toLocaleString()}</li>`);
+  
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+      <h2 style="color: #2563eb;">Account Restrictions Applied</h2>
+      <p>Hello ${user.firstName || user.email.split('@')[0]},</p>
+      <p>Your account has been restricted due to:</p>
+      <ul>${reasons.map(r => `<li>${r}</li>`).join('')}</ul>
+      ${limitsHtml.length ? `<p><strong>Current limits:</strong></p><ul>${limitsHtml.join('')}</ul>` : ''}
+      <p>Complete the required actions to have restrictions lifted automatically.</p>
+      <hr>
+      <p style="font-size: 12px; color: #666;">BitHash LLC</p>
+    </div>
+  `;
+  
+  await sendEmail({ email: user.email, subject: 'Account Restrictions Applied - BitHash', html });
+};
+
+// Send restriction lifted email
+AccountRestrictionsSchema.statics.sendLiftedEmail = async function(userId, type, message) {
+  const user = await User.findById(userId).select('firstName lastName email');
+  if (!user || !user.email) return;
+  
+  const typeText = type === 'kyc' ? 'KYC verification' : 'transaction activity';
+  
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+      <h2 style="color: #10b981;">Restrictions Lifted ✓</h2>
+      <p>Hello ${user.firstName || user.email.split('@')[0]},</p>
+      <p>Good news! Your ${typeText} has been completed.</p>
+      <p>${message}</p>
+      <p>Your account is now fully unrestricted.</p>
+      <hr>
+      <p style="font-size: 12px; color: #666;">BitHash LLC</p>
+    </div>
+  `;
+  
+  await sendEmail({ email: user.email, subject: 'Account Restrictions Lifted - BitHash', html });
+};
+
+// User Restriction Status Schema - Track individual user restrictions
+const UserRestrictionStatusSchema = new mongoose.Schema({
+  user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
+  kyc_restricted: { type: Boolean, default: false },
+  transaction_restricted: { type: Boolean, default: false },
+  kyc_restriction_reason: { type: String },
+  transaction_restriction_reason: { type: String },
+  last_checked: { type: Date, default: Date.now }
+}, { timestamps: true });
+
+const AccountRestrictions = mongoose.model('AccountRestrictions', AccountRestrictionsSchema);
+const UserRestrictionStatus = mongoose.model('UserRestrictionStatus', UserRestrictionStatusSchema);
 
 
 
@@ -9935,6 +10123,119 @@ app.post('/api/users/cookie-preferences', protect, async (req, res) => {
     });
   }
 });
+
+
+
+
+// GET /api/admin/restrictions - Load restriction settings
+app.get('/api/admin/restrictions', adminProtect, restrictTo('super'), async (req, res) => {
+  try {
+    const restrictions = await AccountRestrictions.getInstance();
+    
+    res.json({
+      status: 'success',
+      data: {
+        withdraw_limit_no_kyc: restrictions.withdraw_limit_no_kyc,
+        invest_limit_no_kyc: restrictions.invest_limit_no_kyc,
+        withdraw_limit_no_txn: restrictions.withdraw_limit_no_txn,
+        invest_limit_no_txn: restrictions.invest_limit_no_txn,
+        kyc_restriction_reason: restrictions.kyc_restriction_reason,
+        txn_restriction_reason: restrictions.txn_restriction_reason
+      }
+    });
+  } catch (err) {
+    console.error('GET restrictions error:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch restriction settings' });
+  }
+});
+
+// POST /api/admin/restrictions - Save restriction settings
+app.post('/api/admin/restrictions', adminProtect, restrictTo('super'), async (req, res) => {
+  try {
+    let restrictions = await AccountRestrictions.findOne();
+    if (!restrictions) restrictions = new AccountRestrictions();
+    
+    // Update all fields from frontend
+    if (req.body.withdraw_limit_no_kyc !== undefined) {
+      restrictions.withdraw_limit_no_kyc = req.body.withdraw_limit_no_kyc === '' ? null : parseFloat(req.body.withdraw_limit_no_kyc);
+    }
+    if (req.body.invest_limit_no_kyc !== undefined) {
+      restrictions.invest_limit_no_kyc = req.body.invest_limit_no_kyc === '' ? null : parseFloat(req.body.invest_limit_no_kyc);
+    }
+    if (req.body.withdraw_limit_no_txn !== undefined) {
+      restrictions.withdraw_limit_no_txn = req.body.withdraw_limit_no_txn === '' ? null : parseFloat(req.body.withdraw_limit_no_txn);
+    }
+    if (req.body.invest_limit_no_txn !== undefined) {
+      restrictions.invest_limit_no_txn = req.body.invest_limit_no_txn === '' ? null : parseFloat(req.body.invest_limit_no_txn);
+    }
+    if (req.body.kyc_restriction_reason !== undefined) {
+      restrictions.kyc_restriction_reason = req.body.kyc_restriction_reason;
+    }
+    if (req.body.txn_restriction_reason !== undefined) {
+      restrictions.txn_restriction_reason = req.body.txn_restriction_reason;
+    }
+    
+    restrictions.updatedBy = req.admin._id;
+    restrictions.updatedAt = new Date();
+    await restrictions.save();
+    
+    // After saving, run checks on all users to apply new limits
+    if (restrictions.auto_restrictions_enabled !== false) {
+      const users = await User.find({ status: 'active' }).select('_id');
+      for (const user of users) {
+        await AccountRestrictions.checkAndUpdateRestrictions(user._id, 'settings_update');
+      }
+    }
+    
+    res.json({ status: 'success', message: 'Restrictions saved successfully' });
+  } catch (err) {
+    console.error('POST restrictions error:', err);
+    res.status(500).json({ status: 'error', message: err.message || 'Failed to save restrictions' });
+  }
+});
+
+// Trigger restriction check on KYC approval (hook into your existing KYC approval)
+// Add this to your KYC approval endpoint
+const triggerKYCApprovalCheck = async (userId) => {
+  await AccountRestrictions.checkAndUpdateRestrictions(userId, 'kyc_approval');
+};
+
+// Trigger restriction check on transaction completion (hook into deposit/withdrawal completion)
+const triggerTransactionCheck = async (userId) => {
+  await AccountRestrictions.checkAndUpdateRestrictions(userId, 'transaction_completion');
+};
+
+// Scheduled job to run daily at midnight to check all users
+const scheduleDailyRestrictionChecks = () => {
+  setInterval(async () => {
+    console.log('Running daily restriction checks...');
+    const restrictions = await AccountRestrictions.getInstance();
+    if (restrictions.auto_restrictions_enabled !== false) {
+      const users = await User.find({ status: 'active' }).select('_id');
+      let updated = 0;
+      for (const user of users) {
+        const result = await AccountRestrictions.checkAndUpdateRestrictions(user._id, 'scheduled');
+        if (result.changes.kyc_lifted || result.changes.transaction_lifted || 
+            result.changes.kyc_applied || result.changes.transaction_applied) {
+          updated++;
+        }
+      }
+      console.log(`Daily restriction check complete. ${updated} users had status changes.`);
+    }
+  }, 24 * 60 * 60 * 1000); // 24 hours
+};
+
+// Start scheduler after server starts
+setTimeout(scheduleDailyRestrictionChecks, 60000);
+
+
+
+
+
+
+
+
+
 
 
 
