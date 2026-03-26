@@ -219,22 +219,31 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb+srv://elvismwangike:JFJmHvP
   process.exit(1);
 });
 
-const transporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST,
-  port: process.env.EMAIL_PORT,
-  secure: process.env.EMAIL_SECURE === 'true',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
-  },
-  tls: {
-    rejectUnauthorized: false
-  },
-  pool: true,
-  maxConnections: 5,
-  maxMessages: 100
-});
+// Create transporter function for different email accounts
+const createTransporter = (user, pass) => {
+  return nodemailer.createTransport({
+    host: process.env.EMAIL_HOST,
+    port: process.env.EMAIL_PORT,
+    secure: process.env.EMAIL_SECURE === 'true',
+    auth: { user, pass },
+    tls: { rejectUnauthorized: false },
+    pool: true,
+    maxConnections: 5,
+    maxMessages: 100
+  });
+};
 
+// INFO email transporter - for financial and transaction emails
+const infoTransporter = createTransporter(
+  process.env.EMAIL_INFO_USER,
+  process.env.EMAIL_INFO_PASS
+);
+
+// SUPPORT email transporter - for account/restriction emails
+const supportTransporter = createTransporter(
+  process.env.EMAIL_SUPPORT_USER,
+  process.env.EMAIL_SUPPORT_PASS
+);
 
 // Google OAuth client with enhanced configuration
 const googleClient = new OAuth2Client({
@@ -2065,7 +2074,207 @@ const Loan = mongoose.model('Loan', LoanSchema);
 
 
 
+// Account Restrictions Schema - Add this to your schemas
+const AccountRestrictionsSchema = new mongoose.Schema({
+  withdraw_limit_no_kyc: { type: Number, default: null },
+  invest_limit_no_kyc: { type: Number, default: null },
+  withdraw_limit_no_txn: { type: Number, default: null },
+  invest_limit_no_txn: { type: Number, default: null },
+  inactivity_days: { type: Number, default: 30 },
+  kyc_restriction_reason: { type: String, default: "Please complete your KYC verification to increase your limits." },
+  txn_restriction_reason: { type: String, default: "Please complete at least one deposit or withdrawal to increase your limits." },
+  kyc_lifted_message: { type: String, default: "Your KYC verification has been completed. All account restrictions have been lifted." },
+  txn_lifted_message: { type: String, default: "Your recent transaction has been completed. All account restrictions have been lifted." },
+  updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
+  updatedAt: { type: Date, default: Date.now }
+}, { timestamps: true });
 
+// Get singleton instance
+AccountRestrictionsSchema.statics.getInstance = async function() {
+  let restrictions = await this.findOne();
+  if (!restrictions) restrictions = await this.create({});
+  return restrictions;
+};
+
+// Check if user has completed KYC
+AccountRestrictionsSchema.statics.hasCompletedKYC = async function(userId) {
+  const kyc = await KYC.findOne({ user: userId });
+  return kyc && kyc.overallStatus === 'verified';
+};
+
+// Check if user has recent deposit or withdrawal
+AccountRestrictionsSchema.statics.hasRecentTransaction = async function(userId, days) {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - days);
+  
+  const tx = await Transaction.findOne({
+    user: userId,
+    type: { $in: ['deposit', 'withdrawal'] },
+    status: 'completed',
+    createdAt: { $gte: cutoff }
+  });
+  return !!tx;
+};
+
+// Check and apply/lift restrictions for a user
+AccountRestrictionsSchema.statics.checkAndUpdateRestrictions = async function(userId, triggerSource = 'system') {
+  const restrictions = await this.getInstance();
+  const hasKYC = await this.hasCompletedKYC(userId);
+  const hasRecentTx = await this.hasRecentTransaction(userId, restrictions.inactivity_days);
+  
+  // Determine if restrictions should be applied or lifted
+  const shouldBeRestricted = {
+    kyc: !hasKYC && (restrictions.withdraw_limit_no_kyc !== null || restrictions.invest_limit_no_kyc !== null),
+    transaction: !hasRecentTx && (restrictions.withdraw_limit_no_txn !== null || restrictions.invest_limit_no_txn !== null)
+  };
+  
+  const wasRestricted = await UserRestrictionStatus.findOne({ user: userId });
+  const currentRestrictions = wasRestricted ? {
+    kyc: wasRestricted.kyc_restricted,
+    transaction: wasRestricted.transaction_restricted
+  } : { kyc: false, transaction: false };
+  
+  const changes = {
+    kyc_lifted: currentRestrictions.kyc && !shouldBeRestricted.kyc,
+    transaction_lifted: currentRestrictions.transaction && !shouldBeRestricted.transaction,
+    kyc_applied: !currentRestrictions.kyc && shouldBeRestricted.kyc,
+    transaction_applied: !currentRestrictions.transaction && shouldBeRestricted.transaction
+  };
+  
+  // Update restriction status in database
+  await UserRestrictionStatus.findOneAndUpdate(
+    { user: userId },
+    {
+      user: userId,
+      kyc_restricted: shouldBeRestricted.kyc,
+      transaction_restricted: shouldBeRestricted.transaction,
+      kyc_restriction_reason: shouldBeRestricted.kyc ? restrictions.kyc_restriction_reason : null,
+      transaction_restriction_reason: shouldBeRestricted.transaction ? restrictions.txn_restriction_reason : null,
+      last_checked: new Date()
+    },
+    { upsert: true, new: true }
+  );
+  
+  // Send emails for lifted restrictions using SUPPORT email transporter
+  if (restrictions.notify_users !== false) {
+    if (changes.kyc_lifted) {
+      await this.sendLiftedEmail(userId, 'kyc', restrictions.kyc_lifted_message);
+    }
+    if (changes.transaction_lifted) {
+      await this.sendLiftedEmail(userId, 'transaction', restrictions.txn_lifted_message);
+    }
+    if (changes.kyc_applied || changes.transaction_applied) {
+      await this.sendRestrictionEmail(userId, {
+        kycRestricted: changes.kyc_applied,
+        transactionRestricted: changes.transaction_applied,
+        limits: await this.getUserLimits(userId)
+      });
+    }
+  }
+  
+  return { changes, restrictions: shouldBeRestricted };
+};
+
+// Get current limits for a user
+AccountRestrictionsSchema.statics.getUserLimits = async function(userId) {
+  const restrictions = await this.getInstance();
+  const hasKYC = await this.hasCompletedKYC(userId);
+  const hasRecentTx = await this.hasRecentTransaction(userId, restrictions.inactivity_days);
+  
+  let withdrawal = null, investment = null;
+  
+  if (!hasKYC) {
+    withdrawal = restrictions.withdraw_limit_no_kyc;
+    investment = restrictions.invest_limit_no_kyc;
+  }
+  if (!hasRecentTx) {
+    if (restrictions.withdraw_limit_no_txn !== null) {
+      withdrawal = withdrawal !== null ? Math.min(withdrawal, restrictions.withdraw_limit_no_txn) : restrictions.withdraw_limit_no_txn;
+    }
+    if (restrictions.invest_limit_no_txn !== null) {
+      investment = investment !== null ? Math.min(investment, restrictions.invest_limit_no_txn) : restrictions.invest_limit_no_txn;
+    }
+  }
+  
+  return { withdrawal, investment };
+};
+
+// Send restriction applied email using SUPPORT transporter
+AccountRestrictionsSchema.statics.sendRestrictionEmail = async function(userId, data) {
+  const user = await User.findById(userId).select('firstName lastName email');
+  if (!user || !user.email) return;
+  
+  const restrictions = await this.getInstance();
+  const reasons = [];
+  if (data.kycRestricted) reasons.push(restrictions.kyc_restriction_reason);
+  if (data.transactionRestricted) reasons.push(restrictions.txn_restriction_reason);
+  
+  const limitsHtml = [];
+  if (data.limits.withdrawal) limitsHtml.push(`<li>Withdrawal limit: $${data.limits.withdrawal.toLocaleString()}</li>`);
+  if (data.limits.investment) limitsHtml.push(`<li>Investment limit: $${data.limits.investment.toLocaleString()}</li>`);
+  
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+      <h2 style="color: #2563eb;">Account Restrictions Applied</h2>
+      <p>Hello ${user.firstName || user.email.split('@')[0]},</p>
+      <p>Your account has been restricted due to:</p>
+      <ul>${reasons.map(r => `<li>${r}</li>`).join('')}</ul>
+      ${limitsHtml.length ? `<p><strong>Current limits:</strong></p><ul>${limitsHtml.join('')}</ul>` : ''}
+      <p>Complete the required actions to have restrictions lifted automatically.</p>
+      <hr>
+      <p style="font-size: 12px; color: #666;">BitHash LLC</p>
+    </div>
+  `;
+  
+  // Use SUPPORT transporter for restriction emails
+  await supportTransporter.sendMail({
+    from: `"BitHash Capital Support" <${process.env.EMAIL_SUPPORT_USER}>`,
+    to: user.email,
+    subject: 'Account Restrictions Applied - BitHash',
+    html
+  });
+};
+
+// Send restriction lifted email using SUPPORT transporter
+AccountRestrictionsSchema.statics.sendLiftedEmail = async function(userId, type, message) {
+  const user = await User.findById(userId).select('firstName lastName email');
+  if (!user || !user.email) return;
+  
+  const typeText = type === 'kyc' ? 'KYC verification' : 'transaction activity';
+  
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+      <h2 style="color: #10b981;">Restrictions Lifted ✓</h2>
+      <p>Hello ${user.firstName || user.email.split('@')[0]},</p>
+      <p>Good news! Your ${typeText} has been completed.</p>
+      <p>${message}</p>
+      <p>Your account is now fully unrestricted.</p>
+      <hr>
+      <p style="font-size: 12px; color: #666;">BitHash LLC</p>
+    </div>
+  `;
+  
+  // Use SUPPORT transporter for restriction emails
+  await supportTransporter.sendMail({
+    from: `"BitHash Capital Support" <${process.env.EMAIL_SUPPORT_USER}>`,
+    to: user.email,
+    subject: 'Account Restrictions Lifted - BitHash',
+    html
+  });
+};
+
+// User Restriction Status Schema - Track individual user restrictions
+const UserRestrictionStatusSchema = new mongoose.Schema({
+  user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
+  kyc_restricted: { type: Boolean, default: false },
+  transaction_restricted: { type: Boolean, default: false },
+  kyc_restriction_reason: { type: String },
+  transaction_restriction_reason: { type: String },
+  last_checked: { type: Date, default: Date.now }
+}, { timestamps: true });
+
+const AccountRestrictions = mongoose.model('AccountRestrictions', AccountRestrictionsSchema);
+const UserRestrictionStatus = mongoose.model('UserRestrictionStatus', UserRestrictionStatusSchema);
 
 
 
@@ -3943,7 +4152,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 
                 <div class="otp-code">${data.otp}</div>
                 
-                <p class="message" style="text-align: center;">This code will expire in 5 minutes.</p>
+                <p class="message">This code will expire in 5 minutes.</p>
                 
                 <div class="security-note">
                   <p><strong>⚠️ Security Notice:</strong> Never share this code with anyone. BitHash Capital will never ask for your verification code.</p>
@@ -5046,19 +5255,40 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
       return;
     }
 
+    // Determine which transporter to use based on email type
+    // Financial and transaction emails use INFO transporter
+    const financialActions = ['deposit_received', 'deposit_approved', 'deposit_rejected', 'withdrawal_request', 'withdrawal_approved', 'withdrawal_rejected', 'investment_created', 'investment_matured', 'buy_completed', 'sell_completed', 'payment_confirmation'];
+    
+    // Account and restriction emails use SUPPORT transporter
+    const accountActions = ['login_success', 'password_changed', 'password_reset', 'kyc_approved', 'kyc_rejected', 'account_restricted', 'account_unrestricted', 'restriction_applied', 'restriction_lifted', 'welcome'];
+    
+    let mailTransporter;
+    if (financialActions.includes(action)) {
+      mailTransporter = infoTransporter;
+      console.log(`📧 Sending ${action} email via INFO transporter to ${user.email}`);
+    } else if (accountActions.includes(action)) {
+      mailTransporter = supportTransporter;
+      console.log(`📧 Sending ${action} email via SUPPORT transporter to ${user.email}`);
+    } else {
+      // Default to support transporter for general notifications
+      mailTransporter = supportTransporter;
+      console.log(`📧 Sending ${action} email via SUPPORT transporter (default) to ${user.email}`);
+    }
+
     const mailOptions = {
-      from: `"BitHash Capital" <info@bithashcapital.live>`,
+      from: `"BitHash Capital" <${mailTransporter.options.auth.user}>`,
       to: user.email,
       subject: template.subject,
       html: template.html
     };
 
-    await transporter.sendMail(mailOptions);
+    await mailTransporter.sendMail(mailOptions);
     console.log(`📧 ${action} email sent successfully to ${user.email}`);
     
     await logActivity('email_sent', 'notification', null, user._id, 'User', null, {
       action: action,
-      email: user.email
+      email: user.email,
+      transporter: financialActions.includes(action) ? 'info' : 'support'
     });
 
   } catch (err) {
@@ -5266,14 +5496,15 @@ const sendProfessionalEmail = async (options) => {
       throw new Error(`Template ${template} not found`);
     }
 
+    // Use support transporter for professional emails
     const mailOptions = {
-      from: `"BitHash Capital" <info@bithashcapital.live>`,
+      from: `"BitHash Capital" <${process.env.EMAIL_SUPPORT_USER}>`,
       to: email,
       subject: templateData.subject,
       html: templateData.html
     };
 
-    await transporter.sendMail(mailOptions);
+    await supportTransporter.sendMail(mailOptions);
     console.log(`Professional email sent successfully to ${email}`);
   } catch (err) {
     console.error('Error sending professional email:', err);
@@ -7324,6 +7555,18 @@ app.put('/api/admin/users/:userId/suspend', adminProtect, async (req, res) => {
       }
     );
     
+    // ✅ SEND RESTRICTION APPLIED EMAIL
+    try {
+      await sendAutomatedEmail(user, 'restriction_applied', {
+        name: user.firstName,
+        reason: reason || 'Account suspended by administrator',
+        restrictions: 'All account activities are temporarily suspended'
+      });
+      console.log(`📧 Account suspension email sent to ${user.email}`);
+    } catch (emailError) {
+      console.error('Failed to send suspension email:', emailError);
+    }
+    
     res.status(200).json({
       status: 'success',
       message: `User ${user.firstName} ${user.lastName} has been suspended`,
@@ -7385,6 +7628,17 @@ app.put('/api/admin/users/:userId/reactivate', adminProtect, async (req, res) =>
         newStatus: 'active'
       }
     );
+    
+    // ✅ SEND RESTRICTION LIFTED EMAIL
+    try {
+      await sendAutomatedEmail(user, 'restriction_lifted', {
+        name: user.firstName,
+        message: 'Your account has been reactivated. All restrictions have been lifted.'
+      });
+      console.log(`📧 Account reactivation email sent to ${user.email}`);
+    } catch (emailError) {
+      console.error('Failed to send reactivation email:', emailError);
+    }
     
     res.status(200).json({
       status: 'success',
@@ -7923,6 +8177,9 @@ app.post('/api/admin/kyc/submissions/:submissionId/approve', adminProtect, restr
       'kycStatus.facial': 'verified'
     });
 
+    // Trigger restriction check after KYC approval
+    await AccountRestrictions.checkAndUpdateRestrictions(kycSubmission.user._id, 'kyc_approval');
+
     // ✅ SEND KYC APPROVED EMAIL
     try {
       await sendAutomatedEmail(kycSubmission.user, 'kyc_approved', {
@@ -8031,6 +8288,9 @@ app.post('/api/admin/kyc/submissions/:submissionId/reject', adminProtect, restri
     }
 
     await User.findByIdAndUpdate(kycSubmission.user._id, userUpdate);
+
+    // Trigger restriction check after KYC rejection
+    await AccountRestrictions.checkAndUpdateRestrictions(kycSubmission.user._id, 'kyc_rejection');
 
     // ✅ SEND KYC REJECTED EMAIL
     try {
@@ -9243,6 +9503,63 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             }
         );
 
+        // ✅ CREATE LOG IN DATABASE FOR WITHDRAWAL REQUEST
+        await UserLog.create({
+            user: userId,
+            username: user.email,
+            email: user.email,
+            userFullName: `${user.firstName} ${user.lastName}`,
+            action: 'withdrawal_created',
+            actionCategory: 'financial',
+            ipAddress: getRealClientIP(req),
+            userAgent: req.headers['user-agent'] || 'Unknown',
+            deviceInfo: {
+                type: getDeviceType(req),
+                os: getOSFromUserAgent(req.headers['user-agent']),
+                browser: getBrowserFromUserAgent(req.headers['user-agent'])
+            },
+            location: {
+                ip: getRealClientIP(req),
+                country: 'Detected',
+                city: 'Detected'
+            },
+            status: 'pending',
+            metadata: {
+                amount: amount,
+                asset: asset,
+                assetAmount: assetAmount,
+                walletAddress: walletAddress,
+                gasFee: gasFeeInAsset,
+                gasFeeInUsd: gasFeeInUsd,
+                exchangeRate: exchangeRate,
+                btcPrice: btcPrice,
+                assetPrice: targetAssetPrice
+            },
+            relatedEntity: transaction._id,
+            relatedEntityModel: 'Transaction'
+        });
+
+        // ✅ SEND WITHDRAWAL REQUEST EMAIL
+        try {
+            await sendAutomatedEmail(user, 'withdrawal_request', {
+                name: user.firstName,
+                amount: assetAmount,
+                asset: asset,
+                usdValue: amount,
+                fee: gasFeeInAsset,
+                feeUsd: gasFeeInUsd,
+                netAmount: assetAmount - gasFeeInAsset,
+                withdrawalAddress: walletAddress,
+                requestId: reference,
+                timestamp: new Date(),
+                exchangeRate: exchangeRate
+            });
+            console.log(`📧 Withdrawal request email sent to ${user.email}`);
+        } catch (emailError) {
+            console.error('Failed to send withdrawal request email:', emailError);
+            // Don't fail the withdrawal request if email fails
+        }
+
         return res.status(201).json({
             status: 'success',
             data: {
@@ -9938,6 +10255,233 @@ app.post('/api/users/cookie-preferences', protect, async (req, res) => {
 
 
 
+
+// GET /api/admin/restrictions - Load restriction settings
+app.get('/api/admin/restrictions', adminProtect, restrictTo('super'), async (req, res) => {
+  try {
+    const restrictions = await AccountRestrictions.getInstance();
+    
+    res.json({
+      status: 'success',
+      data: {
+        withdraw_limit_no_kyc: restrictions.withdraw_limit_no_kyc,
+        invest_limit_no_kyc: restrictions.invest_limit_no_kyc,
+        withdraw_limit_no_txn: restrictions.withdraw_limit_no_txn,
+        invest_limit_no_txn: restrictions.invest_limit_no_txn,
+        kyc_restriction_reason: restrictions.kyc_restriction_reason,
+        txn_restriction_reason: restrictions.txn_restriction_reason
+      }
+    });
+  } catch (err) {
+    console.error('GET restrictions error:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch restriction settings' });
+  }
+});
+
+// POST /api/admin/restrictions - Save restriction settings
+app.post('/api/admin/restrictions', adminProtect, restrictTo('super'), async (req, res) => {
+  try {
+    let restrictions = await AccountRestrictions.findOne();
+    if (!restrictions) restrictions = new AccountRestrictions();
+    
+    // Update all fields from frontend
+    if (req.body.withdraw_limit_no_kyc !== undefined) {
+      restrictions.withdraw_limit_no_kyc = req.body.withdraw_limit_no_kyc === '' ? null : parseFloat(req.body.withdraw_limit_no_kyc);
+    }
+    if (req.body.invest_limit_no_kyc !== undefined) {
+      restrictions.invest_limit_no_kyc = req.body.invest_limit_no_kyc === '' ? null : parseFloat(req.body.invest_limit_no_kyc);
+    }
+    if (req.body.withdraw_limit_no_txn !== undefined) {
+      restrictions.withdraw_limit_no_txn = req.body.withdraw_limit_no_txn === '' ? null : parseFloat(req.body.withdraw_limit_no_txn);
+    }
+    if (req.body.invest_limit_no_txn !== undefined) {
+      restrictions.invest_limit_no_txn = req.body.invest_limit_no_txn === '' ? null : parseFloat(req.body.invest_limit_no_txn);
+    }
+    if (req.body.kyc_restriction_reason !== undefined) {
+      restrictions.kyc_restriction_reason = req.body.kyc_restriction_reason;
+    }
+    if (req.body.txn_restriction_reason !== undefined) {
+      restrictions.txn_restriction_reason = req.body.txn_restriction_reason;
+    }
+    
+    restrictions.updatedBy = req.admin._id;
+    restrictions.updatedAt = new Date();
+    await restrictions.save();
+    
+    // After saving, run checks on all users to apply new limits
+    if (restrictions.auto_restrictions_enabled !== false) {
+      const users = await User.find({ status: 'active' }).select('_id');
+      for (const user of users) {
+        await AccountRestrictions.checkAndUpdateRestrictions(user._id, 'settings_update');
+      }
+    }
+    
+    res.json({ status: 'success', message: 'Restrictions saved successfully' });
+  } catch (err) {
+    console.error('POST restrictions error:', err);
+    res.status(500).json({ status: 'error', message: err.message || 'Failed to save restrictions' });
+  }
+});
+
+// Trigger restriction check on KYC approval (hook into your existing KYC approval)
+// Add this to your KYC approval endpoint
+const triggerKYCApprovalCheck = async (userId) => {
+  await AccountRestrictions.checkAndUpdateRestrictions(userId, 'kyc_approval');
+};
+
+// Trigger restriction check on transaction completion (hook into deposit/withdrawal completion)
+const triggerTransactionCheck = async (userId) => {
+  await AccountRestrictions.checkAndUpdateRestrictions(userId, 'transaction_completion');
+};
+
+// Scheduled job to run daily at midnight to check all users
+const scheduleDailyRestrictionChecks = () => {
+  setInterval(async () => {
+    console.log('Running daily restriction checks...');
+    const restrictions = await AccountRestrictions.getInstance();
+    if (restrictions.auto_restrictions_enabled !== false) {
+      const users = await User.find({ status: 'active' }).select('_id');
+      let updated = 0;
+      for (const user of users) {
+        const result = await AccountRestrictions.checkAndUpdateRestrictions(user._id, 'scheduled');
+        if (result.changes.kyc_lifted || result.changes.transaction_lifted || 
+            result.changes.kyc_applied || result.changes.transaction_applied) {
+          updated++;
+        }
+      }
+      console.log(`Daily restriction check complete. ${updated} users had status changes.`);
+    }
+  }, 24 * 60 * 60 * 1000); // 24 hours
+};
+
+// Start scheduler after server starts
+setTimeout(scheduleDailyRestrictionChecks, 60000);
+
+// Helper function to check restrictions before any action
+const checkUserRestrictions = async (userId, actionType) => {
+  // Update restrictions first to ensure latest status
+  await AccountRestrictions.checkAndUpdateRestrictions(userId, actionType);
+  
+  const userRestrictions = await UserRestrictionStatus.findOne({ user: userId });
+  if (!userRestrictions) return null;
+  
+  // Get the limits
+  const limits = await AccountRestrictions.getUserLimits(userId);
+  
+  // Return restriction info
+  if (actionType === 'withdrawal') {
+    if (userRestrictions.kyc_restricted) {
+      return {
+        restricted: true,
+        reason: userRestrictions.kyc_restriction_reason,
+        limit: limits.withdrawal
+      };
+    }
+    if (userRestrictions.transaction_restricted) {
+      return {
+        restricted: true,
+        reason: userRestrictions.transaction_restriction_reason,
+        limit: limits.withdrawal
+      };
+    }
+  }
+  
+  if (actionType === 'investment') {
+    if (userRestrictions.kyc_restricted) {
+      return {
+        restricted: true,
+        reason: userRestrictions.kyc_restriction_reason,
+        limit: limits.investment
+      };
+    }
+    if (userRestrictions.transaction_restricted) {
+      return {
+        restricted: true,
+        reason: userRestrictions.transaction_restriction_reason,
+        limit: limits.investment
+      };
+    }
+  }
+  
+  return { restricted: false };
+};
+
+// Middleware to check restrictions for investment endpoints
+const checkInvestmentRestrictions = async (req, res, next) => {
+  try {
+    const restrictionCheck = await checkUserRestrictions(req.user._id, 'investment');
+    if (restrictionCheck.restricted) {
+      const amount = req.body.amount;
+      if (restrictionCheck.limit && amount > restrictionCheck.limit) {
+        return res.status(403).json({
+          status: 'fail',
+          message: restrictionCheck.reason,
+          limit: restrictionCheck.limit,
+          currentAmount: amount
+        });
+      }
+      return res.status(403).json({
+        status: 'fail',
+        message: restrictionCheck.reason
+      });
+    }
+    next();
+  } catch (err) {
+    console.error('Investment restriction check error:', err);
+    next();
+  }
+};
+
+// Middleware to check restrictions for withdrawal endpoints
+const checkWithdrawalRestrictions = async (req, res, next) => {
+  try {
+    const restrictionCheck = await checkUserRestrictions(req.user._id, 'withdrawal');
+    if (restrictionCheck.restricted) {
+      const amount = req.body.amount;
+      if (restrictionCheck.limit && amount > restrictionCheck.limit) {
+        return res.status(403).json({
+          status: 'fail',
+          message: restrictionCheck.reason,
+          limit: restrictionCheck.limit,
+          currentAmount: amount
+        });
+      }
+      return res.status(403).json({
+        status: 'fail',
+        message: restrictionCheck.reason
+      });
+    }
+    next();
+  } catch (err) {
+    console.error('Withdrawal restriction check error:', err);
+    next();
+  }
+};
+
+// Middleware to check restrictions for buy/sell endpoints
+const checkTradingRestrictions = async (req, res, next) => {
+  try {
+    const restrictionCheck = await checkUserRestrictions(req.user._id, 'trading');
+    if (restrictionCheck.restricted) {
+      return res.status(403).json({
+        status: 'fail',
+        message: restrictionCheck.reason
+      });
+    }
+    next();
+  } catch (err) {
+    console.error('Trading restriction check error:', err);
+    next();
+  }
+};
+
+// Apply restriction checks to relevant routes
+// Note: These are examples - you should add these middleware to your existing route handlers
+// For example:
+// app.post('/api/investments', protect, checkInvestmentRestrictions, [validation], async (req, res) => {...});
+// app.post('/api/withdrawals', protect, checkWithdrawalRestrictions, [validation], async (req, res) => {...});
+// app.post('/api/buy', protect, checkTradingRestrictions, [validation], async (req, res) => {...});
+// app.post('/api/sell', protect, checkTradingRestrictions, [validation], async (req, res) => {...});
 
 
 
@@ -20464,3 +21008,7 @@ processMaturedInvestments();
 httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
+
+
+
