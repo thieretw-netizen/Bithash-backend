@@ -3288,6 +3288,245 @@ const convertToFiat = async (cryptoAmount, asset) => {
   return cryptoAmount * rate;
 };
 
+
+
+
+
+// Add this after the helper functions (after sendAutomatedEmail and before the routes)
+
+// =============================================
+// MIDDLEWARE FUNCTIONS
+// =============================================
+
+const protect = async (req, res, next) => {
+  try {
+    let token;
+    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+      token = req.headers.authorization.split(' ')[1];
+    } else if (req.cookies.jwt) {
+      token = req.cookies.jwt;
+    }
+
+    if (!token) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'You are not logged in! Please log in to get access.'
+      });
+    }
+
+    const decoded = verifyJWT(token);
+    const currentUser = await User.findById(decoded.id).select('+passwordChangedAt +twoFactorAuth.secret');
+
+    if (!currentUser) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'The user belonging to this token no longer exists.'
+      });
+    }
+
+    if (currentUser.passwordChangedAt && decoded.iat < currentUser.passwordChangedAt.getTime() / 1000) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'User recently changed password! Please log in again.'
+      });
+    }
+
+    if (currentUser.status !== 'active') {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Your account has been suspended. Please contact support.'
+      });
+    }
+
+    // Check if 2FA is required
+    if (currentUser.twoFactorAuth.enabled && !req.headers['x-2fa-verified']) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Two-factor authentication required'
+      });
+    }
+
+    req.user = currentUser;
+    next();
+  } catch (err) {
+    return res.status(401).json({
+      status: 'fail',
+      message: err.message || 'Invalid token. Please log in again.'
+    });
+  }
+};
+
+const adminProtect = async (req, res, next) => {
+  try {
+    let token;
+    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+      token = req.headers.authorization.split(' ')[1];
+    } else if (req.cookies.admin_jwt) {
+      token = req.cookies.admin_jwt;
+    }
+
+    if (!token) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'You are not logged in! Please log in to get access.'
+      });
+    }
+
+    const decoded = verifyJWT(token);
+    if (!decoded.isAdmin) {
+      return res.status(403).json({
+        status: 'fail',
+        message: 'You do not have permission to access this resource'
+      });
+    }
+
+    const currentAdmin = await Admin.findById(decoded.id).select('+passwordChangedAt +twoFactorAuth.secret');
+    if (!currentAdmin) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'The admin belonging to this token no longer exists.'
+      });
+    }
+
+    // Check if 2FA is required
+    if (currentAdmin.twoFactorAuth.enabled && !req.headers['x-2fa-verified']) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Two-factor authentication required'
+      });
+    }
+
+    req.admin = currentAdmin;
+    next();
+  } catch (err) {
+    return res.status(401).json({
+      status: 'fail',
+      message: err.message || 'Invalid token. Please log in again.'
+    });
+  }
+};
+
+const restrictTo = (...roles) => {
+  return (req, res, next) => {
+    if (!req.admin) {
+      return res.status(403).json({
+        status: 'fail',
+        message: 'You do not have permission to perform this action'
+      });
+    }
+    if (!roles.includes(req.admin.role)) {
+      return res.status(403).json({
+        status: 'fail',
+        message: 'You do not have permission to perform this action'
+      });
+    }
+    next();
+  };
+};
+
+const checkCSRF = (req, res, next) => {
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') {
+    return next();
+  }
+
+  const csrfToken = req.headers['x-csrf-token'] || req.body._csrf;
+  if (!csrfToken || !req.session.csrfToken || csrfToken !== req.session.csrfToken) {
+    return res.status(403).json({
+      status: 'fail',
+      message: 'Invalid CSRF token'
+    });
+  }
+  next();
+};
+
+// Check activity restriction middleware
+const checkActivityRestriction = (activityType) => {
+  return async (req, res, next) => {
+    try {
+      if (!req.user) {
+        return next();
+      }
+      
+      const userId = req.user._id;
+      
+      // Get user restriction status
+      const restrictionStatus = await UserRestrictionStatus.findOne({ user: userId });
+      
+      if (!restrictionStatus) {
+        return next();
+      }
+      
+      // Check KYC restriction for buy, sell, investment creation, withdrawal
+      if (activityType === 'buy' || activityType === 'sell' || activityType === 'investment' || activityType === 'withdrawal') {
+        if (restrictionStatus.kyc_restricted) {
+          // Get the restriction reason
+          const restrictions = await AccountRestrictions.getInstance();
+          const reason = restrictionStatus.kyc_restriction_reason || restrictions.kyc_restriction_reason || 'Please complete your KYC verification to continue.';
+          
+          return res.status(403).json({
+            status: 'fail',
+            message: reason,
+            restriction: {
+              type: 'kyc',
+              message: reason,
+              action: 'complete_kyc'
+            }
+          });
+        }
+        
+        // Check transaction restriction (for withdrawals specifically)
+        if (activityType === 'withdrawal' && restrictionStatus.transaction_restricted) {
+          const restrictions = await AccountRestrictions.getInstance();
+          const reason = restrictionStatus.transaction_restriction_reason || restrictions.txn_restriction_reason || 'Please complete at least one deposit or withdrawal to increase your limits.';
+          
+          return res.status(403).json({
+            status: 'fail',
+            message: reason,
+            restriction: {
+              type: 'transaction',
+              message: reason,
+              action: 'make_transaction'
+            }
+          });
+        }
+      }
+      
+      // Check limit for investment creation
+      if (activityType === 'investment' && req.body.amount) {
+        const limits = await AccountRestrictions.getUserLimits(userId);
+        
+        if (limits.investment && req.body.amount > limits.investment) {
+          return res.status(403).json({
+            status: 'fail',
+            message: `Investment amount exceeds your current limit of $${limits.investment.toLocaleString()}. ${restrictionStatus.kyc_restricted ? 'Please complete KYC to increase limits.' : ''}`
+          });
+        }
+      }
+      
+      // Check limit for withdrawal
+      if (activityType === 'withdrawal' && req.body.amount) {
+        const limits = await AccountRestrictions.getUserLimits(userId);
+        
+        if (limits.withdrawal && req.body.amount > limits.withdrawal) {
+          return res.status(403).json({
+            status: 'fail',
+            message: `Withdrawal amount exceeds your current limit of $${limits.withdrawal.toLocaleString()}. ${restrictionStatus.kyc_restricted ? 'Please complete KYC to increase limits.' : ''}`
+          });
+        }
+      }
+      
+      next();
+    } catch (err) {
+      console.error('Restriction check error:', err);
+      next();
+    }
+  };
+};
+
+
+
+
+
 // Enhanced email service with professional, highly visible templates - Mobile Optimized (no boxes/blocks, smooth flowing like Binance)
 // Using INFO transporter for financial/transaction emails
 const sendAutomatedEmail = async (user, action, data = {}) => {
