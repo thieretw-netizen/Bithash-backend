@@ -10043,7 +10043,6 @@ app.post('/api/users/cookie-preferences', protect, async (req, res) => {
 
 
 
-
 app.post('/api/auth/verify-2fa', [
   body('token').notEmpty().withMessage('Token is required'),
   body('email').isEmail().withMessage('Please provide a valid email').normalizeEmail()
