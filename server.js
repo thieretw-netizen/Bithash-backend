@@ -121,26 +121,28 @@ redis.on('connect', () => {
   console.log('Redis connected successfully');
 });
 
-// Helper function to get real client IP from request (exact and precise location, not approximate, not Cloudflare)
+// Helper function to get real client IP from request (ensures exact/precise location, not Cloudflare)
 const getRealClientIP = (req) => {
-  // Check X-Forwarded-For header first (this is what Render uses for real client IP)
+  // Check X-Forwarded-For header first (this is what Render uses)
   const forwardedFor = req.headers['x-forwarded-for'];
   if (forwardedFor) {
-    // Get the first IP in the list (the real client IP, not proxy)
-    const ips = forwardedFor.split(',');
-    return ips[0].trim();
+    // Get the first IP in the list (the real client IP)
+    return forwardedFor.split(',')[0].trim();
   }
   
-  // Check Cloudflare headers - we ignore these as per requirement to avoid Cloudflare location
-  // We do NOT use cf-connecting-ip as it gives Cloudflare location
+  // Check Cloudflare headers - ensure we don't use Cloudflare's IP
+  const cfConnectingIp = req.headers['cf-connecting-ip'];
+  if (cfConnectingIp) {
+    return cfConnectingIp;
+  }
   
-  // Check other common proxy headers but prioritize the real client
+  // Check other common proxy headers
   const realIp = req.headers['x-real-ip'];
   if (realIp) {
     return realIp;
   }
   
-  // Fallback to remote address
+  // Fallback to other headers or remote address
   return req.ip || 
          req.connection?.remoteAddress || 
          req.socket?.remoteAddress || 
@@ -217,12 +219,12 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb+srv://elvismwangike:JFJmHvP
   process.exit(1);
 });
 
-// Create transporters for different email types
+// Create transporter factory
 const createTransporter = (user, pass) => {
   return nodemailer.createTransport({
-    host: process.env.EMAIL_HOST,
-    port: process.env.EMAIL_PORT,
-    secure: process.env.EMAIL_SECURE === 'true',
+    host: process.env.EMAIL_HOST || 'mail.privateemail.com',
+    port: process.env.EMAIL_PORT || 465,
+    secure: true,
     auth: {
       user: user,
       pass: pass
@@ -236,23 +238,23 @@ const createTransporter = (user, pass) => {
   });
 };
 
-// INFO email transporter - for finances and transactions
+// INFO email transporter for financial/transaction emails
 const infoTransporter = createTransporter(
   process.env.EMAIL_INFO_USER,
   process.env.EMAIL_INFO_PASS
 );
 
-// SUPPORT email transporter - for accounts and restrictions
+// SUPPORT email transporter for account/restriction emails
 const supportTransporter = createTransporter(
   process.env.EMAIL_SUPPORT_USER,
   process.env.EMAIL_SUPPORT_PASS
 );
 
-// Legacy transporter for backward compatibility
+// Keep original transporter for backward compatibility
 const transporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST,
-  port: process.env.EMAIL_PORT,
-  secure: process.env.EMAIL_SECURE === 'true',
+  host: process.env.EMAIL_HOST || 'mail.privateemail.com',
+  port: process.env.EMAIL_PORT || 465,
+  secure: true,
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS
@@ -265,6 +267,27 @@ const transporter = nodemailer.createTransport({
   maxMessages: 100
 });
 
+// Email sending function with transporter selection based on email type
+const sendEmailWithTransporter = async (options, emailType = 'financial') => {
+  try {
+    const selectedTransporter = emailType === 'financial' ? infoTransporter : supportTransporter;
+    
+    const mailOptions = {
+      from: `BitHash <${emailType === 'financial' ? process.env.EMAIL_INFO_USER : process.env.EMAIL_SUPPORT_USER}>`,
+      to: options.email,
+      subject: options.subject,
+      text: options.message,
+      html: options.html
+    };
+
+    await selectedTransporter.sendMail(mailOptions);
+    console.log(`Email sent successfully via ${emailType} transporter to ${options.email}`);
+    return true;
+  } catch (err) {
+    console.error('Error sending email:', err);
+    return false;
+  }
+};
 
 // Google OAuth client with enhanced configuration
 const googleClient = new OAuth2Client({
@@ -755,7 +778,7 @@ const UserLogSchema = new mongoose.Schema({
     type: String,
     enum: [
       'authentication', 'financial', 'investment', 'security', 'profile',
-      'verification', 'referral', 'support', 'system', 'navigation', 'restriction'
+      'verification', 'referral', 'support', 'system', 'navigation'
     ],
     required: true,
     index: true
@@ -861,11 +884,6 @@ const UserLogSchema = new mongoose.Schema({
     duration: Number,
     roiPercentage: Number,
     
-    // Restrictions
-    restrictionType: String,
-    restrictionReason: String,
-    restrictionLiftedReason: String,
-    
     // User actions
     oldValues: mongoose.Schema.Types.Mixed,
     newValues: mongoose.Schema.Types.Mixed,
@@ -875,6 +893,8 @@ const UserLogSchema = new mongoose.Schema({
     adminId: mongoose.Schema.Types.ObjectId,
     adminName: String,
     reason: String,
+    restrictionType: String,
+    restrictionStatus: String,
     
     // Page navigation
     pageUrl: String,
@@ -904,7 +924,7 @@ const UserLogSchema = new mongoose.Schema({
     enum: [
       'User', 'Transaction', 'Investment', 'KYC', 'Plan', 'Loan', 
       'SupportTicket', 'Card', 'Referral', 'Notification', 'Admin',
-      'UserAssetBalance', 'Buy', 'Sell', 'DepositAsset', 'AccountRestrictions'
+      'UserAssetBalance', 'Buy', 'Sell', 'DepositAsset'
     ]
   },
 
@@ -974,8 +994,9 @@ UserLogSchema.virtual('actionDescription').get(function() {
     'buy_completed': 'User completed a buy order',
     'sell_created': 'User initiated a sell order',
     'sell_completed': 'User completed a sell order',
-    'restriction_applied': 'Account restriction was applied',
-    'restriction_lifted': 'Account restriction was lifted'
+    'restriction_applied': 'Restriction applied to account',
+    'restriction_lifted': 'Restriction lifted from account',
+    // Add more descriptions as needed
   };
   return actionDescriptions[this.action] || `User performed ${this.action.replace(/_/g, ' ')}`;
 });
@@ -1108,10 +1129,10 @@ UserLogSchema.methods.calculateActionCategory = function(action) {
     // Security
     'password_change': 'security',
     '2fa_enable': 'security',
+    'restriction_applied': 'security',
+    'restriction_lifted': 'security',
     
-    // Restrictions
-    'restriction_applied': 'restriction',
-    'restriction_lifted': 'restriction'
+    // Add more mappings as needed
   };
   
   return categoryMap[action] || 'system';
@@ -1119,7 +1140,7 @@ UserLogSchema.methods.calculateActionCategory = function(action) {
 
 UserLogSchema.methods.calculateRiskLevel = function() {
   const highRiskActions = ['failed_login', 'suspicious_activity', 'withdrawal_created'];
-  const mediumRiskActions = ['login', 'password_change', 'deposit_created'];
+  const mediumRiskActions = ['login', 'password_change', 'deposit_created', 'restriction_applied'];
   
   if (highRiskActions.includes(this.action)) return 'high';
   if (mediumRiskActions.includes(this.action)) return 'medium';
@@ -1993,7 +2014,7 @@ const NotificationSchema = new mongoose.Schema({
   },
   type: {
     type: String,
-    enum: ['info', 'warning', 'success', 'error', 'kyc_approved', 'kyc_rejected', 'withdrawal_approved', 'withdrawal_rejected', 'deposit_approved', 'system_update', 'maintenance', 'restriction_applied', 'restriction_lifted'],
+    enum: ['info', 'warning', 'success', 'error', 'kyc_approved', 'kyc_rejected', 'withdrawal_approved', 'withdrawal_rejected', 'deposit_approved', 'system_update', 'maintenance'],
     default: 'info'
   },
   recipientType: {
@@ -2117,8 +2138,7 @@ const AccountRestrictionsSchema = new mongoose.Schema({
   kyc_lifted_message: { type: String, default: "Your KYC verification has been completed. All account restrictions have been lifted." },
   txn_lifted_message: { type: String, default: "Your recent transaction has been completed. All account restrictions have been lifted." },
   updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
-  updatedAt: { type: Date, default: Date.now },
-  notify_users: { type: Boolean, default: true }
+  updatedAt: { type: Date, default: Date.now }
 }, { timestamps: true });
 
 // Get singleton instance
@@ -2148,72 +2168,8 @@ AccountRestrictionsSchema.statics.hasRecentTransaction = async function(userId, 
   return !!tx;
 };
 
-// Send restriction applied email
-AccountRestrictionsSchema.statics.sendRestrictionEmail = async function(userId, data) {
-  const user = await User.findById(userId).select('firstName lastName email');
-  if (!user || !user.email) return;
-  
-  const restrictions = await this.getInstance();
-  const reasons = [];
-  if (data.kycRestricted) reasons.push(restrictions.kyc_restriction_reason);
-  if (data.transactionRestricted) reasons.push(restrictions.txn_restriction_reason);
-  
-  const limitsHtml = [];
-  if (data.limits.withdrawal) limitsHtml.push(`<li>Withdrawal limit: $${data.limits.withdrawal.toLocaleString()}</li>`);
-  if (data.limits.investment) limitsHtml.push(`<li>Investment limit: $${data.limits.investment.toLocaleString()}</li>`);
-  
-  const html = `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-      <h2 style="color: #2563eb;">Account Restrictions Applied</h2>
-      <p>Hello ${user.firstName || user.email.split('@')[0]},</p>
-      <p>Your account has been restricted due to:</p>
-      <ul>${reasons.map(r => `<li>${r}</li>`).join('')}</ul>
-      ${limitsHtml.length ? `<p><strong>Current limits:</strong></p><ul>${limitsHtml.join('')}</ul>` : ''}
-      <p>Complete the required actions to have restrictions lifted automatically.</p>
-      <hr>
-      <p style="font-size: 12px; color: #666;">BitHash LLC</p>
-    </div>
-  `;
-  
-  // Use SUPPORT transporter for account/restriction emails
-  await supportTransporter.sendMail({
-    from: `"BitHash Support" <${process.env.EMAIL_SUPPORT_USER}>`,
-    to: user.email,
-    subject: 'Account Restrictions Applied - BitHash',
-    html: html
-  });
-};
-
-// Send restriction lifted email
-AccountRestrictionsSchema.statics.sendLiftedEmail = async function(userId, type, message) {
-  const user = await User.findById(userId).select('firstName lastName email');
-  if (!user || !user.email) return;
-  
-  const typeText = type === 'kyc' ? 'KYC verification' : 'transaction activity';
-  
-  const html = `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-      <h2 style="color: #10b981;">Restrictions Lifted ✓</h2>
-      <p>Hello ${user.firstName || user.email.split('@')[0]},</p>
-      <p>Good news! Your ${typeText} has been completed.</p>
-      <p>${message}</p>
-      <p>Your account is now fully unrestricted.</p>
-      <hr>
-      <p style="font-size: 12px; color: #666;">BitHash LLC</p>
-    </div>
-  `;
-  
-  // Use SUPPORT transporter for account/restriction emails
-  await supportTransporter.sendMail({
-    from: `"BitHash Support" <${process.env.EMAIL_SUPPORT_USER}>`,
-    to: user.email,
-    subject: 'Account Restrictions Lifted - BitHash',
-    html: html
-  });
-};
-
-// Check and apply/lift restrictions for a user - WITH EMAIL SENDING
-AccountRestrictionsSchema.statics.checkAndUpdateRestrictions = async function(userId, triggerSource = 'system', req = null) {
+// Check and apply/lift restrictions for a user
+AccountRestrictionsSchema.statics.checkAndUpdateRestrictions = async function(userId, triggerSource = 'system') {
   const restrictions = await this.getInstance();
   const hasKYC = await this.hasCompletedKYC(userId);
   const hasRecentTx = await this.hasRecentTransaction(userId, restrictions.inactivity_days);
@@ -2238,7 +2194,7 @@ AccountRestrictionsSchema.statics.checkAndUpdateRestrictions = async function(us
   };
   
   // Update restriction status in database
-  const updatedStatus = await UserRestrictionStatus.findOneAndUpdate(
+  await UserRestrictionStatus.findOneAndUpdate(
     { user: userId },
     {
       user: userId,
@@ -2251,76 +2207,15 @@ AccountRestrictionsSchema.statics.checkAndUpdateRestrictions = async function(us
     { upsert: true, new: true }
   );
   
-  // Get user for logging
-  const user = await User.findById(userId);
-  const userFullName = user ? `${user.firstName} ${user.lastName}` : userId;
-  
-  // CREATE LOGS AND SEND EMAILS for restriction changes
+  // Send emails for lifted restrictions - using SUPPORT email
   if (restrictions.notify_users !== false) {
     if (changes.kyc_lifted) {
-      // CREATE LOG for restriction lifted
-      await UserLog.create({
-        user: userId,
-        username: user?.email || userId,
-        email: user?.email || userId,
-        userFullName: userFullName,
-        action: 'restriction_lifted',
-        actionCategory: 'restriction',
-        ipAddress: req ? getRealClientIP(req) : 'system',
-        userAgent: req ? req.headers['user-agent'] || 'Unknown' : 'System',
-        status: 'success',
-        metadata: {
-          restrictionType: 'kyc',
-          restrictionLiftedReason: restrictions.kyc_lifted_message
-        }
-      });
-      
-      // SEND EMAIL for restriction lifted
       await this.sendLiftedEmail(userId, 'kyc', restrictions.kyc_lifted_message);
     }
     if (changes.transaction_lifted) {
-      // CREATE LOG for restriction lifted
-      await UserLog.create({
-        user: userId,
-        username: user?.email || userId,
-        email: user?.email || userId,
-        userFullName: userFullName,
-        action: 'restriction_lifted',
-        actionCategory: 'restriction',
-        ipAddress: req ? getRealClientIP(req) : 'system',
-        userAgent: req ? req.headers['user-agent'] || 'Unknown' : 'System',
-        status: 'success',
-        metadata: {
-          restrictionType: 'transaction',
-          restrictionLiftedReason: restrictions.txn_lifted_message
-        }
-      });
-      
-      // SEND EMAIL for restriction lifted
       await this.sendLiftedEmail(userId, 'transaction', restrictions.txn_lifted_message);
     }
     if (changes.kyc_applied || changes.transaction_applied) {
-      // CREATE LOG for restriction applied
-      await UserLog.create({
-        user: userId,
-        username: user?.email || userId,
-        email: user?.email || userId,
-        userFullName: userFullName,
-        action: 'restriction_applied',
-        actionCategory: 'restriction',
-        ipAddress: req ? getRealClientIP(req) : 'system',
-        userAgent: req ? req.headers['user-agent'] || 'Unknown' : 'System',
-        status: 'success',
-        metadata: {
-          kycRestricted: changes.kyc_applied,
-          transactionRestricted: changes.transaction_applied,
-          kycReason: changes.kyc_applied ? restrictions.kyc_restriction_reason : null,
-          transactionReason: changes.transaction_applied ? restrictions.txn_restriction_reason : null,
-          limits: await this.getUserLimits(userId)
-        }
-      });
-      
-      // SEND EMAIL for restriction applied
       await this.sendRestrictionEmail(userId, {
         kycRestricted: changes.kyc_applied,
         transactionRestricted: changes.transaction_applied,
@@ -2329,7 +2224,92 @@ AccountRestrictionsSchema.statics.checkAndUpdateRestrictions = async function(us
     }
   }
   
-  return { changes, restrictions: shouldBeRestricted, updatedStatus };
+  // Create logs for restriction changes
+  if (changes.kyc_applied) {
+    await UserLog.create({
+      user: userId,
+      username: wasRestricted?.username || userId,
+      email: wasRestricted?.email || '',
+      userFullName: wasRestricted?.userFullName || '',
+      action: 'restriction_applied',
+      actionCategory: 'security',
+      ipAddress: 'system',
+      userAgent: 'system',
+      deviceInfo: { type: 'system' },
+      location: { country: 'System', city: 'System' },
+      status: 'success',
+      metadata: {
+        restrictionType: 'kyc',
+        reason: restrictions.kyc_restriction_reason,
+        triggerSource: triggerSource
+      }
+    });
+  }
+  
+  if (changes.transaction_applied) {
+    await UserLog.create({
+      user: userId,
+      username: wasRestricted?.username || userId,
+      email: wasRestricted?.email || '',
+      userFullName: wasRestricted?.userFullName || '',
+      action: 'restriction_applied',
+      actionCategory: 'security',
+      ipAddress: 'system',
+      userAgent: 'system',
+      deviceInfo: { type: 'system' },
+      location: { country: 'System', city: 'System' },
+      status: 'success',
+      metadata: {
+        restrictionType: 'transaction',
+        reason: restrictions.txn_restriction_reason,
+        triggerSource: triggerSource
+      }
+    });
+  }
+  
+  if (changes.kyc_lifted) {
+    await UserLog.create({
+      user: userId,
+      username: wasRestricted?.username || userId,
+      email: wasRestricted?.email || '',
+      userFullName: wasRestricted?.userFullName || '',
+      action: 'restriction_lifted',
+      actionCategory: 'security',
+      ipAddress: 'system',
+      userAgent: 'system',
+      deviceInfo: { type: 'system' },
+      location: { country: 'System', city: 'System' },
+      status: 'success',
+      metadata: {
+        restrictionType: 'kyc',
+        message: restrictions.kyc_lifted_message,
+        triggerSource: triggerSource
+      }
+    });
+  }
+  
+  if (changes.transaction_lifted) {
+    await UserLog.create({
+      user: userId,
+      username: wasRestricted?.username || userId,
+      email: wasRestricted?.email || '',
+      userFullName: wasRestricted?.userFullName || '',
+      action: 'restriction_lifted',
+      actionCategory: 'security',
+      ipAddress: 'system',
+      userAgent: 'system',
+      deviceInfo: { type: 'system' },
+      location: { country: 'System', city: 'System' },
+      status: 'success',
+      metadata: {
+        restrictionType: 'transaction',
+        message: restrictions.txn_lifted_message,
+        triggerSource: triggerSource
+      }
+    });
+  }
+  
+  return { changes, restrictions: shouldBeRestricted };
 };
 
 // Get current limits for a user
@@ -2356,66 +2336,56 @@ AccountRestrictionsSchema.statics.getUserLimits = async function(userId) {
   return { withdrawal, investment };
 };
 
-// Check if user can perform a specific action based on restrictions
-AccountRestrictionsSchema.statics.canPerformAction = async function(userId, actionType, amount, req = null) {
+// Send restriction applied email - using SUPPORT email
+AccountRestrictionsSchema.statics.sendRestrictionEmail = async function(userId, data) {
+  const user = await User.findById(userId).select('firstName lastName email');
+  if (!user || !user.email) return;
+  
   const restrictions = await this.getInstance();
-  const userRestriction = await UserRestrictionStatus.findOne({ user: userId });
+  const reasons = [];
+  if (data.kycRestricted) reasons.push(restrictions.kyc_restriction_reason);
+  if (data.transactionRestricted) reasons.push(restrictions.txn_restriction_reason);
   
-  // If no restrictions record exists, user is unrestricted
-  if (!userRestriction) return { allowed: true };
+  const limitsHtml = [];
+  if (data.limits.withdrawal) limitsHtml.push(`<li>Withdrawal limit: $${data.limits.withdrawal.toLocaleString()}</li>`);
+  if (data.limits.investment) limitsHtml.push(`<li>Investment limit: $${data.limits.investment.toLocaleString()}</li>`);
   
-  const { withdrawal, investment } = await this.getUserLimits(userId);
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+      <h2 style="color: #2563eb;">Account Restrictions Applied</h2>
+      <p>Hello ${user.firstName || user.email.split('@')[0]},</p>
+      <p>Your account has been restricted due to:</p>
+      <ul>${reasons.map(r => `<li>${r}</li>`).join('')}</ul>
+      ${limitsHtml.length ? `<p><strong>Current limits:</strong></p><ul>${limitsHtml.join('')}</ul>` : ''}
+      <p>Complete the required actions to have restrictions lifted automatically.</p>
+      <hr>
+      <p style="font-size: 12px; color: #666;">BitHash LLC</p>
+    </div>
+  `;
   
-  if (actionType === 'withdrawal' && userRestriction.kyc_restricted && withdrawal !== null && amount > withdrawal) {
-    return {
-      allowed: false,
-      reason: `Withdrawal limit of $${withdrawal.toLocaleString()} applies until KYC is completed. ${restrictions.kyc_restriction_reason}`
-    };
-  }
+  await sendEmailWithTransporter({ email: user.email, subject: 'Account Restrictions Applied - BitHash', html }, 'account');
+};
+
+// Send restriction lifted email - using SUPPORT email
+AccountRestrictionsSchema.statics.sendLiftedEmail = async function(userId, type, message) {
+  const user = await User.findById(userId).select('firstName lastName email');
+  if (!user || !user.email) return;
   
-  if (actionType === 'withdrawal' && userRestriction.transaction_restricted && withdrawal !== null && amount > withdrawal) {
-    return {
-      allowed: false,
-      reason: `Withdrawal limit of $${withdrawal.toLocaleString()} applies until you complete a deposit or withdrawal. ${restrictions.txn_restriction_reason}`
-    };
-  }
+  const typeText = type === 'kyc' ? 'KYC verification' : 'transaction activity';
   
-  if (actionType === 'investment' && userRestriction.kyc_restricted && investment !== null && amount > investment) {
-    return {
-      allowed: false,
-      reason: `Investment limit of $${investment.toLocaleString()} applies until KYC is completed. ${restrictions.kyc_restriction_reason}`
-    };
-  }
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+      <h2 style="color: #10b981;">Restrictions Lifted ✓</h2>
+      <p>Hello ${user.firstName || user.email.split('@')[0]},</p>
+      <p>Good news! Your ${typeText} has been completed.</p>
+      <p>${message}</p>
+      <p>Your account is now fully unrestricted.</p>
+      <hr>
+      <p style="font-size: 12px; color: #666;">BitHash LLC</p>
+    </div>
+  `;
   
-  if (actionType === 'investment' && userRestriction.transaction_restricted && investment !== null && amount > investment) {
-    return {
-      allowed: false,
-      reason: `Investment limit of $${investment.toLocaleString()} applies until you complete a deposit or withdrawal. ${restrictions.txn_restriction_reason}`
-    };
-  }
-  
-  if ((actionType === 'buy' || actionType === 'sell') && (userRestriction.kyc_restricted || userRestriction.transaction_restricted)) {
-    if (userRestriction.kyc_restricted && userRestriction.transaction_restricted) {
-      return {
-        allowed: false,
-        reason: `Trading is restricted until KYC is completed and you complete a deposit or withdrawal.`
-      };
-    }
-    if (userRestriction.kyc_restricted) {
-      return {
-        allowed: false,
-        reason: `Trading is restricted until KYC is completed. ${restrictions.kyc_restriction_reason}`
-      };
-    }
-    if (userRestriction.transaction_restricted) {
-      return {
-        allowed: false,
-        reason: `Trading is restricted until you complete a deposit or withdrawal. ${restrictions.txn_restriction_reason}`
-      };
-    }
-  }
-  
-  return { allowed: true };
+  await sendEmailWithTransporter({ email: user.email, subject: 'Account Restrictions Lifted - BitHash', html }, 'account');
 };
 
 // User Restriction Status Schema - Track individual user restrictions
@@ -3324,592 +3294,6 @@ const convertToFiat = async (cryptoAmount, asset) => {
   const rate = await getExchangeRate(asset);
   return cryptoAmount * rate;
 };
-
-// Email sending function with proper transporter selection
-const sendEmail = async (options, emailType = 'info') => {
-  try {
-    // Select transporter based on email type
-    let selectedTransporter;
-    let fromEmail;
-    
-    if (emailType === 'info') {
-      selectedTransporter = infoTransporter;
-      fromEmail = process.env.EMAIL_INFO_USER;
-    } else if (emailType === 'support') {
-      selectedTransporter = supportTransporter;
-      fromEmail = process.env.EMAIL_SUPPORT_USER;
-    } else {
-      selectedTransporter = transporter;
-      fromEmail = process.env.EMAIL_USER;
-    }
-    
-    const mailOptions = {
-      from: `BitHash ${emailType === 'support' ? 'Support' : 'Capital'} <${fromEmail}>`,
-      to: options.email,
-      subject: options.subject,
-      text: options.message,
-      html: options.html
-    };
-
-    await selectedTransporter.sendMail(mailOptions);
-    console.log(`Email sent successfully via ${emailType} transporter to ${options.email}`);
-  } catch (err) {
-    console.error('Error sending email:', err);
-    throw new Error('Failed to send email');
-  }
-};
-
-const getUserDeviceInfo = async (req) => {
-  try {
-    // Enhanced IP detection with multiple header checks to get REAL client IP (not Cloudflare)
-    let ip = getRealClientIP(req);
-
-    let location = 'Unknown Location';
-    let isPublicIP = true;
-
-    // Enhanced private IP range detection
-    const privateIPRanges = [
-      /^10\./, // 10.0.0.0/8
-      /^172\.(1[6-9]|2[0-9]|3[0-1])\./, // 172.16.0.0/12
-      /^192\.168\./, // 192.168.0.0/16
-      /^127\./, // localhost
-      /^169\.254\./, // link-local
-      /^::1$/, // IPv6 localhost
-      /^fc00::/, // IPv6 private
-      /^fd00::/, // IPv6 private
-      /^fe80::/ // IPv6 link-local
-    ];
-
-    // Check if IP is private
-    for (const range of privateIPRanges) {
-      if (range.test(ip)) {
-        isPublicIP = false;
-        location = 'Local Network';
-        break;
-      }
-    }
-
-    // Only try location lookup for public IPs
-    if (isPublicIP && ip && ip !== 'Unknown' && ip !== '0.0.0.0') {
-      try {
-        console.log(`Looking up location for IP: ${ip}`);
-        
-        // Try multiple IP geolocation services as fallback
-        const ipinfoToken = process.env.IPINFO_TOKEN || 'b56ce6e91d732d';
-        
-        // First try ipinfo.io
-        try {
-          const response = await axios.get(`https://ipinfo.io/${ip}?token=${ipinfoToken}`, {
-            timeout: 5000
-          });
-          
-          if (response.data) {
-            const { city, region, country, loc, org, timezone } = response.data;
-            location = `${city || 'Unknown'}, ${region || 'Unknown'}, ${country || 'Unknown'}`;
-            
-            console.log(`IPInfo.io location result: ${location}`);
-          }
-        } catch (ipinfoError) {
-          console.log('IPInfo.io failed, trying fallback services...');
-          
-          // Fallback 1: ipapi.co
-          try {
-            const response = await axios.get(`https://ipapi.co/${ip}/json/`, {
-              timeout: 5000
-            });
-            
-            if (response.data) {
-              const { city, region, country_name, country_code } = response.data;
-              location = `${city || 'Unknown'}, ${region || 'Unknown'}, ${country_name || country_code || 'Unknown'}`;
-              console.log(`IPApi.co location result: ${location}`);
-            }
-          } catch (ipapiError) {
-            // Fallback 2: freeipapi.com
-            try {
-              const response = await axios.get(`https://freeipapi.com/api/json/${ip}`, {
-                timeout: 5000
-              });
-              
-              if (response.data) {
-                const { cityName, regionName, countryName } = response.data;
-                location = `${cityName || 'Unknown'}, ${regionName || 'Unknown'}, ${countryName || 'Unknown'}`;
-                console.log(`FreeIPAPI location result: ${location}`);
-              }
-            } catch (freeipapiError) {
-              // Final fallback: ip-api.com
-              try {
-                const response = await axios.get(`http://ip-api.com/json/${ip}`, {
-                  timeout: 5000
-                });
-                
-                if (response.data && response.data.status === 'success') {
-                  const { city, regionName, country } = response.data;
-                  location = `${city || 'Unknown'}, ${regionName || 'Unknown'}, ${country || 'Unknown'}`;
-                  console.log(`IP-API.com location result: ${location}`);
-                }
-              } catch (ipapiComError) {
-                location = 'Location Service Unavailable';
-                console.log('All location services failed');
-              }
-            }
-          }
-        }
-      } catch (err) {
-        console.error('All location lookup services failed:', err.message);
-        location = 'Location Unavailable';
-      }
-    } else if (!isPublicIP) {
-      console.log(`Private IP detected: ${ip}, using local network location`);
-    }
-
-    return {
-      ip: ip || 'Unknown',
-      device: req.headers['user-agent'] || 'Unknown',
-      location: location,
-      isPublicIP: isPublicIP
-    };
-  } catch (err) {
-    console.error('Error getting device info:', err);
-    return {
-      ip: req.ip || 'Unknown',
-      device: req.headers['user-agent'] || 'Unknown',
-      location: 'Unknown',
-      isPublicIP: false
-    };
-  }
-};
-const logActivity = async (action, entity, entityId, performedBy, performedByModel, req, changes = {}) => {
-  try {
-    const deviceInfo = await getUserDeviceInfo(req);
-    
-    // Enhanced location data
-    const locationData = {
-      ip: deviceInfo.ip,
-      location: deviceInfo.location,
-      isPublicIP: deviceInfo.isPublicIP,
-      userAgent: deviceInfo.device,
-      detectedAt: new Date()
-    };
-    
-    await SystemLog.create({
-      action,
-      entity,
-      entityId,
-      performedBy,
-      performedByModel,
-      ip: locationData.ip,
-      device: locationData.userAgent,
-      location: locationData.location,
-      changes: {
-        ...changes,
-        locationData: locationData
-      }
-    });
-    
-    console.log(`Activity Logged: ${action}`, {
-      entity,
-      entityId,
-      location: locationData.location,
-      ip: locationData.ip,
-      isPublicIP: locationData.isPublicIP
-    });
-  } catch (err) {
-    console.error('Error logging activity:', err);
-  }
-};
-
-const generateTOTPSecret = () => {
-  return speakeasy.generateSecret({
-    length: 20,
-    name: 'BitHash',
-    issuer: 'BitHash LLC'
-  });
-};
-
-const verifyTOTP = (token, secret) => {
-  return speakeasy.totp.verify({
-    secret,
-    encoding: 'base32',
-    token,
-    window: 2
-  });
-};
-
-
-
-// Initialize default admin and plans
-const initializeAdmin = async () => {
-  try {
-    const adminExists = await Admin.findOne({ email: 'admin@bithash.com' });
-    if (!adminExists) {
-      const hashedPassword = await bcrypt.hash(process.env.DEFAULT_ADMIN_PASSWORD || 'SecureAdminPassword123!', 12);
-      await Admin.create({
-        email: 'admin@bithash.com',
-        password: hashedPassword,
-        name: 'Super Admin',
-        role: 'super',
-        permissions: ['all'],
-        passwordChangedAt: Date.now()
-      });
-      console.log('Default admin created');
-    }
-  } catch (err) {
-    console.error('Error initializing admin:', err);
-  }
-};
-
-const initializePlans = async () => {
-  try {
-    const plans = [
-      {
-        name: 'Starter Plan',
-        description: '12% After 10 hours',
-        percentage: 12,
-        duration: 10,
-        minAmount: 50,
-        maxAmount: 499,
-        referralBonus: 5
-      },
-      {
-        name: 'Gold Plan',
-        description: '20% After 24 hours',
-        percentage: 20,
-        duration: 24,
-        minAmount: 500,
-        maxAmount: 1999,
-        referralBonus: 5
-      },
-      {
-        name: 'Advance Plan',
-        description: '35% After 48 hours',
-        percentage: 35,
-        duration: 48,
-        minAmount: 2000,
-        maxAmount: 9999,
-        referralBonus: 5
-      },
-      {
-        name: 'Exclusive Plan',
-        description: '40% After 72 hours',
-        percentage: 40,
-        duration: 72,
-        minAmount: 10000,
-        maxAmount: 49999,
-        referralBonus: 5
-      },
-      {
-        name: 'Expert Plan',
-        description: '50% After 96 hours',
-        percentage: 50,
-        duration: 96,
-        minAmount: 50000,
-        maxAmount: 1000000,
-        referralBonus: 5
-      }
-    ];
-
-    for (const plan of plans) {
-      const existingPlan = await Plan.findOne({ name: plan.name });
-      if (!existingPlan) {
-        await Plan.create(plan);
-      }
-    }
-  } catch (err) {
-    console.error('Error initializing plans:', err);
-  }
-};
-
-initializeAdmin();
-initializePlans();
-
-// Middleware with enhanced security
-const protect = async (req, res, next) => {
-  try {
-    let token;
-    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-      token = req.headers.authorization.split(' ')[1];
-    } else if (req.cookies.jwt) {
-      token = req.cookies.jwt;
-    }
-
-    if (!token) {
-      return res.status(401).json({
-        status: 'fail',
-        message: 'You are not logged in! Please log in to get access.'
-      });
-    }
-
-    const decoded = verifyJWT(token);
-    const currentUser = await User.findById(decoded.id).select('+passwordChangedAt +twoFactorAuth.secret');
-
-    if (!currentUser) {
-      return res.status(401).json({
-        status: 'fail',
-        message: 'The user belonging to this token no longer exists.'
-      });
-    }
-
-    if (currentUser.passwordChangedAt && decoded.iat < currentUser.passwordChangedAt.getTime() / 1000) {
-      return res.status(401).json({
-        status: 'fail',
-        message: 'User recently changed password! Please log in again.'
-      });
-    }
-
-    if (currentUser.status !== 'active') {
-      return res.status(401).json({
-        status: 'fail',
-        message: 'Your account has been suspended. Please contact support.'
-      });
-    }
-
-    // Check if 2FA is required
-    if (currentUser.twoFactorAuth.enabled && !req.headers['x-2fa-verified']) {
-      return res.status(401).json({
-        status: 'fail',
-        message: 'Two-factor authentication required'
-      });
-    }
-
-    req.user = currentUser;
-    next();
-  } catch (err) {
-    return res.status(401).json({
-      status: 'fail',
-      message: err.message || 'Invalid token. Please log in again.'
-    });
-  }
-};
-
-const adminProtect = async (req, res, next) => {
-  try {
-    let token;
-    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-      token = req.headers.authorization.split(' ')[1];
-    } else if (req.cookies.admin_jwt) {
-      token = req.cookies.admin_jwt;
-    }
-
-    if (!token) {
-      return res.status(401).json({
-        status: 'fail',
-        message: 'You are not logged in! Please log in to get access.'
-      });
-    }
-
-    const decoded = verifyJWT(token);
-    if (!decoded.isAdmin) {
-      return res.status(403).json({
-        status: 'fail',
-        message: 'You do not have permission to access this resource'
-      });
-    }
-
-    const currentAdmin = await Admin.findById(decoded.id).select('+passwordChangedAt +twoFactorAuth.secret');
-    if (!currentAdmin) {
-      return res.status(401).json({
-        status: 'fail',
-        message: 'The admin belonging to this token no longer exists.'
-      });
-    }
-
-    // Check if 2FA is required
-    if (currentAdmin.twoFactorAuth.enabled && !req.headers['x-2fa-verified']) {
-      return res.status(401).json({
-        status: 'fail',
-        message: 'Two-factor authentication required'
-      });
-    }
-
-    req.admin = currentAdmin;
-    next();
-  } catch (err) {
-    return res.status(401).json({
-      status: 'fail',
-      message: err.message || 'Invalid token. Please log in again.'
-    });
-  }
-};
-
-const restrictTo = (...roles) => {
-  return (req, res, next) => {
-    if (!roles.includes(req.admin.role)) {
-      return res.status(403).json({
-        status: 'fail',
-        message: 'You do not have permission to perform this action'
-      });
-    }
-    next();
-  };
-};
-
-const checkCSRF = (req, res, next) => {
-  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') {
-    return next();
-  }
-
-  const csrfToken = req.headers['x-csrf-token'] || req.body._csrf;
-  if (!csrfToken || !req.session.csrfToken || csrfToken !== req.session.csrfToken) {
-    return res.status(403).json({
-      status: 'fail',
-      message: 'Invalid CSRF token'
-    });
-  }
-  next();
-};
-
-
-// Fixed function to calculate and distribute downline referral commissions
-const calculateReferralCommissions = async (investment) => {
-  try {
-    // First, populate the investment with user data
-    const populatedInvestment = await Investment.findById(investment._id)
-      .populate('user', 'firstName lastName email')
-      .populate('plan');
-
-    if (!populatedInvestment) {
-      console.log(`❌ Investment not found: ${investment._id}`);
-      return;
-    }
-
-    const investmentId = populatedInvestment._id;
-    const investorId = populatedInvestment.user._id;
-    const investmentAmount = populatedInvestment.amount;
-
-    console.log(`🔍 Checking downline commissions for investment: ${investmentId}, user: ${investorId}, amount: $${investmentAmount}`);
-
-    // Find the downline relationship for this investor (check if they have an upline)
-    const relationship = await DownlineRelationship.findOne({
-      downline: investorId,
-      status: 'active',
-      remainingRounds: { $gt: 0 }
-    }).populate('upline', 'firstName lastName email balances referralStats downlineStats');
-
-    if (!relationship) {
-      console.log(`❌ No active downline relationship found for user: ${investorId}`);
-      return; // No upline found or no commission rounds remaining
-    }
-
-    const uplineId = relationship.upline._id;
-    const uplineUser = relationship.upline;
-    const commissionPercentage = relationship.commissionPercentage;
-    const commissionAmount = (investmentAmount * commissionPercentage) / 100;
-
-    console.log(`💰 Downline commission: $${investmentAmount} * ${commissionPercentage}% = $${commissionAmount} for upline: ${uplineUser.email}`);
-
-    // Create commission history record
-    const commissionHistory = await CommissionHistory.create({
-      upline: uplineId,
-      downline: investorId,
-      investment: investmentId,
-      investmentAmount: investmentAmount,
-      commissionPercentage: commissionPercentage,
-      commissionAmount: commissionAmount,
-      roundNumber: relationship.commissionRounds - relationship.remainingRounds + 1,
-      status: 'paid',
-      paidAt: new Date()
-    });
-
-    // ✅ FIXED: Add commission to upline's MAIN balance as requested
-    const updatedUpline = await User.findByIdAndUpdate(
-      uplineId,
-      {
-        $inc: {
-          'balances.main': commissionAmount, // Added to main balance
-          'referralStats.totalEarnings': commissionAmount,
-          'referralStats.availableBalance': commissionAmount,
-          'downlineStats.totalCommissionEarned': commissionAmount,
-          'downlineStats.thisMonthCommission': commissionAmount
-        }
-      },
-      { new: true }
-    );
-
-    console.log(`✅ Updated upline ${uplineUser.email} MAIN balance with $${commissionAmount}. New balance: $${updatedUpline.balances.main}`);
-
-    // Update downline relationship
-    relationship.remainingRounds -= 1;
-    relationship.totalCommissionEarned += commissionAmount;
-    
-    if (relationship.remainingRounds === 0) {
-      relationship.status = 'completed';
-      console.log(`🎯 Commission rounds completed for relationship: ${relationship._id}`);
-    }
-
-    await relationship.save();
-
-    // Create transaction record for the commission
-    await Transaction.create({
-      user: uplineId,
-      type: 'referral',
-      amount: commissionAmount,
-      currency: 'USD',
-      status: 'completed',
-      method: 'INTERNAL',
-      reference: `DOWNLINE-COMM-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      details: {
-        commissionFrom: investorId,
-        investmentId: investmentId,
-        round: relationship.commissionRounds - relationship.remainingRounds + 1,
-        totalRounds: relationship.commissionRounds,
-        commissionType: 'downline',
-        downlineName: `${populatedInvestment.user.firstName} ${populatedInvestment.user.lastName}`,
-        percentage: commissionPercentage
-      },
-      fee: 0,
-      netAmount: commissionAmount
-    });
-
-    // Add to upline's referral history
-    await User.findByIdAndUpdate(uplineId, {
-      $push: {
-        referralHistory: {
-          referredUser: investorId,
-          amount: commissionAmount,
-          percentage: commissionPercentage,
-          level: 1, // Direct downline
-          date: new Date(),
-          status: 'available',
-          type: 'downline_commission'
-        }
-      }
-    });
-
-    // Update downline stats count
-    const activeDownlinesCount = await DownlineRelationship.countDocuments({ 
-      upline: uplineId, 
-      status: 'active',
-      remainingRounds: { $gt: 0 }
-    });
-
-    await User.findByIdAndUpdate(uplineId, {
-      'downlineStats.activeDownlines': activeDownlinesCount
-    });
-
-    console.log(`🎉 Downline commission of $${commissionAmount} paid to upline ${uplineUser.email} for investment ${investmentId} (Round ${relationship.commissionRounds - relationship.remainingRounds + 1}/${relationship.commissionRounds})`);
-
-    // Log the activity
-    await logActivity('downline_commission_paid', 'commission', commissionHistory._id, uplineId, 'User', null, {
-      amount: commissionAmount,
-      downline: investorId,
-      investment: investmentId,
-      round: relationship.commissionRounds - relationship.remainingRounds + 1,
-      totalRounds: relationship.commissionRounds,
-      percentage: commissionPercentage
-    });
-
-  } catch (err) {
-    console.error('❌ Downline commission calculation error:', err);
-    // Don't throw error to avoid disrupting investment process
-  }
-};
-
-
-
-
-
-
-
 
 // Enhanced email service with professional, highly visible templates - Mobile Optimized (no boxes/blocks, smooth flowing like Binance)
 const sendAutomatedEmail = async (user, action, data = {}) => {
@@ -5359,160 +4743,6 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
         `
       },
 
-      // RESTRICTION APPLIED
-      restriction_applied: {
-        subject: 'Account Restrictions Applied - BitHash Capital',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-              <title>Account Restrictions Applied - BitHash Capital</title>
-              <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #ffffff; margin: 0; padding: 0; }
-                .email-wrapper { max-width: 100%; margin: 0 auto; background-color: #ffffff; }
-                .header { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); padding: 32px 20px; text-align: center; }
-                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
-                .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
-                .content { padding: 40px 20px; background-color: #ffffff; }
-                .greeting { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
-                .message { color: #4b5563; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .restriction-box { background: #fef2f2; padding: 24px; border-radius: 12px; margin: 24px 0; }
-                .restriction-item { margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #fecaca; }
-                .restriction-item:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
-                .restriction-title { font-weight: 600; color: #991b1b; margin-bottom: 8px; }
-                .restriction-reason { color: #4b5563; font-size: 14px; }
-                .limit-info { background: #f9fafb; padding: 16px; border-radius: 8px; margin: 16px 0; }
-                .footer { padding: 24px 20px; background-color: #f9fafb; text-align: center; }
-                .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
-                @media only screen and (max-width: 600px) {
-                  .header { padding: 20px; }
-                  .content { padding: 24px 16px; }
-                  .greeting { font-size: 20px; }
-                }
-              </style>
-          </head>
-          <body style="background-color: #ffffff; margin: 0; padding: 0;">
-            <div class="email-wrapper">
-              <div class="header">
-                <div class="logo-container">
-                  <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
-                  <span class="logo-text">BitHash Capital</span>
-                </div>
-              </div>
-              <div class="content">
-                <h2 class="greeting">Hello ${user.firstName || 'there'},</h2>
-                <p class="message">Your account has been restricted due to the following:</p>
-                
-                <div class="restriction-box">
-                  ${data.kycRestricted ? `
-                  <div class="restriction-item">
-                    <div class="restriction-title">KYC Verification Required</div>
-                    <div class="restriction-reason">${data.kycReason || 'Please complete your KYC verification to increase your limits.'}</div>
-                  </div>
-                  ` : ''}
-                  ${data.transactionRestricted ? `
-                  <div class="restriction-item">
-                    <div class="restriction-title">Transaction History Required</div>
-                    <div class="restriction-reason">${data.transactionReason || 'Please complete at least one deposit or withdrawal to increase your limits.'}</div>
-                  </div>
-                  ` : ''}
-                </div>
-                
-                ${data.limits && (data.limits.withdrawal || data.limits.investment) ? `
-                <div class="limit-info">
-                  <strong>Current Limits:</strong>
-                  ${data.limits.withdrawal ? `<p>Withdrawal limit: $${data.limits.withdrawal.toLocaleString()}</p>` : ''}
-                  ${data.limits.investment ? `<p>Investment limit: $${data.limits.investment.toLocaleString()}</p>` : ''}
-                </div>
-                ` : ''}
-                
-                <p class="message">Complete the required actions to have restrictions lifted automatically.</p>
-                
-                <div style="text-align: center; margin-top: 24px;">
-                  <a href="https://www.bithashcapital.live/kyc.html" style="display: inline-block; padding: 10px 20px; background: #3b82f6; color: white; text-decoration: none; border-radius: 6px;">Complete KYC</a>
-                  <a href="https://www.bithashcapital.live/deposit.html" style="display: inline-block; padding: 10px 20px; background: #10b981; color: white; text-decoration: none; border-radius: 6px; margin-left: 12px;">Make a Deposit</a>
-                </div>
-              </div>
-              <div class="footer">
-                <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
-                Need help? <a href="mailto:support@bithashcapital.live" style="color: #3b82f6;">Contact Support</a></p>
-              </div>
-            </div>
-          </body>
-          </html>
-        `
-      },
-
-      // RESTRICTION LIFTED
-      restriction_lifted: {
-        subject: 'Account Restrictions Lifted - BitHash Capital',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-              <title>Restrictions Lifted - BitHash Capital</title>
-              <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #ffffff; margin: 0; padding: 0; }
-                .email-wrapper { max-width: 100%; margin: 0 auto; background-color: #ffffff; }
-                .header { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); padding: 32px 20px; text-align: center; }
-                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
-                .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
-                .content { padding: 40px 20px; background-color: #ffffff; }
-                .greeting { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
-                .message { color: #4b5563; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .success-box { background: #f0fdf4; padding: 24px; text-align: center; border-radius: 12px; margin: 24px 0; }
-                .check-icon { font-size: 64px; color: #22c55e; margin-bottom: 16px; }
-                .footer { padding: 24px 20px; background-color: #f9fafb; text-align: center; }
-                .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
-                @media only screen and (max-width: 600px) {
-                  .header { padding: 20px; }
-                  .content { padding: 24px 16px; }
-                  .greeting { font-size: 20px; }
-                }
-              </style>
-          </head>
-          <body style="background-color: #ffffff; margin: 0; padding: 0;">
-            <div class="email-wrapper">
-              <div class="header">
-                <div class="logo-container">
-                  <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
-                  <span class="logo-text">BitHash Capital</span>
-                </div>
-              </div>
-              <div class="content">
-                <h2 class="greeting">Hello ${user.firstName || 'there'},</h2>
-                <p class="message">Good news! Your account restrictions have been lifted.</p>
-                
-                <div class="success-box">
-                  <div class="check-icon">✓</div>
-                  <div style="font-size: 20px; font-weight: 600; color: #166534;">Restrictions Removed</div>
-                  <p style="color: #15803d; margin-top: 8px;">${data.message || 'Your account is now fully unrestricted.'}</p>
-                </div>
-                
-                <p class="message">You can now perform all activities including deposits, withdrawals, investments, and trading without any limitations.</p>
-                
-                <div style="text-align: center; margin-top: 24px;">
-                  <a href="https://www.bithashcapital.live/dashboard.html" style="display: inline-block; padding: 12px 24px; background: #3b82f6; color: white; text-decoration: none; border-radius: 8px;">Go to Dashboard</a>
-                </div>
-              </div>
-              <div class="footer">
-                <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
-                Need help? <a href="mailto:support@bithashcapital.live" style="color: #3b82f6;">Contact Support</a></p>
-              </div>
-            </div>
-          </body>
-          </html>
-        `
-      },
-
       // GENERAL NOTIFICATION
       general: {
         subject: data.subject || 'BitHash Capital | Notification',
@@ -5580,31 +4810,31 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
       return;
     }
 
-    // Determine which transporter to use based on email type
-    let emailType = 'info'; // Default for finances and transactions
+    // Determine email type: financial/transaction emails use infoTransporter, account/restriction emails use supportTransporter
+    const financialActions = ['investment_created', 'investment_matured', 'deposit_received', 'deposit_approved', 'deposit_rejected', 'withdrawal_request', 'withdrawal_approved', 'withdrawal_rejected'];
+    const accountActions = ['restriction_applied', 'restriction_lifted', 'kyc_approved', 'kyc_rejected', 'welcome', 'login_success', 'password_changed', 'password_reset', 'otp'];
     
-    // Use support transporter for account/restriction related emails
-    if (action === 'restriction_applied' || action === 'restriction_lifted' || 
-        action === 'kyc_approved' || action === 'kyc_rejected' ||
-        action === 'account_suspended' || action === 'account_deletion') {
-      emailType = 'support';
+    let emailType = 'financial';
+    if (accountActions.includes(action)) {
+      emailType = 'account';
     }
-
+    
+    const selectedTransporter = emailType === 'financial' ? infoTransporter : supportTransporter;
+    
     const mailOptions = {
-      from: `"BitHash Capital" <${emailType === 'support' ? process.env.EMAIL_SUPPORT_USER : process.env.EMAIL_INFO_USER}>`,
+      from: `"BitHash Capital" <${emailType === 'financial' ? process.env.EMAIL_INFO_USER : process.env.EMAIL_SUPPORT_USER}>`,
       to: user.email,
       subject: template.subject,
       html: template.html
     };
 
-    const selectedTransporter = emailType === 'support' ? supportTransporter : infoTransporter;
     await selectedTransporter.sendMail(mailOptions);
     console.log(`📧 ${action} email sent successfully to ${user.email} via ${emailType} transporter`);
     
     await logActivity('email_sent', 'notification', null, user._id, 'User', null, {
       action: action,
       email: user.email,
-      transporter: emailType
+      emailType: emailType
     });
 
   } catch (err) {
@@ -5812,16 +5042,26 @@ const sendProfessionalEmail = async (options) => {
       throw new Error(`Template ${template} not found`);
     }
 
-    // Use info transporter for these emails
+    // Determine email type for this professional email
+    const financialActions = ['welcome', 'deposit', 'withdrawal', 'investment'];
+    const accountActions = ['otp', 'verification', 'kyc', 'restriction'];
+    
+    let emailType = 'financial';
+    if (accountActions.includes(template)) {
+      emailType = 'account';
+    }
+    
+    const selectedTransporter = emailType === 'financial' ? infoTransporter : supportTransporter;
+
     const mailOptions = {
-      from: `"BitHash Capital" <${process.env.EMAIL_INFO_USER}>`,
+      from: `"BitHash Capital" <${emailType === 'financial' ? process.env.EMAIL_INFO_USER : process.env.EMAIL_SUPPORT_USER}>`,
       to: email,
       subject: templateData.subject,
       html: templateData.html
     };
 
-    await infoTransporter.sendMail(mailOptions);
-    console.log(`Professional email sent successfully to ${email}`);
+    await selectedTransporter.sendMail(mailOptions);
+    console.log(`Professional email sent successfully to ${email} via ${emailType} transporter`);
   } catch (err) {
     console.error('Error sending professional email:', err);
     throw new Error('Failed to send email');
@@ -5921,7 +5161,7 @@ app.post('/api/auth/signup', [
       otp,
       type: 'signup',
       expiresAt,
-      ipAddress: getRealClientIP(req),
+      ipAddress: req.ip,
       userAgent: req.headers['user-agent']
     });
 
@@ -5944,33 +5184,6 @@ app.post('/api/auth/signup', [
     // Generate temporary token for OTP verification
     const tempToken = generateJWT(newUser._id);
 
-    // ✅ CREATE LOG FOR SIGNUP
-    await UserLog.create({
-      user: newUser._id,
-      username: newUser.email,
-      email: newUser.email,
-      userFullName: `${newUser.firstName} ${newUser.lastName}`,
-      action: 'signup',
-      actionCategory: 'authentication',
-      ipAddress: getRealClientIP(req),
-      userAgent: req.headers['user-agent'] || 'Unknown',
-      deviceInfo: {
-        type: getDeviceType(req),
-        os: getOSFromUserAgent(req.headers['user-agent']),
-        browser: getBrowserFromUserAgent(req.headers['user-agent'])
-      },
-      location: {
-        ip: getRealClientIP(req),
-        country: 'Detected',
-        city: 'Detected'
-      },
-      status: 'success',
-      metadata: {
-        referralSource: referralSource,
-        referredBy: referredByUser ? referredByUser.email : null
-      }
-    });
-
     res.status(201).json({
       status: 'success',
       message: 'Account created successfully. Please verify your email with the OTP sent to your inbox.',
@@ -5988,6 +5201,28 @@ app.post('/api/auth/signup', [
 
     // Log activity
     await logActivity('signup_initiated', 'user', newUser._id, newUser._id, 'User', req);
+    
+    // Create user log for signup
+    await UserLog.create({
+      user: newUser._id,
+      username: newUser.email,
+      email: newUser.email,
+      userFullName: `${newUser.firstName} ${newUser.lastName}`,
+      action: 'signup',
+      actionCategory: 'authentication',
+      ipAddress: getRealClientIP(req),
+      userAgent: req.headers['user-agent'] || 'Unknown',
+      deviceInfo: {
+        type: getDeviceType(req),
+        os: getOSFromUserAgent(req.headers['user-agent']),
+        browser: getBrowserFromUserAgent(req.headers['user-agent'])
+      },
+      status: 'success',
+      metadata: {
+        referralCode: referralCode || null,
+        referralSource: referralSource
+      }
+    });
 
   } catch (err) {
     console.error('Signup error:', err);
@@ -6069,7 +5304,7 @@ app.get('/api/referrals/validate/:code', async (req, res) => {
 
 
 
-// Enhanced Login Endpoint with OTP - FIXED email handling and log creation
+// Enhanced Login Endpoint with OTP - FIXED email handling
 app.post('/api/auth/login', [
   body('email').isEmail().withMessage('Please provide a valid email'),
   body('password').notEmpty().withMessage('Password is required'),
@@ -6090,6 +5325,12 @@ app.post('/api/auth/login', [
     const user = await User.findOne({ email }).select('+password +twoFactorAuth.secret');
     if (!user || !(await bcrypt.compare(password, user.password))) {
       // Log failed attempt
+      await logUserActivity(req, 'login_attempt', 'failed', {
+        error: 'Invalid credentials',
+        email: email // Log exact email used
+      });
+      
+      // Create user log for failed login attempt
       await UserLog.create({
         user: null,
         username: email,
@@ -6099,6 +5340,11 @@ app.post('/api/auth/login', [
         actionCategory: 'authentication',
         ipAddress: getRealClientIP(req),
         userAgent: req.headers['user-agent'] || 'Unknown',
+        deviceInfo: {
+          type: getDeviceType(req),
+          os: getOSFromUserAgent(req.headers['user-agent']),
+          browser: getBrowserFromUserAgent(req.headers['user-agent'])
+        },
         status: 'failed',
         metadata: {
           error: 'Invalid credentials',
@@ -6113,6 +5359,13 @@ app.post('/api/auth/login', [
     }
 
     if (user.status !== 'active') {
+      await logUserActivity(req, 'login_attempt', 'failed', {
+        error: 'Account suspended',
+        userId: user._id,
+        status: user.status
+      });
+      
+      // Create user log for suspended account attempt
       await UserLog.create({
         user: user._id,
         username: user.email,
@@ -6122,6 +5375,11 @@ app.post('/api/auth/login', [
         actionCategory: 'authentication',
         ipAddress: getRealClientIP(req),
         userAgent: req.headers['user-agent'] || 'Unknown',
+        deviceInfo: {
+          type: getDeviceType(req),
+          os: getOSFromUserAgent(req.headers['user-agent']),
+          browser: getBrowserFromUserAgent(req.headers['user-agent'])
+        },
         status: 'failed',
         metadata: {
           error: 'Account suspended',
@@ -6145,7 +5403,7 @@ app.post('/api/auth/login', [
       otp,
       type: 'login',
       expiresAt,
-      ipAddress: getRealClientIP(req),
+      ipAddress: req.ip,
       userAgent: req.headers['user-agent']
     });
 
@@ -6163,7 +5421,7 @@ app.post('/api/auth/login', [
     // Generate temporary token for OTP verification
     const tempToken = generateJWT(user._id);
 
-    // ✅ CREATE LOG FOR LOGIN ATTEMPT
+    // Create user log for login OTP sent
     await UserLog.create({
       user: user._id,
       username: user.email,
@@ -6180,7 +5438,7 @@ app.post('/api/auth/login', [
       },
       status: 'pending',
       metadata: {
-        method: 'otp',
+        otpSent: true,
         email: email
       }
     });
@@ -6200,23 +5458,17 @@ app.post('/api/auth/login', [
       }
     });
 
+    await logUserActivity(req, 'login_otp_sent', 'pending', {
+      email: email, // Log exact email used
+      userId: user._id
+    }, user);
+
   } catch (err) {
     console.error('Login error:', err);
     
-    await UserLog.create({
-      user: null,
-      username: req.body.email,
-      email: req.body.email,
-      userFullName: 'Unknown',
-      action: 'login_error',
-      actionCategory: 'authentication',
-      ipAddress: getRealClientIP(req),
-      userAgent: req.headers['user-agent'] || 'Unknown',
-      status: 'failed',
-      metadata: {
-        error: err.message,
-        email: req.body.email
-      }
+    await logUserActivity(req, 'login_error', 'failed', {
+      error: err.message,
+      email: req.body.email // Log exact email used
     });
 
     res.status(500).json({
@@ -6231,7 +5483,6 @@ app.post('/api/auth/login', [
 app.post('/api/auth/google', async (req, res) => {
   try {
     console.log('Google auth request received');
-    console.log('Request body:', req.body);
     
     const { credential } = req.body;
     
@@ -6244,49 +5495,22 @@ app.post('/api/auth/google', async (req, res) => {
     }
 
     console.log('Verifying Google token...');
-    console.log('Google Client ID present:', !!process.env.GOOGLE_CLIENT_ID);
 
-    // Verify the Google token with fallback client ID
-    const googleClientId = process.env.GOOGLE_CLIENT_ID || '634814462335-9o4t8q95c4orcsd9sijjl52374g6vm85.apps.googleusercontent.com';
-    
-    // Create OAuth2 client with proper configuration
-    const oauthClient = new OAuth2Client({
-      clientId: googleClientId,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
-      redirectUri: process.env.GOOGLE_REDIRECT_URI || 'postmessage'
-    });
-    
+    // Verify the Google token
     let payload;
     try {
-      // Verify the ID token
-      const ticket = await oauthClient.verifyIdToken({
+      const ticket = await googleClient.verifyIdToken({
         idToken: credential,
-        audience: googleClientId
+        audience: process.env.GOOGLE_CLIENT_ID || '634814462335-9o4t8q95c4orcsd9sijjl52374g6vm85.apps.googleusercontent.com'
       });
       payload = ticket.getPayload();
       console.log('Google token verified successfully');
-      console.log('Token payload email:', payload.email);
     } catch (verifyError) {
       console.error('Google token verification failed:', verifyError);
-      console.error('Verify error details:', verifyError.message);
-      
-      // Try alternative verification method for testing
-      try {
-        // For development: decode JWT without verification (ONLY FOR DEBUGGING)
-        const decoded = jwt.decode(credential);
-        if (decoded && decoded.email) {
-          console.log('Using decoded JWT for development (no verification)');
-          payload = decoded;
-        } else {
-          throw new Error('Invalid token structure');
-        }
-      } catch (decodeError) {
-        return res.status(400).json({
-          status: 'fail',
-          message: 'Invalid Google token. Please try again.',
-          error: process.env.NODE_ENV === 'development' ? verifyError.message : undefined
-        });
-      }
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid Google token. Please try again.'
+      });
     }
 
     if (!payload) {
@@ -6317,7 +5541,7 @@ app.post('/api/auth/google', async (req, res) => {
 
     try {
       user = await User.findOne({ email: originalEmail });
-      console.log('User lookup result:', user ? `Found: ${user._id}` : 'Not found');
+      console.log('User lookup result:', user ? 'Found' : 'Not found');
     } catch (dbError) {
       console.error('Database lookup error:', dbError);
       return res.status(500).json({
@@ -6330,32 +5554,38 @@ app.post('/api/auth/google', async (req, res) => {
       // Create new user with Google auth using exact email
       try {
         const referralCode = generateReferralCode();
-        const firstName = given_name || email.split('@')[0] || 'Google';
-        const lastName = family_name || 'User';
-        
         user = await User.create({
-          firstName: firstName,
-          lastName: lastName,
+          firstName: given_name || 'Google',
+          lastName: family_name || 'User',
           email: originalEmail,
           googleId: sub,
           isVerified: true,
-          referralCode: referralCode,
-          status: 'active',
-          balances: {
-            main: 0,
-            active: 0,
-            matured: 0,
-            savings: 0,
-            loan: 0
-          }
+          referralCode,
+          status: 'active'
         });
         isNewUser = true;
         console.log('New user created via Google:', originalEmail);
 
-        // Send welcome email (don't let this fail the request)
+        // Create user log for signup
+        await UserLog.create({
+          user: user._id,
+          username: user.email,
+          email: user.email,
+          userFullName: `${user.firstName} ${user.lastName}`,
+          action: 'signup',
+          actionCategory: 'authentication',
+          ipAddress: getRealClientIP(req),
+          userAgent: req.headers['user-agent'] || 'Unknown',
+          status: 'success',
+          metadata: {
+            provider: 'google'
+          }
+        });
+
+        // Send welcome email
         try {
           await sendAutomatedEmail(user, 'welcome', {
-            firstName: firstName
+            firstName: given_name || 'Google User'
           });
         } catch (emailError) {
           console.error('Welcome email failed:', emailError);
@@ -6363,10 +5593,9 @@ app.post('/api/auth/google', async (req, res) => {
         }
       } catch (createError) {
         console.error('User creation error:', createError);
-        console.error('Create error details:', createError.message);
         return res.status(500).json({
           status: 'error',
-          message: 'Failed to create user account: ' + (createError.message || 'Unknown error')
+          message: 'Failed to create user account'
         });
       }
     } else if (!user.googleId) {
@@ -6376,6 +5605,23 @@ app.post('/api/auth/google', async (req, res) => {
         user.isVerified = true;
         await user.save();
         console.log('Existing user linked with Google:', originalEmail);
+        
+        // Create user log for Google link
+        await UserLog.create({
+          user: user._id,
+          username: user.email,
+          email: user.email,
+          userFullName: `${user.firstName} ${user.lastName}`,
+          action: 'profile_update',
+          actionCategory: 'profile',
+          ipAddress: getRealClientIP(req),
+          userAgent: req.headers['user-agent'] || 'Unknown',
+          status: 'success',
+          metadata: {
+            provider: 'google',
+            action: 'link_account'
+          }
+        });
       } catch (updateError) {
         console.error('User update error:', updateError);
         return res.status(500).json({
@@ -6394,7 +5640,6 @@ app.post('/api/auth/google', async (req, res) => {
     }
 
     // Generate OTP for Google sign-in
-    let otpSent = false;
     try {
       const otp = Math.floor(100000 + Math.random() * 900000).toString();
       const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
@@ -6404,8 +5649,8 @@ app.post('/api/auth/google', async (req, res) => {
         otp,
         type: 'login',
         expiresAt,
-        ipAddress: getRealClientIP(req),
-        userAgent: req.headers['user-agent'] || 'Unknown'
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent']
       });
 
       // Send OTP email
@@ -6418,38 +5663,8 @@ app.post('/api/auth/google', async (req, res) => {
           action: 'Google sign-in verification'
         }
       });
-      otpSent = true;
-      console.log(`OTP sent to ${originalEmail}`);
-    } catch (otpError) {
-      console.error('OTP creation/email error:', otpError);
-      // Continue even if OTP fails - we'll still try to log in
-    }
-
-    // Generate temporary token
-    const tempToken = generateJWT(user._id);
-
-    // Update last login
-    try {
-      user.lastLogin = new Date();
-      const deviceInfo = await getUserDeviceInfo(req);
-      user.loginHistory.push({
-        ip: deviceInfo.ip,
-        device: deviceInfo.device,
-        location: deviceInfo.location,
-        timestamp: new Date()
-      });
-      // Limit login history to last 50 entries
-      if (user.loginHistory.length > 50) {
-        user.loginHistory = user.loginHistory.slice(-50);
-      }
-      await user.save();
-    } catch (updateError) {
-      console.error('User update error:', updateError);
-      // Continue even if update fails
-    }
-
-    // ✅ CREATE LOG FOR GOOGLE LOGIN ATTEMPT
-    try {
+      
+      // Create user log for Google login OTP sent
       await UserLog.create({
         user: user._id,
         username: user.email,
@@ -6459,57 +5674,32 @@ app.post('/api/auth/google', async (req, res) => {
         actionCategory: 'authentication',
         ipAddress: getRealClientIP(req),
         userAgent: req.headers['user-agent'] || 'Unknown',
-        deviceInfo: {
-          type: getDeviceType(req),
-          os: getOSFromUserAgent(req.headers['user-agent']),
-          browser: getBrowserFromUserAgent(req.headers['user-agent'])
-        },
-        status: otpSent ? 'pending' : 'success',
+        status: 'pending',
         metadata: {
-          method: 'google',
-          isNewUser: isNewUser,
-          email: originalEmail,
-          otpSent: otpSent
+          provider: 'google',
+          otpSent: true
         }
       });
-    } catch (logError) {
-      console.error('Activity logging error:', logError);
-      // Don't fail the request if logging fails
+    } catch (otpError) {
+      console.error('OTP creation error:', otpError);
+      // Continue even if OTP fails for now
     }
 
-    // If OTP failed to send, log the user in directly
-    if (!otpSent) {
-      console.log('OTP failed, logging in user directly');
-      
-      // Generate final JWT
-      const token = generateJWT(user._id);
-      
-      // Set cookie
-      res.cookie('jwt', token, {
-        expires: new Date(Date.now() + JWT_COOKIE_EXPIRES * 24 * 60 * 60 * 1000),
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict'
-      });
-      
-      return res.status(200).json({
-        status: 'success',
-        token: token,
-        message: 'Google sign-in successful',
-        isNewUser: isNewUser,
-        data: {
-          user: {
-            id: user._id,
-            firstName: user.firstName,
-            lastName: user.lastName,
-            email: user.email,
-            isVerified: user.isVerified
-          }
-        }
-      });
+    // Generate temporary token
+    const tempToken = generateJWT(user._id);
+
+    // Update last login
+    try {
+      user.lastLogin = new Date();
+      const deviceInfo = await getUserDeviceInfo(req);
+      user.loginHistory.push(deviceInfo);
+      await user.save();
+    } catch (updateError) {
+      console.error('User update error:', updateError);
+      // Continue even if update fails
     }
 
-    // SUCCESS RESPONSE with OTP
+    // SUCCESS RESPONSE
     res.status(200).json({
       status: 'success',
       message: 'OTP sent to your email. Please verify to complete Google sign-in.',
@@ -6526,18 +5716,29 @@ app.post('/api/auth/google', async (req, res) => {
       }
     });
 
+    // Log activity (don't let this break the response)
+    try {
+      await logActivity('google_signin_otp_sent', 'user', user._id, user._id, 'User', req, {
+        isNewUser,
+        provider: 'google',
+        email: originalEmail
+      });
+    } catch (logError) {
+      console.error('Activity logging error:', logError);
+    }
+
   } catch (err) {
     console.error('Google auth UNEXPECTED error:', err);
     console.error('Error stack:', err.stack);
     
-    // Return a more helpful error message
     res.status(500).json({
       status: 'error',
-      message: 'An unexpected error occurred during Google authentication',
-      error: process.env.NODE_ENV === 'development' ? err.message : undefined
+      message: 'An unexpected error occurred during Google authentication'
     });
   }
 });
+
+
 
 app.post('/api/auth/forgot-password', [
   body('email').isEmail().withMessage('Please provide a valid email').normalizeEmail()
@@ -6573,6 +5774,22 @@ app.post('/api/auth/forgot-password', [
     await sendAutomatedEmail(user, 'password_reset', {
       name: user.firstName,
       resetUrl: resetURL
+    });
+    
+    // Create user log for password reset request
+    await UserLog.create({
+      user: user._id,
+      username: user.email,
+      email: user.email,
+      userFullName: `${user.firstName} ${user.lastName}`,
+      action: 'password_reset_request',
+      actionCategory: 'security',
+      ipAddress: getRealClientIP(req),
+      userAgent: req.headers['user-agent'] || 'Unknown',
+      status: 'success',
+      metadata: {
+        resetRequested: true
+      }
     });
 
     res.status(200).json({
@@ -6645,6 +5862,22 @@ app.post('/api/auth/reset-password', [
       ip: deviceInfo.ip,
       device: deviceInfo.device
     });
+    
+    // Create user log for password reset completion
+    await UserLog.create({
+      user: user._id,
+      username: user.email,
+      email: user.email,
+      userFullName: `${user.firstName} ${user.lastName}`,
+      action: 'password_reset_complete',
+      actionCategory: 'security',
+      ipAddress: getRealClientIP(req),
+      userAgent: req.headers['user-agent'] || 'Unknown',
+      status: 'success',
+      metadata: {
+        resetCompleted: true
+      }
+    });
 
     res.status(200).json({
       status: 'success',
@@ -6663,219 +5896,8 @@ app.post('/api/auth/reset-password', [
 });
 
 
-// OTP Verification Endpoint
-app.post('/api/auth/verify-otp', [
-  body('email').isEmail().withMessage('Please provide a valid email'),
-  body('otp').isLength({ min: 6, max: 6 }).withMessage('OTP must be 6 digits')
-], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({
-      status: 'fail',
-      errors: errors.array()
-    });
-  }
 
-  try {
-    const { email, otp } = req.body;
 
-    // Find valid OTP
-    const otpRecord = await OTP.findOne({
-      email: email,
-      otp: otp,
-      used: false,
-      expiresAt: { $gt: new Date() }
-    });
-
-    if (!otpRecord) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Invalid or expired OTP'
-      });
-    }
-
-    // Mark OTP as used
-    otpRecord.used = true;
-    await otpRecord.save();
-
-    // Find user
-    const user = await User.findOne({ email: email });
-    if (!user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found'
-      });
-    }
-
-    // Update user verification status if needed
-    if (!user.isVerified) {
-      user.isVerified = true;
-      await user.save();
-    }
-
-    // Update last login
-    user.lastLogin = new Date();
-    const deviceInfo = await getUserDeviceInfo(req);
-    user.loginHistory.push({
-      ip: deviceInfo.ip,
-      device: deviceInfo.device,
-      location: deviceInfo.location,
-      timestamp: new Date()
-    });
-    await user.save();
-
-    // Send login success email with device and location
-    await sendAutomatedEmail(user, 'login_success', {
-      name: user.firstName,
-      device: deviceInfo.device,
-      location: deviceInfo.location,
-      ip: deviceInfo.ip
-    });
-
-    // Generate final JWT
-    const token = generateJWT(user._id);
-
-    // Set cookie
-    res.cookie('jwt', token, {
-      expires: new Date(Date.now() + JWT_COOKIE_EXPIRES * 24 * 60 * 60 * 1000),
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict'
-    });
-
-    // ✅ CREATE LOG FOR SUCCESSFUL LOGIN
-    await UserLog.create({
-      user: user._id,
-      username: user.email,
-      email: user.email,
-      userFullName: `${user.firstName} ${user.lastName}`,
-      action: 'login',
-      actionCategory: 'authentication',
-      ipAddress: deviceInfo.ip,
-      userAgent: req.headers['user-agent'] || 'Unknown',
-      deviceInfo: {
-        type: getDeviceType(req),
-        os: getOSFromUserAgent(req.headers['user-agent']),
-        browser: getBrowserFromUserAgent(req.headers['user-agent'])
-      },
-      location: {
-        ip: deviceInfo.ip,
-        country: deviceInfo.location?.split(', ')[2] || 'Unknown',
-        city: deviceInfo.location?.split(', ')[0] || 'Unknown',
-        region: deviceInfo.location?.split(', ')[1] || 'Unknown'
-      },
-      status: 'success',
-      metadata: {
-        method: 'otp',
-        deviceInfo: deviceInfo
-      }
-    });
-
-    // ✅ SEND LOGIN SUCCESS EMAIL CONFIRMATION
-    await sendAutomatedEmail(user, 'login_success', {
-      name: user.firstName,
-      device: deviceInfo.device,
-      location: deviceInfo.location,
-      ip: deviceInfo.ip,
-      timestamp: new Date()
-    });
-
-    res.status(200).json({
-      status: 'success',
-      token,
-      data: {
-        user: {
-          id: user._id,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          email: user.email,
-          isVerified: user.isVerified
-        }
-      }
-    });
-
-  } catch (err) {
-    console.error('OTP verification error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'An error occurred during verification'
-    });
-  }
-});
-
-// Send OTP Endpoint (for resend)
-app.post('/api/auth/send-otp', [
-  body('email').isEmail().withMessage('Please provide a valid email')
-], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({
-      status: 'fail',
-      errors: errors.array()
-    });
-  }
-
-  try {
-    const { email } = req.body;
-
-    // Rate limiting - check recent OTP requests
-    const recentOTP = await OTP.findOne({
-      email: email,
-      createdAt: { $gt: new Date(Date.now() - 60000) } // Last minute
-    });
-
-    if (recentOTP) {
-      return res.status(429).json({
-        status: 'fail',
-        message: 'Please wait before requesting a new OTP'
-      });
-    }
-
-    // Generate new OTP
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
-
-    // Invalidate old OTPs
-    await OTP.updateMany(
-      { email: email, used: false },
-      { used: true }
-    );
-
-    // Create new OTP
-    await OTP.create({
-      email: email,
-      otp,
-      type: 'login',
-      expiresAt,
-      ipAddress: getRealClientIP(req),
-      userAgent: req.headers['user-agent']
-    });
-
-    // Send OTP email
-    const user = await User.findOne({ email });
-    await sendProfessionalEmail({
-      email: email,
-      template: 'otp',
-      data: {
-        name: user ? user.firstName : 'there',
-        otp: otp,
-        action: 'verification'
-      }
-    });
-
-    res.status(200).json({
-      status: 'success',
-      message: 'OTP sent successfully'
-    });
-
-  } catch (err) {
-    console.error('Send OTP error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to send OTP'
-    });
-  }
-});
 
 
 // Investment routes - ENHANCED VERSION WITH EMAIL NOTIFICATIONS AND LOG CREATION
@@ -6895,15 +5917,6 @@ app.post('/api/investments', protect, [
   try {
     const { planId, amount, balanceType } = req.body;
     const userId = req.user._id;
-
-    // Check account restrictions for investment
-    const restrictionCheck = await AccountRestrictions.canPerformAction(userId, 'investment', amount, req);
-    if (!restrictionCheck.allowed) {
-      return res.status(403).json({
-        status: 'fail',
-        message: restrictionCheck.reason
-      });
-    }
 
     // Verify plan exists and is active
     const plan = await Plan.findById(planId);
@@ -6954,7 +5967,7 @@ app.post('/api/investments', protect, [
       endDate,
       payoutSchedule: 'end_term',
       status: 'active',
-      ipAddress: getRealClientIP(req),
+      ipAddress: req.ip,
       userAgent: req.headers['user-agent'],
       deviceInfo: getDeviceType(req),
       termsAccepted: true,
@@ -7109,7 +6122,7 @@ app.post('/api/investments', protect, [
       console.log(`🎁 Direct referral bonus of $${referralBonus} paid to ${user.referredBy}`);
     }
 
-    // ✅ SEND INVESTMENT CREATION EMAIL (via INFO transporter)
+    // ✅ SEND INVESTMENT CREATION EMAIL
     try {
       await sendAutomatedEmail(user, 'investment_created', {
         name: user.firstName,
@@ -7284,7 +6297,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
       // Commit transaction
       await session.commitTransaction();
       
-      // ✅ SEND INVESTMENT COMPLETION EMAIL (via INFO transporter)
+      // ✅ SEND INVESTMENT COMPLETION EMAIL
       try {
         await sendAutomatedEmail(user, 'investment_matured', {
           name: user.firstName,
@@ -7696,13 +6709,14 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
         amount: deposit.amount,
         method: deposit.method,
         reference: deposit.reference,
-        processedBy: req.admin.email
+        processedBy: req.admin.name || req.admin.email,
+        adminNotes: notes
       },
       relatedEntity: deposit._id,
       relatedEntityModel: 'Transaction'
     });
 
-    // ✅ SEND DEPOSIT APPROVED EMAIL (via INFO transporter)
+    // ✅ SEND DEPOSIT APPROVED EMAIL
     try {
       // Get real-time crypto price if applicable
       let cryptoPrice = null;
@@ -7734,9 +6748,6 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       console.error('Failed to send deposit approval email:', emailError);
       // Don't fail the deposit approval if email fails
     }
-    
-    // ✅ TRIGGER RESTRICTION CHECK after deposit completion
-    await AccountRestrictions.checkAndUpdateRestrictions(user._id, 'transaction_completion', req);
     
     res.status(200).json({
       status: 'success',
@@ -7810,13 +6821,13 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
         method: deposit.method,
         reference: deposit.reference,
         rejectionReason: reason,
-        processedBy: req.admin.email
+        processedBy: req.admin.name || req.admin.email
       },
       relatedEntity: deposit._id,
       relatedEntityModel: 'Transaction'
     });
 
-    // ✅ SEND DEPOSIT REJECTED EMAIL (via INFO transporter)
+    // ✅ SEND DEPOSIT REJECTED EMAIL
     try {
       await sendAutomatedEmail(deposit.user, 'deposit_rejected', {
         name: deposit.user.firstName,
@@ -7876,7 +6887,7 @@ app.get('/api/admin/withdrawals/:id', adminProtect, async (req, res) => {
   }
 });
 
-// Admin Approve Withdrawal Endpoint - ENHANCED WITH EMAIL, LOG, AND REAL-TIME CRYPTO PRICE
+// Admin Approve Withdrawal Endpoint - ENHANCED WITH EMAIL AND LOG
 app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
   body('notes').optional().trim(),
   body('txid').optional().trim()
@@ -7944,16 +6955,20 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
       metadata: {
         amount: withdrawal.amount,
         asset: withdrawal.asset,
+        assetAmount: withdrawal.assetAmount,
         method: withdrawal.method,
         reference: withdrawal.reference,
+        processedBy: req.admin.name || req.admin.email,
+        adminNotes: notes,
         txid: txid,
-        processedBy: req.admin.email
+        fee: withdrawal.fee,
+        feeUsd: feeUsd
       },
       relatedEntity: withdrawal._id,
       relatedEntityModel: 'Transaction'
     });
 
-    // ✅ SEND WITHDRAWAL APPROVED EMAIL (via INFO transporter)
+    // ✅ SEND WITHDRAWAL APPROVED EMAIL
     try {
       await sendAutomatedEmail(withdrawal.user, 'withdrawal_approved', {
         name: withdrawal.user.firstName,
@@ -8065,13 +7080,13 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
         method: withdrawal.method,
         reference: withdrawal.reference,
         rejectionReason: reason,
-        processedBy: req.admin.email
+        processedBy: req.admin.name || req.admin.email
       },
       relatedEntity: withdrawal._id,
       relatedEntityModel: 'Transaction'
     });
 
-    // ✅ SEND WITHDRAWAL REJECTED EMAIL (via INFO transporter)
+    // ✅ SEND WITHDRAWAL REJECTED EMAIL
     try {
       await sendAutomatedEmail(user, 'withdrawal_rejected', {
         name: user.firstName,
@@ -8239,11 +7254,7 @@ app.delete('/api/admin/users/:userId', adminProtect, async (req, res) => {
     await Notification.deleteMany({ specificUserId: userId });
     console.log('Deleted user-specific notifications');
     
-    // 20. Delete user restriction status
-    await UserRestrictionStatus.deleteOne({ user: userId });
-    console.log('Deleted user restriction status');
-    
-    // 21. Finally delete the user
+    // 20. Finally delete the user
     const deletedUser = await User.findByIdAndDelete(userId);
     
     if (!deletedUser) {
@@ -8345,37 +7356,45 @@ app.put('/api/admin/users/:userId/suspend', adminProtect, async (req, res) => {
       });
     }
     
-    // Store previous status
+    // Store previous status for logging
     const previousStatus = user.status;
     
     // Update user status to suspended
     user.status = 'suspended';
     await user.save();
     
-    // ✅ CREATE LOG FOR ACCOUNT SUSPENSION
+    // ✅ CREATE LOG FOR SUSPENSION
     await UserLog.create({
       user: user._id,
       username: user.email,
       email: user.email,
       userFullName: `${user.firstName} ${user.lastName}`,
       action: 'account_suspended',
-      actionCategory: 'restriction',
+      actionCategory: 'security',
       ipAddress: getRealClientIP(req),
       userAgent: req.headers['user-agent'] || 'Unknown',
       status: 'success',
       metadata: {
         reason: reason || 'No reason provided',
         previousStatus: previousStatus,
-        newStatus: 'suspended',
-        suspendedBy: req.admin.email
+        processedBy: req.admin.name || req.admin.email,
+        processedByAdminId: req.admin._id
       }
     });
     
-    // ✅ SEND ACCOUNT SUSPENSION EMAIL (via SUPPORT transporter)
-    await sendAutomatedEmail(user, 'account_suspended', {
-      name: user.firstName,
-      reason: reason || 'Your account has been suspended. Please contact support for more information.'
-    });
+    // ✅ SEND RESTRICTION APPLIED EMAIL (using support transporter)
+    try {
+      const restrictions = await AccountRestrictions.getInstance();
+      await sendAutomatedEmail(user, 'restriction_applied', {
+        name: user.firstName,
+        reason: reason || restrictions.kyc_restriction_reason,
+        restrictionType: 'account_suspension'
+      });
+      console.log(`📧 Suspension email sent to ${user.email}`);
+    } catch (emailError) {
+      console.error('Failed to send suspension email:', emailError);
+      // Don't fail the suspension if email fails
+    }
     
     // Log the suspension activity
     await logActivity(
@@ -8436,36 +7455,44 @@ app.put('/api/admin/users/:userId/reactivate', adminProtect, async (req, res) =>
       });
     }
     
-    // Store previous status
+    // Store previous status for logging
     const previousStatus = user.status;
     
     // Update user status to active
     user.status = 'active';
     await user.save();
     
-    // ✅ CREATE LOG FOR ACCOUNT REACTIVATION
+    // ✅ CREATE LOG FOR REACTIVATION
     await UserLog.create({
       user: user._id,
       username: user.email,
       email: user.email,
       userFullName: `${user.firstName} ${user.lastName}`,
-      action: 'account_reactivated',
-      actionCategory: 'restriction',
+      action: 'restriction_lifted',
+      actionCategory: 'security',
       ipAddress: getRealClientIP(req),
       userAgent: req.headers['user-agent'] || 'Unknown',
       status: 'success',
       metadata: {
         previousStatus: previousStatus,
-        newStatus: 'active',
-        reactivatedBy: req.admin.email
+        processedBy: req.admin.name || req.admin.email,
+        processedByAdminId: req.admin._id
       }
     });
     
-    // ✅ SEND ACCOUNT REACTIVATION EMAIL (via SUPPORT transporter)
-    await sendAutomatedEmail(user, 'account_reactivated', {
-      name: user.firstName,
-      message: 'Your account has been reactivated. You can now log in and use all platform features.'
-    });
+    // ✅ SEND RESTRICTION LIFTED EMAIL (using support transporter)
+    try {
+      const restrictions = await AccountRestrictions.getInstance();
+      await sendAutomatedEmail(user, 'restriction_lifted', {
+        name: user.firstName,
+        message: restrictions.kyc_lifted_message || 'Your account has been reactivated. All restrictions have been lifted.',
+        restrictionType: 'account_suspension'
+      });
+      console.log(`📧 Reactivation email sent to ${user.email}`);
+    } catch (emailError) {
+      console.error('Failed to send reactivation email:', emailError);
+      // Don't fail the reactivation if email fails
+    }
     
     // Log the reactivation activity
     await logActivity(
@@ -9030,14 +8057,17 @@ app.post('/api/admin/kyc/submissions/:submissionId/approve', adminProtect, restr
       userAgent: req.headers['user-agent'] || 'Unknown',
       status: 'success',
       metadata: {
-        verifiedBy: req.admin.email,
-        notes: notes
+        processedBy: req.admin.name || req.admin.email,
+        adminNotes: notes
       },
       relatedEntity: kycSubmission._id,
       relatedEntityModel: 'KYC'
     });
 
-    // ✅ SEND KYC APPROVED EMAIL (via SUPPORT transporter)
+    // ✅ TRIGGER KYC APPROVAL CHECK FOR RESTRICTIONS
+    await triggerKYCApprovalCheck(kycSubmission.user._id);
+
+    // ✅ SEND KYC APPROVED EMAIL
     try {
       await sendAutomatedEmail(kycSubmission.user, 'kyc_approved', {
         name: kycSubmission.user.firstName
@@ -9047,9 +8077,6 @@ app.post('/api/admin/kyc/submissions/:submissionId/approve', adminProtect, restr
       console.error('Failed to send KYC approval email:', emailError);
       // Don't fail the KYC approval if email fails
     }
-
-    // ✅ TRIGGER RESTRICTION CHECK after KYC approval
-    await AccountRestrictions.checkAndUpdateRestrictions(kycSubmission.user._id, 'kyc_approval', req);
 
     res.status(200).json({
       status: 'success',
@@ -9163,13 +8190,13 @@ app.post('/api/admin/kyc/submissions/:submissionId/reject', adminProtect, restri
       metadata: {
         reason: reason,
         section: section,
-        rejectedBy: req.admin.email
+        processedBy: req.admin.name || req.admin.email
       },
       relatedEntity: kycSubmission._id,
       relatedEntityModel: 'KYC'
     });
 
-    // ✅ SEND KYC REJECTED EMAIL (via SUPPORT transporter)
+    // ✅ SEND KYC REJECTED EMAIL
     try {
       await sendAutomatedEmail(kycSubmission.user, 'kyc_rejected', {
         name: kycSubmission.user.firstName,
@@ -9814,7 +8841,214 @@ const trackFailedLogin = async (req, res, next) => {
   }
 };
 
+// OTP Verification Endpoint
+app.post('/api/auth/verify-otp', [
+  body('email').isEmail().withMessage('Please provide a valid email'),
+  body('otp').isLength({ min: 6, max: 6 }).withMessage('OTP must be 6 digits')
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      status: 'fail',
+      errors: errors.array()
+    });
+  }
 
+  try {
+    const { email, otp } = req.body;
+
+    // Find valid OTP
+    const otpRecord = await OTP.findOne({
+      email: email,
+      otp: otp,
+      used: false,
+      expiresAt: { $gt: new Date() }
+    });
+
+    if (!otpRecord) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid or expired OTP'
+      });
+    }
+
+    // Mark OTP as used
+    otpRecord.used = true;
+    await otpRecord.save();
+
+    // Find user
+    const user = await User.findOne({ email: email });
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+
+    // Update user verification status if needed
+    if (!user.isVerified) {
+      user.isVerified = true;
+      await user.save();
+    }
+
+    // Update last login
+    user.lastLogin = new Date();
+    const deviceInfo = await getUserDeviceInfo(req);
+    user.loginHistory.push({
+      ip: deviceInfo.ip,
+      device: deviceInfo.device,
+      location: deviceInfo.location,
+      timestamp: new Date()
+    });
+    await user.save();
+
+    // Send login success email with device and location
+    await sendAutomatedEmail(user, 'login_success', {
+      name: user.firstName,
+      device: deviceInfo.device,
+      location: deviceInfo.location,
+      ip: deviceInfo.ip
+    });
+
+    // Generate final JWT
+    const token = generateJWT(user._id);
+
+    // Set cookie
+    res.cookie('jwt', token, {
+      expires: new Date(Date.now() + JWT_COOKIE_EXPIRES * 24 * 60 * 60 * 1000),
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict'
+    });
+
+    // ✅ CREATE LOG FOR SUCCESSFUL LOGIN
+    await UserLog.create({
+      user: user._id,
+      username: user.email,
+      email: user.email,
+      userFullName: `${user.firstName} ${user.lastName}`,
+      action: 'login',
+      actionCategory: 'authentication',
+      ipAddress: deviceInfo.ip,
+      userAgent: deviceInfo.device,
+      deviceInfo: {
+        type: getDeviceType(req),
+        os: getOSFromUserAgent(req.headers['user-agent']),
+        browser: getBrowserFromUserAgent(req.headers['user-agent'])
+      },
+      location: {
+        country: deviceInfo.location?.split(', ')[2] || 'Unknown',
+        region: deviceInfo.location?.split(', ')[1] || 'Unknown',
+        city: deviceInfo.location?.split(', ')[0] || 'Unknown'
+      },
+      status: 'success',
+      metadata: {
+        method: 'otp',
+        deviceInfo: deviceInfo
+      }
+    });
+
+    res.status(200).json({
+      status: 'success',
+      token,
+      data: {
+        user: {
+          id: user._id,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          email: user.email,
+          isVerified: user.isVerified
+        }
+      }
+    });
+
+    await logUserActivity(req, 'login', 'success', {
+      method: 'otp',
+      deviceInfo: deviceInfo
+    }, user);
+
+  } catch (err) {
+    console.error('OTP verification error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred during verification'
+    });
+  }
+});
+
+// Send OTP Endpoint (for resend)
+app.post('/api/auth/send-otp', [
+  body('email').isEmail().withMessage('Please provide a valid email')
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      status: 'fail',
+      errors: errors.array()
+    });
+  }
+
+  try {
+    const { email } = req.body;
+
+    // Rate limiting - check recent OTP requests
+    const recentOTP = await OTP.findOne({
+      email: email,
+      createdAt: { $gt: new Date(Date.now() - 60000) } // Last minute
+    });
+
+    if (recentOTP) {
+      return res.status(429).json({
+        status: 'fail',
+        message: 'Please wait before requesting a new OTP'
+      });
+    }
+
+    // Generate new OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+
+    // Invalidate old OTPs
+    await OTP.updateMany(
+      { email: email, used: false },
+      { used: true }
+    );
+
+    // Create new OTP
+    await OTP.create({
+      email: email,
+      otp,
+      type: 'login',
+      expiresAt,
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent']
+    });
+
+    // Send OTP email
+    const user = await User.findOne({ email });
+    await sendProfessionalEmail({
+      email: email,
+      template: 'otp',
+      data: {
+        name: user ? user.firstName : 'there',
+        otp: otp,
+        action: 'verification'
+      }
+    });
+
+    res.status(200).json({
+      status: 'success',
+      message: 'OTP sent successfully'
+    });
+
+  } catch (err) {
+    console.error('Send OTP error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to send OTP'
+    });
+  }
+});
 
 /**
  * POST /api/withdrawals/asset - Process asset withdrawal
@@ -9851,15 +9085,6 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             return res.status(400).json({
                 status: 'error',
                 message: 'Valid wallet address is required'
-            });
-        }
-
-        // Check account restrictions for withdrawal
-        const restrictionCheck = await AccountRestrictions.canPerformAction(userId, 'withdrawal', amount, req);
-        if (!restrictionCheck.allowed) {
-            return res.status(403).json({
-                status: 'fail',
-                message: restrictionCheck.reason
             });
         }
 
@@ -10184,7 +9409,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             $inc: updateQuery
         });
 
-        // ✅ CREATE LOG FOR WITHDRAWAL CREATION
+        // ✅ CREATE LOG FOR WITHDRAWAL REQUEST
         await UserLog.create({
             user: userId,
             username: user.email,
@@ -10194,6 +9419,11 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             actionCategory: 'financial',
             ipAddress: getRealClientIP(req),
             userAgent: req.headers['user-agent'] || 'Unknown',
+            deviceInfo: {
+                type: getDeviceType(req),
+                os: getOSFromUserAgent(req.headers['user-agent']),
+                browser: getBrowserFromUserAgent(req.headers['user-agent'])
+            },
             status: 'pending',
             metadata: {
                 amount: amount,
@@ -10204,27 +9434,34 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 balanceSource: balanceSource,
                 gasFee: gasFeeInAsset,
                 gasFeeInUsd: gasFeeInUsd,
-                exchangeRate: exchangeRate
+                exchangeRate: exchangeRate,
+                btcGasFeeUsed: btcGasFeeAmount,
+                btcPriceAtTime: btcPrice,
+                assetPriceAtTime: targetAssetPrice
             },
             relatedEntity: transaction._id,
             relatedEntityModel: 'Transaction'
         });
 
-        // ✅ SEND WITHDRAWAL REQUEST EMAIL (via INFO transporter)
-        await sendAutomatedEmail(user, 'withdrawal_request', {
-            name: user.firstName,
-            amount: assetAmount,
-            asset: asset,
-            usdValue: amount,
-            fee: gasFeeInAsset,
-            feeUsd: gasFeeInUsd,
-            netAmount: assetAmount - gasFeeInAsset,
-            withdrawalAddress: walletAddress,
-            requestId: reference,
-            timestamp: new Date(),
-            method: asset,
-            network: asset === 'USDT' ? 'ERC-20' : asset === 'BTC' ? 'Bitcoin' : 'Mainnet'
-        });
+        // ✅ SEND WITHDRAWAL REQUEST EMAIL
+        try {
+            await sendAutomatedEmail(user, 'withdrawal_request', {
+                name: user.firstName,
+                amount: assetAmount,
+                asset: asset,
+                usdValue: amount,
+                fee: gasFeeInAsset,
+                feeUsd: gasFeeInUsd,
+                netAmount: assetAmount - gasFeeInAsset,
+                withdrawalAddress: walletAddress,
+                requestId: reference,
+                timestamp: new Date(),
+                exchangeRate: exchangeRate
+            });
+            console.log(`📧 Withdrawal request email sent to ${user.email}`);
+        } catch (emailError) {
+            console.error('Failed to send withdrawal request email:', emailError);
+        }
 
         // Log activity with all withdrawal details
         await logActivity(
@@ -10664,12 +9901,6 @@ function getActivityDescription(action, metadata) {
     'investment_created': 'Created new investment',
     'investment_matured': 'Investment matured',
     'investment_completed': 'Investment completed',
-    'deposit_created': 'Created deposit request',
-    'deposit_completed': 'Deposit completed',
-    'deposit_failed': 'Deposit failed',
-    'withdrawal_created': 'Created withdrawal request',
-    'withdrawal_completed': 'Withdrawal completed',
-    'withdrawal_failed': 'Withdrawal failed',
     
     // Account actions
     'profile_update': 'Updated profile information',
@@ -10679,14 +9910,6 @@ function getActivityDescription(action, metadata) {
     'submit-kyc': 'Submitted KYC',
     'settings_change': 'Changed account settings',
     'update-preferences': 'Updated preferences',
-    'kyc_approved': 'KYC approved',
-    'kyc_rejected': 'KYC rejected',
-    'account_suspended': 'Account suspended',
-    'account_reactivated': 'Account reactivated',
-    
-    // Restriction actions
-    'restriction_applied': 'Account restriction applied',
-    'restriction_lifted': 'Account restriction lifted',
     
     // Security actions
     '2fa_enable': 'Enabled two-factor authentication',
@@ -10696,6 +9919,8 @@ function getActivityDescription(action, metadata) {
     'api_key_create': 'Created API key',
     'api_key_delete': 'Deleted API key',
     'device_login': 'Logged in from new device',
+    'restriction_applied': 'Restriction applied to account',
+    'restriction_lifted': 'Restriction lifted from account',
     
     // System & Admin actions
     'session_timeout': 'Session timed out',
@@ -10713,15 +9938,7 @@ function getActivityDescription(action, metadata) {
     'approve-withdrawal': 'Approved withdrawal',
     'reject-withdrawal': 'Rejected withdrawal',
     'create-user': 'Created user account',
-    'update-user': 'Updated user account',
-    'delete_user': 'Deleted user account',
-    'suspend_user': 'Suspended user account',
-    'reactivate_user': 'Reactivated user account',
-    'approve_kyc': 'Approved KYC',
-    'reject_kyc': 'Rejected KYC',
-    'assign_downline': 'Assigned downline relationship',
-    'remove_downline': 'Removed downline relationship',
-    'update_commission_settings': 'Updated commission settings'
+    'update-user': 'Updated user account'
   };
 
   let description = actionMap[action] || `Performed ${action.replace(/_/g, ' ')}`;
@@ -10743,11 +9960,8 @@ function getActivityDescription(action, metadata) {
     if (metadata.fields && Array.isArray(metadata.fields)) {
       description += ` (${metadata.fields.join(', ')})`;
     }
-    if (metadata.reason) {
-      description += ` - Reason: ${metadata.reason}`;
-    }
     if (metadata.restrictionType) {
-      description += ` - Type: ${metadata.restrictionType}`;
+      description += ` (${metadata.restrictionType})`;
     }
   }
 
@@ -11031,7 +10245,7 @@ app.post('/api/admin/restrictions', adminProtect, restrictTo('super'), async (re
     if (restrictions.auto_restrictions_enabled !== false) {
       const users = await User.find({ status: 'active' }).select('_id');
       for (const user of users) {
-        await AccountRestrictions.checkAndUpdateRestrictions(user._id, 'settings_update', req);
+        await AccountRestrictions.checkAndUpdateRestrictions(user._id, 'settings_update');
       }
     }
     
@@ -11042,67 +10256,14 @@ app.post('/api/admin/restrictions', adminProtect, restrictTo('super'), async (re
   }
 });
 
-// GET /api/users/restriction-status - Check current user's restriction status
-app.get('/api/users/restriction-status', protect, async (req, res) => {
-  try {
-    const userId = req.user._id;
-    const restrictions = await AccountRestrictions.getInstance();
-    const restrictionStatus = await UserRestrictionStatus.findOne({ user: userId });
-    const limits = await AccountRestrictions.getUserLimits(userId);
-    
-    // Get user's KYC status
-    const kyc = await KYC.findOne({ user: userId });
-    const hasKYC = kyc && kyc.overallStatus === 'verified';
-    
-    // Get recent transaction check
-    const hasRecentTx = await AccountRestrictions.hasRecentTransaction(userId, restrictions.inactivity_days);
-    
-    // Determine if user is restricted
-    const isRestricted = (restrictionStatus?.kyc_restricted || false) || (restrictionStatus?.transaction_restricted || false);
-    
-    // Build restriction reasons
-    const reasons = [];
-    if (restrictionStatus?.kyc_restricted) {
-      reasons.push(restrictionStatus.kyc_restriction_reason || restrictions.kyc_restriction_reason);
-    }
-    if (restrictionStatus?.transaction_restricted) {
-      reasons.push(restrictionStatus.transaction_restriction_reason || restrictions.txn_restriction_reason);
-    }
-    
-    res.json({
-      status: 'success',
-      data: {
-        isRestricted: isRestricted,
-        kycRestricted: restrictionStatus?.kyc_restricted || false,
-        transactionRestricted: restrictionStatus?.transaction_restricted || false,
-        reasons: reasons,
-        limits: {
-          withdrawal: limits.withdrawal,
-          investment: limits.investment
-        },
-        kycCompleted: hasKYC,
-        hasRecentTransaction: hasRecentTx,
-        inactivityDays: restrictions.inactivity_days
-      }
-    });
-    
-  } catch (err) {
-    console.error('Get restriction status error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch restriction status'
-    });
-  }
-});
-
-// Trigger restriction check on KYC approval (hook into your existing KYC approval)
-const triggerKYCApprovalCheck = async (userId, req) => {
-  await AccountRestrictions.checkAndUpdateRestrictions(userId, 'kyc_approval', req);
+// Trigger restriction check on KYC approval
+const triggerKYCApprovalCheck = async (userId) => {
+  await AccountRestrictions.checkAndUpdateRestrictions(userId, 'kyc_approval');
 };
 
-// Trigger restriction check on transaction completion (hook into deposit/withdrawal completion)
-const triggerTransactionCheck = async (userId, req) => {
-  await AccountRestrictions.checkAndUpdateRestrictions(userId, 'transaction_completion', req);
+// Trigger restriction check on transaction completion
+const triggerTransactionCheck = async (userId) => {
+  await AccountRestrictions.checkAndUpdateRestrictions(userId, 'transaction_completion');
 };
 
 // Scheduled job to run daily at midnight to check all users
