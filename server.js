@@ -6178,7 +6178,6 @@ app.post('/api/auth/login', [
 
 
 
-// Replace the Google auth endpoint with this corrected version
 app.post('/api/auth/google', async (req, res) => {
   try {
     console.log('Google auth request received');
@@ -6265,7 +6264,7 @@ app.post('/api/auth/google', async (req, res) => {
         isNewUser = true;
         console.log('New user created via Google:', originalEmail);
 
-        // Send welcome email - FIXED: Use sendAutomatedEmail with correct parameters
+        // Send welcome email - FIXED: use sendAutomatedEmail properly
         try {
           await sendAutomatedEmail(user, 'welcome', {
             firstName: given_name || 'Google User'
@@ -6274,32 +6273,6 @@ app.post('/api/auth/google', async (req, res) => {
           console.error('Welcome email failed:', emailError);
           // Don't fail the request if email fails
         }
-        
-        // Create log for new user
-        await UserLog.create({
-          user: user._id,
-          username: user.email,
-          email: user.email,
-          userFullName: `${user.firstName} ${user.lastName}`,
-          action: 'signup',
-          actionCategory: 'authentication',
-          ipAddress: getRealClientIP(req),
-          userAgent: req.headers['user-agent'] || 'Unknown',
-          deviceInfo: {
-            type: getDeviceType(req),
-            os: getOSFromUserAgent(req.headers['user-agent']),
-            browser: getBrowserFromUserAgent(req.headers['user-agent'])
-          },
-          location: {
-            ip: getRealClientIP(req),
-            country: 'Detected',
-            city: 'Detected'
-          },
-          status: 'success',
-          metadata: {
-            provider: 'google'
-          }
-        });
       } catch (createError) {
         console.error('User creation error:', createError);
         return res.status(500).json({
@@ -6314,33 +6287,6 @@ app.post('/api/auth/google', async (req, res) => {
         user.isVerified = true;
         await user.save();
         console.log('Existing user linked with Google:', originalEmail);
-        
-        // Create log for Google linking
-        await UserLog.create({
-          user: user._id,
-          username: user.email,
-          email: user.email,
-          userFullName: `${user.firstName} ${user.lastName}`,
-          action: 'login',
-          actionCategory: 'authentication',
-          ipAddress: getRealClientIP(req),
-          userAgent: req.headers['user-agent'] || 'Unknown',
-          deviceInfo: {
-            type: getDeviceType(req),
-            os: getOSFromUserAgent(req.headers['user-agent']),
-            browser: getBrowserFromUserAgent(req.headers['user-agent'])
-          },
-          location: {
-            ip: getRealClientIP(req),
-            country: 'Detected',
-            city: 'Detected'
-          },
-          status: 'success',
-          metadata: {
-            provider: 'google',
-            action: 'link'
-          }
-        });
       } catch (updateError) {
         console.error('User update error:', updateError);
         return res.status(500).json({
@@ -6400,36 +6346,6 @@ app.post('/api/auth/google', async (req, res) => {
       console.error('User update error:', updateError);
       // Continue even if update fails
     }
-
-    // Create login attempt log
-    await UserLog.create({
-      user: user._id,
-      username: user.email,
-      email: user.email,
-      userFullName: `${user.firstName} ${user.lastName}`,
-      action: 'login_attempt',
-      actionCategory: 'authentication',
-      ipAddress: getRealClientIP(req),
-      userAgent: req.headers['user-agent'] || 'Unknown',
-      deviceInfo: {
-        type: getDeviceType(req),
-        os: getOSFromUserAgent(req.headers['user-agent']),
-        browser: getBrowserFromUserAgent(req.headers['user-agent'])
-      },
-      location: {
-        ip: getRealClientIP(req),
-        country: 'Detected',
-        city: 'Detected'
-      },
-      status: 'pending',
-      metadata: {
-        email: originalEmail,
-        userId: user._id,
-        isNewUser: isNewUser,
-        provider: 'google',
-        requiresOtp: true
-      }
-    });
 
     // SUCCESS RESPONSE
     res.status(200).json({
