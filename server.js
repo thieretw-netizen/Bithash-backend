@@ -6089,34 +6089,59 @@ app.post('/api/auth/google', async (req, res) => {
 
     console.log('Verifying Google token...');
 
+    // Get Google Client ID from environment with fallback
+    const googleClientId = process.env.GOOGLE_CLIENT_ID || '634814462335-9o4t8q95c4orcsd9sijjl52374g6vm85.apps.googleusercontent.com';
+    const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET;
+    const googleRedirectUri = process.env.GOOGLE_REDIRECT_URI;
+
+    // Create OAuth2Client with proper configuration
+    const googleAuthClient = new OAuth2Client({
+      clientId: googleClientId,
+      clientSecret: googleClientSecret,
+      redirectUri: googleRedirectUri
+    });
+
     // Verify the Google token
     let payload;
     try {
-      const ticket = await googleClient.verifyIdToken({
+      const ticket = await googleAuthClient.verifyIdToken({
         idToken: credential,
-        audience: process.env.GOOGLE_CLIENT_ID || '634814462335-9o4t8q95c4orcsd9sijjl52374g6vm85.apps.googleusercontent.com'
+        audience: googleClientId
       });
       payload = ticket.getPayload();
-      console.log('Google token verified successfully');
+      
+      if (!payload) {
+        throw new Error('No payload from Google');
+      }
+      
+      console.log('Google token verified successfully for:', payload.email);
     } catch (verifyError) {
-      console.error('Google token verification failed:', verifyError);
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Invalid Google token. Please try again.'
-      });
+      console.error('Google token verification failed:', verifyError.message);
+      
+      // Try alternative verification method (for Google Sign-In button)
+      try {
+        // For Google Sign-In button, the token might be in a different format
+        const response = await axios.post('https://oauth2.googleapis.com/tokeninfo', null, {
+          params: { id_token: credential },
+          timeout: 10000
+        });
+        
+        if (response.data && response.data.email) {
+          payload = response.data;
+          console.log('Alternative Google verification successful for:', payload.email);
+        } else {
+          throw new Error('Alternative verification failed');
+        }
+      } catch (altError) {
+        console.error('Alternative verification also failed:', altError.message);
+        return res.status(400).json({
+          status: 'fail',
+          message: 'Invalid Google token. Please try again.'
+        });
+      }
     }
 
-    if (!payload) {
-      console.error('No payload from Google token');
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Invalid token payload'
-      });
-    }
-
-    const { email, given_name, family_name, sub } = payload;
-
-    if (!email) {
+    if (!payload || !payload.email) {
       console.error('No email in Google payload');
       return res.status(400).json({
         status: 'fail',
@@ -6124,6 +6149,7 @@ app.post('/api/auth/google', async (req, res) => {
       });
     }
 
+    const { email, given_name, family_name, sub } = payload;
     console.log('Google auth successful for:', email);
 
     // Use the EXACT email from Google - no normalization
@@ -6154,32 +6180,41 @@ app.post('/api/auth/google', async (req, res) => {
           googleId: sub,
           isVerified: true,
           referralCode,
-          status: 'active'
+          status: 'active',
+          balances: {
+            main: 0,
+            active: 0,
+            matured: 0,
+            savings: 0,
+            loan: 0
+          }
         });
         isNewUser = true;
         console.log('New user created via Google:', originalEmail);
 
-        // Send welcome email
+        // Send welcome email (don't let it break the flow)
         try {
           await sendAutomatedEmail(user, 'welcome', {
             firstName: given_name || 'Google User'
           });
         } catch (emailError) {
-          console.error('Welcome email failed:', emailError);
+          console.error('Welcome email failed:', emailError.message);
           // Don't fail the request if email fails
         }
       } catch (createError) {
         console.error('User creation error:', createError);
         return res.status(500).json({
           status: 'error',
-          message: 'Failed to create user account'
+          message: 'Failed to create user account: ' + (createError.message || 'Unknown error')
         });
       }
     } else if (!user.googleId) {
       // Existing user, add Google auth
       try {
         user.googleId = sub;
-        user.isVerified = true;
+        if (!user.isVerified) {
+          user.isVerified = true;
+        }
         await user.save();
         console.log('Existing user linked with Google:', originalEmail);
       } catch (updateError) {
@@ -6200,17 +6235,24 @@ app.post('/api/auth/google', async (req, res) => {
     }
 
     // Generate OTP for Google sign-in
+    let otpSent = false;
     try {
       const otp = Math.floor(100000 + Math.random() * 900000).toString();
       const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+      // Invalidate old OTPs
+      await OTP.updateMany(
+        { email: originalEmail, used: false },
+        { used: true }
+      );
 
       await OTP.create({
         email: originalEmail,
         otp,
         type: 'login',
         expiresAt,
-        ipAddress: req.ip,
-        userAgent: req.headers['user-agent']
+        ipAddress: getRealClientIP(req),
+        userAgent: req.headers['user-agent'] || 'Unknown'
       });
 
       // Send OTP email
@@ -6223,9 +6265,11 @@ app.post('/api/auth/google', async (req, res) => {
           action: 'Google sign-in verification'
         }
       });
+      otpSent = true;
+      console.log('OTP sent to:', originalEmail);
     } catch (otpError) {
       console.error('OTP creation error:', otpError);
-      // Continue even if OTP fails for now
+      // Continue even if OTP fails - we'll still create the session
     }
 
     // Generate temporary token
@@ -6235,7 +6279,12 @@ app.post('/api/auth/google', async (req, res) => {
     try {
       user.lastLogin = new Date();
       const deviceInfo = await getUserDeviceInfo(req);
-      user.loginHistory.push(deviceInfo);
+      user.loginHistory.push({
+        ip: deviceInfo.ip,
+        device: deviceInfo.device,
+        location: deviceInfo.location,
+        timestamp: new Date()
+      });
       await user.save();
     } catch (updateError) {
       console.error('User update error:', updateError);
@@ -6243,52 +6292,59 @@ app.post('/api/auth/google', async (req, res) => {
     }
 
     // ✅ CREATE LOG IN DATABASE FOR GOOGLE LOGIN ATTEMPT
-    const preciseLocation = await getPreciseLocation(getRealClientIP(req));
-    await UserLog.create({
-      user: user._id,
-      username: user.email,
-      email: user.email,
-      userFullName: `${user.firstName} ${user.lastName}`,
-      action: 'login_attempt',
-      actionCategory: 'authentication',
-      ipAddress: getRealClientIP(req),
-      userAgent: req.headers['user-agent'] || 'Unknown',
-      deviceInfo: {
-        type: getDeviceType(req),
-        os: getOSFromUserAgent(req.headers['user-agent']),
-        browser: getBrowserFromUserAgent(req.headers['user-agent'])
-      },
-      location: preciseLocation,
-      status: 'pending',
-      metadata: {
-        provider: 'google',
-        isNewUser: isNewUser
-      }
-    });
+    try {
+      const preciseLocation = await getPreciseLocation(getRealClientIP(req));
+      await UserLog.create({
+        user: user._id,
+        username: user.email,
+        email: user.email,
+        userFullName: `${user.firstName} ${user.lastName}`,
+        action: 'login_attempt',
+        actionCategory: 'authentication',
+        ipAddress: getRealClientIP(req),
+        userAgent: req.headers['user-agent'] || 'Unknown',
+        deviceInfo: {
+          type: getDeviceType(req),
+          os: getOSFromUserAgent(req.headers['user-agent']),
+          browser: getBrowserFromUserAgent(req.headers['user-agent'])
+        },
+        location: preciseLocation,
+        status: otpSent ? 'pending' : 'success',
+        metadata: {
+          provider: 'google',
+          isNewUser: isNewUser,
+          otpSent: otpSent
+        }
+      });
+    } catch (logError) {
+      console.error('Activity logging error:', logError);
+    }
 
     // SUCCESS RESPONSE
     res.status(200).json({
       status: 'success',
-      message: 'OTP sent to your email. Please verify to complete Google sign-in.',
+      message: otpSent ? 'OTP sent to your email. Please verify to complete Google sign-in.' : 'Google sign-in successful',
       tempToken,
-      needsOtp: true,
+      needsOtp: otpSent,
       isNewUser: isNewUser,
       data: {
         user: {
           id: user._id,
           firstName: user.firstName,
           lastName: user.lastName,
-          email: user.email
+          email: user.email,
+          isVerified: user.isVerified
         }
       }
     });
 
     // Log activity (don't let this break the response)
     try {
-      await logActivity('google_signin_otp_sent', 'user', user._id, user._id, 'User', req, {
+      await logActivity('google_signin', 'user', user._id, user._id, 'User', req, {
         isNewUser,
         provider: 'google',
-        email: originalEmail
+        email: originalEmail,
+        otpSent: otpSent
       });
     } catch (logError) {
       console.error('Activity logging error:', logError);
@@ -6298,14 +6354,14 @@ app.post('/api/auth/google', async (req, res) => {
     console.error('Google auth UNEXPECTED error:', err);
     console.error('Error stack:', err.stack);
     
+    // Return a user-friendly error message
     res.status(500).json({
       status: 'error',
-      message: 'An unexpected error occurred during Google authentication'
+      message: 'Unable to authenticate with Google. Please try again or use email signup.',
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   }
 });
-
-
 
 app.post('/api/auth/forgot-password', [
   body('email').isEmail().withMessage('Please provide a valid email').normalizeEmail()
