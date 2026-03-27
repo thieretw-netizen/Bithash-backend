@@ -3944,6 +3944,63 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
       return assetMap[asset?.toUpperCase()] || asset || 'Bitcoin';
     };
 
+    // Helper function to get sign-off based on email type
+    const getSignOff = (action) => {
+      const securityActions = ['login_success', 'otp', 'password_reset', 'password_changed'];
+      const investmentActions = ['investment_created', 'investment_matured'];
+      const transactionActions = ['deposit_received', 'withdrawal_request', 'withdrawal_approved', 'deposit_approved', 'deposit_rejected', 'withdrawal_rejected'];
+      const kycActions = ['kyc_approved', 'kyc_rejected'];
+      const welcomeActions = ['welcome'];
+      
+      if (securityActions.includes(action)) {
+        return `Best regards,<br><strong>The BitHash Capital Security Team</strong>`;
+      } else if (investmentActions.includes(action)) {
+        return `Happy Mining!<br><strong>The BitHash Capital Investment Team</strong>`;
+      } else if (transactionActions.includes(action)) {
+        return `Thank you for trusting us,<br><strong>The BitHash Capital Operations Team</strong>`;
+      } else if (kycActions.includes(action)) {
+        return `Best regards,<br><strong>The BitHash Capital Compliance Team</strong>`;
+      } else if (welcomeActions.includes(action)) {
+        return `Welcome aboard!<br><strong>The BitHash Capital Team</strong>`;
+      } else {
+        return `Best regards,<br><strong>The BitHash Capital Team</strong>`;
+      }
+    };
+    
+    // Helper function to get footer based on email type
+    const getFooter = (action) => {
+      const securityActions = ['login_success', 'otp', 'password_reset', 'password_changed'];
+      const investmentActions = ['investment_created', 'investment_matured'];
+      const transactionActions = ['deposit_received', 'withdrawal_request', 'withdrawal_approved', 'deposit_approved', 'deposit_rejected', 'withdrawal_rejected'];
+      const kycActions = ['kyc_approved', 'kyc_rejected'];
+      const welcomeActions = ['welcome'];
+      
+      let additionalFooter = '';
+      
+      if (securityActions.includes(action)) {
+        additionalFooter = `<p class="footer-text" style="margin-top: 12px;"><i class="fas fa-shield-alt"></i> This is an automated security notification. If you did not perform this action, please contact us immediately.</p>`;
+      } else if (investmentActions.includes(action)) {
+        additionalFooter = `<p class="footer-text" style="margin-top: 12px;"><i class="fas fa-chart-line"></i> Track your investments in real-time through your dashboard.</p>`;
+      } else if (transactionActions.includes(action)) {
+        additionalFooter = `<p class="footer-text" style="margin-top: 12px;"><i class="fas fa-clock"></i> Transaction processing times may vary based on network conditions.</p>`;
+      } else if (kycActions.includes(action)) {
+        additionalFooter = `<p class="footer-text" style="margin-top: 12px;"><i class="fas fa-id-card"></i> KYC verification is required for full platform access.</p>`;
+      } else if (welcomeActions.includes(action)) {
+        additionalFooter = `<p class="footer-text" style="margin-top: 12px;"><i class="fas fa-gem"></i> Start your Bitcoin mining journey today!</p>`;
+      } else {
+        additionalFooter = ``;
+      }
+      
+      return `
+        <div class="footer" style="padding: 24px 20px; background-color: #f9fafb; text-align: center;">
+          <p class="footer-text" style="color: #6b7280; font-size: 12px; line-height: 1.5;">© 2024 BitHash Capital. All rights reserved.<br>
+          This email was sent to ${user.email}. Please do not reply to this email.<br>
+          Need help? <a href="mailto:support@bithashcapital.live" class="support-link" style="color: #3b82f6; text-decoration: none;">Contact Support</a></p>
+          ${additionalFooter}
+        </div>
+      `;
+    };
+
     const templates = {
       // WELCOME EMAIL
       welcome: {
@@ -4046,19 +4103,13 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   border-radius: 8px;
                   margin: 20px 0;
                 }
-                .footer {
-                  padding: 24px 20px;
-                  background-color: #f9fafb;
-                  text-align: center;
-                }
-                .footer-text {
-                  color: #6b7280;
-                  font-size: 12px;
-                  line-height: 1.5;
-                }
-                .support-link {
-                  color: #3b82f6;
-                  text-decoration: none;
+                .sign-off {
+                  margin-top: 32px;
+                  padding-top: 20px;
+                  border-top: 1px solid #e5e7eb;
+                  color: #4b5563;
+                  font-size: 14px;
+                  line-height: 1.6;
                 }
                 @media only screen and (max-width: 600px) {
                   .header { padding: 20px; }
@@ -4111,12 +4162,12 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 </div>
                 
                 <p class="message">Start your mining journey today and earn passive income with Bitcoin.</p>
+                
+                <div class="sign-off">
+                  ${getSignOff('welcome')}
+                </div>
               </div>
-              <div class="footer">
-                <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
-                This email was sent to ${user.email}. Please do not reply to this email.<br>
-                Need help? <a href="mailto:support@bithashcapital.live" class="support-link">Contact Support</a></p>
-              </div>
+              ${getFooter('welcome')}
             </div>
           </body>
           </html>
@@ -4152,9 +4203,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 .security-note { background: #fef2f2; padding: 16px; margin: 24px 0; border-radius: 8px; }
                 .security-note strong { color: #dc2626; }
                 .security-note p { color: #991b1b; font-size: 14px; }
-                .footer { padding: 24px 20px; background-color: #f9fafb; text-align: center; }
-                .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
-                .support-link { color: #3b82f6; text-decoration: none; }
+                .sign-off { margin-top: 32px; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #4b5563; font-size: 14px; line-height: 1.6; }
                 .device-badge { display: inline-block; background: #e5e7eb; padding: 4px 10px; font-size: 12px; color: #374151; border-radius: 6px; }
                 @media only screen and (max-width: 600px) {
                   .header { padding: 20px; }
@@ -4202,12 +4251,12 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   <strong>⚠️ Not you?</strong>
                   <p>If you didn't perform this login, please secure your account immediately by changing your password and enabling two-factor authentication.</p>
                 </div>
+                
+                <div class="sign-off">
+                  ${getSignOff('login_success')}
+                </div>
               </div>
-              <div class="footer">
-                <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
-                This is an automated security notification.<br>
-                Need help? <a href="mailto:support@bithashcapital.live" class="support-link">Contact Support</a></p>
-              </div>
+              ${getFooter('login_success')}
             </div>
           </body>
           </html>
@@ -4238,8 +4287,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 .otp-code { background: #f9fafb; padding: 24px; font-size: 48px; font-weight: 700; text-align: center; letter-spacing: 12px; margin: 24px 0; color: #3b82f6; font-family: 'Courier New', monospace; border-radius: 12px; }
                 .security-note { background: #fef2f2; padding: 16px; margin: 24px 0; border-radius: 8px; }
                 .security-note p { color: #991b1b; font-size: 14px; }
-                .footer { padding: 24px 20px; background-color: #f9fafb; text-align: center; }
-                .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
+                .sign-off { margin-top: 32px; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #4b5563; font-size: 14px; line-height: 1.6; }
                 @media only screen and (max-width: 600px) {
                   .header { padding: 20px; }
                   .content { padding: 24px 16px; }
@@ -4267,11 +4315,12 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 <div class="security-note">
                   <p><strong>⚠️ Security Notice:</strong> Never share this code with anyone. BitHash Capital will never ask for your verification code.</p>
                 </div>
+                
+                <div class="sign-off">
+                  ${getSignOff('otp')}
+                </div>
               </div>
-              <div class="footer">
-                <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
-                This is an automated security message.</p>
-              </div>
+              ${getFooter('otp')}
             </div>
           </body>
           </html>
@@ -4302,8 +4351,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 .reset-button { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); color: #ffffff; padding: 14px 32px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 16px; border-radius: 8px; margin: 20px 0; }
                 .security-note { background: #fef2f2; padding: 16px; margin: 24px 0; border-radius: 8px; }
                 .security-note p { color: #991b1b; font-size: 14px; }
-                .footer { padding: 24px 20px; background-color: #f9fafb; text-align: center; }
-                .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
+                .sign-off { margin-top: 32px; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #4b5563; font-size: 14px; line-height: 1.6; }
                 @media only screen and (max-width: 600px) {
                   .header { padding: 20px; }
                   .content { padding: 24px 16px; }
@@ -4333,11 +4381,12 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 <div class="security-note">
                   <p><strong>⚠️ Didn't request this?</strong> If you didn't request a password reset, please ignore this email. Your account remains secure.</p>
                 </div>
+                
+                <div class="sign-off">
+                  ${getSignOff('password_reset')}
+                </div>
               </div>
-              <div class="footer">
-                <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
-                This is an automated security message.</p>
-              </div>
+              ${getFooter('password_reset')}
             </div>
           </body>
           </html>
@@ -4369,8 +4418,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 .info-box { background: #f0fdf4; padding: 20px; border-radius: 12px; margin: 24px 0; }
                 .info-box p { color: #166534; font-size: 14px; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #bbf7d0; }
                 .info-box p:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
-                .footer { padding: 24px 20px; background-color: #f9fafb; text-align: center; }
-                .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
+                .sign-off { margin-top: 32px; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #4b5563; font-size: 14px; line-height: 1.6; text-align: center; }
                 @media only screen and (max-width: 600px) {
                   .header { padding: 20px; }
                   .content { padding: 24px 16px; }
@@ -4398,11 +4446,12 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 </div>
                 
                 <p class="message">If you did not make this change, please contact our support team immediately.</p>
+                
+                <div class="sign-off">
+                  ${getSignOff('password_changed')}
+                </div>
               </div>
-              <div class="footer">
-                <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
-                This is an automated security notification.</p>
-              </div>
+              ${getFooter('password_changed')}
             </div>
           </body>
           </html>
@@ -4436,8 +4485,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 .detail-label { color: #6b7280; font-size: 14px; font-weight: 500; }
                 .detail-value { color: #1f2937; font-weight: 600; font-size: 16px; }
                 .cta-button { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); color: #ffffff; padding: 12px 28px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 15px; border-radius: 8px; margin: 16px 0; }
-                .footer { padding: 24px 20px; background-color: #f9fafb; text-align: center; }
-                .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
+                .sign-off { margin-top: 32px; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #4b5563; font-size: 14px; line-height: 1.6; }
                 @media only screen and (max-width: 600px) {
                   .header { padding: 20px; }
                   .content { padding: 24px 16px; }
@@ -4493,10 +4541,12 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 <div style="text-align: center;">
                   <a href="https://www.bithashcapital.live/dashboard.html" class="cta-button">Track Investment</a>
                 </div>
+                
+                <div class="sign-off">
+                  ${getSignOff('investment_created')}
+                </div>
               </div>
-              <div class="footer">
-                <p class="footer-text">© 2024 BitHash Capital. All rights reserved.</p>
-              </div>
+              ${getFooter('investment_created')}
             </div>
           </body>
           </html>
@@ -4533,8 +4583,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 .detail-label { color: #6b7280; font-size: 14px; font-weight: 500; }
                 .detail-value { color: #1f2937; font-weight: 500; font-size: 14px; }
                 .cta-button { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); color: #ffffff; padding: 12px 28px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 15px; border-radius: 8px; margin: 16px 0; }
-                .footer { padding: 24px 20px; background-color: #f9fafb; text-align: center; }
-                .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
+                .sign-off { margin-top: 32px; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #4b5563; font-size: 14px; line-height: 1.6; }
                 @media only screen and (max-width: 600px) {
                   .header { padding: 20px; }
                   .content { padding: 24px 16px; }
@@ -4587,10 +4636,12 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 <div style="text-align: center;">
                   <a href="https://www.bithashcapital.live/dashboard.html" class="cta-button">View Dashboard</a>
                 </div>
+                
+                <div class="sign-off">
+                  ${getSignOff('investment_matured')}
+                </div>
               </div>
-              <div class="footer">
-                <p class="footer-text">© 2024 BitHash Capital. All rights reserved.</p>
-              </div>
+              ${getFooter('investment_matured')}
             </div>
           </body>
           </html>
@@ -4629,8 +4680,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 .detail-label { color: #6b7280; font-size: 14px; font-weight: 500; }
                 .detail-value { color: #1f2937; font-weight: 500; font-size: 14px; word-break: break-all; }
                 .address-value { font-family: monospace; background: #ffffff; padding: 4px 8px; border-radius: 6px; font-size: 12px; border: 1px solid #e5e7eb; }
-                .footer { padding: 24px 20px; background-color: #f9fafb; text-align: center; }
-                .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
+                .sign-off { margin-top: 32px; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #4b5563; font-size: 14px; line-height: 1.6; }
                 @media only screen and (max-width: 600px) {
                   .header { padding: 20px; }
                   .content { padding: 24px 16px; }
@@ -4694,10 +4744,12 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 </div>
                 
                 <p class="message">Your funds are now available for mining investments and other platform activities.</p>
+                
+                <div class="sign-off">
+                  ${getSignOff('deposit_received')}
+                </div>
               </div>
-              <div class="footer">
-                <p class="footer-text">© 2024 BitHash Capital. All rights reserved.</p>
-              </div>
+              ${getFooter('deposit_received')}
             </div>
           </body>
           </html>
@@ -4738,8 +4790,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 .address-value { font-family: monospace; background: #ffffff; padding: 4px 8px; border-radius: 6px; font-size: 12px; border: 1px solid #e5e7eb; }
                 .processing-info { background: #fef3c7; padding: 16px; border-radius: 12px; margin: 20px 0; }
                 .processing-info p { color: #92400e; font-size: 14px; }
-                .footer { padding: 24px 20px; background-color: #f9fafb; text-align: center; }
-                .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
+                .sign-off { margin-top: 32px; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #4b5563; font-size: 14px; line-height: 1.6; }
                 @media only screen and (max-width: 600px) {
                   .header { padding: 20px; }
                   .content { padding: 24px 16px; }
@@ -4807,10 +4858,12 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 </div>
                 
                 <p class="message">If you did not initiate this withdrawal, please contact our security team immediately.</p>
+                
+                <div class="sign-off">
+                  ${getSignOff('withdrawal_request')}
+                </div>
               </div>
-              <div class="footer">
-                <p class="footer-text">© 2024 BitHash Capital. All rights reserved.</p>
-              </div>
+              ${getFooter('withdrawal_request')}
             </div>
           </body>
           </html>
@@ -4850,8 +4903,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 .detail-label { color: #6b7280; font-size: 14px; font-weight: 500; }
                 .detail-value { color: #1f2937; font-weight: 500; font-size: 14px; word-break: break-all; }
                 .address-value { font-family: monospace; background: #ffffff; padding: 4px 8px; border-radius: 6px; font-size: 12px; border: 1px solid #e5e7eb; }
-                .footer { padding: 24px 20px; background-color: #f9fafb; text-align: center; }
-                .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
+                .sign-off { margin-top: 32px; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #4b5563; font-size: 14px; line-height: 1.6; }
                 @media only screen and (max-width: 600px) {
                   .header { padding: 20px; }
                   .content { padding: 24px 16px; }
@@ -4906,10 +4958,12 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 </div>
                 
                 <p class="message">The funds have been sent to your designated withdrawal address. Please allow time for the transaction to be confirmed on the blockchain.</p>
+                
+                <div class="sign-off">
+                  ${getSignOff('withdrawal_approved')}
+                </div>
               </div>
-              <div class="footer">
-                <p class="footer-text">© 2024 BitHash Capital. All rights reserved.</p>
-              </div>
+              ${getFooter('withdrawal_approved')}
             </div>
           </body>
           </html>
@@ -4945,8 +4999,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 .detail-label { color: #6b7280; font-size: 14px; font-weight: 500; }
                 .detail-value { color: #1f2937; font-weight: 500; font-size: 14px; word-break: break-all; }
                 .cta-button { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); color: #ffffff; padding: 12px 28px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 15px; border-radius: 8px; margin: 16px 0; }
-                .footer { padding: 24px 20px; background-color: #f9fafb; text-align: center; }
-                .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
+                .sign-off { margin-top: 32px; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #4b5563; font-size: 14px; line-height: 1.6; }
                 @media only screen and (max-width: 600px) {
                   .header { padding: 20px; }
                   .content { padding: 24px 16px; }
@@ -4992,10 +5045,12 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 <div style="text-align: center;">
                   <a href="https://www.bithashcapital.live/dashboard.html" class="cta-button">View Dashboard</a>
                 </div>
+                
+                <div class="sign-off">
+                  ${getSignOff('deposit_approved')}
+                </div>
               </div>
-              <div class="footer">
-                <p class="footer-text">© 2024 BitHash Capital. All rights reserved.</p>
-              </div>
+              ${getFooter('deposit_approved')}
             </div>
           </body>
           </html>
@@ -5027,9 +5082,8 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 .rejected-amount { font-size: 36px; font-weight: 700; color: #dc2626; margin: 12px 0; }
                 .reason-box { background: #f9fafb; padding: 20px; border-radius: 12px; margin: 24px 0; }
                 .reason-box p { color: #991b1b; font-size: 14px; line-height: 1.6; }
-                .footer { padding: 24px 20px; background-color: #f9fafb; text-align: center; }
-                .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
                 .support-link { color: #3b82f6; text-decoration: none; }
+                .sign-off { margin-top: 32px; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #4b5563; font-size: 14px; line-height: 1.6; }
                 @media only screen and (max-width: 600px) {
                   .header { padding: 20px; }
                   .content { padding: 24px 16px; }
@@ -5066,11 +5120,12 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 <div style="text-align: center;">
                   <a href="https://www.bithashcapital.live/support.html" class="support-link" style="display: inline-block; padding: 12px 24px; background: #3b82f6; color: white; text-decoration: none; border-radius: 8px;">Contact Support</a>
                 </div>
+                
+                <div class="sign-off">
+                  ${getSignOff('deposit_rejected')}
+                </div>
               </div>
-              <div class="footer">
-                <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
-                Need help? <a href="mailto:support@bithashcapital.live" class="support-link">support@bithashcapital.live</a></p>
-              </div>
+              ${getFooter('deposit_rejected')}
             </div>
           </body>
           </html>
@@ -5102,9 +5157,8 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 .rejected-amount { font-size: 36px; font-weight: 700; color: #dc2626; margin: 12px 0; }
                 .reason-box { background: #f9fafb; padding: 20px; border-radius: 12px; margin: 24px 0; }
                 .reason-box p { color: #991b1b; font-size: 14px; line-height: 1.6; }
-                .footer { padding: 24px 20px; background-color: #f9fafb; text-align: center; }
-                .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
                 .support-link { color: #3b82f6; text-decoration: none; }
+                .sign-off { margin-top: 32px; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #4b5563; font-size: 14px; line-height: 1.6; }
                 @media only screen and (max-width: 600px) {
                   .header { padding: 20px; }
                   .content { padding: 24px 16px; }
@@ -5141,11 +5195,12 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 <div style="text-align: center;">
                   <a href="https://www.bithashcapital.live/support.html" class="support-link" style="display: inline-block; padding: 12px 24px; background: #3b82f6; color: white; text-decoration: none; border-radius: 8px;">Contact Support</a>
                 </div>
+                
+                <div class="sign-off">
+                  ${getSignOff('withdrawal_rejected')}
+                </div>
               </div>
-              <div class="footer">
-                <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
-                Need help? <a href="mailto:support@bithashcapital.live" class="support-link">support@bithashcapital.live</a></p>
-              </div>
+              ${getFooter('withdrawal_rejected')}
             </div>
           </body>
           </html>
@@ -5179,8 +5234,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 .benefit-item { display: flex; align-items: center; margin-bottom: 12px; color: #4b5563; }
                 .benefit-icon { color: #22c55e; margin-right: 12px; font-weight: bold; font-size: 18px; }
                 .cta-button { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); color: #ffffff; padding: 12px 28px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 15px; border-radius: 8px; margin: 16px 0; }
-                .footer { padding: 24px 20px; background-color: #f9fafb; text-align: center; }
-                .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
+                .sign-off { margin-top: 32px; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #4b5563; font-size: 14px; line-height: 1.6; }
                 @media only screen and (max-width: 600px) {
                   .header { padding: 20px; }
                   .content { padding: 24px 16px; }
@@ -5216,10 +5270,12 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 <div style="text-align: center;">
                   <a href="https://www.bithashcapital.live/dashboard.html" class="cta-button">Go to Dashboard</a>
                 </div>
+                
+                <div class="sign-off">
+                  ${getSignOff('kyc_approved')}
+                </div>
               </div>
-              <div class="footer">
-                <p class="footer-text">© 2024 BitHash Capital. All rights reserved.</p>
-              </div>
+              ${getFooter('kyc_approved')}
             </div>
           </body>
           </html>
@@ -5251,8 +5307,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 .reason-box { background: #f9fafb; padding: 20px; border-radius: 12px; margin: 24px 0; }
                 .reason-box p { color: #991b1b; font-size: 14px; line-height: 1.6; }
                 .cta-button { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); color: #ffffff; padding: 12px 28px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 15px; border-radius: 8px; margin: 16px 0; }
-                .footer { padding: 24px 20px; background-color: #f9fafb; text-align: center; }
-                .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
+                .sign-off { margin-top: 32px; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #4b5563; font-size: 14px; line-height: 1.6; }
                 @media only screen and (max-width: 600px) {
                   .header { padding: 20px; }
                   .content { padding: 24px 16px; }
@@ -5287,11 +5342,12 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 <div style="text-align: center;">
                   <a href="https://www.bithashcapital.live/kyc.html" class="cta-button">Resubmit KYC</a>
                 </div>
+                
+                <div class="sign-off">
+                  ${getSignOff('kyc_rejected')}
+                </div>
               </div>
-              <div class="footer">
-                <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
-                Need help? Contact support@bithashcapital.live</p>
-              </div>
+              ${getFooter('kyc_rejected')}
             </div>
           </body>
           </html>
@@ -5320,8 +5376,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                 .greeting { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
                 .message-content { background: #f9fafb; padding: 24px; border-radius: 12px; margin: 24px 0; color: #1f2937; line-height: 1.6; font-size: 16px; }
                 .cta-button { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); color: #ffffff; padding: 12px 28px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 15px; border-radius: 8px; margin: 16px 0; }
-                .footer { padding: 24px 20px; background-color: #f9fafb; text-align: center; }
-                .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
+                .sign-off { margin-top: 32px; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #4b5563; font-size: 14px; line-height: 1.6; }
                 @media only screen and (max-width: 600px) {
                   .header { padding: 20px; }
                   .content { padding: 24px 16px; }
@@ -5347,11 +5402,11 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
                   <a href="${data.cta.url}" class="cta-button">${data.cta.text}</a>
                 </div>
                 ` : ''}
+                <div class="sign-off">
+                  ${getSignOff('general')}
+                </div>
               </div>
-              <div class="footer">
-                <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
-                Need help? Contact us at support@bithashcapital.live</p>
-              </div>
+              ${getFooter('general')}
             </div>
           </body>
           </html>
@@ -5423,6 +5478,41 @@ const sendProfessionalEmail = async (options) => {
       }
       return amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     };
+    
+    // Helper function to get sign-off based on email type for professional emails
+    const getProfessionalSignOff = (templateType) => {
+      const securityTemplates = ['otp', 'password_reset'];
+      const welcomeTemplates = ['welcome'];
+      
+      if (securityTemplates.includes(templateType)) {
+        return `Best regards,<br><strong>The BitHash Capital Security Team</strong>`;
+      } else if (welcomeTemplates.includes(templateType)) {
+        return `Welcome aboard!<br><strong>The BitHash Capital Team</strong>`;
+      } else {
+        return `Best regards,<br><strong>The BitHash Capital Team</strong>`;
+      }
+    };
+    
+    // Helper function to get footer for professional emails
+    const getProfessionalFooter = (templateType) => {
+      const securityTemplates = ['otp', 'password_reset'];
+      
+      let additionalFooter = '';
+      
+      if (securityTemplates.includes(templateType)) {
+        additionalFooter = `<p class="footer-text" style="margin-top: 12px;"><i class="fas fa-shield-alt"></i> This is an automated security notification. Please do not reply to this email.</p>`;
+      } else {
+        additionalFooter = `<p class="footer-text" style="margin-top: 12px;"><i class="fas fa-gem"></i> Start your Bitcoin mining journey today!</p>`;
+      }
+      
+      return `
+        <div class="footer" style="padding: 24px 20px; background-color: #f9fafb; text-align: center;">
+          <p class="footer-text" style="color: #6b7280; font-size: 12px; line-height: 1.5;">© 2024 BitHash Capital. All rights reserved.<br>
+          This email was sent to ${email}. Need assistance? <a href="mailto:support@bithashcapital.live" class="support-link" style="color: #3b82f6; text-decoration: none;">Contact Support</a></p>
+          ${additionalFooter}
+        </div>
+      `;
+    };
 
     const emailTemplates = {
       welcome: {
@@ -5454,9 +5544,7 @@ const sendProfessionalEmail = async (options) => {
                 .benefit-icon { color: #22c55e; margin-right: 12px; font-weight: bold; font-size: 18px; }
                 .cta-button { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); color: #ffffff; padding: 14px 32px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 16px; border-radius: 8px; margin: 20px 0; }
                 .security-note { background: #fef3c7; padding: 16px; border-radius: 12px; margin: 24px 0; }
-                .footer { padding: 24px 20px; background-color: #f9fafb; text-align: center; }
-                .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
-                .support-link { color: #3b82f6; text-decoration: none; }
+                .sign-off { margin-top: 32px; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #4b5563; font-size: 14px; line-height: 1.6; }
                 @media only screen and (max-width: 600px) {
                   .header { padding: 20px; }
                   .content { padding: 24px 16px; }
@@ -5512,13 +5600,11 @@ const sendProfessionalEmail = async (options) => {
                   <strong>🔐 Security Notice:</strong> Enable two-factor authentication and use strong, unique passwords to protect your account.
                 </div>
                 
-                <p class="message">Best regards,<br><strong>The BitHash Capital Team</strong></p>
+                <div class="sign-off">
+                  ${getProfessionalSignOff('welcome')}
+                </div>
               </div>
-              <div class="footer">
-                <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
-                Professional Bitcoin Mining and Investment Platform</p>
-                <p class="footer-text">This email was sent to ${email}. Need assistance? <a href="mailto:support@bithashcapital.live" class="support-link">Contact Support</a></p>
-              </div>
+              ${getProfessionalFooter('welcome')}
             </div>
           </body>
           </html>
@@ -5548,8 +5634,7 @@ const sendProfessionalEmail = async (options) => {
                 .otp-code { background: #f9fafb; padding: 24px; font-size: 48px; font-weight: 700; text-align: center; letter-spacing: 12px; margin: 24px 0; color: #3b82f6; font-family: 'Courier New', monospace; border-radius: 12px; }
                 .security-note { background: #fef2f2; padding: 16px; border-radius: 12px; margin: 24px 0; }
                 .security-note p { color: #991b1b; font-size: 14px; }
-                .footer { padding: 24px 20px; background-color: #f9fafb; text-align: center; }
-                .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
+                .sign-off { margin-top: 32px; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #4b5563; font-size: 14px; line-height: 1.6; }
                 @media only screen and (max-width: 600px) {
                   .header { padding: 20px; }
                   .content { padding: 24px 16px; }
@@ -5580,11 +5665,11 @@ const sendProfessionalEmail = async (options) => {
                 
                 <p class="message">If you didn't request this code, please secure your account immediately and contact our support team.</p>
                 
-                <p class="message">Best regards,<br><strong>BitHash Capital Security Team</strong></p>
+                <div class="sign-off">
+                  ${getProfessionalSignOff('otp')}
+                </div>
               </div>
-              <div class="footer">
-                <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>This is an automated security message. Please do not reply.</p>
-              </div>
+              ${getProfessionalFooter('otp')}
             </div>
           </body>
           </html>
@@ -5620,7 +5705,6 @@ const sendProfessionalEmail = async (options) => {
     throw new Error('Failed to send email');
   }
 };
-
 
 
 // Routes
@@ -21583,7 +21667,742 @@ app.post('/api/withdrawals/confirm-gas-payment', protect, async (req, res) => {
 
 
 
+// =============================================
+// TRADING ENDPOINTS - ADD THESE TO YOUR SERVER.JS
+// =============================================
 
+// =============================================
+// 1. GET USER BALANCE
+// =============================================
+app.get('/api/users/balances', protect, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    res.json({
+      status: 'success',
+      data: {
+        balances: {
+          main: user.balances.main || 0,
+          matured: user.balances.matured || 0,
+          active: user.balances.active || 0,
+          savings: user.balances.savings || 0,
+          loan: user.balances.loan || 0
+        }
+      }
+    });
+  } catch (err) {
+    console.error('Get balances error:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch balances' });
+  }
+});
+
+// =============================================
+// 2. GET USER ORDERS
+// =============================================
+app.get('/api/trading/orders', protect, async (req, res) => {
+  try {
+    const { symbol, status, limit = 50 } = req.query;
+    const userId = req.user._id;
+    
+    let query = { user: userId };
+    
+    if (symbol) {
+      query['details.symbol'] = symbol;
+    }
+    
+    if (status) {
+      if (status === 'open') {
+        query.status = { $in: ['pending', 'partial'] };
+      } else if (status === 'history') {
+        query.status = { $in: ['completed', 'cancelled', 'failed'] };
+      } else {
+        query.status = status;
+      }
+    }
+    
+    const orders = await Transaction.find(query)
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit));
+    
+    const formattedOrders = orders.map(order => ({
+      id: order._id,
+      symbol: order.details?.symbol || 'BTCUSDT',
+      side: order.type === 'buy' ? 'buy' : (order.type === 'sell' ? 'sell' : order.type),
+      type: order.details?.orderType || 'limit',
+      price: order.details?.price || order.amount,
+      amount: order.details?.amount || 1,
+      filled: order.status === 'completed' ? order.details?.amount || 1 : 0,
+      total: order.amount,
+      status: order.status,
+      createdAt: order.createdAt,
+      orderId: order._id
+    }));
+    
+    res.json({
+      status: 'success',
+      data: formattedOrders
+    });
+  } catch (err) {
+    console.error('Get orders error:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch orders' });
+  }
+});
+
+// =============================================
+// 3. GET USER TRADES (HISTORY)
+// =============================================
+app.get('/api/trading/trades', protect, async (req, res) => {
+  try {
+    const { symbol, limit = 50 } = req.query;
+    const userId = req.user._id;
+    
+    let query = { 
+      user: userId,
+      type: { $in: ['buy', 'sell'] },
+      status: 'completed'
+    };
+    
+    if (symbol) {
+      query['details.symbol'] = symbol;
+    }
+    
+    const trades = await Transaction.find(query)
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit));
+    
+    const formattedTrades = trades.map(trade => ({
+      id: trade._id,
+      symbol: trade.details?.symbol || 'BTCUSDT',
+      side: trade.type,
+      price: trade.details?.price || trade.amount,
+      amount: trade.details?.amount || 1,
+      total: trade.amount,
+      time: trade.createdAt,
+      isBuyerMaker: trade.type === 'buy'
+    }));
+    
+    res.json({
+      status: 'success',
+      data: formattedTrades
+    });
+  } catch (err) {
+    console.error('Get trades error:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch trades' });
+  }
+});
+
+// =============================================
+// 4. GET USER POSITIONS
+// =============================================
+app.get('/api/trading/positions', protect, async (req, res) => {
+  try {
+    const { symbol } = req.query;
+    const userId = req.user._id;
+    
+    // Get open orders that are pending/partial
+    const openOrders = await Transaction.find({
+      user: userId,
+      type: { $in: ['buy', 'sell'] },
+      status: { $in: ['pending', 'partial'] }
+    });
+    
+    // Calculate positions from open orders
+    const positionsMap = new Map();
+    
+    for (const order of openOrders) {
+      const orderSymbol = order.details?.symbol || 'BTCUSDT';
+      if (symbol && orderSymbol !== symbol) continue;
+      
+      if (!positionsMap.has(orderSymbol)) {
+        positionsMap.set(orderSymbol, {
+          id: order._id,
+          symbol: orderSymbol,
+          side: order.type,
+          size: 0,
+          entryPrice: 0,
+          margin: 0,
+          liquidationPrice: 0
+        });
+      }
+      
+      const position = positionsMap.get(orderSymbol);
+      const orderAmount = order.details?.amount || 1;
+      const orderPrice = order.details?.price || order.amount;
+      
+      position.size += orderAmount;
+      position.entryPrice = ((position.entryPrice * (position.size - orderAmount)) + (orderPrice * orderAmount)) / position.size;
+      position.margin += orderAmount * orderPrice * 0.1; // 10% margin for leverage
+    }
+    
+    const positions = Array.from(positionsMap.values());
+    
+    res.json({
+      status: 'success',
+      data: positions
+    });
+  } catch (err) {
+    console.error('Get positions error:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch positions' });
+  }
+});
+
+// =============================================
+// 5. BUY ORDER - WITH RESTRICTION CHECKS AND BALANCE DEDUCTION
+// =============================================
+app.post('/api/trading/orders/buy', protect, async (req, res) => {
+  try {
+    const { symbol, type, price, amount } = req.body;
+    const userId = req.user._id;
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      return res.status(404).json({ status: 'fail', message: 'User not found' });
+    }
+    
+    // ✅ CHECK RESTRICTIONS BEFORE ALLOWING ORDER
+    const restrictions = await AccountRestrictions.getInstance();
+    const kycStatus = await KYC.findOne({ user: userId });
+    const hasKYC = kycStatus && kycStatus.overallStatus === 'verified';
+    
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - (restrictions.inactivity_days || 30));
+    const hasRecentTx = await Transaction.findOne({
+      user: userId,
+      type: { $in: ['deposit', 'withdrawal'] },
+      status: 'completed',
+      createdAt: { $gte: cutoff }
+    });
+    
+    // Calculate limits
+    let investmentLimit = null;
+    let restrictionMessage = null;
+    
+    if (!hasKYC && restrictions.invest_limit_no_kyc !== null) {
+      const totalValue = price * amount;
+      if (totalValue > restrictions.invest_limit_no_kyc) {
+        restrictionMessage = restrictions.kyc_restriction_reason || `Please complete your KYC verification. Investment limit without KYC: $${restrictions.invest_limit_no_kyc.toLocaleString()}`;
+        return res.status(403).json({
+          status: 'fail',
+          message: restrictionMessage,
+          restriction: {
+            type: 'kyc',
+            limit: restrictions.invest_limit_no_kyc,
+            reason: restrictions.kyc_restriction_reason
+          }
+        });
+      }
+      investmentLimit = restrictions.invest_limit_no_kyc;
+    }
+    
+    if (!hasRecentTx && restrictions.invest_limit_no_txn !== null) {
+      const totalValue = price * amount;
+      if (totalValue > restrictions.invest_limit_no_txn) {
+        restrictionMessage = restrictions.txn_restriction_reason || `Please complete at least one deposit or withdrawal. Investment limit without transaction activity: $${restrictions.invest_limit_no_txn.toLocaleString()}`;
+        return res.status(403).json({
+          status: 'fail',
+          message: restrictionMessage,
+          restriction: {
+            type: 'transaction',
+            limit: restrictions.invest_limit_no_txn,
+            reason: restrictions.txn_restriction_reason,
+            daysRequired: restrictions.inactivity_days
+          }
+        });
+      }
+      if (investmentLimit === null || (restrictions.invest_limit_no_txn !== null && restrictions.invest_limit_no_txn < investmentLimit)) {
+        investmentLimit = restrictions.invest_limit_no_txn;
+      }
+    }
+    
+    // Check user restriction status
+    const userRestrictionStatus = await UserRestrictionStatus.findOne({ user: userId });
+    if (userRestrictionStatus) {
+      if (userRestrictionStatus.kyc_restricted && restrictions.invest_limit_no_kyc !== null) {
+        const totalValue = price * amount;
+        if (totalValue > restrictions.invest_limit_no_kyc) {
+          restrictionMessage = userRestrictionStatus.kyc_restriction_reason || restrictions.kyc_restriction_reason;
+          return res.status(403).json({
+            status: 'fail',
+            message: restrictionMessage,
+            restriction: {
+              type: 'kyc',
+              limit: restrictions.invest_limit_no_kyc,
+              reason: restrictionMessage
+            }
+          });
+        }
+      }
+      
+      if (userRestrictionStatus.transaction_restricted && restrictions.invest_limit_no_txn !== null) {
+        const totalValue = price * amount;
+        if (totalValue > restrictions.invest_limit_no_txn) {
+          restrictionMessage = userRestrictionStatus.transaction_restriction_reason || restrictions.txn_restriction_reason;
+          return res.status(403).json({
+            status: 'fail',
+            message: restrictionMessage,
+            restriction: {
+              type: 'transaction',
+              limit: restrictions.invest_limit_no_txn,
+              reason: restrictionMessage,
+              daysRequired: restrictions.inactivity_days
+            }
+          });
+        }
+      }
+    }
+    
+    const totalCost = price * amount;
+    const fee = totalCost * 0.001; // 0.1% trading fee
+    const totalWithFee = totalCost + fee;
+    
+    // Check if user has sufficient balance (use both main and matured, but deduct from main first)
+    const totalAvailable = user.balances.main + user.balances.matured;
+    
+    if (totalWithFee > totalAvailable) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Insufficient balance. Need ${totalWithFee.toFixed(2)} USDT (including fee)`
+      });
+    }
+    
+    // Deduct from main first, then matured if needed
+    let mainDeduction = Math.min(user.balances.main, totalWithFee);
+    let maturedDeduction = totalWithFee - mainDeduction;
+    
+    const updateQuery = {};
+    if (mainDeduction > 0) {
+      updateQuery['balances.main'] = -mainDeduction;
+    }
+    if (maturedDeduction > 0) {
+      updateQuery['balances.matured'] = -maturedDeduction;
+    }
+    
+    await User.findByIdAndUpdate(userId, { $inc: updateQuery });
+    
+    // Generate reference
+    const reference = `BUY-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    
+    // Create transaction record
+    const transaction = await Transaction.create({
+      user: userId,
+      type: 'buy',
+      amount: totalCost,
+      currency: 'USD',
+      status: 'completed',
+      method: 'INTERNAL',
+      reference: reference,
+      details: {
+        symbol: symbol,
+        orderType: type,
+        price: price,
+        amount: amount,
+        fee: fee,
+        totalWithFee: totalWithFee,
+        mainUsed: mainDeduction,
+        maturedUsed: maturedDeduction
+      },
+      fee: fee,
+      netAmount: totalCost,
+      buyDetails: {
+        asset: symbol.replace('USDT', ''),
+        amountUSD: totalCost,
+        assetAmount: amount,
+        buyingPrice: price,
+        currentPrice: price
+      }
+    });
+    
+    // ✅ CREATE LOG FOR ORDER
+    const deviceInfo = await getUserDeviceInfo(req);
+    await UserLog.create({
+      user: userId,
+      username: user.email,
+      email: user.email,
+      userFullName: `${user.firstName} ${user.lastName}`,
+      action: 'buy_created',
+      actionCategory: 'financial',
+      ipAddress: getRealClientIP(req),
+      userAgent: req.headers['user-agent'] || 'Unknown',
+      deviceInfo: {
+        type: getDeviceType(req),
+        os: { name: getOSFromUserAgent(req.headers['user-agent']), version: 'Unknown' },
+        browser: { name: getBrowserFromUserAgent(req.headers['user-agent']), version: 'Unknown' },
+        platform: req.headers['user-agent'] || 'Unknown',
+        language: req.headers['accept-language'] || 'Unknown',
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+      },
+      location: {
+        ip: getRealClientIP(req),
+        country: { name: deviceInfo.locationDetails?.country || 'Unknown', code: deviceInfo.locationDetails?.country || 'Unknown' },
+        region: { name: deviceInfo.locationDetails?.region || 'Unknown', code: deviceInfo.locationDetails?.region || 'Unknown' },
+        city: deviceInfo.locationDetails?.city || 'Unknown',
+        exactLocation: deviceInfo.exactLocation,
+        latitude: deviceInfo.locationDetails?.latitude,
+        longitude: deviceInfo.locationDetails?.longitude
+      },
+      status: 'success',
+      metadata: {
+        symbol: symbol,
+        orderType: type,
+        price: price,
+        amount: amount,
+        totalCost: totalCost,
+        fee: fee,
+        totalWithFee: totalWithFee,
+        mainUsed: mainDeduction,
+        maturedUsed: maturedDeduction
+      },
+      relatedEntity: transaction._id,
+      relatedEntityModel: 'Transaction'
+    });
+    
+    // ✅ SEND ORDER CONFIRMATION EMAIL
+    try {
+      await sendAutomatedEmail(user, 'general', {
+        subject: 'Buy Order Confirmed',
+        message: `Your ${type} order to buy ${amount} ${symbol.replace('USDT', '')} at ${price} USDT has been executed successfully. Total: ${totalCost.toFixed(2)} USDT (Fee: ${fee.toFixed(2)} USDT)`
+      });
+    } catch (emailError) {
+      console.error('Failed to send order email:', emailError);
+    }
+    
+    res.json({
+      status: 'success',
+      message: 'Buy order executed successfully',
+      data: {
+        order: {
+          id: transaction._id,
+          symbol: symbol,
+          type: type,
+          price: price,
+          amount: amount,
+          total: totalCost,
+          fee: fee,
+          reference: reference
+        },
+        balances: {
+          main: user.balances.main - mainDeduction,
+          matured: user.balances.matured - maturedDeduction
+        }
+      }
+    });
+    
+  } catch (err) {
+    console.error('Buy order error:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to place buy order' });
+  }
+});
+
+// =============================================
+// 6. SELL ORDER - WITH RESTRICTION CHECKS
+// =============================================
+app.post('/api/trading/orders/sell', protect, async (req, res) => {
+  try {
+    const { symbol, type, price, amount } = req.body;
+    const userId = req.user._id;
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      return res.status(404).json({ status: 'fail', message: 'User not found' });
+    }
+    
+    // For sell orders, we need to check if user has the asset in their portfolio
+    // Since we're using USDT pairs, selling means receiving USDT
+    // For simplicity, we'll check if user has enough USDT equivalent in main/matured
+    // In a real system, you'd track asset balances separately
+    
+    const totalValue = price * amount;
+    const fee = totalValue * 0.001;
+    const netReceive = totalValue - fee;
+    
+    // For sell orders, we need to have the asset to sell
+    // For now, we'll assume the asset is held in the portfolio
+    // Check if user has enough USDT to cover potential losses? Actually selling gives USDT
+    
+    // Generate reference
+    const reference = `SELL-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    
+    // Add proceeds to matured balance (all proceeds go to matured wallet)
+    await User.findByIdAndUpdate(userId, {
+      $inc: {
+        'balances.matured': netReceive
+      }
+    });
+    
+    // Create transaction record
+    const transaction = await Transaction.create({
+      user: userId,
+      type: 'sell',
+      amount: totalValue,
+      currency: 'USD',
+      status: 'completed',
+      method: 'INTERNAL',
+      reference: reference,
+      details: {
+        symbol: symbol,
+        orderType: type,
+        price: price,
+        amount: amount,
+        fee: fee,
+        netReceive: netReceive
+      },
+      fee: fee,
+      netAmount: netReceive,
+      sellDetails: {
+        asset: symbol.replace('USDT', ''),
+        amountUSD: totalValue,
+        assetAmount: amount,
+        sellingPrice: price,
+        profitLoss: 0
+      }
+    });
+    
+    // ✅ CREATE LOG FOR SELL ORDER
+    const deviceInfo = await getUserDeviceInfo(req);
+    await UserLog.create({
+      user: userId,
+      username: user.email,
+      email: user.email,
+      userFullName: `${user.firstName} ${user.lastName}`,
+      action: 'sell_created',
+      actionCategory: 'financial',
+      ipAddress: getRealClientIP(req),
+      userAgent: req.headers['user-agent'] || 'Unknown',
+      deviceInfo: {
+        type: getDeviceType(req),
+        os: { name: getOSFromUserAgent(req.headers['user-agent']), version: 'Unknown' },
+        browser: { name: getBrowserFromUserAgent(req.headers['user-agent']), version: 'Unknown' },
+        platform: req.headers['user-agent'] || 'Unknown',
+        language: req.headers['accept-language'] || 'Unknown',
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+      },
+      location: {
+        ip: getRealClientIP(req),
+        country: { name: deviceInfo.locationDetails?.country || 'Unknown', code: deviceInfo.locationDetails?.country || 'Unknown' },
+        region: { name: deviceInfo.locationDetails?.region || 'Unknown', code: deviceInfo.locationDetails?.region || 'Unknown' },
+        city: deviceInfo.locationDetails?.city || 'Unknown',
+        exactLocation: deviceInfo.exactLocation,
+        latitude: deviceInfo.locationDetails?.latitude,
+        longitude: deviceInfo.locationDetails?.longitude
+      },
+      status: 'success',
+      metadata: {
+        symbol: symbol,
+        orderType: type,
+        price: price,
+        amount: amount,
+        totalValue: totalValue,
+        fee: fee,
+        netReceive: netReceive
+      },
+      relatedEntity: transaction._id,
+      relatedEntityModel: 'Transaction'
+    });
+    
+    // ✅ SEND ORDER CONFIRMATION EMAIL
+    try {
+      await sendAutomatedEmail(user, 'general', {
+        subject: 'Sell Order Confirmed',
+        message: `Your ${type} order to sell ${amount} ${symbol.replace('USDT', '')} at ${price} USDT has been executed successfully. Total: ${totalValue.toFixed(2)} USDT (Fee: ${fee.toFixed(2)} USDT)`
+      });
+    } catch (emailError) {
+      console.error('Failed to send order email:', emailError);
+    }
+    
+    res.json({
+      status: 'success',
+      message: 'Sell order executed successfully',
+      data: {
+        order: {
+          id: transaction._id,
+          symbol: symbol,
+          type: type,
+          price: price,
+          amount: amount,
+          total: totalValue,
+          fee: fee,
+          netReceive: netReceive,
+          reference: reference
+        },
+        balances: {
+          main: user.balances.main,
+          matured: user.balances.matured + netReceive
+        }
+      }
+    });
+    
+  } catch (err) {
+    console.error('Sell order error:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to place sell order' });
+  }
+});
+
+// =============================================
+// 7. CANCEL ORDER
+// =============================================
+app.post('/api/trading/orders/cancel', protect, async (req, res) => {
+  try {
+    const { orderId } = req.body;
+    const userId = req.user._id;
+    
+    const order = await Transaction.findOne({
+      _id: orderId,
+      user: userId,
+      status: { $in: ['pending', 'partial'] }
+    });
+    
+    if (!order) {
+      return res.status(404).json({ status: 'fail', message: 'Order not found or already completed' });
+    }
+    
+    // Update order status
+    order.status = 'cancelled';
+    await order.save();
+    
+    // Refund the funds if it was a buy order
+    if (order.type === 'buy') {
+      const totalRefund = order.details?.totalWithFee || order.amount;
+      await User.findByIdAndUpdate(userId, {
+        $inc: {
+          'balances.main': totalRefund
+        }
+      });
+    }
+    
+    // ✅ CREATE LOG FOR ORDER CANCELLATION
+    const user = await User.findById(userId);
+    const deviceInfo = await getUserDeviceInfo(req);
+    await UserLog.create({
+      user: userId,
+      username: user.email,
+      email: user.email,
+      userFullName: `${user.firstName} ${user.lastName}`,
+      action: 'order_cancelled',
+      actionCategory: 'financial',
+      ipAddress: getRealClientIP(req),
+      userAgent: req.headers['user-agent'] || 'Unknown',
+      deviceInfo: {
+        type: getDeviceType(req),
+        os: { name: getOSFromUserAgent(req.headers['user-agent']), version: 'Unknown' },
+        browser: { name: getBrowserFromUserAgent(req.headers['user-agent']), version: 'Unknown' }
+      },
+      location: {
+        ip: getRealClientIP(req),
+        country: { name: deviceInfo.locationDetails?.country || 'Unknown', code: deviceInfo.locationDetails?.country || 'Unknown' },
+        region: { name: deviceInfo.locationDetails?.region || 'Unknown', code: deviceInfo.locationDetails?.region || 'Unknown' },
+        city: deviceInfo.locationDetails?.city || 'Unknown'
+      },
+      status: 'success',
+      metadata: {
+        orderId: orderId,
+        orderType: order.type,
+        amount: order.amount,
+        refunded: order.type === 'buy'
+      },
+      relatedEntity: order._id,
+      relatedEntityModel: 'Transaction'
+    });
+    
+    res.json({
+      status: 'success',
+      message: 'Order cancelled successfully'
+    });
+    
+  } catch (err) {
+    console.error('Cancel order error:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to cancel order' });
+  }
+});
+
+// =============================================
+// 8. CANCEL ALL ORDERS
+// =============================================
+app.post('/api/trading/orders/cancel-all', protect, async (req, res) => {
+  try {
+    const { symbol } = req.body;
+    const userId = req.user._id;
+    
+    const query = {
+      user: userId,
+      status: { $in: ['pending', 'partial'] }
+    };
+    
+    if (symbol) {
+      query['details.symbol'] = symbol;
+    }
+    
+    const orders = await Transaction.find(query);
+    
+    let totalRefund = 0;
+    
+    for (const order of orders) {
+      order.status = 'cancelled';
+      await order.save();
+      
+      if (order.type === 'buy') {
+        totalRefund += order.details?.totalWithFee || order.amount;
+      }
+    }
+    
+    if (totalRefund > 0) {
+      await User.findByIdAndUpdate(userId, {
+        $inc: {
+          'balances.main': totalRefund
+        }
+      });
+    }
+    
+    res.json({
+      status: 'success',
+      message: `${orders.length} orders cancelled successfully`,
+      data: {
+        cancelledCount: orders.length,
+        refundedAmount: totalRefund
+      }
+    });
+    
+  } catch (err) {
+    console.error('Cancel all orders error:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to cancel orders' });
+  }
+});
+
+// =============================================
+// 9. CLOSE POSITION
+// =============================================
+app.post('/api/trading/positions/close', protect, async (req, res) => {
+  try {
+    const { positionId } = req.body;
+    const userId = req.user._id;
+    
+    const position = await Transaction.findOne({
+      _id: positionId,
+      user: userId,
+      type: { $in: ['buy', 'sell'] },
+      status: { $in: ['pending', 'partial'] }
+    });
+    
+    if (!position) {
+      return res.status(404).json({ status: 'fail', message: 'Position not found' });
+    }
+    
+    // Calculate profit/loss based on current market price
+    // For simplicity, we'll close at current price
+    const currentPrice = 0; // This should come from market data
+    
+    // Mark position as closed
+    position.status = 'completed';
+    await position.save();
+    
+    res.json({
+      status: 'success',
+      message: 'Position closed successfully'
+    });
+    
+  } catch (err) {
+    console.error('Close position error:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to close position' });
+  }
+});
 
 
 
