@@ -7139,7 +7139,41 @@ app.get('/api/admin/deposits/:id', adminProtect, async (req, res) => {
   }
 });
 
-// Admin Approve Deposit Endpoint - ENHANCED WITH EMAIL AND LOG
+
+
+
+
+
+// Admin Get Withdrawal Details Endpoint
+app.get('/api/admin/withdrawals/:id', adminProtect, async (req, res) => {
+  try {
+    const withdrawal = await Transaction.findById(req.params.id)
+      .populate('user', 'firstName lastName email')
+      .lean();
+    
+    if (!withdrawal || withdrawal.type !== 'withdrawal') {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Withdrawal not found'
+      });
+    }
+    
+    res.status(200).json({
+      status: 'success',
+      data: { withdrawal }
+    });
+  } catch (err) {
+    console.error('Admin get withdrawal error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch withdrawal details'
+    });
+  }
+});
+
+
+
+// Admin Approve Deposit Endpoint - FIXED VERSION
 app.post('/api/admin/deposits/:id/approve', adminProtect, [
   body('notes').optional().trim()
 ], async (req, res) => {
@@ -7184,8 +7218,10 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
     deposit.adminNotes = notes;
     await deposit.save();
 
-    // ✅ CREATE LOG FOR DEPOSIT APPROVAL
+    // Get device info for exact location
     const deviceInfo = await getUserDeviceInfo(req);
+    
+    // ✅ CREATE LOG FOR DEPOSIT APPROVAL - FIXED STRUCTURE
     await UserLog.create({
       user: user._id,
       username: user.email,
@@ -7197,17 +7233,35 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       userAgent: req.headers['user-agent'] || 'Unknown',
       deviceInfo: {
         type: getDeviceType(req),
-        os: getOSFromUserAgent(req.headers['user-agent']),
-        browser: getBrowserFromUserAgent(req.headers['user-agent'])
+        os: {
+          name: getOSFromUserAgent(req.headers['user-agent']),
+          version: 'Unknown'
+        },
+        browser: {
+          name: getBrowserFromUserAgent(req.headers['user-agent']),
+          version: 'Unknown'
+        },
+        platform: req.headers['user-agent'] || 'Unknown',
+        language: req.headers['accept-language'] || 'Unknown',
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
       },
       location: {
         ip: getRealClientIP(req),
-        country: deviceInfo.locationDetails?.country || 'Unknown',
+        country: {
+          name: deviceInfo.locationDetails?.country || 'Unknown',
+          code: deviceInfo.locationDetails?.country || 'Unknown'
+        },
+        region: {
+          name: deviceInfo.locationDetails?.region || 'Unknown',
+          code: deviceInfo.locationDetails?.region || 'Unknown'
+        },
         city: deviceInfo.locationDetails?.city || 'Unknown',
-        region: deviceInfo.locationDetails?.region || 'Unknown',
-        exactLocation: deviceInfo.exactLocation,
+        postalCode: deviceInfo.locationDetails?.postalCode || 'Unknown',
         latitude: deviceInfo.locationDetails?.latitude,
-        longitude: deviceInfo.locationDetails?.longitude
+        longitude: deviceInfo.locationDetails?.longitude,
+        timezone: deviceInfo.locationDetails?.timezone || 'Unknown',
+        isp: deviceInfo.locationDetails?.isp || 'Unknown',
+        exactLocation: deviceInfo.exactLocation
       },
       status: 'success',
       metadata: {
@@ -7216,7 +7270,8 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
         reference: deposit.reference,
         adminId: req.admin._id,
         adminName: req.admin.name,
-        adminNotes: notes
+        adminNotes: notes,
+        processedAt: deposit.processedAt
       },
       relatedEntity: deposit._id,
       relatedEntityModel: 'Transaction'
@@ -7239,6 +7294,9 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       // Don't fail the deposit approval if email fails
     }
     
+    // ✅ TRIGGER RESTRICTION CHECK ON TRANSACTION COMPLETION
+    await AccountRestrictions.checkAndUpdateRestrictions(user._id, 'transaction_completion');
+    
     res.status(200).json({
       status: 'success',
       message: 'Deposit approved successfully'
@@ -7252,12 +7310,13 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
     console.error('Admin approve deposit error:', err);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to approve deposit'
+      message: 'Failed to approve deposit',
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   }
 });
 
-// Admin Reject Deposit Endpoint - ENHANCED WITH EMAIL AND LOG
+// Admin Reject Deposit Endpoint - FIXED VERSION
 app.post('/api/admin/deposits/:id/reject', adminProtect, [
   body('reason').trim().notEmpty().withMessage('Rejection reason is required')
 ], async (req, res) => {
@@ -7295,8 +7354,10 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
     deposit.adminNotes = reason;
     await deposit.save();
 
-    // ✅ CREATE LOG FOR DEPOSIT REJECTION
+    // Get device info for exact location
     const deviceInfo = await getUserDeviceInfo(req);
+    
+    // ✅ CREATE LOG FOR DEPOSIT REJECTION - FIXED STRUCTURE
     await UserLog.create({
       user: deposit.user._id,
       username: deposit.user.email,
@@ -7308,17 +7369,35 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
       userAgent: req.headers['user-agent'] || 'Unknown',
       deviceInfo: {
         type: getDeviceType(req),
-        os: getOSFromUserAgent(req.headers['user-agent']),
-        browser: getBrowserFromUserAgent(req.headers['user-agent'])
+        os: {
+          name: getOSFromUserAgent(req.headers['user-agent']),
+          version: 'Unknown'
+        },
+        browser: {
+          name: getBrowserFromUserAgent(req.headers['user-agent']),
+          version: 'Unknown'
+        },
+        platform: req.headers['user-agent'] || 'Unknown',
+        language: req.headers['accept-language'] || 'Unknown',
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
       },
       location: {
         ip: getRealClientIP(req),
-        country: deviceInfo.locationDetails?.country || 'Unknown',
+        country: {
+          name: deviceInfo.locationDetails?.country || 'Unknown',
+          code: deviceInfo.locationDetails?.country || 'Unknown'
+        },
+        region: {
+          name: deviceInfo.locationDetails?.region || 'Unknown',
+          code: deviceInfo.locationDetails?.region || 'Unknown'
+        },
         city: deviceInfo.locationDetails?.city || 'Unknown',
-        region: deviceInfo.locationDetails?.region || 'Unknown',
-        exactLocation: deviceInfo.exactLocation,
+        postalCode: deviceInfo.locationDetails?.postalCode || 'Unknown',
         latitude: deviceInfo.locationDetails?.latitude,
-        longitude: deviceInfo.locationDetails?.longitude
+        longitude: deviceInfo.locationDetails?.longitude,
+        timezone: deviceInfo.locationDetails?.timezone || 'Unknown',
+        isp: deviceInfo.locationDetails?.isp || 'Unknown',
+        exactLocation: deviceInfo.exactLocation
       },
       status: 'failed',
       metadata: {
@@ -7361,39 +7440,13 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
     console.error('Admin reject deposit error:', err);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to reject deposit'
+      message: 'Failed to reject deposit',
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   }
 });
 
-// Admin Get Withdrawal Details Endpoint
-app.get('/api/admin/withdrawals/:id', adminProtect, async (req, res) => {
-  try {
-    const withdrawal = await Transaction.findById(req.params.id)
-      .populate('user', 'firstName lastName email')
-      .lean();
-    
-    if (!withdrawal || withdrawal.type !== 'withdrawal') {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Withdrawal not found'
-      });
-    }
-    
-    res.status(200).json({
-      status: 'success',
-      data: { withdrawal }
-    });
-  } catch (err) {
-    console.error('Admin get withdrawal error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch withdrawal details'
-    });
-  }
-});
-
-// Admin Approve Withdrawal Endpoint - ENHANCED WITH EMAIL AND LOG
+// Admin Approve Withdrawal Endpoint - FIXED VERSION
 app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
   body('notes').optional().trim(),
   body('txid').optional().trim()
@@ -7447,8 +7500,10 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
     }
     await withdrawal.save();
 
-    // ✅ CREATE LOG FOR WITHDRAWAL APPROVAL
+    // Get device info for exact location
     const deviceInfo = await getUserDeviceInfo(req);
+    
+    // ✅ CREATE LOG FOR WITHDRAWAL APPROVAL - FIXED STRUCTURE
     await UserLog.create({
       user: withdrawal.user._id,
       username: withdrawal.user.email,
@@ -7460,17 +7515,35 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
       userAgent: req.headers['user-agent'] || 'Unknown',
       deviceInfo: {
         type: getDeviceType(req),
-        os: getOSFromUserAgent(req.headers['user-agent']),
-        browser: getBrowserFromUserAgent(req.headers['user-agent'])
+        os: {
+          name: getOSFromUserAgent(req.headers['user-agent']),
+          version: 'Unknown'
+        },
+        browser: {
+          name: getBrowserFromUserAgent(req.headers['user-agent']),
+          version: 'Unknown'
+        },
+        platform: req.headers['user-agent'] || 'Unknown',
+        language: req.headers['accept-language'] || 'Unknown',
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
       },
       location: {
         ip: getRealClientIP(req),
-        country: deviceInfo.locationDetails?.country || 'Unknown',
+        country: {
+          name: deviceInfo.locationDetails?.country || 'Unknown',
+          code: deviceInfo.locationDetails?.country || 'Unknown'
+        },
+        region: {
+          name: deviceInfo.locationDetails?.region || 'Unknown',
+          code: deviceInfo.locationDetails?.region || 'Unknown'
+        },
         city: deviceInfo.locationDetails?.city || 'Unknown',
-        region: deviceInfo.locationDetails?.region || 'Unknown',
-        exactLocation: deviceInfo.exactLocation,
+        postalCode: deviceInfo.locationDetails?.postalCode || 'Unknown',
         latitude: deviceInfo.locationDetails?.latitude,
-        longitude: deviceInfo.locationDetails?.longitude
+        longitude: deviceInfo.locationDetails?.longitude,
+        timezone: deviceInfo.locationDetails?.timezone || 'Unknown',
+        isp: deviceInfo.locationDetails?.isp || 'Unknown',
+        exactLocation: deviceInfo.exactLocation
       },
       status: 'success',
       metadata: {
@@ -7482,7 +7555,8 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
         adminId: req.admin._id,
         adminName: req.admin.name,
         adminNotes: notes,
-        txid: txid
+        txid: txid,
+        processedAt: withdrawal.processedAt
       },
       relatedEntity: withdrawal._id,
       relatedEntityModel: 'Transaction'
@@ -7509,6 +7583,9 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
       // Don't fail the withdrawal approval if email fails
     }
     
+    // ✅ TRIGGER RESTRICTION CHECK ON TRANSACTION COMPLETION
+    await AccountRestrictions.checkAndUpdateRestrictions(withdrawal.user._id, 'transaction_completion');
+    
     res.status(200).json({
       status: 'success',
       message: 'Withdrawal approved successfully'
@@ -7522,17 +7599,13 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
     console.error('Admin approve withdrawal error:', err);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to approve withdrawal'
+      message: 'Failed to approve withdrawal',
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   }
 });
 
-
-
-
-
-
-// CORRECTED Admin Reject Withdrawal Endpoint - ENHANCED WITH EMAIL AND LOG
+// Admin Reject Withdrawal Endpoint - FIXED VERSION
 app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
   body('reason').trim().notEmpty().withMessage('Rejection reason is required')
 ], async (req, res) => {
@@ -7583,8 +7656,10 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
     withdrawal.adminNotes = reason;
     await withdrawal.save();
 
-    // ✅ CREATE LOG FOR WITHDRAWAL REJECTION
+    // Get device info for exact location
     const deviceInfo = await getUserDeviceInfo(req);
+    
+    // ✅ CREATE LOG FOR WITHDRAWAL REJECTION - FIXED STRUCTURE
     await UserLog.create({
       user: user._id,
       username: user.email,
@@ -7596,17 +7671,35 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
       userAgent: req.headers['user-agent'] || 'Unknown',
       deviceInfo: {
         type: getDeviceType(req),
-        os: getOSFromUserAgent(req.headers['user-agent']),
-        browser: getBrowserFromUserAgent(req.headers['user-agent'])
+        os: {
+          name: getOSFromUserAgent(req.headers['user-agent']),
+          version: 'Unknown'
+        },
+        browser: {
+          name: getBrowserFromUserAgent(req.headers['user-agent']),
+          version: 'Unknown'
+        },
+        platform: req.headers['user-agent'] || 'Unknown',
+        language: req.headers['accept-language'] || 'Unknown',
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
       },
       location: {
         ip: getRealClientIP(req),
-        country: deviceInfo.locationDetails?.country || 'Unknown',
+        country: {
+          name: deviceInfo.locationDetails?.country || 'Unknown',
+          code: deviceInfo.locationDetails?.country || 'Unknown'
+        },
+        region: {
+          name: deviceInfo.locationDetails?.region || 'Unknown',
+          code: deviceInfo.locationDetails?.region || 'Unknown'
+        },
         city: deviceInfo.locationDetails?.city || 'Unknown',
-        region: deviceInfo.locationDetails?.region || 'Unknown',
-        exactLocation: deviceInfo.exactLocation,
+        postalCode: deviceInfo.locationDetails?.postalCode || 'Unknown',
         latitude: deviceInfo.locationDetails?.latitude,
-        longitude: deviceInfo.locationDetails?.longitude
+        longitude: deviceInfo.locationDetails?.longitude,
+        timezone: deviceInfo.locationDetails?.timezone || 'Unknown',
+        isp: deviceInfo.locationDetails?.isp || 'Unknown',
+        exactLocation: deviceInfo.exactLocation
       },
       status: 'failed',
       metadata: {
@@ -7651,16 +7744,11 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
     console.error('Admin reject withdrawal error:', err);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to reject withdrawal'
+      message: 'Failed to reject withdrawal',
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   }
 });
-
-
-
-
-
-
 
 
 
