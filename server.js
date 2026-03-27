@@ -10893,42 +10893,6 @@ app.get('/api/user/restriction-status', protect, async (req, res) => {
 
 
 
-// Keep the existing server start code
-const PORT = process.env.PORT || 3000;
-const server = app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log('Email system configured with INFO and SUPPORT emails');
-  console.log('Location tracking configured for exact location (not approximate)');
-  console.log('Restriction system integrated with user messaging');
-  console.log('Log and email system active for:');
-  console.log('  - Investments (creation and maturity)');
-  console.log('  - Deposits and withdrawals (requests and admin actions)');
-  console.log('  - Login attempts');
-  console.log('  - Admin approvals/declines');
-  console.log('  - KYC approvals/declines');
-  console.log('  - Restrictions (application and lifting)');
-});
-
-// WebSocket setup
-setupWebSocketServer(server);
-
-// Handle unhandled promise rejections
-process.on('unhandledRejection', (err) => {
-  console.error('UNHANDLED REJECTION! 💥 Shutting down...');
-  console.error(err.name, err.message);
-  server.close(() => {
-    process.exit(1);
-  });
-});
-
-// Handle uncaught exceptions
-process.on('uncaughtException', (err) => {
-  console.error('UNCAUGHT EXCEPTION! 💥 Shutting down...');
-  console.error(err.name, err.message);
-  process.exit(1);
-});
-
-
 
 
 
