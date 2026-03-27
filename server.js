@@ -3186,15 +3186,7 @@ const convertToFiat = async (cryptoAmount, asset) => {
   return cryptoAmount * rate;
 };
 
-const sendEmail = async (options) => {
-  try {
-    const mailOptions = {
-      from: `BitHash <${process.env.EMAIL_INFO_USER}>`,
-      to: options.email,
-      subject: options.subject,
-      text: options.message,
-      html: options.html
-    };
+
 
     await infoTransporter.sendMail(mailOptions);
     console.log('Email sent successfully via INFO email');
