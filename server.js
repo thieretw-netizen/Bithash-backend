@@ -21730,338 +21730,590 @@ app.post('/api/withdrawals/confirm-gas-payment', protect, async (req, res) => {
 });
 
 
+
+
+
+
+
+
+
+
+
 // =============================================
-// UPDATED FRONTEND FUNCTIONS FOR ORDERS
+// COMPLETE TRADING ENDPOINTS - FROM SCRATCH
 // =============================================
 
-async function loadUserOrders() {
-    if (!isAuthenticated) {
-        userOrders = [];
-        renderOrders();
-        return;
-    }
-
-    if (!checkRateLimit('request')) {
-        return;
-    }
-
-    try {
-        const token = localStorage.getItem('jwtToken');
-        const response = await fetch(`${CONFIG.BACKEND_URL}${CONFIG.USER_ORDERS_ENDPOINT}?symbol=${currentPair}`, {
-            headers: { 
-                'Authorization': `Bearer ${token}`,
-                'X-Rate-Limit': CONFIG.RATE_LIMIT.MAX_REQUESTS_PER_MINUTE.toString()
-            }
-        });
-
-        if (response.ok) {
-            const data = await response.json();
-            userOrders = data.data?.all || [];
-            console.log('📊 Loaded orders:', userOrders.length);
-        } else {
-            userOrders = [];
-        }
-    } catch (error) {
-        console.error('Failed to load orders:', error);
-        userOrders = [];
+// =============================================
+// 1. GET USER BALANCE
+// =============================================
+app.get('/api/users/balances', protect, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ status: 'fail', message: 'User not found' });
     }
     
-    renderOrders();
-}
-
-async function loadUserTrades() {
-    if (!isAuthenticated) {
-        return;
-    }
-
-    if (!checkRateLimit('request')) return;
-
-    try {
-        const token = localStorage.getItem('jwtToken');
-        const response = await fetch(`${CONFIG.BACKEND_URL}${CONFIG.USER_TRADES_ENDPOINT}?symbol=${currentPair}`, {
-            headers: { 
-                'Authorization': `Bearer ${token}`,
-                'X-Rate-Limit': CONFIG.RATE_LIMIT.MAX_REQUESTS_PER_MINUTE.toString()
-            }
-        });
-
-        if (response.ok) {
-            const data = await response.json();
-            userTrades = data.data || [];
-            console.log('📊 Loaded trades:', userTrades.length);
+    res.json({
+      status: 'success',
+      data: {
+        balances: {
+          main: user.balances.main || 0,
+          matured: user.balances.matured || 0,
+          active: user.balances.active || 0,
+          savings: user.balances.savings || 0,
+          loan: user.balances.loan || 0
         }
-    } catch (error) {
-        console.error('Failed to load user trades:', error);
-    }
-}
-
-function renderOrders() {
-    const tbody = safeGetElement('ordersTableBody');
-    if (!tbody) return;
-    
-    let filteredOrders = [];
-    let title = '';
-    
-    if (currentOrdersTab === 'open') {
-        filteredOrders = userOrders.filter(o => 
-            o.status === 'pending' || o.status === 'partial'
-        );
-        title = 'Open Orders';
-    } 
-    else if (currentOrdersTab === 'history') {
-        filteredOrders = userOrders.filter(o => 
-            o.status === 'completed' || o.status === 'cancelled' || o.status === 'failed'
-        );
-        title = 'Order History';
-    } 
-    else if (currentOrdersTab === 'trade') {
-        filteredOrders = userTrades.map(t => ({
-            ...t,
-            isTrade: true,
-            status: 'filled',
-            side: t.side,
-            price: t.price,
-            amount: t.amount,
-            total: t.total,
-            fee: t.fee,
-            createdAt: t.time || t.timestamp
-        }));
-        title = 'Trade History';
-    } 
-    else if (currentOrdersTab === 'funds') {
-        renderFunds();
-        return;
-    }
-
-    // Apply filter
-    if (currentFilter !== 'all' && currentOrdersTab !== 'trade') {
-        filteredOrders = filteredOrders.filter(o => o.side === currentFilter);
-    }
-
-    // Pagination
-    const start = (ordersPage - 1) * CONFIG.ORDERS_PER_PAGE;
-    const end = start + CONFIG.ORDERS_PER_PAGE;
-    const ordersToShow = filteredOrders.slice(start, end);
-
-    if (ordersToShow.length === 0) {
-        tbody.innerHTML = `
-            <tr>
-                <td colspan="11" style="text-align: center; padding: var(--spacing-xl); color: var(--gray);">
-                    <i class="fas fa-inbox" style="font-size: 2rem; margin-bottom: var(--spacing-md); display: block; opacity: 0.5;"></i>
-                    No ${title} found
-                </td>
-            </tr>
-        `;
-        
-        safeSetTextContent('ordersCount', `0 ${title}`);
-        return;
-    }
-
-    let html = '';
-    ordersToShow.forEach(order => {
-        const date = new Date(order.createdAt || order.time || Date.now()).toLocaleString();
-        const sideClass = order.side === 'buy' ? 'order-side-buy' : 'order-side-sell';
-        let statusClass = 'status-pending';
-        let status = order.status || (order.isTrade ? 'filled' : 'pending');
-        
-        if (status === 'filled' || status === 'completed') statusClass = 'status-filled';
-        if (status === 'cancelled') statusClass = 'status-cancelled';
-        if (status === 'partial') statusClass = 'status-partial';
-        if (status === 'expired') statusClass = 'status-expired';
-
-        const orderSymbol = order.symbol || currentPair;
-        const orderType = order.type || 'limit';
-        const orderSide = order.side || 'buy';
-        const orderPrice = order.price || 0;
-        const orderAmount = order.amount || 0;
-        const orderFilled = order.filled || (order.isTrade ? order.amount : 0);
-        const orderTotal = order.total || (order.price * order.amount);
-        
-        let pnlHtml = '-';
-        if ((status === 'filled' || status === 'completed') && orderSide && orderPrice && currentPrice) {
-            const pnlValue = orderSide === 'buy' 
-                ? (currentPrice - orderPrice) * orderAmount
-                : (orderPrice - currentPrice) * orderAmount;
-            const pnlPercent = orderPrice > 0 ? (pnlValue / (orderPrice * orderAmount)) * 100 : 0;
-            const isProfit = pnlValue >= 0;
-            pnlHtml = `
-                <span class="${isProfit ? 'pnl-positive' : 'pnl-negative'}">
-                    ${isProfit ? '+' : ''}${formatUSD(pnlValue)} (${isProfit ? '+' : ''}${Math.abs(pnlPercent).toFixed(2)}%)
-                </span>
-            `;
-        }
-
-        const showCancel = (status === 'pending' || status === 'partial') && !order.isTrade && currentOrdersTab === 'open';
-
-        html += `
-            <tr>
-                <td>${date}</td>
-                <td><span style="font-weight: 500;">${orderSymbol}</span></td>
-                <td>${orderType.charAt(0).toUpperCase() + orderType.slice(1)}</td>
-                <td class="${sideClass}">${orderSide.toUpperCase()}</td>
-                <td>${formatUSD(orderPrice)}</td>
-                <td>${formatNumber(orderAmount)}</td>
-                <td>${formatNumber(orderFilled)}</td>
-                <td>${formatUSD(orderTotal)}</td>
-                <td>${pnlHtml}</td>
-                <td><span class="order-status-badge ${statusClass}">${order.isTrade ? 'Filled' : status.toUpperCase()}</span></td>
-                <td>
-                    ${showCancel ? 
-                        `<button class="cancel-order-btn" onclick="cancelOrder('${order.id || order.orderId}')">Cancel</button>` : 
-                        '-'}
-                </td>
-            </tr>
-        `;
+      }
     });
+  } catch (err) {
+    console.error('Get balances error:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch balances' });
+  }
+});
 
-    tbody.innerHTML = html;
-
-    const totalPages = Math.ceil(filteredOrders.length / CONFIG.ORDERS_PER_PAGE);
-    safeSetTextContent('ordersPageInfo', `${ordersPage}/${totalPages || 1}`);
-    safeSetTextContent('ordersCount', `${filteredOrders.length} ${title}`);
+// =============================================
+// 2. GET USER ORDERS
+// =============================================
+app.get('/api/trading/orders', protect, async (req, res) => {
+  try {
+    const { symbol, status, limit = 100 } = req.query;
+    const userId = req.user._id;
     
-    const prevBtn = safeGetElement('ordersPrevBtn');
-    const nextBtn = safeGetElement('ordersNextBtn');
+    let query = { 
+      user: userId,
+      type: { $in: ['buy', 'sell'] }
+    };
     
-    if (prevBtn) prevBtn.disabled = ordersPage === 1;
-    if (nextBtn) nextBtn.disabled = ordersPage === totalPages || totalPages === 0;
-}
-
-// Also update the placeOrder function to refresh orders immediately
-async function placeOrder() {
-    if (isOrderProcessing) {
-        showNotification('warning', 'Order Processing', 'Please wait for your previous order to complete');
-        return;
-    }
-
-    if (!isAuthenticated) {
-        showAuthModal();
-        return;
-    }
-
-    if (!checkRateLimit('order')) {
-        return;
-    }
-
-    const amountInput = safeGetElement('orderAmount');
-    const amount = amountInput ? parseFloat(amountInput.value) : 0;
-    
-    let price = currentPrice;
-    
-    if (currentOrderType === 'limit') {
-        const priceInput = safeGetElement('orderPrice');
-        price = priceInput ? parseFloat(priceInput.value) || currentPrice : currentPrice;
-    }
-
-    const fee = price * amount * 0.001;
-    const total = price * amount + fee;
-
-    if (!amount || amount <= 0) {
-        showNotification('error', 'Invalid Amount', 'Please enter a valid amount');
-        return;
-    }
-
-    if (total < CONFIG.MIN_TRADE_AMOUNT_USD) {
-        showNotification('error', 'Minimum Amount Required', `Minimum trade amount is $${CONFIG.MIN_TRADE_AMOUNT_USD}. Your total is $${total.toFixed(2)}`);
-        return;
-    }
-
-    const totalAvailable = userMainBalance + userMaturedBalance;
-    
-    if (currentOrderTab === 'buy' && total > totalAvailable) {
-        showNotification('error', 'Insufficient Balance', `You need ${formatUSD(total)} USDT to place this order (including fee)`);
-        return;
+    if (symbol) {
+      query['details.symbol'] = symbol;
     }
     
-    if (currentOrderTab === 'sell') {
-        const baseBalance = totalAvailable / currentPrice;
-        if (amount > baseBalance) {
-            showNotification('error', 'Insufficient Balance', `You need ${formatNumber(amount)} ${currentBaseAsset} to place this order. Available: ${formatNumber(baseBalance)} ${currentBaseAsset}`);
-            return;
+    const orders = await Transaction.find(query)
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit));
+    
+    const formattedOrders = orders.map(order => ({
+      id: order._id,
+      orderId: order._id,
+      symbol: order.details?.symbol || `${order.asset || 'BTC'}USDT`,
+      side: order.type,
+      type: order.details?.orderType || 'limit',
+      price: order.details?.price || (order.amount / (order.details?.amount || 1)),
+      amount: order.details?.amount || order.assetAmount || 1,
+      filled: order.status === 'completed' ? (order.details?.amount || order.assetAmount || 1) : 0,
+      total: order.amount,
+      status: order.status,
+      createdAt: order.createdAt,
+      timestamp: order.createdAt,
+      fee: order.fee || 0
+    }));
+    
+    res.json({
+      status: 'success',
+      data: formattedOrders
+    });
+  } catch (err) {
+    console.error('Get orders error:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch orders' });
+  }
+});
+
+// =============================================
+// 3. GET USER TRADES
+// =============================================
+app.get('/api/trading/trades', protect, async (req, res) => {
+  try {
+    const { symbol, limit = 100 } = req.query;
+    const userId = req.user._id;
+    
+    let query = { 
+      user: userId,
+      type: { $in: ['buy', 'sell'] },
+      status: 'completed'
+    };
+    
+    if (symbol) {
+      query['details.symbol'] = symbol;
+    }
+    
+    const trades = await Transaction.find(query)
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit));
+    
+    const formattedTrades = trades.map(trade => ({
+      id: trade._id,
+      tradeId: trade._id,
+      symbol: trade.details?.symbol || `${trade.asset || 'BTC'}USDT`,
+      side: trade.type,
+      price: trade.details?.price || (trade.amount / (trade.details?.amount || 1)),
+      amount: trade.details?.amount || trade.assetAmount || 1,
+      total: trade.amount,
+      fee: trade.fee || 0,
+      time: trade.createdAt,
+      timestamp: trade.createdAt,
+      isBuyerMaker: trade.type === 'buy'
+    }));
+    
+    res.json({
+      status: 'success',
+      data: formattedTrades
+    });
+  } catch (err) {
+    console.error('Get trades error:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch trades' });
+  }
+});
+
+// =============================================
+// 4. GET USER POSITIONS
+// =============================================
+app.get('/api/trading/positions', protect, async (req, res) => {
+  try {
+    const { symbol } = req.query;
+    const userId = req.user._id;
+    
+    const openOrders = await Transaction.find({
+      user: userId,
+      type: { $in: ['buy', 'sell'] },
+      status: { $in: ['pending', 'partial'] }
+    });
+    
+    const positions = [];
+    
+    for (const order of openOrders) {
+      const orderSymbol = order.details?.symbol || `${order.asset || 'BTC'}USDT`;
+      if (symbol && orderSymbol !== symbol) continue;
+      
+      const orderAmount = order.details?.amount || order.assetAmount || 1;
+      const orderPrice = order.details?.price || (order.amount / orderAmount);
+      
+      positions.push({
+        id: order._id,
+        positionId: order._id,
+        symbol: orderSymbol,
+        side: order.type,
+        size: orderAmount,
+        entryPrice: orderPrice,
+        markPrice: orderPrice,
+        margin: orderAmount * orderPrice * 0.1,
+        liquidationPrice: orderPrice * 0.8,
+        takeProfit: null,
+        stopLoss: null,
+        pnl: 0,
+        roe: 0
+      });
+    }
+    
+    res.json({
+      status: 'success',
+      data: positions
+    });
+  } catch (err) {
+    console.error('Get positions error:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch positions' });
+  }
+});
+
+// =============================================
+// 5. BUY ORDER
+// =============================================
+app.post('/api/trading/orders/buy', protect, async (req, res) => {
+  try {
+    const { symbol, type, price, amount } = req.body;
+    const userId = req.user._id;
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      return res.status(404).json({ status: 'fail', message: 'User not found' });
+    }
+    
+    const asset = symbol ? symbol.replace('USDT', '') : 'BTC';
+    const totalCost = price * amount;
+    const fee = totalCost * 0.001;
+    const totalWithFee = totalCost + fee;
+    
+    const totalAvailable = (user.balances.main || 0) + (user.balances.matured || 0);
+    
+    if (totalWithFee > totalAvailable) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Insufficient balance. Need ${totalWithFee.toFixed(2)} USDT. Available: ${totalAvailable.toFixed(2)} USDT`
+      });
+    }
+    
+    let mainDeduction = Math.min(user.balances.main || 0, totalWithFee);
+    let maturedDeduction = totalWithFee - mainDeduction;
+    
+    const updateQuery = {};
+    if (mainDeduction > 0) updateQuery['balances.main'] = -mainDeduction;
+    if (maturedDeduction > 0) updateQuery['balances.matured'] = -maturedDeduction;
+    
+    await User.findByIdAndUpdate(userId, { $inc: updateQuery });
+    
+    const reference = `BUY-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    
+    const transaction = await Transaction.create({
+      user: userId,
+      type: 'buy',
+      amount: totalCost,
+      asset: asset,
+      assetAmount: amount,
+      currency: 'USD',
+      status: 'completed',
+      method: asset,
+      reference: reference,
+      details: {
+        symbol: symbol,
+        orderType: type || 'market',
+        price: price,
+        amount: amount,
+        fee: fee,
+        totalWithFee: totalWithFee,
+        mainUsed: mainDeduction,
+        maturedUsed: maturedDeduction
+      },
+      fee: fee,
+      netAmount: totalCost,
+      exchangeRateAtTime: price,
+      buyDetails: {
+        asset: asset,
+        amountUSD: totalCost,
+        assetAmount: amount,
+        buyingPrice: price,
+        currentPrice: price
+      }
+    });
+    
+    const updatedUser = await User.findById(userId);
+    
+    res.json({
+      status: 'success',
+      message: 'Buy order executed successfully',
+      data: {
+        order: {
+          id: transaction._id,
+          orderId: transaction._id,
+          symbol: symbol,
+          side: 'buy',
+          type: type || 'market',
+          price: price,
+          amount: amount,
+          filled: amount,
+          total: totalCost,
+          fee: fee,
+          status: 'completed',
+          createdAt: transaction.createdAt
+        },
+        balances: {
+          main: updatedUser.balances.main || 0,
+          matured: updatedUser.balances.matured || 0
         }
-    }
-
-    isOrderProcessing = true;
-    const placeOrderBtn = safeGetElement('placeOrderBtn');
-    const mobilePlaceOrderBtn = safeGetElement('mobilePlaceOrderBtn');
+      }
+    });
     
-    if (placeOrderBtn) {
-        placeOrderBtn.disabled = true;
-        placeOrderBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+  } catch (err) {
+    console.error('Buy order error:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to place buy order' });
+  }
+});
+
+// =============================================
+// 6. SELL ORDER
+// =============================================
+app.post('/api/trading/orders/sell', protect, async (req, res) => {
+  try {
+    const { symbol, type, price, amount } = req.body;
+    const userId = req.user._id;
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      return res.status(404).json({ status: 'fail', message: 'User not found' });
     }
     
-    if (mobilePlaceOrderBtn) {
-        mobilePlaceOrderBtn.disabled = true;
-        mobilePlaceOrderBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+    const asset = symbol ? symbol.replace('USDT', '') : 'BTC';
+    const totalValue = price * amount;
+    const fee = totalValue * 0.001;
+    const netReceive = totalValue - fee;
+    
+    const reference = `SELL-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    
+    await User.findByIdAndUpdate(userId, {
+      $inc: { 'balances.matured': netReceive }
+    });
+    
+    const transaction = await Transaction.create({
+      user: userId,
+      type: 'sell',
+      amount: totalValue,
+      asset: asset,
+      assetAmount: amount,
+      currency: 'USD',
+      status: 'completed',
+      method: asset,
+      reference: reference,
+      details: {
+        symbol: symbol,
+        orderType: type || 'market',
+        price: price,
+        amount: amount,
+        fee: fee,
+        netReceive: netReceive
+      },
+      fee: fee,
+      netAmount: netReceive,
+      exchangeRateAtTime: price,
+      sellDetails: {
+        asset: asset,
+        amountUSD: totalValue,
+        assetAmount: amount,
+        sellingPrice: price,
+        buyingPrice: price,
+        profitLoss: 0,
+        profitLossPercentage: 0
+      }
+    });
+    
+    const updatedUser = await User.findById(userId);
+    
+    res.json({
+      status: 'success',
+      message: 'Sell order executed successfully',
+      data: {
+        order: {
+          id: transaction._id,
+          orderId: transaction._id,
+          symbol: symbol,
+          side: 'sell',
+          type: type || 'market',
+          price: price,
+          amount: amount,
+          filled: amount,
+          total: totalValue,
+          fee: fee,
+          netReceive: netReceive,
+          status: 'completed',
+          createdAt: transaction.createdAt
+        },
+        balances: {
+          main: updatedUser.balances.main || 0,
+          matured: updatedUser.balances.matured || 0
+        }
+      }
+    });
+    
+  } catch (err) {
+    console.error('Sell order error:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to place sell order' });
+  }
+});
+
+// =============================================
+// 7. CANCEL ORDER
+// =============================================
+app.post('/api/trading/orders/cancel', protect, async (req, res) => {
+  try {
+    const { orderId } = req.body;
+    const userId = req.user._id;
+    
+    const order = await Transaction.findOne({
+      _id: orderId,
+      user: userId,
+      status: { $in: ['pending', 'partial'] }
+    });
+    
+    if (!order) {
+      return res.status(404).json({ status: 'fail', message: 'Order not found or already completed' });
     }
-
-    try {
-        const endpoint = currentOrderTab === 'buy' ? CONFIG.BUY_ENDPOINT : CONFIG.SELL_ENDPOINT;
-        const token = localStorage.getItem('jwtToken');
-        
-        const orderData = {
-            symbol: currentPair,
-            type: currentOrderType,
-            price: price,
-            amount: amount
-        };
-
-        const response = await fetch(`${CONFIG.BACKEND_URL}${endpoint}`, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(orderData)
-        });
-
-        const result = await response.json();
-
-        if (response.ok) {
-            showNotification('success', 'Order Placed Successfully', 
-                `${currentOrderType.toUpperCase()} ${currentOrderTab} order for ${formatNumber(amount)} ${currentBaseAsset} has been placed`
-            );
-            
-            // Clear inputs
-            if (amountInput) amountInput.value = '';
-            const mobileAmountInput = safeGetElement('mobileOrderAmount');
-            if (mobileAmountInput) mobileAmountInput.value = '';
-            
-            const totalInput = safeGetElement('orderTotal');
-            if (totalInput) totalInput.value = '';
-            
-            const mobileTotalInput = safeGetElement('mobileOrderTotal');
-            if (mobileTotalInput) mobileTotalInput.value = '';
-            
-            // Refresh data
-            await loadUserBalance();
-            await loadUserOrders();
-            await loadUserTrades();
-            
-            // If we're in trade history tab, refresh trades
-            if (currentOrdersTab === 'trade') {
-                renderOrders();
-            }
-        } else {
-            showNotification('error', 'Order Failed', result.message || 'Could not place order');
-        }
-    } catch (error) {
-        console.error('Error placing order:', error);
-        showNotification('error', 'Error', 'Failed to place order');
-    } finally {
-        isOrderProcessing = false;
-        if (placeOrderBtn) {
-            placeOrderBtn.disabled = false;
-            placeOrderBtn.innerHTML = currentOrderTab === 'buy' ? `Buy / Long ${currentBaseAsset}` : `Sell / Short ${currentBaseAsset}`;
-        }
-        if (mobilePlaceOrderBtn) {
-            mobilePlaceOrderBtn.disabled = false;
-            mobilePlaceOrderBtn.innerHTML = currentOrderTab === 'buy' ? `Buy / Long ${currentBaseAsset}` : `Sell / Short ${currentBaseAsset}`;
-        }
+    
+    order.status = 'cancelled';
+    await order.save();
+    
+    if (order.type === 'buy') {
+      const totalRefund = order.details?.totalWithFee || order.amount;
+      await User.findByIdAndUpdate(userId, {
+        $inc: { 'balances.main': totalRefund }
+      });
     }
-}
+    
+    res.json({
+      status: 'success',
+      message: 'Order cancelled successfully'
+    });
+    
+  } catch (err) {
+    console.error('Cancel order error:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to cancel order' });
+  }
+});
 
+// =============================================
+// 8. CANCEL ALL ORDERS
+// =============================================
+app.post('/api/trading/orders/cancel-all', protect, async (req, res) => {
+  try {
+    const { symbol } = req.body;
+    const userId = req.user._id;
+    
+    const query = {
+      user: userId,
+      type: { $in: ['buy', 'sell'] },
+      status: { $in: ['pending', 'partial'] }
+    };
+    
+    if (symbol) {
+      query['details.symbol'] = symbol;
+    }
+    
+    const orders = await Transaction.find(query);
+    let totalRefund = 0;
+    
+    for (const order of orders) {
+      order.status = 'cancelled';
+      await order.save();
+      if (order.type === 'buy') {
+        totalRefund += order.details?.totalWithFee || order.amount;
+      }
+    }
+    
+    if (totalRefund > 0) {
+      await User.findByIdAndUpdate(userId, {
+        $inc: { 'balances.main': totalRefund }
+      });
+    }
+    
+    res.json({
+      status: 'success',
+      message: `${orders.length} orders cancelled successfully`,
+      data: {
+        cancelledCount: orders.length,
+        refundedAmount: totalRefund
+      }
+    });
+    
+  } catch (err) {
+    console.error('Cancel all orders error:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to cancel orders' });
+  }
+});
 
+// =============================================
+// 9. CLOSE POSITION
+// =============================================
+app.post('/api/trading/positions/close', protect, async (req, res) => {
+  try {
+    const { positionId } = req.body;
+    const userId = req.user._id;
+    
+    const position = await Transaction.findOne({
+      _id: positionId,
+      user: userId,
+      type: { $in: ['buy', 'sell'] },
+      status: { $in: ['pending', 'partial'] }
+    });
+    
+    if (!position) {
+      return res.status(404).json({ status: 'fail', message: 'Position not found' });
+    }
+    
+    let pnl = 0;
+    let refundAmount = 0;
+    
+    if (position.type === 'buy') {
+      refundAmount = position.details?.totalWithFee || position.amount;
+      pnl = 0;
+    } else {
+      refundAmount = position.details?.netReceive || position.netAmount;
+      pnl = 0;
+    }
+    
+    position.status = 'completed';
+    await position.save();
+    
+    if (refundAmount > 0) {
+      await User.findByIdAndUpdate(userId, {
+        $inc: { 'balances.matured': refundAmount }
+      });
+    }
+    
+    res.json({
+      status: 'success',
+      message: 'Position closed successfully',
+      data: {
+        pnl: pnl,
+        refunded: refundAmount
+      }
+    });
+    
+  } catch (err) {
+    console.error('Close position error:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to close position' });
+  }
+});
+
+// =============================================
+// 10. SET TAKE PROFIT / STOP LOSS
+// =============================================
+app.post('/api/trading/orders/tpsl', protect, async (req, res) => {
+  try {
+    const { orderId, takeProfit, stopLoss } = req.body;
+    const userId = req.user._id;
+    
+    const order = await Transaction.findOne({
+      _id: orderId,
+      user: userId,
+      status: { $in: ['pending', 'partial'] }
+    });
+    
+    if (!order) {
+      return res.status(404).json({ status: 'fail', message: 'Order not found' });
+    }
+    
+    order.details = {
+      ...order.details,
+      takeProfit: takeProfit,
+      stopLoss: stopLoss
+    };
+    
+    await order.save();
+    
+    res.json({
+      status: 'success',
+      message: 'TP/SL set successfully',
+      data: {
+        takeProfit: takeProfit,
+        stopLoss: stopLoss
+      }
+    });
+    
+  } catch (err) {
+    console.error('Set TP/SL error:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to set TP/SL' });
+  }
+});
+
+// =============================================
+// 11. GET USER ME (for authentication check)
+// =============================================
+app.get('/api/users/me', protect, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).select('-password');
+    res.json({
+      status: 'success',
+      data: {
+        user: {
+          id: user._id,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          email: user.email,
+          isVerified: user.isVerified
+        }
+      }
+    });
+  } catch (err) {
+    console.error('Get user error:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch user' });
+  }
+});
 
 
 
