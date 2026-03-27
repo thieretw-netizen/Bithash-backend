@@ -21734,49 +21734,12 @@ app.post('/api/withdrawals/confirm-gas-payment', protect, async (req, res) => {
 
 
 
-
-
-
 // =============================================
-// HELPER FUNCTIONS - ADD THESE FIRST
-// =============================================
-
-// Get device type from user agent
-function getDeviceType(req) {
-  const ua = req.headers['user-agent'] || '';
-  if (/mobile/i.test(ua)) return 'mobile';
-  if (/tablet/i.test(ua)) return 'tablet';
-  return 'desktop';
-}
-
-// Get OS from user agent
-function getOSFromUserAgent(ua) {
-  if (!ua) return 'Unknown';
-  if (/windows/i.test(ua)) return 'Windows';
-  if (/mac/i.test(ua)) return 'MacOS';
-  if (/linux/i.test(ua)) return 'Linux';
-  if (/android/i.test(ua)) return 'Android';
-  if (/ios|iphone|ipad/i.test(ua)) return 'iOS';
-  return 'Unknown';
-}
-
-// Get browser from user agent
-function getBrowserFromUserAgent(ua) {
-  if (!ua) return 'Unknown';
-  if (/edg/i.test(ua)) return 'Edge';
-  if (/chrome/i.test(ua)) return 'Chrome';
-  if (/safari/i.test(ua)) return 'Safari';
-  if (/firefox/i.test(ua)) return 'Firefox';
-  if (/opera/i.test(ua)) return 'Opera';
-  return 'Unknown';
-}
-
-// =============================================
-// TRADING ENDPOINTS - FIXED VERSION
+// TRADING ENDPOINTS - USING EXISTING HELPER FUNCTIONS
 // =============================================
 
 // =============================================
-// 1. GET USER ME - Add this if missing
+// 1. GET USER ME
 // =============================================
 app.get('/api/users/me', protect, async (req, res) => {
   try {
@@ -21982,7 +21945,7 @@ app.get('/api/trading/positions', protect, async (req, res) => {
 });
 
 // =============================================
-// 6. BUY ORDER - WITH RESTRICTION CHECKS
+// 6. BUY ORDER
 // =============================================
 app.post('/api/trading/orders/buy', protect, async (req, res) => {
   try {
@@ -21998,7 +21961,7 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
     const fee = totalCost * 0.001;
     const totalWithFee = totalCost + fee;
     
-    // Check if user has sufficient balance
+    // Check if user has sufficient balance (use both main and matured)
     const totalAvailable = (user.balances?.main || 0) + (user.balances?.matured || 0);
     
     if (totalWithFee > totalAvailable) {
@@ -22105,7 +22068,7 @@ app.post('/api/trading/orders/sell', protect, async (req, res) => {
     // Generate reference
     const reference = `SELL-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     
-    // Add proceeds to matured wallet
+    // Add proceeds to matured wallet ONLY
     await User.findByIdAndUpdate(userId, {
       $inc: {
         'balances.matured': netReceive
@@ -22301,7 +22264,6 @@ app.post('/api/trading/positions/close', protect, async (req, res) => {
     res.status(500).json({ status: 'error', message: 'Failed to close position: ' + err.message });
   }
 });
-
 
 
 
