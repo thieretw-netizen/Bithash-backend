@@ -21732,220 +21732,8 @@ app.post('/api/withdrawals/confirm-gas-payment', protect, async (req, res) => {
 
 
 
-
-
 // =============================================
-// TRADING ENDPOINTS - USING EXISTING HELPER FUNCTIONS
-// =============================================
-
-// =============================================
-// 1. GET USER ME
-// =============================================
-app.get('/api/users/me', protect, async (req, res) => {
-  try {
-    const user = await User.findById(req.user._id).select('-password');
-    res.json({
-      status: 'success',
-      data: {
-        user: {
-          id: user._id,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          email: user.email,
-          isVerified: user.isVerified
-        }
-      }
-    });
-  } catch (err) {
-    console.error('Get user error:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch user' });
-  }
-});
-
-// =============================================
-// 2. GET USER BALANCE
-// =============================================
-app.get('/api/users/balances', protect, async (req, res) => {
-  try {
-    const user = await User.findById(req.user._id);
-    if (!user) {
-      return res.status(404).json({ status: 'fail', message: 'User not found' });
-    }
-    
-    res.json({
-      status: 'success',
-      data: {
-        balances: {
-          main: user.balances?.main || 0,
-          matured: user.balances?.matured || 0,
-          active: user.balances?.active || 0,
-          savings: user.balances?.savings || 0,
-          loan: user.balances?.loan || 0
-        }
-      }
-    });
-  } catch (err) {
-    console.error('Get balances error:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch balances' });
-  }
-});
-
-// =============================================
-// 3. GET USER ORDERS
-// =============================================
-app.get('/api/trading/orders', protect, async (req, res) => {
-  try {
-    const { symbol, status, limit = 50 } = req.query;
-    const userId = req.user._id;
-    
-    let query = { 
-      user: userId,
-      type: { $in: ['buy', 'sell'] }
-    };
-    
-    if (symbol) {
-      query['details.symbol'] = symbol;
-    }
-    
-    if (status) {
-      if (status === 'open') {
-        query.status = { $in: ['pending', 'partial'] };
-      } else if (status === 'history') {
-        query.status = { $in: ['completed', 'cancelled', 'failed'] };
-      } else {
-        query.status = status;
-      }
-    }
-    
-    const orders = await Transaction.find(query)
-      .sort({ createdAt: -1 })
-      .limit(parseInt(limit));
-    
-    const formattedOrders = orders.map(order => ({
-      id: order._id,
-      symbol: order.details?.symbol || 'BTCUSDT',
-      side: order.type,
-      type: order.details?.orderType || 'limit',
-      price: order.details?.price || (order.amount / (order.details?.amount || 1)),
-      amount: order.details?.amount || 1,
-      filled: order.status === 'completed' ? (order.details?.amount || 1) : 0,
-      total: order.amount,
-      status: order.status,
-      createdAt: order.createdAt,
-      orderId: order._id
-    }));
-    
-    res.json({
-      status: 'success',
-      data: formattedOrders
-    });
-  } catch (err) {
-    console.error('Get orders error:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch orders' });
-  }
-});
-
-// =============================================
-// 4. GET USER TRADES
-// =============================================
-app.get('/api/trading/trades', protect, async (req, res) => {
-  try {
-    const { symbol, limit = 50 } = req.query;
-    const userId = req.user._id;
-    
-    let query = { 
-      user: userId,
-      type: { $in: ['buy', 'sell'] },
-      status: 'completed'
-    };
-    
-    if (symbol) {
-      query['details.symbol'] = symbol;
-    }
-    
-    const trades = await Transaction.find(query)
-      .sort({ createdAt: -1 })
-      .limit(parseInt(limit));
-    
-    const formattedTrades = trades.map(trade => ({
-      id: trade._id,
-      symbol: trade.details?.symbol || 'BTCUSDT',
-      side: trade.type,
-      price: trade.details?.price || (trade.amount / (trade.details?.amount || 1)),
-      amount: trade.details?.amount || 1,
-      total: trade.amount,
-      time: trade.createdAt,
-      isBuyerMaker: trade.type === 'buy'
-    }));
-    
-    res.json({
-      status: 'success',
-      data: formattedTrades
-    });
-  } catch (err) {
-    console.error('Get trades error:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch trades' });
-  }
-});
-
-// =============================================
-// 5. GET USER POSITIONS
-// =============================================
-app.get('/api/trading/positions', protect, async (req, res) => {
-  try {
-    const { symbol } = req.query;
-    const userId = req.user._id;
-    
-    // Get open orders that are pending/partial
-    const openOrders = await Transaction.find({
-      user: userId,
-      type: { $in: ['buy', 'sell'] },
-      status: { $in: ['pending', 'partial'] }
-    });
-    
-    // Calculate positions from open orders
-    const positionsMap = new Map();
-    
-    for (const order of openOrders) {
-      const orderSymbol = order.details?.symbol || 'BTCUSDT';
-      if (symbol && orderSymbol !== symbol) continue;
-      
-      if (!positionsMap.has(orderSymbol)) {
-        positionsMap.set(orderSymbol, {
-          id: order._id,
-          symbol: orderSymbol,
-          side: order.type,
-          size: 0,
-          entryPrice: 0,
-          margin: 0,
-          liquidationPrice: 0
-        });
-      }
-      
-      const position = positionsMap.get(orderSymbol);
-      const orderAmount = order.details?.amount || 1;
-      const orderPrice = order.details?.price || (order.amount / orderAmount);
-      
-      position.size += orderAmount;
-      position.entryPrice = ((position.entryPrice * (position.size - orderAmount)) + (orderPrice * orderAmount)) / position.size;
-      position.margin += orderAmount * orderPrice * 0.1;
-      position.liquidationPrice = orderPrice * 0.8;
-    }
-    
-    const positions = Array.from(positionsMap.values());
-    
-    res.json({
-      status: 'success',
-      data: positions
-    });
-  } catch (err) {
-    console.error('Get positions error:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch positions' });
-  }
-});
-
-// =============================================
-// 6. BUY ORDER
+// 6. BUY ORDER - FIXED WITH ASSET FIELD
 // =============================================
 app.post('/api/trading/orders/buy', protect, async (req, res) => {
   try {
@@ -21957,6 +21745,8 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
       return res.status(404).json({ status: 'fail', message: 'User not found' });
     }
     
+    // Extract asset from symbol (e.g., BTC from BTCUSDT)
+    const asset = symbol ? symbol.replace('USDT', '') : 'BTC';
     const totalCost = price * amount;
     const fee = totalCost * 0.001;
     const totalWithFee = totalCost + fee;
@@ -21988,14 +21778,16 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
     // Generate reference
     const reference = `BUY-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     
-    // Create transaction record
+    // Create transaction record with ALL required fields
     const transaction = await Transaction.create({
       user: userId,
       type: 'buy',
       amount: totalCost,
+      asset: asset,
+      assetAmount: amount,
       currency: 'USD',
       status: 'completed',
-      method: 'INTERNAL',
+      method: asset,
       reference: reference,
       details: {
         symbol: symbol,
@@ -22009,8 +21801,9 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
       },
       fee: fee,
       netAmount: totalCost,
+      exchangeRateAtTime: price,
       buyDetails: {
-        asset: symbol ? symbol.replace('USDT', '') : 'BTC',
+        asset: asset,
         amountUSD: totalCost,
         assetAmount: amount,
         buyingPrice: price,
@@ -22049,7 +21842,7 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
 });
 
 // =============================================
-// 7. SELL ORDER
+// 7. SELL ORDER - FIXED WITH ASSET FIELD
 // =============================================
 app.post('/api/trading/orders/sell', protect, async (req, res) => {
   try {
@@ -22061,6 +21854,8 @@ app.post('/api/trading/orders/sell', protect, async (req, res) => {
       return res.status(404).json({ status: 'fail', message: 'User not found' });
     }
     
+    // Extract asset from symbol (e.g., BTC from BTCUSDT)
+    const asset = symbol ? symbol.replace('USDT', '') : 'BTC';
     const totalValue = price * amount;
     const fee = totalValue * 0.001;
     const netReceive = totalValue - fee;
@@ -22075,14 +21870,16 @@ app.post('/api/trading/orders/sell', protect, async (req, res) => {
       }
     });
     
-    // Create transaction record
+    // Create transaction record with ALL required fields
     const transaction = await Transaction.create({
       user: userId,
       type: 'sell',
       amount: totalValue,
+      asset: asset,
+      assetAmount: amount,
       currency: 'USD',
       status: 'completed',
-      method: 'INTERNAL',
+      method: asset,
       reference: reference,
       details: {
         symbol: symbol,
@@ -22094,12 +21891,15 @@ app.post('/api/trading/orders/sell', protect, async (req, res) => {
       },
       fee: fee,
       netAmount: netReceive,
+      exchangeRateAtTime: price,
       sellDetails: {
-        asset: symbol ? symbol.replace('USDT', '') : 'BTC',
+        asset: asset,
         amountUSD: totalValue,
         assetAmount: amount,
         sellingPrice: price,
-        profitLoss: 0
+        buyingPrice: price,
+        profitLoss: 0,
+        profitLossPercentage: 0
       }
     });
     
@@ -22135,7 +21935,7 @@ app.post('/api/trading/orders/sell', protect, async (req, res) => {
 });
 
 // =============================================
-// 8. CANCEL ORDER
+// 8. CANCEL ORDER - FIXED
 // =============================================
 app.post('/api/trading/orders/cancel', protect, async (req, res) => {
   try {
@@ -22178,7 +21978,7 @@ app.post('/api/trading/orders/cancel', protect, async (req, res) => {
 });
 
 // =============================================
-// 9. CANCEL ALL ORDERS
+// 9. CANCEL ALL ORDERS - FIXED
 // =============================================
 app.post('/api/trading/orders/cancel-all', protect, async (req, res) => {
   try {
@@ -22232,7 +22032,7 @@ app.post('/api/trading/orders/cancel-all', protect, async (req, res) => {
 });
 
 // =============================================
-// 10. CLOSE POSITION
+// 10. CLOSE POSITION - FIXED
 // =============================================
 app.post('/api/trading/positions/close', protect, async (req, res) => {
   try {
@@ -22264,10 +22064,6 @@ app.post('/api/trading/positions/close', protect, async (req, res) => {
     res.status(500).json({ status: 'error', message: 'Failed to close position: ' + err.message });
   }
 });
-
-
-
-
 
 
 
