@@ -121,7 +121,7 @@ redis.on('connect', () => {
   console.log('Redis connected successfully');
 });
 
-// Helper function to get real client IP from request - captures exact and precise location
+// Helper function to get real client IP from request
 const getRealClientIP = (req) => {
   // Check X-Forwarded-For header first (this is what Render uses)
   const forwardedFor = req.headers['x-forwarded-for'];
@@ -219,7 +219,7 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb+srv://elvismwangike:JFJmHvP
   process.exit(1);
 });
 
-// Create transporter function for email with custom user/pass
+// NEW: Create two separate email transporters
 const createTransporter = (user, pass) => {
   return nodemailer.createTransport({
     host: process.env.EMAIL_HOST,
@@ -238,13 +238,13 @@ const createTransporter = (user, pass) => {
   });
 };
 
-// INFO email transporter - all automated emails will be sent from this
+// INFO email
 const infoTransporter = createTransporter(
   process.env.EMAIL_INFO_USER,
   process.env.EMAIL_INFO_PASS
 );
 
-// SUPPORT email transporter
+// SUPPORT email
 const supportTransporter = createTransporter(
   process.env.EMAIL_SUPPORT_USER,
   process.env.EMAIL_SUPPORT_PASS
@@ -344,7 +344,7 @@ const UserSchema = new mongoose.Schema({
     },
     theme: { type: String, enum: ['light', 'dark'], default: 'dark' }
   },
-  // NEW: Location tracking fields - captures exact and precise location
+  // NEW: Location tracking fields
   location: {
     lastKnown: {
       lat: { type: Number },
@@ -777,7 +777,7 @@ const UserLogSchema = new mongoose.Schema({
     deviceId: String
   },
 
-  // Enhanced Location Information - captures exact and precise location
+  // Enhanced Location Information
   location: {
     ip: String,
     country: {
@@ -2079,7 +2079,7 @@ const Loan = mongoose.model('Loan', LoanSchema);
 
 
 
-// Account Restrictions Schema
+// Account Restrictions Schema - Add this to your schemas
 const AccountRestrictionsSchema = new mongoose.Schema({
   withdraw_limit_no_kyc: { type: Number, default: null },
   invest_limit_no_kyc: { type: Number, default: null },
@@ -2160,7 +2160,7 @@ AccountRestrictionsSchema.statics.checkAndUpdateRestrictions = async function(us
     { upsert: true, new: true }
   );
   
-  // Send emails for lifted restrictions using INFO email
+  // Send emails for lifted restrictions
   if (restrictions.notify_users !== false) {
     if (changes.kyc_lifted) {
       await this.sendLiftedEmail(userId, 'kyc', restrictions.kyc_lifted_message);
@@ -2204,7 +2204,7 @@ AccountRestrictionsSchema.statics.getUserLimits = async function(userId) {
   return { withdrawal, investment };
 };
 
-// Send restriction applied email using INFO email
+// Send restriction applied email
 AccountRestrictionsSchema.statics.sendRestrictionEmail = async function(userId, data) {
   const user = await User.findById(userId).select('firstName lastName email');
   if (!user || !user.email) return;
@@ -2231,10 +2231,10 @@ AccountRestrictionsSchema.statics.sendRestrictionEmail = async function(userId, 
     </div>
   `;
   
-  await sendEmailViaInfo({ email: user.email, subject: 'Account Restrictions Applied - BitHash', html });
+  await sendEmail({ email: user.email, subject: 'Account Restrictions Applied - BitHash', html });
 };
 
-// Send restriction lifted email using INFO email
+// Send restriction lifted email
 AccountRestrictionsSchema.statics.sendLiftedEmail = async function(userId, type, message) {
   const user = await User.findById(userId).select('firstName lastName email');
   if (!user || !user.email) return;
@@ -2253,7 +2253,7 @@ AccountRestrictionsSchema.statics.sendLiftedEmail = async function(userId, type,
     </div>
   `;
   
-  await sendEmailViaInfo({ email: user.email, subject: 'Account Restrictions Lifted - BitHash', html });
+  await sendEmail({ email: user.email, subject: 'Account Restrictions Lifted - BitHash', html });
 };
 
 // User Restriction Status Schema - Track individual user restrictions
@@ -3163,8 +3163,8 @@ const convertToFiat = async (cryptoAmount, asset) => {
   return cryptoAmount * rate;
 };
 
-// NEW FUNCTION: Send email using INFO email (all automated emails)
-const sendEmailViaInfo = async (options) => {
+// UPDATED sendEmail function - NOW USING INFO EMAIL FOR ALL AUTOMATED EMAILS
+const sendEmail = async (options) => {
   try {
     const mailOptions = {
       from: `BitHash <${process.env.EMAIL_INFO_USER}>`,
@@ -3175,32 +3175,11 @@ const sendEmailViaInfo = async (options) => {
     };
 
     await infoTransporter.sendMail(mailOptions);
-    console.log('Email sent via INFO email successfully');
-    return true;
+    console.log('Email sent successfully via INFO email');
   } catch (err) {
-    console.error('Error sending email via INFO email:', err);
-    // Fallback to support email if INFO fails
-    try {
-      const fallbackOptions = {
-        from: `BitHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
-        to: options.email,
-        subject: options.subject,
-        text: options.message,
-        html: options.html
-      };
-      await supportTransporter.sendMail(fallbackOptions);
-      console.log('Email sent via SUPPORT email as fallback');
-      return true;
-    } catch (fallbackErr) {
-      console.error('Error sending email via SUPPORT email:', fallbackErr);
-      throw new Error('Failed to send email');
-    }
+    console.error('Error sending email:', err);
+    throw new Error('Failed to send email');
   }
-};
-
-// Keep the original sendEmail function for backward compatibility but redirect to info email
-const sendEmail = async (options) => {
-  return sendEmailViaInfo(options);
 };
 
 const getUserDeviceInfo = async (req) => {
@@ -5270,7 +5249,6 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
       return;
     }
 
-    // Use INFO email for all automated communications
     const mailOptions = {
       from: `"BitHash Capital" <${process.env.EMAIL_INFO_USER}>`,
       to: user.email,
@@ -5291,7 +5269,7 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
   }
 };
 
-// Keep the sendProfessionalEmail function with the same professional styling but use INFO email
+// Keep the sendProfessionalEmail function with the same professional styling
 const sendProfessionalEmail = async (options) => {
   try {
     const { email, subject, template, data } = options;
@@ -5491,7 +5469,6 @@ const sendProfessionalEmail = async (options) => {
       throw new Error(`Template ${template} not found`);
     }
 
-    // Use INFO email for professional emails
     const mailOptions = {
       from: `"BitHash Capital" <${process.env.EMAIL_INFO_USER}>`,
       to: email,
@@ -5741,21 +5718,10 @@ app.post('/api/auth/login', [
     // Use exact email for lookup - no normalization
     const user = await User.findOne({ email }).select('+password +twoFactorAuth.secret');
     if (!user || !(await bcrypt.compare(password, user.password))) {
-      // Log failed attempt with UserLog
-      await UserLog.create({
-        user: user ? user._id : null,
-        username: email,
-        email: email,
-        userFullName: 'Unknown',
-        action: 'login_attempt',
-        actionCategory: 'authentication',
-        ipAddress: getRealClientIP(req),
-        userAgent: req.headers['user-agent'] || 'Unknown',
-        status: 'failed',
-        metadata: {
-          error: 'Invalid credentials',
-          email: email
-        }
+      // Log failed attempt
+      await logUserActivity(req, 'login_attempt', 'failed', {
+        error: 'Invalid credentials',
+        email: email // Log exact email used
       });
       
       return res.status(401).json({
@@ -5765,20 +5731,10 @@ app.post('/api/auth/login', [
     }
 
     if (user.status !== 'active') {
-      await UserLog.create({
-        user: user._id,
-        username: user.email,
-        email: user.email,
-        userFullName: `${user.firstName} ${user.lastName}`,
-        action: 'login_attempt',
-        actionCategory: 'authentication',
-        ipAddress: getRealClientIP(req),
-        userAgent: req.headers['user-agent'] || 'Unknown',
-        status: 'failed',
-        metadata: {
-          error: 'Account suspended',
-          status: user.status
-        }
+      await logUserActivity(req, 'login_attempt', 'failed', {
+        error: 'Account suspended',
+        userId: user._id,
+        status: user.status
       });
       
       return res.status(401).json({
@@ -5830,39 +5786,17 @@ app.post('/api/auth/login', [
       }
     });
 
-    await UserLog.create({
-      user: user._id,
-      username: user.email,
-      email: user.email,
-      userFullName: `${user.firstName} ${user.lastName}`,
-      action: 'login_attempt',
-      actionCategory: 'authentication',
-      ipAddress: getRealClientIP(req),
-      userAgent: req.headers['user-agent'] || 'Unknown',
-      status: 'pending',
-      metadata: {
-        email: email,
-        method: 'otp_sent'
-      }
-    });
+    await logUserActivity(req, 'login_otp_sent', 'pending', {
+      email: email, // Log exact email used
+      userId: user._id
+    }, user);
 
   } catch (err) {
     console.error('Login error:', err);
     
-    await UserLog.create({
-      user: null,
-      username: req.body.email || 'Unknown',
-      email: req.body.email || 'Unknown',
-      userFullName: 'Unknown',
-      action: 'login_error',
-      actionCategory: 'authentication',
-      ipAddress: getRealClientIP(req),
-      userAgent: req.headers['user-agent'] || 'Unknown',
-      status: 'failed',
-      metadata: {
-        error: err.message,
-        email: req.body.email
-      }
+    await logUserActivity(req, 'login_error', 'failed', {
+      error: err.message,
+      email: req.body.email // Log exact email used
     });
 
     res.status(500).json({
@@ -6036,12 +5970,7 @@ app.post('/api/auth/google', async (req, res) => {
     try {
       user.lastLogin = new Date();
       const deviceInfo = await getUserDeviceInfo(req);
-      user.loginHistory.push({
-        ip: deviceInfo.ip,
-        device: deviceInfo.device,
-        location: deviceInfo.location,
-        timestamp: new Date()
-      });
+      user.loginHistory.push(deviceInfo);
       await user.save();
     } catch (updateError) {
       console.error('User update error:', updateError);
@@ -6966,7 +6895,7 @@ app.get('/api/admin/deposits/:id', adminProtect, async (req, res) => {
   }
 });
 
-// Admin Approve Deposit Endpoint - ENHANCED WITH EMAIL AND LOG
+// Admin Approve Deposit Endpoint - ENHANCED WITH EMAIL
 app.post('/api/admin/deposits/:id/approve', adminProtect, [
   body('notes').optional().trim()
 ], async (req, res) => {
@@ -7021,14 +6950,24 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       actionCategory: 'financial',
       ipAddress: getRealClientIP(req),
       userAgent: req.headers['user-agent'] || 'Unknown',
+      deviceInfo: {
+        type: getDeviceType(req),
+        os: getOSFromUserAgent(req.headers['user-agent']),
+        browser: getBrowserFromUserAgent(req.headers['user-agent'])
+      },
+      location: {
+        ip: getRealClientIP(req),
+        country: 'Detected',
+        city: 'Detected'
+      },
       status: 'success',
       metadata: {
         depositId: deposit._id,
         amount: deposit.amount,
         method: deposit.method,
-        reference: deposit.reference,
-        processedBy: req.admin.name,
-        processedAt: deposit.processedAt
+        adminNotes: notes,
+        adminId: req.admin._id,
+        adminName: req.admin.name
       },
       relatedEntity: deposit._id,
       relatedEntityModel: 'Transaction'
@@ -7036,6 +6975,19 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
 
     // ✅ SEND DEPOSIT APPROVED EMAIL
     try {
+      // Get real-time crypto price if applicable
+      let cryptoPrice = null;
+      let assetAmount = null;
+      let usdValue = deposit.amount;
+      
+      if (deposit.method && deposit.method !== 'BANK' && deposit.method !== 'CARD') {
+        cryptoPrice = await getCryptoPrice(deposit.method);
+        if (cryptoPrice) {
+          assetAmount = deposit.amount / cryptoPrice;
+          usdValue = deposit.amount;
+        }
+      }
+      
       await sendAutomatedEmail(user, 'deposit_approved', {
         name: user.firstName,
         amount: deposit.amount,
@@ -7043,7 +6995,10 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
         reference: deposit.reference,
         newBalance: user.balances.main,
         processedAt: deposit.processedAt,
-        asset: deposit.method !== 'BANK' && deposit.method !== 'CARD' ? deposit.method : 'USD'
+        asset: deposit.method !== 'BANK' && deposit.method !== 'CARD' ? deposit.method : 'USD',
+        assetAmount: assetAmount,
+        usdValue: usdValue,
+        cryptoPrice: cryptoPrice
       });
       console.log(`📧 Deposit approval email sent to ${user.email}`);
     } catch (emailError) {
@@ -7069,19 +7024,19 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
   }
 });
 
-// Admin Reject Deposit Endpoint - ENHANCED WITH EMAIL AND LOG
+// Admin Reject Deposit Endpoint - ENHANCED WITH EMAIL
 app.post('/api/admin/deposits/:id/reject', adminProtect, [
   body('reason').trim().notEmpty().withMessage('Rejection reason is required')
 ], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({
-      status: 'fail',
-      errors: errors.array()
-    });
-  }
-  
   try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        status: 'fail',
+        errors: errors.array()
+      });
+    }
+    
     const { reason } = req.body;
     
     // Find deposit
@@ -7117,15 +7072,24 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
       actionCategory: 'financial',
       ipAddress: getRealClientIP(req),
       userAgent: req.headers['user-agent'] || 'Unknown',
+      deviceInfo: {
+        type: getDeviceType(req),
+        os: getOSFromUserAgent(req.headers['user-agent']),
+        browser: getBrowserFromUserAgent(req.headers['user-agent'])
+      },
+      location: {
+        ip: getRealClientIP(req),
+        country: 'Detected',
+        city: 'Detected'
+      },
       status: 'failed',
       metadata: {
         depositId: deposit._id,
         amount: deposit.amount,
         method: deposit.method,
-        reference: deposit.reference,
         rejectionReason: reason,
-        processedBy: req.admin.name,
-        processedAt: new Date()
+        adminId: req.admin._id,
+        adminName: req.admin.name
       },
       relatedEntity: deposit._id,
       relatedEntityModel: 'Transaction'
@@ -7191,7 +7155,7 @@ app.get('/api/admin/withdrawals/:id', adminProtect, async (req, res) => {
   }
 });
 
-// Admin Approve Withdrawal Endpoint - ENHANCED WITH EMAIL AND LOG
+// Admin Approve Withdrawal Endpoint - ENHANCED WITH EMAIL AND REAL-TIME CRYPTO PRICE
 app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
   body('notes').optional().trim(),
   body('txid').optional().trim()
@@ -7255,18 +7219,26 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
       actionCategory: 'financial',
       ipAddress: getRealClientIP(req),
       userAgent: req.headers['user-agent'] || 'Unknown',
+      deviceInfo: {
+        type: getDeviceType(req),
+        os: getOSFromUserAgent(req.headers['user-agent']),
+        browser: getBrowserFromUserAgent(req.headers['user-agent'])
+      },
+      location: {
+        ip: getRealClientIP(req),
+        country: 'Detected',
+        city: 'Detected'
+      },
       status: 'success',
       metadata: {
         withdrawalId: withdrawal._id,
         amount: withdrawal.amount,
         asset: withdrawal.asset,
         assetAmount: withdrawal.assetAmount,
-        method: withdrawal.method,
-        reference: withdrawal.reference,
-        walletAddress: withdrawal.details?.withdrawalAddress || withdrawal.btcAddress,
-        txid: txid || withdrawal.details?.txid,
-        processedBy: req.admin.name,
-        processedAt: withdrawal.processedAt
+        adminNotes: notes,
+        txid: txid,
+        adminId: req.admin._id,
+        adminName: req.admin.name
       },
       relatedEntity: withdrawal._id,
       relatedEntityModel: 'Transaction'
@@ -7316,19 +7288,19 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
 
 
 
-// CORRECTED Admin Reject Withdrawal Endpoint - ENHANCED WITH EMAIL AND LOG
+// CORRECTED Admin Reject Withdrawal Endpoint - ENHANCED WITH EMAIL
 app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
   body('reason').trim().notEmpty().withMessage('Rejection reason is required')
 ], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({
-      status: 'fail',
-      errors: errors.array()
-    });
-  }
-  
   try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        status: 'fail',
+        errors: errors.array()
+      });
+    }
+    
     const { reason } = req.body;
     
     // Find withdrawal
@@ -7377,17 +7349,24 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
       actionCategory: 'financial',
       ipAddress: getRealClientIP(req),
       userAgent: req.headers['user-agent'] || 'Unknown',
+      deviceInfo: {
+        type: getDeviceType(req),
+        os: getOSFromUserAgent(req.headers['user-agent']),
+        browser: getBrowserFromUserAgent(req.headers['user-agent'])
+      },
+      location: {
+        ip: getRealClientIP(req),
+        country: 'Detected',
+        city: 'Detected'
+      },
       status: 'failed',
       metadata: {
         withdrawalId: withdrawal._id,
         amount: withdrawal.amount,
         asset: withdrawal.asset,
-        method: withdrawal.method,
-        reference: withdrawal.reference,
-        walletAddress: withdrawal.details?.withdrawalAddress || withdrawal.btcAddress,
         rejectionReason: reason,
-        processedBy: req.admin.name,
-        processedAt: new Date()
+        adminId: req.admin._id,
+        adminName: req.admin.name
       },
       relatedEntity: withdrawal._id,
       relatedEntityModel: 'Transaction'
@@ -8237,7 +8216,7 @@ app.get('/api/admin/kyc/submissions/:submissionId', adminProtect, restrictTo('su
   }
 });
 
-// Approve KYC submission - ENHANCED WITH EMAIL AND LOG
+// Approve KYC submission - ENHANCED WITH EMAIL
 app.post('/api/admin/kyc/submissions/:submissionId/approve', adminProtect, restrictTo('super', 'support'), [
   body('notes').optional().trim()
 ], async (req, res) => {
@@ -8291,19 +8270,26 @@ app.post('/api/admin/kyc/submissions/:submissionId/approve', adminProtect, restr
       actionCategory: 'verification',
       ipAddress: getRealClientIP(req),
       userAgent: req.headers['user-agent'] || 'Unknown',
+      deviceInfo: {
+        type: getDeviceType(req),
+        os: getOSFromUserAgent(req.headers['user-agent']),
+        browser: getBrowserFromUserAgent(req.headers['user-agent'])
+      },
+      location: {
+        ip: getRealClientIP(req),
+        country: 'Detected',
+        city: 'Detected'
+      },
       status: 'success',
       metadata: {
         kycId: kycSubmission._id,
-        approvedBy: req.admin.name,
-        approvedAt: new Date(),
-        notes: notes
+        adminId: req.admin._id,
+        adminName: req.admin.name,
+        adminNotes: notes
       },
       relatedEntity: kycSubmission._id,
       relatedEntityModel: 'KYC'
     });
-
-    // ✅ CHECK AND UPDATE RESTRICTIONS (lift KYC restrictions)
-    await AccountRestrictions.checkAndUpdateRestrictions(kycSubmission.user._id, 'kyc_approval');
 
     // ✅ SEND KYC APPROVED EMAIL
     try {
@@ -8338,7 +8324,7 @@ app.post('/api/admin/kyc/submissions/:submissionId/approve', adminProtect, restr
   }
 });
 
-// Reject KYC submission - ENHANCED WITH EMAIL AND LOG
+// Reject KYC submission - ENHANCED WITH EMAIL
 app.post('/api/admin/kyc/submissions/:submissionId/reject', adminProtect, restrictTo('super', 'support'), [
   body('reason').trim().notEmpty().withMessage('Rejection reason is required'),
   body('section').optional().isIn(['all', 'identity', 'address', 'facial']).withMessage('Invalid section')
@@ -8424,12 +8410,22 @@ app.post('/api/admin/kyc/submissions/:submissionId/reject', adminProtect, restri
       actionCategory: 'verification',
       ipAddress: getRealClientIP(req),
       userAgent: req.headers['user-agent'] || 'Unknown',
+      deviceInfo: {
+        type: getDeviceType(req),
+        os: getOSFromUserAgent(req.headers['user-agent']),
+        browser: getBrowserFromUserAgent(req.headers['user-agent'])
+      },
+      location: {
+        ip: getRealClientIP(req),
+        country: 'Detected',
+        city: 'Detected'
+      },
       status: 'failed',
       metadata: {
         kycId: kycSubmission._id,
-        rejectedBy: req.admin.name,
-        rejectedAt: new Date(),
-        reason: reason,
+        adminId: req.admin._id,
+        adminName: req.admin.name,
+        rejectionReason: reason,
         section: section
       },
       relatedEntity: kycSubmission._id,
@@ -9142,6 +9138,34 @@ app.post('/api/auth/verify-otp', [
     });
     await user.save();
 
+    // ✅ CREATE LOG FOR LOGIN ATTEMPT
+    await UserLog.create({
+      user: user._id,
+      username: user.email,
+      email: user.email,
+      userFullName: `${user.firstName} ${user.lastName}`,
+      action: 'login',
+      actionCategory: 'authentication',
+      ipAddress: deviceInfo.ip,
+      userAgent: deviceInfo.device,
+      deviceInfo: {
+        type: getDeviceType(req),
+        os: getOSFromUserAgent(req.headers['user-agent']),
+        browser: getBrowserFromUserAgent(req.headers['user-agent'])
+      },
+      location: {
+        ip: deviceInfo.ip,
+        country: deviceInfo.location?.split(', ')[2] || 'Unknown',
+        region: deviceInfo.location?.split(', ')[1] || 'Unknown',
+        city: deviceInfo.location?.split(', ')[0] || 'Unknown'
+      },
+      status: 'success',
+      metadata: {
+        method: 'otp',
+        rememberMe: req.body.rememberMe || false
+      }
+    });
+
     // Send login success email with device and location
     await sendAutomatedEmail(user, 'login_success', {
       name: user.firstName,
@@ -9175,32 +9199,10 @@ app.post('/api/auth/verify-otp', [
       }
     });
 
-    // ✅ CREATE LOG FOR SUCCESSFUL LOGIN
-    await UserLog.create({
-      user: user._id,
-      username: user.email,
-      email: user.email,
-      userFullName: `${user.firstName} ${user.lastName}`,
-      action: 'login',
-      actionCategory: 'authentication',
-      ipAddress: deviceInfo.ip,
-      userAgent: deviceInfo.device,
-      deviceInfo: {
-        type: getDeviceType(req),
-        os: getOSFromUserAgent(req.headers['user-agent']),
-        browser: getBrowserFromUserAgent(req.headers['user-agent'])
-      },
-      location: {
-        country: deviceInfo.location?.split(', ')[2] || 'Unknown',
-        region: deviceInfo.location?.split(', ')[1] || 'Unknown',
-        city: deviceInfo.location?.split(', ')[0] || 'Unknown'
-      },
-      status: 'success',
-      metadata: {
-        method: 'otp',
-        deviceInfo: deviceInfo
-      }
-    });
+    await logUserActivity(req, 'login', 'success', {
+      method: 'otp',
+      deviceInfo: deviceInfo
+    }, user);
 
   } catch (err) {
     console.error('OTP verification error:', err);
@@ -9624,6 +9626,67 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             exchangeRateAtTime: exchangeRate
         });
 
+        // ✅ CREATE LOG FOR WITHDRAWAL CREATION
+        await UserLog.create({
+            user: userId,
+            username: user.email,
+            email: user.email,
+            userFullName: `${user.firstName} ${user.lastName}`,
+            action: 'withdrawal_created',
+            actionCategory: 'financial',
+            ipAddress: getRealClientIP(req),
+            userAgent: req.headers['user-agent'] || 'Unknown',
+            deviceInfo: {
+                type: getDeviceType(req),
+                os: getOSFromUserAgent(req.headers['user-agent']),
+                browser: getBrowserFromUserAgent(req.headers['user-agent'])
+            },
+            location: {
+                ip: getRealClientIP(req),
+                country: 'Detected',
+                city: 'Detected'
+            },
+            status: 'pending',
+            metadata: {
+                amount: amount,
+                asset: asset,
+                assetAmount: assetAmount,
+                reference: reference,
+                walletAddress: walletAddress,
+                balanceSource: balanceSource,
+                gasFee: gasFeeInAsset,
+                gasFeeInUsd: gasFeeInUsd,
+                exchangeRate: exchangeRate,
+                btcGasFeeUsed: btcGasFeeAmount,
+                btcPriceAtTime: btcPrice,
+                assetPriceAtTime: targetAssetPrice
+            },
+            relatedEntity: transaction._id,
+            relatedEntityModel: 'Transaction'
+        });
+
+        // ✅ SEND WITHDRAWAL REQUEST EMAIL
+        try {
+            await sendAutomatedEmail(user, 'withdrawal_request', {
+                name: user.firstName,
+                amount: assetAmount,
+                asset: asset,
+                usdValue: amount,
+                fee: gasFeeInAsset,
+                feeUsd: gasFeeInUsd,
+                netAmount: assetAmount - gasFeeInAsset,
+                withdrawalAddress: walletAddress,
+                requestId: reference,
+                timestamp: new Date(),
+                exchangeRate: exchangeRate,
+                network: asset === 'USDT' ? 'ERC-20' : asset === 'BTC' ? 'Bitcoin' : 'Mainnet'
+            });
+            console.log(`📧 Withdrawal request email sent to ${user.email}`);
+        } catch (emailError) {
+            console.error('Failed to send withdrawal request email:', emailError);
+            // Don't fail the withdrawal if email fails
+        }
+
         // Deduct withdrawal amount from user balances (immediate hold)
         const updateQuery = {};
         
@@ -9644,56 +9707,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             $inc: updateQuery
         });
 
-        // ✅ CREATE LOG FOR WITHDRAWAL REQUEST
-        await UserLog.create({
-            user: userId,
-            username: user.email,
-            email: user.email,
-            userFullName: `${user.firstName} ${user.lastName}`,
-            action: 'withdrawal_created',
-            actionCategory: 'financial',
-            ipAddress: getRealClientIP(req),
-            userAgent: req.headers['user-agent'] || 'Unknown',
-            status: 'pending',
-            metadata: {
-                withdrawalId: transaction._id,
-                amount: amount,
-                asset: asset,
-                assetAmount: assetAmount,
-                reference: reference,
-                walletAddress: walletAddress,
-                balanceSource: balanceSource,
-                gasFee: gasFeeInAsset,
-                gasFeeInUsd: gasFeeInUsd,
-                exchangeRate: exchangeRate,
-                btcPrice: btcPrice,
-                assetPrice: targetAssetPrice
-            },
-            relatedEntity: transaction._id,
-            relatedEntityModel: 'Transaction'
-        });
-
-        // ✅ SEND WITHDRAWAL REQUEST EMAIL
-        try {
-            await sendAutomatedEmail(user, 'withdrawal_request', {
-                name: user.firstName,
-                amount: assetAmount,
-                asset: asset,
-                usdValue: amount,
-                fee: gasFeeInAsset,
-                feeUsd: gasFeeInUsd,
-                netAmount: assetAmount,
-                withdrawalAddress: walletAddress,
-                timestamp: new Date(),
-                requestId: reference,
-                network: asset === 'USDT' ? 'ERC-20' : asset === 'BTC' ? 'Bitcoin' : 'Mainnet'
-            });
-            console.log(`📧 Withdrawal request email sent to ${user.email}`);
-        } catch (emailError) {
-            console.error('Failed to send withdrawal request email:', emailError);
-        }
-
-        // Log activity
+        // Log activity with all withdrawal details
         await logActivity(
             'withdrawal_created',
             'Transaction',
@@ -10232,7 +10246,7 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
 
 
 // =============================================
-// ENDPOINT 1: USER LOCATION - ROBUST ENTERPRISE VERSION (captures exact and precise location)
+// ENDPOINT 1: USER LOCATION - ROBUST ENTERPRISE VERSION
 // =============================================
 app.post('/api/users/location', protect, async (req, res) => {
   try {
@@ -10514,9 +10528,6 @@ const scheduleDailyRestrictionChecks = () => {
 
 // Start scheduler after server starts
 setTimeout(scheduleDailyRestrictionChecks, 60000);
-
-
-
 
 
 
