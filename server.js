@@ -6380,7 +6380,7 @@ app.post('/api/auth/reset-password', [
 
 
 
-// Investment routes - ENHANCED VERSION WITH EMAIL NOTIFICATIONS AND LOG CREATION
+// Investment routes - ENHANCED VERSION WITH RESTRICTION CHECKS
 app.post('/api/investments', protect, [
   body('planId').notEmpty().withMessage('Plan ID is required').isMongoId().withMessage('Invalid Plan ID'),
   body('amount').isFloat({ min: 1 }).withMessage('Amount must be a positive number'),
@@ -6397,6 +6397,110 @@ app.post('/api/investments', protect, [
   try {
     const { planId, amount, balanceType } = req.body;
     const userId = req.user._id;
+
+    // ✅ CHECK RESTRICTIONS BEFORE ALLOWING INVESTMENT
+    const restrictions = await AccountRestrictions.getInstance();
+    const userRestrictionStatus = await UserRestrictionStatus.findOne({ user: userId });
+    
+    // Get user's KYC status
+    const kycStatus = await KYC.findOne({ user: userId });
+    const hasKYC = kycStatus && kycStatus.overallStatus === 'verified';
+    
+    // Get user's transaction history
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - (restrictions.inactivity_days || 30));
+    const hasRecentTx = await Transaction.findOne({
+      user: userId,
+      type: { $in: ['deposit', 'withdrawal'] },
+      status: 'completed',
+      createdAt: { $gte: cutoff }
+    });
+    
+    // Calculate limits
+    let withdrawalLimit = null;
+    let investmentLimit = null;
+    let restrictionMessage = null;
+    
+    // Check KYC restriction
+    if (!hasKYC && (restrictions.withdraw_limit_no_kyc !== null || restrictions.invest_limit_no_kyc !== null)) {
+      if (restrictions.invest_limit_no_kyc !== null && amount > restrictions.invest_limit_no_kyc) {
+        restrictionMessage = restrictions.kyc_restriction_reason || `Please complete your KYC verification. Investment limit without KYC: $${restrictions.invest_limit_no_kyc.toLocaleString()}`;
+        return res.status(403).json({
+          status: 'fail',
+          message: restrictionMessage,
+          restriction: {
+            type: 'kyc',
+            limit: restrictions.invest_limit_no_kyc,
+            reason: restrictions.kyc_restriction_reason
+          }
+        });
+      }
+      investmentLimit = restrictions.invest_limit_no_kyc;
+    }
+    
+    // Check transaction restriction (no recent deposits/withdrawals)
+    if (!hasRecentTx && (restrictions.withdraw_limit_no_txn !== null || restrictions.invest_limit_no_txn !== null)) {
+      if (restrictions.invest_limit_no_txn !== null && amount > restrictions.invest_limit_no_txn) {
+        restrictionMessage = restrictions.txn_restriction_reason || `Please complete at least one deposit or withdrawal. Investment limit without transaction activity: $${restrictions.invest_limit_no_txn.toLocaleString()}`;
+        return res.status(403).json({
+          status: 'fail',
+          message: restrictionMessage,
+          restriction: {
+            type: 'transaction',
+            limit: restrictions.invest_limit_no_txn,
+            reason: restrictions.txn_restriction_reason,
+            daysRequired: restrictions.inactivity_days
+          }
+        });
+      }
+      if (investmentLimit === null || (restrictions.invest_limit_no_txn !== null && restrictions.invest_limit_no_txn < investmentLimit)) {
+        investmentLimit = restrictions.invest_limit_no_txn;
+      }
+    }
+    
+    // If there's an active restriction in the database, enforce it
+    if (userRestrictionStatus) {
+      if (userRestrictionStatus.kyc_restricted && restrictions.invest_limit_no_kyc !== null && amount > restrictions.invest_limit_no_kyc) {
+        restrictionMessage = userRestrictionStatus.kyc_restriction_reason || restrictions.kyc_restriction_reason;
+        return res.status(403).json({
+          status: 'fail',
+          message: restrictionMessage,
+          restriction: {
+            type: 'kyc',
+            limit: restrictions.invest_limit_no_kyc,
+            reason: restrictionMessage
+          }
+        });
+      }
+      
+      if (userRestrictionStatus.transaction_restricted && restrictions.invest_limit_no_txn !== null && amount > restrictions.invest_limit_no_txn) {
+        restrictionMessage = userRestrictionStatus.transaction_restriction_reason || restrictions.txn_restriction_reason;
+        return res.status(403).json({
+          status: 'fail',
+          message: restrictionMessage,
+          restriction: {
+            type: 'transaction',
+            limit: restrictions.invest_limit_no_txn,
+            reason: restrictionMessage,
+            daysRequired: restrictions.inactivity_days
+          }
+        });
+      }
+    }
+    
+    // If we have an investment limit from any restriction, enforce it
+    if (investmentLimit !== null && amount > investmentLimit) {
+      restrictionMessage = `Your investment amount exceeds the current limit of $${investmentLimit.toLocaleString()}. Please complete KYC verification or make a deposit/withdrawal to increase your limit.`;
+      return res.status(403).json({
+        status: 'fail',
+        message: restrictionMessage,
+        restriction: {
+          type: investmentLimit === restrictions.invest_limit_no_kyc ? 'kyc' : 'transaction',
+          limit: investmentLimit,
+          reason: restrictionMessage
+        }
+      });
+    }
 
     // Verify plan exists and is active
     const plan = await Plan.findById(planId);
@@ -6510,17 +6614,35 @@ app.post('/api/investments', protect, [
       userAgent: req.headers['user-agent'] || 'Unknown',
       deviceInfo: {
         type: getDeviceType(req),
-        os: getOSFromUserAgent(req.headers['user-agent']),
-        browser: getBrowserFromUserAgent(req.headers['user-agent'])
+        os: {
+          name: getOSFromUserAgent(req.headers['user-agent']),
+          version: 'Unknown'
+        },
+        browser: {
+          name: getBrowserFromUserAgent(req.headers['user-agent']),
+          version: 'Unknown'
+        },
+        platform: req.headers['user-agent'] || 'Unknown',
+        language: req.headers['accept-language'] || 'Unknown',
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
       },
       location: {
         ip: getRealClientIP(req),
-        country: deviceInfo.locationDetails?.country || 'Unknown',
+        country: {
+          name: deviceInfo.locationDetails?.country || 'Unknown',
+          code: deviceInfo.locationDetails?.country || 'Unknown'
+        },
+        region: {
+          name: deviceInfo.locationDetails?.region || 'Unknown',
+          code: deviceInfo.locationDetails?.region || 'Unknown'
+        },
         city: deviceInfo.locationDetails?.city || 'Unknown',
-        region: deviceInfo.locationDetails?.region || 'Unknown',
-        exactLocation: deviceInfo.exactLocation,
+        postalCode: deviceInfo.locationDetails?.postalCode || 'Unknown',
         latitude: deviceInfo.locationDetails?.latitude,
-        longitude: deviceInfo.locationDetails?.longitude
+        longitude: deviceInfo.locationDetails?.longitude,
+        timezone: deviceInfo.locationDetails?.timezone || 'Unknown',
+        isp: deviceInfo.locationDetails?.isp || 'Unknown',
+        exactLocation: deviceInfo.exactLocation
       },
       status: 'success',
       metadata: {
@@ -6531,7 +6653,13 @@ app.post('/api/investments', protect, [
         expectedReturn: expectedReturn,
         duration: plan.duration,
         roiPercentage: plan.percentage,
-        endDate: endDate
+        endDate: endDate,
+        restrictionStatusAtTime: {
+          kyc_restricted: userRestrictionStatus?.kyc_restricted || false,
+          transaction_restricted: userRestrictionStatus?.transaction_restricted || false,
+          hasKYC: hasKYC,
+          hasRecentTx: !!hasRecentTx
+        }
       },
       relatedEntity: investment._id,
       relatedEntityModel: 'Investment'
@@ -6653,6 +6781,11 @@ app.post('/api/investments', protect, [
     });
   }
 });
+
+
+
+
+
 
 app.post('/api/investments/:id/complete', protect, async (req, res) => {
   try {
