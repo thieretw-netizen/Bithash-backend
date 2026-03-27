@@ -9544,8 +9544,11 @@ app.post('/api/auth/send-otp', [
   }
 });
 
+
+
+
 /**
- * POST /api/withdrawals/asset - Process asset withdrawal
+ * POST /api/withdrawals/asset - Process asset withdrawal (FIXED VERSION)
  */
 app.post('/api/withdrawals/asset', protect, async (req, res) => {
     try {
@@ -9903,8 +9906,22 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             $inc: updateQuery
         });
 
-        // ✅ CREATE LOG FOR WITHDRAWAL REQUEST
+        // Get device info for exact location
         const deviceInfo = await getUserDeviceInfo(req);
+        
+        // Get location details for exact location
+        let locationDetails = {
+            country: { name: deviceInfo.locationDetails?.country || 'Unknown', code: 'Unknown' },
+            region: { name: deviceInfo.locationDetails?.region || 'Unknown', code: 'Unknown' },
+            city: deviceInfo.locationDetails?.city || 'Unknown',
+            postalCode: deviceInfo.locationDetails?.postalCode || 'Unknown',
+            street: deviceInfo.locationDetails?.street || 'Unknown',
+            latitude: deviceInfo.locationDetails?.latitude,
+            longitude: deviceInfo.locationDetails?.longitude,
+            exactLocation: deviceInfo.exactLocation
+        };
+
+        // ✅ CREATE LOG FOR WITHDRAWAL REQUEST - FIXED STRUCTURE
         await UserLog.create({
             user: userId,
             username: user.email,
@@ -9916,17 +9933,35 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             userAgent: req.headers['user-agent'] || 'Unknown',
             deviceInfo: {
                 type: getDeviceType(req),
-                os: getOSFromUserAgent(req.headers['user-agent']),
-                browser: getBrowserFromUserAgent(req.headers['user-agent'])
+                os: {
+                    name: getOSFromUserAgent(req.headers['user-agent']),
+                    version: 'Unknown'
+                },
+                browser: {
+                    name: getBrowserFromUserAgent(req.headers['user-agent']),
+                    version: 'Unknown'
+                },
+                platform: req.headers['user-agent'] || 'Unknown',
+                language: req.headers['accept-language'] || 'Unknown',
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
             },
             location: {
                 ip: getRealClientIP(req),
-                country: deviceInfo.locationDetails?.country || 'Unknown',
+                country: {
+                    name: deviceInfo.locationDetails?.country || 'Unknown',
+                    code: deviceInfo.locationDetails?.country || 'Unknown'
+                },
+                region: {
+                    name: deviceInfo.locationDetails?.region || 'Unknown',
+                    code: deviceInfo.locationDetails?.region || 'Unknown'
+                },
                 city: deviceInfo.locationDetails?.city || 'Unknown',
-                region: deviceInfo.locationDetails?.region || 'Unknown',
-                exactLocation: deviceInfo.exactLocation,
+                postalCode: deviceInfo.locationDetails?.postalCode || 'Unknown',
                 latitude: deviceInfo.locationDetails?.latitude,
-                longitude: deviceInfo.locationDetails?.longitude
+                longitude: deviceInfo.locationDetails?.longitude,
+                timezone: deviceInfo.locationDetails?.timezone || 'Unknown',
+                isp: deviceInfo.locationDetails?.isp || 'Unknown',
+                exactLocation: deviceInfo.exactLocation
             },
             status: 'pending',
             metadata: {
