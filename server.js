@@ -8687,7 +8687,7 @@ app.get('/api/admin/kyc/submissions/:submissionId', adminProtect, restrictTo('su
   }
 });
 
-// Approve KYC submission - ENHANCED WITH EMAIL AND LOG
+// Approve KYC submission - FIXED VERSION WITH PROPER LOG STRUCTURE
 app.post('/api/admin/kyc/submissions/:submissionId/approve', adminProtect, restrictTo('super', 'support'), [
   body('notes').optional().trim()
 ], async (req, res) => {
@@ -8731,8 +8731,10 @@ app.post('/api/admin/kyc/submissions/:submissionId/approve', adminProtect, restr
       'kycStatus.facial': 'verified'
     });
 
-    // ✅ CREATE LOG FOR KYC APPROVAL
+    // Get device info for exact location
     const deviceInfo = await getUserDeviceInfo(req);
+    
+    // ✅ CREATE LOG FOR KYC APPROVAL - FIXED STRUCTURE
     await UserLog.create({
       user: kycSubmission.user._id,
       username: kycSubmission.user.email,
@@ -8744,23 +8746,42 @@ app.post('/api/admin/kyc/submissions/:submissionId/approve', adminProtect, restr
       userAgent: req.headers['user-agent'] || 'Unknown',
       deviceInfo: {
         type: getDeviceType(req),
-        os: getOSFromUserAgent(req.headers['user-agent']),
-        browser: getBrowserFromUserAgent(req.headers['user-agent'])
+        os: {
+          name: getOSFromUserAgent(req.headers['user-agent']),
+          version: 'Unknown'
+        },
+        browser: {
+          name: getBrowserFromUserAgent(req.headers['user-agent']),
+          version: 'Unknown'
+        },
+        platform: req.headers['user-agent'] || 'Unknown',
+        language: req.headers['accept-language'] || 'Unknown',
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
       },
       location: {
         ip: getRealClientIP(req),
-        country: deviceInfo.locationDetails?.country || 'Unknown',
+        country: {
+          name: deviceInfo.locationDetails?.country || 'Unknown',
+          code: deviceInfo.locationDetails?.country || 'Unknown'
+        },
+        region: {
+          name: deviceInfo.locationDetails?.region || 'Unknown',
+          code: deviceInfo.locationDetails?.region || 'Unknown'
+        },
         city: deviceInfo.locationDetails?.city || 'Unknown',
-        region: deviceInfo.locationDetails?.region || 'Unknown',
-        exactLocation: deviceInfo.exactLocation,
+        postalCode: deviceInfo.locationDetails?.postalCode || 'Unknown',
         latitude: deviceInfo.locationDetails?.latitude,
-        longitude: deviceInfo.locationDetails?.longitude
+        longitude: deviceInfo.locationDetails?.longitude,
+        timezone: deviceInfo.locationDetails?.timezone || 'Unknown',
+        isp: deviceInfo.locationDetails?.isp || 'Unknown',
+        exactLocation: deviceInfo.exactLocation
       },
       status: 'success',
       metadata: {
         adminId: req.admin._id,
         adminName: req.admin.name,
-        adminNotes: notes
+        adminNotes: notes,
+        reviewedAt: kycSubmission.reviewedAt
       },
       relatedEntity: kycSubmission._id,
       relatedEntityModel: 'KYC'
@@ -8797,12 +8818,13 @@ app.post('/api/admin/kyc/submissions/:submissionId/approve', adminProtect, restr
     console.error('Approve KYC error:', err);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to approve KYC application'
+      message: 'Failed to approve KYC application',
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   }
 });
 
-// Reject KYC submission - ENHANCED WITH EMAIL AND LOG
+// Reject KYC submission - FIXED VERSION WITH PROPER LOG STRUCTURE
 app.post('/api/admin/kyc/submissions/:submissionId/reject', adminProtect, restrictTo('super', 'support'), [
   body('reason').trim().notEmpty().withMessage('Rejection reason is required'),
   body('section').optional().isIn(['all', 'identity', 'address', 'facial']).withMessage('Invalid section')
@@ -8878,8 +8900,10 @@ app.post('/api/admin/kyc/submissions/:submissionId/reject', adminProtect, restri
 
     await User.findByIdAndUpdate(kycSubmission.user._id, userUpdate);
 
-    // ✅ CREATE LOG FOR KYC REJECTION
+    // Get device info for exact location
     const deviceInfo = await getUserDeviceInfo(req);
+    
+    // ✅ CREATE LOG FOR KYC REJECTION - FIXED STRUCTURE
     await UserLog.create({
       user: kycSubmission.user._id,
       username: kycSubmission.user.email,
@@ -8891,24 +8915,43 @@ app.post('/api/admin/kyc/submissions/:submissionId/reject', adminProtect, restri
       userAgent: req.headers['user-agent'] || 'Unknown',
       deviceInfo: {
         type: getDeviceType(req),
-        os: getOSFromUserAgent(req.headers['user-agent']),
-        browser: getBrowserFromUserAgent(req.headers['user-agent'])
+        os: {
+          name: getOSFromUserAgent(req.headers['user-agent']),
+          version: 'Unknown'
+        },
+        browser: {
+          name: getBrowserFromUserAgent(req.headers['user-agent']),
+          version: 'Unknown'
+        },
+        platform: req.headers['user-agent'] || 'Unknown',
+        language: req.headers['accept-language'] || 'Unknown',
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
       },
       location: {
         ip: getRealClientIP(req),
-        country: deviceInfo.locationDetails?.country || 'Unknown',
+        country: {
+          name: deviceInfo.locationDetails?.country || 'Unknown',
+          code: deviceInfo.locationDetails?.country || 'Unknown'
+        },
+        region: {
+          name: deviceInfo.locationDetails?.region || 'Unknown',
+          code: deviceInfo.locationDetails?.region || 'Unknown'
+        },
         city: deviceInfo.locationDetails?.city || 'Unknown',
-        region: deviceInfo.locationDetails?.region || 'Unknown',
-        exactLocation: deviceInfo.exactLocation,
+        postalCode: deviceInfo.locationDetails?.postalCode || 'Unknown',
         latitude: deviceInfo.locationDetails?.latitude,
-        longitude: deviceInfo.locationDetails?.longitude
+        longitude: deviceInfo.locationDetails?.longitude,
+        timezone: deviceInfo.locationDetails?.timezone || 'Unknown',
+        isp: deviceInfo.locationDetails?.isp || 'Unknown',
+        exactLocation: deviceInfo.exactLocation
       },
       status: 'failed',
       metadata: {
         adminId: req.admin._id,
         adminName: req.admin.name,
         reason: reason,
-        section: section
+        section: section,
+        reviewedAt: kycSubmission.reviewedAt
       },
       relatedEntity: kycSubmission._id,
       relatedEntityModel: 'KYC'
@@ -8944,7 +8987,8 @@ app.post('/api/admin/kyc/submissions/:submissionId/reject', adminProtect, restri
     console.error('Reject KYC error:', err);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to reject KYC application'
+      message: 'Failed to reject KYC application',
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   }
 });
