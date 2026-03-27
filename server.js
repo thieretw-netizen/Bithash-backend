@@ -121,7 +121,7 @@ redis.on('connect', () => {
   console.log('Redis connected successfully');
 });
 
-// Helper function to get real client IP from request (exact location, not Cloudflare)
+// Helper function to get real client IP from request
 const getRealClientIP = (req) => {
   // Check X-Forwarded-For header first (this is what Render uses)
   const forwardedFor = req.headers['x-forwarded-for'];
@@ -130,7 +130,7 @@ const getRealClientIP = (req) => {
     return forwardedFor.split(',')[0].trim();
   }
   
-  // Check Cloudflare headers - we want the REAL IP, not Cloudflare's
+  // Check Cloudflare headers
   const cfConnectingIp = req.headers['cf-connecting-ip'];
   if (cfConnectingIp) {
     return cfConnectingIp;
@@ -219,7 +219,10 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb+srv://elvismwangike:JFJmHvP
   process.exit(1);
 });
 
-// Create transporter function for reusable email configuration
+// =============================================
+// ENHANCED EMAIL SYSTEM WITH TWO TRANSPORTERS
+// =============================================
+
 const createTransporter = (user, pass) => {
   return nodemailer.createTransport({
     host: process.env.EMAIL_HOST,
@@ -238,20 +241,77 @@ const createTransporter = (user, pass) => {
   });
 };
 
-// INFO email
+// INFO email transporter (all automated emails)
 const infoTransporter = createTransporter(
   process.env.EMAIL_INFO_USER,
   process.env.EMAIL_INFO_PASS
 );
 
-// SUPPORT email
+// SUPPORT email transporter
 const supportTransporter = createTransporter(
   process.env.EMAIL_SUPPORT_USER,
   process.env.EMAIL_SUPPORT_PASS
 );
 
-// Default transporter (for backward compatibility, uses INFO as default)
-const transporter = infoTransporter;
+// Function to send email using INFO transporter
+const sendInfoEmail = async (options) => {
+  try {
+    const mailOptions = {
+      from: `BitHash <${process.env.EMAIL_INFO_USER}>`,
+      to: options.email,
+      subject: options.subject,
+      text: options.message,
+      html: options.html
+    };
+
+    await infoTransporter.sendMail(mailOptions);
+    console.log('Info email sent successfully');
+    return true;
+  } catch (err) {
+    console.error('Error sending info email:', err);
+    throw new Error('Failed to send email');
+  }
+};
+
+// Function to send email using SUPPORT transporter
+const sendSupportEmail = async (options) => {
+  try {
+    const mailOptions = {
+      from: `BitHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
+      to: options.email,
+      subject: options.subject,
+      text: options.message,
+      html: options.html
+    };
+
+    await supportTransporter.sendMail(mailOptions);
+    console.log('Support email sent successfully');
+    return true;
+  } catch (err) {
+    console.error('Error sending support email:', err);
+    throw new Error('Failed to send email');
+  }
+};
+
+// Enhanced sendEmail function that uses INFO transporter for all automated emails
+const sendEmail = async (options) => {
+  try {
+    const mailOptions = {
+      from: `BitHash <${process.env.EMAIL_INFO_USER}>`,
+      to: options.email,
+      subject: options.subject,
+      text: options.message,
+      html: options.html
+    };
+
+    await infoTransporter.sendMail(mailOptions);
+    console.log('Email sent successfully via Info transporter');
+    return true;
+  } catch (err) {
+    console.error('Error sending email:', err);
+    throw new Error('Failed to send email');
+  }
+};
 
 // Google OAuth client with enhanced configuration
 const googleClient = new OAuth2Client({
@@ -347,7 +407,7 @@ const UserSchema = new mongoose.Schema({
     },
     theme: { type: String, enum: ['light', 'dark'], default: 'dark' }
   },
-  // NEW: Location tracking fields - exact location
+  // NEW: Location tracking fields
   location: {
     lastKnown: {
       lat: { type: Number },
@@ -357,8 +417,7 @@ const UserSchema = new mongoose.Schema({
       region: { type: String },
       updatedAt: { type: Date },
       ipAddress: { type: String },
-      userAgent: { type: String },
-      exactLocation: { type: Boolean, default: true }
+      userAgent: { type: String }
     },
     locationHistory: [{
       lat: { type: Number },
@@ -366,10 +425,7 @@ const UserSchema = new mongoose.Schema({
       locationDetails: {
         country: String,
         city: String,
-        region: String,
-        street: String,
-        postalCode: String,
-        timezone: String
+        region: String
       },
       ipAddress: String,
       userAgent: String,
@@ -736,7 +792,10 @@ const UserLogSchema = new mongoose.Schema({
       // Page Views & Navigation
       'page_visited', 'dashboard_viewed', 'investment_page_visited',
       'wallet_page_visited', 'profile_page_visited', 'settings_page_visited',
-      'support_page_visited', 'referral_page_visited'
+      'support_page_visited', 'referral_page_visited',
+      
+      // Restriction Events
+      'restriction_applied', 'restriction_lifted', 'restriction_check'
     ],
     index: true
   },
@@ -745,7 +804,7 @@ const UserLogSchema = new mongoose.Schema({
     type: String,
     enum: [
       'authentication', 'financial', 'investment', 'security', 'profile',
-      'verification', 'referral', 'support', 'system', 'navigation'
+      'verification', 'referral', 'support', 'system', 'navigation', 'restriction'
     ],
     required: true,
     index: true
@@ -784,7 +843,7 @@ const UserLogSchema = new mongoose.Schema({
     deviceId: String
   },
 
-  // Enhanced Location Information - exact location
+  // Enhanced Location Information
   location: {
     ip: String,
     country: {
@@ -801,9 +860,7 @@ const UserLogSchema = new mongoose.Schema({
     longitude: Number,
     timezone: String,
     isp: String,
-    asn: String,
-    street: String,
-    exactLocation: { type: Boolean, default: true }
+    asn: String
   },
 
   // Status & Performance
@@ -873,6 +930,12 @@ const UserLogSchema = new mongoose.Schema({
     riskScore: Number,
     suspiciousFactors: [String],
     verificationMethod: String,
+    
+    // Restriction data
+    restrictionType: String,
+    restrictionApplied: Boolean,
+    restrictionLifted: Boolean,
+    restrictionReason: String,
     
     // General
     description: String,
@@ -956,12 +1019,15 @@ UserLogSchema.virtual('actionDescription').get(function() {
     'logout': 'User logged out of their account',
     'deposit_created': 'User created a deposit request',
     'investment_created': 'User created a new investment',
+    'investment_matured': 'User investment matured',
     'withdrawal_created': 'User requested a withdrawal',
     'buy_created': 'User initiated a buy order',
     'buy_completed': 'User completed a buy order',
     'sell_created': 'User initiated a sell order',
     'sell_completed': 'User completed a sell order',
-    // Add more descriptions as needed
+    'restriction_applied': 'Account restriction applied',
+    'restriction_lifted': 'Account restriction lifted',
+    'restriction_check': 'Restriction status checked'
   };
   return actionDescriptions[this.action] || `User performed ${this.action.replace(/_/g, ' ')}`;
 });
@@ -1076,6 +1142,7 @@ UserLogSchema.methods.calculateActionCategory = function(action) {
     'login': 'authentication',
     'logout': 'authentication',
     'login_attempt': 'authentication',
+    'failed_login': 'authentication',
     
     // Financial
     'deposit_created': 'financial',
@@ -1088,11 +1155,17 @@ UserLogSchema.methods.calculateActionCategory = function(action) {
     
     // Investment
     'investment_created': 'investment',
+    'investment_matured': 'investment',
     'investment_completed': 'investment',
     
     // Security
     'password_change': 'security',
     '2fa_enable': 'security',
+    
+    // Restriction
+    'restriction_applied': 'restriction',
+    'restriction_lifted': 'restriction',
+    'restriction_check': 'restriction',
     
     // Add more mappings as needed
   };
@@ -1101,8 +1174,8 @@ UserLogSchema.methods.calculateActionCategory = function(action) {
 };
 
 UserLogSchema.methods.calculateRiskLevel = function() {
-  const highRiskActions = ['failed_login', 'suspicious_activity', 'withdrawal_created'];
-  const mediumRiskActions = ['login', 'password_change', 'deposit_created'];
+  const highRiskActions = ['failed_login', 'suspicious_activity', 'withdrawal_created', 'restriction_applied'];
+  const mediumRiskActions = ['login', 'password_change', 'deposit_created', 'restriction_check'];
   
   if (highRiskActions.includes(this.action)) return 'high';
   if (mediumRiskActions.includes(this.action)) return 'medium';
@@ -3172,52 +3245,13 @@ const convertToFiat = async (cryptoAmount, asset) => {
   return cryptoAmount * rate;
 };
 
-// Enhanced sendEmail function using the new two-email system
-const sendEmail = async (options) => {
-  try {
-    // Determine which transporter to use based on email type
-    let mailTransporter = infoTransporter; // default to INFO email
-    
-    // Use SUPPORT email for certain types
-    if (options.useSupportEmail === true) {
-      mailTransporter = supportTransporter;
-    }
-    
-    const mailOptions = {
-      from: `BitHash Capital <${mailTransporter === supportTransporter ? process.env.EMAIL_SUPPORT_USER : process.env.EMAIL_INFO_USER}>`,
-      to: options.email,
-      subject: options.subject,
-      text: options.message,
-      html: options.html
-    };
-
-    await mailTransporter.sendMail(mailOptions);
-    console.log('Email sent successfully using', mailTransporter === supportTransporter ? 'SUPPORT' : 'INFO', 'email');
-  } catch (err) {
-    console.error('Error sending email:', err);
-    throw new Error('Failed to send email');
-  }
-};
-
-// Enhanced getUserDeviceInfo for exact location (not approximate, not Cloudflare)
 const getUserDeviceInfo = async (req) => {
   try {
     // Enhanced IP detection with multiple header checks to get REAL client IP (not Cloudflare)
     let ip = getRealClientIP(req);
 
     let location = 'Unknown Location';
-    let exactLocation = false;
     let isPublicIP = true;
-    let locationDetails = {
-      country: 'Unknown',
-      city: 'Unknown',
-      region: 'Unknown',
-      street: 'Unknown',
-      postalCode: 'Unknown',
-      timezone: 'Unknown',
-      latitude: null,
-      longitude: null
-    };
 
     // Enhanced private IP range detection
     const privateIPRanges = [
@@ -3241,77 +3275,39 @@ const getUserDeviceInfo = async (req) => {
       }
     }
 
-    // Only try location lookup for public IPs to get exact location
+    // Only try location lookup for public IPs
     if (isPublicIP && ip && ip !== 'Unknown' && ip !== '0.0.0.0') {
       try {
-        console.log(`Looking up exact location for IP: ${ip}`);
+        console.log(`Looking up location for IP: ${ip}`);
         
-        // Try multiple IP geolocation services for exact location
+        // Try multiple IP geolocation services as fallback
         const ipinfoToken = process.env.IPINFO_TOKEN || 'b56ce6e91d732d';
         
-        // First try ipinfo.io (most accurate for exact location)
+        // First try ipinfo.io
         try {
           const response = await axios.get(`https://ipinfo.io/${ip}?token=${ipinfoToken}`, {
             timeout: 5000
           });
           
           if (response.data) {
-            const { city, region, country, loc, org, timezone, postal } = response.data;
-            
-            // Parse coordinates if available
-            let latitude = null;
-            let longitude = null;
-            if (loc && loc.includes(',')) {
-              const coords = loc.split(',');
-              latitude = parseFloat(coords[0]);
-              longitude = parseFloat(coords[1]);
-              exactLocation = true;
-            }
-            
-            locationDetails = {
-              country: country || 'Unknown',
-              city: city || 'Unknown',
-              region: region || 'Unknown',
-              street: response.data.street || 'Unknown',
-              postalCode: postal || 'Unknown',
-              timezone: timezone || 'Unknown',
-              latitude: latitude,
-              longitude: longitude
-            };
-            
+            const { city, region, country, loc, org, timezone } = response.data;
             location = `${city || 'Unknown'}, ${region || 'Unknown'}, ${country || 'Unknown'}`;
             
-            console.log(`Exact location from ipinfo.io: ${location} (lat: ${latitude}, lng: ${longitude})`);
+            console.log(`IPInfo.io location result: ${location}`);
           }
         } catch (ipinfoError) {
-          console.log('ipinfo.io failed for exact location, trying fallback services...');
+          console.log('IPInfo.io failed, trying fallback services...');
           
-          // Fallback 1: ipapi.co (also provides coordinates)
+          // Fallback 1: ipapi.co
           try {
             const response = await axios.get(`https://ipapi.co/${ip}/json/`, {
               timeout: 5000
             });
             
-            if (response.data && !response.data.error) {
-              const { city, region, country_name, country_code, latitude, longitude, timezone, postal } = response.data;
-              
-              if (latitude && longitude) {
-                exactLocation = true;
-              }
-              
-              locationDetails = {
-                country: country_name || country_code || 'Unknown',
-                city: city || 'Unknown',
-                region: region || 'Unknown',
-                street: 'Unknown',
-                postalCode: postal || 'Unknown',
-                timezone: timezone || 'Unknown',
-                latitude: latitude || null,
-                longitude: longitude || null
-              };
-              
+            if (response.data) {
+              const { city, region, country_name, country_code } = response.data;
               location = `${city || 'Unknown'}, ${region || 'Unknown'}, ${country_name || country_code || 'Unknown'}`;
-              console.log(`Exact location from ipapi.co: ${location}`);
+              console.log(`IPApi.co location result: ${location}`);
             }
           } catch (ipapiError) {
             // Fallback 2: freeipapi.com
@@ -3321,25 +3317,9 @@ const getUserDeviceInfo = async (req) => {
               });
               
               if (response.data) {
-                const { cityName, regionName, countryName, latitude, longitude, timeZone } = response.data;
-                
-                if (latitude && longitude) {
-                  exactLocation = true;
-                }
-                
-                locationDetails = {
-                  country: countryName || 'Unknown',
-                  city: cityName || 'Unknown',
-                  region: regionName || 'Unknown',
-                  street: 'Unknown',
-                  postalCode: 'Unknown',
-                  timezone: timeZone || 'Unknown',
-                  latitude: latitude || null,
-                  longitude: longitude || null
-                };
-                
+                const { cityName, regionName, countryName } = response.data;
                 location = `${cityName || 'Unknown'}, ${regionName || 'Unknown'}, ${countryName || 'Unknown'}`;
-                console.log(`Exact location from freeipapi.com: ${location}`);
+                console.log(`FreeIPAPI location result: ${location}`);
               }
             } catch (freeipapiError) {
               // Final fallback: ip-api.com
@@ -3349,35 +3329,19 @@ const getUserDeviceInfo = async (req) => {
                 });
                 
                 if (response.data && response.data.status === 'success') {
-                  const { city, regionName, country, lat, lon, timezone, zip } = response.data;
-                  
-                  if (lat && lon) {
-                    exactLocation = true;
-                  }
-                  
-                  locationDetails = {
-                    country: country || 'Unknown',
-                    city: city || 'Unknown',
-                    region: regionName || 'Unknown',
-                    street: 'Unknown',
-                    postalCode: zip || 'Unknown',
-                    timezone: timezone || 'Unknown',
-                    latitude: lat || null,
-                    longitude: lon || null
-                  };
-                  
+                  const { city, regionName, country } = response.data;
                   location = `${city || 'Unknown'}, ${regionName || 'Unknown'}, ${country || 'Unknown'}`;
-                  console.log(`Exact location from ip-api.com: ${location}`);
+                  console.log(`IP-API.com location result: ${location}`);
                 }
               } catch (ipapiComError) {
-                location = 'Location Unavailable';
-                console.log('All location services failed for exact location');
+                location = 'Location Service Unavailable';
+                console.log('All location services failed');
               }
             }
           }
         }
       } catch (err) {
-        console.error('All exact location lookup services failed:', err.message);
+        console.error('All location lookup services failed:', err.message);
         location = 'Location Unavailable';
       }
     } else if (!isPublicIP) {
@@ -3388,9 +3352,7 @@ const getUserDeviceInfo = async (req) => {
       ip: ip || 'Unknown',
       device: req.headers['user-agent'] || 'Unknown',
       location: location,
-      isPublicIP: isPublicIP,
-      exactLocation: exactLocation,
-      locationDetails: locationDetails
+      isPublicIP: isPublicIP
     };
   } catch (err) {
     console.error('Error getting device info:', err);
@@ -3398,33 +3360,19 @@ const getUserDeviceInfo = async (req) => {
       ip: req.ip || 'Unknown',
       device: req.headers['user-agent'] || 'Unknown',
       location: 'Unknown',
-      isPublicIP: false,
-      exactLocation: false,
-      locationDetails: {
-        country: 'Unknown',
-        city: 'Unknown',
-        region: 'Unknown',
-        street: 'Unknown',
-        postalCode: 'Unknown',
-        timezone: 'Unknown',
-        latitude: null,
-        longitude: null
-      }
+      isPublicIP: false
     };
   }
 };
-
 const logActivity = async (action, entity, entityId, performedBy, performedByModel, req, changes = {}) => {
   try {
     const deviceInfo = await getUserDeviceInfo(req);
     
-    // Enhanced location data with exact location
+    // Enhanced location data
     const locationData = {
       ip: deviceInfo.ip,
       location: deviceInfo.location,
       isPublicIP: deviceInfo.isPublicIP,
-      exactLocation: deviceInfo.exactLocation,
-      locationDetails: deviceInfo.locationDetails,
       userAgent: deviceInfo.device,
       detectedAt: new Date()
     };
@@ -3448,7 +3396,6 @@ const logActivity = async (action, entity, entityId, performedBy, performedByMod
       entity,
       entityId,
       location: locationData.location,
-      exactLocation: locationData.exactLocation,
       ip: locationData.ip,
       isPublicIP: locationData.isPublicIP
     });
@@ -5298,6 +5245,165 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
         `
       },
 
+      // RESTRICTION APPLIED
+      restriction_applied: {
+        subject: 'Account Restrictions Applied - BitHash Capital',
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
+              <title>Account Restrictions Applied - BitHash Capital</title>
+              <style>
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #ffffff; margin: 0; padding: 0; }
+                .email-wrapper { max-width: 100%; margin: 0 auto; background-color: #ffffff; }
+                .header { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); padding: 32px 20px; text-align: center; }
+                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
+                .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
+                .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
+                .content { padding: 40px 20px; background-color: #ffffff; }
+                .greeting { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
+                .message { color: #4b5563; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
+                .restriction-box { background: #fef2f2; padding: 24px; border-radius: 12px; margin: 24px 0; }
+                .restriction-item { margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #fee2e2; }
+                .restriction-item:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+                .restriction-title { font-weight: 600; color: #dc2626; margin-bottom: 4px; }
+                .restriction-reason { color: #991b1b; font-size: 14px; }
+                .limits-list { background: #f9fafb; padding: 16px; border-radius: 8px; margin: 16px 0; }
+                .limits-list li { color: #374151; margin-left: 20px; font-size: 14px; }
+                .cta-button { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); color: #ffffff; padding: 12px 28px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 15px; border-radius: 8px; margin: 16px 0; }
+                .footer { padding: 24px 20px; background-color: #f9fafb; text-align: center; }
+                .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
+                @media only screen and (max-width: 600px) {
+                  .header { padding: 20px; }
+                  .content { padding: 24px 16px; }
+                  .greeting { font-size: 20px; }
+                }
+              </style>
+          </head>
+          <body style="background-color: #ffffff; margin: 0; padding: 0;">
+            <div class="email-wrapper">
+              <div class="header">
+                <div class="logo-container">
+                  <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
+                  <span class="logo-text">BitHash Capital</span>
+                </div>
+              </div>
+              <div class="content">
+                <h2 class="greeting">Hello ${user.firstName || 'there'},</h2>
+                <p class="message">Your account has been restricted due to incomplete verification requirements.</p>
+                
+                <div class="restriction-box">
+                  ${data.kycRestricted ? `
+                  <div class="restriction-item">
+                    <div class="restriction-title">⚠️ KYC Verification Required</div>
+                    <div class="restriction-reason">${data.kycReason || 'Please complete your KYC verification to increase your limits.'}</div>
+                  </div>
+                  ` : ''}
+                  ${data.transactionRestricted ? `
+                  <div class="restriction-item">
+                    <div class="restriction-title">⚠️ Transaction Activity Required</div>
+                    <div class="restriction-reason">${data.transactionReason || 'Please complete at least one deposit or withdrawal to increase your limits.'}</div>
+                  </div>
+                  ` : ''}
+                </div>
+                
+                ${data.limits && (data.limits.withdrawal || data.limits.investment) ? `
+                <div class="limits-list">
+                  <strong>Current Limits:</strong>
+                  <ul>
+                    ${data.limits.withdrawal ? `<li>Withdrawal limit: $${data.limits.withdrawal.toLocaleString()}</li>` : ''}
+                    ${data.limits.investment ? `<li>Investment limit: $${data.limits.investment.toLocaleString()}</li>` : ''}
+                  </ul>
+                </div>
+                ` : ''}
+                
+                <p class="message">Complete the required actions to have restrictions lifted automatically.</p>
+                
+                <div style="text-align: center;">
+                  <a href="https://www.bithashcapital.live/kyc.html" class="cta-button">Complete KYC</a>
+                </div>
+              </div>
+              <div class="footer">
+                <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
+                Need help? Contact support@bithashcapital.live</p>
+              </div>
+            </div>
+          </body>
+          </html>
+        `
+      },
+
+      // RESTRICTION LIFTED
+      restriction_lifted: {
+        subject: 'Account Restrictions Lifted - BitHash Capital',
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
+              <title>Restrictions Lifted - BitHash Capital</title>
+              <style>
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #ffffff; margin: 0; padding: 0; }
+                .email-wrapper { max-width: 100%; margin: 0 auto; background-color: #ffffff; }
+                .header { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); padding: 32px 20px; text-align: center; }
+                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
+                .logo-img { width: 40px; height: 40px; border-radius: 50%; background: white; padding: 4px; }
+                .logo-text { font-size: 28px; font-weight: 700; color: #ffffff; }
+                .content { padding: 40px 20px; background-color: #ffffff; }
+                .greeting { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
+                .message { color: #4b5563; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
+                .success-box { background: #f0fdf4; padding: 24px; text-align: center; border-radius: 12px; margin: 24px 0; }
+                .check-icon { font-size: 64px; color: #22c55e; margin-bottom: 16px; }
+                .lifted-message { font-size: 18px; color: #166534; margin: 16px 0; }
+                .cta-button { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); color: #ffffff; padding: 12px 28px; text-decoration: none; display: inline-block; font-weight: 600; font-size: 15px; border-radius: 8px; margin: 16px 0; }
+                .footer { padding: 24px 20px; background-color: #f9fafb; text-align: center; }
+                .footer-text { color: #6b7280; font-size: 12px; line-height: 1.5; }
+                @media only screen and (max-width: 600px) {
+                  .header { padding: 20px; }
+                  .content { padding: 24px 16px; }
+                  .greeting { font-size: 20px; }
+                }
+              </style>
+          </head>
+          <body style="background-color: #ffffff; margin: 0; padding: 0;">
+            <div class="email-wrapper">
+              <div class="header">
+                <div class="logo-container">
+                  <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Logo" class="logo-img">
+                  <span class="logo-text">BitHash Capital</span>
+                </div>
+              </div>
+              <div class="content">
+                <h2 class="greeting">Hello ${user.firstName || 'there'},</h2>
+                <p class="message">Good news! The restrictions on your account have been lifted.</p>
+                
+                <div class="success-box">
+                  <div class="check-icon">✓</div>
+                  <div class="lifted-message">${data.message || 'Your account is now fully unrestricted.'}</div>
+                  <p style="color: #15803d; margin-top: 8px;">You can now enjoy full platform features</p>
+                </div>
+                
+                <p class="message">All withdrawal and investment limits have been restored to normal levels.</p>
+                
+                <div style="text-align: center;">
+                  <a href="https://www.bithashcapital.live/dashboard.html" class="cta-button">Go to Dashboard</a>
+                </div>
+              </div>
+              <div class="footer">
+                <p class="footer-text">© 2024 BitHash Capital. All rights reserved.<br>
+                Need help? Contact support@bithashcapital.live</p>
+              </div>
+            </div>
+          </body>
+          </html>
+        `
+      },
+
       // GENERAL NOTIFICATION
       general: {
         subject: data.subject || 'BitHash Capital | Notification',
@@ -5365,31 +5471,19 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
       return;
     }
 
-    // Determine which email to use for sending
-    let useSupportEmail = false;
-    
-    // Use SUPPORT email for certain actions
-    if (action === 'withdrawal_request' || action === 'withdrawal_approved' || action === 'withdrawal_rejected' ||
-        action === 'deposit_approved' || action === 'deposit_rejected' || action === 'kyc_approved' || 
-        action === 'kyc_rejected' || action === 'support_ticket_created' || action === 'support_ticket_updated') {
-      useSupportEmail = true;
-    }
-
     const mailOptions = {
-      from: `"BitHash Capital" <${useSupportEmail ? process.env.EMAIL_SUPPORT_USER : process.env.EMAIL_INFO_USER}>`,
+      from: `"BitHash Capital" <${process.env.EMAIL_INFO_USER}>`,
       to: user.email,
       subject: template.subject,
       html: template.html
     };
 
-    const mailTransporter = useSupportEmail ? supportTransporter : infoTransporter;
-    await mailTransporter.sendMail(mailOptions);
-    console.log(`📧 ${action} email sent successfully to ${user.email} using ${useSupportEmail ? 'SUPPORT' : 'INFO'} email`);
+    await infoTransporter.sendMail(mailOptions);
+    console.log(`📧 ${action} email sent successfully to ${user.email}`);
     
     await logActivity('email_sent', 'notification', null, user._id, 'User', null, {
       action: action,
-      email: user.email,
-      transporter: useSupportEmail ? 'SUPPORT' : 'INFO'
+      email: user.email
     });
 
   } catch (err) {
@@ -5597,24 +5691,15 @@ const sendProfessionalEmail = async (options) => {
       throw new Error(`Template ${template} not found`);
     }
 
-    // Determine which email to use for sending
-    let useSupportEmail = false;
-    
-    // Use SUPPORT email for security-related communications
-    if (template === 'otp' || template === 'password_reset') {
-      useSupportEmail = true;
-    }
-
     const mailOptions = {
-      from: `"BitHash Capital" <${useSupportEmail ? process.env.EMAIL_SUPPORT_USER : process.env.EMAIL_INFO_USER}>`,
+      from: `"BitHash Capital" <${process.env.EMAIL_INFO_USER}>`,
       to: email,
       subject: templateData.subject,
       html: templateData.html
     };
 
-    const mailTransporter = useSupportEmail ? supportTransporter : infoTransporter;
-    await mailTransporter.sendMail(mailOptions);
-    console.log(`Professional email sent successfully to ${email} using ${useSupportEmail ? 'SUPPORT' : 'INFO'} email`);
+    await infoTransporter.sendMail(mailOptions);
+    console.log(`Professional email sent successfully to ${email}`);
   } catch (err) {
     console.error('Error sending professional email:', err);
     throw new Error('Failed to send email');
@@ -5624,8 +5709,6 @@ const sendProfessionalEmail = async (options) => {
 
 
 // Routes
-
-
 
 // Enhanced Signup Endpoint with OTP - FIXED email handling
 app.post('/api/auth/signup', [
@@ -5905,8 +5988,10 @@ app.post('/api/auth/login', [
       }
     });
 
-    // ✅ CREATE LOG FOR LOGIN ATTEMPT
-    const deviceInfo = await getUserDeviceInfo(req);
+    // Generate temporary token for OTP verification
+    const tempToken = generateJWT(user._id);
+
+    // CREATE LOG FOR LOGIN ATTEMPT
     await UserLog.create({
       user: user._id,
       username: user.email,
@@ -5914,47 +5999,27 @@ app.post('/api/auth/login', [
       userFullName: `${user.firstName} ${user.lastName}`,
       action: 'login_attempt',
       actionCategory: 'authentication',
-      ipAddress: deviceInfo.ip,
-      userAgent: deviceInfo.device,
+      ipAddress: getRealClientIP(req),
+      userAgent: req.headers['user-agent'] || 'Unknown',
       deviceInfo: {
         type: getDeviceType(req),
         os: getOSFromUserAgent(req.headers['user-agent']),
         browser: getBrowserFromUserAgent(req.headers['user-agent'])
       },
       location: {
-        ip: deviceInfo.ip,
-        country: deviceInfo.locationDetails?.country || 'Unknown',
-        city: deviceInfo.locationDetails?.city || 'Unknown',
-        region: deviceInfo.locationDetails?.region || 'Unknown',
-        exactLocation: deviceInfo.exactLocation,
-        latitude: deviceInfo.locationDetails?.latitude,
-        longitude: deviceInfo.locationDetails?.longitude
+        ip: getRealClientIP(req),
+        country: 'Detected',
+        city: 'Detected'
       },
       status: 'pending',
       metadata: {
-        email: email,
-        loginMethod: 'password',
-        otpSent: true
-      }
+        method: 'otp',
+        otpSent: true,
+        rememberMe: rememberMe || false
+      },
+      relatedEntity: user._id,
+      relatedEntityModel: 'User'
     });
-
-    // ✅ SEND LOGIN ATTEMPT EMAIL
-    try {
-      await sendAutomatedEmail(user, 'login_success', {
-        name: user.firstName,
-        device: deviceInfo.device,
-        location: deviceInfo.location,
-        ip: deviceInfo.ip,
-        timestamp: new Date()
-      });
-      console.log(`📧 Login attempt email sent to ${user.email}`);
-    } catch (emailError) {
-      console.error('Failed to send login attempt email:', emailError);
-      // Don't fail the login if email fails
-    }
-
-    // Generate temporary token for OTP verification
-    const tempToken = generateJWT(user._id);
 
     res.status(200).json({
       status: 'success',
@@ -6143,55 +6208,6 @@ app.post('/api/auth/google', async (req, res) => {
           action: 'Google sign-in verification'
         }
       });
-      
-      // ✅ CREATE LOG FOR GOOGLE LOGIN ATTEMPT
-      const deviceInfo = await getUserDeviceInfo(req);
-      await UserLog.create({
-        user: user._id,
-        username: user.email,
-        email: user.email,
-        userFullName: `${user.firstName} ${user.lastName}`,
-        action: 'login_attempt',
-        actionCategory: 'authentication',
-        ipAddress: deviceInfo.ip,
-        userAgent: deviceInfo.device,
-        deviceInfo: {
-          type: getDeviceType(req),
-          os: getOSFromUserAgent(req.headers['user-agent']),
-          browser: getBrowserFromUserAgent(req.headers['user-agent'])
-        },
-        location: {
-          ip: deviceInfo.ip,
-          country: deviceInfo.locationDetails?.country || 'Unknown',
-          city: deviceInfo.locationDetails?.city || 'Unknown',
-          region: deviceInfo.locationDetails?.region || 'Unknown',
-          exactLocation: deviceInfo.exactLocation,
-          latitude: deviceInfo.locationDetails?.latitude,
-          longitude: deviceInfo.locationDetails?.longitude
-        },
-        status: 'pending',
-        metadata: {
-          email: originalEmail,
-          loginMethod: 'google',
-          otpSent: true,
-          isNewUser: isNewUser
-        }
-      });
-      
-      // ✅ SEND LOGIN ATTEMPT EMAIL FOR GOOGLE SIGN-IN
-      try {
-        await sendAutomatedEmail(user, 'login_success', {
-          name: user.firstName,
-          device: deviceInfo.device,
-          location: deviceInfo.location,
-          ip: deviceInfo.ip,
-          timestamp: new Date()
-        });
-        console.log(`📧 Google login attempt email sent to ${user.email}`);
-      } catch (emailError) {
-        console.error('Failed to send Google login attempt email:', emailError);
-      }
-      
     } catch (otpError) {
       console.error('OTP creation error:', otpError);
       // Continue even if OTP fails for now
@@ -6498,7 +6514,6 @@ app.post('/api/investments', protect, [
     });
 
     // ✅ CREATE LOG IN DATABASE FOR INVESTMENT CREATION
-    const deviceInfo = await getUserDeviceInfo(req);
     await UserLog.create({
       user: userId,
       username: user.email,
@@ -6515,12 +6530,8 @@ app.post('/api/investments', protect, [
       },
       location: {
         ip: getRealClientIP(req),
-        country: deviceInfo.locationDetails?.country || 'Unknown',
-        city: deviceInfo.locationDetails?.city || 'Unknown',
-        region: deviceInfo.locationDetails?.region || 'Unknown',
-        exactLocation: deviceInfo.exactLocation,
-        latitude: deviceInfo.locationDetails?.latitude,
-        longitude: deviceInfo.locationDetails?.longitude
+        country: 'Detected',
+        city: 'Detected'
       },
       status: 'success',
       metadata: {
@@ -6743,7 +6754,6 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
       }], { session });
 
       // ✅ CREATE LOG IN DATABASE FOR INVESTMENT MATURITY
-      const deviceInfo = await getUserDeviceInfo(req);
       await UserLog.create({
         user: userId,
         username: user.email,
@@ -6760,12 +6770,8 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
         },
         location: {
           ip: getRealClientIP(req),
-          country: deviceInfo.locationDetails?.country || 'Unknown',
-          city: deviceInfo.locationDetails?.city || 'Unknown',
-          region: deviceInfo.locationDetails?.region || 'Unknown',
-          exactLocation: deviceInfo.exactLocation,
-          latitude: deviceInfo.locationDetails?.latitude,
-          longitude: deviceInfo.locationDetails?.longitude
+          country: 'Detected',
+          city: 'Detected'
         },
         status: 'success',
         metadata: {
@@ -7185,7 +7191,6 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
     await deposit.save();
 
     // ✅ CREATE LOG FOR DEPOSIT APPROVAL
-    const deviceInfo = await getUserDeviceInfo(req);
     await UserLog.create({
       user: user._id,
       username: user.email,
@@ -7202,21 +7207,16 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       },
       location: {
         ip: getRealClientIP(req),
-        country: deviceInfo.locationDetails?.country || 'Unknown',
-        city: deviceInfo.locationDetails?.city || 'Unknown',
-        region: deviceInfo.locationDetails?.region || 'Unknown',
-        exactLocation: deviceInfo.exactLocation,
-        latitude: deviceInfo.locationDetails?.latitude,
-        longitude: deviceInfo.locationDetails?.longitude
+        country: 'Detected',
+        city: 'Detected'
       },
       status: 'success',
       metadata: {
         amount: deposit.amount,
         method: deposit.method,
         reference: deposit.reference,
-        adminId: req.admin._id,
-        adminName: req.admin.name,
-        adminNotes: notes
+        processedBy: req.admin.name,
+        processedAt: deposit.processedAt
       },
       relatedEntity: deposit._id,
       relatedEntityModel: 'Transaction'
@@ -7224,6 +7224,19 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
 
     // ✅ SEND DEPOSIT APPROVED EMAIL
     try {
+      // Get real-time crypto price if applicable
+      let cryptoPrice = null;
+      let assetAmount = null;
+      let usdValue = deposit.amount;
+      
+      if (deposit.method && deposit.method !== 'BANK' && deposit.method !== 'CARD') {
+        cryptoPrice = await getCryptoPrice(deposit.method);
+        if (cryptoPrice) {
+          assetAmount = deposit.amount / cryptoPrice;
+          usdValue = deposit.amount;
+        }
+      }
+      
       await sendAutomatedEmail(user, 'deposit_approved', {
         name: user.firstName,
         amount: deposit.amount,
@@ -7231,7 +7244,10 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
         reference: deposit.reference,
         newBalance: user.balances.main,
         processedAt: deposit.processedAt,
-        asset: deposit.method !== 'BANK' && deposit.method !== 'CARD' ? deposit.method : 'USD'
+        asset: deposit.method !== 'BANK' && deposit.method !== 'CARD' ? deposit.method : 'USD',
+        assetAmount: assetAmount,
+        usdValue: usdValue,
+        cryptoPrice: cryptoPrice
       });
       console.log(`📧 Deposit approval email sent to ${user.email}`);
     } catch (emailError) {
@@ -7296,7 +7312,6 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
     await deposit.save();
 
     // ✅ CREATE LOG FOR DEPOSIT REJECTION
-    const deviceInfo = await getUserDeviceInfo(req);
     await UserLog.create({
       user: deposit.user._id,
       username: deposit.user.email,
@@ -7313,21 +7328,16 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
       },
       location: {
         ip: getRealClientIP(req),
-        country: deviceInfo.locationDetails?.country || 'Unknown',
-        city: deviceInfo.locationDetails?.city || 'Unknown',
-        region: deviceInfo.locationDetails?.region || 'Unknown',
-        exactLocation: deviceInfo.exactLocation,
-        latitude: deviceInfo.locationDetails?.latitude,
-        longitude: deviceInfo.locationDetails?.longitude
+        country: 'Detected',
+        city: 'Detected'
       },
       status: 'failed',
       metadata: {
         amount: deposit.amount,
         method: deposit.method,
         reference: deposit.reference,
-        adminId: req.admin._id,
-        adminName: req.admin.name,
-        reason: reason
+        rejectionReason: reason,
+        rejectedBy: req.admin.name
       },
       relatedEntity: deposit._id,
       relatedEntityModel: 'Transaction'
@@ -7393,7 +7403,7 @@ app.get('/api/admin/withdrawals/:id', adminProtect, async (req, res) => {
   }
 });
 
-// Admin Approve Withdrawal Endpoint - ENHANCED WITH EMAIL AND LOG
+// Admin Approve Withdrawal Endpoint - ENHANCED WITH EMAIL, LOG, AND REAL-TIME CRYPTO PRICE
 app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
   body('notes').optional().trim(),
   body('txid').optional().trim()
@@ -7448,7 +7458,6 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
     await withdrawal.save();
 
     // ✅ CREATE LOG FOR WITHDRAWAL APPROVAL
-    const deviceInfo = await getUserDeviceInfo(req);
     await UserLog.create({
       user: withdrawal.user._id,
       username: withdrawal.user.email,
@@ -7465,24 +7474,20 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
       },
       location: {
         ip: getRealClientIP(req),
-        country: deviceInfo.locationDetails?.country || 'Unknown',
-        city: deviceInfo.locationDetails?.city || 'Unknown',
-        region: deviceInfo.locationDetails?.region || 'Unknown',
-        exactLocation: deviceInfo.exactLocation,
-        latitude: deviceInfo.locationDetails?.latitude,
-        longitude: deviceInfo.locationDetails?.longitude
+        country: 'Detected',
+        city: 'Detected'
       },
       status: 'success',
       metadata: {
         amount: withdrawal.amount,
         asset: withdrawal.asset,
         assetAmount: withdrawal.assetAmount,
-        method: withdrawal.method,
         reference: withdrawal.reference,
-        adminId: req.admin._id,
-        adminName: req.admin.name,
-        adminNotes: notes,
-        txid: txid
+        processedBy: req.admin.name,
+        processedAt: withdrawal.processedAt,
+        txid: txid,
+        fee: withdrawal.fee,
+        feeUsd: feeUsd
       },
       relatedEntity: withdrawal._id,
       relatedEntityModel: 'Transaction'
@@ -7584,7 +7589,6 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
     await withdrawal.save();
 
     // ✅ CREATE LOG FOR WITHDRAWAL REJECTION
-    const deviceInfo = await getUserDeviceInfo(req);
     await UserLog.create({
       user: user._id,
       username: user.email,
@@ -7601,22 +7605,16 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
       },
       location: {
         ip: getRealClientIP(req),
-        country: deviceInfo.locationDetails?.country || 'Unknown',
-        city: deviceInfo.locationDetails?.city || 'Unknown',
-        region: deviceInfo.locationDetails?.region || 'Unknown',
-        exactLocation: deviceInfo.exactLocation,
-        latitude: deviceInfo.locationDetails?.latitude,
-        longitude: deviceInfo.locationDetails?.longitude
+        country: 'Detected',
+        city: 'Detected'
       },
       status: 'failed',
       metadata: {
         amount: withdrawal.amount,
         asset: withdrawal.asset,
-        method: withdrawal.method,
         reference: withdrawal.reference,
-        adminId: req.admin._id,
-        adminName: req.admin.name,
-        reason: reason
+        rejectionReason: reason,
+        rejectedBy: req.admin.name
       },
       relatedEntity: withdrawal._id,
       relatedEntityModel: 'Transaction'
@@ -8511,7 +8509,6 @@ app.post('/api/admin/kyc/submissions/:submissionId/approve', adminProtect, restr
     });
 
     // ✅ CREATE LOG FOR KYC APPROVAL
-    const deviceInfo = await getUserDeviceInfo(req);
     await UserLog.create({
       user: kycSubmission.user._id,
       username: kycSubmission.user.email,
@@ -8528,18 +8525,13 @@ app.post('/api/admin/kyc/submissions/:submissionId/approve', adminProtect, restr
       },
       location: {
         ip: getRealClientIP(req),
-        country: deviceInfo.locationDetails?.country || 'Unknown',
-        city: deviceInfo.locationDetails?.city || 'Unknown',
-        region: deviceInfo.locationDetails?.region || 'Unknown',
-        exactLocation: deviceInfo.exactLocation,
-        latitude: deviceInfo.locationDetails?.latitude,
-        longitude: deviceInfo.locationDetails?.longitude
+        country: 'Detected',
+        city: 'Detected'
       },
       status: 'success',
       metadata: {
-        adminId: req.admin._id,
-        adminName: req.admin.name,
-        adminNotes: notes
+        approvedBy: req.admin.name,
+        notes: notes
       },
       relatedEntity: kycSubmission._id,
       relatedEntityModel: 'KYC'
@@ -8556,8 +8548,8 @@ app.post('/api/admin/kyc/submissions/:submissionId/approve', adminProtect, restr
       // Don't fail the KYC approval if email fails
     }
 
-    // ✅ TRIGGER RESTRICTION CHECK ON KYC APPROVAL
-    await AccountRestrictions.checkAndUpdateRestrictions(kycSubmission.user._id, 'kyc_approval');
+    // ✅ CHECK AND UPDATE RESTRICTIONS AFTER KYC APPROVAL
+    await triggerKYCApprovalCheck(kycSubmission.user._id);
 
     res.status(200).json({
       status: 'success',
@@ -8658,7 +8650,6 @@ app.post('/api/admin/kyc/submissions/:submissionId/reject', adminProtect, restri
     await User.findByIdAndUpdate(kycSubmission.user._id, userUpdate);
 
     // ✅ CREATE LOG FOR KYC REJECTION
-    const deviceInfo = await getUserDeviceInfo(req);
     await UserLog.create({
       user: kycSubmission.user._id,
       username: kycSubmission.user.email,
@@ -8675,19 +8666,14 @@ app.post('/api/admin/kyc/submissions/:submissionId/reject', adminProtect, restri
       },
       location: {
         ip: getRealClientIP(req),
-        country: deviceInfo.locationDetails?.country || 'Unknown',
-        city: deviceInfo.locationDetails?.city || 'Unknown',
-        region: deviceInfo.locationDetails?.region || 'Unknown',
-        exactLocation: deviceInfo.exactLocation,
-        latitude: deviceInfo.locationDetails?.latitude,
-        longitude: deviceInfo.locationDetails?.longitude
+        country: 'Detected',
+        city: 'Detected'
       },
       status: 'failed',
       metadata: {
-        adminId: req.admin._id,
-        adminName: req.admin.name,
-        reason: reason,
-        section: section
+        rejectionReason: reason,
+        rejectedSection: section,
+        rejectedBy: req.admin.name
       },
       relatedEntity: kycSubmission._id,
       relatedEntityModel: 'KYC'
@@ -9194,13 +9180,9 @@ const logUserActivity = async (req, action, status = 'success', metadata = {}, r
         browser: getBrowserFromUserAgent(req.headers['user-agent'])
       },
       location: {
-        ip: deviceInfo.ip,
-        country: deviceInfo.locationDetails?.country || 'Unknown',
-        region: deviceInfo.locationDetails?.region || 'Unknown',
-        city: deviceInfo.locationDetails?.city || 'Unknown',
-        exactLocation: deviceInfo.exactLocation,
-        latitude: deviceInfo.locationDetails?.latitude,
-        longitude: deviceInfo.locationDetails?.longitude,
+        country: deviceInfo.location?.split(', ')[2] || 'Unknown',
+        region: deviceInfo.location?.split(', ')[1] || 'Unknown',
+        city: deviceInfo.location?.split(', ')[0] || 'Unknown',
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
       },
       status,
@@ -9403,25 +9385,35 @@ app.post('/api/auth/verify-otp', [
     });
     await user.save();
 
-    // ✅ UPDATE LOGIN ATTEMPT LOG TO SUCCESS
-    await UserLog.findOneAndUpdate(
-      { 
-        user: user._id, 
-        action: 'login_attempt',
-        status: 'pending'
+    // ✅ CREATE LOG FOR SUCCESSFUL LOGIN
+    await UserLog.create({
+      user: user._id,
+      username: user.email,
+      email: user.email,
+      userFullName: `${user.firstName} ${user.lastName}`,
+      action: 'login',
+      actionCategory: 'authentication',
+      ipAddress: deviceInfo.ip,
+      userAgent: deviceInfo.device,
+      deviceInfo: {
+        type: getDeviceType(req),
+        os: getOSFromUserAgent(req.headers['user-agent']),
+        browser: getBrowserFromUserAgent(req.headers['user-agent'])
       },
-      { 
-        $set: { 
-          status: 'success',
-          metadata: { 
-            ...(await UserLog.findOne({ user: user._id, action: 'login_attempt' }))?.metadata,
-            otpVerified: true,
-            verificationTime: new Date()
-          }
-        }
+      location: {
+        ip: deviceInfo.ip,
+        country: deviceInfo.location?.split(', ')[2] || 'Detected',
+        city: deviceInfo.location?.split(', ')[0] || 'Detected',
+        region: deviceInfo.location?.split(', ')[1] || 'Detected'
       },
-      { sort: { createdAt: -1 } }
-    );
+      status: 'success',
+      metadata: {
+        method: 'otp',
+        verificationTime: new Date()
+      },
+      relatedEntity: user._id,
+      relatedEntityModel: 'User'
+    });
 
     // Send login success email with device and location
     await sendAutomatedEmail(user, 'login_success', {
@@ -9904,7 +9896,6 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
         });
 
         // ✅ CREATE LOG FOR WITHDRAWAL REQUEST
-        const deviceInfo = await getUserDeviceInfo(req);
         await UserLog.create({
             user: userId,
             username: user.email,
@@ -9921,12 +9912,8 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             },
             location: {
                 ip: getRealClientIP(req),
-                country: deviceInfo.locationDetails?.country || 'Unknown',
-                city: deviceInfo.locationDetails?.city || 'Unknown',
-                region: deviceInfo.locationDetails?.region || 'Unknown',
-                exactLocation: deviceInfo.exactLocation,
-                latitude: deviceInfo.locationDetails?.latitude,
-                longitude: deviceInfo.locationDetails?.longitude
+                country: 'Detected',
+                city: 'Detected'
             },
             status: 'pending',
             metadata: {
@@ -9934,14 +9921,11 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 asset: asset,
                 assetAmount: assetAmount,
                 reference: reference,
-                walletAddress: walletAddress,
+                walletAddress: hideAddress(walletAddress),
                 balanceSource: balanceSource,
                 gasFee: gasFeeInAsset,
                 gasFeeInUsd: gasFeeInUsd,
-                exchangeRate: exchangeRate,
-                btcGasFeeUsed: btcGasFeeAmount,
-                btcPriceAtTime: btcPrice,
-                assetPriceAtTime: targetAssetPrice
+                exchangeRate: exchangeRate
             },
             relatedEntity: transaction._id,
             relatedEntityModel: 'Transaction'
@@ -9956,11 +9940,11 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 usdValue: amount,
                 fee: gasFeeInAsset,
                 feeUsd: gasFeeInUsd,
-                netAmount: assetAmount - gasFeeInAsset,
+                netAmount: assetAmount,
                 withdrawalAddress: walletAddress,
-                requestId: reference,
                 timestamp: new Date(),
-                network: asset === 'USDT' ? 'ERC-20' : asset === 'BTC' ? 'Bitcoin' : 'Mainnet'
+                requestId: reference,
+                network: asset === 'USDT' ? 'ERC-20' : asset.toUpperCase()
             });
             console.log(`📧 Withdrawal request email sent to ${user.email}`);
         } catch (emailError) {
@@ -9968,7 +9952,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             // Don't fail the withdrawal request if email fails
         }
 
-        // Log activity
+        // Log activity with all withdrawal details
         await logActivity(
             'withdrawal_created',
             'Transaction',
@@ -10074,19 +10058,18 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
       .sort((a, b) => new Date(b.createdAt || b.timestamp) - new Date(a.createdAt || a.timestamp))
       .slice(0, parseInt(limit));
 
-    // Function to get location from IP address using online APIs (exact location)
+    // Function to get location from IP address using online APIs
     const getLocationFromIP = async (ipAddress) => {
       if (!ipAddress || ipAddress === 'Unknown' || ipAddress === '0.0.0.0' || ipAddress === '::1' || ipAddress === '127.0.0.1') {
         return {
           country: 'Unknown',
           city: 'Unknown',
           region: 'Unknown',
-          street: 'Unknown',
+          village: 'Unknown',
           fullLocation: 'Unknown Location',
           latitude: null,
           longitude: null,
-          isp: null,
-          exactLocation: false
+          isp: null
         };
       }
 
@@ -10097,12 +10080,12 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
       }
 
       try {
-        console.log(`Fetching exact location for IP: ${cleanIp}`);
+        console.log(`Fetching location for IP: ${cleanIp}`);
         
         // Try multiple IP geolocation services for better accuracy
         const ipinfoToken = process.env.IPINFO_TOKEN || 'b56ce6e91d732d';
         
-        // Primary: ipinfo.io (most accurate for exact location)
+        // Primary: ipinfo.io (most accurate for city/location)
         try {
           const response = await axios.get(`https://ipinfo.io/${cleanIp}?token=${ipinfoToken}`, {
             timeout: 5000
@@ -10114,39 +10097,38 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
             // Parse coordinates if available
             let latitude = null;
             let longitude = null;
-            let exactLocation = false;
             if (loc && loc.includes(',')) {
               const coords = loc.split(',');
               latitude = parseFloat(coords[0]);
               longitude = parseFloat(coords[1]);
-              exactLocation = true;
             }
             
-            // Try to get street if available from additional data
-            let street = 'Unknown';
-            if (response.data.street) {
-              street = response.data.street;
+            // Try to get village/neighborhood from additional data if available
+            let village = city || 'Unknown';
+            
+            // Check if we have more specific location data from ipinfo
+            if (response.data.city) {
+              village = response.data.city;
             }
             
             return {
               country: country || 'Unknown',
               city: city || 'Unknown',
               region: region || 'Unknown',
-              street: street,
+              village: village,
               fullLocation: `${city || 'Unknown'}, ${region || 'Unknown'}, ${country || 'Unknown'}`,
               latitude: latitude,
               longitude: longitude,
               isp: org || null,
               timezone: timezone || null,
-              postalCode: postal || null,
-              exactLocation: exactLocation
+              postalCode: postal || null
             };
           }
         } catch (ipinfoError) {
-          console.log('ipinfo.io failed for exact location, trying fallback services...');
+          console.log('ipinfo.io failed, trying fallback services...');
         }
         
-        // Fallback 1: ipapi.co (also provides coordinates)
+        // Fallback 1: ipapi.co
         try {
           const response = await axios.get(`https://ipapi.co/${cleanIp}/json/`, {
             timeout: 5000
@@ -10155,23 +10137,17 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
           if (response.data && !response.data.error) {
             const { city, region, country_name, country_code, latitude, longitude, org, timezone, postal } = response.data;
             
-            let exactLocation = false;
-            if (latitude && longitude) {
-              exactLocation = true;
-            }
-            
             return {
               country: country_name || country_code || 'Unknown',
               city: city || 'Unknown',
               region: region || 'Unknown',
-              street: 'Unknown',
+              village: city || 'Unknown',
               fullLocation: `${city || 'Unknown'}, ${region || 'Unknown'}, ${country_name || country_code || 'Unknown'}`,
               latitude: latitude || null,
               longitude: longitude || null,
               isp: org || null,
               timezone: timezone || null,
-              postalCode: postal || null,
-              exactLocation: exactLocation
+              postalCode: postal || null
             };
           }
         } catch (ipapiError) {
@@ -10187,23 +10163,17 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
           if (response.data) {
             const { cityName, regionName, countryName, latitude, longitude, isp, timeZone } = response.data;
             
-            let exactLocation = false;
-            if (latitude && longitude) {
-              exactLocation = true;
-            }
-            
             return {
               country: countryName || 'Unknown',
               city: cityName || 'Unknown',
               region: regionName || 'Unknown',
-              street: 'Unknown',
+              village: cityName || 'Unknown',
               fullLocation: `${cityName || 'Unknown'}, ${regionName || 'Unknown'}, ${countryName || 'Unknown'}`,
               latitude: latitude || null,
               longitude: longitude || null,
               isp: isp || null,
               timezone: timeZone || null,
-              postalCode: null,
-              exactLocation: exactLocation
+              postalCode: null
             };
           }
         } catch (freeipapiError) {
@@ -10219,23 +10189,17 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
           if (response.data && response.data.status === 'success') {
             const { city, regionName, country, lat, lon, isp, timezone, zip } = response.data;
             
-            let exactLocation = false;
-            if (lat && lon) {
-              exactLocation = true;
-            }
-            
             return {
               country: country || 'Unknown',
               city: city || 'Unknown',
               region: regionName || 'Unknown',
-              street: 'Unknown',
+              village: city || 'Unknown',
               fullLocation: `${city || 'Unknown'}, ${regionName || 'Unknown'}, ${country || 'Unknown'}`,
               latitude: lat || null,
               longitude: lon || null,
               isp: isp || null,
               timezone: timezone || null,
-              postalCode: zip || null,
-              exactLocation: exactLocation
+              postalCode: zip || null
             };
           }
         } catch (ipapiComError) {
@@ -10247,35 +10211,33 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
           country: 'Unknown',
           city: 'Unknown',
           region: 'Unknown',
-          street: 'Unknown',
+          village: 'Unknown',
           fullLocation: 'Location Unavailable',
           latitude: null,
           longitude: null,
           isp: null,
           timezone: null,
-          postalCode: null,
-          exactLocation: false
+          postalCode: null
         };
         
       } catch (err) {
-        console.error('Error fetching exact location for IP:', err);
+        console.error('Error fetching location for IP:', err);
         return {
           country: 'Unknown',
           city: 'Unknown',
           region: 'Unknown',
-          street: 'Unknown',
+          village: 'Unknown',
           fullLocation: 'Location Unavailable',
           latitude: null,
           longitude: null,
           isp: null,
           timezone: null,
-          postalCode: null,
-          exactLocation: false
+          postalCode: null
         };
       }
     };
 
-    // Transform activities with PROPER user data mapping and REAL exact location data
+    // Transform activities with PROPER user data mapping and REAL location data
     const activities = await Promise.all(allActivities.map(async (activity) => {
       // Determine if it's a UserLog or SystemLog
       const isUserLog = activity.user !== undefined;
@@ -10335,7 +10297,7 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
         ipAddress = activity.ip || 'Unknown';
       }
 
-      // Get REAL exact location from IP address using online APIs
+      // Get REAL location from IP address using online APIs
       const locationData = await getLocationFromIP(ipAddress);
 
       // Final safety check for user name
@@ -10359,14 +10321,13 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
           country: locationData.country,
           city: locationData.city,
           region: locationData.region,
-          street: locationData.street,
+          village: locationData.village,
           fullLocation: locationData.fullLocation,
           latitude: locationData.latitude,
           longitude: locationData.longitude,
           isp: locationData.isp,
           timezone: locationData.timezone,
-          postalCode: locationData.postalCode,
-          exactLocation: locationData.exactLocation
+          postalCode: locationData.postalCode
         },
         status: status,
         type: isUserLog ? 'user_activity' : 'system_activity',
@@ -10377,7 +10338,7 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
     // Get total count for pagination
     const totalCount = await UserLog.countDocuments() + await SystemLog.countDocuments();
 
-    console.log('Sending activities with exact location data:', activities.length);
+    console.log('Sending activities with real location data:', activities.length);
 
     res.status(200).json({
       status: 'success',
@@ -10464,7 +10425,12 @@ function getActivityDescription(action, metadata) {
     'approve-withdrawal': 'Approved withdrawal',
     'reject-withdrawal': 'Rejected withdrawal',
     'create-user': 'Created user account',
-    'update-user': 'Updated user account'
+    'update-user': 'Updated user account',
+    
+    // Restriction actions
+    'restriction_applied': 'Applied account restriction',
+    'restriction_lifted': 'Lifted account restriction',
+    'restriction_check': 'Checked restriction status'
   };
 
   let description = actionMap[action] || `Performed ${action.replace(/_/g, ' ')}`;
@@ -10485,6 +10451,12 @@ function getActivityDescription(action, metadata) {
     }
     if (metadata.fields && Array.isArray(metadata.fields)) {
       description += ` (${metadata.fields.join(', ')})`;
+    }
+    if (metadata.restrictionType) {
+      description += ` (${metadata.restrictionType} restriction)`;
+    }
+    if (metadata.rejectionReason) {
+      description += ` - Reason: ${metadata.rejectionReason}`;
     }
   }
 
@@ -10530,7 +10502,7 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
 
 
 // =============================================
-// ENDPOINT 1: USER LOCATION - ROBUST ENTERPRISE VERSION (EXACT LOCATION)
+// ENDPOINT 1: USER LOCATION - ROBUST ENTERPRISE VERSION
 // =============================================
 app.post('/api/users/location', protect, async (req, res) => {
   try {
@@ -10554,59 +10526,27 @@ app.post('/api/users/location', protect, async (req, res) => {
       });
     }
     
-    // Get exact location details from IP (not approximate)
+    // Get location details from IP
     let locationDetails = {
       country: 'Unknown',
       city: 'Unknown',
-      region: 'Unknown',
-      street: 'Unknown',
-      postalCode: 'Unknown',
-      timezone: 'Unknown'
+      region: 'Unknown'
     };
-    let exactLocation = false;
     
     try {
-      // Try multiple IP geolocation services for exact location
-      const ipinfoToken = process.env.IPINFO_TOKEN || 'b56ce6e91d732d';
-      
-      // Primary: ipinfo.io
-      try {
-        const geoResponse = await axios.get(`https://ipinfo.io/${ipAddress}?token=${ipinfoToken}`, { timeout: 5000 });
-        if (geoResponse.data) {
-          locationDetails = {
-            country: geoResponse.data.country || 'Unknown',
-            city: geoResponse.data.city || 'Unknown',
-            region: geoResponse.data.region || 'Unknown',
-            street: geoResponse.data.street || 'Unknown',
-            postalCode: geoResponse.data.postal || 'Unknown',
-            timezone: geoResponse.data.timezone || 'Unknown'
-          };
-          if (geoResponse.data.loc && geoResponse.data.loc.includes(',')) {
-            exactLocation = true;
-          }
-        }
-      } catch (ipinfoError) {
-        // Fallback: ipapi.co
-        const geoResponse = await axios.get(`https://ipapi.co/${ipAddress}/json/`, { timeout: 5000 });
-        if (geoResponse.data && !geoResponse.data.error) {
-          locationDetails = {
-            country: geoResponse.data.country_name || 'Unknown',
-            city: geoResponse.data.city || 'Unknown',
-            region: geoResponse.data.region || 'Unknown',
-            street: 'Unknown',
-            postalCode: geoResponse.data.postal || 'Unknown',
-            timezone: geoResponse.data.timezone || 'Unknown'
-          };
-          if (geoResponse.data.latitude && geoResponse.data.longitude) {
-            exactLocation = true;
-          }
-        }
+      const geoResponse = await axios.get(`https://ipapi.co/${ipAddress}/json/`, { timeout: 3000 });
+      if (geoResponse.data && !geoResponse.data.error) {
+        locationDetails = {
+          country: geoResponse.data.country_name || 'Unknown',
+          city: geoResponse.data.city || 'Unknown',
+          region: geoResponse.data.region || 'Unknown'
+        };
       }
     } catch (geoError) {
-      console.log('Geolocation failed for exact location:', geoError.message);
+      console.log('Geolocation failed:', geoError.message);
     }
     
-    // Update user with exact location
+    // Update user with location
     await User.findByIdAndUpdate(userId, {
       $set: {
         'location.lastKnown': {
@@ -10615,10 +10555,6 @@ app.post('/api/users/location', protect, async (req, res) => {
           country: locationDetails.country,
           city: locationDetails.city,
           region: locationDetails.region,
-          street: locationDetails.street,
-          postalCode: locationDetails.postalCode,
-          timezone: locationDetails.timezone,
-          exactLocation: exactLocation,
           updatedAt: new Date(),
           ipAddress: ipAddress,
           userAgent: userAgent
@@ -10632,26 +10568,20 @@ app.post('/api/users/location', protect, async (req, res) => {
             locationDetails: locationDetails,
             ipAddress: ipAddress,
             userAgent: userAgent,
-            timestamp: new Date(),
-            exactLocation: exactLocation
+            timestamp: new Date()
           }],
           $slice: -100
         }
       }
     });
     
-    // Log activity with exact location
-    await logActivity('location_updated', 'User', userId, userId, 'User', req, { 
-      lat, 
-      lng, 
-      locationDetails,
-      exactLocation 
-    });
+    // Log activity
+    await logActivity('location_updated', 'User', userId, userId, 'User', req, { lat, lng, locationDetails });
     
     res.status(200).json({
       status: 'success',
-      message: 'Exact location updated successfully',
-      data: { location: locationDetails, coordinates: { lat, lng }, exactLocation }
+      message: 'Location updated successfully',
+      data: { location: locationDetails, coordinates: { lat, lng } }
     });
     
   } catch (error) {
@@ -10821,7 +10751,12 @@ app.post('/api/admin/restrictions', adminProtect, restrictTo('super'), async (re
   }
 });
 
-// ✅ ADD RESTRICTION CHECK ON TRANSACTION COMPLETION (deposit/withdrawal completion)
+// Trigger restriction check on KYC approval (hook into your existing KYC approval)
+const triggerKYCApprovalCheck = async (userId) => {
+  await AccountRestrictions.checkAndUpdateRestrictions(userId, 'kyc_approval');
+};
+
+// Trigger restriction check on transaction completion (hook into deposit/withdrawal completion)
 const triggerTransactionCheck = async (userId) => {
   await AccountRestrictions.checkAndUpdateRestrictions(userId, 'transaction_completion');
 };
@@ -10849,49 +10784,116 @@ const scheduleDailyRestrictionChecks = () => {
 // Start scheduler after server starts
 setTimeout(scheduleDailyRestrictionChecks, 60000);
 
-// ✅ ADD ENDPOINT TO GET USER RESTRICTION STATUS WITH MESSAGE
-app.get('/api/user/restriction-status', protect, async (req, res) => {
+// =============================================
+// DEPOSIT ENDPOINT - ENHANCED WITH LOG CREATION
+// =============================================
+app.post('/api/deposits', protect, [
+  body('amount').isFloat({ min: 10 }).withMessage('Amount must be at least $10'),
+  body('method').isIn(['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'SHIB', 'TRX', 'LTC', 'BANK', 'CARD']).withMessage('Invalid payment method')
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      status: 'fail',
+      errors: errors.array()
+    });
+  }
+
   try {
+    const { amount, method } = req.body;
     const userId = req.user._id;
-    
-    const restrictionStatus = await UserRestrictionStatus.findOne({ user: userId });
-    const restrictions = await AccountRestrictions.getInstance();
-    const limits = await AccountRestrictions.getUserLimits(userId);
-    
-    let restrictionMessage = null;
-    
-    if (restrictionStatus) {
-      if (restrictionStatus.kyc_restricted) {
-        restrictionMessage = restrictionStatus.kyc_restriction_reason || restrictions.kyc_restriction_reason;
-      } else if (restrictionStatus.transaction_restricted) {
-        restrictionMessage = restrictionStatus.transaction_restriction_reason || restrictions.txn_restriction_reason;
+    const user = await User.findById(userId);
+
+    // Generate unique reference
+    const reference = `DEP-${method}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+
+    // Create deposit request (pending)
+    const deposit = await Transaction.create({
+      user: userId,
+      type: 'deposit',
+      amount: amount,
+      currency: 'USD',
+      status: 'pending',
+      method: method,
+      reference: reference,
+      netAmount: amount,
+      details: {
+        requestedAt: new Date(),
+        depositType: 'crypto'
       }
+    });
+
+    // ✅ CREATE LOG FOR DEPOSIT REQUEST
+    await UserLog.create({
+      user: userId,
+      username: user.email,
+      email: user.email,
+      userFullName: `${user.firstName} ${user.lastName}`,
+      action: 'deposit_created',
+      actionCategory: 'financial',
+      ipAddress: getRealClientIP(req),
+      userAgent: req.headers['user-agent'] || 'Unknown',
+      deviceInfo: {
+        type: getDeviceType(req),
+        os: getOSFromUserAgent(req.headers['user-agent']),
+        browser: getBrowserFromUserAgent(req.headers['user-agent'])
+      },
+      location: {
+        ip: getRealClientIP(req),
+        country: 'Detected',
+        city: 'Detected'
+      },
+      status: 'pending',
+      metadata: {
+        amount: amount,
+        method: method,
+        reference: reference
+      },
+      relatedEntity: deposit._id,
+      relatedEntityModel: 'Transaction'
+    });
+
+    // ✅ SEND DEPOSIT REQUEST EMAIL
+    try {
+      await sendAutomatedEmail(user, 'deposit_received', {
+        name: user.firstName,
+        amount: amount,
+        asset: method,
+        usdValue: amount,
+        timestamp: new Date(),
+        transactionId: reference,
+        network: method === 'USDT' ? 'ERC-20' : method,
+        confirmations: 0
+      });
+      console.log(`📧 Deposit request email sent to ${user.email}`);
+    } catch (emailError) {
+      console.error('Failed to send deposit request email:', emailError);
+      // Don't fail the deposit request if email fails
     }
-    
-    res.json({
+
+    res.status(201).json({
       status: 'success',
+      message: 'Deposit request created. Please complete the payment.',
       data: {
-        kyc_restricted: restrictionStatus?.kyc_restricted || false,
-        transaction_restricted: restrictionStatus?.transaction_restricted || false,
-        restriction_message: restrictionMessage,
-        limits: {
-          withdrawal: limits.withdrawal,
-          investment: limits.investment
+        deposit: {
+          id: deposit._id,
+          amount: amount,
+          method: method,
+          reference: reference,
+          status: 'pending'
         }
       }
     });
+
+    await logActivity('create-deposit', 'transaction', deposit._id, userId, 'User', req);
   } catch (err) {
-    console.error('Get user restriction status error:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch restriction status' });
+    console.error('Deposit creation error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to create deposit request'
+    });
   }
 });
-
-
-
-
-
-
-
 
 
 
