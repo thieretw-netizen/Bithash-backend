@@ -22322,6 +22322,113 @@ app.get('/api/users/me', protect, async (req, res) => {
 
 
 
+// =============================================
+// MARKET DATA ENDPOINT - Prices by Market Cap
+// =============================================
+
+// Cache with 30-second TTL
+let marketDataCache = {
+  data: null,
+  lastUpdated: null
+};
+
+async function fetchMarketData() {
+  try {
+    const response = await axios.get(
+      'https://api.coingecko.com/api/v3/coins/markets',
+      {
+        params: {
+          vs_currency: 'usd',
+          order: 'market_cap_desc',
+          per_page: 50,
+          page: 1,
+          sparkline: true,
+          price_change_percentage: '1h,24h,7d'
+        },
+        timeout: 10000
+      }
+    );
+
+    if (response.data) {
+      const transformed = response.data.map(coin => ({
+        id: coin.id,
+        symbol: coin.symbol,
+        name: coin.name,
+        image: coin.image,
+        current_price: coin.current_price,
+        market_cap: coin.market_cap,
+        market_cap_rank: coin.market_cap_rank,
+        total_volume: coin.total_volume,
+        price_change_percentage_24h: coin.price_change_percentage_24h || 0,
+        price_change_percentage_1h_in_currency: coin.price_change_percentage_1h_in_currency || 0,
+        price_change_percentage_7d_in_currency: coin.price_change_percentage_7d_in_currency || 0,
+        sparkline_in_7d: {
+          price: coin.sparkline_in_7d?.price || []
+        }
+      }));
+
+      marketDataCache = {
+        data: transformed,
+        lastUpdated: new Date()
+      };
+      
+      return transformed;
+    }
+    
+    return marketDataCache.data || [];
+    
+  } catch (error) {
+    console.error('Market data fetch error:', error);
+    return marketDataCache.data || [];
+  }
+}
+
+// Endpoint for Prices by Market Cap table
+app.get('/api/market/assets', async (req, res) => {
+  try {
+    let assets = marketDataCache.data;
+    
+    // Refresh if cache is older than 30 seconds or empty
+    if (!assets || !marketDataCache.lastUpdated || 
+        (new Date() - marketDataCache.lastUpdated) > 30000) {
+      assets = await fetchMarketData();
+    }
+    
+    res.json({
+      status: 'success',
+      data: assets || []
+    });
+    
+  } catch (error) {
+    console.error('Market assets error:', error);
+    res.json({
+      status: 'error',
+      data: []
+    });
+  }
+});
+
+// Refresh cache every 30 seconds in background
+setInterval(async () => {
+  await fetchMarketData();
+}, 30000);
+
+// Initial cache on startup
+fetchMarketData();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Global error handler:', err);
@@ -22348,6 +22455,105 @@ const io = new Server(httpServer, {
     methods: ['GET', 'POST']
   }
 });
+
+
+
+
+// Add market WebSocket to your existing server
+const setupMarketWebSocket = (server) => {
+  const marketWss = new WebSocket.Server({ 
+    server, 
+    path: '/ws/market' 
+  });
+
+  const clients = new Set();
+  let priceInterval = null;
+
+  const broadcastPrices = async () => {
+    try {
+      const response = await axios.get(
+        'https://api.coingecko.com/api/v3/coins/markets',
+        {
+          params: {
+            vs_currency: 'usd',
+            per_page: 50,
+            price_change_percentage: '24h'
+          },
+          timeout: 5000
+        }
+      );
+
+      if (response.data && clients.size > 0) {
+        const updates = response.data.map(coin => ({
+          assetId: coin.id,
+          price: coin.current_price,
+          price_change_percentage_24h: coin.price_change_percentage_24h || 0
+        }));
+
+        const message = JSON.stringify({
+          type: 'batch_update',
+          updates: updates,
+          timestamp: Date.now()
+        });
+
+        clients.forEach(client => {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(message);
+          }
+        });
+      }
+    } catch (error) {
+      console.error('WebSocket price broadcast error:', error);
+    }
+  };
+
+  marketWss.on('connection', (ws) => {
+    clients.add(ws);
+    console.log(`Market WebSocket client connected. Total: ${clients.size}`);
+
+    // Send initial data
+    (async () => {
+      const assets = await fetchMarketData();
+      ws.send(JSON.stringify({
+        type: 'initial_data',
+        assets: assets
+      }));
+    })();
+
+    // Start broadcasting if this is the first client
+    if (clients.size === 1 && !priceInterval) {
+      priceInterval = setInterval(broadcastPrices, 5000);
+    }
+
+    ws.on('message', (message) => {
+      try {
+        const data = JSON.parse(message);
+        if (data.type === 'subscribe') {
+          console.log('Client subscribed to price updates');
+        }
+      } catch (err) {
+        // Ignore invalid messages
+      }
+    });
+
+    ws.on('close', () => {
+      clients.delete(ws);
+      console.log(`Market WebSocket client disconnected. Total: ${clients.size}`);
+      
+      // Stop broadcasting if no clients left
+      if (clients.size === 0 && priceInterval) {
+        clearInterval(priceInterval);
+        priceInterval = null;
+      }
+    });
+  });
+};
+
+// Call this after creating your HTTP server
+// setupMarketWebSocket(server);
+
+
+
 
 // Socket.IO connection handler
 io.on('connection', (socket) => {
