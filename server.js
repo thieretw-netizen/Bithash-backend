@@ -19211,6 +19211,7 @@ app.get('/api/loans/balances', async (req, res) => {
 
 
 
+
 // Stats endpoint with Redis as single source of truth
 app.get('/api/stats', async (req, res) => {
     try {
@@ -19223,16 +19224,9 @@ app.get('/api/stats', async (req, res) => {
             investorCount = parseInt(investorCount);
         }
         
-        // Get last updated timestamp
-        let lastUpdated = await redis.get('last-stats-update');
-        if (!lastUpdated) {
-            lastUpdated = new Date().toISOString();
-        }
-        
         // Return stats - everyone gets the same values from Redis
         const stats = {
-            totalInvestors: investorCount,
-            lastUpdated: lastUpdated
+            totalInvestors: investorCount
         };
         
         res.status(200).json(stats);
@@ -19245,12 +19239,6 @@ app.get('/api/stats', async (req, res) => {
     }
 });
 
-// Helper function to generate random numbers in range
-function getRandomInRange(min, max, decimals = 0) {
-    const rand = Math.random() * (max - min) + min;
-    return parseFloat(rand.toFixed(decimals));
-}
-
 // Clear previous Redis data to start fresh
 async function initializeFreshStats() {
     try {
@@ -19262,7 +19250,6 @@ async function initializeFreshStats() {
         
         // Set initial investor count
         await redis.set('persistent-investor-count', '4254256');
-        await redis.set('last-stats-update', new Date().toISOString());
         
         console.log('Fresh stats initialized with:');
         console.log('- Investors: 4,254,256');
@@ -19274,12 +19261,13 @@ async function initializeFreshStats() {
 // Initialize fresh stats on startup
 initializeFreshStats();
 
-// Real-time stats updater
+// Real-time stats updater - updates at FIXED intervals so all devices see same values
+// Set a random interval between 3-300 seconds ONCE at startup, then stick with it
+const randomIntervalSeconds = Math.floor(Math.random() * (300 - 3 + 1)) + 3;
+console.log(`Investor update interval set to: ${randomIntervalSeconds} seconds`);
+
 setInterval(async () => {
     try {
-        const now = new Date();
-        const currentTime = Date.now();
-        
         // Get current investor count
         let investorCount = await redis.get('persistent-investor-count');
         if (!investorCount) {
@@ -19288,31 +19276,21 @@ setInterval(async () => {
             investorCount = parseInt(investorCount);
         }
         
-        // Get last investor update time
-        const lastInvestorUpdate = await redis.get('last-investor-update') || 0;
+        // Random increment between 1 and 9
+        const increment = Math.floor(Math.random() * 9) + 1;
+        const newInvestorCount = investorCount + increment;
         
-        // Generate random seconds between 3 and 300 for next update
-        const randomSecondsDelay = Math.floor(Math.random() * (300 - 3 + 1)) + 3;
-        const updateIntervalMs = randomSecondsDelay * 1000;
+        // Update Redis with new values
+        await redis.set('persistent-investor-count', newInvestorCount.toString());
         
-        // Check if it's time to update investors
-        if ((currentTime - lastInvestorUpdate) >= updateIntervalMs) {
-            // Random increment between 1 and 9
-            const increment = Math.floor(Math.random() * 9) + 1;
-            const newInvestorCount = investorCount + increment;
-            
-            // Update Redis with new values
-            await redis.set('persistent-investor-count', newInvestorCount.toString());
-            await redis.set('last-investor-update', currentTime.toString());
-            await redis.set('last-stats-update', now.toISOString());
-            
-            console.log(`Investor update: +${increment} (${investorCount} → ${newInvestorCount}) after ${randomSecondsDelay} seconds`);
-        }
+        console.log(`Investor update: +${increment} (${investorCount} → ${newInvestorCount}) every ${randomIntervalSeconds} seconds`);
         
     } catch (err) {
         console.error('Stats updater error:', err);
     }
-}, 1000); // Check every second
+}, randomIntervalSeconds * 1000); // Fixed interval - SAME for everyone
+
+
 
 
 
