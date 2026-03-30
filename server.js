@@ -19215,7 +19215,6 @@ app.get('/api/loans/balances', async (req, res) => {
 
 
 
-
 // Stats endpoint with Redis caching and real-time updates
 app.get('/api/stats', async (req, res) => {
     try {
@@ -19258,7 +19257,7 @@ app.get('/api/stats', async (req, res) => {
             dailyInvestmentVolume: 0,
             dailyWithdrawal: 0, // Will grow up to 17 million daily
             dailyLoan: 0, // Will grow up to 10 million daily
-            dailyCloudMiners: 0, // Will grow up to 9999 daily
+            dailyCloudMiners: 0, // Will grow up to 7999 daily
             hourlyInvestors: 0 // Track investors added this hour (max 599)
         };
 
@@ -19315,7 +19314,7 @@ async function initializeFreshStats() {
         console.log('- 24h Investment limit: 10 million');
         console.log('- 24h Withdrawal limit: 17 million');
         console.log('- 24h Loan limit: 10 million');
-        console.log('- 24h Cloud Miner join limit: 9999');
+        console.log('- 24h Cloud Miner join limit: 7999');
     } catch (err) {
         console.error('Failed to initialize fresh stats:', err);
     }
@@ -19342,7 +19341,7 @@ setInterval(async () => {
                 dailyInvestmentVolume: 0,
                 dailyWithdrawal: 0, // 17 million daily limit
                 dailyLoan: 0, // 10 million daily limit
-                dailyCloudMiners: 0, // 9999 daily limit
+                dailyCloudMiners: 0, // 7999 daily limit
                 hourlyInvestors: 0, // Track investors this hour
                 lastHour: currentHour // Track which hour we're in
             };
@@ -19463,7 +19462,7 @@ setInterval(async () => {
         const randomCloudMinerInterval = getRandomInRange(minCloudMinerInterval, maxCloudMinerInterval, 0);
         
         if (timeSinceLastCloudMinerUpdate >= randomCloudMinerInterval) {
-            const dailyCloudMinerLimit = 9999; // YOUR SPECIFIED: 9999 daily limit
+            const dailyCloudMinerLimit = 7999; // YOUR SPECIFIED: 7999 daily limit
             if (dailyData.dailyCloudMiners < dailyCloudMinerLimit) {
                 const remainingDaily = dailyCloudMinerLimit - dailyData.dailyCloudMiners;
                 // Random increment 1-9 users (not more than 9 per update)
@@ -19545,7 +19544,6 @@ setInterval(async () => {
         console.error('Stats updater error:', err);
     }
 }, 1000); // Run every second to check for updates
-
 
 
 
