@@ -19211,26 +19211,7 @@ app.get('/api/loans/balances', async (req, res) => {
 
 
 
-// ============ STATS ENDPOINT ============
-app.get('/api/stats', async (req, res) => {
-  try {
-    let investorCount = await redis.get('persistent-investor-count');
-    if (!investorCount) {
-      investorCount = 4254256;
-      await redis.set('persistent-investor-count', investorCount.toString());
-    } else {
-      investorCount = parseInt(investorCount);
-    }
-    
-    res.status(200).json({ totalInvestors: investorCount });
-  } catch (err) {
-    console.error('Stats error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch stats'
-    });
-  }
-});
+
 
 
 // =============================================
