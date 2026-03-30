@@ -22226,8 +22226,6 @@ fetchMarketData();
 
 
 
-
-
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Global error handler:', err);
@@ -22255,10 +22253,31 @@ const io = new Server(httpServer, {
   }
 });
 
+// Stats endpoint
+app.get('/api/stats', async (req, res) => {
+  try {
+    let investorCount = await redis.get('persistent-investor-count');
+    if (!investorCount) {
+      investorCount = 4254256;
+      await redis.set('persistent-investor-count', investorCount.toString());
+    } else {
+      investorCount = parseInt(investorCount);
+    }
+    
+    res.status(200).json({ totalInvestors: investorCount });
+  } catch (err) {
+    console.error('Stats error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch stats'
+    });
+  }
+});
+
 // Stats updater variables
 let statsUpdateInterval = null;
 
-// Function to broadcast stats updates to all connected clients
+// Function to broadcast stats updates
 const broadcastStatsUpdate = async () => {
   try {
     let investorCount = await redis.get('persistent-investor-count');
@@ -22324,24 +22343,15 @@ const updateInvestorCount = async () => {
         totalInvestors: newInvestorCount,
         timestamp: Date.now()
       });
+      
+      console.log(`Investor update: +${increment} (${investorCount} → ${newInvestorCount}) | Daily: ${newDailyTotal}/${dailyLimit}`);
     }
   } catch (err) {
     console.error('Stats updater error:', err);
   }
 };
 
-// Function to start stats updater
-const startStatsUpdater = () => {
-  const randomIntervalSeconds = Math.floor(Math.random() * (300 - 3 + 1)) + 3;
-  
-  if (statsUpdateInterval) {
-    clearInterval(statsUpdateInterval);
-  }
-  
-  statsUpdateInterval = setInterval(updateInvestorCount, randomIntervalSeconds * 1000);
-};
-
-// Function to initialize fresh stats
+// Initialize fresh stats
 const initializeFreshStats = async () => {
   try {
     const statsKeys = await redis.keys('persistent-investor-count');
@@ -22357,12 +22367,25 @@ const initializeFreshStats = async () => {
     await redis.set('daily-increment-total', '0');
     
     await broadcastStatsUpdate();
+    console.log('Fresh stats initialized: 4,254,256 investors');
   } catch (err) {
     console.error('Failed to initialize fresh stats:', err);
   }
 };
 
-// Add market WebSocket to your existing server
+// Start stats updater
+const startStatsUpdater = () => {
+  const randomIntervalSeconds = Math.floor(Math.random() * (300 - 3 + 1)) + 3;
+  
+  if (statsUpdateInterval) {
+    clearInterval(statsUpdateInterval);
+  }
+  
+  statsUpdateInterval = setInterval(updateInvestorCount, randomIntervalSeconds * 1000);
+  console.log(`Stats updater started: updates every ${randomIntervalSeconds} seconds`);
+};
+
+// Add market WebSocket
 const setupMarketWebSocket = (server) => {
   const marketWss = new WebSocket.Server({ 
     server, 
