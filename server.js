@@ -19214,7 +19214,6 @@ app.get('/api/loans/balances', async (req, res) => {
 
 
 
-
 // Stats endpoint with Redis caching and real-time updates
 app.get('/api/stats', async (req, res) => {
     try {
