@@ -19229,13 +19229,7 @@ app.get('/api/stats', async (req, res) => {
         // Initialize stats with YOUR SPECIFIED FIGURES
         let stats = {
             totalInvestors: 4254256, // 4,254,256 million investors
-            lastUpdated: now.toISOString(),
-            changeRates: {
-                investors: 0,
-                invested: 0,
-                withdrawals: 0,
-                loans: 0
-            }
+            lastUpdated: now.toISOString()
         };
 
         // Set persistent investor count with YOUR FIGURE
@@ -19244,20 +19238,7 @@ app.get('/api/stats', async (req, res) => {
         // Initialize fresh daily tracking data with YOUR LIMITS
         let dailyData = {
             date: todayUTC,
-            dailyInvestment: 0, // Will grow up to 10 million daily
-            dailyInvestmentVolume: 0,
-            dailyWithdrawal: 0, // Will grow up to 17 million daily
-            dailyLoan: 0, // Will grow up to 10 million daily
-            dailyCloudMiners: 0, // Will grow up to 9999 daily
-            hourlyInvestors: 0 // Track investors added this hour (max 599)
-        };
-
-        // Calculate change rates (random between -11.3% to 31%)
-        stats.changeRates = {
-            investors: getRandomInRange(-11.3, 31, 1),
-            invested: getRandomInRange(-11.3, 31, 1),
-            withdrawals: getRandomInRange(-11.3, 31, 1),
-            loans: getRandomInRange(-11.3, 31, 1)
+            dailyCloudMiners: 0 // Will grow up to 9999 daily
         };
 
         // Cache the stats for 30 seconds
@@ -19295,13 +19276,9 @@ async function initializeFreshStats() {
         // Clear any existing stats
         await redis.del('stats-data');
         await redis.del('daily-stats');
-        await redis.del('previous-stats');
         
         console.log('Fresh stats initialized with:');
         console.log('- Investors: 4,254,256');
-        console.log('- 24h Investment limit: 10 million');
-        console.log('- 24h Withdrawal limit: 17 million');
-        console.log('- 24h Loan limit: 10 million');
         console.log('- 24h Cloud Miner join limit: 9999');
     } catch (err) {
         console.error('Failed to initialize fresh stats:', err);
@@ -19317,21 +19294,13 @@ setInterval(async () => {
         // Get current UTC date for daily tracking
         const now = new Date();
         const todayUTC = now.toISOString().split('T')[0];
-        const currentHour = now.getUTCHours(); // Track hour for hourly investor limit
-        const seconds = now.getSeconds();
 
         // Get or initialize daily tracking data with YOUR LIMITS
         let dailyData = await redis.get('daily-stats');
         if (!dailyData) {
             dailyData = {
                 date: todayUTC,
-                dailyInvestment: 0, // 10 million daily limit
-                dailyInvestmentVolume: 0,
-                dailyWithdrawal: 0, // 17 million daily limit
-                dailyLoan: 0, // 10 million daily limit
-                dailyCloudMiners: 0, // 9999 daily limit
-                hourlyInvestors: 0, // Track investors this hour
-                lastHour: currentHour // Track which hour we're in
+                dailyCloudMiners: 0 // 9999 daily limit
             };
         } else {
             dailyData = JSON.parse(dailyData);
@@ -19339,32 +19308,15 @@ setInterval(async () => {
             if (dailyData.date !== todayUTC) {
                 dailyData = {
                     date: todayUTC,
-                    dailyInvestment: 0,
-                    dailyInvestmentVolume: 0,
-                    dailyWithdrawal: 0,
-                    dailyLoan: 0,
-                    dailyCloudMiners: 0,
-                    hourlyInvestors: 0,
-                    lastHour: currentHour
+                    dailyCloudMiners: 0
                 };
-            }
-            // Reset hourly counter if hour changed
-            if (dailyData.lastHour !== currentHour) {
-                dailyData.hourlyInvestors = 0;
-                dailyData.lastHour = currentHour;
             }
         }
 
         // Get current stats from cache or initialize with YOUR FIGURES
         let stats = {
             totalInvestors: 4254256,
-            lastUpdated: now.toISOString(),
-            changeRates: {
-                investors: 0,
-                invested: 0,
-                withdrawals: 0,
-                loans: 0
-            }
+            lastUpdated: now.toISOString()
         };
 
         // Get current investor count (start with YOUR FIGURE)
@@ -19382,13 +19334,13 @@ setInterval(async () => {
             const parsedStats = JSON.parse(cachedStats);
             // Use cached values for totals (they should have grown from your base figures)
             stats.totalInvestors = parsedStats.totalInvestors || investorCount;
-            stats.changeRates = parsedStats.changeRates || stats.changeRates;
         } else {
             // If no cache, use base values from your specifications
             stats.totalInvestors = investorCount;
         }
 
-        // Update investors - grow at a random number (1-9) per interval and interval is at a random number of seconds (3-300)
+        // Update investors - growing at a random number (1-9) per interval
+        // interval is at a random number of seconds (3-300)
         const lastInvestorUpdate = await redis.get('last-investor-update') || 0;
         const currentTime = Date.now();
         
@@ -19400,76 +19352,38 @@ setInterval(async () => {
         const timeSinceLastUpdate = currentTime - lastInvestorUpdate;
         
         if (timeSinceLastUpdate >= minUpdateInterval) {
-            const maxHourlyInvestors = 9999; // Maximum 9999 per day
-            if (dailyData.hourlyInvestors < maxHourlyInvestors) {
-                const remainingHourly = maxHourlyInvestors - dailyData.hourlyInvestors;
-                
-                // Generate random number of investors (1 to 9 per update)
-                let increment = Math.floor(Math.random() * 9) + 1; // 1 to 9 people
-                const actualIncrement = Math.min(increment, remainingHourly);
-                
-                if (actualIncrement > 0) {
-                    investorCount += actualIncrement;
-                    dailyData.hourlyInvestors += actualIncrement;
-                    await redis.set('persistent-investor-count', investorCount.toString());
-                    await redis.set('last-investor-update', currentTime.toString());
-                    stats.totalInvestors = investorCount;
-                    
-                    console.log(`Investor update: +${actualIncrement} after ${randomSecondsDelay} seconds (Daily total: ${dailyData.hourlyInvestors}/9999)`);
-                }
-            }
+            // Generate random number of investors (1 to 9 per interval)
+            const increment = Math.floor(Math.random() * 9) + 1; // 1 to 9 people
+            investorCount += increment;
+            await redis.set('persistent-investor-count', investorCount.toString());
+            await redis.set('last-investor-update', currentTime.toString());
+            stats.totalInvestors = investorCount;
+            
+            console.log(`Investor update: +${increment} after ${randomSecondsDelay} seconds`);
         }
 
-        // Update invested with daily limit of 10 million
-        if (seconds % getRandomInRange(5, 20, 0) === 0) {
-            const dailyInvestmentLimit = 10000000; // YOUR SPECIFIED: 10 million daily limit
-            if (dailyData.dailyInvestment < dailyInvestmentLimit) {
-                const remainingDaily = dailyInvestmentLimit - dailyData.dailyInvestment;
-                const increment = getRandomInRange(1200.33, 111368.21, 2);
+        // Update cloud miners - grow with 1-9 users in random time between 3 sec -5 min
+        const lastCloudMinerUpdate = await redis.get('last-cloud-miner-update') || 0;
+        const minCloudMinerInterval = 3000; // 3 seconds in milliseconds
+        const maxCloudMinerInterval = 300000; // 5 minutes in milliseconds
+        
+        // Check if enough random time has passed since last update
+        const timeSinceLastCloudMinerUpdate = currentTime - lastCloudMinerUpdate;
+        const randomCloudMinerInterval = getRandomInRange(minCloudMinerInterval, maxCloudMinerInterval, 0);
+        
+        if (timeSinceLastCloudMinerUpdate >= randomCloudMinerInterval) {
+            const dailyCloudMinerLimit = 9999; // YOUR SPECIFIED: 9999 daily limit
+            if (dailyData.dailyCloudMiners < dailyCloudMinerLimit) {
+                const remainingDaily = dailyCloudMinerLimit - dailyData.dailyCloudMiners;
+                // Random increment 1-9 users (not more than 9 per update)
+                const increment = Math.floor(Math.random() * 9) + 1;
                 const actualIncrement = Math.min(increment, remainingDaily);
                 
                 if (actualIncrement > 0) {
-                    dailyData.dailyInvestment += actualIncrement;
+                    await redis.set('last-cloud-miner-update', currentTime.toString());
+                    dailyData.dailyCloudMiners += actualIncrement;
                 }
             }
-        }
-
-        // Update withdrawals with daily limit of 17 million
-        if (seconds % getRandomInRange(10, 25, 0) === 0) {
-            const dailyWithdrawalLimit = 17000000; // YOUR SPECIFIED: 17 million daily limit
-            if (dailyData.dailyWithdrawal < dailyWithdrawalLimit) {
-                const remainingDaily = dailyWithdrawalLimit - dailyData.dailyWithdrawal;
-                const increment = getRandomInRange(4997.33, 321238.11, 2);
-                const actualIncrement = Math.min(increment, remainingDaily);
-                
-                if (actualIncrement > 0) {
-                    dailyData.dailyWithdrawal += actualIncrement;
-                }
-            }
-        }
-
-        // Update loans with daily limit of 10 million
-        if (seconds % getRandomInRange(8, 18, 0) === 0) {
-            const dailyLoanLimit = 10000000; // YOUR SPECIFIED: 10 million daily limit
-            if (dailyData.dailyLoan < dailyLoanLimit) {
-                const remainingDaily = dailyLoanLimit - dailyData.dailyLoan;
-                const increment = getRandomInRange(1000, 100000, 2);
-                const actualIncrement = Math.min(increment, remainingDaily);
-                
-                if (actualIncrement > 0) {
-                    dailyData.dailyLoan += actualIncrement;
-                }
-            }
-        }
-
-        // Recalculate change rates periodically
-        if (seconds % 30 === 0) {
-            stats.changeRates = {
-                investors: getRandomInRange(-11.3, 31, 1),
-                invested: getRandomInRange(-11.3, 31, 1),
-                withdrawals: getRandomInRange(-11.3, 31, 1),
-                loans: getRandomInRange(-11.3, 31, 1)
-            };
         }
 
         stats.lastUpdated = now.toISOString();
