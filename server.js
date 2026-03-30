@@ -22083,7 +22083,6 @@ fetchMarketData();
 
 
 
-
 // ============ ERROR HANDLING MIDDLEWARE ============
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -22138,7 +22137,7 @@ function broadcastStats(io, investorCount) {
     totalInvestors: investorCount,
     timestamp: Date.now()
   });
-  console.log(`Broadcasted to ALL connected clients: ${investorCount} investors`);
+  console.log(`Broadcasted to ALL clients: ${investorCount} investors`);
 }
 
 function startStatsUpdater(io) {
@@ -22159,7 +22158,7 @@ function startStatsUpdater(io) {
       if (lastUpdateDate !== todayUTC) {
         await redis.set('daily-increment-total', '0');
         await redis.set('last-update-date', todayUTC);
-        console.log(`New day: ${todayUTC} - Daily limit reset, investor count continues from previous day`);
+        console.log(`New day: ${todayUTC} - Daily limit reset, investor count continues`);
       }
       
       let investorCount = await redis.get('persistent-investor-count');
@@ -22189,7 +22188,6 @@ function startStatsUpdater(io) {
         await redis.set('persistent-investor-count', newInvestorCount.toString());
         await redis.set('daily-increment-total', newDailyTotal.toString());
         
-        // BROADCAST TO ALL CONNECTED CLIENTS SIMULTANEOUSLY
         broadcastStats(io, newInvestorCount);
         
         console.log(`+${increment} investors (${investorCount} → ${newInvestorCount}) | Daily: ${newDailyTotal}/${dailyLimit}`);
@@ -22199,6 +22197,96 @@ function startStatsUpdater(io) {
     }
   }, randomIntervalSeconds * 1000);
 }
+
+// ============ MARKET WEBSOCKET ============
+const setupMarketWebSocket = (server) => {
+  const marketWss = new WebSocket.Server({ 
+    server, 
+    path: '/ws/market' 
+  });
+
+  const clients = new Set();
+  let priceInterval = null;
+
+  const broadcastPrices = async () => {
+    try {
+      const response = await axios.get(
+        'https://api.coingecko.com/api/v3/coins/markets',
+        {
+          params: {
+            vs_currency: 'usd',
+            per_page: 50,
+            price_change_percentage: '24h'
+          },
+          timeout: 5000
+        }
+      );
+
+      if (response.data && clients.size > 0) {
+        const updates = response.data.map(coin => ({
+          assetId: coin.id,
+          price: coin.current_price,
+          price_change_percentage_24h: coin.price_change_percentage_24h || 0
+        }));
+
+        const message = JSON.stringify({
+          type: 'batch_update',
+          updates: updates,
+          timestamp: Date.now()
+        });
+
+        clients.forEach(client => {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(message);
+          }
+        });
+      }
+    } catch (error) {
+      console.error('WebSocket price broadcast error:', error);
+    }
+  };
+
+  marketWss.on('connection', (ws) => {
+    clients.add(ws);
+    console.log(`Market WebSocket client connected. Total: ${clients.size}`);
+
+    (async () => {
+      const assets = await fetchMarketData();
+      ws.send(JSON.stringify({
+        type: 'initial_data',
+        assets: assets
+      }));
+    })();
+
+    if (clients.size === 1 && !priceInterval) {
+      priceInterval = setInterval(broadcastPrices, 5000);
+    }
+
+    ws.on('message', (message) => {
+      try {
+        const data = JSON.parse(message);
+        if (data.type === 'subscribe') {
+          console.log('Client subscribed to price updates');
+        }
+      } catch (err) {
+        // Ignore invalid messages
+      }
+    });
+
+    ws.on('close', () => {
+      clients.delete(ws);
+      console.log(`Market WebSocket client disconnected. Total: ${clients.size}`);
+      
+      if (clients.size === 0 && priceInterval) {
+        clearInterval(priceInterval);
+        priceInterval = null;
+      }
+    });
+  });
+};
+
+// Call market WebSocket setup
+setupMarketWebSocket(httpServer);
 
 // ============ SOCKET.IO CONNECTION HANDLER ============
 io.on('connection', (socket) => {
@@ -22224,10 +22312,92 @@ io.on('connection', (socket) => {
     }
   })();
 
+  // Verify admin token for admin connections
+  socket.on('authenticate', async (token) => {
+    try {
+      const decoded = verifyJWT(token);
+      if (!decoded.isAdmin) {
+        socket.disconnect();
+        return;
+      }
+
+      const admin = await Admin.findById(decoded.id);
+      if (!admin) {
+        socket.disconnect();
+        return;
+      }
+
+      socket.adminId = admin._id;
+      console.log(`Admin ${admin.email} connected`);
+    } catch (err) {
+      socket.disconnect();
+    }
+  });
+
   socket.on('disconnect', () => {
     console.log('Client disconnected:', socket.id);
   });
 });
+
+// ============ MATURED INVESTMENTS PROCESSOR ============
+const processMaturedInvestments = async () => {
+  try {
+    const now = new Date();
+    const maturedInvestments = await Investment.find({
+      status: 'active',
+      endDate: { $lte: now }
+    }).populate('user plan');
+
+    for (const investment of maturedInvestments) {
+      try {
+        const user = await User.findById(investment.user._id);
+        if (!user) continue;
+
+        const totalReturn = investment.amount + (investment.amount * investment.plan.percentage / 100);
+
+        user.balances.active -= investment.amount;
+        user.balances.matured += totalReturn;
+
+        investment.status = 'completed';
+        investment.completionDate = now;
+        investment.actualReturn = totalReturn - investment.amount;
+
+        await user.save();
+        await investment.save();
+
+        await Transaction.create({
+          user: investment.user._id,
+          type: 'interest',
+          amount: totalReturn - investment.amount,
+          currency: 'USD',
+          status: 'completed',
+          method: 'internal',
+          reference: `AUTO-RET-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          details: {
+            investmentId: investment._id,
+            planName: investment.plan.name,
+            principal: investment.amount,
+            interest: totalReturn - investment.amount
+          },
+          fee: 0,
+          netAmount: totalReturn - investment.amount
+        });
+
+        console.log(`Automatically completed investment ${investment._id} for user ${user.email}`);
+      } catch (err) {
+        console.error(`Error processing investment ${investment._id}:`, err);
+      }
+    }
+  } catch (err) {
+    console.error('Error processing matured investments:', err);
+  }
+};
+
+// Run every hour to check for matured investments
+setInterval(processMaturedInvestments, 60 * 60 * 1000);
+
+// Run once on server start
+processMaturedInvestments();
 
 // ============ INITIALIZE AND START STATS UPDATER ============
 initializeFreshStats().then(() => {
