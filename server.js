@@ -19319,7 +19319,7 @@ async function initializeFreshStats() {
 // Initialize fresh stats on startup
 initializeFreshStats();
 
-// Real-time stats updater with daily limits - SINGLE SOURCE OF TRUTH
+// Real-time stats updater with daily limits
 setInterval(async () => {
     try {
         // Get current UTC date for daily tracking
@@ -19383,20 +19383,24 @@ setInterval(async () => {
             };
         }
 
-        // UPDATE CLOUD MINERS - ONLY USING 7999 LIMIT
+        // UPDATE CLOUD MINERS - GROW WITH RANDOM NUMBER AT RANDOM SECONDS
         const lastCloudMinerUpdate = await redis.get('last-cloud-miner-update') || 0;
         const currentTime = Date.now();
-        const minCloudMinerInterval = 3000; // 3 seconds
-        const maxCloudMinerInterval = 300000; // 5 minutes
-        const randomCloudMinerInterval = getRandomInRange(minCloudMinerInterval, maxCloudMinerInterval, 0);
-        const timeSinceLastCloudMinerUpdate = currentTime - lastCloudMinerUpdate;
         
-        if (timeSinceLastCloudMinerUpdate >= randomCloudMinerInterval) {
-            const DAILY_CLOUD_MINER_LIMIT = 7999; // ONLY LIMIT - 7999
+        // Random seconds between 3 seconds and 5 minutes (300,000 ms)
+        const minSeconds = 3;
+        const maxSeconds = 300;
+        const randomSecondsDelay = Math.floor(Math.random() * (maxSeconds - minSeconds + 1)) + minSeconds;
+        const randomInterval = randomSecondsDelay * 1000;
+        const timeSinceLastUpdate = currentTime - lastCloudMinerUpdate;
+        
+        if (timeSinceLastUpdate >= randomInterval) {
+            const DAILY_CLOUD_MINER_LIMIT = 7999; // 7999 daily limit
             
             if (dailyData.dailyCloudMiners < DAILY_CLOUD_MINER_LIMIT) {
                 const remainingDaily = DAILY_CLOUD_MINER_LIMIT - dailyData.dailyCloudMiners;
-                const increment = Math.floor(Math.random() * 9) + 1; // 1-9 users
+                // Random increment between 1 and 9 users
+                const increment = Math.floor(Math.random() * 9) + 1;
                 const actualIncrement = Math.min(increment, remainingDaily);
                 
                 if (actualIncrement > 0) {
@@ -19404,12 +19408,12 @@ setInterval(async () => {
                     cloudMinerCount += actualIncrement;
                     dailyData.dailyCloudMiners += actualIncrement;
                     
-                    // Update Redis IMMEDIATELY - SINGLE SOURCE OF TRUTH
+                    // Update Redis IMMEDIATELY
                     await redis.set('persistent-cloud-miner-count', cloudMinerCount.toString());
                     await redis.set('last-cloud-miner-update', currentTime.toString());
                     stats.totalCloudMiners = cloudMinerCount;
                     
-                    console.log(`Cloud Miner update: +${actualIncrement} | Daily total: ${dailyData.dailyCloudMiners}/${DAILY_CLOUD_MINER_LIMIT} | Total: ${cloudMinerCount}`);
+                    console.log(`Cloud Miner update: +${actualIncrement} after ${randomSecondsDelay} seconds | Daily: ${dailyData.dailyCloudMiners}/${DAILY_CLOUD_MINER_LIMIT} | Total: ${cloudMinerCount}`);
                 }
             }
         }
@@ -19471,7 +19475,7 @@ setInterval(async () => {
 
         stats.lastUpdated = now.toISOString();
 
-        // Update cache - ALL DEVICES WILL GET THIS EXACT SAME DATA
+        // Update cache - ALL DEVICES GET EXACT SAME DATA
         await redis.set('stats-data', JSON.stringify(stats), 'EX', 30);
         await redis.set('daily-stats', JSON.stringify(dailyData));
 
@@ -19479,6 +19483,13 @@ setInterval(async () => {
         console.error('Stats updater error:', err);
     }
 }, 1000);
+
+
+
+
+
+
+
 
 
 
