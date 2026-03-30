@@ -19212,7 +19212,7 @@ app.get('/api/loans/balances', async (req, res) => {
 
 
 
-// Stats endpoint with Redis as single source of truth
+// Stats endpoint with Redis as single source of truth and WebSocket broadcasting
 app.get('/api/stats', async (req, res) => {
     try {
         // Get current investor count from Redis (single source of truth)
@@ -19239,6 +19239,11 @@ app.get('/api/stats', async (req, res) => {
     }
 });
 
+// Helper function to generate random numbers
+function getRandomInRange(min, max) {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
 // Clear previous Redis data to start fresh
 async function initializeFreshStats() {
     try {
@@ -19250,6 +19255,8 @@ async function initializeFreshStats() {
         
         // Set initial investor count
         await redis.set('persistent-investor-count', '4254256');
+        await redis.set('last-update-date', new Date().toISOString().split('T')[0]);
+        await redis.set('daily-increment-total', '0');
         
         console.log('Fresh stats initialized with:');
         console.log('- Investors: 4,254,256');
@@ -19261,37 +19268,89 @@ async function initializeFreshStats() {
 // Initialize fresh stats on startup
 initializeFreshStats();
 
-// Real-time stats updater - updates at FIXED intervals so all devices see same values
-// Set a random interval between 3-300 seconds ONCE at startup, then stick with it
-const randomIntervalSeconds = Math.floor(Math.random() * (300 - 3 + 1)) + 3;
-console.log(`Investor update interval set to: ${randomIntervalSeconds} seconds`);
+// Function to broadcast updates to all connected WebSocket clients
+function broadcastStats(io, investorCount) {
+    const stats = {
+        totalInvestors: investorCount
+    };
+    io.emit('stats-update', stats);
+    console.log(`Broadcasted to all clients: ${investorCount} investors`);
+}
 
-setInterval(async () => {
-    try {
-        // Get current investor count
-        let investorCount = await redis.get('persistent-investor-count');
-        if (!investorCount) {
-            investorCount = 4254256;
-        } else {
-            investorCount = parseInt(investorCount);
+// Real-time stats updater with WebSocket broadcasting
+function startStatsUpdater(io) {
+    // Set random interval between 3-300 seconds ONCE at startup
+    const randomIntervalSeconds = getRandomInRange(3, 300);
+    console.log(`Investor update interval set to: ${randomIntervalSeconds} seconds`);
+    
+    setInterval(async () => {
+        try {
+            const now = new Date();
+            const todayUTC = now.toISOString().split('T')[0];
+            
+            // Get last update date
+            let lastUpdateDate = await redis.get('last-update-date');
+            if (!lastUpdateDate) {
+                lastUpdateDate = todayUTC;
+                await redis.set('last-update-date', lastUpdateDate);
+            }
+            
+            // Check if it's a new day
+            if (lastUpdateDate !== todayUTC) {
+                // New day - reset daily increment total but keep the investor count where it is
+                await redis.set('daily-increment-total', '0');
+                await redis.set('last-update-date', todayUTC);
+                console.log(`New day: ${todayUTC} - Investor count continues from previous day: ${await redis.get('persistent-investor-count')}`);
+            }
+            
+            // Get current investor count
+            let investorCount = await redis.get('persistent-investor-count');
+            if (!investorCount) {
+                investorCount = 4254256;
+            } else {
+                investorCount = parseInt(investorCount);
+            }
+            
+            // Get daily increment total
+            let dailyIncrementTotal = await redis.get('daily-increment-total');
+            if (!dailyIncrementTotal) {
+                dailyIncrementTotal = 0;
+            } else {
+                dailyIncrementTotal = parseInt(dailyIncrementTotal);
+            }
+            
+            const dailyCloudMinerLimit = 9999;
+            
+            // Check if daily limit has been reached
+            if (dailyIncrementTotal < dailyCloudMinerLimit) {
+                const remainingDaily = dailyCloudMinerLimit - dailyIncrementTotal;
+                // Random increment between 1 and 9 (but not exceeding remaining daily limit)
+                const increment = getRandomInRange(1, Math.min(9, remainingDaily));
+                const newInvestorCount = investorCount + increment;
+                const newDailyTotal = dailyIncrementTotal + increment;
+                
+                // Update Redis with new values
+                await redis.set('persistent-investor-count', newInvestorCount.toString());
+                await redis.set('daily-increment-total', newDailyTotal.toString());
+                
+                // Broadcast to ALL connected clients simultaneously
+                broadcastStats(io, newInvestorCount);
+                
+                console.log(`Investor update: +${increment} (${investorCount} → ${newInvestorCount}) | Daily total: ${newDailyTotal}/${dailyCloudMinerLimit} | Next update in ${randomIntervalSeconds} seconds`);
+            } else {
+                console.log(`Daily limit reached (${dailyCloudMinerLimit}/${dailyCloudMinerLimit}). No more updates until tomorrow.`);
+            }
+            
+        } catch (err) {
+            console.error('Stats updater error:', err);
         }
-        
-        // Random increment between 1 and 9
-        const increment = Math.floor(Math.random() * 9) + 1;
-        const newInvestorCount = investorCount + increment;
-        
-        // Update Redis with new values
-        await redis.set('persistent-investor-count', newInvestorCount.toString());
-        
-        console.log(`Investor update: +${increment} (${investorCount} → ${newInvestorCount}) every ${randomIntervalSeconds} seconds`);
-        
-    } catch (err) {
-        console.error('Stats updater error:', err);
-    }
-}, randomIntervalSeconds * 1000); // Fixed interval - SAME for everyone
+    }, randomIntervalSeconds * 1000);
+}
 
-
-
+// Export function to initialize WebSocket with stats updater
+module.exports = function setupStatsWebSocket(io) {
+    startStatsUpdater(io);
+};
 
 
 
@@ -22325,6 +22384,24 @@ io.on('connection', (socket) => {
     console.log('Client disconnected:', socket.id);
   });
 });
+
+
+
+const http = require('http');
+const socketIo = require('socket.io');
+
+const server = http.createServer(app);
+const io = socketIo(server, {
+    cors: {
+        origin: "*",
+        methods: ["GET", "POST"]
+    }
+});
+
+// Setup stats WebSocket
+const setupStatsWebSocket = require('./stats-websocket');
+setupStatsWebSocket(io);
+
 
 
 // Function to automatically complete matured investments
