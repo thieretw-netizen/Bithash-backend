@@ -22110,156 +22110,246 @@ const io = new Server(httpServer, {
 });
 
 // =============================================
-// REAL-TIME CLOUD MINER COUNT SYSTEM
-// Single source of truth: Redis
-// Investors grow from 4,254,200
-// Random increments (1-9) at random intervals (3-300 seconds)
-// Daily limit of 9999, starting from where previous day stopped
+// REAL-TIME STATS WITH REDIS SINGLE SOURCE OF TRUTH
 // =============================================
 
-// Redis key for cloud miner count
-const CLOUD_MINER_KEY = 'cloud_miner_count';
-const DAILY_LIMIT_KEY = 'daily_limit_used';
-const LAST_UPDATE_DATE_KEY = 'last_update_date';
+// Redis key for storing the current investor count
+const REDIS_INVESTOR_KEY = 'cloud_miner_count';
 
-// Initialize cloud miner count if not exists
-const initializeCloudMinerCount = async () => {
+// Initial value: 4,254,200
+const INITIAL_INVESTOR_COUNT = 4254200;
+
+// Daily limit for growth (max 7999 per day)
+const DAILY_GROWTH_LIMIT = 7999;
+
+// Function to get the start of the day (UTC)
+const getStartOfDay = () => {
+  const now = new Date();
+  now.setUTCHours(0, 0, 0, 0);
+  return now.getTime();
+};
+
+// Function to get the key for daily growth tracking
+const getDailyGrowthKey = (date) => {
+  return `daily_growth:${date}`;
+};
+
+// Initialize or get the current investor count from Redis
+const initializeInvestorCount = async () => {
   try {
-    // Check if count exists in Redis
-    const existingCount = await redis.get(CLOUD_MINER_KEY);
-    if (!existingCount) {
-      // Set initial count to 4,254,200
-      await redis.set(CLOUD_MINER_KEY, 4254200);
-      console.log('✅ Cloud miner count initialized to 4,254,200');
+    // Check if the investor count exists in Redis
+    let currentCount = await redis.get(REDIS_INVESTOR_KEY);
+    
+    if (!currentCount) {
+      // First time - set initial value
+      currentCount = INITIAL_INVESTOR_COUNT;
+      await redis.set(REDIS_INVESTOR_KEY, currentCount);
+      console.log(`✅ Initialized investor count to ${currentCount.toLocaleString()}`);
+    } else {
+      currentCount = parseInt(currentCount);
+      console.log(`📊 Current investor count from Redis: ${currentCount.toLocaleString()}`);
     }
     
-    // Check and reset daily limit if new day
-    await checkAndResetDailyLimit();
+    return currentCount;
   } catch (err) {
-    console.error('Error initializing cloud miner count:', err);
+    console.error('Error initializing investor count:', err);
+    return INITIAL_INVESTOR_COUNT;
   }
 };
 
-// Check and reset daily limit if new day
-const checkAndResetDailyLimit = async () => {
+// Function to check and reset daily growth counter if needed
+const checkAndResetDailyGrowth = async () => {
   try {
-    const today = new Date().toDateString();
-    const lastUpdateDate = await redis.get(LAST_UPDATE_DATE_KEY);
+    const today = getStartOfDay();
+    const todayKey = getDailyGrowthKey(today);
     
-    if (lastUpdateDate !== today) {
-      // Reset daily limit for new day
-      await redis.set(DAILY_LIMIT_KEY, 0);
-      await redis.set(LAST_UPDATE_DATE_KEY, today);
-      console.log(`📅 Daily limit reset for ${today}`);
+    let dailyGrowth = await redis.get(todayKey);
+    
+    if (!dailyGrowth) {
+      // New day - reset daily growth counter
+      dailyGrowth = 0;
+      await redis.set(todayKey, dailyGrowth);
+      console.log(`📅 New day started - daily growth reset to 0`);
+    } else {
+      dailyGrowth = parseInt(dailyGrowth);
     }
+    
+    return dailyGrowth;
   } catch (err) {
-    console.error('Error checking daily limit:', err);
+    console.error('Error checking daily growth:', err);
+    return 0;
   }
 };
 
-// Get current daily limit used
-const getDailyLimitUsed = async () => {
-  const used = await redis.get(DAILY_LIMIT_KEY);
-  return used ? parseInt(used) : 0;
-};
-
-// Increment daily limit used
-const incrementDailyLimitUsed = async (increment) => {
-  const current = await getDailyLimitUsed();
-  const newTotal = current + increment;
-  await redis.set(DAILY_LIMIT_KEY, newTotal);
-  return newTotal;
-};
-
-// Update cloud miner count with random increment
-const updateCloudMinerCount = async () => {
+// Function to add investors with daily limit enforcement
+const addInvestors = async () => {
   try {
-    // Check if daily limit reached
-    const dailyUsed = await getDailyLimitUsed();
+    // Check daily growth limit
+    let dailyGrowth = await checkAndResetDailyGrowth();
     
-    if (dailyUsed >= 9999) {
-      console.log(`⚠️ Daily limit reached (${dailyUsed}/9999). Waiting for next day.`);
-      return;
+    if (dailyGrowth >= DAILY_GROWTH_LIMIT) {
+      console.log(`⏸️ Daily growth limit reached (${DAILY_GROWTH_LIMIT}). No more investors today.`);
+      return false;
     }
     
-    // Calculate remaining daily limit
-    const remainingDaily = 9999 - dailyUsed;
+    // Generate random number between 1 and 49
+    const increment = Math.floor(Math.random() * 49) + 1;
     
-    // Generate random increment between 1 and 9, but not exceeding daily limit
-    let increment = Math.floor(Math.random() * 9) + 1; // 1-9
-    if (increment > remainingDaily) {
-      increment = remainingDaily;
+    // Check if adding this would exceed daily limit
+    const newDailyGrowth = dailyGrowth + increment;
+    const actualIncrement = newDailyGrowth > DAILY_GROWTH_LIMIT 
+      ? DAILY_GROWTH_LIMIT - dailyGrowth 
+      : increment;
+    
+    if (actualIncrement <= 0) {
+      console.log(`⏸️ Daily limit would be exceeded. Stopping growth for today.`);
+      return false;
     }
     
-    if (increment <= 0) {
-      return;
-    }
+    // Update Redis using atomic operation to prevent race conditions
+    const newCount = await redis.incrby(REDIS_INVESTOR_KEY, actualIncrement);
     
-    // Get current count from Redis
-    const currentCount = await redis.get(CLOUD_MINER_KEY);
-    const currentNumber = currentCount ? parseInt(currentCount) : 4254200;
+    // Update daily growth counter
+    const today = getStartOfDay();
+    const todayKey = getDailyGrowthKey(today);
+    await redis.incrby(todayKey, actualIncrement);
     
-    // Calculate new count
-    const newCount = currentNumber + increment;
+    console.log(`📈 Investor count increased by ${actualIncrement}. New count: ${newCount.toLocaleString()}`);
+    console.log(`📊 Daily progress: ${dailyGrowth + actualIncrement}/${DAILY_GROWTH_LIMIT}`);
     
-    // Update Redis
-    await redis.set(CLOUD_MINER_KEY, newCount);
+    return { newCount, increment: actualIncrement };
+  } catch (err) {
+    console.error('Error adding investors:', err);
+    return false;
+  }
+};
+
+// Function to broadcast stats to all connected clients via Socket.IO
+const broadcastStats = async () => {
+  try {
+    const currentCount = await redis.get(REDIS_INVESTOR_KEY);
+    const count = currentCount ? parseInt(currentCount) : INITIAL_INVESTOR_COUNT;
     
-    // Update daily limit tracking
-    await incrementDailyLimitUsed(increment);
+    const stats = {
+      totalInvestors: count,
+      timestamp: Date.now()
+    };
     
-    const newDailyUsed = await getDailyLimitUsed();
+    // Broadcast to all connected Socket.IO clients
+    io.emit('stats-update', stats);
     
-    console.log(`📊 Cloud miner update: +${increment} (${newCount.toLocaleString()}) | Daily: ${newDailyUsed}/9999`);
+    console.log(`📡 Broadcasted stats to ${io.engine.clientsCount} clients: ${count.toLocaleString()} investors`);
+  } catch (err) {
+    console.error('Error broadcasting stats:', err);
+  }
+};
+
+// Function to get current stats for new connections
+const getCurrentStats = async () => {
+  try {
+    const currentCount = await redis.get(REDIS_INVESTOR_KEY);
+    const count = currentCount ? parseInt(currentCount) : INITIAL_INVESTOR_COUNT;
     
-    // Broadcast to all connected clients via Socket.IO
-    io.emit('stats-update', {
-      totalInvestors: newCount,
-      increment: increment,
-      timestamp: new Date().toISOString(),
-      dailyUsed: newDailyUsed,
-      dailyLimit: 9999
+    return {
+      totalInvestors: count,
+      timestamp: Date.now()
+    };
+  } catch (err) {
+    console.error('Error getting current stats:', err);
+    return {
+      totalInvestors: INITIAL_INVESTOR_COUNT,
+      timestamp: Date.now()
+    };
+  }
+};
+
+// Background job for random investor growth
+let growthInterval = null;
+
+const startInvestorGrowthJob = async () => {
+  // Initialize first
+  await initializeInvestorCount();
+  
+  // Function to schedule next growth event
+  const scheduleNextGrowth = () => {
+    // Random interval between 3 and 120 seconds (3000 to 120000 ms)
+    const interval = Math.floor(Math.random() * (120000 - 3000 + 1) + 3000);
+    
+    growthInterval = setTimeout(async () => {
+      try {
+        const result = await addInvestors();
+        
+        if (result) {
+          // Broadcast updated stats to all clients
+          await broadcastStats();
+        }
+        
+        // Schedule next growth event
+        scheduleNextGrowth();
+      } catch (err) {
+        console.error('Error in growth job:', err);
+        // Still schedule next attempt even if this one failed
+        scheduleNextGrowth();
+      }
+    }, interval);
+  };
+  
+  // Start the growth process
+  scheduleNextGrowth();
+  console.log(`🚀 Investor growth job started. Will add 1-49 investors every 3-120 seconds (max ${DAILY_GROWTH_LIMIT}/day)`);
+};
+
+// Function to stop the growth job (useful for graceful shutdown)
+const stopInvestorGrowthJob = () => {
+  if (growthInterval) {
+    clearTimeout(growthInterval);
+    growthInterval = null;
+    console.log('🛑 Investor growth job stopped');
+  }
+};
+
+// API endpoint to get current stats (for clients not using WebSocket)
+app.get('/api/stats/investors', async (req, res) => {
+  try {
+    const stats = await getCurrentStats();
+    res.json({
+      status: 'success',
+      data: stats
     });
-    
   } catch (err) {
-    console.error('Error updating cloud miner count:', err);
+    console.error('Error fetching investor stats:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch investor stats'
+    });
   }
-};
+});
 
-// Start random update scheduler
-const startRandomUpdates = () => {
-  const scheduleNextUpdate = () => {
-    // Random interval between 3 and 300 seconds (3000-300000 ms)
-    const randomInterval = Math.floor(Math.random() * (300000 - 3000 + 1) + 3000);
+// API endpoint to get daily growth progress (admin only - optional)
+app.get('/api/stats/daily-progress', async (req, res) => {
+  try {
+    const today = getStartOfDay();
+    const todayKey = getDailyGrowthKey(today);
+    const dailyGrowth = await redis.get(todayKey);
+    const currentCount = await redis.get(REDIS_INVESTOR_KEY);
     
-    setTimeout(async () => {
-      await updateCloudMinerCount();
-      scheduleNextUpdate();
-    }, randomInterval);
-  };
-  
-  scheduleNextUpdate();
-  console.log('🎲 Random update scheduler started (3-300 second intervals)');
-};
-
-// Get current cloud miner count (for new connections)
-const getCurrentCloudMinerCount = async () => {
-  const count = await redis.get(CLOUD_MINER_KEY);
-  return count ? parseInt(count) : 4254200;
-};
-
-// Get current daily stats
-const getDailyStats = async () => {
-  const dailyUsed = await getDailyLimitUsed();
-  const lastUpdateDate = await redis.get(LAST_UPDATE_DATE_KEY) || new Date().toDateString();
-  
-  return {
-    dailyUsed,
-    dailyLimit: 9999,
-    remaining: Math.max(0, 9999 - dailyUsed),
-    date: lastUpdateDate
-  };
-};
+    res.json({
+      status: 'success',
+      data: {
+        dailyGrowth: dailyGrowth ? parseInt(dailyGrowth) : 0,
+        dailyLimit: DAILY_GROWTH_LIMIT,
+        totalInvestors: currentCount ? parseInt(currentCount) : INITIAL_INVESTOR_COUNT,
+        date: new Date(today).toISOString()
+      }
+    });
+  } catch (err) {
+    console.error('Error fetching daily progress:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch daily progress'
+    });
+  }
+});
 
 // Add market WebSocket to your existing server
 const setupMarketWebSocket = (server) => {
@@ -22354,27 +22444,14 @@ const setupMarketWebSocket = (server) => {
 // Call this after creating your HTTP server
 // setupMarketWebSocket(server);
 
-// Socket.IO connection handler with real-time stats
+// Socket.IO connection handler with stats broadcast
 io.on('connection', async (socket) => {
   console.log('New client connected:', socket.id);
-
-  // Send initial cloud miner count on connection
-  try {
-    const currentCount = await getCurrentCloudMinerCount();
-    const dailyStats = await getDailyStats();
-    
-    socket.emit('stats-update', {
-      totalInvestors: currentCount,
-      timestamp: new Date().toISOString(),
-      dailyUsed: dailyStats.dailyUsed,
-      dailyLimit: dailyStats.dailyLimit,
-      remaining: dailyStats.remaining
-    });
-    
-    console.log(`📊 Sent initial stats to ${socket.id}: ${currentCount.toLocaleString()} investors`);
-  } catch (err) {
-    console.error('Error sending initial stats:', err);
-  }
+  
+  // Send current stats immediately to new client
+  const currentStats = await getCurrentStats();
+  socket.emit('stats-update', currentStats);
+  console.log(`📡 Sent initial stats to new client ${socket.id}: ${currentStats.totalInvestors.toLocaleString()} investors`);
 
   // Verify admin token for admin connections
   socket.on('authenticate', async (token) => {
@@ -22401,31 +22478,6 @@ io.on('connection', async (socket) => {
   socket.on('disconnect', () => {
     console.log('Client disconnected:', socket.id);
   });
-});
-
-// Initialize cloud miner count system
-initializeCloudMinerCount().then(() => {
-  // Start random updates after initialization
-  startRandomUpdates();
-  
-  // Also check and reset daily limit at midnight
-  const checkMidnightReset = () => {
-    const now = new Date();
-    const night = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate() + 1,
-      0, 0, 0
-    );
-    const msUntilMidnight = night.getTime() - now.getTime();
-    
-    setTimeout(() => {
-      checkAndResetDailyLimit();
-      setInterval(checkAndResetDailyLimit, 24 * 60 * 60 * 1000);
-    }, msUntilMidnight);
-  };
-  
-  checkMidnightReset();
 });
 
 // Function to automatically complete matured investments
@@ -22492,7 +22544,22 @@ setInterval(processMaturedInvestments, 60 * 60 * 1000);
 // Also run once on server start
 processMaturedInvestments();
 
+// Start the investor growth job
+startInvestorGrowthJob();
+
+// Graceful shutdown handler
+const gracefulShutdown = () => {
+  console.log('Received shutdown signal. Cleaning up...');
+  stopInvestorGrowthJob();
+  process.exit(0);
+};
+
+process.on('SIGTERM', gracefulShutdown);
+process.on('SIGINT', gracefulShutdown);
+
 // Start server
 httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  console.log(`📊 Real-time stats initialized with Redis as single source of truth`);
+  console.log(`📈 Investors will grow from ${INITIAL_INVESTOR_COUNT.toLocaleString()} with max ${DAILY_GROWTH_LIMIT}/day`);
 });
