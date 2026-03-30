@@ -19388,26 +19388,25 @@ setInterval(async () => {
             stats.totalInvestors = investorCount;
         }
 
-        // Update investors - grow with up to 9999 per day, added randomly over time
-        // Random number of people at random number of seconds (3-300 seconds)
+        // Update investors - grow at a random number (1-9) per interval and interval is at a random number of seconds (3-300)
         const lastInvestorUpdate = await redis.get('last-investor-update') || 0;
         const currentTime = Date.now();
         
         // Generate random seconds between 3 and 300 for the next update
-        const randomSecondsDelay = Math.floor(Math.random() * 298) + 3; // 3 to 300 seconds
+        const randomSecondsDelay = Math.floor(Math.random() * (300 - 3 + 1)) + 3; // 3 to 300 seconds
         const minUpdateInterval = randomSecondsDelay * 1000; // Convert to milliseconds
         
         // Check if enough random time has passed since last update
         const timeSinceLastUpdate = currentTime - lastInvestorUpdate;
         
         if (timeSinceLastUpdate >= minUpdateInterval) {
-            const maxDailyInvestors = 9999; // Maximum 9999 per day
-            if (dailyData.hourlyInvestors < maxDailyInvestors) {
-                const remainingDaily = maxDailyInvestors - dailyData.hourlyInvestors;
+            const maxHourlyInvestors = 9999; // Maximum 9999 per day
+            if (dailyData.hourlyInvestors < maxHourlyInvestors) {
+                const remainingHourly = maxHourlyInvestors - dailyData.hourlyInvestors;
                 
-                // Generate random number of investors (1-99 per update)
-                let increment = Math.floor(Math.random() * 99) + 1; // 1 to 99 people
-                const actualIncrement = Math.min(increment, remainingDaily);
+                // Generate random number of investors (1 to 9 per update)
+                let increment = Math.floor(Math.random() * 9) + 1; // 1 to 9 people
+                const actualIncrement = Math.min(increment, remainingHourly);
                 
                 if (actualIncrement > 0) {
                     investorCount += actualIncrement;
@@ -19430,7 +19429,6 @@ setInterval(async () => {
                 const actualIncrement = Math.min(increment, remainingDaily);
                 
                 if (actualIncrement > 0) {
-                    stats.totalInvested += actualIncrement;
                     dailyData.dailyInvestment += actualIncrement;
                 }
             }
@@ -19445,7 +19443,6 @@ setInterval(async () => {
                 const actualIncrement = Math.min(increment, remainingDaily);
                 
                 if (actualIncrement > 0) {
-                    stats.totalWithdrawals += actualIncrement;
                     dailyData.dailyWithdrawal += actualIncrement;
                 }
             }
@@ -19460,7 +19457,6 @@ setInterval(async () => {
                 const actualIncrement = Math.min(increment, remainingDaily);
                 
                 if (actualIncrement > 0) {
-                    stats.totalLoans += actualIncrement;
                     dailyData.dailyLoan += actualIncrement;
                 }
             }
@@ -19486,7 +19482,6 @@ setInterval(async () => {
         console.error('Stats updater error:', err);
     }
 }, 1000); // Run every second to check for updates
-
 
 
 
