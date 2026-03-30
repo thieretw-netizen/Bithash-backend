@@ -19211,149 +19211,26 @@ app.get('/api/loans/balances', async (req, res) => {
 
 
 
-
-// Stats endpoint with Redis as single source of truth and WebSocket broadcasting
+// ============ STATS ENDPOINT ============
 app.get('/api/stats', async (req, res) => {
-    try {
-        // Get current investor count from Redis (single source of truth)
-        let investorCount = await redis.get('persistent-investor-count');
-        if (!investorCount) {
-            investorCount = 4254256;
-            await redis.set('persistent-investor-count', investorCount.toString());
-        } else {
-            investorCount = parseInt(investorCount);
-        }
-        
-        // Return stats - everyone gets the same values from Redis
-        const stats = {
-            totalInvestors: investorCount
-        };
-        
-        res.status(200).json(stats);
-    } catch (err) {
-        console.error('Stats error:', err);
-        res.status(500).json({
-            status: 'error',
-            message: 'Failed to fetch stats'
-        });
+  try {
+    let investorCount = await redis.get('persistent-investor-count');
+    if (!investorCount) {
+      investorCount = 4254256;
+      await redis.set('persistent-investor-count', investorCount.toString());
+    } else {
+      investorCount = parseInt(investorCount);
     }
-});
-
-// Helper function to generate random numbers
-function getRandomInRange(min, max) {
-    return Math.floor(Math.random() * (max - min + 1)) + min;
-}
-
-// Clear previous Redis data to start fresh
-async function initializeFreshStats() {
-    try {
-        // Delete all keys from redis
-        const keys = await redis.keys('*');
-        if (keys.length > 0) {
-            await redis.del(keys);
-        }
-        
-        // Set initial investor count
-        await redis.set('persistent-investor-count', '4254256');
-        await redis.set('last-update-date', new Date().toISOString().split('T')[0]);
-        await redis.set('daily-increment-total', '0');
-        
-        console.log('Fresh stats initialized with:');
-        console.log('- Investors: 4,254,256');
-    } catch (err) {
-        console.error('Failed to initialize fresh stats:', err);
-    }
-}
-
-// Initialize fresh stats on startup
-initializeFreshStats();
-
-// Function to broadcast updates to all connected WebSocket clients
-function broadcastStats(io, investorCount) {
-    const stats = {
-        totalInvestors: investorCount
-    };
-    io.emit('stats-update', stats);
-    console.log(`Broadcasted to all clients: ${investorCount} investors`);
-}
-
-// Real-time stats updater with WebSocket broadcasting
-function startStatsUpdater(io) {
-    // Set random interval between 3-300 seconds ONCE at startup
-    const randomIntervalSeconds = getRandomInRange(3, 300);
-    console.log(`Investor update interval set to: ${randomIntervalSeconds} seconds`);
     
-    setInterval(async () => {
-        try {
-            const now = new Date();
-            const todayUTC = now.toISOString().split('T')[0];
-            
-            // Get last update date
-            let lastUpdateDate = await redis.get('last-update-date');
-            if (!lastUpdateDate) {
-                lastUpdateDate = todayUTC;
-                await redis.set('last-update-date', lastUpdateDate);
-            }
-            
-            // Check if it's a new day
-            if (lastUpdateDate !== todayUTC) {
-                // New day - reset daily increment total but keep the investor count where it is
-                await redis.set('daily-increment-total', '0');
-                await redis.set('last-update-date', todayUTC);
-                console.log(`New day: ${todayUTC} - Investor count continues from previous day: ${await redis.get('persistent-investor-count')}`);
-            }
-            
-            // Get current investor count
-            let investorCount = await redis.get('persistent-investor-count');
-            if (!investorCount) {
-                investorCount = 4254256;
-            } else {
-                investorCount = parseInt(investorCount);
-            }
-            
-            // Get daily increment total
-            let dailyIncrementTotal = await redis.get('daily-increment-total');
-            if (!dailyIncrementTotal) {
-                dailyIncrementTotal = 0;
-            } else {
-                dailyIncrementTotal = parseInt(dailyIncrementTotal);
-            }
-            
-            const dailyCloudMinerLimit = 9999;
-            
-            // Check if daily limit has been reached
-            if (dailyIncrementTotal < dailyCloudMinerLimit) {
-                const remainingDaily = dailyCloudMinerLimit - dailyIncrementTotal;
-                // Random increment between 1 and 9 (but not exceeding remaining daily limit)
-                const increment = getRandomInRange(1, Math.min(9, remainingDaily));
-                const newInvestorCount = investorCount + increment;
-                const newDailyTotal = dailyIncrementTotal + increment;
-                
-                // Update Redis with new values
-                await redis.set('persistent-investor-count', newInvestorCount.toString());
-                await redis.set('daily-increment-total', newDailyTotal.toString());
-                
-                // Broadcast to ALL connected clients simultaneously
-                broadcastStats(io, newInvestorCount);
-                
-                console.log(`Investor update: +${increment} (${investorCount} → ${newInvestorCount}) | Daily total: ${newDailyTotal}/${dailyCloudMinerLimit} | Next update in ${randomIntervalSeconds} seconds`);
-            } else {
-                console.log(`Daily limit reached (${dailyCloudMinerLimit}/${dailyCloudMinerLimit}). No more updates until tomorrow.`);
-            }
-            
-        } catch (err) {
-            console.error('Stats updater error:', err);
-        }
-    }, randomIntervalSeconds * 1000);
-}
-
-// Export function to initialize WebSocket with stats updater
-module.exports = function setupStatsWebSocket(io) {
-    startStatsUpdater(io);
-};
-
-
-
+    res.status(200).json({ totalInvestors: investorCount });
+  } catch (err) {
+    console.error('Stats error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch stats'
+    });
+  }
+});
 
 
 // =============================================
@@ -22280,7 +22157,7 @@ function broadcastStats(io, investorCount) {
     totalInvestors: investorCount,
     timestamp: Date.now()
   });
-  console.log(`Broadcasted: ${investorCount} investors`);
+  console.log(`Broadcasted to ALL connected clients: ${investorCount} investors`);
 }
 
 function startStatsUpdater(io) {
@@ -22301,7 +22178,7 @@ function startStatsUpdater(io) {
       if (lastUpdateDate !== todayUTC) {
         await redis.set('daily-increment-total', '0');
         await redis.set('last-update-date', todayUTC);
-        console.log(`New day: ${todayUTC} - Daily limit reset`);
+        console.log(`New day: ${todayUTC} - Daily limit reset, investor count continues from previous day`);
       }
       
       let investorCount = await redis.get('persistent-investor-count');
@@ -22331,6 +22208,7 @@ function startStatsUpdater(io) {
         await redis.set('persistent-investor-count', newInvestorCount.toString());
         await redis.set('daily-increment-total', newDailyTotal.toString());
         
+        // BROADCAST TO ALL CONNECTED CLIENTS SIMULTANEOUSLY
         broadcastStats(io, newInvestorCount);
         
         console.log(`+${increment} investors (${investorCount} → ${newInvestorCount}) | Daily: ${newDailyTotal}/${dailyLimit}`);
@@ -22341,100 +22219,11 @@ function startStatsUpdater(io) {
   }, randomIntervalSeconds * 1000);
 }
 
-// ============ MARKET WEBSOCKET ============
-const setupMarketWebSocket = (server) => {
-  const marketWss = new WebSocket.Server({ 
-    server, 
-    path: '/ws/market' 
-  });
-
-  const clients = new Set();
-  let priceInterval = null;
-
-  const broadcastPrices = async () => {
-    try {
-      const response = await axios.get(
-        'https://api.coingecko.com/api/v3/coins/markets',
-        {
-          params: {
-            vs_currency: 'usd',
-            per_page: 50,
-            price_change_percentage: '24h'
-          },
-          timeout: 5000
-        }
-      );
-
-      if (response.data && clients.size > 0) {
-        const updates = response.data.map(coin => ({
-          assetId: coin.id,
-          price: coin.current_price,
-          price_change_percentage_24h: coin.price_change_percentage_24h || 0
-        }));
-
-        const message = JSON.stringify({
-          type: 'batch_update',
-          updates: updates,
-          timestamp: Date.now()
-        });
-
-        clients.forEach(client => {
-          if (client.readyState === WebSocket.OPEN) {
-            client.send(message);
-          }
-        });
-      }
-    } catch (error) {
-      console.error('WebSocket price broadcast error:', error);
-    }
-  };
-
-  marketWss.on('connection', (ws) => {
-    clients.add(ws);
-    console.log(`Market WebSocket client connected. Total: ${clients.size}`);
-
-    (async () => {
-      const assets = await fetchMarketData();
-      ws.send(JSON.stringify({
-        type: 'initial_data',
-        assets: assets
-      }));
-    })();
-
-    if (clients.size === 1 && !priceInterval) {
-      priceInterval = setInterval(broadcastPrices, 5000);
-    }
-
-    ws.on('message', (message) => {
-      try {
-        const data = JSON.parse(message);
-        if (data.type === 'subscribe') {
-          console.log('Client subscribed to price updates');
-        }
-      } catch (err) {
-        // Ignore invalid messages
-      }
-    });
-
-    ws.on('close', () => {
-      clients.delete(ws);
-      console.log(`Market WebSocket client disconnected. Total: ${clients.size}`);
-      
-      if (clients.size === 0 && priceInterval) {
-        clearInterval(priceInterval);
-        priceInterval = null;
-      }
-    });
-  });
-};
-
-setupMarketWebSocket(httpServer);
-
 // ============ SOCKET.IO CONNECTION HANDLER ============
 io.on('connection', (socket) => {
   console.log('New client connected:', socket.id);
 
-  // Send initial stats immediately when client connects
+  // Send current stats immediately when client connects
   (async () => {
     try {
       let investorCount = await redis.get('persistent-investor-count');
@@ -22448,100 +22237,23 @@ io.on('connection', (socket) => {
         totalInvestors: investorCount,
         timestamp: Date.now()
       });
+      console.log(`Sent initial stats to client ${socket.id}: ${investorCount} investors`);
     } catch (err) {
       console.error('Error sending initial stats:', err);
     }
   })();
-
-  // Verify admin token for admin connections
-  socket.on('authenticate', async (token) => {
-    try {
-      const decoded = verifyJWT(token);
-      if (!decoded.isAdmin) {
-        socket.disconnect();
-        return;
-      }
-
-      const admin = await Admin.findById(decoded.id);
-      if (!admin) {
-        socket.disconnect();
-        return;
-      }
-
-      socket.adminId = admin._id;
-      console.log(`Admin ${admin.email} connected`);
-    } catch (err) {
-      socket.disconnect();
-    }
-  });
 
   socket.on('disconnect', () => {
     console.log('Client disconnected:', socket.id);
   });
 });
 
-// ============ MATURED INVESTMENTS PROCESSOR ============
-const processMaturedInvestments = async () => {
-  try {
-    const now = new Date();
-    const maturedInvestments = await Investment.find({
-      status: 'active',
-      endDate: { $lte: now }
-    }).populate('user plan');
-
-    for (const investment of maturedInvestments) {
-      try {
-        const user = await User.findById(investment.user._id);
-        if (!user) continue;
-
-        const totalReturn = investment.amount + (investment.amount * investment.plan.percentage / 100);
-
-        user.balances.active -= investment.amount;
-        user.balances.matured += totalReturn;
-
-        investment.status = 'completed';
-        investment.completionDate = now;
-        investment.actualReturn = totalReturn - investment.amount;
-
-        await user.save();
-        await investment.save();
-
-        await Transaction.create({
-          user: investment.user._id,
-          type: 'interest',
-          amount: totalReturn - investment.amount,
-          currency: 'USD',
-          status: 'completed',
-          method: 'internal',
-          reference: `AUTO-RET-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-          details: {
-            investmentId: investment._id,
-            planName: investment.plan.name,
-            principal: investment.amount,
-            interest: totalReturn - investment.amount
-          },
-          fee: 0,
-          netAmount: totalReturn - investment.amount
-        });
-
-        console.log(`Automatically completed investment ${investment._id} for user ${user.email}`);
-      } catch (err) {
-        console.error(`Error processing investment ${investment._id}:`, err);
-      }
-    }
-  } catch (err) {
-    console.error('Error processing matured investments:', err);
-  }
-};
-
-setInterval(processMaturedInvestments, 60 * 60 * 1000);
-processMaturedInvestments();
-
-// ============ START SERVER ============
+// ============ INITIALIZE AND START STATS UPDATER ============
 initializeFreshStats().then(() => {
   startStatsUpdater(io);
 });
 
+// ============ START SERVER ============
 httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
