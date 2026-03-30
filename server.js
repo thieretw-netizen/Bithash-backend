@@ -19211,40 +19211,30 @@ app.get('/api/loans/balances', async (req, res) => {
 
 
 
-
-// Stats endpoint with Redis caching and real-time updates
+// Stats endpoint with Redis as single source of truth
 app.get('/api/stats', async (req, res) => {
     try {
-        // Check if we have cached stats
-        const cachedStats = await redis.get('stats-data');
-        
-        if (cachedStats) {
-            return res.status(200).json(JSON.parse(cachedStats));
+        // Get current investor count from Redis (single source of truth)
+        let investorCount = await redis.get('persistent-investor-count');
+        if (!investorCount) {
+            investorCount = 4254256;
+            await redis.set('persistent-investor-count', investorCount.toString());
+        } else {
+            investorCount = parseInt(investorCount);
         }
-
-        // Get current UTC time for daily tracking
-        const now = new Date();
-        const todayUTC = now.toISOString().split('T')[0]; // YYYY-MM-DD
-
-        // Initialize stats with YOUR SPECIFIED FIGURES
-        let stats = {
-            totalInvestors: 4254256, // 4,254,256 million investors
-            lastUpdated: now.toISOString()
+        
+        // Get last updated timestamp
+        let lastUpdated = await redis.get('last-stats-update');
+        if (!lastUpdated) {
+            lastUpdated = new Date().toISOString();
+        }
+        
+        // Return stats - everyone gets the same values from Redis
+        const stats = {
+            totalInvestors: investorCount,
+            lastUpdated: lastUpdated
         };
-
-        // Set persistent investor count with YOUR FIGURE
-        await redis.set('persistent-investor-count', '4254256');
-
-        // Initialize fresh daily tracking data with YOUR LIMITS
-        let dailyData = {
-            date: todayUTC,
-            dailyCloudMiners: 0 // Will grow up to 9999 daily
-        };
-
-        // Cache the stats for 30 seconds
-        await redis.set('stats-data', JSON.stringify(stats), 'EX', 30);
-        await redis.set('daily-stats', JSON.stringify(dailyData));
-
+        
         res.status(200).json(stats);
     } catch (err) {
         console.error('Stats error:', err);
@@ -19256,7 +19246,7 @@ app.get('/api/stats', async (req, res) => {
 });
 
 // Helper function to generate random numbers in range
-function getRandomInRange(min, max, decimals = 2) {
+function getRandomInRange(min, max, decimals = 0) {
     const rand = Math.random() * (max - min) + min;
     return parseFloat(rand.toFixed(decimals));
 }
@@ -19264,7 +19254,7 @@ function getRandomInRange(min, max, decimals = 2) {
 // Clear previous Redis data to start fresh
 async function initializeFreshStats() {
     try {
-        // Delete all history from redis
+        // Delete all keys from redis
         const keys = await redis.keys('*');
         if (keys.length > 0) {
             await redis.del(keys);
@@ -19272,14 +19262,10 @@ async function initializeFreshStats() {
         
         // Set initial investor count
         await redis.set('persistent-investor-count', '4254256');
-        
-        // Clear any existing stats
-        await redis.del('stats-data');
-        await redis.del('daily-stats');
+        await redis.set('last-stats-update', new Date().toISOString());
         
         console.log('Fresh stats initialized with:');
         console.log('- Investors: 4,254,256');
-        console.log('- 24h Cloud Miner join limit: 9999');
     } catch (err) {
         console.error('Failed to initialize fresh stats:', err);
     }
@@ -19288,114 +19274,45 @@ async function initializeFreshStats() {
 // Initialize fresh stats on startup
 initializeFreshStats();
 
-// Real-time stats updater with daily limits
+// Real-time stats updater
 setInterval(async () => {
     try {
-        // Get current UTC date for daily tracking
         const now = new Date();
-        const todayUTC = now.toISOString().split('T')[0];
-
-        // Get or initialize daily tracking data with YOUR LIMITS
-        let dailyData = await redis.get('daily-stats');
-        if (!dailyData) {
-            dailyData = {
-                date: todayUTC,
-                dailyCloudMiners: 0 // 9999 daily limit
-            };
-        } else {
-            dailyData = JSON.parse(dailyData);
-            // Reset if it's a new day
-            if (dailyData.date !== todayUTC) {
-                dailyData = {
-                    date: todayUTC,
-                    dailyCloudMiners: 0
-                };
-            }
-        }
-
-        // Get current stats from cache or initialize with YOUR FIGURES
-        let stats = {
-            totalInvestors: 4254256,
-            lastUpdated: now.toISOString()
-        };
-
-        // Get current investor count (start with YOUR FIGURE)
+        const currentTime = Date.now();
+        
+        // Get current investor count
         let investorCount = await redis.get('persistent-investor-count');
         if (!investorCount) {
-            investorCount = 4254256; // YOUR SPECIFIED FIGURE
-            await redis.set('persistent-investor-count', investorCount.toString());
+            investorCount = 4254256;
         } else {
             investorCount = parseInt(investorCount);
         }
-
-        // Get cached stats if they exist
-        const cachedStats = await redis.get('stats-data');
-        if (cachedStats) {
-            const parsedStats = JSON.parse(cachedStats);
-            // Use cached values for totals (they should have grown from your base figures)
-            stats.totalInvestors = parsedStats.totalInvestors || investorCount;
-        } else {
-            // If no cache, use base values from your specifications
-            stats.totalInvestors = investorCount;
-        }
-
-        // Update investors - growing at a random number (1-9) per interval
-        // interval is at a random number of seconds (3-300)
+        
+        // Get last investor update time
         const lastInvestorUpdate = await redis.get('last-investor-update') || 0;
-        const currentTime = Date.now();
         
-        // Generate random seconds between 3 and 300 for the next update
-        const randomSecondsDelay = Math.floor(Math.random() * (300 - 3 + 1)) + 3; // 3 to 300 seconds
-        const minUpdateInterval = randomSecondsDelay * 1000; // Convert to milliseconds
+        // Generate random seconds between 3 and 300 for next update
+        const randomSecondsDelay = Math.floor(Math.random() * (300 - 3 + 1)) + 3;
+        const updateIntervalMs = randomSecondsDelay * 1000;
         
-        // Check if enough random time has passed since last update
-        const timeSinceLastUpdate = currentTime - lastInvestorUpdate;
-        
-        if (timeSinceLastUpdate >= minUpdateInterval) {
-            // Generate random number of investors (1 to 9 per interval)
-            const increment = Math.floor(Math.random() * 9) + 1; // 1 to 9 people
-            investorCount += increment;
-            await redis.set('persistent-investor-count', investorCount.toString());
-            await redis.set('last-investor-update', currentTime.toString());
-            stats.totalInvestors = investorCount;
+        // Check if it's time to update investors
+        if ((currentTime - lastInvestorUpdate) >= updateIntervalMs) {
+            // Random increment between 1 and 9
+            const increment = Math.floor(Math.random() * 9) + 1;
+            const newInvestorCount = investorCount + increment;
             
-            console.log(`Investor update: +${increment} after ${randomSecondsDelay} seconds`);
+            // Update Redis with new values
+            await redis.set('persistent-investor-count', newInvestorCount.toString());
+            await redis.set('last-investor-update', currentTime.toString());
+            await redis.set('last-stats-update', now.toISOString());
+            
+            console.log(`Investor update: +${increment} (${investorCount} → ${newInvestorCount}) after ${randomSecondsDelay} seconds`);
         }
-
-        // Update cloud miners - grow with 1-9 users in random time between 3 sec -5 min
-        const lastCloudMinerUpdate = await redis.get('last-cloud-miner-update') || 0;
-        const minCloudMinerInterval = 3000; // 3 seconds in milliseconds
-        const maxCloudMinerInterval = 300000; // 5 minutes in milliseconds
         
-        // Check if enough random time has passed since last update
-        const timeSinceLastCloudMinerUpdate = currentTime - lastCloudMinerUpdate;
-        const randomCloudMinerInterval = getRandomInRange(minCloudMinerInterval, maxCloudMinerInterval, 0);
-        
-        if (timeSinceLastCloudMinerUpdate >= randomCloudMinerInterval) {
-            const dailyCloudMinerLimit = 9999; // YOUR SPECIFIED: 9999 daily limit
-            if (dailyData.dailyCloudMiners < dailyCloudMinerLimit) {
-                const remainingDaily = dailyCloudMinerLimit - dailyData.dailyCloudMiners;
-                // Random increment 1-9 users (not more than 9 per update)
-                const increment = Math.floor(Math.random() * 9) + 1;
-                const actualIncrement = Math.min(increment, remainingDaily);
-                
-                if (actualIncrement > 0) {
-                    await redis.set('last-cloud-miner-update', currentTime.toString());
-                    dailyData.dailyCloudMiners += actualIncrement;
-                }
-            }
-        }
-
-        stats.lastUpdated = now.toISOString();
-
-        // Update cache and daily tracking
-        await redis.set('stats-data', JSON.stringify(stats), 'EX', 30);
-        await redis.set('daily-stats', JSON.stringify(dailyData));
-
     } catch (err) {
         console.error('Stats updater error:', err);
     }
-}, 1000); // Run every second to check for updates
+}, 1000); // Check every second
 
 
 
