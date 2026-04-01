@@ -202,7 +202,7 @@ app.get('/api/health', (req, res) => {
 });
 
 // Database connection with enhanced settings for autoscaling
-mongoose.connect(process.env.MONGODB_URI || 'mongodb+srv://elvismwangike:JFJmHvP4ktikRYDC@cluster0.vm6hrog.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0', {
+mongoose.connect(process.env.MONGODB_URI || 'mongodb+srv://mekitariansalinacoria8_db_user:<mekitariansalinacoria8_db_user>@cluster0.fvvirw2.mongodb.net/?appName=Cluster0', {
   autoIndex: true,
   connectTimeoutMS: 30000,
   socketTimeoutMS: 30000,
