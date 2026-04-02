@@ -1637,8 +1637,11 @@ const UserAssetBalanceSchema = new mongoose.Schema({
 UserAssetBalanceSchema.index({ user: 1 });
 UserAssetBalanceSchema.index({ 'history.timestamp': -1 });
 
+
+
+
 // =============================================
-// User Preferences Schema
+// User Preferences Schema - Updated to accept any fiat
 // =============================================
 const UserPreferenceSchema = new mongoose.Schema({
   user: {
@@ -1662,11 +1665,18 @@ const UserPreferenceSchema = new mongoose.Schema({
     sms: { type: Boolean, default: false }
   },
   language: { type: String, default: 'en' },
-  currency: { type: String, enum: ['USD', 'EUR', 'GBP', 'JPY'], default: 'USD' }
+  // Updated: Any fiat currency - no enum restriction
+  fiatCurrency: { type: String, default: 'USD' }
 }, { timestamps: true });
 
 UserPreferenceSchema.index({ user: 1 });
 UserPreferenceSchema.index({ displayAsset: 1 });
+
+
+
+
+
+
 
 // =============================================
 // Deposit Asset Tracking Schema
@@ -19877,6 +19887,9 @@ app.get('/api/transactions/recent', protect, async (req, res) => {
   }
 });
 
+
+
+
 // =============================================
 // USER PREFERENCES ENDPOINT - Get and update user preferences
 // =============================================
@@ -19898,7 +19911,7 @@ app.get('/api/users/preferences', protect, async (req, res) => {
           sms: false
         },
         language: 'en',
-        currency: 'USD'
+        fiatCurrency: 'USD'
       });
       await preferences.save();
     }
@@ -19920,7 +19933,7 @@ app.get('/api/users/preferences', protect, async (req, res) => {
 app.post('/api/users/preferences', protect, async (req, res) => {
   try {
     const userId = req.user._id;
-    const { displayAsset, theme, notifications, language, currency } = req.body;
+    const { displayAsset, theme, notifications, language, fiatCurrency } = req.body;
 
     let preferences = await UserPreference.findOne({ user: userId });
 
@@ -19938,17 +19951,10 @@ app.post('/api/users/preferences', protect, async (req, res) => {
       };
     }
     if (language) preferences.language = language;
-    if (currency) preferences.currency = currency;
+    // fiatCurrency accepts any string (no validation - any fiat allowed)
+    if (fiatCurrency !== undefined) preferences.fiatCurrency = fiatCurrency;
 
     await preferences.save();
-
-    // Also update user's main preferences in User model if needed
-    if (displayAsset) {
-      // You might want to store display preference in User model as well
-      await User.findByIdAndUpdate(userId, {
-        'preferences.displayAsset': displayAsset
-      });
-    }
 
     return res.status(200).json({
       status: 'success',
@@ -19964,6 +19970,10 @@ app.post('/api/users/preferences', protect, async (req, res) => {
     });
   }
 });
+
+
+
+
 
 // =============================================
 // DEPOSIT ASSET ENDPOINT - Get and set user's preferred deposit asset
@@ -20142,6 +20152,7 @@ app.get('/api/users/asset-balances', protect, async (req, res) => {
 
 // =============================================
 // GET /api/assets/portfolio - User Asset Portfolio with Profit/Loss Tracking
+// Updated to match HTML expected format
 // =============================================
 app.get('/api/assets/portfolio', protect, async (req, res) => {
   try {
@@ -20165,7 +20176,7 @@ app.get('/api/assets/portfolio', protect, async (req, res) => {
       });
     }
 
-    // Get current prices from CoinGecko for all assets
+    // Get assets with positive balance
     const assets = Object.keys(userAssetBalance.balances).filter(asset => 
       userAssetBalance.balances[asset] > 0
     );
@@ -20223,16 +20234,18 @@ app.get('/api/assets/portfolio', protect, async (req, res) => {
     let currentPrices = {};
     try {
       const coinGeckoIds = assets.map(asset => assetToCoinGeckoId[asset] || asset).filter(Boolean);
-      const response = await axios.get(
-        `https://api.coingecko.com/api/v3/simple/price?ids=${coinGeckoIds.join(',')}&vs_currencies=usd&include_24hr_change=true`
-      );
-      
-      if (response.data) {
-        currentPrices = response.data;
+      if (coinGeckoIds.length > 0) {
+        const response = await axios.get(
+          `https://api.coingecko.com/api/v3/simple/price?ids=${coinGeckoIds.join(',')}&vs_currencies=usd&include_24hr_change=true`,
+          { timeout: 8000 }
+        );
+        
+        if (response.data) {
+          currentPrices = response.data;
+        }
       }
     } catch (priceError) {
       console.error('Error fetching CoinGecko prices:', priceError.message);
-      // Continue with empty prices, will use fallback values
     }
 
     // Get transaction history for profit/loss calculation
@@ -20257,10 +20270,12 @@ app.get('/api/assets/portfolio', protect, async (req, res) => {
       
       // Get all transactions for this asset
       const assetTransactions = transactions.filter(t => 
-        t.asset === asset || t.asset === asset.toUpperCase()
+        (t.asset && t.asset.toLowerCase() === asset) || 
+        (t.buyDetails?.asset && t.buyDetails.asset.toLowerCase() === asset) ||
+        (t.sellDetails?.asset && t.sellDetails.asset.toLowerCase() === asset)
       );
 
-      // Calculate average buying price
+      // Calculate average buying price and profit/loss
       let totalSpent = 0;
       let totalBought = 0;
       let totalSold = 0;
@@ -20268,8 +20283,8 @@ app.get('/api/assets/portfolio', protect, async (req, res) => {
       let realizedLoss = 0;
 
       assetTransactions.forEach(t => {
-        const assetAmount = t.assetAmount || 0;
-        const price = t.buyDetails?.price || t.sellDetails?.price || 0;
+        const assetAmount = t.assetAmount || t.buyDetails?.assetAmount || t.sellDetails?.assetAmount || 0;
+        const price = t.buyDetails?.buyingPrice || t.sellDetails?.sellingPrice || 0;
         
         if (t.type === 'buy') {
           totalSpent += t.amount || 0;
@@ -20277,13 +20292,13 @@ app.get('/api/assets/portfolio', protect, async (req, res) => {
         } else if (t.type === 'sell') {
           totalSold += assetAmount;
           if (t.sellDetails) {
-            realizedProfit += t.sellDetails.profit || 0;
-            realizedLoss += t.sellDetails.loss || 0;
+            if (t.sellDetails.profitLoss > 0) realizedProfit += t.sellDetails.profitLoss;
+            else realizedLoss += Math.abs(t.sellDetails.profitLoss);
           }
         }
       });
 
-      const averageBuyingPrice = totalBought > 0 ? totalSpent / totalBought : 0;
+      const averageBuyingPrice = totalBought > 0 ? totalSpent / totalBought : currentPrice;
       const currentValue = assetBalance * currentPrice;
       const unrealizedProfitLoss = (currentPrice - averageBuyingPrice) * assetBalance;
       const unrealizedPercentage = averageBuyingPrice > 0 
@@ -20293,31 +20308,37 @@ app.get('/api/assets/portfolio', protect, async (req, res) => {
       totalPortfolioValue += currentValue;
       totalPortfolioProfitLoss += unrealizedProfitLoss;
 
+      // Format transactions for HTML (limited to 10 most recent)
+      const formattedTransactions = assetTransactions.slice(0, 10).map(t => ({
+        type: t.type,
+        amount: t.assetAmount || t.buyDetails?.assetAmount || t.sellDetails?.assetAmount || 0,
+        price: t.type === 'buy' ? (t.buyDetails?.buyingPrice || 0) : (t.sellDetails?.sellingPrice || 0),
+        profit: t.sellDetails?.profitLoss && t.sellDetails.profitLoss > 0 ? t.sellDetails.profitLoss : 0,
+        loss: t.sellDetails?.profitLoss && t.sellDetails.profitLoss < 0 ? Math.abs(t.sellDetails.profitLoss) : 0,
+        date: t.createdAt || t.completedAt || new Date(),
+        transactionId: t._id
+      }));
+
       portfolio.push({
-        asset,
+        asset: asset,
         totalAmount: assetBalance,
-        currentPrice,
-        currentValue,
-        averageBuyingPrice,
-        totalSpent,
-        totalBought,
-        totalSold,
-        realizedProfit,
-        realizedLoss,
-        unrealizedProfitLoss,
-        unrealizedPercentage,
-        change24h,
-        transactions: assetTransactions.slice(0, 10).map(t => ({
-          type: t.type,
-          amount: t.assetAmount || 0,
-          price: t.type === 'buy' ? t.buyDetails?.price : t.sellDetails?.price,
-          profit: t.sellDetails?.profit || 0,
-          loss: t.sellDetails?.loss || 0,
-          date: t.createdAt,
-          transactionId: t._id
-        }))
+        currentPrice: currentPrice,
+        currentValue: currentValue,
+        averageBuyingPrice: averageBuyingPrice,
+        totalSpent: totalSpent,
+        totalBought: totalBought,
+        totalSold: totalSold,
+        realizedProfit: realizedProfit,
+        realizedLoss: realizedLoss,
+        unrealizedProfitLoss: unrealizedProfitLoss,
+        unrealizedPercentage: unrealizedPercentage,
+        change24h: change24h,
+        transactions: formattedTransactions
       });
     }
+
+    // Sort by current value descending
+    portfolio.sort((a, b) => b.currentValue - a.currentValue);
 
     // Calculate summary
     const totalPortfolioPercentage = totalPortfolioValue > 0 
@@ -20327,7 +20348,7 @@ app.get('/api/assets/portfolio', protect, async (req, res) => {
     res.status(200).json({
       status: 'success',
       data: {
-        portfolio: portfolio.sort((a, b) => b.currentValue - a.currentValue),
+        portfolio: portfolio,
         summary: {
           totalValue: totalPortfolioValue,
           totalProfitLoss: totalPortfolioProfitLoss,
@@ -20354,9 +20375,6 @@ app.get('/api/assets/portfolio', protect, async (req, res) => {
     });
   }
 });
-
-
-
 
 
 
@@ -23885,7 +23903,412 @@ async function getCurrentPrice(symbol) {
 
 
 
+// =============================================
+// GET /api/fiat-currencies - Get supported fiat currencies with exchange rates
+// =============================================
+app.get('/api/fiat-currencies', async (req, res) => {
+  try {
+    // Comprehensive list of fiat currencies with their details
+    const fiatCurrencies = [
+      { code: 'USD', name: 'US Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/us.png', decimals: 2 },
+      { code: 'EUR', name: 'Euro', symbol: '€', flag: 'https://flagcdn.com/w40/eu.png', decimals: 2 },
+      { code: 'GBP', name: 'British Pound', symbol: '£', flag: 'https://flagcdn.com/w40/gb.png', decimals: 2 },
+      { code: 'JPY', name: 'Japanese Yen', symbol: '¥', flag: 'https://flagcdn.com/w40/jp.png', decimals: 0 },
+      { code: 'CAD', name: 'Canadian Dollar', symbol: 'C$', flag: 'https://flagcdn.com/w40/ca.png', decimals: 2 },
+      { code: 'AUD', name: 'Australian Dollar', symbol: 'A$', flag: 'https://flagcdn.com/w40/au.png', decimals: 2 },
+      { code: 'CHF', name: 'Swiss Franc', symbol: 'Fr', flag: 'https://flagcdn.com/w40/ch.png', decimals: 2 },
+      { code: 'CNY', name: 'Chinese Yuan', symbol: '¥', flag: 'https://flagcdn.com/w40/cn.png', decimals: 2 },
+      { code: 'INR', name: 'Indian Rupee', symbol: '₹', flag: 'https://flagcdn.com/w40/in.png', decimals: 2 },
+      { code: 'BRL', name: 'Brazilian Real', symbol: 'R$', flag: 'https://flagcdn.com/w40/br.png', decimals: 2 },
+      { code: 'KRW', name: 'South Korean Won', symbol: '₩', flag: 'https://flagcdn.com/w40/kr.png', decimals: 0 },
+      { code: 'RUB', name: 'Russian Ruble', symbol: '₽', flag: 'https://flagcdn.com/w40/ru.png', decimals: 2 },
+      { code: 'ZAR', name: 'South African Rand', symbol: 'R', flag: 'https://flagcdn.com/w40/za.png', decimals: 2 },
+      { code: 'MXN', name: 'Mexican Peso', symbol: '$', flag: 'https://flagcdn.com/w40/mx.png', decimals: 2 },
+      { code: 'SGD', name: 'Singapore Dollar', symbol: 'S$', flag: 'https://flagcdn.com/w40/sg.png', decimals: 2 },
+      { code: 'NZD', name: 'New Zealand Dollar', symbol: 'NZ$', flag: 'https://flagcdn.com/w40/nz.png', decimals: 2 },
+      { code: 'HKD', name: 'Hong Kong Dollar', symbol: 'HK$', flag: 'https://flagcdn.com/w40/hk.png', decimals: 2 },
+      { code: 'SEK', name: 'Swedish Krona', symbol: 'kr', flag: 'https://flagcdn.com/w40/se.png', decimals: 2 },
+      { code: 'NOK', name: 'Norwegian Krone', symbol: 'kr', flag: 'https://flagcdn.com/w40/no.png', decimals: 2 },
+      { code: 'DKK', name: 'Danish Krone', symbol: 'kr', flag: 'https://flagcdn.com/w40/dk.png', decimals: 2 },
+      { code: 'PLN', name: 'Polish Zloty', symbol: 'zł', flag: 'https://flagcdn.com/w40/pl.png', decimals: 2 },
+      { code: 'TRY', name: 'Turkish Lira', symbol: '₺', flag: 'https://flagcdn.com/w40/tr.png', decimals: 2 },
+      { code: 'AED', name: 'UAE Dirham', symbol: 'د.إ', flag: 'https://flagcdn.com/w40/ae.png', decimals: 2 },
+      { code: 'SAR', name: 'Saudi Riyal', symbol: '﷼', flag: 'https://flagcdn.com/w40/sa.png', decimals: 2 },
+      { code: 'IDR', name: 'Indonesian Rupiah', symbol: 'Rp', flag: 'https://flagcdn.com/w40/id.png', decimals: 0 },
+      { code: 'THB', name: 'Thai Baht', symbol: '฿', flag: 'https://flagcdn.com/w40/th.png', decimals: 2 },
+      { code: 'VND', name: 'Vietnamese Dong', symbol: '₫', flag: 'https://flagcdn.com/w40/vn.png', decimals: 0 },
+      { code: 'MYR', name: 'Malaysian Ringgit', symbol: 'RM', flag: 'https://flagcdn.com/w40/my.png', decimals: 2 },
+      { code: 'PHP', name: 'Philippine Peso', symbol: '₱', flag: 'https://flagcdn.com/w40/ph.png', decimals: 2 },
+      { code: 'NGN', name: 'Nigerian Naira', symbol: '₦', flag: 'https://flagcdn.com/w40/ng.png', decimals: 2 }
+    ];
 
+    // Get exchange rates using external API
+    let exchangeRates = {};
+    let ratesLastUpdated = new Date();
+
+    try {
+      // Try to get rates from cache in Redis first
+      const cachedRates = await redis.get('fiat_exchange_rates');
+      if (cachedRates) {
+        const cached = JSON.parse(cachedRates);
+        exchangeRates = cached.rates;
+        ratesLastUpdated = new Date(cached.lastUpdated);
+      } else {
+        // Fetch fresh rates from ExchangeRate-API (free tier)
+        const apiKey = process.env.EXCHANGE_RATE_API_KEY || 'YOUR_API_KEY';
+        const response = await axios.get(`https://v6.exchangerate-api.com/v6/${apiKey}/latest/USD`, { timeout: 10000 });
+        
+        if (response.data && response.data.conversion_rates) {
+          exchangeRates = response.data.conversion_rates;
+          // Cache for 1 hour
+          await redis.set('fiat_exchange_rates', JSON.stringify({
+            rates: exchangeRates,
+            lastUpdated: new Date().toISOString()
+          }), 'EX', 3600);
+        }
+      }
+    } catch (rateError) {
+      console.error('Error fetching exchange rates:', rateError.message);
+      // Fallback rates if API fails
+      exchangeRates = {
+        USD: 1, EUR: 0.92, GBP: 0.79, JPY: 150.5, CAD: 1.36, AUD: 1.52, CHF: 0.88,
+        CNY: 7.24, INR: 83.5, BRL: 5.05, KRW: 1330, RUB: 92.5, ZAR: 18.8, MXN: 16.8,
+        SGD: 1.34, NZD: 1.64, HKD: 7.82, SEK: 10.5, NOK: 10.7, DKK: 6.86, PLN: 4.0,
+        TRY: 32.1, AED: 3.67, SAR: 3.75, IDR: 15800, THB: 36.5, VND: 25400, MYR: 4.73,
+        PHP: 56.2, NGN: 1480
+      };
+    }
+
+    // Attach exchange rates to each currency
+    const currenciesWithRates = fiatCurrencies.map(fiat => ({
+      ...fiat,
+      exchangeRate: exchangeRates[fiat.code] || 1,
+      lastUpdated: ratesLastUpdated
+    }));
+
+    res.status(200).json({
+      status: 'success',
+      currencies: currenciesWithRates,
+      baseCurrency: 'USD',
+      lastUpdated: ratesLastUpdated
+    });
+
+  } catch (err) {
+    console.error('Fiat currencies error:', err);
+    // Return basic fallback
+    res.status(200).json({
+      status: 'success',
+      currencies: [
+        { code: 'USD', name: 'US Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/us.png', exchangeRate: 1 },
+        { code: 'EUR', name: 'Euro', symbol: '€', flag: 'https://flagcdn.com/w40/eu.png', exchangeRate: 0.92 },
+        { code: 'GBP', name: 'British Pound', symbol: '£', flag: 'https://flagcdn.com/w40/gb.png', exchangeRate: 0.79 }
+      ],
+      baseCurrency: 'USD'
+    });
+  }
+});
+
+// =============================================
+// GET /api/convert/assets - Get available assets for conversion
+// =============================================
+app.get('/api/convert/assets', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    // Get user's asset balances
+    const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
+    
+    if (!userAssetBalance) {
+      return res.status(200).json({
+        status: 'success',
+        assets: []
+      });
+    }
+
+    // Get assets with positive balance
+    const assetsWithBalance = Object.entries(userAssetBalance.balances)
+      .filter(([_, amount]) => amount > 0)
+      .map(([asset]) => asset);
+
+    // Get current prices for all supported assets
+    const assetToCoinGeckoId = {
+      btc: 'bitcoin', eth: 'ethereum', usdt: 'tether', bnb: 'binancecoin',
+      sol: 'solana', usdc: 'usd-coin', xrp: 'xrp', doge: 'dogecoin',
+      ada: 'cardano', shib: 'shiba-inu', avax: 'avalanche-2', dot: 'polkadot',
+      trx: 'tron', link: 'chainlink', matic: 'polygon', wbtc: 'wrapped-bitcoin',
+      ltc: 'litecoin', near: 'near', uni: 'uniswap', bch: 'bitcoin-cash'
+    };
+
+    let currentPrices = {};
+    try {
+      const coinIds = Object.values(assetToCoinGeckoId);
+      const response = await axios.get(
+        `https://api.coingecko.com/api/v3/simple/price?ids=${coinIds.join(',')}&vs_currencies=usd`,
+        { timeout: 8000 }
+      );
+      currentPrices = response.data;
+    } catch (priceError) {
+      console.error('Error fetching prices for convert:', priceError.message);
+    }
+
+    // Build asset list with details
+    const availableAssets = [];
+    for (const asset of assetsWithBalance) {
+      const assetUpper = asset.toUpperCase();
+      const coinGeckoId = assetToCoinGeckoId[asset] || asset;
+      const currentPrice = currentPrices[coinGeckoId]?.usd || 0;
+      const balance = userAssetBalance.balances[asset];
+      
+      availableAssets.push({
+        symbol: asset,
+        symbolUpper: assetUpper,
+        name: assetUpper === 'BTC' ? 'Bitcoin' : assetUpper === 'ETH' ? 'Ethereum' : assetUpper,
+        balance: balance,
+        balanceUSD: balance * currentPrice,
+        currentPrice: currentPrice,
+        logo: `https://assets.coingecko.com/coins/images/1/large/${asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset}.png`,
+        canConvert: balance > 0
+      });
+    }
+
+    // Also add target assets that user can convert to (all supported assets)
+    const allSupportedAssets = Object.keys(assetToCoinGeckoId);
+    const targetAssets = allSupportedAssets.map(asset => ({
+      symbol: asset,
+      symbolUpper: asset.toUpperCase(),
+      name: asset === 'btc' ? 'Bitcoin' : asset === 'eth' ? 'Ethereum' : asset.toUpperCase(),
+      logo: `https://assets.coingecko.com/coins/images/1/large/${asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset}.png`,
+      currentPrice: currentPrices[assetToCoinGeckoId[asset]]?.usd || 0
+    }));
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        sourceAssets: availableAssets.filter(a => a.canConvert),
+        targetAssets: targetAssets,
+        allAssets: availableAssets
+      }
+    });
+
+  } catch (err) {
+    console.error('Convert assets error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to fetch convertible assets'
+    });
+  }
+});
+
+// =============================================
+// POST /api/convert - Execute crypto to crypto conversion
+// =============================================
+app.post('/api/convert', protect, async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const userId = req.user._id;
+    const { fromAsset, toAsset, amount } = req.body;
+
+    // Validate inputs
+    if (!fromAsset || !toAsset || !amount || amount <= 0) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid conversion parameters. Please provide fromAsset, toAsset, and positive amount.'
+      });
+    }
+
+    const fromAssetLower = fromAsset.toLowerCase();
+    const toAssetLower = toAsset.toLowerCase();
+
+    if (fromAssetLower === toAssetLower) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        status: 'error',
+        message: 'Cannot convert to the same asset'
+      });
+    }
+
+    // Get user's asset balances
+    let userAssetBalance = await UserAssetBalance.findOne({ user: userId }).session(session);
+    
+    if (!userAssetBalance) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        status: 'error',
+        message: 'No asset balances found'
+      });
+    }
+
+    // Check if user has enough balance
+    const fromBalance = userAssetBalance.balances[fromAssetLower] || 0;
+    if (fromBalance < amount) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        status: 'error',
+        message: `Insufficient ${fromAssetUpper} balance. You have ${fromBalance} ${fromAssetUpper}`
+      });
+    }
+
+    // Get current prices for both assets
+    const assetToCoinGeckoId = {
+      btc: 'bitcoin', eth: 'ethereum', usdt: 'tether', bnb: 'binancecoin',
+      sol: 'solana', usdc: 'usd-coin', xrp: 'xrp', doge: 'dogecoin',
+      ada: 'cardano', shib: 'shiba-inu', avax: 'avalanche-2', dot: 'polkadot',
+      trx: 'tron', link: 'chainlink', matic: 'polygon', wbtc: 'wrapped-bitcoin',
+      ltc: 'litecoin', near: 'near', uni: 'uniswap', bch: 'bitcoin-cash'
+    };
+
+    let fromPrice = 0;
+    let toPrice = 0;
+
+    try {
+      const fromId = assetToCoinGeckoId[fromAssetLower];
+      const toId = assetToCoinGeckoId[toAssetLower];
+      const response = await axios.get(
+        `https://api.coingecko.com/api/v3/simple/price?ids=${fromId},${toId}&vs_currencies=usd`,
+        { timeout: 8000 }
+      );
+      fromPrice = response.data[fromId]?.usd || 0;
+      toPrice = response.data[toId]?.usd || 0;
+    } catch (priceError) {
+      console.error('Error fetching prices for conversion:', priceError.message);
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(503).json({
+        status: 'error',
+        message: 'Unable to fetch current exchange rates. Please try again.'
+      });
+    }
+
+    if (fromPrice === 0 || toPrice === 0) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        status: 'error',
+        message: `Unable to get price for ${fromAssetUpper} or ${toAssetUpper}`
+      });
+    }
+
+    // Calculate conversion
+    const usdValue = amount * fromPrice;
+    const toAmount = usdValue / toPrice;
+    
+    // Apply small conversion fee (0.5%)
+    const conversionFee = usdValue * 0.005;
+    const toAmountAfterFee = toAmount * 0.995;
+
+    // Update balances
+    userAssetBalance.balances[fromAssetLower] = fromBalance - amount;
+    userAssetBalance.balances[toAssetLower] = (userAssetBalance.balances[toAssetLower] || 0) + toAmountAfterFee;
+    userAssetBalance.lastUpdated = new Date();
+    
+    // Add to history
+    userAssetBalance.history.push({
+      asset: fromAssetLower,
+      type: 'sell',
+      amount: amount,
+      balance: userAssetBalance.balances[fromAssetLower],
+      usdValue: usdValue,
+      price: fromPrice,
+      profitLoss: 0,
+      profitLossPercentage: 0,
+      timestamp: new Date(),
+      transactionId: null
+    });
+    
+    userAssetBalance.history.push({
+      asset: toAssetLower,
+      type: 'buy',
+      amount: toAmountAfterFee,
+      balance: userAssetBalance.balances[toAssetLower],
+      usdValue: usdValue - conversionFee,
+      price: toPrice,
+      profitLoss: 0,
+      profitLossPercentage: 0,
+      timestamp: new Date(),
+      transactionId: null
+    });
+
+    await userAssetBalance.save({ session });
+
+    // Create transaction record
+    const conversionRef = `CONV-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+    const transaction = new Transaction({
+      user: userId,
+      type: 'conversion',
+      amount: usdValue,
+      currency: 'USD',
+      status: 'completed',
+      method: 'INTERNAL',
+      reference: conversionRef,
+      details: {
+        fromAsset: fromAssetUpper,
+        toAsset: toAssetUpper,
+        fromAmount: amount,
+        toAmount: toAmountAfterFee,
+        fromPrice: fromPrice,
+        toPrice: toPrice,
+        conversionFee: conversionFee,
+        usdValue: usdValue
+      },
+      fee: conversionFee,
+      netAmount: usdValue - conversionFee
+    });
+    await transaction.save({ session });
+
+    // Update user's main balance (add the converted value as USD equivalent)
+    // This ensures the user sees the value in their balance
+    await User.findByIdAndUpdate(
+      userId,
+      { $inc: { 'balances.main': usdValue - conversionFee } },
+      { session }
+    );
+
+    await session.commitTransaction();
+    session.endSession();
+
+    // Log the activity
+    await logActivity('conversion_completed', 'Transaction', transaction._id, userId, 'User', req, {
+      fromAsset: fromAssetUpper,
+      toAsset: toAssetUpper,
+      fromAmount: amount,
+      toAmount: toAmountAfterFee,
+      usdValue: usdValue - conversionFee,
+      conversionFee: conversionFee
+    });
+
+    res.status(200).json({
+      status: 'success',
+      message: `Successfully converted ${amount} ${fromAssetUpper} to ${toAmountAfterFee.toFixed(8)} ${toAssetUpper}`,
+      data: {
+        fromAsset: fromAssetUpper,
+        toAsset: toAssetUpper,
+        fromAmount: amount,
+        toAmount: toAmountAfterFee,
+        usdValue: usdValue - conversionFee,
+        conversionFee: conversionFee,
+        exchangeRate: fromPrice / toPrice,
+        transactionId: transaction._id,
+        reference: conversionRef
+      }
+    });
+
+  } catch (err) {
+    await session.abortTransaction();
+    session.endSession();
+    console.error('Conversion error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to complete conversion'
+    });
+  }
+});
 
 
 
@@ -24199,6 +24622,214 @@ app.get('/api/stats/daily-progress', async (req, res) => {
     });
   }
 });
+
+
+
+// =============================================
+// WebSocket Real-time Events Setup
+// =============================================
+const setupRealtimeWebSocket = (server) => {
+  const wss = new WebSocket.Server({ 
+    server, 
+    path: '/api/realtime',
+    clientTracking: true
+  });
+
+  // Store connected clients
+  const connectedClients = new Map();
+
+  // Function to calculate PnL for a user
+  const calculateUserPnL = async (userId) => {
+    try {
+      // Get user's balances
+      const user = await User.findById(userId).select('balances');
+      if (!user) return null;
+
+      // Get current BTC price
+      let btcPrice = 43000;
+      try {
+        const response = await axios.get('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd', { timeout: 5000 });
+        if (response.data && response.data.bitcoin) {
+          btcPrice = response.data.bitcoin.usd;
+        }
+      } catch (e) {
+        console.warn('Could not fetch BTC price for PnL');
+      }
+
+      // Calculate PnL (simplified - you can enhance based on your business logic)
+      const mainPnl = user.balances.main * 0.02; // Example: 2% daily return expectation
+      const maturedPnl = user.balances.matured * 0.015; // Example: 1.5% daily return expectation
+      
+      return {
+        main: {
+          amount: mainPnl,
+          percentage: 2.0
+        },
+        matured: {
+          amount: maturedPnl,
+          percentage: 1.5
+        }
+      };
+    } catch (err) {
+      console.error('Error calculating PnL:', err);
+      return null;
+    }
+  };
+
+  // Function to calculate money flow for a user
+  const calculateMoneyFlow = async (userId) => {
+    try {
+      // Get recent transactions (last 30 days)
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+      const transactions = await Transaction.find({
+        user: userId,
+        createdAt: { $gte: thirtyDaysAgo },
+        status: 'completed'
+      });
+
+      let deposits = 0;
+      let withdrawals = 0;
+      let conversions = 0;
+      let investments = 0;
+
+      transactions.forEach(t => {
+        const amount = t.netAmount || t.amount || 0;
+        if (t.type === 'deposit') deposits += amount;
+        else if (t.type === 'withdrawal') withdrawals += amount;
+        else if (t.type === 'conversion') conversions += amount;
+        else if (t.type === 'investment') investments += amount;
+      });
+
+      return { deposits, withdrawals, conversions, investments };
+    } catch (err) {
+      console.error('Error calculating money flow:', err);
+      return { deposits: 0, withdrawals: 0, conversions: 0, investments: 0 };
+    }
+  };
+
+  // Broadcast PnL updates to specific user
+  const broadcastPnLUpdate = async (userId, ws) => {
+    const pnlData = await calculateUserPnL(userId);
+    if (pnlData && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'pnl_update',
+        data: pnlData
+      }));
+    }
+  };
+
+  // Broadcast money flow updates to specific user
+  const broadcastMoneyFlowUpdate = async (userId, ws) => {
+    const flowData = await calculateMoneyFlow(userId);
+    if (flowData && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'money_flow_update',
+        data: flowData
+      }));
+    }
+  };
+
+  // Start periodic updates for a client
+  const startPeriodicUpdates = (userId, ws) => {
+    // PnL update every 10 seconds
+    const pnlInterval = setInterval(async () => {
+      await broadcastPnLUpdate(userId, ws);
+    }, 10000);
+
+    // Money flow update every 30 seconds
+    const flowInterval = setInterval(async () => {
+      await broadcastMoneyFlowUpdate(userId, ws);
+    }, 30000);
+
+    // Store intervals to clear on disconnect
+    ws.intervals = { pnlInterval, flowInterval };
+  };
+
+  wss.on('connection', async (ws, req) => {
+    let userId = null;
+    let isAuthenticated = false;
+
+    // Handle authentication
+    ws.on('message', async (message) => {
+      try {
+        const data = JSON.parse(message);
+        
+        if (data.type === 'authenticate') {
+          const token = data.token;
+          if (!token) {
+            ws.send(JSON.stringify({ type: 'error', message: 'No token provided' }));
+            return;
+          }
+
+          try {
+            const decoded = verifyJWT(token);
+            if (!decoded.isAdmin) {
+              const user = await User.findById(decoded.id);
+              if (user && user.status === 'active') {
+                userId = decoded.id;
+                isAuthenticated = true;
+                connectedClients.set(userId, ws);
+                
+                // Send initial data
+                const pnlData = await calculateUserPnL(userId);
+                const flowData = await calculateMoneyFlow(userId);
+                
+                ws.send(JSON.stringify({
+                  type: 'connected',
+                  data: { pnl: pnlData, moneyFlow: flowData }
+                }));
+                
+                // Start periodic updates
+                startPeriodicUpdates(userId, ws);
+                
+                ws.send(JSON.stringify({ type: 'authenticated', success: true }));
+              } else {
+                ws.send(JSON.stringify({ type: 'authenticated', success: false, message: 'User not found or inactive' }));
+              }
+            }
+          } catch (err) {
+            ws.send(JSON.stringify({ type: 'authenticated', success: false, message: 'Invalid token' }));
+          }
+        }
+      } catch (err) {
+        console.error('WebSocket message error:', err);
+      }
+    });
+
+    // Handle close
+    ws.on('close', () => {
+      if (userId) {
+        connectedClients.delete(userId);
+      }
+      if (ws.intervals) {
+        clearInterval(ws.intervals.pnlInterval);
+        clearInterval(ws.intervals.flowInterval);
+      }
+    });
+
+    // Handle errors
+    ws.on('error', (err) => {
+      console.error('WebSocket error:', err);
+      if (ws.intervals) {
+        clearInterval(ws.intervals.pnlInterval);
+        clearInterval(ws.intervals.flowInterval);
+      }
+    });
+  });
+
+  return wss;
+};
+
+// Initialize the realtime WebSocket server
+const realtimeWss = setupRealtimeWebSocket(server);
+
+
+
+
+
+
 
 // =============================================
 // TRADING WEBSOCKET - REAL-TIME MARKET DATA
