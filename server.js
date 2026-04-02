@@ -1178,273 +1178,12 @@ const LoginRecord = mongoose.model('LoginRecord', LoginRecordSchema);
 
 
 // =============================================
-// TRADING MODELS - Add to your existing schemas
+// TRADING MODELS - REMOVED PER USER REQUEST
 // =============================================
+// All trading-related schemas (MarketPair, Order, Trade, Position, OrderBookSnapshot, 
+// Ticker24hr, Candle, AssetInfo, TradingData, AnalysisData, UserTradingSettings, TradingRevenue)
+// have been DELETED as requested.
 
-// Market Data Models
-const MarketPairSchema = new mongoose.Schema({
-  symbol: { type: String, required: true, unique: true, index: true },
-  baseAsset: { type: String, required: true, index: true },
-  quoteAsset: { type: String, required: true, index: true },
-  basePrecision: { type: Number, default: 8 },
-  quotePrecision: { type: Number, default: 2 },
-  minQty: { type: Number, default: 0.0001 },
-  maxQty: { type: Number, default: 1000 },
-  minNotional: { type: Number, default: 10 },
-  status: { type: String, enum: ['active', 'suspended', 'maintenance'], default: 'active' },
-  logo: { type: String },
-  price: { type: Number, default: 0 },
-  priceChange24h: { type: Number, default: 0 },
-  priceChangePercent24h: { type: Number, default: 0 },
-  volume24h: { type: Number, default: 0 },
-  high24h: { type: Number, default: 0 },
-  low24h: { type: Number, default: 0 },
-  lastUpdated: { type: Date, default: Date.now }
-}, { timestamps: true });
-
-MarketPairSchema.index({ baseAsset: 1, quoteAsset: 1 });
-MarketPairSchema.index({ status: 1 });
-
-// Order Schema
-const OrderSchema = new mongoose.Schema({
-  user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-  symbol: { type: String, required: true, index: true },
-  orderId: { type: String, required: true, unique: true },
-  side: { type: String, enum: ['buy', 'sell'], required: true },
-  type: { type: String, enum: ['limit', 'market'], required: true },
-  price: { type: Number, required: function() { return this.type === 'limit'; } },
-  originalQty: { type: Number, required: true, min: 0 },
-  executedQty: { type: Number, default: 0, min: 0 },
-  remainingQty: { type: Number, required: true, min: 0 },
-  quoteOrderQty: { type: Number },
-  status: { type: String, enum: ['new', 'partial', 'filled', 'cancelled', 'expired', 'pending'], default: 'new', index: true },
-  timeInForce: { type: String, enum: ['GTC', 'IOC', 'FOK'], default: 'GTC' },
-  icebergQty: { type: Number },
-  stopPrice: { type: Number },
-  takeProfit: { type: Number },
-  stopLoss: { type: Number },
-  fee: { type: Number, default: 0 },
-  feeAsset: { type: String, default: 'USDT' },
-  total: { type: Number, required: true },
-  avgPrice: { type: Number },
-  createdAt: { type: Date, default: Date.now, index: true },
-  updatedAt: { type: Date, default: Date.now }
-});
-
-OrderSchema.index({ user: 1, status: 1 });
-OrderSchema.index({ symbol: 1, status: 1 });
-OrderSchema.index({ orderId: 1 });
-
-// Trade Schema (executed trades)
-const TradeSchema = new mongoose.Schema({
-  user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-  orderId: { type: String, required: true, index: true },
-  symbol: { type: String, required: true, index: true },
-  tradeId: { type: String, required: true, unique: true },
-  side: { type: String, enum: ['buy', 'sell'], required: true },
-  price: { type: Number, required: true },
-  qty: { type: Number, required: true },
-  quoteQty: { type: Number, required: true },
-  commission: { type: Number, default: 0 },
-  commissionAsset: { type: String, default: 'USDT' },
-  isBuyerMaker: { type: Boolean, default: false },
-  time: { type: Date, default: Date.now, index: true }
-});
-
-TradeSchema.index({ user: 1, symbol: 1, time: -1 });
-TradeSchema.index({ orderId: 1 });
-
-// Position Schema
-const PositionSchema = new mongoose.Schema({
-  user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-  symbol: { type: String, required: true, index: true },
-  side: { type: String, enum: ['long', 'short'], required: true },
-  entryPrice: { type: Number, required: true },
-  quantity: { type: Number, required: true, min: 0 },
-  margin: { type: Number, required: true },
-  leverage: { type: Number, default: 1 },
-  liquidationPrice: { type: Number },
-  takeProfit: { type: Number },
-  stopLoss: { type: Number },
-  unrealizedPnL: { type: Number, default: 0 },
-  realizedPnL: { type: Number, default: 0 },
-  status: { type: String, enum: ['open', 'closed'], default: 'open' },
-  openedAt: { type: Date, default: Date.now },
-  closedAt: { type: Date }
-});
-
-PositionSchema.index({ user: 1, symbol: 1, status: 1 });
-
-// Order Book Snapshot Schema (for persistence)
-const OrderBookSnapshotSchema = new mongoose.Schema({
-  symbol: { type: String, required: true, unique: true },
-  bids: [[Number]],
-  asks: [[Number]],
-  lastUpdateId: { type: Number, required: true },
-  updatedAt: { type: Date, default: Date.now }
-});
-
-OrderBookSnapshotSchema.index({ symbol: 1 });
-OrderBookSnapshotSchema.index({ updatedAt: 1 }, { expireAfterSeconds: 60 });
-
-// 24hr Ticker Schema
-const Ticker24hrSchema = new mongoose.Schema({
-  symbol: { type: String, required: true, unique: true },
-  priceChange: { type: Number, default: 0 },
-  priceChangePercent: { type: Number, default: 0 },
-  weightedAvgPrice: { type: Number, default: 0 },
-  prevClosePrice: { type: Number, default: 0 },
-  lastPrice: { type: Number, default: 0 },
-  lastQty: { type: Number, default: 0 },
-  bidPrice: { type: Number, default: 0 },
-  askPrice: { type: Number, default: 0 },
-  openPrice: { type: Number, default: 0 },
-  highPrice: { type: Number, default: 0 },
-  lowPrice: { type: Number, default: 0 },
-  volume: { type: Number, default: 0 },
-  quoteVolume: { type: Number, default: 0 },
-  openTime: { type: Date, default: Date.now },
-  closeTime: { type: Date, default: Date.now },
-  firstId: { type: Number, default: 0 },
-  lastId: { type: Number, default: 0 },
-  count: { type: Number, default: 0 },
-  updatedAt: { type: Date, default: Date.now }
-});
-
-Ticker24hrSchema.index({ symbol: 1 });
-Ticker24hrSchema.index({ updatedAt: 1 }, { expireAfterSeconds: 30 });
-
-// Candle Schema (OHLCV)
-const CandleSchema = new mongoose.Schema({
-  symbol: { type: String, required: true, index: true },
-  interval: { type: String, required: true, index: true },
-  openTime: { type: Date, required: true, index: true },
-  open: { type: Number, required: true },
-  high: { type: Number, required: true },
-  low: { type: Number, required: true },
-  close: { type: Number, required: true },
-  volume: { type: Number, required: true },
-  quoteVolume: { type: Number, default: 0 },
-  trades: { type: Number, default: 0 },
-  closeTime: { type: Date, required: true }
-});
-
-CandleSchema.index({ symbol: 1, interval: 1, openTime: 1 }, { unique: true });
-
-// Asset Info Schema (for detailed crypto data)
-const AssetInfoSchema = new mongoose.Schema({
-  symbol: { type: String, required: true, unique: true, index: true },
-  name: { type: String, required: true },
-  logo: { type: String },
-  rank: { type: Number, default: 0 },
-  marketCap: { type: Number, default: 0 },
-  fullyDilutedMarketCap: { type: Number, default: 0 },
-  marketDominance: { type: Number, default: 0 },
-  volume24h: { type: Number, default: 0 },
-  circulatingSupply: { type: Number, default: 0 },
-  maxSupply: { type: Number, default: 0 },
-  totalSupply: { type: Number, default: 0 },
-  networks: [{ type: String }],
-  tags: [{ type: String }],
-  description: { type: String },
-  website: { type: String },
-  explorer: { type: String },
-  twitter: { type: String },
-  reddit: { type: String },
-  lastUpdated: { type: Date, default: Date.now }
-});
-
-AssetInfoSchema.index({ symbol: 1 });
-AssetInfoSchema.index({ rank: 1 });
-
-// Trading Data Schema (fund flow, net flow)
-const TradingDataSchema = new mongoose.Schema({
-  symbol: { type: String, required: true, unique: true },
-  fundFlowLong: { type: Number, default: 50 },
-  fundFlowShort: { type: Number, default: 50 },
-  netFlow: [{ type: Number }],
-  inflow24h: { type: Number, default: 0 },
-  outflow24h: { type: Number, default: 0 },
-  netFlow24h: { type: Number, default: 0 },
-  updatedAt: { type: Date, default: Date.now }
-});
-
-TradingDataSchema.index({ symbol: 1 });
-
-// Analysis Data Schema
-const AnalysisDataSchema = new mongoose.Schema({
-  symbol: { type: String, required: true, unique: true },
-  longShortRatio: { type: Number, default: 1.0 },
-  marginData: { type: Number, default: 0 },
-  volatility: { type: Number, default: 0 },
-  sentiment: { type: String, enum: ['bullish', 'bearish', 'neutral'], default: 'neutral' },
-  rsi: { type: Number, default: 50 },
-  macd: { type: Number, default: 0 },
-  movingAverage50: { type: Number, default: 0 },
-  movingAverage200: { type: Number, default: 0 },
-  updatedAt: { type: Date, default: Date.now }
-});
-
-AnalysisDataSchema.index({ symbol: 1 });
-
-// User Settings Schema (for trading preferences)
-const UserTradingSettingsSchema = new mongoose.Schema({
-  user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
-  orderBookSettings: {
-    precision: { type: Number, default: 0.01 },
-    depthSize: { type: Number, default: 20 },
-    showCumulativeTotal: { type: Boolean, default: false },
-    colorMode: { type: String, enum: ['default', 'reverse'], default: 'default' },
-    displaySize: { type: String, enum: ['compact', 'normal'], default: 'compact' }
-  },
-  chartSettings: {
-    interval: { type: String, default: '15m' },
-    theme: { type: String, enum: ['light', 'dark'], default: 'dark' },
-    studies: [{ type: String }]
-  },
-  notifications: {
-    orderFilled: { type: Boolean, default: true },
-    priceAlerts: { type: Boolean, default: false },
-    liquidationWarning: { type: Boolean, default: true }
-  },
-  defaultLeverage: { type: Number, default: 1, min: 1, max: 100 },
-  defaultOrderType: { type: String, enum: ['limit', 'market'], default: 'limit' }
-}, { timestamps: true });
-
-UserTradingSettingsSchema.index({ user: 1 });
-
-// Platform Revenue Schema (for tracking company revenue from trading)
-const TradingRevenueSchema = new mongoose.Schema({
-  source: { type: String, enum: ['maker_fee', 'taker_fee', 'convert_spread', 'instant_buy_spread'], required: true },
-  orderId: { type: String, ref: 'Order' },
-  tradeId: { type: String, ref: 'Trade' },
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-  symbol: { type: String, required: true },
-  amount: { type: Number, required: true },
-  feePercentage: { type: Number, required: true },
-  currency: { type: String, default: 'USDT' },
-  usdValue: { type: Number, required: true },
-  metadata: { type: mongoose.Schema.Types.Mixed },
-  recordedAt: { type: Date, default: Date.now }
-});
-
-TradingRevenueSchema.index({ source: 1 });
-TradingRevenueSchema.index({ recordedAt: -1 });
-TradingRevenueSchema.index({ userId: 1 });
-
-// Create models if they don't exist
-const MarketPair = mongoose.models.MarketPair || mongoose.model('MarketPair', MarketPairSchema);
-const Order = mongoose.models.Order || mongoose.model('Order', OrderSchema);
-const Trade = mongoose.models.Trade || mongoose.model('Trade', TradeSchema);
-const Position = mongoose.models.Position || mongoose.model('Position', PositionSchema);
-const OrderBookSnapshot = mongoose.models.OrderBookSnapshot || mongoose.model('OrderBookSnapshot', OrderBookSnapshotSchema);
-const Ticker24hr = mongoose.models.Ticker24hr || mongoose.model('Ticker24hr', Ticker24hrSchema);
-const Candle = mongoose.models.Candle || mongoose.model('Candle', CandleSchema);
-const AssetInfo = mongoose.models.AssetInfo || mongoose.model('AssetInfo', AssetInfoSchema);
-const TradingData = mongoose.models.TradingData || mongoose.model('TradingData', TradingDataSchema);
-const AnalysisData = mongoose.models.AnalysisData || mongoose.model('AnalysisData', AnalysisDataSchema);
-const UserTradingSettings = mongoose.models.UserTradingSettings || mongoose.model('UserTradingSettings', UserTradingSettingsSchema);
-const TradingRevenue = mongoose.models.TradingRevenue || mongoose.model('TradingRevenue', TradingRevenueSchema);
 
 
 
@@ -1531,7 +1270,7 @@ const Plan = mongoose.model('Plan', PlanSchema);
 
 
 // =============================================
-// User Asset Balances Schema
+// User Asset Balances Schema - UPDATED: Tracks crypto holdings only (no fiat storage)
 // =============================================
 const UserAssetBalanceSchema = new mongoose.Schema({
   user: {
@@ -1579,7 +1318,7 @@ const UserAssetBalanceSchema = new mongoose.Schema({
   },
   history: [{
     asset: { type: String, required: true },
-    type: { type: String, enum: ['deposit', 'withdrawal', 'buy', 'sell', 'interest', 'referral'], required: true },
+    type: { type: String, enum: ['deposit', 'withdrawal', 'buy', 'sell', 'interest', 'referral', 'convert'], required: true },
     amount: { type: Number, required: true },
     balance: { type: Number, required: true },
     usdValue: { type: Number, required: true },
@@ -1587,7 +1326,9 @@ const UserAssetBalanceSchema = new mongoose.Schema({
     profitLoss: { type: Number },
     profitLossPercentage: { type: Number },
     timestamp: { type: Date, default: Date.now },
-    transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' }
+    transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
+    convertedToAsset: { type: String },
+    convertedToAmount: { type: Number }
   }]
 }, { timestamps: true });
 
@@ -1720,12 +1461,33 @@ const SellSchema = new mongoose.Schema({
 SellSchema.index({ user: 1, createdAt: -1 });
 SellSchema.index({ status: 1 });
 
+// =============================================
+// Convert Schema - For tracking crypto-to-crypto conversions
+// =============================================
+const ConvertSchema = new mongoose.Schema({
+  user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+  fromAsset: { type: String, required: true },
+  toAsset: { type: String, required: true },
+  fromAmount: { type: Number, required: true, min: 0 },
+  toAmount: { type: Number, required: true, min: 0 },
+  usdValue: { type: Number, required: true, min: 0 },
+  conversionFee: { type: Number, default: 0 },
+  exchangeRate: { type: Number, required: true },
+  status: { type: String, enum: ['pending', 'completed', 'failed'], default: 'completed' },
+  transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
+  completedAt: { type: Date, default: Date.now }
+}, { timestamps: true });
+
+ConvertSchema.index({ user: 1, createdAt: -1 });
+ConvertSchema.index({ fromAsset: 1, toAsset: 1 });
+
 // Create models
 const UserAssetBalance = mongoose.model('UserAssetBalance', UserAssetBalanceSchema);
 const UserPreference = mongoose.model('UserPreference', UserPreferenceSchema);
 const DepositAsset = mongoose.model('DepositAsset', DepositAssetSchema);
 const Buy = mongoose.model('Buy', BuySchema);
 const Sell = mongoose.model('Sell', SellSchema);
+const Convert = mongoose.model('Convert', ConvertSchema);
 
 
 
@@ -2138,7 +1900,7 @@ const TransactionSchema = new mongoose.Schema({
   },
   type: { 
     type: String, 
-    enum: ['deposit', 'withdrawal', 'transfer', 'investment', 'interest', 'referral', 'loan', 'buy', 'sell'], 
+    enum: ['deposit', 'withdrawal', 'transfer', 'investment', 'interest', 'referral', 'loan', 'buy', 'sell', 'convert'], 
     required: [true, 'Transaction type is required'],
     index: true
   },
@@ -2154,7 +1916,7 @@ const TransactionSchema = new mongoose.Schema({
            'XLM', 'ATOM', 'XMR', 'FLOW', 'VET', 'FIL', 'THETA', 'HBAR', 'FTM', 'XTZ'],
     uppercase: true,
     required: function() {
-      return this.type === 'deposit' || this.type === 'withdrawal' || this.type === 'buy' || this.type === 'sell';
+      return this.type === 'deposit' || this.type === 'withdrawal' || this.type === 'buy' || this.type === 'sell' || this.type === 'convert';
     }
   },
   assetAmount: {
@@ -2220,6 +1982,14 @@ const TransactionSchema = new mongoose.Schema({
     buyingPrice: { type: Number },
     profitLoss: { type: Number },
     profitLossPercentage: { type: Number }
+  },
+  convertDetails: {
+    fromAsset: { type: String, uppercase: true },
+    toAsset: { type: String, uppercase: true },
+    fromAmount: { type: Number },
+    toAmount: { type: Number },
+    exchangeRate: { type: Number },
+    conversionFee: { type: Number }
   },
   adminNotes: { type: String },
   processedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
@@ -2619,7 +2389,7 @@ const OTP = mongoose.model('OTP', OTPSchema);
 const PlatformRevenueSchema = new mongoose.Schema({
   source: {
     type: String,
-    enum: ['investment_fee', 'withdrawal_fee', 'buy_fee', 'sell_fee', 'other'],
+    enum: ['investment_fee', 'withdrawal_fee', 'buy_fee', 'sell_fee', 'convert_fee', 'other'],
     required: true
   },
   amount: {
@@ -2646,6 +2416,10 @@ const PlatformRevenueSchema = new mongoose.Schema({
   sellId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Sell'
+  },
+  convertId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Convert'
   },
   userId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -3233,6 +3007,7 @@ module.exports = {
   DepositAsset,
   Buy,
   Sell,
+  Convert,
   setupWebSocketServer
 };
 
@@ -4125,6 +3900,35 @@ const calculateReferralCommissions = async (investment) => {
     // Don't throw error to avoid disrupting investment process
   }
 };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -19838,233 +19642,6 @@ app.get('/api/users/asset-balances', protect, async (req, res) => {
 
 
 
-// =============================================
-// GET /api/assets/portfolio - User Asset Portfolio with Profit/Loss Tracking
-// Updated to match HTML expected format
-// =============================================
-app.get('/api/assets/portfolio', protect, async (req, res) => {
-  try {
-    const userId = req.user._id;
-
-    // Get user's asset balances
-    const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
-    
-    if (!userAssetBalance) {
-      return res.status(200).json({
-        status: 'success',
-        data: {
-          portfolio: [],
-          summary: {
-            totalValue: 0,
-            totalProfitLoss: 0,
-            totalProfitLossPercentage: 0,
-            assetsCount: 0
-          }
-        }
-      });
-    }
-
-    // Get assets with positive balance
-    const assets = Object.keys(userAssetBalance.balances).filter(asset => 
-      userAssetBalance.balances[asset] > 0
-    );
-
-    if (assets.length === 0) {
-      return res.status(200).json({
-        status: 'success',
-        data: {
-          portfolio: [],
-          summary: {
-            totalValue: 0,
-            totalProfitLoss: 0,
-            totalProfitLossPercentage: 0,
-            assetsCount: 0
-          }
-        }
-      });
-    }
-
-    // Map asset symbols to CoinGecko IDs
-    const assetToCoinGeckoId = {
-      btc: 'bitcoin',
-      eth: 'ethereum',
-      usdt: 'tether',
-      bnb: 'binancecoin',
-      sol: 'solana',
-      usdc: 'usd-coin',
-      xrp: 'xrp',
-      doge: 'dogecoin',
-      ada: 'cardano',
-      shib: 'shiba-inu',
-      avax: 'avalanche-2',
-      dot: 'polkadot',
-      trx: 'tron',
-      link: 'chainlink',
-      matic: 'polygon',
-      wbtc: 'wrapped-bitcoin',
-      ltc: 'litecoin',
-      near: 'near',
-      uni: 'uniswap',
-      bch: 'bitcoin-cash',
-      xlm: 'stellar',
-      atom: 'cosmos',
-      xmr: 'monero',
-      flow: 'flow',
-      vet: 'vechain',
-      fil: 'filecoin',
-      theta: 'theta-token',
-      hbar: 'hedera-hashgraph',
-      ftm: 'fantom',
-      xtz: 'tezos'
-    };
-
-    // Get current prices from CoinGecko
-    let currentPrices = {};
-    try {
-      const coinGeckoIds = assets.map(asset => assetToCoinGeckoId[asset] || asset).filter(Boolean);
-      if (coinGeckoIds.length > 0) {
-        const response = await axios.get(
-          `https://api.coingecko.com/api/v3/simple/price?ids=${coinGeckoIds.join(',')}&vs_currencies=usd&include_24hr_change=true`,
-          { timeout: 8000 }
-        );
-        
-        if (response.data) {
-          currentPrices = response.data;
-        }
-      }
-    } catch (priceError) {
-      console.error('Error fetching CoinGecko prices:', priceError.message);
-    }
-
-    // Get transaction history for profit/loss calculation
-    const transactions = await Transaction.find({
-      user: userId,
-      type: { $in: ['buy', 'sell'] },
-      status: 'completed'
-    }).sort({ createdAt: -1 });
-
-    // Build portfolio for each asset
-    const portfolio = [];
-    let totalPortfolioValue = 0;
-    let totalPortfolioProfitLoss = 0;
-
-    for (const asset of assets) {
-      const assetBalance = userAssetBalance.balances[asset];
-      if (assetBalance <= 0) continue;
-
-      const coinGeckoId = assetToCoinGeckoId[asset] || asset;
-      const currentPrice = currentPrices[coinGeckoId]?.usd || 0;
-      const change24h = currentPrices[coinGeckoId]?.usd_24h_change || 0;
-      
-      // Get all transactions for this asset
-      const assetTransactions = transactions.filter(t => 
-        (t.asset && t.asset.toLowerCase() === asset) || 
-        (t.buyDetails?.asset && t.buyDetails.asset.toLowerCase() === asset) ||
-        (t.sellDetails?.asset && t.sellDetails.asset.toLowerCase() === asset)
-      );
-
-      // Calculate average buying price and profit/loss
-      let totalSpent = 0;
-      let totalBought = 0;
-      let totalSold = 0;
-      let realizedProfit = 0;
-      let realizedLoss = 0;
-
-      assetTransactions.forEach(t => {
-        const assetAmount = t.assetAmount || t.buyDetails?.assetAmount || t.sellDetails?.assetAmount || 0;
-        const price = t.buyDetails?.buyingPrice || t.sellDetails?.sellingPrice || 0;
-        
-        if (t.type === 'buy') {
-          totalSpent += t.amount || 0;
-          totalBought += assetAmount;
-        } else if (t.type === 'sell') {
-          totalSold += assetAmount;
-          if (t.sellDetails) {
-            if (t.sellDetails.profitLoss > 0) realizedProfit += t.sellDetails.profitLoss;
-            else realizedLoss += Math.abs(t.sellDetails.profitLoss);
-          }
-        }
-      });
-
-      const averageBuyingPrice = totalBought > 0 ? totalSpent / totalBought : currentPrice;
-      const currentValue = assetBalance * currentPrice;
-      const unrealizedProfitLoss = (currentPrice - averageBuyingPrice) * assetBalance;
-      const unrealizedPercentage = averageBuyingPrice > 0 
-        ? ((currentPrice - averageBuyingPrice) / averageBuyingPrice) * 100 
-        : 0;
-
-      totalPortfolioValue += currentValue;
-      totalPortfolioProfitLoss += unrealizedProfitLoss;
-
-      // Format transactions for HTML (limited to 10 most recent)
-      const formattedTransactions = assetTransactions.slice(0, 10).map(t => ({
-        type: t.type,
-        amount: t.assetAmount || t.buyDetails?.assetAmount || t.sellDetails?.assetAmount || 0,
-        price: t.type === 'buy' ? (t.buyDetails?.buyingPrice || 0) : (t.sellDetails?.sellingPrice || 0),
-        profit: t.sellDetails?.profitLoss && t.sellDetails.profitLoss > 0 ? t.sellDetails.profitLoss : 0,
-        loss: t.sellDetails?.profitLoss && t.sellDetails.profitLoss < 0 ? Math.abs(t.sellDetails.profitLoss) : 0,
-        date: t.createdAt || t.completedAt || new Date(),
-        transactionId: t._id
-      }));
-
-      portfolio.push({
-        asset: asset,
-        totalAmount: assetBalance,
-        currentPrice: currentPrice,
-        currentValue: currentValue,
-        averageBuyingPrice: averageBuyingPrice,
-        totalSpent: totalSpent,
-        totalBought: totalBought,
-        totalSold: totalSold,
-        realizedProfit: realizedProfit,
-        realizedLoss: realizedLoss,
-        unrealizedProfitLoss: unrealizedProfitLoss,
-        unrealizedPercentage: unrealizedPercentage,
-        change24h: change24h,
-        transactions: formattedTransactions
-      });
-    }
-
-    // Sort by current value descending
-    portfolio.sort((a, b) => b.currentValue - a.currentValue);
-
-    // Calculate summary
-    const totalPortfolioPercentage = totalPortfolioValue > 0 
-      ? (totalPortfolioProfitLoss / totalPortfolioValue) * 100 
-      : 0;
-
-    res.status(200).json({
-      status: 'success',
-      data: {
-        portfolio: portfolio,
-        summary: {
-          totalValue: totalPortfolioValue,
-          totalProfitLoss: totalPortfolioProfitLoss,
-          totalProfitLossPercentage: totalPortfolioPercentage,
-          assetsCount: portfolio.length
-        }
-      }
-    });
-
-  } catch (err) {
-    console.error('Portfolio error:', err);
-    // Return empty portfolio instead of error to prevent UI breakage
-    res.status(200).json({
-      status: 'success',
-      data: {
-        portfolio: [],
-        summary: {
-          totalValue: 0,
-          totalProfitLoss: 0,
-          totalProfitLossPercentage: 0,
-          assetsCount: 0
-        }
-      }
-    });
-  }
-});
-
-
 
 
 
@@ -21225,70 +20802,7 @@ app.post('/api/users/deposit-asset', protect, async (req, res) => {
   }
 });
 
-// Get user preferences (including display asset)
-app.get('/api/users/preferences', protect, async (req, res) => {
-  try {
-    let preferences = await UserPreference.findOne({ user: req.user._id });
-    
-    if (!preferences) {
-      // Create default preferences
-      preferences = await UserPreference.create({
-        user: req.user._id,
-        displayAsset: 'btc',
-        theme: 'dark',
-        notifications: { email: true, push: true, sms: false },
-        language: 'en',
-        currency: 'USD'
-      });
-    }
 
-    res.status(200).json({
-      status: 'success',
-      data: preferences
-    });
-
-  } catch (error) {
-    console.error('Error in /api/users/preferences:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch preferences',
-      error: error.message
-    });
-  }
-});
-
-// Update user preferences
-app.post('/api/users/preferences', protect, async (req, res) => {
-  try {
-    const { displayAsset, theme, notifications, language, currency } = req.body;
-
-    const updateData = {};
-    if (displayAsset) updateData.displayAsset = displayAsset.toLowerCase();
-    if (theme) updateData.theme = theme;
-    if (notifications) updateData.notifications = notifications;
-    if (language) updateData.language = language;
-    if (currency) updateData.currency = currency;
-
-    const preferences = await UserPreference.findOneAndUpdate(
-      { user: req.user._id },
-      updateData,
-      { upsert: true, new: true }
-    );
-
-    res.status(200).json({
-      status: 'success',
-      data: preferences
-    });
-
-  } catch (error) {
-    console.error('Error in POST /api/users/preferences:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to update preferences',
-      error: error.message
-    });
-  }
-});
 
 // Get user balances
 app.get('/api/users/balances', protect, async (req, res) => {
@@ -22372,6 +21886,334 @@ fetchMarketData();
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// =============================================
+// GET /api/assets/portfolio - User Asset Portfolio with Profit/Loss Tracking
+// Updated to match HTML expected format
+// =============================================
+app.get('/api/assets/portfolio', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    // Get user's asset balances
+    const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
+    
+    if (!userAssetBalance) {
+      return res.status(200).json({
+        status: 'success',
+        data: {
+          portfolio: [],
+          summary: {
+            totalValue: 0,
+            totalProfitLoss: 0,
+            totalProfitLossPercentage: 0,
+            assetsCount: 0
+          }
+        }
+      });
+    }
+
+    // Get assets with positive balance
+    const assets = Object.keys(userAssetBalance.balances).filter(asset => 
+      userAssetBalance.balances[asset] > 0
+    );
+
+    if (assets.length === 0) {
+      return res.status(200).json({
+        status: 'success',
+        data: {
+          portfolio: [],
+          summary: {
+            totalValue: 0,
+            totalProfitLoss: 0,
+            totalProfitLossPercentage: 0,
+            assetsCount: 0
+          }
+        }
+      });
+    }
+
+    // Map asset symbols to CoinGecko IDs
+    const assetToCoinGeckoId = {
+      btc: 'bitcoin',
+      eth: 'ethereum',
+      usdt: 'tether',
+      bnb: 'binancecoin',
+      sol: 'solana',
+      usdc: 'usd-coin',
+      xrp: 'xrp',
+      doge: 'dogecoin',
+      ada: 'cardano',
+      shib: 'shiba-inu',
+      avax: 'avalanche-2',
+      dot: 'polkadot',
+      trx: 'tron',
+      link: 'chainlink',
+      matic: 'polygon',
+      wbtc: 'wrapped-bitcoin',
+      ltc: 'litecoin',
+      near: 'near',
+      uni: 'uniswap',
+      bch: 'bitcoin-cash',
+      xlm: 'stellar',
+      atom: 'cosmos',
+      xmr: 'monero',
+      flow: 'flow',
+      vet: 'vechain',
+      fil: 'filecoin',
+      theta: 'theta-token',
+      hbar: 'hedera-hashgraph',
+      ftm: 'fantom',
+      xtz: 'tezos'
+    };
+
+    // Get current prices from CoinGecko
+    let currentPrices = {};
+    try {
+      const coinGeckoIds = assets.map(asset => assetToCoinGeckoId[asset] || asset).filter(Boolean);
+      if (coinGeckoIds.length > 0) {
+        const response = await axios.get(
+          `https://api.coingecko.com/api/v3/simple/price?ids=${coinGeckoIds.join(',')}&vs_currencies=usd&include_24hr_change=true`,
+          { timeout: 8000 }
+        );
+        
+        if (response.data) {
+          currentPrices = response.data;
+        }
+      }
+    } catch (priceError) {
+      console.error('Error fetching CoinGecko prices:', priceError.message);
+    }
+
+    // Get transaction history for profit/loss calculation
+    const transactions = await Transaction.find({
+      user: userId,
+      type: { $in: ['buy', 'sell', 'convert'] },
+      status: 'completed'
+    }).sort({ createdAt: -1 });
+
+    // Build portfolio for each asset
+    const portfolio = [];
+    let totalPortfolioValue = 0;
+    let totalPortfolioProfitLoss = 0;
+
+    for (const asset of assets) {
+      const assetBalance = userAssetBalance.balances[asset];
+      if (assetBalance <= 0) continue;
+
+      const coinGeckoId = assetToCoinGeckoId[asset] || asset;
+      const currentPrice = currentPrices[coinGeckoId]?.usd || 0;
+      const change24h = currentPrices[coinGeckoId]?.usd_24h_change || 0;
+      
+      // Get all transactions for this asset
+      const assetTransactions = transactions.filter(t => 
+        (t.asset && t.asset.toLowerCase() === asset) || 
+        (t.buyDetails?.asset && t.buyDetails.asset.toLowerCase() === asset) ||
+        (t.sellDetails?.asset && t.sellDetails.asset.toLowerCase() === asset) ||
+        (t.convertDetails?.fromAsset && t.convertDetails.fromAsset.toLowerCase() === asset) ||
+        (t.convertDetails?.toAsset && t.convertDetails.toAsset.toLowerCase() === asset)
+      );
+
+      // Calculate average buying price and profit/loss
+      let totalSpent = 0;
+      let totalBought = 0;
+      let totalSold = 0;
+      let realizedProfit = 0;
+      let realizedLoss = 0;
+
+      assetTransactions.forEach(t => {
+        const assetAmount = t.assetAmount || t.buyDetails?.assetAmount || t.sellDetails?.assetAmount || 
+                           (t.convertDetails?.fromAsset?.toLowerCase() === asset ? t.convertDetails.fromAmount : 
+                            (t.convertDetails?.toAsset?.toLowerCase() === asset ? t.convertDetails.toAmount : 0)) || 0;
+        const price = t.buyDetails?.buyingPrice || t.sellDetails?.sellingPrice || 
+                     (t.convertDetails?.fromAsset?.toLowerCase() === asset ? t.convertDetails.exchangeRate : 
+                      (t.convertDetails?.toAsset?.toLowerCase() === asset ? (1 / t.convertDetails.exchangeRate) : 0)) || 0;
+        
+        if (t.type === 'buy') {
+          totalSpent += t.amount || 0;
+          totalBought += assetAmount;
+        } else if (t.type === 'sell') {
+          totalSold += assetAmount;
+          if (t.sellDetails) {
+            if (t.sellDetails.profitLoss > 0) realizedProfit += t.sellDetails.profitLoss;
+            else realizedLoss += Math.abs(t.sellDetails.profitLoss);
+          }
+        } else if (t.type === 'convert') {
+          if (t.convertDetails?.fromAsset?.toLowerCase() === asset) {
+            totalSold += assetAmount;
+          } else if (t.convertDetails?.toAsset?.toLowerCase() === asset) {
+            totalSpent += t.amount || 0;
+            totalBought += assetAmount;
+          }
+        }
+      });
+
+      const averageBuyingPrice = totalBought > 0 ? totalSpent / totalBought : currentPrice;
+      const currentValue = assetBalance * currentPrice;
+      const unrealizedProfitLoss = (currentPrice - averageBuyingPrice) * assetBalance;
+      const unrealizedPercentage = averageBuyingPrice > 0 
+        ? ((currentPrice - averageBuyingPrice) / averageBuyingPrice) * 100 
+        : 0;
+
+      totalPortfolioValue += currentValue;
+      totalPortfolioProfitLoss += unrealizedProfitLoss;
+
+      // Format transactions for HTML (limited to 10 most recent)
+      const formattedTransactions = assetTransactions.slice(0, 10).map(t => ({
+        type: t.type,
+        amount: t.assetAmount || t.buyDetails?.assetAmount || t.sellDetails?.assetAmount || 
+                (t.convertDetails?.fromAsset?.toLowerCase() === asset ? t.convertDetails.fromAmount :
+                 (t.convertDetails?.toAsset?.toLowerCase() === asset ? t.convertDetails.toAmount : 0)) || 0,
+        price: t.type === 'buy' ? (t.buyDetails?.buyingPrice || 0) : 
+               (t.type === 'sell' ? (t.sellDetails?.sellingPrice || 0) :
+                (t.type === 'convert' ? (t.convertDetails?.exchangeRate || 0) : 0)),
+        profit: t.sellDetails?.profitLoss && t.sellDetails.profitLoss > 0 ? t.sellDetails.profitLoss : 0,
+        loss: t.sellDetails?.profitLoss && t.sellDetails.profitLoss < 0 ? Math.abs(t.sellDetails.profitLoss) : 0,
+        date: t.createdAt || t.completedAt || new Date(),
+        transactionId: t._id
+      }));
+
+      portfolio.push({
+        asset: asset,
+        totalAmount: assetBalance,
+        currentPrice: currentPrice,
+        currentValue: currentValue,
+        averageBuyingPrice: averageBuyingPrice,
+        totalSpent: totalSpent,
+        totalBought: totalBought,
+        totalSold: totalSold,
+        realizedProfit: realizedProfit,
+        realizedLoss: realizedLoss,
+        unrealizedProfitLoss: unrealizedProfitLoss,
+        unrealizedPercentage: unrealizedPercentage,
+        change24h: change24h,
+        transactions: formattedTransactions
+      });
+    }
+
+    // Sort by current value descending
+    portfolio.sort((a, b) => b.currentValue - a.currentValue);
+
+    // Calculate summary
+    const totalPortfolioPercentage = totalPortfolioValue > 0 
+      ? (totalPortfolioProfitLoss / totalPortfolioValue) * 100 
+      : 0;
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        portfolio: portfolio,
+        summary: {
+          totalValue: totalPortfolioValue,
+          totalProfitLoss: totalPortfolioProfitLoss,
+          totalProfitLossPercentage: totalPortfolioPercentage,
+          assetsCount: portfolio.length
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Portfolio error:', err);
+    // Return empty portfolio instead of error to prevent UI breakage
+    res.status(200).json({
+      status: 'success',
+      data: {
+        portfolio: [],
+        summary: {
+          totalValue: 0,
+          totalProfitLoss: 0,
+          totalProfitLossPercentage: 0,
+          assetsCount: 0
+        }
+      }
+    });
+  }
+});
+
+
+// Get user preferences (including display asset)
+app.get('/api/users/preferences', protect, async (req, res) => {
+  try {
+    let preferences = await UserPreference.findOne({ user: req.user._id });
+    
+    if (!preferences) {
+      // Create default preferences
+      preferences = await UserPreference.create({
+        user: req.user._id,
+        displayAsset: 'btc',
+        theme: 'dark',
+        notifications: { email: true, push: true, sms: false },
+        language: 'en',
+        fiatCurrency: 'USD'
+      });
+    }
+
+    res.status(200).json({
+      status: 'success',
+      data: preferences
+    });
+
+  } catch (error) {
+    console.error('Error in /api/users/preferences:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch preferences',
+      error: error.message
+    });
+  }
+});
+
+// Update user preferences
+app.post('/api/users/preferences', protect, async (req, res) => {
+  try {
+    const { displayAsset, theme, notifications, language, fiatCurrency } = req.body;
+
+    const updateData = {};
+    if (displayAsset) updateData.displayAsset = displayAsset.toLowerCase();
+    if (theme) updateData.theme = theme;
+    if (notifications) updateData.notifications = notifications;
+    if (language) updateData.language = language;
+    if (fiatCurrency) updateData.fiatCurrency = fiatCurrency;
+
+    const preferences = await UserPreference.findOneAndUpdate(
+      { user: req.user._id },
+      updateData,
+      { upsert: true, new: true }
+    );
+
+    res.status(200).json({
+      status: 'success',
+      data: preferences
+    });
+
+  } catch (error) {
+    console.error('Error in POST /api/users/preferences:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to update preferences',
+      error: error.message
+    });
+  }
+});
+
+
 // =============================================
 // GET /api/fiat-currencies - Get supported fiat currencies with exchange rates
 // =============================================
@@ -22620,7 +22462,7 @@ app.post('/api/convert', protect, async (req, res) => {
       session.endSession();
       return res.status(400).json({
         status: 'error',
-        message: `Insufficient ${fromAssetUpper} balance. You have ${fromBalance} ${fromAssetUpper}`
+        message: `Insufficient ${fromAsset.toUpperCase()} balance. You have ${fromBalance} ${fromAsset.toUpperCase()}`
       });
     }
 
@@ -22660,7 +22502,7 @@ app.post('/api/convert', protect, async (req, res) => {
       session.endSession();
       return res.status(400).json({
         status: 'error',
-        message: `Unable to get price for ${fromAssetUpper} or ${toAssetUpper}`
+        message: `Unable to get price for ${fromAsset.toUpperCase()} or ${toAsset.toUpperCase()}`
       });
     }
 
@@ -22688,7 +22530,9 @@ app.post('/api/convert', protect, async (req, res) => {
       profitLoss: 0,
       profitLossPercentage: 0,
       timestamp: new Date(),
-      transactionId: null
+      transactionId: null,
+      convertedToAsset: toAssetLower,
+      convertedToAmount: toAmountAfterFee
     });
     
     userAssetBalance.history.push({
@@ -22710,15 +22554,15 @@ app.post('/api/convert', protect, async (req, res) => {
     const conversionRef = `CONV-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
     const transaction = new Transaction({
       user: userId,
-      type: 'conversion',
+      type: 'convert',
       amount: usdValue,
       currency: 'USD',
       status: 'completed',
       method: 'INTERNAL',
       reference: conversionRef,
       details: {
-        fromAsset: fromAssetUpper,
-        toAsset: toAssetUpper,
+        fromAsset: fromAsset.toUpperCase(),
+        toAsset: toAsset.toUpperCase(),
         fromAmount: amount,
         toAmount: toAmountAfterFee,
         fromPrice: fromPrice,
@@ -22726,10 +22570,36 @@ app.post('/api/convert', protect, async (req, res) => {
         conversionFee: conversionFee,
         usdValue: usdValue
       },
+      convertDetails: {
+        fromAsset: fromAsset.toUpperCase(),
+        toAsset: toAsset.toUpperCase(),
+        fromAmount: amount,
+        toAmount: toAmountAfterFee,
+        exchangeRate: fromPrice / toPrice,
+        conversionFee: conversionFee
+      },
+      asset: fromAsset.toUpperCase(),
+      assetAmount: amount,
       fee: conversionFee,
       netAmount: usdValue - conversionFee
     });
     await transaction.save({ session });
+
+    // Create Convert record
+    const convertRecord = new Convert({
+      user: userId,
+      fromAsset: fromAssetLower,
+      toAsset: toAssetLower,
+      fromAmount: amount,
+      toAmount: toAmountAfterFee,
+      usdValue: usdValue - conversionFee,
+      conversionFee: conversionFee,
+      exchangeRate: fromPrice / toPrice,
+      status: 'completed',
+      transactionId: transaction._id,
+      completedAt: new Date()
+    });
+    await convertRecord.save({ session });
 
     // Update user's main balance (add the converted value as USD equivalent)
     // This ensures the user sees the value in their balance
@@ -22744,8 +22614,8 @@ app.post('/api/convert', protect, async (req, res) => {
 
     // Log the activity
     await logActivity('conversion_completed', 'Transaction', transaction._id, userId, 'User', req, {
-      fromAsset: fromAssetUpper,
-      toAsset: toAssetUpper,
+      fromAsset: fromAsset.toUpperCase(),
+      toAsset: toAsset.toUpperCase(),
       fromAmount: amount,
       toAmount: toAmountAfterFee,
       usdValue: usdValue - conversionFee,
@@ -22754,10 +22624,10 @@ app.post('/api/convert', protect, async (req, res) => {
 
     res.status(200).json({
       status: 'success',
-      message: `Successfully converted ${amount} ${fromAssetUpper} to ${toAmountAfterFee.toFixed(8)} ${toAssetUpper}`,
+      message: `Successfully converted ${amount} ${fromAsset.toUpperCase()} to ${toAmountAfterFee.toFixed(8)} ${toAsset.toUpperCase()}`,
       data: {
-        fromAsset: fromAssetUpper,
-        toAsset: toAssetUpper,
+        fromAsset: fromAsset.toUpperCase(),
+        toAsset: toAsset.toUpperCase(),
         fromAmount: amount,
         toAmount: toAmountAfterFee,
         usdValue: usdValue - conversionFee,
@@ -22778,6 +22648,24 @@ app.post('/api/convert', protect, async (req, res) => {
     });
   }
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -23228,7 +23116,7 @@ const setupRealtimeWebSocket = (server) => {
         const amount = t.netAmount || t.amount || 0;
         if (t.type === 'deposit') deposits += amount;
         else if (t.type === 'withdrawal') withdrawals += amount;
-        else if (t.type === 'conversion') conversions += amount;
+        else if (t.type === 'convert') conversions += amount;
         else if (t.type === 'investment') investments += amount;
       });
 
