@@ -23241,7 +23241,7 @@ const setupRealtimeWebSocket = (server) => {
 };
 
 // Initialize the realtime WebSocket server
-const realtimeWss = setupRealtimeWebSocket(server);
+const realtimeWss = setupRealtimeWebSocket(httpServer);
 
   
 
