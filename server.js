@@ -22669,7 +22669,6 @@ app.post('/api/convert', protect, async (req, res) => {
 
 
 
-
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Global error handler:', err);
@@ -22939,31 +22938,6 @@ app.get('/api/stats/daily-progress', async (req, res) => {
   }
 });
 
-// =============================================
-// MARKET DATA WEBSOCKET - RESTORED AND WORKING
-// =============================================
-
-// Function to fetch market data for initial connection
-const fetchMarketData = async () => {
-  try {
-    const response = await axios.get(
-      'https://api.coingecko.com/api/v3/coins/markets',
-      {
-        params: {
-          vs_currency: 'usd',
-          per_page: 50,
-          price_change_percentage: '24h'
-        },
-        timeout: 5000
-      }
-    );
-    return response.data || [];
-  } catch (error) {
-    console.error('Error fetching market data:', error);
-    return [];
-  }
-};
-
 // Add market WebSocket to your existing server
 const setupMarketWebSocket = (server) => {
   const marketWss = new WebSocket.Server({ 
@@ -23054,7 +23028,7 @@ const setupMarketWebSocket = (server) => {
   });
 };
 
-// Initialize the market WebSocket
+// Call this after creating your HTTP server
 setupMarketWebSocket(httpServer);
 
 // Socket.IO connection handler with stats broadcast
@@ -23065,6 +23039,210 @@ io.on('connection', async (socket) => {
   const currentStats = await getCurrentStats();
   socket.emit('stats-update', currentStats);
   console.log(`📡 Sent initial stats to new client ${socket.id}: ${currentStats.totalInvestors.toLocaleString()} investors`);
+
+
+
+// =============================================
+// WebSocket Real-time Events Setup
+// =============================================
+const setupRealtimeWebSocket = (server) => {
+  const wss = new WebSocket.Server({ 
+    server, 
+    path: '/api/realtime',
+    clientTracking: true
+  });
+
+  // Store connected clients
+  const connectedClients = new Map();
+
+  // Function to calculate PnL for a user
+  const calculateUserPnL = async (userId) => {
+    try {
+      // Get user's balances
+      const user = await User.findById(userId).select('balances');
+      if (!user) return null;
+
+      // Get current BTC price
+      let btcPrice = 43000;
+      try {
+        const response = await axios.get('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd', { timeout: 5000 });
+        if (response.data && response.data.bitcoin) {
+          btcPrice = response.data.bitcoin.usd;
+        }
+      } catch (e) {
+        console.warn('Could not fetch BTC price for PnL');
+      }
+
+      // Calculate PnL (simplified - you can enhance based on your business logic)
+      const mainPnl = user.balances.main * 0.02; // Example: 2% daily return expectation
+      const maturedPnl = user.balances.matured * 0.015; // Example: 1.5% daily return expectation
+      
+      return {
+        main: {
+          amount: mainPnl,
+          percentage: 2.0
+        },
+        matured: {
+          amount: maturedPnl,
+          percentage: 1.5
+        }
+      };
+    } catch (err) {
+      console.error('Error calculating PnL:', err);
+      return null;
+    }
+  };
+
+  // Function to calculate money flow for a user
+  const calculateMoneyFlow = async (userId) => {
+    try {
+      // Get recent transactions (last 30 days)
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+      const transactions = await Transaction.find({
+        user: userId,
+        createdAt: { $gte: thirtyDaysAgo },
+        status: 'completed'
+      });
+
+      let deposits = 0;
+      let withdrawals = 0;
+      let conversions = 0;
+      let investments = 0;
+
+      transactions.forEach(t => {
+        const amount = t.netAmount || t.amount || 0;
+        if (t.type === 'deposit') deposits += amount;
+        else if (t.type === 'withdrawal') withdrawals += amount;
+        else if (t.type === 'conversion') conversions += amount;
+        else if (t.type === 'investment') investments += amount;
+      });
+
+      return { deposits, withdrawals, conversions, investments };
+    } catch (err) {
+      console.error('Error calculating money flow:', err);
+      return { deposits: 0, withdrawals: 0, conversions: 0, investments: 0 };
+    }
+  };
+
+  // Broadcast PnL updates to specific user
+  const broadcastPnLUpdate = async (userId, ws) => {
+    const pnlData = await calculateUserPnL(userId);
+    if (pnlData && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'pnl_update',
+        data: pnlData
+      }));
+    }
+  };
+
+  // Broadcast money flow updates to specific user
+  const broadcastMoneyFlowUpdate = async (userId, ws) => {
+    const flowData = await calculateMoneyFlow(userId);
+    if (flowData && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'money_flow_update',
+        data: flowData
+      }));
+    }
+  };
+
+  // Start periodic updates for a client
+  const startPeriodicUpdates = (userId, ws) => {
+    // PnL update every 10 seconds
+    const pnlInterval = setInterval(async () => {
+      await broadcastPnLUpdate(userId, ws);
+    }, 10000);
+
+    // Money flow update every 30 seconds
+    const flowInterval = setInterval(async () => {
+      await broadcastMoneyFlowUpdate(userId, ws);
+    }, 30000);
+
+    // Store intervals to clear on disconnect
+    ws.intervals = { pnlInterval, flowInterval };
+  };
+
+  wss.on('connection', async (ws, req) => {
+    let userId = null;
+    let isAuthenticated = false;
+
+    // Handle authentication
+    ws.on('message', async (message) => {
+      try {
+        const data = JSON.parse(message);
+        
+        if (data.type === 'authenticate') {
+          const token = data.token;
+          if (!token) {
+            ws.send(JSON.stringify({ type: 'error', message: 'No token provided' }));
+            return;
+          }
+
+          try {
+            const decoded = verifyJWT(token);
+            if (!decoded.isAdmin) {
+              const user = await User.findById(decoded.id);
+              if (user && user.status === 'active') {
+                userId = decoded.id;
+                isAuthenticated = true;
+                connectedClients.set(userId, ws);
+                
+                // Send initial data
+                const pnlData = await calculateUserPnL(userId);
+                const flowData = await calculateMoneyFlow(userId);
+                
+                ws.send(JSON.stringify({
+                  type: 'connected',
+                  data: { pnl: pnlData, moneyFlow: flowData }
+                }));
+                
+                // Start periodic updates
+                startPeriodicUpdates(userId, ws);
+                
+                ws.send(JSON.stringify({ type: 'authenticated', success: true }));
+              } else {
+                ws.send(JSON.stringify({ type: 'authenticated', success: false, message: 'User not found or inactive' }));
+              }
+            }
+          } catch (err) {
+            ws.send(JSON.stringify({ type: 'authenticated', success: false, message: 'Invalid token' }));
+          }
+        }
+      } catch (err) {
+        console.error('WebSocket message error:', err);
+      }
+    });
+
+    // Handle close
+    ws.on('close', () => {
+      if (userId) {
+        connectedClients.delete(userId);
+      }
+      if (ws.intervals) {
+        clearInterval(ws.intervals.pnlInterval);
+        clearInterval(ws.intervals.flowInterval);
+      }
+    });
+
+    // Handle errors
+    ws.on('error', (err) => {
+      console.error('WebSocket error:', err);
+      if (ws.intervals) {
+        clearInterval(ws.intervals.pnlInterval);
+        clearInterval(ws.intervals.flowInterval);
+      }
+    });
+  });
+
+  return wss;
+};
+
+// Initialize the realtime WebSocket server
+const realtimeWss = setupRealtimeWebSocket(httpServer);
+
+  
 
   // Verify admin token for admin connections
   socket.on('authenticate', async (token) => {
@@ -23175,5 +23353,4 @@ httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`📊 Real-time stats initialized with Redis as single source of truth`);
   console.log(`📈 Investors will grow from ${INITIAL_INVESTOR_COUNT.toLocaleString()} with max ${DAILY_GROWTH_LIMIT}/day`);
-  console.log(`🔌 Market WebSocket running on /ws/market`);
 });
