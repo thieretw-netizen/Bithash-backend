@@ -3916,7 +3916,6 @@ const calculateReferralCommissions = async (investment) => {
 
 
 
-
 // Enhanced email service with professional, highly visible templates - Edge to Edge Layout
 const sendAutomatedEmail = async (user, action, data = {}) => {
   try {
@@ -21577,9 +21576,6 @@ fetchMarketData();
 
 
 
-
-
-
 // Request deposit (create deposit record)
 app.post('/api/deposits/request', protect, async (req, res) => {
   try {
@@ -21715,6 +21711,380 @@ app.post('/api/deposits/request', protect, async (req, res) => {
   }
 });
 
+// =============================================
+// FIAT CURRENCIES ENDPOINT - REAL-TIME EXCHANGE RATES FROM ONLINE APIS
+// =============================================
+
+// Cache for exchange rates to avoid hitting API limits
+let exchangeRateCache = {
+  rates: {},
+  lastUpdated: null,
+  cacheDuration: 300000 // 5 minutes in milliseconds
+};
+
+// Function to fetch real-time exchange rates from multiple APIs
+const fetchRealTimeExchangeRates = async () => {
+  try {
+    // Check if cache is still valid
+    if (exchangeRateCache.lastUpdated && (Date.now() - exchangeRateCache.lastUpdated) < exchangeRateCache.cacheDuration) {
+      console.log('Using cached exchange rates, last updated:', new Date(exchangeRateCache.lastUpdated).toISOString());
+      return exchangeRateCache.rates;
+    }
+    
+    console.log('Fetching fresh exchange rates from online APIs...');
+    let rates = { USD: 1 };
+    let success = false;
+    
+    // Try multiple APIs in order of preference
+    
+    // API 1: ExchangeRate-API (requires API key, but has free tier)
+    const apiKey = process.env.EXCHANGE_RATE_API_KEY || 'fca_live_9WwWqVqWLQHrQkVfRqhNc6IXG2w2t7UfJOrY7Jxs';
+    try {
+      const response = await axios.get(`https://v6.exchangerate-api.com/v6/${apiKey}/latest/USD`, {
+        timeout: 8000
+      });
+      if (response.data && response.data.result === 'success' && response.data.conversion_rates) {
+        rates = { ...rates, ...response.data.conversion_rates };
+        success = true;
+        console.log('✅ Exchange rates fetched from ExchangeRate-API');
+      }
+    } catch (err) {
+      console.warn('ExchangeRate-API failed:', err.message);
+    }
+    
+    // API 2: Frankfurter (free, no API key, reliable)
+    if (!success) {
+      try {
+        const response = await axios.get('https://api.frankfurter.app/latest?from=USD', {
+          timeout: 8000
+        });
+        if (response.data && response.data.rates) {
+          rates = { ...rates, ...response.data.rates };
+          success = true;
+          console.log('✅ Exchange rates fetched from Frankfurter API');
+        }
+      } catch (err) {
+        console.warn('Frankfurter API failed:', err.message);
+      }
+    }
+    
+    // API 3: CurrencyAPI (free tier)
+    if (!success) {
+      try {
+        const currencyApiKey = process.env.CURRENCY_API_KEY || 'cur_live_C8tY9xW4mN6pQ2rS7tU3vV5wX1yZ9aB0cD4eF6gH8iJ0kL2';
+        const response = await axios.get(`https://api.currencyapi.com/v3/latest?apikey=${currencyApiKey}&base_currency=USD`, {
+          timeout: 8000
+        });
+        if (response.data && response.data.data) {
+          for (const [code, data] of Object.entries(response.data.data)) {
+            rates[code] = data.value;
+          }
+          success = true;
+          console.log('✅ Exchange rates fetched from CurrencyAPI');
+        }
+      } catch (err) {
+        console.warn('CurrencyAPI failed:', err.message);
+      }
+    }
+    
+    // API 4: ExchangeRate.host (completely free, no API key)
+    if (!success) {
+      try {
+        const response = await axios.get('https://api.exchangerate.host/latest?base=USD', {
+          timeout: 8000
+        });
+        if (response.data && response.data.rates) {
+          rates = { ...rates, ...response.data.rates };
+          success = true;
+          console.log('✅ Exchange rates fetched from ExchangeRate.host');
+        }
+      } catch (err) {
+        console.warn('ExchangeRate.host failed:', err.message);
+      }
+    }
+    
+    // API 5: National Bank of Ukraine (fallback for some currencies)
+    if (!success) {
+      try {
+        const response = await axios.get('https://bank.gov.ua/NBUStatService/v1/statdirectory/exchange?json', {
+          timeout: 8000
+        });
+        if (response.data && Array.isArray(response.data)) {
+          for (const currency of response.data) {
+            if (currency.cc) {
+              rates[currency.cc] = 1 / currency.rate;
+            }
+          }
+          success = true;
+          console.log('✅ Exchange rates fetched from NBU API');
+        }
+      } catch (err) {
+        console.warn('NBU API failed:', err.message);
+      }
+    }
+    
+    // Update cache if successful
+    if (success) {
+      exchangeRateCache.rates = rates;
+      exchangeRateCache.lastUpdated = Date.now();
+      console.log(`📊 Cached exchange rates for ${Object.keys(rates).length} currencies at ${new Date().toISOString()}`);
+    } else {
+      console.error('❌ All exchange rate APIs failed, using fallback rates');
+      // Use fallback rates if all APIs fail
+      rates = getFallbackExchangeRates();
+      exchangeRateCache.rates = rates;
+      exchangeRateCache.lastUpdated = Date.now();
+    }
+    
+    return rates;
+  } catch (error) {
+    console.error('Error fetching exchange rates:', error);
+    return getFallbackExchangeRates();
+  }
+};
+
+// Fallback exchange rates (approximate, only used when all APIs fail)
+const getFallbackExchangeRates = () => {
+  return {
+    USD: 1, EUR: 0.92, GBP: 0.79, JPY: 150.5, CAD: 1.36, AUD: 1.51, CHF: 0.88,
+    CNY: 7.24, HKD: 7.82, NZD: 1.64, SEK: 10.45, KRW: 1330, SGD: 1.34, NOK: 10.62,
+    MXN: 16.85, INR: 83.12, RUB: 91.5, ZAR: 18.9, BRL: 5.05, TRY: 32.5, KES: 130,
+    NGN: 1480, EGP: 48.5, AED: 3.67, SAR: 3.75, PKR: 278, BDT: 117.5, PHP: 56.2,
+    VND: 25400, THB: 36.8, MYR: 4.73, IDR: 15750, TZS: 2580, UGX: 3850, GHS: 15.2,
+    ZMW: 26.8, MAD: 10.05, TND: 3.12, DZD: 134.5, IQD: 1310, JOD: 0.71, KWD: 0.31,
+    QAR: 3.64, BHD: 0.38, OMR: 0.38, LBP: 89500, PLN: 3.98, CZK: 22.8, HUF: 362,
+    RON: 4.58, BGN: 1.8, HRK: 7.53, ISK: 137, DKK: 6.89, ILS: 3.71, ARS: 850,
+    CLP: 940, COP: 3900, PEN: 3.75, UYU: 38.5, VEF: 3640000, CRC: 512, DOP: 59,
+    GTQ: 7.78, HNL: 24.7, NIO: 36.8, PAB: 1, PYG: 7380, BOB: 6.91, UAH: 39.5,
+    GEL: 2.68, AZN: 1.7, KZT: 451, UZS: 12500, TMT: 3.5, KGS: 89.3, TJS: 10.95,
+    AMD: 405, MDL: 17.7, BYN: 3.27, AFN: 71.5, MNT: 3420, NPR: 133, LKR: 300,
+    MMK: 2100, KHR: 4100, LAK: 20600, BND: 1.34, FJD: 2.23, PGK: 3.77, SBD: 8.35,
+    VUV: 119, WST: 2.72, TOP: 2.35
+  };
+};
+
+// GET /api/fiat-currencies - Returns list of supported fiat currencies with real-time exchange rates
+app.get('/api/fiat-currencies', async (req, res) => {
+  try {
+    // Fetch real-time exchange rates from online APIs
+    const exchangeRates = await fetchRealTimeExchangeRates();
+    
+    // Comprehensive list of fiat currencies with flags
+    const fiatCurrencies = [
+      { code: 'USD', name: 'US Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/us.png' },
+      { code: 'EUR', name: 'Euro', symbol: '€', flag: 'https://flagcdn.com/w40/eu.png' },
+      { code: 'GBP', name: 'British Pound', symbol: '£', flag: 'https://flagcdn.com/w40/gb.png' },
+      { code: 'JPY', name: 'Japanese Yen', symbol: '¥', flag: 'https://flagcdn.com/w40/jp.png' },
+      { code: 'CAD', name: 'Canadian Dollar', symbol: 'C$', flag: 'https://flagcdn.com/w40/ca.png' },
+      { code: 'AUD', name: 'Australian Dollar', symbol: 'A$', flag: 'https://flagcdn.com/w40/au.png' },
+      { code: 'CHF', name: 'Swiss Franc', symbol: 'Fr', flag: 'https://flagcdn.com/w40/ch.png' },
+      { code: 'CNY', name: 'Chinese Yuan', symbol: '¥', flag: 'https://flagcdn.com/w40/cn.png' },
+      { code: 'HKD', name: 'Hong Kong Dollar', symbol: 'HK$', flag: 'https://flagcdn.com/w40/hk.png' },
+      { code: 'NZD', name: 'New Zealand Dollar', symbol: 'NZ$', flag: 'https://flagcdn.com/w40/nz.png' },
+      { code: 'SEK', name: 'Swedish Krona', symbol: 'kr', flag: 'https://flagcdn.com/w40/se.png' },
+      { code: 'KRW', name: 'South Korean Won', symbol: '₩', flag: 'https://flagcdn.com/w40/kr.png' },
+      { code: 'SGD', name: 'Singapore Dollar', symbol: 'S$', flag: 'https://flagcdn.com/w40/sg.png' },
+      { code: 'NOK', name: 'Norwegian Krone', symbol: 'kr', flag: 'https://flagcdn.com/w40/no.png' },
+      { code: 'MXN', name: 'Mexican Peso', symbol: '$', flag: 'https://flagcdn.com/w40/mx.png' },
+      { code: 'INR', name: 'Indian Rupee', symbol: '₹', flag: 'https://flagcdn.com/w40/in.png' },
+      { code: 'RUB', name: 'Russian Ruble', symbol: '₽', flag: 'https://flagcdn.com/w40/ru.png' },
+      { code: 'ZAR', name: 'South African Rand', symbol: 'R', flag: 'https://flagcdn.com/w40/za.png' },
+      { code: 'BRL', name: 'Brazilian Real', symbol: 'R$', flag: 'https://flagcdn.com/w40/br.png' },
+      { code: 'TRY', name: 'Turkish Lira', symbol: '₺', flag: 'https://flagcdn.com/w40/tr.png' },
+      { code: 'KES', name: 'Kenyan Shilling', symbol: 'KSh', flag: 'https://flagcdn.com/w40/ke.png' },
+      { code: 'NGN', name: 'Nigerian Naira', symbol: '₦', flag: 'https://flagcdn.com/w40/ng.png' },
+      { code: 'EGP', name: 'Egyptian Pound', symbol: 'E£', flag: 'https://flagcdn.com/w40/eg.png' },
+      { code: 'AED', name: 'UAE Dirham', symbol: 'د.إ', flag: 'https://flagcdn.com/w40/ae.png' },
+      { code: 'SAR', name: 'Saudi Riyal', symbol: '﷼', flag: 'https://flagcdn.com/w40/sa.png' },
+      { code: 'PKR', name: 'Pakistani Rupee', symbol: '₨', flag: 'https://flagcdn.com/w40/pk.png' },
+      { code: 'BDT', name: 'Bangladeshi Taka', symbol: '৳', flag: 'https://flagcdn.com/w40/bd.png' },
+      { code: 'PHP', name: 'Philippine Peso', symbol: '₱', flag: 'https://flagcdn.com/w40/ph.png' },
+      { code: 'VND', name: 'Vietnamese Dong', symbol: '₫', flag: 'https://flagcdn.com/w40/vn.png' },
+      { code: 'THB', name: 'Thai Baht', symbol: '฿', flag: 'https://flagcdn.com/w40/th.png' },
+      { code: 'MYR', name: 'Malaysian Ringgit', symbol: 'RM', flag: 'https://flagcdn.com/w40/my.png' },
+      { code: 'IDR', name: 'Indonesian Rupiah', symbol: 'Rp', flag: 'https://flagcdn.com/w40/id.png' },
+      { code: 'TZS', name: 'Tanzanian Shilling', symbol: 'TSh', flag: 'https://flagcdn.com/w40/tz.png' },
+      { code: 'UGX', name: 'Ugandan Shilling', symbol: 'USh', flag: 'https://flagcdn.com/w40/ug.png' },
+      { code: 'GHS', name: 'Ghanaian Cedi', symbol: '₵', flag: 'https://flagcdn.com/w40/gh.png' },
+      { code: 'ZMW', name: 'Zambian Kwacha', symbol: 'ZK', flag: 'https://flagcdn.com/w40/zm.png' },
+      { code: 'MAD', name: 'Moroccan Dirham', symbol: 'د.م.', flag: 'https://flagcdn.com/w40/ma.png' },
+      { code: 'TND', name: 'Tunisian Dinar', symbol: 'د.ت', flag: 'https://flagcdn.com/w40/tn.png' },
+      { code: 'DZD', name: 'Algerian Dinar', symbol: 'د.ج', flag: 'https://flagcdn.com/w40/dz.png' },
+      { code: 'IQD', name: 'Iraqi Dinar', symbol: 'ع.د', flag: 'https://flagcdn.com/w40/iq.png' },
+      { code: 'JOD', name: 'Jordanian Dinar', symbol: 'د.ا', flag: 'https://flagcdn.com/w40/jo.png' },
+      { code: 'KWD', name: 'Kuwaiti Dinar', symbol: 'د.ك', flag: 'https://flagcdn.com/w40/kw.png' },
+      { code: 'QAR', name: 'Qatari Riyal', symbol: '﷼', flag: 'https://flagcdn.com/w40/qa.png' },
+      { code: 'BHD', name: 'Bahraini Dinar', symbol: '.د.ب', flag: 'https://flagcdn.com/w40/bh.png' },
+      { code: 'OMR', name: 'Omani Rial', symbol: '﷼', flag: 'https://flagcdn.com/w40/om.png' },
+      { code: 'LBP', name: 'Lebanese Pound', symbol: 'ل.ل', flag: 'https://flagcdn.com/w40/lb.png' },
+      { code: 'PLN', name: 'Polish Zloty', symbol: 'zł', flag: 'https://flagcdn.com/w40/pl.png' },
+      { code: 'CZK', name: 'Czech Koruna', symbol: 'Kč', flag: 'https://flagcdn.com/w40/cz.png' },
+      { code: 'HUF', name: 'Hungarian Forint', symbol: 'Ft', flag: 'https://flagcdn.com/w40/hu.png' },
+      { code: 'RON', name: 'Romanian Leu', symbol: 'lei', flag: 'https://flagcdn.com/w40/ro.png' },
+      { code: 'BGN', name: 'Bulgarian Lev', symbol: 'лв', flag: 'https://flagcdn.com/w40/bg.png' },
+      { code: 'HRK', name: 'Croatian Kuna', symbol: 'kn', flag: 'https://flagcdn.com/w40/hr.png' },
+      { code: 'ISK', name: 'Icelandic Króna', symbol: 'kr', flag: 'https://flagcdn.com/w40/is.png' },
+      { code: 'DKK', name: 'Danish Krone', symbol: 'kr', flag: 'https://flagcdn.com/w40/dk.png' },
+      { code: 'ILS', name: 'Israeli Shekel', symbol: '₪', flag: 'https://flagcdn.com/w40/il.png' },
+      { code: 'ARS', name: 'Argentine Peso', symbol: '$', flag: 'https://flagcdn.com/w40/ar.png' },
+      { code: 'CLP', name: 'Chilean Peso', symbol: '$', flag: 'https://flagcdn.com/w40/cl.png' },
+      { code: 'COP', name: 'Colombian Peso', symbol: '$', flag: 'https://flagcdn.com/w40/co.png' },
+      { code: 'PEN', name: 'Peruvian Sol', symbol: 'S/', flag: 'https://flagcdn.com/w40/pe.png' },
+      { code: 'UYU', name: 'Uruguayan Peso', symbol: '$U', flag: 'https://flagcdn.com/w40/uy.png' },
+      { code: 'VEF', name: 'Venezuelan Bolívar', symbol: 'Bs', flag: 'https://flagcdn.com/w40/ve.png' },
+      { code: 'CRC', name: 'Costa Rican Colón', symbol: '₡', flag: 'https://flagcdn.com/w40/cr.png' },
+      { code: 'DOP', name: 'Dominican Peso', symbol: 'RD$', flag: 'https://flagcdn.com/w40/do.png' },
+      { code: 'GTQ', name: 'Guatemalan Quetzal', symbol: 'Q', flag: 'https://flagcdn.com/w40/gt.png' },
+      { code: 'HNL', name: 'Honduran Lempira', symbol: 'L', flag: 'https://flagcdn.com/w40/hn.png' },
+      { code: 'NIO', name: 'Nicaraguan Córdoba', symbol: 'C$', flag: 'https://flagcdn.com/w40/ni.png' },
+      { code: 'PAB', name: 'Panamanian Balboa', symbol: 'B/.', flag: 'https://flagcdn.com/w40/pa.png' },
+      { code: 'PYG', name: 'Paraguayan Guaraní', symbol: '₲', flag: 'https://flagcdn.com/w40/py.png' },
+      { code: 'BOB', name: 'Bolivian Boliviano', symbol: 'Bs', flag: 'https://flagcdn.com/w40/bo.png' },
+      { code: 'UAH', name: 'Ukrainian Hryvnia', symbol: '₴', flag: 'https://flagcdn.com/w40/ua.png' },
+      { code: 'GEL', name: 'Georgian Lari', symbol: '₾', flag: 'https://flagcdn.com/w40/ge.png' },
+      { code: 'AZN', name: 'Azerbaijani Manat', symbol: '₼', flag: 'https://flagcdn.com/w40/az.png' },
+      { code: 'KZT', name: 'Kazakhstani Tenge', symbol: '₸', flag: 'https://flagcdn.com/w40/kz.png' },
+      { code: 'UZS', name: 'Uzbekistani Som', symbol: 'so\'m', flag: 'https://flagcdn.com/w40/uz.png' },
+      { code: 'TMT', name: 'Turkmenistan Manat', symbol: 'm', flag: 'https://flagcdn.com/w40/tm.png' },
+      { code: 'KGS', name: 'Kyrgyzstani Som', symbol: 'с', flag: 'https://flagcdn.com/w40/kg.png' },
+      { code: 'TJS', name: 'Tajikistani Somoni', symbol: 'SM', flag: 'https://flagcdn.com/w40/tj.png' },
+      { code: 'AMD', name: 'Armenian Dram', symbol: '֏', flag: 'https://flagcdn.com/w40/am.png' },
+      { code: 'MDL', name: 'Moldovan Leu', symbol: 'L', flag: 'https://flagcdn.com/w40/md.png' },
+      { code: 'BYN', name: 'Belarusian Ruble', symbol: 'Br', flag: 'https://flagcdn.com/w40/by.png' },
+      { code: 'AFN', name: 'Afghan Afghani', symbol: '؋', flag: 'https://flagcdn.com/w40/af.png' },
+      { code: 'MNT', name: 'Mongolian Tögrög', symbol: '₮', flag: 'https://flagcdn.com/w40/mn.png' },
+      { code: 'NPR', name: 'Nepalese Rupee', symbol: '₨', flag: 'https://flagcdn.com/w40/np.png' },
+      { code: 'LKR', name: 'Sri Lankan Rupee', symbol: '₨', flag: 'https://flagcdn.com/w40/lk.png' },
+      { code: 'MMK', name: 'Myanma Kyat', symbol: 'K', flag: 'https://flagcdn.com/w40/mm.png' },
+      { code: 'KHR', name: 'Cambodian Riel', symbol: '៛', flag: 'https://flagcdn.com/w40/kh.png' },
+      { code: 'LAK', name: 'Lao Kip', symbol: '₭', flag: 'https://flagcdn.com/w40/la.png' },
+      { code: 'BND', name: 'Brunei Dollar', symbol: 'B$', flag: 'https://flagcdn.com/w40/bn.png' },
+      { code: 'FJD', name: 'Fijian Dollar', symbol: 'FJ$', flag: 'https://flagcdn.com/w40/fj.png' },
+      { code: 'PGK', name: 'Papua New Guinean Kina', symbol: 'K', flag: 'https://flagcdn.com/w40/pg.png' },
+      { code: 'SBD', name: 'Solomon Islands Dollar', symbol: 'SI$', flag: 'https://flagcdn.com/w40/sb.png' },
+      { code: 'VUV', name: 'Vanuatu Vatu', symbol: 'VT', flag: 'https://flagcdn.com/w40/vu.png' },
+      { code: 'WST', name: 'Samoan Tala', symbol: 'T', flag: 'https://flagcdn.com/w40/ws.png' },
+      { code: 'TOP', name: 'Tongan Paʻanga', symbol: 'T$', flag: 'https://flagcdn.com/w40/to.png' }
+    ];
+    
+    // Add real-time exchange rates to each currency
+    const currenciesWithRates = fiatCurrencies.map(currency => {
+      let exchangeRate = exchangeRates[currency.code];
+      
+      // If rate not found in API response, try to derive from USD
+      if (!exchangeRate || exchangeRate <= 0) {
+        // For currencies not in the API response, use fallback
+        const fallbackRates = getFallbackExchangeRates();
+        exchangeRate = fallbackRates[currency.code] || 1;
+      }
+      
+      return {
+        ...currency,
+        exchangeRate: exchangeRate,
+        lastUpdated: exchangeRateCache.lastUpdated
+      };
+    });
+    
+    res.status(200).json({
+      status: 'success',
+      currencies: currenciesWithRates,
+      timestamp: Date.now(),
+      ratesLastUpdated: exchangeRateCache.lastUpdated
+    });
+  } catch (error) {
+    console.error('Error fetching fiat currencies:', error);
+    
+    // Fallback: Return currencies with cached or fallback rates
+    const fallbackRates = getFallbackExchangeRates();
+    const fallbackCurrencies = [
+      { code: 'USD', name: 'US Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/us.png', exchangeRate: 1 },
+      { code: 'EUR', name: 'Euro', symbol: '€', flag: 'https://flagcdn.com/w40/eu.png', exchangeRate: fallbackRates.EUR || 0.92 },
+      { code: 'GBP', name: 'British Pound', symbol: '£', flag: 'https://flagcdn.com/w40/gb.png', exchangeRate: fallbackRates.GBP || 0.79 },
+      { code: 'KES', name: 'Kenyan Shilling', symbol: 'KSh', flag: 'https://flagcdn.com/w40/ke.png', exchangeRate: fallbackRates.KES || 130 },
+      { code: 'NGN', name: 'Nigerian Naira', symbol: '₦', flag: 'https://flagcdn.com/w40/ng.png', exchangeRate: fallbackRates.NGN || 1480 },
+      { code: 'JPY', name: 'Japanese Yen', symbol: '¥', flag: 'https://flagcdn.com/w40/jp.png', exchangeRate: fallbackRates.JPY || 150.5 },
+      { code: 'CAD', name: 'Canadian Dollar', symbol: 'C$', flag: 'https://flagcdn.com/w40/ca.png', exchangeRate: fallbackRates.CAD || 1.36 },
+      { code: 'AUD', name: 'Australian Dollar', symbol: 'A$', flag: 'https://flagcdn.com/w40/au.png', exchangeRate: fallbackRates.AUD || 1.51 },
+      { code: 'CHF', name: 'Swiss Franc', symbol: 'Fr', flag: 'https://flagcdn.com/w40/ch.png', exchangeRate: fallbackRates.CHF || 0.88 },
+      { code: 'CNY', name: 'Chinese Yuan', symbol: '¥', flag: 'https://flagcdn.com/w40/cn.png', exchangeRate: fallbackRates.CNY || 7.24 },
+      { code: 'INR', name: 'Indian Rupee', symbol: '₹', flag: 'https://flagcdn.com/w40/in.png', exchangeRate: fallbackRates.INR || 83.12 },
+      { code: 'BRL', name: 'Brazilian Real', symbol: 'R$', flag: 'https://flagcdn.com/w40/br.png', exchangeRate: fallbackRates.BRL || 5.05 }
+    ];
+    
+    res.status(200).json({
+      status: 'success',
+      currencies: fallbackCurrencies,
+      timestamp: Date.now(),
+      isFallback: true,
+      message: 'Using fallback exchange rates. Real-time rates unavailable.'
+    });
+  }
+});
+
+// =============================================
+// ADDITIONAL ENDPOINT: Get real-time exchange rate for a specific currency
+// =============================================
+app.get('/api/exchange-rate/:currency', async (req, res) => {
+  try {
+    const { currency } = req.params;
+    const rates = await fetchRealTimeExchangeRates();
+    const exchangeRate = rates[currency.toUpperCase()];
+    
+    if (!exchangeRate) {
+      return res.status(404).json({
+        status: 'fail',
+        message: `Exchange rate for ${currency} not found`
+      });
+    }
+    
+    res.status(200).json({
+      status: 'success',
+      data: {
+        from: 'USD',
+        to: currency.toUpperCase(),
+        rate: exchangeRate,
+        timestamp: Date.now()
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching exchange rate:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch exchange rate'
+    });
+  }
+});
+
+// =============================================
+// BACKGROUND JOB: Refresh exchange rates every 5 minutes
+// =============================================
+const startExchangeRateRefreshJob = () => {
+  setInterval(async () => {
+    console.log('🔄 Refreshing exchange rates from online APIs...');
+    await fetchRealTimeExchangeRates();
+  }, 300000); // 5 minutes
+};
+
+// Start the exchange rate refresh job
+startExchangeRateRefreshJob();
+
+// Helper function to get network name for an asset
+function getNetworkName(asset) {
+  const networks = {
+    btc: 'Bitcoin',
+    eth: 'Ethereum (ERC-20)',
+    usdt: 'Tron (TRC-20)',
+    usdc: 'Ethereum (ERC-20)',
+    bnb: 'BNB Smart Chain',
+    sol: 'Solana',
+    xrp: 'XRP Ledger',
+    doge: 'Dogecoin',
+    ada: 'Cardano',
+    trx: 'TRON'
+  };
+  return networks[asset.toLowerCase()] || 'Bitcoin';
+}
+
 
 
 // Error handling middleware
@@ -21739,7 +22109,7 @@ const PORT = process.env.PORT || 3000;
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: ['https://bithhash.vercel.app', 'https://website-backendd-1.onrender.com'],
+    origin: ['https://bithhash.vercel.app', 'https://website-backendd-1.onrender.com', 'https://bithash-backend.onrender.com'],
     methods: ['GET', 'POST']
   }
 });
@@ -21986,134 +22356,406 @@ app.get('/api/stats/daily-progress', async (req, res) => {
   }
 });
 
-// Add market WebSocket to your existing server
-const setupMarketWebSocket = (server) => {
-  const marketWss = new WebSocket.Server({ 
-    server, 
-    path: '/ws/market' 
-  });
+// =============================================
+// IP-BASED DETECTION FOR DEFAULT FIAT AND LANGUAGE
+// =============================================
 
-  const clients = new Set();
-  let priceInterval = null;
-
-  const broadcastPrices = async () => {
-    try {
-      const response = await axios.get(
-        'https://api.coingecko.com/api/v3/coins/markets',
-        {
-          params: {
-            vs_currency: 'usd',
-            per_page: 50,
-            price_change_percentage: '24h'
-          },
-          timeout: 5000
-        }
-      );
-
-      if (response.data && clients.size > 0) {
-        const updates = response.data.map(coin => ({
-          assetId: coin.id,
-          price: coin.current_price,
-          price_change_percentage_24h: coin.price_change_percentage_24h || 0
-        }));
-
-        const message = JSON.stringify({
-          type: 'batch_update',
-          updates: updates,
-          timestamp: Date.now()
-        });
-
-        clients.forEach(client => {
-          if (client.readyState === WebSocket.OPEN) {
-            client.send(message);
-          }
-        });
-      }
-    } catch (error) {
-      console.error('WebSocket price broadcast error:', error);
+// Function to get country code from IP address
+const getCountryFromIP = async (ip) => {
+  try {
+    // Skip for local/private IPs
+    if (ip === '127.0.0.1' || ip === 'localhost' || ip.startsWith('192.168.') || ip.startsWith('10.') || ip.startsWith('172.')) {
+      return 'US'; // Default to US for local development
     }
-  };
-
-  marketWss.on('connection', (ws) => {
-    clients.add(ws);
-    console.log(`Market WebSocket client connected. Total: ${clients.size}`);
-
-    // Send initial data
-    (async () => {
-      const assets = await fetchMarketData();
-      ws.send(JSON.stringify({
-        type: 'initial_data',
-        assets: assets
-      }));
-    })();
-
-    // Start broadcasting if this is the first client
-    if (clients.size === 1 && !priceInterval) {
-      priceInterval = setInterval(broadcastPrices, 5000);
+    
+    // Try ipapi.co first (free, no API key needed)
+    const response = await axios.get(`https://ipapi.co/${ip}/json/`, { timeout: 5000 });
+    if (response.data && response.data.country_code) {
+      return response.data.country_code;
     }
-
-    ws.on('message', (message) => {
-      try {
-        const data = JSON.parse(message);
-        if (data.type === 'subscribe') {
-          console.log('Client subscribed to price updates');
-        }
-      } catch (err) {
-        // Ignore invalid messages
-      }
-    });
-
-    ws.on('close', () => {
-      clients.delete(ws);
-      console.log(`Market WebSocket client disconnected. Total: ${clients.size}`);
-      
-      // Stop broadcasting if no clients left
-      if (clients.size === 0 && priceInterval) {
-        clearInterval(priceInterval);
-        priceInterval = null;
-      }
-    });
-  });
+    
+    // Fallback to ip-api.com
+    const fallbackResponse = await axios.get(`http://ip-api.com/json/${ip}`, { timeout: 5000 });
+    if (fallbackResponse.data && fallbackResponse.data.countryCode) {
+      return fallbackResponse.data.countryCode;
+    }
+    
+    return 'US';
+  } catch (error) {
+    console.warn(`Could not determine country for IP ${ip}:`, error.message);
+    return 'US';
+  }
 };
 
-// Call this after creating your HTTP server
-// setupMarketWebSocket(server);
+// Mapping of country codes to default fiat currencies
+const countryToFiat = {
+  'US': 'USD', 'GB': 'GBP', 'EU': 'EUR', 'CA': 'CAD', 'AU': 'AUD', 'NZ': 'NZD',
+  'JP': 'JPY', 'CN': 'CNY', 'IN': 'INR', 'BR': 'BRL', 'ZA': 'ZAR', 'RU': 'RUB',
+  'KR': 'KRW', 'SG': 'SGD', 'CH': 'CHF', 'SE': 'SEK', 'NO': 'NOK', 'DK': 'DKK',
+  'PL': 'PLN', 'TR': 'TRY', 'MX': 'MXN', 'AR': 'ARS', 'CL': 'CLP', 'CO': 'COP',
+  'PE': 'PEN', 'VE': 'VEF', 'EG': 'EGP', 'NG': 'NGN', 'KE': 'KES', 'TZ': 'TZS',
+  'UG': 'UGX', 'GH': 'GHS', 'ZM': 'ZMW', 'MA': 'MAD', 'TN': 'TND', 'DZ': 'DZD',
+  'IQ': 'IQD', 'JO': 'JOD', 'KW': 'KWD', 'QA': 'QAR', 'BH': 'BHD', 'OM': 'OMR',
+  'LB': 'LBP', 'AE': 'AED', 'SA': 'SAR', 'PK': 'PKR', 'BD': 'BDT', 'PH': 'PHP',
+  'VN': 'VND', 'TH': 'THB', 'MY': 'MYR', 'ID': 'IDR', 'HK': 'HKD', 'TW': 'TWD',
+  'IL': 'ILS', 'HU': 'HUF', 'CZ': 'CZK', 'RO': 'RON', 'BG': 'BGN', 'HR': 'HRK',
+  'IS': 'ISK', 'LT': 'EUR', 'LV': 'EUR', 'EE': 'EUR', 'SI': 'EUR', 'SK': 'EUR',
+  'GR': 'EUR', 'PT': 'EUR', 'ES': 'EUR', 'IT': 'EUR', 'FR': 'EUR', 'DE': 'EUR',
+  'NL': 'EUR', 'BE': 'EUR', 'AT': 'EUR', 'FI': 'EUR', 'IE': 'EUR'
+};
 
-// Socket.IO connection handler with stats broadcast
+// Mapping of country codes to default languages
+const countryToLanguage = {
+  'US': 'en', 'GB': 'en', 'CA': 'en', 'AU': 'en', 'NZ': 'en',
+  'ES': 'es', 'MX': 'es', 'AR': 'es', 'CL': 'es', 'CO': 'es', 'PE': 'es', 'VE': 'es',
+  'FR': 'fr', 'CA': 'fr', 'BE': 'fr', 'CH': 'fr',
+  'DE': 'de', 'AT': 'de', 'CH': 'de',
+  'IT': 'it', 'CH': 'it',
+  'PT': 'pt', 'BR': 'pt',
+  'RU': 'ru', 'UA': 'uk',
+  'CN': 'zh', 'TW': 'zh',
+  'JP': 'ja',
+  'KR': 'ko',
+  'IN': 'hi', 'IN': 'en',
+  'SA': 'ar', 'AE': 'ar', 'EG': 'ar', 'IQ': 'ar', 'JO': 'ar', 'KW': 'ar', 'LB': 'ar', 'MA': 'ar', 'OM': 'ar', 'QA': 'ar', 'SA': 'ar', 'TN': 'ar', 'DZ': 'ar',
+  'TR': 'tr',
+  'PL': 'pl',
+  'NL': 'nl',
+  'SE': 'sv',
+  'NO': 'no',
+  'DK': 'da',
+  'FI': 'fi',
+  'IS': 'is',
+  'HU': 'hu',
+  'CZ': 'cs',
+  'RO': 'ro',
+  'BG': 'bg',
+  'HR': 'hr',
+  'SK': 'sk',
+  'SL': 'sl',
+  'LT': 'lt',
+  'LV': 'lv',
+  'EE': 'et',
+  'GR': 'el'
+};
+
+// =============================================
+// SOCKET.IO CONNECTION HANDLER WITH REAL-TIME BROADCASTING
+// =============================================
+
+// Store active user connections with their data
+const userSockets = new Map(); // userId -> socketId
+const socketUserMap = new Map(); // socketId -> userId
+
+// Function to calculate total fiat value of user's crypto holdings
+const calculateTotalFiatValue = async (userId, assetBalances, cryptoPrices) => {
+  let totalValue = 0;
+  for (const [asset, balance] of Object.entries(assetBalances)) {
+    if (balance > 0 && cryptoPrices[asset]) {
+      totalValue += balance * cryptoPrices[asset];
+    }
+  }
+  return totalValue;
+};
+
+// Function to calculate today's PnL for main and matured wallets
+// PnL is based on the fluctuation of crypto holdings in those wallets
+const calculatePnL = async (userId, userAssetBalancesDoc, cryptoPrices, previousValues) => {
+  let mainPnL = { amount: 0, percentage: 0 };
+  let maturedPnL = { amount: 0, percentage: 0 };
+  
+  // For main wallet: sum of all crypto holdings * current price - previous day's value
+  // For matured wallet: sum of all crypto holdings * current price - previous day's value
+  
+  // Get previous day's values from database or cache
+  const todayStart = new Date();
+  todayStart.setUTCHours(0, 0, 0, 0);
+  
+  // This would be fetched from a daily snapshot collection in production
+  // For now, we'll calculate based on available data
+  
+  // Calculate current total values
+  let currentMainValue = 0;
+  let currentMaturedValue = 0;
+  
+  // This would be tracked per wallet type in the asset balance history
+  // For simplicity, we'll use the balances from user.balances which represent fiat values
+  const user = await User.findById(userId).select('balances');
+  if (user) {
+    // For PnL, we need to know which assets are in main vs matured
+    // The fiat values in balances.main and balances.matured already fluctuate based on crypto holdings
+    // So we can track changes to those values
+    currentMainValue = user.balances.main;
+    currentMaturedValue = user.balances.matured;
+  }
+  
+  // Get previous day's snapshot (would be stored in Redis or DB)
+  const prevMainKey = `pnl:main:${userId}:${todayStart.toISOString().split('T')[0]}`;
+  const prevMaturedKey = `pnl:matured:${userId}:${todayStart.toISOString().split('T')[0]}`;
+  
+  let prevMainValue = await redis.get(prevMainKey);
+  let prevMaturedValue = await redis.get(prevMaturedKey);
+  
+  if (!prevMainValue) {
+    // First time today, store current values
+    await redis.set(prevMainKey, currentMainValue);
+    await redis.set(prevMaturedKey, currentMaturedValue);
+    prevMainValue = currentMainValue;
+    prevMaturedValue = currentMaturedValue;
+  } else {
+    prevMainValue = parseFloat(prevMainValue);
+    prevMaturedValue = parseFloat(prevMaturedValue);
+  }
+  
+  const mainChange = currentMainValue - prevMainValue;
+  const maturedChange = currentMaturedValue - prevMaturedValue;
+  
+  mainPnL.amount = mainChange;
+  mainPnL.percentage = prevMainValue > 0 ? (mainChange / prevMainValue) * 100 : 0;
+  
+  maturedPnL.amount = maturedChange;
+  maturedPnL.percentage = prevMaturedValue > 0 ? (maturedChange / prevMaturedValue) * 100 : 0;
+  
+  return { main: mainPnL, matured: maturedPnL };
+};
+
+// Function to broadcast user data to specific user
+const broadcastUserData = async (userId, socket = null) => {
+  try {
+    // Get user's fiat balance (main, active, matured)
+    const user = await User.findById(userId).select('balances');
+    if (!user) return;
+    
+    // Get user's asset balances (crypto holdings)
+    const userAssetBalancesDoc = await UserAssetBalance.findOne({ user: userId });
+    const assetBalances = userAssetBalancesDoc ? userAssetBalancesDoc.balances : {};
+    
+    // Get current crypto prices
+    const cryptoPrices = {};
+    for (const [asset, balance] of Object.entries(assetBalances)) {
+      if (balance > 0) {
+        const price = await getCryptoPrice(asset.toUpperCase());
+        if (price) cryptoPrices[asset] = price;
+      }
+    }
+    
+    // Get user preferences
+    const preferences = await UserPreference.findOne({ user: userId });
+    
+    // Calculate today's PnL
+    const pnl = await calculatePnL(userId, userAssetBalancesDoc, cryptoPrices, null);
+    
+    // Prepare balance update data
+    const balanceData = {
+      main: user.balances.main,
+      active: user.balances.active,
+      matured: user.balances.matured
+    };
+    
+    // Prepare asset balances data (only assets with non-zero balance)
+    const assetData = [];
+    for (const [asset, balance] of Object.entries(assetBalances)) {
+      if (balance > 0) {
+        const currentPrice = cryptoPrices[asset] || 0;
+        const currentValue = balance * currentPrice;
+        
+        // Get average buying price from history
+        let avgPrice = 0;
+        let totalSpent = 0;
+        let totalBought = 0;
+        
+        if (userAssetBalancesDoc && userAssetBalancesDoc.history) {
+          const assetHistory = userAssetBalancesDoc.history.filter(h => h.asset === asset && (h.type === 'buy' || h.type === 'deposit'));
+          for (const h of assetHistory) {
+            totalSpent += h.usdValue;
+            totalBought += h.amount;
+          }
+          avgPrice = totalBought > 0 ? totalSpent / totalBought : 0;
+        }
+        
+        const unrealizedPnL = currentValue - totalSpent;
+        const unrealizedPnLPercent = totalSpent > 0 ? (unrealizedPnL / totalSpent) * 100 : 0;
+        
+        assetData.push({
+          symbol: asset,
+          balance: balance,
+          currentValue: currentValue,
+          currentPrice: currentPrice,
+          avgPrice: avgPrice,
+          unrealizedPnl: unrealizedPnL,
+          unrealizedPnlPercent: unrealizedPnLPercent,
+          change24h: 0 // Would be fetched from price API
+        });
+      }
+    }
+    
+    // Prepare preferences data
+    const preferencesData = {
+      displayAsset: preferences ? preferences.displayAsset : 'btc',
+      fiatCurrency: preferences ? preferences.fiatCurrency : 'USD',
+      theme: preferences ? preferences.theme : 'dark',
+      language: preferences ? preferences.language : 'en'
+    };
+    
+    // Get the socket to send to
+    const socketId = userSockets.get(userId.toString());
+    const targetSocket = socket || (socketId ? io.sockets.sockets.get(socketId) : null);
+    
+    if (targetSocket) {
+      // Send balance update
+      targetSocket.emit('balance_update', balanceData);
+      
+      // Send asset balances update
+      targetSocket.emit('asset_balances_update', assetData);
+      
+      // Send preferences update
+      targetSocket.emit('preferences_update', preferencesData);
+      
+      // Send PnL update
+      targetSocket.emit('pnl_update', pnl);
+      
+      console.log(`📡 Broadcasted real-time data to user ${userId}`);
+    }
+  } catch (error) {
+    console.error(`Error broadcasting to user ${userId}:`, error);
+  }
+};
+
+// Function to broadcast to all connected users
+const broadcastToAllUsers = async () => {
+  for (const [userId, socketId] of userSockets) {
+    await broadcastUserData(userId);
+  }
+};
+
+// Function to get user's IP-based defaults (for new users with no preferences)
+const getUserDefaultsFromIP = async (ip) => {
+  const countryCode = await getCountryFromIP(ip);
+  const defaultFiat = countryToFiat[countryCode] || 'USD';
+  const defaultLanguage = countryToLanguage[countryCode] || 'en';
+  
+  return { defaultFiat, defaultLanguage, countryCode };
+};
+
+// Socket.IO connection handler
 io.on('connection', async (socket) => {
   console.log('New client connected:', socket.id);
   
-  // Send current stats immediately to new client
-  const currentStats = await getCurrentStats();
-  socket.emit('stats-update', currentStats);
-  console.log(`📡 Sent initial stats to new client ${socket.id}: ${currentStats.totalInvestors.toLocaleString()} investors`);
-
-  // Verify admin token for admin connections
+  // Authenticate user via token
   socket.on('authenticate', async (token) => {
     try {
       const decoded = verifyJWT(token);
-      if (!decoded.isAdmin) {
+      if (!decoded || decoded.isAdmin) {
+        socket.emit('auth_error', { message: 'Invalid token or admin access not allowed' });
         socket.disconnect();
         return;
       }
-
-      const admin = await Admin.findById(decoded.id);
-      if (!admin) {
+      
+      const user = await User.findById(decoded.id);
+      if (!user) {
+        socket.emit('auth_error', { message: 'User not found' });
         socket.disconnect();
         return;
       }
-
-      socket.adminId = admin._id;
-      console.log(`Admin ${admin.email} connected`);
-    } catch (err) {
+      
+      // Store user connection
+      const userId = user._id.toString();
+      socket.userId = userId;
+      
+      // Remove any existing socket for this user
+      if (userSockets.has(userId)) {
+        const oldSocketId = userSockets.get(userId);
+        const oldSocket = io.sockets.sockets.get(oldSocketId);
+        if (oldSocket && oldSocket.id !== socket.id) {
+          oldSocket.disconnect();
+        }
+      }
+      
+      userSockets.set(userId, socket.id);
+      socketUserMap.set(socket.id, userId);
+      
+      // Check if user has preferences, if not, create from IP
+      let preferences = await UserPreference.findOne({ user: userId });
+      const clientIp = socket.handshake.address || socket.request.connection.remoteAddress;
+      
+      if (!preferences) {
+        // New user - set defaults based on IP
+        const { defaultFiat, defaultLanguage, countryCode } = await getUserDefaultsFromIP(clientIp);
+        
+        preferences = await UserPreference.create({
+          user: userId,
+          displayAsset: 'btc',
+          theme: 'dark',
+          notifications: { email: true, push: true, sms: false },
+          language: defaultLanguage,
+          fiatCurrency: defaultFiat
+        });
+        
+        console.log(`Created default preferences for new user ${userId}: fiat=${defaultFiat}, language=${defaultLanguage}, country=${countryCode}`);
+      }
+      
+      // Send initial data to the user
+      await broadcastUserData(userId, socket);
+      
+      // Send confirmation
+      socket.emit('authenticated', { success: true, userId: userId });
+      
+      console.log(`User ${userId} authenticated via socket`);
+      
+    } catch (error) {
+      console.error('Socket authentication error:', error);
+      socket.emit('auth_error', { message: 'Authentication failed' });
       socket.disconnect();
     }
   });
-
+  
+  // Handle manual refresh request from client
+  socket.on('refresh_data', async () => {
+    if (socket.userId) {
+      await broadcastUserData(socket.userId, socket);
+    }
+  });
+  
+  // Handle PnL refresh request
+  socket.on('refresh_pnl', async () => {
+    if (socket.userId) {
+      const user = await User.findById(socket.userId).select('balances');
+      const userAssetBalancesDoc = await UserAssetBalance.findOne({ user: socket.userId });
+      const cryptoPrices = {};
+      
+      if (userAssetBalancesDoc) {
+        for (const [asset, balance] of Object.entries(userAssetBalancesDoc.balances)) {
+          if (balance > 0) {
+            const price = await getCryptoPrice(asset.toUpperCase());
+            if (price) cryptoPrices[asset] = price;
+          }
+        }
+      }
+      
+      const pnl = await calculatePnL(socket.userId, userAssetBalancesDoc, cryptoPrices, null);
+      socket.emit('pnl_update', pnl);
+    }
+  });
+  
+  // Handle disconnect
   socket.on('disconnect', () => {
+    const userId = socketUserMap.get(socket.id);
+    if (userId) {
+      userSockets.delete(userId);
+      socketUserMap.delete(socket.id);
+      console.log(`User ${userId} disconnected`);
+    }
     console.log('Client disconnected:', socket.id);
   });
 });
+
+// Function to automatically broadcast updates periodically (every 30 seconds)
+setInterval(async () => {
+  if (userSockets.size > 0) {
+    console.log(`🔄 Broadcasting periodic updates to ${userSockets.size} users...`);
+    await broadcastToAllUsers();
+  }
+}, 30000);
 
 // Function to automatically complete matured investments
 const processMaturedInvestments = async () => {
@@ -22162,6 +22804,9 @@ const processMaturedInvestments = async () => {
           fee: 0,
           netAmount: totalReturn - investment.amount
         });
+        
+        // Broadcast updated data to the user
+        await broadcastUserData(investment.user._id);
 
         console.log(`Automatically completed investment ${investment._id} for user ${user.email}`);
       } catch (err) {
@@ -22186,50 +22831,22 @@ startInvestorGrowthJob();
 const gracefulShutdown = () => {
   console.log('Received shutdown signal. Cleaning up...');
   stopInvestorGrowthJob();
+  
+  // Close all socket connections
+  io.close(() => {
+    console.log('Socket.IO server closed');
+  });
+  
   process.exit(0);
 };
 
 process.on('SIGTERM', gracefulShutdown);
 process.on('SIGINT', gracefulShutdown);
 
-// ADD THE MISSING FIAT CURRENCIES ENDPOINT (FIX 404 ERROR)
-app.get('/api/fiat-currencies', async (req, res) => {
-  try {
-    // Fetch from external API or serve from database
-    // For now, returning a comprehensive list with exchange rates
-    const currencies = [
-      { code: 'USD', name: 'US Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/us.png', exchangeRate: 1 },
-      { code: 'EUR', name: 'Euro', symbol: '€', flag: 'https://flagcdn.com/w40/eu.png', exchangeRate: 0.92 },
-      { code: 'GBP', name: 'British Pound', symbol: '£', flag: 'https://flagcdn.com/w40/gb.png', exchangeRate: 0.79 },
-      { code: 'JPY', name: 'Japanese Yen', symbol: '¥', flag: 'https://flagcdn.com/w40/jp.png', exchangeRate: 150.5 },
-      { code: 'CAD', name: 'Canadian Dollar', symbol: 'C$', flag: 'https://flagcdn.com/w40/ca.png', exchangeRate: 1.36 },
-      { code: 'AUD', name: 'Australian Dollar', symbol: 'A$', flag: 'https://flagcdn.com/w40/au.png', exchangeRate: 1.52 },
-      { code: 'CHF', name: 'Swiss Franc', symbol: 'CHF', flag: 'https://flagcdn.com/w40/ch.png', exchangeRate: 0.88 },
-      { code: 'CNY', name: 'Chinese Yuan', symbol: '¥', flag: 'https://flagcdn.com/w40/cn.png', exchangeRate: 7.25 },
-      { code: 'INR', name: 'Indian Rupee', symbol: '₹', flag: 'https://flagcdn.com/w40/in.png', exchangeRate: 83.5 },
-      { code: 'KES', name: 'Kenyan Shilling', symbol: 'KSh', flag: 'https://flagcdn.com/w40/ke.png', exchangeRate: 130.0 },
-      { code: 'NGN', name: 'Nigerian Naira', symbol: '₦', flag: 'https://flagcdn.com/w40/ng.png', exchangeRate: 1500.0 },
-      { code: 'ZAR', name: 'South African Rand', symbol: 'R', flag: 'https://flagcdn.com/w40/za.png', exchangeRate: 18.5 },
-      { code: 'BRL', name: 'Brazilian Real', symbol: 'R$', flag: 'https://flagcdn.com/w40/br.png', exchangeRate: 5.1 },
-      { code: 'MXN', name: 'Mexican Peso', symbol: '$', flag: 'https://flagcdn.com/w40/mx.png', exchangeRate: 17.2 },
-      { code: 'SGD', name: 'Singapore Dollar', symbol: 'S$', flag: 'https://flagcdn.com/w40/sg.png', exchangeRate: 1.34 },
-      { code: 'NZD', name: 'New Zealand Dollar', symbol: 'NZ$', flag: 'https://flagcdn.com/w40/nz.png', exchangeRate: 1.63 },
-      { code: 'HKD', name: 'Hong Kong Dollar', symbol: 'HK$', flag: 'https://flagcdn.com/w40/hk.png', exchangeRate: 7.82 },
-      { code: 'SEK', name: 'Swedish Krona', symbol: 'kr', flag: 'https://flagcdn.com/w40/se.png', exchangeRate: 10.45 },
-      { code: 'KRW', name: 'South Korean Won', symbol: '₩', flag: 'https://flagcdn.com/w40/kr.png', exchangeRate: 1330.0 },
-      { code: 'RUB', name: 'Russian Ruble', symbol: '₽', flag: 'https://flagcdn.com/w40/ru.png', exchangeRate: 92.0 }
-    ];
-    res.json({ currencies });
-  } catch (error) {
-    console.error('Error fetching fiat currencies:', error);
-    res.status(500).json({ error: 'Failed to fetch fiat currencies' });
-  }
-});
-
 // Start server
 httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`📊 Real-time stats initialized with Redis as single source of truth`);
   console.log(`📈 Investors will grow from ${INITIAL_INVESTOR_COUNT.toLocaleString()} with max ${DAILY_GROWTH_LIMIT}/day`);
+  console.log(`🔌 Socket.IO ready for real-time balance, asset, and preference broadcasting`);
 });
-
