@@ -3917,7 +3917,6 @@ const calculateReferralCommissions = async (investment) => {
 
 
 
-
 // Enhanced email service with professional, highly visible templates - Edge to Edge Layout
 const sendAutomatedEmail = async (user, action, data = {}) => {
   try {
@@ -21567,6 +21566,20 @@ fetchMarketData();
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // Request deposit (create deposit record)
 app.post('/api/deposits/request', protect, async (req, res) => {
   try {
@@ -21704,19 +21717,6 @@ app.post('/api/deposits/request', protect, async (req, res) => {
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Global error handler:', err);
@@ -21732,82 +21732,6 @@ app.use((req, res) => {
     status: 'fail',
     message: `Can't find ${req.originalUrl} on this server`
   });
-});
-
-// =============================================
-// FIAT CURRENCIES ENDPOINT - ADDED FOR HTML FIX
-// =============================================
-app.get('/api/fiat-currencies', async (req, res) => {
-  try {
-    // List of supported fiat currencies with exchange rates (USD base)
-    const currencies = [
-      { code: 'USD', name: 'US Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/us.png', exchangeRate: 1 },
-      { code: 'EUR', name: 'Euro', symbol: '€', flag: 'https://flagcdn.com/w40/eu.png', exchangeRate: 0.92 },
-      { code: 'GBP', name: 'British Pound', symbol: '£', flag: 'https://flagcdn.com/w40/gb.png', exchangeRate: 0.79 },
-      { code: 'JPY', name: 'Japanese Yen', symbol: '¥', flag: 'https://flagcdn.com/w40/jp.png', exchangeRate: 150.5 },
-      { code: 'CAD', name: 'Canadian Dollar', symbol: 'C$', flag: 'https://flagcdn.com/w40/ca.png', exchangeRate: 1.36 },
-      { code: 'AUD', name: 'Australian Dollar', symbol: 'A$', flag: 'https://flagcdn.com/w40/au.png', exchangeRate: 1.52 },
-      { code: 'CHF', name: 'Swiss Franc', symbol: 'Fr', flag: 'https://flagcdn.com/w40/ch.png', exchangeRate: 0.89 },
-      { code: 'CNY', name: 'Chinese Yuan', symbol: '¥', flag: 'https://flagcdn.com/w40/cn.png', exchangeRate: 7.25 },
-      { code: 'INR', name: 'Indian Rupee', symbol: '₹', flag: 'https://flagcdn.com/w40/in.png', exchangeRate: 83.5 },
-      { code: 'BRL', name: 'Brazilian Real', symbol: 'R$', flag: 'https://flagcdn.com/w40/br.png', exchangeRate: 5.12 },
-      { code: 'ZAR', name: 'South African Rand', symbol: 'R', flag: 'https://flagcdn.com/w40/za.png', exchangeRate: 18.8 },
-      { code: 'NGN', name: 'Nigerian Naira', symbol: '₦', flag: 'https://flagcdn.com/w40/ng.png', exchangeRate: 1480 },
-      { code: 'KES', name: 'Kenyan Shilling', symbol: 'KSh', flag: 'https://flagcdn.com/w40/ke.png', exchangeRate: 130 },
-      { code: 'GHS', name: 'Ghanaian Cedi', symbol: '₵', flag: 'https://flagcdn.com/w40/gh.png', exchangeRate: 12.5 },
-      { code: 'EGP', name: 'Egyptian Pound', symbol: 'E£', flag: 'https://flagcdn.com/w40/eg.png', exchangeRate: 48.5 },
-      { code: 'MAD', name: 'Moroccan Dirham', symbol: 'DH', flag: 'https://flagcdn.com/w40/ma.png', exchangeRate: 10.0 },
-      { code: 'TZS', name: 'Tanzanian Shilling', symbol: 'TSh', flag: 'https://flagcdn.com/w40/tz.png', exchangeRate: 2600 },
-      { code: 'UGX', name: 'Ugandan Shilling', symbol: 'USh', flag: 'https://flagcdn.com/w40/ug.png', exchangeRate: 3800 },
-      { code: 'RWF', name: 'Rwandan Franc', symbol: 'FRw', flag: 'https://flagcdn.com/w40/rw.png', exchangeRate: 1300 },
-      { code: 'ZMW', name: 'Zambian Kwacha', symbol: 'ZK', flag: 'https://flagcdn.com/w40/zm.png', exchangeRate: 27.0 },
-      { code: 'BWP', name: 'Botswana Pula', symbol: 'P', flag: 'https://flagcdn.com/w40/bw.png', exchangeRate: 13.8 },
-      { code: 'MUR', name: 'Mauritian Rupee', symbol: '₨', flag: 'https://flagcdn.com/w40/mu.png', exchangeRate: 46.5 },
-      { code: 'ETB', name: 'Ethiopian Birr', symbol: 'Br', flag: 'https://flagcdn.com/w40/et.png', exchangeRate: 57.0 },
-      { code: 'SDG', name: 'Sudanese Pound', symbol: '£', flag: 'https://flagcdn.com/w40/sd.png', exchangeRate: 600 },
-      { code: 'LYD', name: 'Libyan Dinar', symbol: 'LD', flag: 'https://flagcdn.com/w40/ly.png', exchangeRate: 4.85 },
-      { code: 'TND', name: 'Tunisian Dinar', symbol: 'DT', flag: 'https://flagcdn.com/w40/tn.png', exchangeRate: 3.12 },
-      { code: 'DZD', name: 'Algerian Dinar', symbol: 'DA', flag: 'https://flagcdn.com/w40/dz.png', exchangeRate: 134 },
-      { code: 'AOA', name: 'Angolan Kwanza', symbol: 'Kz', flag: 'https://flagcdn.com/w40/ao.png', exchangeRate: 850 },
-      { code: 'CDF', name: 'Congolese Franc', symbol: 'FC', flag: 'https://flagcdn.com/w40/cd.png', exchangeRate: 2800 },
-      { code: 'SSP', name: 'South Sudanese Pound', symbol: '£', flag: 'https://flagcdn.com/w40/ss.png', exchangeRate: 1300 }
-    ];
-    
-    // Try to fetch live exchange rates from an API for better accuracy
-    try {
-      const response = await axios.get('https://api.exchangerate-api.com/v4/latest/USD', { timeout: 5000 });
-      if (response.data && response.data.rates) {
-        const liveRates = response.data.rates;
-        // Update exchange rates for currencies we have
-        currencies.forEach(currency => {
-          const code = currency.code;
-          if (liveRates[code]) {
-            currency.exchangeRate = liveRates[code];
-          }
-        });
-        console.log('Fetched live exchange rates for fiat currencies');
-      }
-    } catch (rateError) {
-      console.warn('Could not fetch live exchange rates, using fallback rates:', rateError.message);
-    }
-    
-    res.status(200).json({
-      status: 'success',
-      currencies: currencies
-    });
-  } catch (error) {
-    console.error('Error fetching fiat currencies:', error);
-    // Return fallback data if something goes wrong
-    res.status(200).json({
-      status: 'success',
-      currencies: [
-        { code: 'USD', name: 'US Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/us.png', exchangeRate: 1 },
-        { code: 'EUR', name: 'Euro', symbol: '€', flag: 'https://flagcdn.com/w40/eu.png', exchangeRate: 0.92 },
-        { code: 'GBP', name: 'British Pound', symbol: '£', flag: 'https://flagcdn.com/w40/gb.png', exchangeRate: 0.79 },
-        { code: 'KES', name: 'Kenyan Shilling', symbol: 'KSh', flag: 'https://flagcdn.com/w40/ke.png', exchangeRate: 130 }
-      ]
-    });
-  }
 });
 
 // Create HTTP server and Socket.IO
@@ -22268,13 +22192,44 @@ const gracefulShutdown = () => {
 process.on('SIGTERM', gracefulShutdown);
 process.on('SIGINT', gracefulShutdown);
 
+// ADD THE MISSING FIAT CURRENCIES ENDPOINT (FIX 404 ERROR)
+app.get('/api/fiat-currencies', async (req, res) => {
+  try {
+    // Fetch from external API or serve from database
+    // For now, returning a comprehensive list with exchange rates
+    const currencies = [
+      { code: 'USD', name: 'US Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/us.png', exchangeRate: 1 },
+      { code: 'EUR', name: 'Euro', symbol: '€', flag: 'https://flagcdn.com/w40/eu.png', exchangeRate: 0.92 },
+      { code: 'GBP', name: 'British Pound', symbol: '£', flag: 'https://flagcdn.com/w40/gb.png', exchangeRate: 0.79 },
+      { code: 'JPY', name: 'Japanese Yen', symbol: '¥', flag: 'https://flagcdn.com/w40/jp.png', exchangeRate: 150.5 },
+      { code: 'CAD', name: 'Canadian Dollar', symbol: 'C$', flag: 'https://flagcdn.com/w40/ca.png', exchangeRate: 1.36 },
+      { code: 'AUD', name: 'Australian Dollar', symbol: 'A$', flag: 'https://flagcdn.com/w40/au.png', exchangeRate: 1.52 },
+      { code: 'CHF', name: 'Swiss Franc', symbol: 'CHF', flag: 'https://flagcdn.com/w40/ch.png', exchangeRate: 0.88 },
+      { code: 'CNY', name: 'Chinese Yuan', symbol: '¥', flag: 'https://flagcdn.com/w40/cn.png', exchangeRate: 7.25 },
+      { code: 'INR', name: 'Indian Rupee', symbol: '₹', flag: 'https://flagcdn.com/w40/in.png', exchangeRate: 83.5 },
+      { code: 'KES', name: 'Kenyan Shilling', symbol: 'KSh', flag: 'https://flagcdn.com/w40/ke.png', exchangeRate: 130.0 },
+      { code: 'NGN', name: 'Nigerian Naira', symbol: '₦', flag: 'https://flagcdn.com/w40/ng.png', exchangeRate: 1500.0 },
+      { code: 'ZAR', name: 'South African Rand', symbol: 'R', flag: 'https://flagcdn.com/w40/za.png', exchangeRate: 18.5 },
+      { code: 'BRL', name: 'Brazilian Real', symbol: 'R$', flag: 'https://flagcdn.com/w40/br.png', exchangeRate: 5.1 },
+      { code: 'MXN', name: 'Mexican Peso', symbol: '$', flag: 'https://flagcdn.com/w40/mx.png', exchangeRate: 17.2 },
+      { code: 'SGD', name: 'Singapore Dollar', symbol: 'S$', flag: 'https://flagcdn.com/w40/sg.png', exchangeRate: 1.34 },
+      { code: 'NZD', name: 'New Zealand Dollar', symbol: 'NZ$', flag: 'https://flagcdn.com/w40/nz.png', exchangeRate: 1.63 },
+      { code: 'HKD', name: 'Hong Kong Dollar', symbol: 'HK$', flag: 'https://flagcdn.com/w40/hk.png', exchangeRate: 7.82 },
+      { code: 'SEK', name: 'Swedish Krona', symbol: 'kr', flag: 'https://flagcdn.com/w40/se.png', exchangeRate: 10.45 },
+      { code: 'KRW', name: 'South Korean Won', symbol: '₩', flag: 'https://flagcdn.com/w40/kr.png', exchangeRate: 1330.0 },
+      { code: 'RUB', name: 'Russian Ruble', symbol: '₽', flag: 'https://flagcdn.com/w40/ru.png', exchangeRate: 92.0 }
+    ];
+    res.json({ currencies });
+  } catch (error) {
+    console.error('Error fetching fiat currencies:', error);
+    res.status(500).json({ error: 'Failed to fetch fiat currencies' });
+  }
+});
+
 // Start server
 httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`📊 Real-time stats initialized with Redis as single source of truth`);
   console.log(`📈 Investors will grow from ${INITIAL_INVESTOR_COUNT.toLocaleString()} with max ${DAILY_GROWTH_LIMIT}/day`);
 });
-
-
-
 
