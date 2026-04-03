@@ -22087,6 +22087,31 @@ function getNetworkName(asset) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Global error handler:', err);
@@ -22109,9 +22134,10 @@ const PORT = process.env.PORT || 3000;
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: ['https://bithhash.vercel.app', 'https://website-backendd-1.onrender.com', 'https://bithash-backend.onrender.com'],
+    origin: ['https://bithhash.vercel.app', 'https://website-backendd-1.onrender.com', 'https://bithash-backend.onrender.com', 'http://localhost:3000', 'http://localhost:5500'],
     methods: ['GET', 'POST']
-  }
+  },
+  transports: ['websocket', 'polling']
 });
 
 // =============================================
@@ -22408,15 +22434,15 @@ const countryToFiat = {
 const countryToLanguage = {
   'US': 'en', 'GB': 'en', 'CA': 'en', 'AU': 'en', 'NZ': 'en',
   'ES': 'es', 'MX': 'es', 'AR': 'es', 'CL': 'es', 'CO': 'es', 'PE': 'es', 'VE': 'es',
-  'FR': 'fr', 'CA': 'fr', 'BE': 'fr', 'CH': 'fr',
-  'DE': 'de', 'AT': 'de', 'CH': 'de',
-  'IT': 'it', 'CH': 'it',
+  'FR': 'fr', 'BE': 'fr', 'CH': 'fr',
+  'DE': 'de', 'AT': 'de',
+  'IT': 'it',
   'PT': 'pt', 'BR': 'pt',
   'RU': 'ru', 'UA': 'uk',
   'CN': 'zh', 'TW': 'zh',
   'JP': 'ja',
   'KR': 'ko',
-  'IN': 'hi', 'IN': 'en',
+  'IN': 'hi',
   'SA': 'ar', 'AE': 'ar', 'EG': 'ar', 'IQ': 'ar', 'JO': 'ar', 'KW': 'ar', 'LB': 'ar', 'MA': 'ar', 'OM': 'ar', 'QA': 'ar', 'SA': 'ar', 'TN': 'ar', 'DZ': 'ar',
   'TR': 'tr',
   'PL': 'pl',
@@ -22447,8 +22473,39 @@ const countryToLanguage = {
 const userSockets = new Map(); // userId -> socketId
 const socketUserMap = new Map(); // socketId -> userId
 
+// Store previous day's balances for PnL calculation
+const previousDayBalances = new Map(); // userId -> { main: number, matured: number, date: string }
+
+// Function to get current crypto prices for multiple assets
+const getCurrentCryptoPrices = async () => {
+  try {
+    const response = await axios.get('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,tether,binancecoin,solana,usd-coin,xrp,dogecoin,cardano,shiba-inu,avalanche-2,polkadot,tron,chainlink,polygon,wrapped-bitcoin,litecoin,near,uniswap,bitcoin-cash&vs_currencies=usd', {
+      timeout: 8000
+    });
+    const prices = {};
+    if (response.data) {
+      const mapping = {
+        'bitcoin': 'btc', 'ethereum': 'eth', 'tether': 'usdt', 'binancecoin': 'bnb',
+        'solana': 'sol', 'usd-coin': 'usdc', 'xrp': 'xrp', 'dogecoin': 'doge',
+        'cardano': 'ada', 'shiba-inu': 'shib', 'avalanche-2': 'avax', 'polkadot': 'dot',
+        'tron': 'trx', 'chainlink': 'link', 'polygon': 'matic', 'wrapped-bitcoin': 'wbtc',
+        'litecoin': 'ltc', 'near': 'near', 'uniswap': 'uni', 'bitcoin-cash': 'bch'
+      };
+      for (const [key, value] of Object.entries(response.data)) {
+        if (mapping[key] && value.usd) {
+          prices[mapping[key]] = value.usd;
+        }
+      }
+    }
+    return prices;
+  } catch (error) {
+    console.warn('Error fetching crypto prices:', error.message);
+    return { btc: 43000, eth: 2200, usdt: 1, bnb: 300, sol: 100, usdc: 1, xrp: 0.5, doge: 0.08, ada: 0.3, shib: 0.00001 };
+  }
+};
+
 // Function to calculate total fiat value of user's crypto holdings
-const calculateTotalFiatValue = async (userId, assetBalances, cryptoPrices) => {
+const calculateTotalFiatValue = (assetBalances, cryptoPrices) => {
   let totalValue = 0;
   for (const [asset, balance] of Object.entries(assetBalances)) {
     if (balance > 0 && cryptoPrices[asset]) {
@@ -22458,99 +22515,42 @@ const calculateTotalFiatValue = async (userId, assetBalances, cryptoPrices) => {
   return totalValue;
 };
 
-// Function to calculate today's PnL for main and matured wallets
-// PnL is based on the fluctuation of crypto holdings in those wallets
-const calculatePnL = async (userId, userAssetBalancesDoc, cryptoPrices, previousValues) => {
-  let mainPnL = { amount: 0, percentage: 0 };
-  let maturedPnL = { amount: 0, percentage: 0 };
-  
-  // For main wallet: sum of all crypto holdings * current price - previous day's value
-  // For matured wallet: sum of all crypto holdings * current price - previous day's value
-  
-  // Get previous day's values from database or cache
-  const todayStart = new Date();
-  todayStart.setUTCHours(0, 0, 0, 0);
-  
-  // This would be fetched from a daily snapshot collection in production
-  // For now, we'll calculate based on available data
-  
-  // Calculate current total values
-  let currentMainValue = 0;
-  let currentMaturedValue = 0;
-  
-  // This would be tracked per wallet type in the asset balance history
-  // For simplicity, we'll use the balances from user.balances which represent fiat values
-  const user = await User.findById(userId).select('balances');
-  if (user) {
-    // For PnL, we need to know which assets are in main vs matured
-    // The fiat values in balances.main and balances.matured already fluctuate based on crypto holdings
-    // So we can track changes to those values
-    currentMainValue = user.balances.main;
-    currentMaturedValue = user.balances.matured;
-  }
-  
-  // Get previous day's snapshot (would be stored in Redis or DB)
-  const prevMainKey = `pnl:main:${userId}:${todayStart.toISOString().split('T')[0]}`;
-  const prevMaturedKey = `pnl:matured:${userId}:${todayStart.toISOString().split('T')[0]}`;
-  
-  let prevMainValue = await redis.get(prevMainKey);
-  let prevMaturedValue = await redis.get(prevMaturedKey);
-  
-  if (!prevMainValue) {
-    // First time today, store current values
-    await redis.set(prevMainKey, currentMainValue);
-    await redis.set(prevMaturedKey, currentMaturedValue);
-    prevMainValue = currentMainValue;
-    prevMaturedValue = currentMaturedValue;
-  } else {
-    prevMainValue = parseFloat(prevMainValue);
-    prevMaturedValue = parseFloat(prevMaturedValue);
-  }
-  
-  const mainChange = currentMainValue - prevMainValue;
-  const maturedChange = currentMaturedValue - prevMaturedValue;
-  
-  mainPnL.amount = mainChange;
-  mainPnL.percentage = prevMainValue > 0 ? (mainChange / prevMainValue) * 100 : 0;
-  
-  maturedPnL.amount = maturedChange;
-  maturedPnL.percentage = prevMaturedValue > 0 ? (maturedChange / prevMaturedValue) * 100 : 0;
-  
-  return { main: mainPnL, matured: maturedPnL };
-};
-
-// Function to broadcast user data to specific user
-const broadcastUserData = async (userId, socket = null) => {
+// Function to get user's complete data for broadcasting
+const getUserCompleteData = async (userId) => {
   try {
-    // Get user's fiat balance (main, active, matured)
+    // Get user's fiat balances (main, active, matured)
     const user = await User.findById(userId).select('balances');
-    if (!user) return;
+    if (!user) return null;
     
     // Get user's asset balances (crypto holdings)
     const userAssetBalancesDoc = await UserAssetBalance.findOne({ user: userId });
     const assetBalances = userAssetBalancesDoc ? userAssetBalancesDoc.balances : {};
     
     // Get current crypto prices
-    const cryptoPrices = {};
-    for (const [asset, balance] of Object.entries(assetBalances)) {
-      if (balance > 0) {
-        const price = await getCryptoPrice(asset.toUpperCase());
-        if (price) cryptoPrices[asset] = price;
-      }
-    }
+    const cryptoPrices = await getCurrentCryptoPrices();
     
     // Get user preferences
-    const preferences = await UserPreference.findOne({ user: userId });
+    let preferences = await UserPreference.findOne({ user: userId });
     
-    // Calculate today's PnL
-    const pnl = await calculatePnL(userId, userAssetBalancesDoc, cryptoPrices, null);
-    
-    // Prepare balance update data
-    const balanceData = {
-      main: user.balances.main,
-      active: user.balances.active,
-      matured: user.balances.matured
-    };
+    // If no preferences exist, create them with IP-based defaults
+    if (!preferences) {
+      // Get client IP from the socket handshake (will be set during authentication)
+      const clientIp = userLastIp.get(userId) || '0.0.0.0';
+      const countryCode = await getCountryFromIP(clientIp);
+      const defaultFiat = countryToFiat[countryCode] || 'USD';
+      const defaultLanguage = countryToLanguage[countryCode] || 'en';
+      
+      preferences = await UserPreference.create({
+        user: userId,
+        displayAsset: 'btc',
+        theme: 'dark',
+        notifications: { email: true, push: true, sms: false },
+        language: defaultLanguage,
+        fiatCurrency: defaultFiat
+      });
+      
+      console.log(`Created default preferences for user ${userId}: fiat=${defaultFiat}, language=${defaultLanguage}`);
+    }
     
     // Prepare asset balances data (only assets with non-zero balance)
     const assetData = [];
@@ -22584,18 +22584,77 @@ const broadcastUserData = async (userId, socket = null) => {
           avgPrice: avgPrice,
           unrealizedPnl: unrealizedPnL,
           unrealizedPnlPercent: unrealizedPnLPercent,
-          change24h: 0 // Would be fetched from price API
+          change24h: 0
         });
       }
     }
     
-    // Prepare preferences data
-    const preferencesData = {
-      displayAsset: preferences ? preferences.displayAsset : 'btc',
-      fiatCurrency: preferences ? preferences.fiatCurrency : 'USD',
-      theme: preferences ? preferences.theme : 'dark',
-      language: preferences ? preferences.language : 'en'
+    // Calculate today's PnL for main and matured wallets
+    const today = new Date().toISOString().split('T')[0];
+    let prevMainBalance = user.balances.main;
+    let prevMaturedBalance = user.balances.matured;
+    
+    // Check if we have previous day's balance stored
+    const prevKey = `${userId}:${today}`;
+    const storedPrev = previousDayBalances.get(userId);
+    
+    if (!storedPrev || storedPrev.date !== today) {
+      // Store current balances as reference for next time
+      previousDayBalances.set(userId, {
+        main: user.balances.main,
+        matured: user.balances.matured,
+        date: today
+      });
+      prevMainBalance = user.balances.main;
+      prevMaturedBalance = user.balances.matured;
+    } else {
+      prevMainBalance = storedPrev.main;
+      prevMaturedBalance = storedPrev.matured;
+    }
+    
+    const mainChange = user.balances.main - prevMainBalance;
+    const maturedChange = user.balances.matured - prevMaturedBalance;
+    
+    const pnlData = {
+      main: {
+        amount: mainChange,
+        percentage: prevMainBalance > 0 ? (mainChange / prevMainBalance) * 100 : 0
+      },
+      matured: {
+        amount: maturedChange,
+        percentage: prevMaturedBalance > 0 ? (maturedChange / prevMaturedBalance) * 100 : 0
+      }
     };
+    
+    return {
+      balances: {
+        main: user.balances.main,
+        active: user.balances.active,
+        matured: user.balances.matured
+      },
+      assetBalances: assetData,
+      preferences: {
+        displayAsset: preferences.displayAsset,
+        fiatCurrency: preferences.fiatCurrency,
+        theme: preferences.theme,
+        language: preferences.language
+      },
+      pnl: pnlData
+    };
+  } catch (error) {
+    console.error(`Error getting user data for ${userId}:`, error);
+    return null;
+  }
+};
+
+// Store user IP addresses for preference creation
+const userLastIp = new Map();
+
+// Function to broadcast user data to specific user
+const broadcastUserData = async (userId, socket = null) => {
+  try {
+    const userData = await getUserCompleteData(userId);
+    if (!userData) return;
     
     // Get the socket to send to
     const socketId = userSockets.get(userId.toString());
@@ -22603,18 +22662,20 @@ const broadcastUserData = async (userId, socket = null) => {
     
     if (targetSocket) {
       // Send balance update
-      targetSocket.emit('balance_update', balanceData);
+      targetSocket.emit('balance_update', userData.balances);
       
       // Send asset balances update
-      targetSocket.emit('asset_balances_update', assetData);
+      targetSocket.emit('asset_balances_update', userData.assetBalances);
       
       // Send preferences update
-      targetSocket.emit('preferences_update', preferencesData);
+      targetSocket.emit('preferences_update', userData.preferences);
       
       // Send PnL update
-      targetSocket.emit('pnl_update', pnl);
+      targetSocket.emit('pnl_update', userData.pnl);
       
       console.log(`📡 Broadcasted real-time data to user ${userId}`);
+    } else {
+      console.log(`⚠️ No socket found for user ${userId}`);
     }
   } catch (error) {
     console.error(`Error broadcasting to user ${userId}:`, error);
@@ -22644,23 +22705,30 @@ io.on('connection', async (socket) => {
   // Authenticate user via token
   socket.on('authenticate', async (token) => {
     try {
+      if (!token) {
+        socket.emit('auth_error', { message: 'No token provided' });
+        return;
+      }
+      
       const decoded = verifyJWT(token);
       if (!decoded || decoded.isAdmin) {
         socket.emit('auth_error', { message: 'Invalid token or admin access not allowed' });
-        socket.disconnect();
         return;
       }
       
       const user = await User.findById(decoded.id);
       if (!user) {
         socket.emit('auth_error', { message: 'User not found' });
-        socket.disconnect();
         return;
       }
       
       // Store user connection
       const userId = user._id.toString();
       socket.userId = userId;
+      
+      // Store the client IP for preference creation
+      const clientIp = socket.handshake.address || socket.request.connection.remoteAddress || '0.0.0.0';
+      userLastIp.set(userId, clientIp);
       
       // Remove any existing socket for this user
       if (userSockets.has(userId)) {
@@ -22676,7 +22744,6 @@ io.on('connection', async (socket) => {
       
       // Check if user has preferences, if not, create from IP
       let preferences = await UserPreference.findOne({ user: userId });
-      const clientIp = socket.handshake.address || socket.request.connection.remoteAddress;
       
       if (!preferences) {
         // New user - set defaults based on IP
@@ -22700,18 +22767,18 @@ io.on('connection', async (socket) => {
       // Send confirmation
       socket.emit('authenticated', { success: true, userId: userId });
       
-      console.log(`User ${userId} authenticated via socket`);
+      console.log(`✅ User ${userId} authenticated via socket`);
       
     } catch (error) {
       console.error('Socket authentication error:', error);
-      socket.emit('auth_error', { message: 'Authentication failed' });
-      socket.disconnect();
+      socket.emit('auth_error', { message: 'Authentication failed: ' + error.message });
     }
   });
   
   // Handle manual refresh request from client
   socket.on('refresh_data', async () => {
     if (socket.userId) {
+      console.log(`🔄 Manual refresh requested for user ${socket.userId}`);
       await broadcastUserData(socket.userId, socket);
     }
   });
@@ -22719,21 +22786,10 @@ io.on('connection', async (socket) => {
   // Handle PnL refresh request
   socket.on('refresh_pnl', async () => {
     if (socket.userId) {
-      const user = await User.findById(socket.userId).select('balances');
-      const userAssetBalancesDoc = await UserAssetBalance.findOne({ user: socket.userId });
-      const cryptoPrices = {};
-      
-      if (userAssetBalancesDoc) {
-        for (const [asset, balance] of Object.entries(userAssetBalancesDoc.balances)) {
-          if (balance > 0) {
-            const price = await getCryptoPrice(asset.toUpperCase());
-            if (price) cryptoPrices[asset] = price;
-          }
-        }
+      const userData = await getUserCompleteData(socket.userId);
+      if (userData && userData.pnl) {
+        socket.emit('pnl_update', userData.pnl);
       }
-      
-      const pnl = await calculatePnL(socket.userId, userAssetBalancesDoc, cryptoPrices, null);
-      socket.emit('pnl_update', pnl);
     }
   });
   
@@ -22749,13 +22805,13 @@ io.on('connection', async (socket) => {
   });
 });
 
-// Function to automatically broadcast updates periodically (every 30 seconds)
+// Function to automatically broadcast updates periodically (every 15 seconds for faster updates)
 setInterval(async () => {
   if (userSockets.size > 0) {
     console.log(`🔄 Broadcasting periodic updates to ${userSockets.size} users...`);
     await broadcastToAllUsers();
   }
-}, 30000);
+}, 15000);
 
 // Function to automatically complete matured investments
 const processMaturedInvestments = async () => {
