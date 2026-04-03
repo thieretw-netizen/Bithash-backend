@@ -1178,273 +1178,12 @@ const LoginRecord = mongoose.model('LoginRecord', LoginRecordSchema);
 
 
 // =============================================
-// TRADING MODELS - Add to your existing schemas
+// TRADING MODELS - REMOVED PER USER REQUEST
 // =============================================
+// All trading-related schemas (MarketPair, Order, Trade, Position, OrderBookSnapshot, 
+// Ticker24hr, Candle, AssetInfo, TradingData, AnalysisData, UserTradingSettings, TradingRevenue)
+// have been DELETED as requested.
 
-// Market Data Models
-const MarketPairSchema = new mongoose.Schema({
-  symbol: { type: String, required: true, unique: true, index: true },
-  baseAsset: { type: String, required: true, index: true },
-  quoteAsset: { type: String, required: true, index: true },
-  basePrecision: { type: Number, default: 8 },
-  quotePrecision: { type: Number, default: 2 },
-  minQty: { type: Number, default: 0.0001 },
-  maxQty: { type: Number, default: 1000 },
-  minNotional: { type: Number, default: 10 },
-  status: { type: String, enum: ['active', 'suspended', 'maintenance'], default: 'active' },
-  logo: { type: String },
-  price: { type: Number, default: 0 },
-  priceChange24h: { type: Number, default: 0 },
-  priceChangePercent24h: { type: Number, default: 0 },
-  volume24h: { type: Number, default: 0 },
-  high24h: { type: Number, default: 0 },
-  low24h: { type: Number, default: 0 },
-  lastUpdated: { type: Date, default: Date.now }
-}, { timestamps: true });
-
-MarketPairSchema.index({ baseAsset: 1, quoteAsset: 1 });
-MarketPairSchema.index({ status: 1 });
-
-// Order Schema
-const OrderSchema = new mongoose.Schema({
-  user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-  symbol: { type: String, required: true, index: true },
-  orderId: { type: String, required: true, unique: true },
-  side: { type: String, enum: ['buy', 'sell'], required: true },
-  type: { type: String, enum: ['limit', 'market'], required: true },
-  price: { type: Number, required: function() { return this.type === 'limit'; } },
-  originalQty: { type: Number, required: true, min: 0 },
-  executedQty: { type: Number, default: 0, min: 0 },
-  remainingQty: { type: Number, required: true, min: 0 },
-  quoteOrderQty: { type: Number },
-  status: { type: String, enum: ['new', 'partial', 'filled', 'cancelled', 'expired', 'pending'], default: 'new', index: true },
-  timeInForce: { type: String, enum: ['GTC', 'IOC', 'FOK'], default: 'GTC' },
-  icebergQty: { type: Number },
-  stopPrice: { type: Number },
-  takeProfit: { type: Number },
-  stopLoss: { type: Number },
-  fee: { type: Number, default: 0 },
-  feeAsset: { type: String, default: 'USDT' },
-  total: { type: Number, required: true },
-  avgPrice: { type: Number },
-  createdAt: { type: Date, default: Date.now, index: true },
-  updatedAt: { type: Date, default: Date.now }
-});
-
-OrderSchema.index({ user: 1, status: 1 });
-OrderSchema.index({ symbol: 1, status: 1 });
-OrderSchema.index({ orderId: 1 });
-
-// Trade Schema (executed trades)
-const TradeSchema = new mongoose.Schema({
-  user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-  orderId: { type: String, required: true, index: true },
-  symbol: { type: String, required: true, index: true },
-  tradeId: { type: String, required: true, unique: true },
-  side: { type: String, enum: ['buy', 'sell'], required: true },
-  price: { type: Number, required: true },
-  qty: { type: Number, required: true },
-  quoteQty: { type: Number, required: true },
-  commission: { type: Number, default: 0 },
-  commissionAsset: { type: String, default: 'USDT' },
-  isBuyerMaker: { type: Boolean, default: false },
-  time: { type: Date, default: Date.now, index: true }
-});
-
-TradeSchema.index({ user: 1, symbol: 1, time: -1 });
-TradeSchema.index({ orderId: 1 });
-
-// Position Schema
-const PositionSchema = new mongoose.Schema({
-  user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-  symbol: { type: String, required: true, index: true },
-  side: { type: String, enum: ['long', 'short'], required: true },
-  entryPrice: { type: Number, required: true },
-  quantity: { type: Number, required: true, min: 0 },
-  margin: { type: Number, required: true },
-  leverage: { type: Number, default: 1 },
-  liquidationPrice: { type: Number },
-  takeProfit: { type: Number },
-  stopLoss: { type: Number },
-  unrealizedPnL: { type: Number, default: 0 },
-  realizedPnL: { type: Number, default: 0 },
-  status: { type: String, enum: ['open', 'closed'], default: 'open' },
-  openedAt: { type: Date, default: Date.now },
-  closedAt: { type: Date }
-});
-
-PositionSchema.index({ user: 1, symbol: 1, status: 1 });
-
-// Order Book Snapshot Schema (for persistence)
-const OrderBookSnapshotSchema = new mongoose.Schema({
-  symbol: { type: String, required: true, unique: true },
-  bids: [[Number]],
-  asks: [[Number]],
-  lastUpdateId: { type: Number, required: true },
-  updatedAt: { type: Date, default: Date.now }
-});
-
-OrderBookSnapshotSchema.index({ symbol: 1 });
-OrderBookSnapshotSchema.index({ updatedAt: 1 }, { expireAfterSeconds: 60 });
-
-// 24hr Ticker Schema
-const Ticker24hrSchema = new mongoose.Schema({
-  symbol: { type: String, required: true, unique: true },
-  priceChange: { type: Number, default: 0 },
-  priceChangePercent: { type: Number, default: 0 },
-  weightedAvgPrice: { type: Number, default: 0 },
-  prevClosePrice: { type: Number, default: 0 },
-  lastPrice: { type: Number, default: 0 },
-  lastQty: { type: Number, default: 0 },
-  bidPrice: { type: Number, default: 0 },
-  askPrice: { type: Number, default: 0 },
-  openPrice: { type: Number, default: 0 },
-  highPrice: { type: Number, default: 0 },
-  lowPrice: { type: Number, default: 0 },
-  volume: { type: Number, default: 0 },
-  quoteVolume: { type: Number, default: 0 },
-  openTime: { type: Date, default: Date.now },
-  closeTime: { type: Date, default: Date.now },
-  firstId: { type: Number, default: 0 },
-  lastId: { type: Number, default: 0 },
-  count: { type: Number, default: 0 },
-  updatedAt: { type: Date, default: Date.now }
-});
-
-Ticker24hrSchema.index({ symbol: 1 });
-Ticker24hrSchema.index({ updatedAt: 1 }, { expireAfterSeconds: 30 });
-
-// Candle Schema (OHLCV)
-const CandleSchema = new mongoose.Schema({
-  symbol: { type: String, required: true, index: true },
-  interval: { type: String, required: true, index: true },
-  openTime: { type: Date, required: true, index: true },
-  open: { type: Number, required: true },
-  high: { type: Number, required: true },
-  low: { type: Number, required: true },
-  close: { type: Number, required: true },
-  volume: { type: Number, required: true },
-  quoteVolume: { type: Number, default: 0 },
-  trades: { type: Number, default: 0 },
-  closeTime: { type: Date, required: true }
-});
-
-CandleSchema.index({ symbol: 1, interval: 1, openTime: 1 }, { unique: true });
-
-// Asset Info Schema (for detailed crypto data)
-const AssetInfoSchema = new mongoose.Schema({
-  symbol: { type: String, required: true, unique: true, index: true },
-  name: { type: String, required: true },
-  logo: { type: String },
-  rank: { type: Number, default: 0 },
-  marketCap: { type: Number, default: 0 },
-  fullyDilutedMarketCap: { type: Number, default: 0 },
-  marketDominance: { type: Number, default: 0 },
-  volume24h: { type: Number, default: 0 },
-  circulatingSupply: { type: Number, default: 0 },
-  maxSupply: { type: Number, default: 0 },
-  totalSupply: { type: Number, default: 0 },
-  networks: [{ type: String }],
-  tags: [{ type: String }],
-  description: { type: String },
-  website: { type: String },
-  explorer: { type: String },
-  twitter: { type: String },
-  reddit: { type: String },
-  lastUpdated: { type: Date, default: Date.now }
-});
-
-AssetInfoSchema.index({ symbol: 1 });
-AssetInfoSchema.index({ rank: 1 });
-
-// Trading Data Schema (fund flow, net flow)
-const TradingDataSchema = new mongoose.Schema({
-  symbol: { type: String, required: true, unique: true },
-  fundFlowLong: { type: Number, default: 50 },
-  fundFlowShort: { type: Number, default: 50 },
-  netFlow: [{ type: Number }],
-  inflow24h: { type: Number, default: 0 },
-  outflow24h: { type: Number, default: 0 },
-  netFlow24h: { type: Number, default: 0 },
-  updatedAt: { type: Date, default: Date.now }
-});
-
-TradingDataSchema.index({ symbol: 1 });
-
-// Analysis Data Schema
-const AnalysisDataSchema = new mongoose.Schema({
-  symbol: { type: String, required: true, unique: true },
-  longShortRatio: { type: Number, default: 1.0 },
-  marginData: { type: Number, default: 0 },
-  volatility: { type: Number, default: 0 },
-  sentiment: { type: String, enum: ['bullish', 'bearish', 'neutral'], default: 'neutral' },
-  rsi: { type: Number, default: 50 },
-  macd: { type: Number, default: 0 },
-  movingAverage50: { type: Number, default: 0 },
-  movingAverage200: { type: Number, default: 0 },
-  updatedAt: { type: Date, default: Date.now }
-});
-
-AnalysisDataSchema.index({ symbol: 1 });
-
-// User Settings Schema (for trading preferences)
-const UserTradingSettingsSchema = new mongoose.Schema({
-  user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
-  orderBookSettings: {
-    precision: { type: Number, default: 0.01 },
-    depthSize: { type: Number, default: 20 },
-    showCumulativeTotal: { type: Boolean, default: false },
-    colorMode: { type: String, enum: ['default', 'reverse'], default: 'default' },
-    displaySize: { type: String, enum: ['compact', 'normal'], default: 'compact' }
-  },
-  chartSettings: {
-    interval: { type: String, default: '15m' },
-    theme: { type: String, enum: ['light', 'dark'], default: 'dark' },
-    studies: [{ type: String }]
-  },
-  notifications: {
-    orderFilled: { type: Boolean, default: true },
-    priceAlerts: { type: Boolean, default: false },
-    liquidationWarning: { type: Boolean, default: true }
-  },
-  defaultLeverage: { type: Number, default: 1, min: 1, max: 100 },
-  defaultOrderType: { type: String, enum: ['limit', 'market'], default: 'limit' }
-}, { timestamps: true });
-
-UserTradingSettingsSchema.index({ user: 1 });
-
-// Platform Revenue Schema (for tracking company revenue from trading)
-const TradingRevenueSchema = new mongoose.Schema({
-  source: { type: String, enum: ['maker_fee', 'taker_fee', 'convert_spread', 'instant_buy_spread'], required: true },
-  orderId: { type: String, ref: 'Order' },
-  tradeId: { type: String, ref: 'Trade' },
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-  symbol: { type: String, required: true },
-  amount: { type: Number, required: true },
-  feePercentage: { type: Number, required: true },
-  currency: { type: String, default: 'USDT' },
-  usdValue: { type: Number, required: true },
-  metadata: { type: mongoose.Schema.Types.Mixed },
-  recordedAt: { type: Date, default: Date.now }
-});
-
-TradingRevenueSchema.index({ source: 1 });
-TradingRevenueSchema.index({ recordedAt: -1 });
-TradingRevenueSchema.index({ userId: 1 });
-
-// Create models if they don't exist
-const MarketPair = mongoose.models.MarketPair || mongoose.model('MarketPair', MarketPairSchema);
-const Order = mongoose.models.Order || mongoose.model('Order', OrderSchema);
-const Trade = mongoose.models.Trade || mongoose.model('Trade', TradeSchema);
-const Position = mongoose.models.Position || mongoose.model('Position', PositionSchema);
-const OrderBookSnapshot = mongoose.models.OrderBookSnapshot || mongoose.model('OrderBookSnapshot', OrderBookSnapshotSchema);
-const Ticker24hr = mongoose.models.Ticker24hr || mongoose.model('Ticker24hr', Ticker24hrSchema);
-const Candle = mongoose.models.Candle || mongoose.model('Candle', CandleSchema);
-const AssetInfo = mongoose.models.AssetInfo || mongoose.model('AssetInfo', AssetInfoSchema);
-const TradingData = mongoose.models.TradingData || mongoose.model('TradingData', TradingDataSchema);
-const AnalysisData = mongoose.models.AnalysisData || mongoose.model('AnalysisData', AnalysisDataSchema);
-const UserTradingSettings = mongoose.models.UserTradingSettings || mongoose.model('UserTradingSettings', UserTradingSettingsSchema);
-const TradingRevenue = mongoose.models.TradingRevenue || mongoose.model('TradingRevenue', TradingRevenueSchema);
 
 
 
@@ -1531,7 +1270,7 @@ const Plan = mongoose.model('Plan', PlanSchema);
 
 
 // =============================================
-// User Asset Balances Schema
+// User Asset Balances Schema - UPDATED: Tracks crypto holdings only (no fiat storage)
 // =============================================
 const UserAssetBalanceSchema = new mongoose.Schema({
   user: {
@@ -1579,7 +1318,7 @@ const UserAssetBalanceSchema = new mongoose.Schema({
   },
   history: [{
     asset: { type: String, required: true },
-    type: { type: String, enum: ['deposit', 'withdrawal', 'buy', 'sell', 'interest', 'referral'], required: true },
+    type: { type: String, enum: ['deposit', 'withdrawal', 'buy', 'sell', 'interest', 'referral', 'convert'], required: true },
     amount: { type: Number, required: true },
     balance: { type: Number, required: true },
     usdValue: { type: Number, required: true },
@@ -1587,15 +1326,20 @@ const UserAssetBalanceSchema = new mongoose.Schema({
     profitLoss: { type: Number },
     profitLossPercentage: { type: Number },
     timestamp: { type: Date, default: Date.now },
-    transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' }
+    transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
+    convertedToAsset: { type: String },
+    convertedToAmount: { type: Number }
   }]
 }, { timestamps: true });
 
 UserAssetBalanceSchema.index({ user: 1 });
 UserAssetBalanceSchema.index({ 'history.timestamp': -1 });
 
+
+
+
 // =============================================
-// User Preferences Schema
+// User Preferences Schema - Updated to accept any fiat
 // =============================================
 const UserPreferenceSchema = new mongoose.Schema({
   user: {
@@ -1619,11 +1363,24 @@ const UserPreferenceSchema = new mongoose.Schema({
     sms: { type: Boolean, default: false }
   },
   language: { type: String, default: 'en' },
-  currency: { type: String, enum: ['USD', 'EUR', 'GBP', 'JPY'], default: 'USD' }
+  // Updated: Any fiat currency - no enum restriction
+  fiatCurrency: { type: String, default: 'USD' }
 }, { timestamps: true });
 
 UserPreferenceSchema.index({ user: 1 });
 UserPreferenceSchema.index({ displayAsset: 1 });
+
+
+
+
+
+
+
+
+
+
+
+
 
 // =============================================
 // Deposit Asset Tracking Schema
@@ -1704,12 +1461,33 @@ const SellSchema = new mongoose.Schema({
 SellSchema.index({ user: 1, createdAt: -1 });
 SellSchema.index({ status: 1 });
 
+// =============================================
+// Convert Schema - For tracking crypto-to-crypto conversions
+// =============================================
+const ConvertSchema = new mongoose.Schema({
+  user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+  fromAsset: { type: String, required: true },
+  toAsset: { type: String, required: true },
+  fromAmount: { type: Number, required: true, min: 0 },
+  toAmount: { type: Number, required: true, min: 0 },
+  usdValue: { type: Number, required: true, min: 0 },
+  conversionFee: { type: Number, default: 0 },
+  exchangeRate: { type: Number, required: true },
+  status: { type: String, enum: ['pending', 'completed', 'failed'], default: 'completed' },
+  transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
+  completedAt: { type: Date, default: Date.now }
+}, { timestamps: true });
+
+ConvertSchema.index({ user: 1, createdAt: -1 });
+ConvertSchema.index({ fromAsset: 1, toAsset: 1 });
+
 // Create models
 const UserAssetBalance = mongoose.model('UserAssetBalance', UserAssetBalanceSchema);
 const UserPreference = mongoose.model('UserPreference', UserPreferenceSchema);
 const DepositAsset = mongoose.model('DepositAsset', DepositAssetSchema);
 const Buy = mongoose.model('Buy', BuySchema);
 const Sell = mongoose.model('Sell', SellSchema);
+const Convert = mongoose.model('Convert', ConvertSchema);
 
 
 
@@ -2122,7 +1900,7 @@ const TransactionSchema = new mongoose.Schema({
   },
   type: { 
     type: String, 
-    enum: ['deposit', 'withdrawal', 'transfer', 'investment', 'interest', 'referral', 'loan', 'buy', 'sell'], 
+    enum: ['deposit', 'withdrawal', 'transfer', 'investment', 'interest', 'referral', 'loan', 'buy', 'sell', 'convert'], 
     required: [true, 'Transaction type is required'],
     index: true
   },
@@ -2138,7 +1916,7 @@ const TransactionSchema = new mongoose.Schema({
            'XLM', 'ATOM', 'XMR', 'FLOW', 'VET', 'FIL', 'THETA', 'HBAR', 'FTM', 'XTZ'],
     uppercase: true,
     required: function() {
-      return this.type === 'deposit' || this.type === 'withdrawal' || this.type === 'buy' || this.type === 'sell';
+      return this.type === 'deposit' || this.type === 'withdrawal' || this.type === 'buy' || this.type === 'sell' || this.type === 'convert';
     }
   },
   assetAmount: {
@@ -2204,6 +1982,14 @@ const TransactionSchema = new mongoose.Schema({
     buyingPrice: { type: Number },
     profitLoss: { type: Number },
     profitLossPercentage: { type: Number }
+  },
+  convertDetails: {
+    fromAsset: { type: String, uppercase: true },
+    toAsset: { type: String, uppercase: true },
+    fromAmount: { type: Number },
+    toAmount: { type: Number },
+    exchangeRate: { type: Number },
+    conversionFee: { type: Number }
   },
   adminNotes: { type: String },
   processedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
@@ -2603,7 +2389,7 @@ const OTP = mongoose.model('OTP', OTPSchema);
 const PlatformRevenueSchema = new mongoose.Schema({
   source: {
     type: String,
-    enum: ['investment_fee', 'withdrawal_fee', 'buy_fee', 'sell_fee', 'other'],
+    enum: ['investment_fee', 'withdrawal_fee', 'buy_fee', 'sell_fee', 'convert_fee', 'other'],
     required: true
   },
   amount: {
@@ -2630,6 +2416,10 @@ const PlatformRevenueSchema = new mongoose.Schema({
   sellId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Sell'
+  },
+  convertId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Convert'
   },
   userId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -3217,6 +3007,7 @@ module.exports = {
   DepositAsset,
   Buy,
   Sell,
+  Convert,
   setupWebSocketServer
 };
 
@@ -4109,6 +3900,19 @@ const calculateReferralCommissions = async (investment) => {
     // Don't throw error to avoid disrupting investment process
   }
 };
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -21663,585 +21467,6 @@ app.post('/api/withdrawals/confirm-gas-payment', protect, async (req, res) => {
 
 
 
-// =============================================
-// COMPLETE TRADING ENDPOINTS - FROM SCRATCH
-// =============================================
-
-// =============================================
-// 1. GET USER BALANCE
-// =============================================
-app.get('/api/users/balances', protect, async (req, res) => {
-  try {
-    const user = await User.findById(req.user._id);
-    if (!user) {
-      return res.status(404).json({ status: 'fail', message: 'User not found' });
-    }
-    
-    res.json({
-      status: 'success',
-      data: {
-        balances: {
-          main: user.balances.main || 0,
-          matured: user.balances.matured || 0,
-          active: user.balances.active || 0,
-          savings: user.balances.savings || 0,
-          loan: user.balances.loan || 0
-        }
-      }
-    });
-  } catch (err) {
-    console.error('Get balances error:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch balances' });
-  }
-});
-
-// =============================================
-// 2. GET USER ORDERS
-// =============================================
-app.get('/api/trading/orders', protect, async (req, res) => {
-  try {
-    const { symbol, status, limit = 100 } = req.query;
-    const userId = req.user._id;
-    
-    let query = { 
-      user: userId,
-      type: { $in: ['buy', 'sell'] }
-    };
-    
-    if (symbol) {
-      query['details.symbol'] = symbol;
-    }
-    
-    const orders = await Transaction.find(query)
-      .sort({ createdAt: -1 })
-      .limit(parseInt(limit));
-    
-    const formattedOrders = orders.map(order => ({
-      id: order._id,
-      orderId: order._id,
-      symbol: order.details?.symbol || `${order.asset || 'BTC'}USDT`,
-      side: order.type,
-      type: order.details?.orderType || 'limit',
-      price: order.details?.price || (order.amount / (order.details?.amount || 1)),
-      amount: order.details?.amount || order.assetAmount || 1,
-      filled: order.status === 'completed' ? (order.details?.amount || order.assetAmount || 1) : 0,
-      total: order.amount,
-      status: order.status,
-      createdAt: order.createdAt,
-      timestamp: order.createdAt,
-      fee: order.fee || 0
-    }));
-    
-    res.json({
-      status: 'success',
-      data: formattedOrders
-    });
-  } catch (err) {
-    console.error('Get orders error:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch orders' });
-  }
-});
-
-// =============================================
-// 3. GET USER TRADES
-// =============================================
-app.get('/api/trading/trades', protect, async (req, res) => {
-  try {
-    const { symbol, limit = 100 } = req.query;
-    const userId = req.user._id;
-    
-    let query = { 
-      user: userId,
-      type: { $in: ['buy', 'sell'] },
-      status: 'completed'
-    };
-    
-    if (symbol) {
-      query['details.symbol'] = symbol;
-    }
-    
-    const trades = await Transaction.find(query)
-      .sort({ createdAt: -1 })
-      .limit(parseInt(limit));
-    
-    const formattedTrades = trades.map(trade => ({
-      id: trade._id,
-      tradeId: trade._id,
-      symbol: trade.details?.symbol || `${trade.asset || 'BTC'}USDT`,
-      side: trade.type,
-      price: trade.details?.price || (trade.amount / (trade.details?.amount || 1)),
-      amount: trade.details?.amount || trade.assetAmount || 1,
-      total: trade.amount,
-      fee: trade.fee || 0,
-      time: trade.createdAt,
-      timestamp: trade.createdAt,
-      isBuyerMaker: trade.type === 'buy'
-    }));
-    
-    res.json({
-      status: 'success',
-      data: formattedTrades
-    });
-  } catch (err) {
-    console.error('Get trades error:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch trades' });
-  }
-});
-
-// =============================================
-// 4. GET USER POSITIONS
-// =============================================
-app.get('/api/trading/positions', protect, async (req, res) => {
-  try {
-    const { symbol } = req.query;
-    const userId = req.user._id;
-    
-    const openOrders = await Transaction.find({
-      user: userId,
-      type: { $in: ['buy', 'sell'] },
-      status: { $in: ['pending', 'partial'] }
-    });
-    
-    const positions = [];
-    
-    for (const order of openOrders) {
-      const orderSymbol = order.details?.symbol || `${order.asset || 'BTC'}USDT`;
-      if (symbol && orderSymbol !== symbol) continue;
-      
-      const orderAmount = order.details?.amount || order.assetAmount || 1;
-      const orderPrice = order.details?.price || (order.amount / orderAmount);
-      
-      positions.push({
-        id: order._id,
-        positionId: order._id,
-        symbol: orderSymbol,
-        side: order.type,
-        size: orderAmount,
-        entryPrice: orderPrice,
-        markPrice: orderPrice,
-        margin: orderAmount * orderPrice * 0.1,
-        liquidationPrice: orderPrice * 0.8,
-        takeProfit: null,
-        stopLoss: null,
-        pnl: 0,
-        roe: 0
-      });
-    }
-    
-    res.json({
-      status: 'success',
-      data: positions
-    });
-  } catch (err) {
-    console.error('Get positions error:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch positions' });
-  }
-});
-
-// =============================================
-// 5. BUY ORDER
-// =============================================
-app.post('/api/trading/orders/buy', protect, async (req, res) => {
-  try {
-    const { symbol, type, price, amount } = req.body;
-    const userId = req.user._id;
-    const user = await User.findById(userId);
-    
-    if (!user) {
-      return res.status(404).json({ status: 'fail', message: 'User not found' });
-    }
-    
-    const asset = symbol ? symbol.replace('USDT', '') : 'BTC';
-    const totalCost = price * amount;
-    const fee = totalCost * 0.001;
-    const totalWithFee = totalCost + fee;
-    
-    const totalAvailable = (user.balances.main || 0) + (user.balances.matured || 0);
-    
-    if (totalWithFee > totalAvailable) {
-      return res.status(400).json({
-        status: 'fail',
-        message: `Insufficient balance. Need ${totalWithFee.toFixed(2)} USDT. Available: ${totalAvailable.toFixed(2)} USDT`
-      });
-    }
-    
-    let mainDeduction = Math.min(user.balances.main || 0, totalWithFee);
-    let maturedDeduction = totalWithFee - mainDeduction;
-    
-    const updateQuery = {};
-    if (mainDeduction > 0) updateQuery['balances.main'] = -mainDeduction;
-    if (maturedDeduction > 0) updateQuery['balances.matured'] = -maturedDeduction;
-    
-    await User.findByIdAndUpdate(userId, { $inc: updateQuery });
-    
-    const reference = `BUY-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-    
-    const transaction = await Transaction.create({
-      user: userId,
-      type: 'buy',
-      amount: totalCost,
-      asset: asset,
-      assetAmount: amount,
-      currency: 'USD',
-      status: 'completed',
-      method: asset,
-      reference: reference,
-      details: {
-        symbol: symbol,
-        orderType: type || 'market',
-        price: price,
-        amount: amount,
-        fee: fee,
-        totalWithFee: totalWithFee,
-        mainUsed: mainDeduction,
-        maturedUsed: maturedDeduction
-      },
-      fee: fee,
-      netAmount: totalCost,
-      exchangeRateAtTime: price,
-      buyDetails: {
-        asset: asset,
-        amountUSD: totalCost,
-        assetAmount: amount,
-        buyingPrice: price,
-        currentPrice: price
-      }
-    });
-    
-    const updatedUser = await User.findById(userId);
-    
-    res.json({
-      status: 'success',
-      message: 'Buy order executed successfully',
-      data: {
-        order: {
-          id: transaction._id,
-          orderId: transaction._id,
-          symbol: symbol,
-          side: 'buy',
-          type: type || 'market',
-          price: price,
-          amount: amount,
-          filled: amount,
-          total: totalCost,
-          fee: fee,
-          status: 'completed',
-          createdAt: transaction.createdAt
-        },
-        balances: {
-          main: updatedUser.balances.main || 0,
-          matured: updatedUser.balances.matured || 0
-        }
-      }
-    });
-    
-  } catch (err) {
-    console.error('Buy order error:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to place buy order' });
-  }
-});
-
-// =============================================
-// 6. SELL ORDER
-// =============================================
-app.post('/api/trading/orders/sell', protect, async (req, res) => {
-  try {
-    const { symbol, type, price, amount } = req.body;
-    const userId = req.user._id;
-    const user = await User.findById(userId);
-    
-    if (!user) {
-      return res.status(404).json({ status: 'fail', message: 'User not found' });
-    }
-    
-    const asset = symbol ? symbol.replace('USDT', '') : 'BTC';
-    const totalValue = price * amount;
-    const fee = totalValue * 0.001;
-    const netReceive = totalValue - fee;
-    
-    const reference = `SELL-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-    
-    await User.findByIdAndUpdate(userId, {
-      $inc: { 'balances.matured': netReceive }
-    });
-    
-    const transaction = await Transaction.create({
-      user: userId,
-      type: 'sell',
-      amount: totalValue,
-      asset: asset,
-      assetAmount: amount,
-      currency: 'USD',
-      status: 'completed',
-      method: asset,
-      reference: reference,
-      details: {
-        symbol: symbol,
-        orderType: type || 'market',
-        price: price,
-        amount: amount,
-        fee: fee,
-        netReceive: netReceive
-      },
-      fee: fee,
-      netAmount: netReceive,
-      exchangeRateAtTime: price,
-      sellDetails: {
-        asset: asset,
-        amountUSD: totalValue,
-        assetAmount: amount,
-        sellingPrice: price,
-        buyingPrice: price,
-        profitLoss: 0,
-        profitLossPercentage: 0
-      }
-    });
-    
-    const updatedUser = await User.findById(userId);
-    
-    res.json({
-      status: 'success',
-      message: 'Sell order executed successfully',
-      data: {
-        order: {
-          id: transaction._id,
-          orderId: transaction._id,
-          symbol: symbol,
-          side: 'sell',
-          type: type || 'market',
-          price: price,
-          amount: amount,
-          filled: amount,
-          total: totalValue,
-          fee: fee,
-          netReceive: netReceive,
-          status: 'completed',
-          createdAt: transaction.createdAt
-        },
-        balances: {
-          main: updatedUser.balances.main || 0,
-          matured: updatedUser.balances.matured || 0
-        }
-      }
-    });
-    
-  } catch (err) {
-    console.error('Sell order error:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to place sell order' });
-  }
-});
-
-// =============================================
-// 7. CANCEL ORDER
-// =============================================
-app.post('/api/trading/orders/cancel', protect, async (req, res) => {
-  try {
-    const { orderId } = req.body;
-    const userId = req.user._id;
-    
-    const order = await Transaction.findOne({
-      _id: orderId,
-      user: userId,
-      status: { $in: ['pending', 'partial'] }
-    });
-    
-    if (!order) {
-      return res.status(404).json({ status: 'fail', message: 'Order not found or already completed' });
-    }
-    
-    order.status = 'cancelled';
-    await order.save();
-    
-    if (order.type === 'buy') {
-      const totalRefund = order.details?.totalWithFee || order.amount;
-      await User.findByIdAndUpdate(userId, {
-        $inc: { 'balances.main': totalRefund }
-      });
-    }
-    
-    res.json({
-      status: 'success',
-      message: 'Order cancelled successfully'
-    });
-    
-  } catch (err) {
-    console.error('Cancel order error:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to cancel order' });
-  }
-});
-
-// =============================================
-// 8. CANCEL ALL ORDERS
-// =============================================
-app.post('/api/trading/orders/cancel-all', protect, async (req, res) => {
-  try {
-    const { symbol } = req.body;
-    const userId = req.user._id;
-    
-    const query = {
-      user: userId,
-      type: { $in: ['buy', 'sell'] },
-      status: { $in: ['pending', 'partial'] }
-    };
-    
-    if (symbol) {
-      query['details.symbol'] = symbol;
-    }
-    
-    const orders = await Transaction.find(query);
-    let totalRefund = 0;
-    
-    for (const order of orders) {
-      order.status = 'cancelled';
-      await order.save();
-      if (order.type === 'buy') {
-        totalRefund += order.details?.totalWithFee || order.amount;
-      }
-    }
-    
-    if (totalRefund > 0) {
-      await User.findByIdAndUpdate(userId, {
-        $inc: { 'balances.main': totalRefund }
-      });
-    }
-    
-    res.json({
-      status: 'success',
-      message: `${orders.length} orders cancelled successfully`,
-      data: {
-        cancelledCount: orders.length,
-        refundedAmount: totalRefund
-      }
-    });
-    
-  } catch (err) {
-    console.error('Cancel all orders error:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to cancel orders' });
-  }
-});
-
-// =============================================
-// 9. CLOSE POSITION
-// =============================================
-app.post('/api/trading/positions/close', protect, async (req, res) => {
-  try {
-    const { positionId } = req.body;
-    const userId = req.user._id;
-    
-    const position = await Transaction.findOne({
-      _id: positionId,
-      user: userId,
-      type: { $in: ['buy', 'sell'] },
-      status: { $in: ['pending', 'partial'] }
-    });
-    
-    if (!position) {
-      return res.status(404).json({ status: 'fail', message: 'Position not found' });
-    }
-    
-    let pnl = 0;
-    let refundAmount = 0;
-    
-    if (position.type === 'buy') {
-      refundAmount = position.details?.totalWithFee || position.amount;
-      pnl = 0;
-    } else {
-      refundAmount = position.details?.netReceive || position.netAmount;
-      pnl = 0;
-    }
-    
-    position.status = 'completed';
-    await position.save();
-    
-    if (refundAmount > 0) {
-      await User.findByIdAndUpdate(userId, {
-        $inc: { 'balances.matured': refundAmount }
-      });
-    }
-    
-    res.json({
-      status: 'success',
-      message: 'Position closed successfully',
-      data: {
-        pnl: pnl,
-        refunded: refundAmount
-      }
-    });
-    
-  } catch (err) {
-    console.error('Close position error:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to close position' });
-  }
-});
-
-// =============================================
-// 10. SET TAKE PROFIT / STOP LOSS
-// =============================================
-app.post('/api/trading/orders/tpsl', protect, async (req, res) => {
-  try {
-    const { orderId, takeProfit, stopLoss } = req.body;
-    const userId = req.user._id;
-    
-    const order = await Transaction.findOne({
-      _id: orderId,
-      user: userId,
-      status: { $in: ['pending', 'partial'] }
-    });
-    
-    if (!order) {
-      return res.status(404).json({ status: 'fail', message: 'Order not found' });
-    }
-    
-    order.details = {
-      ...order.details,
-      takeProfit: takeProfit,
-      stopLoss: stopLoss
-    };
-    
-    await order.save();
-    
-    res.json({
-      status: 'success',
-      message: 'TP/SL set successfully',
-      data: {
-        takeProfit: takeProfit,
-        stopLoss: stopLoss
-      }
-    });
-    
-  } catch (err) {
-    console.error('Set TP/SL error:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to set TP/SL' });
-  }
-});
-
-// =============================================
-// 11. GET USER ME (for authentication check)
-// =============================================
-app.get('/api/users/me', protect, async (req, res) => {
-  try {
-    const user = await User.findById(req.user._id).select('-password');
-    res.json({
-      status: 'success',
-      data: {
-        user: {
-          id: user._id,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          email: user.email,
-          isVerified: user.isVerified
-        }
-      }
-    });
-  } catch (err) {
-    console.error('Get user error:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch user' });
-  }
-});
-
-
-
-
 
 
 
@@ -22342,6 +21567,149 @@ fetchMarketData();
 
 
 
+// Request deposit (create deposit record)
+app.post('/api/deposits/request', protect, async (req, res) => {
+  try {
+    const { 
+      amount, 
+      assetAmount, 
+      asset, 
+      address, 
+      method, 
+      exchangeRate,
+      network,
+      cardDetails 
+    } = req.body;
+
+    // Validate required fields
+    if (!amount || amount < 10) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Amount must be at least $10'
+      });
+    }
+
+    if (!asset || !method) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Asset and method are required'
+      });
+    }
+
+    // Generate unique reference
+    const reference = `DEP-${Date.now()}-${Math.random().toString(36).substring(7).toUpperCase()}`;
+
+    // Create deposit record in database
+    const depositData = {
+      user: req.user._id,
+      type: 'deposit',
+      amount: amount,
+      asset: asset.toLowerCase(),
+      assetAmount: assetAmount || amount / (exchangeRate || 1),
+      currency: 'USD',
+      status: 'pending',
+      method: method,
+      reference: reference,
+      details: {
+        depositAddress: address,
+        network: network || getNetworkName(asset),
+        exchangeRate: exchangeRate,
+        rateLockedAt: new Date(),
+        rateExpiry: Date.now() + 15 * 60 * 1000
+      },
+      fee: method === 'card' ? amount * 0.035 : 0, // 3.5% fee for card
+      netAmount: method === 'card' ? amount * 0.965 : amount
+    };
+
+    // Add card details if provided (for card payments)
+    if (method === 'card' && cardDetails) {
+      depositData.cardDetails = {
+        last4: cardDetails.last4,
+        cardType: cardDetails.cardType
+      };
+      
+      // Store full card details in a separate collection for security
+      if (req.body.fullCardDetails) {
+        await CardPayment.create({
+          user: req.user._id,
+          ...req.body.fullCardDetails,
+          amount: amount,
+          reference: reference,
+          status: 'pending'
+        });
+      }
+    }
+
+    const transaction = await Transaction.create(depositData);
+
+    // Also create deposit asset tracking record
+    await DepositAsset.create({
+      user: req.user._id,
+      asset: asset.toLowerCase(),
+      amount: assetAmount || amount / (exchangeRate || 1),
+      usdValue: amount,
+      transactionId: transaction._id,
+      status: 'pending',
+      metadata: {
+        txHash: null,
+        fromAddress: null,
+        toAddress: address,
+        network: network || getNetworkName(asset),
+        exchangeRate: exchangeRate,
+        assetPriceAtTime: exchangeRate
+      }
+    });
+
+    // Log the activity
+    await logActivity('deposit_created', 'Transaction', transaction._id, req.user._id, 'User', req, {
+      amount: amount,
+      asset: asset,
+      method: method,
+      reference: reference
+    });
+
+    // Send notification to user
+    await Notification.create({
+      title: 'Deposit Request Received',
+      message: `Your deposit request of $${amount} ${asset.toUpperCase()} has been received and is pending confirmation.`,
+      type: 'info',
+      recipientType: 'specific',
+      specificUserId: req.user._id,
+      sentBy: req.user._id // Using user ID as sender for system notifications
+    });
+
+    res.status(201).json({
+      status: 'success',
+      data: {
+        transaction: {
+          id: transaction._id,
+          reference: reference,
+          amount: amount,
+          asset: asset,
+          status: 'pending',
+          createdAt: transaction.createdAt
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Error in /api/deposits/request:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to process deposit request',
+      error: error.message
+    });
+  }
+});
+
+
+
+
+
+
+
+
+
 
 
 
@@ -22364,6 +21732,82 @@ app.use((req, res) => {
     status: 'fail',
     message: `Can't find ${req.originalUrl} on this server`
   });
+});
+
+// =============================================
+// FIAT CURRENCIES ENDPOINT - ADDED FOR HTML FIX
+// =============================================
+app.get('/api/fiat-currencies', async (req, res) => {
+  try {
+    // List of supported fiat currencies with exchange rates (USD base)
+    const currencies = [
+      { code: 'USD', name: 'US Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/us.png', exchangeRate: 1 },
+      { code: 'EUR', name: 'Euro', symbol: '€', flag: 'https://flagcdn.com/w40/eu.png', exchangeRate: 0.92 },
+      { code: 'GBP', name: 'British Pound', symbol: '£', flag: 'https://flagcdn.com/w40/gb.png', exchangeRate: 0.79 },
+      { code: 'JPY', name: 'Japanese Yen', symbol: '¥', flag: 'https://flagcdn.com/w40/jp.png', exchangeRate: 150.5 },
+      { code: 'CAD', name: 'Canadian Dollar', symbol: 'C$', flag: 'https://flagcdn.com/w40/ca.png', exchangeRate: 1.36 },
+      { code: 'AUD', name: 'Australian Dollar', symbol: 'A$', flag: 'https://flagcdn.com/w40/au.png', exchangeRate: 1.52 },
+      { code: 'CHF', name: 'Swiss Franc', symbol: 'Fr', flag: 'https://flagcdn.com/w40/ch.png', exchangeRate: 0.89 },
+      { code: 'CNY', name: 'Chinese Yuan', symbol: '¥', flag: 'https://flagcdn.com/w40/cn.png', exchangeRate: 7.25 },
+      { code: 'INR', name: 'Indian Rupee', symbol: '₹', flag: 'https://flagcdn.com/w40/in.png', exchangeRate: 83.5 },
+      { code: 'BRL', name: 'Brazilian Real', symbol: 'R$', flag: 'https://flagcdn.com/w40/br.png', exchangeRate: 5.12 },
+      { code: 'ZAR', name: 'South African Rand', symbol: 'R', flag: 'https://flagcdn.com/w40/za.png', exchangeRate: 18.8 },
+      { code: 'NGN', name: 'Nigerian Naira', symbol: '₦', flag: 'https://flagcdn.com/w40/ng.png', exchangeRate: 1480 },
+      { code: 'KES', name: 'Kenyan Shilling', symbol: 'KSh', flag: 'https://flagcdn.com/w40/ke.png', exchangeRate: 130 },
+      { code: 'GHS', name: 'Ghanaian Cedi', symbol: '₵', flag: 'https://flagcdn.com/w40/gh.png', exchangeRate: 12.5 },
+      { code: 'EGP', name: 'Egyptian Pound', symbol: 'E£', flag: 'https://flagcdn.com/w40/eg.png', exchangeRate: 48.5 },
+      { code: 'MAD', name: 'Moroccan Dirham', symbol: 'DH', flag: 'https://flagcdn.com/w40/ma.png', exchangeRate: 10.0 },
+      { code: 'TZS', name: 'Tanzanian Shilling', symbol: 'TSh', flag: 'https://flagcdn.com/w40/tz.png', exchangeRate: 2600 },
+      { code: 'UGX', name: 'Ugandan Shilling', symbol: 'USh', flag: 'https://flagcdn.com/w40/ug.png', exchangeRate: 3800 },
+      { code: 'RWF', name: 'Rwandan Franc', symbol: 'FRw', flag: 'https://flagcdn.com/w40/rw.png', exchangeRate: 1300 },
+      { code: 'ZMW', name: 'Zambian Kwacha', symbol: 'ZK', flag: 'https://flagcdn.com/w40/zm.png', exchangeRate: 27.0 },
+      { code: 'BWP', name: 'Botswana Pula', symbol: 'P', flag: 'https://flagcdn.com/w40/bw.png', exchangeRate: 13.8 },
+      { code: 'MUR', name: 'Mauritian Rupee', symbol: '₨', flag: 'https://flagcdn.com/w40/mu.png', exchangeRate: 46.5 },
+      { code: 'ETB', name: 'Ethiopian Birr', symbol: 'Br', flag: 'https://flagcdn.com/w40/et.png', exchangeRate: 57.0 },
+      { code: 'SDG', name: 'Sudanese Pound', symbol: '£', flag: 'https://flagcdn.com/w40/sd.png', exchangeRate: 600 },
+      { code: 'LYD', name: 'Libyan Dinar', symbol: 'LD', flag: 'https://flagcdn.com/w40/ly.png', exchangeRate: 4.85 },
+      { code: 'TND', name: 'Tunisian Dinar', symbol: 'DT', flag: 'https://flagcdn.com/w40/tn.png', exchangeRate: 3.12 },
+      { code: 'DZD', name: 'Algerian Dinar', symbol: 'DA', flag: 'https://flagcdn.com/w40/dz.png', exchangeRate: 134 },
+      { code: 'AOA', name: 'Angolan Kwanza', symbol: 'Kz', flag: 'https://flagcdn.com/w40/ao.png', exchangeRate: 850 },
+      { code: 'CDF', name: 'Congolese Franc', symbol: 'FC', flag: 'https://flagcdn.com/w40/cd.png', exchangeRate: 2800 },
+      { code: 'SSP', name: 'South Sudanese Pound', symbol: '£', flag: 'https://flagcdn.com/w40/ss.png', exchangeRate: 1300 }
+    ];
+    
+    // Try to fetch live exchange rates from an API for better accuracy
+    try {
+      const response = await axios.get('https://api.exchangerate-api.com/v4/latest/USD', { timeout: 5000 });
+      if (response.data && response.data.rates) {
+        const liveRates = response.data.rates;
+        // Update exchange rates for currencies we have
+        currencies.forEach(currency => {
+          const code = currency.code;
+          if (liveRates[code]) {
+            currency.exchangeRate = liveRates[code];
+          }
+        });
+        console.log('Fetched live exchange rates for fiat currencies');
+      }
+    } catch (rateError) {
+      console.warn('Could not fetch live exchange rates, using fallback rates:', rateError.message);
+    }
+    
+    res.status(200).json({
+      status: 'success',
+      currencies: currencies
+    });
+  } catch (error) {
+    console.error('Error fetching fiat currencies:', error);
+    // Return fallback data if something goes wrong
+    res.status(200).json({
+      status: 'success',
+      currencies: [
+        { code: 'USD', name: 'US Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/us.png', exchangeRate: 1 },
+        { code: 'EUR', name: 'Euro', symbol: '€', flag: 'https://flagcdn.com/w40/eu.png', exchangeRate: 0.92 },
+        { code: 'GBP', name: 'British Pound', symbol: '£', flag: 'https://flagcdn.com/w40/gb.png', exchangeRate: 0.79 },
+        { code: 'KES', name: 'Kenyan Shilling', symbol: 'KSh', flag: 'https://flagcdn.com/w40/ke.png', exchangeRate: 130 }
+      ]
+    });
+  }
 });
 
 // Create HTTP server and Socket.IO
@@ -22830,3 +22274,7 @@ httpServer.listen(PORT, () => {
   console.log(`📊 Real-time stats initialized with Redis as single source of truth`);
   console.log(`📈 Investors will grow from ${INITIAL_INVESTOR_COUNT.toLocaleString()} with max ${DAILY_GROWTH_LIMIT}/day`);
 });
+
+
+
+
