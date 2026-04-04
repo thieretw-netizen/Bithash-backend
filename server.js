@@ -3909,6 +3909,19 @@ const calculateReferralCommissions = async (investment) => {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
 // Enhanced email service with professional, highly visible templates - Edge to Edge Layout
 const sendAutomatedEmail = async (user, action, data = {}) => {
   try {
@@ -20658,73 +20671,6 @@ fetchMarketData();
 
 
 
-// =============================================
-// ADDED: Fiat Currencies Endpoint (was 404)
-// =============================================
-app.get('/api/fiat-currencies', async (req, res) => {
-  try {
-    // Comprehensive list of fiat currencies with exchange rates
-    const fiatCurrencies = [
-      { code: 'USD', name: 'US Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/us.png', exchangeRate: 1 },
-      { code: 'EUR', name: 'Euro', symbol: '€', flag: 'https://flagcdn.com/w40/eu.png', exchangeRate: 0.92 },
-      { code: 'GBP', name: 'British Pound', symbol: '£', flag: 'https://flagcdn.com/w40/gb.png', exchangeRate: 0.79 },
-      { code: 'JPY', name: 'Japanese Yen', symbol: '¥', flag: 'https://flagcdn.com/w40/jp.png', exchangeRate: 150.5 },
-      { code: 'CAD', name: 'Canadian Dollar', symbol: 'C$', flag: 'https://flagcdn.com/w40/ca.png', exchangeRate: 1.36 },
-      { code: 'AUD', name: 'Australian Dollar', symbol: 'A$', flag: 'https://flagcdn.com/w40/au.png', exchangeRate: 1.52 },
-      { code: 'CNY', name: 'Chinese Yuan', symbol: '¥', flag: 'https://flagcdn.com/w40/cn.png', exchangeRate: 7.25 },
-      { code: 'INR', name: 'Indian Rupee', symbol: '₹', flag: 'https://flagcdn.com/w40/in.png', exchangeRate: 83.5 },
-      { code: 'BRL', name: 'Brazilian Real', symbol: 'R$', flag: 'https://flagcdn.com/w40/br.png', exchangeRate: 5.05 },
-      { code: 'ZAR', name: 'South African Rand', symbol: 'R', flag: 'https://flagcdn.com/w40/za.png', exchangeRate: 18.5 },
-      { code: 'KES', name: 'Kenyan Shilling', symbol: 'KSh', flag: 'https://flagcdn.com/w40/ke.png', exchangeRate: 130.0 },
-      { code: 'NGN', name: 'Nigerian Naira', symbol: '₦', flag: 'https://flagcdn.com/w40/ng.png', exchangeRate: 750.0 },
-      { code: 'EGP', name: 'Egyptian Pound', symbol: 'E£', flag: 'https://flagcdn.com/w40/eg.png', exchangeRate: 48.5 },
-      { code: 'SAR', name: 'Saudi Riyal', symbol: '﷼', flag: 'https://flagcdn.com/w40/sa.png', exchangeRate: 3.75 },
-      { code: 'AED', name: 'UAE Dirham', symbol: 'د.إ', flag: 'https://flagcdn.com/w40/ae.png', exchangeRate: 3.67 },
-      { code: 'PKR', name: 'Pakistani Rupee', symbol: '₨', flag: 'https://flagcdn.com/w40/pk.png', exchangeRate: 278.0 },
-      { code: 'BDT', name: 'Bangladeshi Taka', symbol: '৳', flag: 'https://flagcdn.com/w40/bd.png', exchangeRate: 110.0 },
-      { code: 'VND', name: 'Vietnamese Dong', symbol: '₫', flag: 'https://flagcdn.com/w40/vn.png', exchangeRate: 25400 },
-      { code: 'THB', name: 'Thai Baht', symbol: '฿', flag: 'https://flagcdn.com/w40/th.png', exchangeRate: 36.5 },
-      { code: 'SGD', name: 'Singapore Dollar', symbol: 'S$', flag: 'https://flagcdn.com/w40/sg.png', exchangeRate: 1.34 },
-      { code: 'HKD', name: 'Hong Kong Dollar', symbol: 'HK$', flag: 'https://flagcdn.com/w40/hk.png', exchangeRate: 7.82 },
-      { code: 'CHF', name: 'Swiss Franc', symbol: 'Fr', flag: 'https://flagcdn.com/w40/ch.png', exchangeRate: 0.91 },
-      { code: 'SEK', name: 'Swedish Krona', symbol: 'kr', flag: 'https://flagcdn.com/w40/se.png', exchangeRate: 10.85 },
-      { code: 'NOK', name: 'Norwegian Krone', symbol: 'kr', flag: 'https://flagcdn.com/w40/no.png', exchangeRate: 11.20 },
-      { code: 'DKK', name: 'Danish Krone', symbol: 'kr', flag: 'https://flagcdn.com/w40/dk.png', exchangeRate: 6.95 },
-      { code: 'PLN', name: 'Polish Zloty', symbol: 'zł', flag: 'https://flagcdn.com/w40/pl.png', exchangeRate: 4.05 },
-      { code: 'CZK', name: 'Czech Koruna', symbol: 'Kč', flag: 'https://flagcdn.com/w40/cz.png', exchangeRate: 23.5 },
-      { code: 'HUF', name: 'Hungarian Forint', symbol: 'Ft', flag: 'https://flagcdn.com/w40/hu.png', exchangeRate: 370.0 },
-      { code: 'ILS', name: 'Israeli Shekel', symbol: '₪', flag: 'https://flagcdn.com/w40/il.png', exchangeRate: 3.85 },
-      { code: 'TRY', name: 'Turkish Lira', symbol: '₺', flag: 'https://flagcdn.com/w40/tr.png', exchangeRate: 32.5 },
-      { code: 'RUB', name: 'Russian Ruble', symbol: '₽', flag: 'https://flagcdn.com/w40/ru.png', exchangeRate: 91.0 },
-      { code: 'UAH', name: 'Ukrainian Hryvnia', symbol: '₴', flag: 'https://flagcdn.com/w40/ua.png', exchangeRate: 41.0 },
-      { code: 'PHP', name: 'Philippine Peso', symbol: '₱', flag: 'https://flagcdn.com/w40/ph.png', exchangeRate: 58.5 },
-      { code: 'MYR', name: 'Malaysian Ringgit', symbol: 'RM', flag: 'https://flagcdn.com/w40/my.png', exchangeRate: 4.72 },
-      { code: 'IDR', name: 'Indonesian Rupiah', symbol: 'Rp', flag: 'https://flagcdn.com/w40/id.png', exchangeRate: 16200 },
-      { code: 'KRW', name: 'South Korean Won', symbol: '₩', flag: 'https://flagcdn.com/w40/kr.png', exchangeRate: 1380 },
-      { code: 'TWD', name: 'New Taiwan Dollar', symbol: 'NT$', flag: 'https://flagcdn.com/w40/tw.png', exchangeRate: 32.2 },
-      { code: 'MXN', name: 'Mexican Peso', symbol: '$', flag: 'https://flagcdn.com/w40/mx.png', exchangeRate: 16.8 },
-      { code: 'ARS', name: 'Argentine Peso', symbol: '$', flag: 'https://flagcdn.com/w40/ar.png', exchangeRate: 880.0 },
-      { code: 'CLP', name: 'Chilean Peso', symbol: '$', flag: 'https://flagcdn.com/w40/cl.png', exchangeRate: 960.0 },
-      { code: 'COP', name: 'Colombian Peso', symbol: '$', flag: 'https://flagcdn.com/w40/co.png', exchangeRate: 3950.0 },
-      { code: 'PEN', name: 'Peruvian Sol', symbol: 'S/', flag: 'https://flagcdn.com/w40/pe.png', exchangeRate: 3.75 },
-      { code: 'NZD', name: 'New Zealand Dollar', symbol: 'NZ$', flag: 'https://flagcdn.com/w40/nz.png', exchangeRate: 1.67 }
-    ];
-    
-    res.status(200).json({
-      status: 'success',
-      currencies: fiatCurrencies,
-      lastUpdated: new Date().toISOString()
-    });
-  } catch (err) {
-    console.error('Error fetching fiat currencies:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch fiat currencies'
-    });
-  }
-});
-
-// NOTE: The rest of the API endpoints (deposit, admin endpoints, etc.) are included in Snippet B
 
 
 
@@ -21192,7 +21138,7 @@ app.get('/api/admin/withdrawals/:id', adminProtect, async (req, res) => {
 
 
 
-// Admin Approve Deposit Endpoint - FIXED VERSION - ADD CRYPTO TO USER ASSET BALANCE
+// Admin Approve Deposit Endpoint - FIXED VERSION
 app.post('/api/admin/deposits/:id/approve', adminProtect, [
   body('notes').optional().trim()
 ], async (req, res) => {
@@ -21226,37 +21172,7 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       });
     }
     
-    // Get the asset from the deposit method (e.g., 'BTC' method means BTC deposit)
-    const asset = deposit.method.toLowerCase();
-    const assetAmount = deposit.assetAmount || deposit.amount / (deposit.exchangeRateAtTime || 1);
-    
-    // Update user asset balance - ADD CRYPTO TO USER'S ASSET BALANCE
-    let userAssetBalance = await UserAssetBalance.findOne({ user: user._id });
-    if (!userAssetBalance) {
-      userAssetBalance = new UserAssetBalance({ user: user._id, balances: {} });
-    }
-    
-    // Add the deposited crypto to user's asset balance
-    const currentBalance = userAssetBalance.balances[asset] || 0;
-    userAssetBalance.balances[asset] = currentBalance + assetAmount;
-    userAssetBalance.lastUpdated = new Date();
-    
-    // Add to history
-    const currentPrice = await getCryptoPrice(asset.toUpperCase());
-    userAssetBalance.history.push({
-      asset: asset,
-      type: 'deposit',
-      amount: assetAmount,
-      balance: userAssetBalance.balances[asset],
-      usdValue: deposit.amount,
-      price: currentPrice || deposit.exchangeRateAtTime || 1,
-      timestamp: new Date(),
-      transactionId: deposit._id
-    });
-    
-    await userAssetBalance.save();
-    
-    // Update user MAIN balance (fiat value for display purposes)
+    // Update user balance
     user.balances.main += deposit.amount;
     await user.save();
     
@@ -21267,16 +21183,10 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
     deposit.adminNotes = notes;
     await deposit.save();
 
-    // Update deposit asset tracking record
-    await DepositAsset.findOneAndUpdate(
-      { transactionId: deposit._id },
-      { status: 'confirmed', confirmedAt: new Date() }
-    );
-
     // Get device info for exact location
     const deviceInfo = await getUserDeviceInfo(req);
     
-    // CREATE LOG FOR DEPOSIT APPROVAL
+    // ✅ CREATE LOG FOR DEPOSIT APPROVAL - FIXED STRUCTURE
     await UserLog.create({
       user: user._id,
       username: user.email,
@@ -21321,8 +21231,6 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       status: 'success',
       metadata: {
         amount: deposit.amount,
-        asset: asset,
-        assetAmount: assetAmount,
         method: deposit.method,
         reference: deposit.reference,
         adminId: req.admin._id,
@@ -21334,7 +21242,7 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       relatedEntityModel: 'Transaction'
     });
 
-    // SEND DEPOSIT APPROVED EMAIL
+    // ✅ SEND DEPOSIT APPROVED EMAIL
     try {
       await sendAutomatedEmail(user, 'deposit_approved', {
         name: user.firstName,
@@ -21348,28 +21256,11 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       console.log(`📧 Deposit approval email sent to ${user.email}`);
     } catch (emailError) {
       console.error('Failed to send deposit approval email:', emailError);
+      // Don't fail the deposit approval if email fails
     }
     
-    // TRIGGER RESTRICTION CHECK ON TRANSACTION COMPLETION
+    // ✅ TRIGGER RESTRICTION CHECK ON TRANSACTION COMPLETION
     await AccountRestrictions.checkAndUpdateRestrictions(user._id, 'transaction_completion');
-    
-    // Emit real-time updates via Socket.IO
-    const io = req.app.get('io');
-    if (io) {
-      // Emit balance update
-      io.to(`user_${user._id}`).emit('balance_update', {
-        main: user.balances.main,
-        active: user.balances.active,
-        matured: user.balances.matured
-      });
-      
-      // Emit asset balance update
-      io.to(`user_${user._id}`).emit('asset_balance_update', {
-        asset: asset,
-        balance: userAssetBalance.balances[asset],
-        usdValue: deposit.amount
-      });
-    }
     
     res.status(200).json({
       status: 'success',
@@ -21378,8 +21269,6 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
     
     await logActivity('approve-deposit', 'transaction', deposit._id, req.admin._id, 'Admin', req, {
       amount: deposit.amount,
-      asset: asset,
-      assetAmount: assetAmount,
       userId: user._id
     });
   } catch (err) {
@@ -21430,16 +21319,10 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
     deposit.adminNotes = reason;
     await deposit.save();
 
-    // Update deposit asset tracking record
-    await DepositAsset.findOneAndUpdate(
-      { transactionId: deposit._id },
-      { status: 'failed' }
-    );
-
     // Get device info for exact location
     const deviceInfo = await getUserDeviceInfo(req);
     
-    // CREATE LOG FOR DEPOSIT REJECTION
+    // ✅ CREATE LOG FOR DEPOSIT REJECTION - FIXED STRUCTURE
     await UserLog.create({
       user: deposit.user._id,
       username: deposit.user.email,
@@ -21494,7 +21377,7 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
       relatedEntityModel: 'Transaction'
     });
 
-    // SEND DEPOSIT REJECTED EMAIL
+    // ✅ SEND DEPOSIT REJECTED EMAIL
     try {
       await sendAutomatedEmail(deposit.user, 'deposit_rejected', {
         name: deposit.user.firstName,
@@ -21505,6 +21388,7 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
       console.log(`📧 Deposit rejection email sent to ${deposit.user.email}`);
     } catch (emailError) {
       console.error('Failed to send deposit rejection email:', emailError);
+      // Don't fail the deposit rejection if email fails
     }
     
     res.status(200).json({
@@ -21561,6 +21445,7 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
     if (withdrawal.asset && withdrawal.asset !== 'USD') {
       cryptoPrice = await getCryptoPrice(withdrawal.asset);
       if (cryptoPrice) {
+        // Calculate USD value based on crypto amount
         if (withdrawal.assetAmount) {
           usdValue = withdrawal.assetAmount * cryptoPrice;
         } else {
@@ -21583,7 +21468,7 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
     // Get device info for exact location
     const deviceInfo = await getUserDeviceInfo(req);
     
-    // CREATE LOG FOR WITHDRAWAL APPROVAL
+    // ✅ CREATE LOG FOR WITHDRAWAL APPROVAL - FIXED STRUCTURE
     await UserLog.create({
       user: withdrawal.user._id,
       username: withdrawal.user.email,
@@ -21642,7 +21527,7 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
       relatedEntityModel: 'Transaction'
     });
 
-    // SEND WITHDRAWAL APPROVED EMAIL
+    // ✅ SEND WITHDRAWAL APPROVED EMAIL
     try {
       await sendAutomatedEmail(withdrawal.user, 'withdrawal_approved', {
         name: withdrawal.user.firstName,
@@ -21660,9 +21545,10 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
       console.log(`📧 Withdrawal approval email sent to ${withdrawal.user.email}`);
     } catch (emailError) {
       console.error('Failed to send withdrawal approval email:', emailError);
+      // Don't fail the withdrawal approval if email fails
     }
     
-    // TRIGGER RESTRICTION CHECK ON TRANSACTION COMPLETION
+    // ✅ TRIGGER RESTRICTION CHECK ON TRANSACTION COMPLETION
     await AccountRestrictions.checkAndUpdateRestrictions(withdrawal.user._id, 'transaction_completion');
     
     res.status(200).json({
@@ -21738,7 +21624,7 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
     // Get device info for exact location
     const deviceInfo = await getUserDeviceInfo(req);
     
-    // CREATE LOG FOR WITHDRAWAL REJECTION
+    // ✅ CREATE LOG FOR WITHDRAWAL REJECTION - FIXED STRUCTURE
     await UserLog.create({
       user: user._id,
       username: user.email,
@@ -21794,7 +21680,7 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
       relatedEntityModel: 'Transaction'
     });
 
-    // SEND WITHDRAWAL REJECTED EMAIL
+    // ✅ SEND WITHDRAWAL REJECTED EMAIL
     try {
       await sendAutomatedEmail(user, 'withdrawal_rejected', {
         name: user.firstName,
@@ -21806,6 +21692,7 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
       console.log(`📧 Withdrawal rejection email sent to ${user.email}`);
     } catch (emailError) {
       console.error('Failed to send withdrawal rejection email:', emailError);
+      // Don't fail the withdrawal rejection if email fails
     }
     
     res.status(200).json({
@@ -21827,6 +21714,101 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
     });
   }
 });
+
+// =============================================
+// FIAT CURRENCIES ENDPOINT - ADDED FOR dashboard.js
+// =============================================
+app.get('/api/fiat-currencies', async (req, res) => {
+  try {
+    // Comprehensive list of fiat currencies with exchange rates to USD
+    const fiatCurrencies = [
+      { code: 'USD', name: 'US Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/us.png', exchangeRate: 1 },
+      { code: 'EUR', name: 'Euro', symbol: '€', flag: 'https://flagcdn.com/w40/eu.png', exchangeRate: 0.92 },
+      { code: 'GBP', name: 'British Pound', symbol: '£', flag: 'https://flagcdn.com/w40/gb.png', exchangeRate: 0.79 },
+      { code: 'JPY', name: 'Japanese Yen', symbol: '¥', flag: 'https://flagcdn.com/w40/jp.png', exchangeRate: 150.5 },
+      { code: 'CAD', name: 'Canadian Dollar', symbol: 'C$', flag: 'https://flagcdn.com/w40/ca.png', exchangeRate: 1.36 },
+      { code: 'AUD', name: 'Australian Dollar', symbol: 'A$', flag: 'https://flagcdn.com/w40/au.png', exchangeRate: 1.52 },
+      { code: 'CHF', name: 'Swiss Franc', symbol: 'CHF', flag: 'https://flagcdn.com/w40/ch.png', exchangeRate: 0.89 },
+      { code: 'CNY', name: 'Chinese Yuan', symbol: '¥', flag: 'https://flagcdn.com/w40/cn.png', exchangeRate: 7.23 },
+      { code: 'INR', name: 'Indian Rupee', symbol: '₹', flag: 'https://flagcdn.com/w40/in.png', exchangeRate: 83.5 },
+      { code: 'BRL', name: 'Brazilian Real', symbol: 'R$', flag: 'https://flagcdn.com/w40/br.png', exchangeRate: 5.02 },
+      { code: 'ZAR', name: 'South African Rand', symbol: 'R', flag: 'https://flagcdn.com/w40/za.png', exchangeRate: 18.85 },
+      { code: 'MXN', name: 'Mexican Peso', symbol: '$', flag: 'https://flagcdn.com/w40/mx.png', exchangeRate: 16.92 },
+      { code: 'SGD', name: 'Singapore Dollar', symbol: 'S$', flag: 'https://flagcdn.com/w40/sg.png', exchangeRate: 1.35 },
+      { code: 'HKD', name: 'Hong Kong Dollar', symbol: 'HK$', flag: 'https://flagcdn.com/w40/hk.png', exchangeRate: 7.82 },
+      { code: 'NZD', name: 'New Zealand Dollar', symbol: 'NZ$', flag: 'https://flagcdn.com/w40/nz.png', exchangeRate: 1.66 },
+      { code: 'KRW', name: 'South Korean Won', symbol: '₩', flag: 'https://flagcdn.com/w40/kr.png', exchangeRate: 1340 },
+      { code: 'TRY', name: 'Turkish Lira', symbol: '₺', flag: 'https://flagcdn.com/w40/tr.png', exchangeRate: 32.1 },
+      { code: 'RUB', name: 'Russian Ruble', symbol: '₽', flag: 'https://flagcdn.com/w40/ru.png', exchangeRate: 92.5 },
+      { code: 'SEK', name: 'Swedish Krona', symbol: 'kr', flag: 'https://flagcdn.com/w40/se.png', exchangeRate: 10.65 },
+      { code: 'NOK', name: 'Norwegian Krone', symbol: 'kr', flag: 'https://flagcdn.com/w40/no.png', exchangeRate: 10.82 },
+      { code: 'DKK', name: 'Danish Krone', symbol: 'kr', flag: 'https://flagcdn.com/w40/dk.png', exchangeRate: 6.89 },
+      { code: 'PLN', name: 'Polish Zloty', symbol: 'zł', flag: 'https://flagcdn.com/w40/pl.png', exchangeRate: 4.02 },
+      { code: 'CZK', name: 'Czech Koruna', symbol: 'Kč', flag: 'https://flagcdn.com/w40/cz.png', exchangeRate: 23.1 },
+      { code: 'HUF', name: 'Hungarian Forint', symbol: 'Ft', flag: 'https://flagcdn.com/w40/hu.png', exchangeRate: 363 },
+      { code: 'ILS', name: 'Israeli Shekel', symbol: '₪', flag: 'https://flagcdn.com/w40/il.png', exchangeRate: 3.72 },
+      { code: 'AED', name: 'UAE Dirham', symbol: 'د.إ', flag: 'https://flagcdn.com/w40/ae.png', exchangeRate: 3.67 },
+      { code: 'SAR', name: 'Saudi Riyal', symbol: '﷼', flag: 'https://flagcdn.com/w40/sa.png', exchangeRate: 3.75 },
+      { code: 'KES', name: 'Kenyan Shilling', symbol: 'KSh', flag: 'https://flagcdn.com/w40/ke.png', exchangeRate: 132 },
+      { code: 'NGN', name: 'Nigerian Naira', symbol: '₦', flag: 'https://flagcdn.com/w40/ng.png', exchangeRate: 1510 },
+      { code: 'EGP', name: 'Egyptian Pound', symbol: 'E£', flag: 'https://flagcdn.com/w40/eg.png', exchangeRate: 48.2 },
+      { code: 'PKR', name: 'Pakistani Rupee', symbol: '₨', flag: 'https://flagcdn.com/w40/pk.png', exchangeRate: 278 },
+      { code: 'BDT', name: 'Bangladeshi Taka', symbol: '৳', flag: 'https://flagcdn.com/w40/bd.png', exchangeRate: 109.5 },
+      { code: 'VND', name: 'Vietnamese Dong', symbol: '₫', flag: 'https://flagcdn.com/w40/vn.png', exchangeRate: 25400 },
+      { code: 'THB', name: 'Thai Baht', symbol: '฿', flag: 'https://flagcdn.com/w40/th.png', exchangeRate: 36.7 },
+      { code: 'MYR', name: 'Malaysian Ringgit', symbol: 'RM', flag: 'https://flagcdn.com/w40/my.png', exchangeRate: 4.73 },
+      { code: 'IDR', name: 'Indonesian Rupiah', symbol: 'Rp', flag: 'https://flagcdn.com/w40/id.png', exchangeRate: 15800 },
+      { code: 'PHP', name: 'Philippine Peso', symbol: '₱', flag: 'https://flagcdn.com/w40/ph.png', exchangeRate: 56.2 },
+      { code: 'ARS', name: 'Argentine Peso', symbol: '$', flag: 'https://flagcdn.com/w40/ar.png', exchangeRate: 870 },
+      { code: 'CLP', name: 'Chilean Peso', symbol: '$', flag: 'https://flagcdn.com/w40/cl.png', exchangeRate: 940 },
+      { code: 'COP', name: 'Colombian Peso', symbol: '$', flag: 'https://flagcdn.com/w40/co.png', exchangeRate: 3890 },
+      { code: 'PEN', name: 'Peruvian Sol', symbol: 'S/', flag: 'https://flagcdn.com/w40/pe.png', exchangeRate: 3.74 },
+      { code: 'UAH', name: 'Ukrainian Hryvnia', symbol: '₴', flag: 'https://flagcdn.com/w40/ua.png', exchangeRate: 39.2 },
+      { code: 'KZT', name: 'Kazakhstani Tenge', symbol: '₸', flag: 'https://flagcdn.com/w40/kz.png', exchangeRate: 445 },
+      { code: 'GHS', name: 'Ghanaian Cedi', symbol: '₵', flag: 'https://flagcdn.com/w40/gh.png', exchangeRate: 13.8 },
+      { code: 'TZS', name: 'Tanzanian Shilling', symbol: 'TSh', flag: 'https://flagcdn.com/w40/tz.png', exchangeRate: 2580 },
+      { code: 'UGX', name: 'Ugandan Shilling', symbol: 'USh', flag: 'https://flagcdn.com/w40/ug.png', exchangeRate: 3880 },
+      { code: 'RWF', name: 'Rwandan Franc', symbol: 'FRw', flag: 'https://flagcdn.com/w40/rw.png', exchangeRate: 1280 },
+      { code: 'ZMW', name: 'Zambian Kwacha', symbol: 'ZK', flag: 'https://flagcdn.com/w40/zm.png', exchangeRate: 26.5 }
+    ];
+    
+    // Try to fetch live exchange rates from an API for more accurate rates
+    try {
+      const response = await axios.get('https://api.exchangerate-api.com/v4/latest/USD', { timeout: 3000 });
+      if (response.data && response.data.rates) {
+        const liveRates = response.data.rates;
+        // Update exchange rates for currencies we have
+        fiatCurrencies.forEach(currency => {
+          if (liveRates[currency.code]) {
+            currency.exchangeRate = liveRates[currency.code];
+          }
+        });
+        console.log('Fiat currencies updated with live exchange rates');
+      }
+    } catch (apiError) {
+      console.log('Using fallback exchange rates for fiat currencies');
+    }
+    
+    res.status(200).json({
+      status: 'success',
+      currencies: fiatCurrencies
+    });
+  } catch (error) {
+    console.error('Error fetching fiat currencies:', error);
+    // Fallback response with basic currencies
+    res.status(200).json({
+      status: 'success',
+      currencies: [
+        { code: 'USD', name: 'US Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/us.png', exchangeRate: 1 },
+        { code: 'EUR', name: 'Euro', symbol: '€', flag: 'https://flagcdn.com/w40/eu.png', exchangeRate: 0.92 },
+        { code: 'GBP', name: 'British Pound', symbol: '£', flag: 'https://flagcdn.com/w40/gb.png', exchangeRate: 0.79 },
+        { code: 'JPY', name: 'Japanese Yen', symbol: '¥', flag: 'https://flagcdn.com/w40/jp.png', exchangeRate: 150.5 },
+        { code: 'KES', name: 'Kenyan Shilling', symbol: 'KSh', flag: 'https://flagcdn.com/w40/ke.png', exchangeRate: 132 }
+      ]
+    });
+  }
+});
+
 
 
 
@@ -21856,9 +21838,6 @@ const io = new Server(httpServer, {
     methods: ['GET', 'POST']
   }
 });
-
-// Store io instance on app for use in routes
-app.set('io', io);
 
 // =============================================
 // REAL-TIME STATS WITH REDIS SINGLE SOURCE OF TRUTH
@@ -22102,268 +22081,134 @@ app.get('/api/stats/daily-progress', async (req, res) => {
   }
 });
 
-// =============================================
-// ENHANCED SOCKET.IO FOR REAL-TIME UPDATES
-// =============================================
+// Add market WebSocket to your existing server
+const setupMarketWebSocket = (server) => {
+  const marketWss = new WebSocket.Server({ 
+    server, 
+    path: '/ws/market' 
+  });
 
-// Track user connections and their data
-const userSockets = new Map();
-const userAssetBalanceCache = new Map();
+  const clients = new Set();
+  let priceInterval = null;
 
-// Function to calculate total fiat value of user's crypto holdings
-const calculateTotalFiatValue = async (userAssetBalance, cryptoPrices) => {
-  let total = 0;
-  const assetBalances = userAssetBalance?.balances || {};
-  
-  for (const [asset, balance] of Object.entries(assetBalances)) {
-    if (balance > 0) {
-      const price = cryptoPrices[asset]?.usd || 0;
-      total += balance * price;
-    }
-  }
-  return total;
-};
-
-// Function to calculate PnL for a wallet based on crypto holdings
-const calculateWalletPnL = async (userAssetBalance, previousPrices, currentPrices) => {
-  let totalPreviousValue = 0;
-  let totalCurrentValue = 0;
-  const assetBalances = userAssetBalance?.balances || {};
-  
-  for (const [asset, balance] of Object.entries(assetBalances)) {
-    if (balance > 0) {
-      const previousPrice = previousPrices[asset]?.usd || 0;
-      const currentPrice = currentPrices[asset]?.usd || 0;
-      totalPreviousValue += balance * previousPrice;
-      totalCurrentValue += balance * currentPrice;
-    }
-  }
-  
-  const pnlAmount = totalCurrentValue - totalPreviousValue;
-  const pnlPercentage = totalPreviousValue > 0 ? (pnlAmount / totalPreviousValue) * 100 : 0;
-  
-  return { amount: pnlAmount, percentage: pnlPercentage };
-};
-
-// Cache for crypto prices
-let cachedCryptoPrices = {};
-let lastPriceFetch = 0;
-const PRICE_FETCH_INTERVAL = 30000; // 30 seconds
-
-// Function to fetch and cache crypto prices
-const fetchAndCachePrices = async () => {
-  try {
-    const topAssetIds = ['bitcoin', 'ethereum', 'tether', 'binancecoin', 'solana', 'usd-coin', 'xrp', 'dogecoin', 'cardano', 'shiba-inu', 'avalanche-2', 'polkadot', 'tron', 'chainlink', 'matic-network', 'wrapped-bitcoin', 'litecoin', 'near', 'uniswap', 'bitcoin-cash'];
-    const ids = topAssetIds.join(',');
-    const response = await axios.get(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd&include_24hr_change=true`, { timeout: 10000 });
-    
-    if (response.data) {
-      const newPrices = {};
-      for (const [id, data] of Object.entries(response.data)) {
-        newPrices[id] = { usd: data.usd || 0, usd_24h_change: data.usd_24h_change || 0 };
-      }
-      
-      // Store previous prices before updating
-      const previousPrices = { ...cachedCryptoPrices };
-      cachedCryptoPrices = newPrices;
-      lastPriceFetch = Date.now();
-      
-      // Broadcast price updates and recalculate PnL for all connected users
-      for (const [userId, socketIds] of userSockets.entries()) {
-        const userAssetBalance = userAssetBalanceCache.get(userId);
-        if (userAssetBalance) {
-          // Calculate total fiat value for main and matured wallets
-          const totalFiatValue = await calculateTotalFiatValue(userAssetBalance, cachedCryptoPrices);
-          
-          // Calculate PnL
-          const pnl = await calculateWalletPnL(userAssetBalance, previousPrices, cachedCryptoPrices);
-          
-          // Broadcast to user's sockets
-          for (const socketId of socketIds) {
-            io.to(socketId).emit('balance_update', {
-              main: totalFiatValue,
-              matured: totalFiatValue, // Matured also fluctuates based on crypto holdings
-              active: 0 // Active balance does not fluctuate
-            });
-            
-            io.to(socketId).emit('pnl_update', {
-              main: { amount: pnl.amount, percentage: pnl.percentage },
-              matured: { amount: pnl.amount, percentage: pnl.percentage }
-            });
-          }
+  const broadcastPrices = async () => {
+    try {
+      const response = await axios.get(
+        'https://api.coingecko.com/api/v3/coins/markets',
+        {
+          params: {
+            vs_currency: 'usd',
+            per_page: 50,
+            price_change_percentage: '24h'
+          },
+          timeout: 5000
         }
+      );
+
+      if (response.data && clients.size > 0) {
+        const updates = response.data.map(coin => ({
+          assetId: coin.id,
+          price: coin.current_price,
+          price_change_percentage_24h: coin.price_change_percentage_24h || 0
+        }));
+
+        const message = JSON.stringify({
+          type: 'batch_update',
+          updates: updates,
+          timestamp: Date.now()
+        });
+
+        clients.forEach(client => {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(message);
+          }
+        });
       }
-      
-      return true;
+    } catch (error) {
+      console.error('WebSocket price broadcast error:', error);
     }
-  } catch (error) {
-    console.error('Error fetching crypto prices:', error);
-  }
-  return false;
+  };
+
+  marketWss.on('connection', (ws) => {
+    clients.add(ws);
+    console.log(`Market WebSocket client connected. Total: ${clients.size}`);
+
+    // Send initial data
+    (async () => {
+      const assets = await fetchMarketData();
+      ws.send(JSON.stringify({
+        type: 'initial_data',
+        assets: assets
+      }));
+    })();
+
+    // Start broadcasting if this is the first client
+    if (clients.size === 1 && !priceInterval) {
+      priceInterval = setInterval(broadcastPrices, 5000);
+    }
+
+    ws.on('message', (message) => {
+      try {
+        const data = JSON.parse(message);
+        if (data.type === 'subscribe') {
+          console.log('Client subscribed to price updates');
+        }
+      } catch (err) {
+        // Ignore invalid messages
+      }
+    });
+
+    ws.on('close', () => {
+      clients.delete(ws);
+      console.log(`Market WebSocket client disconnected. Total: ${clients.size}`);
+      
+      // Stop broadcasting if no clients left
+      if (clients.size === 0 && priceInterval) {
+        clearInterval(priceInterval);
+        priceInterval = null;
+      }
+    });
+  });
 };
 
-// Start periodic price fetching
-setInterval(async () => {
-  await fetchAndCachePrices();
-}, PRICE_FETCH_INTERVAL);
+// Call this after creating your HTTP server
+// setupMarketWebSocket(server);
 
-// Initial price fetch
-fetchAndCachePrices();
-
-// Socket.IO connection handler with enhanced real-time updates
+// Socket.IO connection handler with stats broadcast
 io.on('connection', async (socket) => {
   console.log('New client connected:', socket.id);
   
-  // Get token from handshake auth
-  const token = socket.handshake.auth.token;
-  let userId = null;
-  
-  // Authenticate user
-  if (token) {
+  // Send current stats immediately to new client
+  const currentStats = await getCurrentStats();
+  socket.emit('stats-update', currentStats);
+  console.log(`📡 Sent initial stats to new client ${socket.id}: ${currentStats.totalInvestors.toLocaleString()} investors`);
+
+  // Verify admin token for admin connections
+  socket.on('authenticate', async (token) => {
     try {
       const decoded = verifyJWT(token);
-      userId = decoded.id;
-      socket.userId = userId;
-      
-      // Track socket for this user
-      if (!userSockets.has(userId)) {
-        userSockets.set(userId, new Set());
+      if (!decoded.isAdmin) {
+        socket.disconnect();
+        return;
       }
-      userSockets.get(userId).add(socket.id);
-      
-      // Join user-specific room
-      socket.join(`user_${userId}`);
-      
-      // Load user data
-      const user = await User.findById(userId);
-      const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
-      const userPreferences = await UserPreference.findOne({ user: userId });
-      
-      // Cache asset balance for price calculations
-      if (userAssetBalance) {
-        userAssetBalanceCache.set(userId, userAssetBalance);
+
+      const admin = await Admin.findById(decoded.id);
+      if (!admin) {
+        socket.disconnect();
+        return;
       }
-      
-      // Calculate total fiat value of crypto holdings
-      const totalFiatValue = await calculateTotalFiatValue(userAssetBalance, cachedCryptoPrices);
-      
-      // Send initial balance data
-      socket.emit('balance_update', {
-        main: totalFiatValue,
-        active: user?.balances?.active || 0,
-        matured: totalFiatValue
-      });
-      
-      // Send initial asset balances
-      if (userAssetBalance) {
-        const assetsWithValues = [];
-        for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
-          if (balance > 0) {
-            const price = cachedCryptoPrices[getAssetId(asset)]?.usd || 0;
-            assetsWithValues.push({
-              symbol: asset,
-              balance: balance,
-              usdValue: balance * price,
-              id: getAssetId(asset)
-            });
-          }
-        }
-        socket.emit('asset_balances_update', assetsWithValues);
-      }
-      
-      // Send user preferences
-      if (userPreferences) {
-        socket.emit('preferences_update', {
-          displayAsset: userPreferences.displayAsset,
-          fiatCurrency: userPreferences.fiatCurrency,
-          theme: userPreferences.theme,
-          language: userPreferences.language
-        });
-      }
-      
-      // Send current stats
-      const currentStats = await getCurrentStats();
-      socket.emit('stats-update', currentStats);
-      
+
+      socket.adminId = admin._id;
+      console.log(`Admin ${admin.email} connected`);
     } catch (err) {
-      console.error('Socket authentication error:', err);
-    }
-  }
-  
-  // Handle preference updates from client
-  socket.on('update_preferences', async (preferences) => {
-    if (userId) {
-      try {
-        await UserPreference.findOneAndUpdate(
-          { user: userId },
-          { ...preferences },
-          { upsert: true, new: true }
-        );
-        
-        // Broadcast to all user's sockets
-        for (const socketId of userSockets.get(userId) || []) {
-          io.to(socketId).emit('preferences_update', preferences);
-        }
-      } catch (err) {
-        console.error('Error updating preferences:', err);
-      }
+      socket.disconnect();
     }
   });
-  
-  // Handle refresh PnL request
-  socket.on('refresh_pnl', async () => {
-    if (userId) {
-      const userAssetBalance = userAssetBalanceCache.get(userId);
-      if (userAssetBalance && cachedCryptoPrices) {
-        const totalFiatValue = await calculateTotalFiatValue(userAssetBalance, cachedCryptoPrices);
-        socket.emit('balance_update', {
-          main: totalFiatValue,
-          matured: totalFiatValue,
-          active: 0
-        });
-      }
-    }
-  });
-  
-  // Handle disconnect
+
   socket.on('disconnect', () => {
     console.log('Client disconnected:', socket.id);
-    if (userId && userSockets.has(userId)) {
-      userSockets.get(userId).delete(socket.id);
-      if (userSockets.get(userId).size === 0) {
-        userSockets.delete(userId);
-        userAssetBalanceCache.delete(userId);
-      }
-    }
   });
 });
-
-// Helper function to get CoinGecko asset ID from symbol
-const getAssetId = (symbol) => {
-  const assetMap = {
-    'btc': 'bitcoin',
-    'eth': 'ethereum',
-    'usdt': 'tether',
-    'bnb': 'binancecoin',
-    'sol': 'solana',
-    'usdc': 'usd-coin',
-    'xrp': 'xrp',
-    'doge': 'dogecoin',
-    'ada': 'cardano',
-    'shib': 'shiba-inu',
-    'avax': 'avalanche-2',
-    'dot': 'polkadot',
-    'trx': 'tron',
-    'link': 'chainlink',
-    'matic': 'matic-network',
-    'wbtc': 'wrapped-bitcoin',
-    'ltc': 'litecoin',
-    'near': 'near',
-    'uni': 'uniswap',
-    'bch': 'bitcoin-cash'
-  };
-  return assetMap[symbol.toLowerCase()] || 'bitcoin';
-};
 
 // Function to automatically complete matured investments
 const processMaturedInvestments = async () => {
@@ -22447,6 +22292,4 @@ httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`📊 Real-time stats initialized with Redis as single source of truth`);
   console.log(`📈 Investors will grow from ${INITIAL_INVESTOR_COUNT.toLocaleString()} with max ${DAILY_GROWTH_LIMIT}/day`);
-  console.log(`🔌 Socket.IO enabled for real-time balance updates`);
-  console.log(`💱 Fiat currencies endpoint available at /api/fiat-currencies`);
 });
