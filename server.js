@@ -21562,9 +21562,6 @@ fetchMarketData();
 
 
 
-
-
-
 // Request deposit (create deposit record)
 app.post('/api/deposits/request', protect, async (req, res) => {
   try {
@@ -21615,7 +21612,7 @@ app.post('/api/deposits/request', protect, async (req, res) => {
         rateLockedAt: new Date(),
         rateExpiry: Date.now() + 15 * 60 * 1000
       },
-      fee: method === 'card' ? amount * 0.035 : 0, // 3.5% fee for card
+      fee: method === 'card' ? amount * 0.035 : 0,
       netAmount: method === 'card' ? amount * 0.965 : amount
     };
 
@@ -21673,7 +21670,7 @@ app.post('/api/deposits/request', protect, async (req, res) => {
       type: 'info',
       recipientType: 'specific',
       specificUserId: req.user._id,
-      sentBy: req.user._id // Using user ID as sender for system notifications
+      sentBy: req.user._id
     });
 
     res.status(201).json({
@@ -21700,111 +21697,126 @@ app.post('/api/deposits/request', protect, async (req, res) => {
   }
 });
 
-// NEW ENDPOINT: Get available fiat currencies with real-time exchange rates (FIX for dashboard:4979 404 error)
+// =============================================
+// FIAT CURRENCIES ENDPOINT - ADD THIS
+// =============================================
 app.get('/api/fiat-currencies', async (req, res) => {
   try {
-    // Comprehensive list of major fiat currencies with symbols and flags
+    // Comprehensive list of all world currencies with exchange rates to USD
+    // Using approximate exchange rates - in production, fetch from a live API
     const fiatCurrencies = [
-      { code: 'USD', name: 'US Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/us.png', exchangeRate: 1 },
-      { code: 'EUR', name: 'Euro', symbol: '€', flag: 'https://flagcdn.com/w40/eu.png', exchangeRate: 0.92 },
-      { code: 'GBP', name: 'British Pound', symbol: '£', flag: 'https://flagcdn.com/w40/gb.png', exchangeRate: 0.79 },
-      { code: 'JPY', name: 'Japanese Yen', symbol: '¥', flag: 'https://flagcdn.com/w40/jp.png', exchangeRate: 150.5 },
-      { code: 'CAD', name: 'Canadian Dollar', symbol: 'C$', flag: 'https://flagcdn.com/w40/ca.png', exchangeRate: 1.36 },
-      { code: 'AUD', name: 'Australian Dollar', symbol: 'A$', flag: 'https://flagcdn.com/w40/au.png', exchangeRate: 1.52 },
-      { code: 'CHF', name: 'Swiss Franc', symbol: 'Fr', flag: 'https://flagcdn.com/w40/ch.png', exchangeRate: 0.88 },
-      { code: 'CNY', name: 'Chinese Yuan', symbol: '¥', flag: 'https://flagcdn.com/w40/cn.png', exchangeRate: 7.25 },
-      { code: 'INR', name: 'Indian Rupee', symbol: '₹', flag: 'https://flagcdn.com/w40/in.png', exchangeRate: 83.5 },
-      { code: 'KES', name: 'Kenyan Shilling', symbol: 'KSh', flag: 'https://flagcdn.com/w40/ke.png', exchangeRate: 130 },
-      { code: 'NGN', name: 'Nigerian Naira', symbol: '₦', flag: 'https://flagcdn.com/w40/ng.png', exchangeRate: 1600 },
-      { code: 'ZAR', name: 'South African Rand', symbol: 'R', flag: 'https://flagcdn.com/w40/za.png', exchangeRate: 18.5 },
-      { code: 'BRL', name: 'Brazilian Real', symbol: 'R$', flag: 'https://flagcdn.com/w40/br.png', exchangeRate: 5.1 },
-      { code: 'MXN', name: 'Mexican Peso', symbol: '$', flag: 'https://flagcdn.com/w40/mx.png', exchangeRate: 17.8 },
-      { code: 'SGD', name: 'Singapore Dollar', symbol: 'S$', flag: 'https://flagcdn.com/w40/sg.png', exchangeRate: 1.34 },
-      { code: 'HKD', name: 'Hong Kong Dollar', symbol: 'HK$', flag: 'https://flagcdn.com/w40/hk.png', exchangeRate: 7.82 },
-      { code: 'NZD', name: 'New Zealand Dollar', symbol: 'NZ$', flag: 'https://flagcdn.com/w40/nz.png', exchangeRate: 1.63 },
-      { code: 'SEK', name: 'Swedish Krona', symbol: 'kr', flag: 'https://flagcdn.com/w40/se.png', exchangeRate: 10.4 },
-      { code: 'NOK', name: 'Norwegian Krone', symbol: 'kr', flag: 'https://flagcdn.com/w40/no.png', exchangeRate: 10.6 },
-      { code: 'DKK', name: 'Danish Krone', symbol: 'kr', flag: 'https://flagcdn.com/w40/dk.png', exchangeRate: 6.88 },
-      { code: 'PLN', name: 'Polish Zloty', symbol: 'zł', flag: 'https://flagcdn.com/w40/pl.png', exchangeRate: 3.95 },
-      { code: 'TRY', name: 'Turkish Lira', symbol: '₺', flag: 'https://flagcdn.com/w40/tr.png', exchangeRate: 32.5 },
-      { code: 'AED', name: 'UAE Dirham', symbol: 'د.إ', flag: 'https://flagcdn.com/w40/ae.png', exchangeRate: 3.67 },
-      { code: 'SAR', name: 'Saudi Riyal', symbol: 'ر.س', flag: 'https://flagcdn.com/w40/sa.png', exchangeRate: 3.75 },
-      { code: 'KRW', name: 'South Korean Won', symbol: '₩', flag: 'https://flagcdn.com/w40/kr.png', exchangeRate: 1330 },
-      { code: 'RUB', name: 'Russian Ruble', symbol: '₽', flag: 'https://flagcdn.com/w40/ru.png', exchangeRate: 92 },
-      { code: 'IDR', name: 'Indonesian Rupiah', symbol: 'Rp', flag: 'https://flagcdn.com/w40/id.png', exchangeRate: 15600 },
-      { code: 'THB', name: 'Thai Baht', symbol: '฿', flag: 'https://flagcdn.com/w40/th.png', exchangeRate: 36.5 },
-      { code: 'VND', name: 'Vietnamese Dong', symbol: '₫', flag: 'https://flagcdn.com/w40/vn.png', exchangeRate: 25400 },
-      { code: 'PHP', name: 'Philippine Peso', symbol: '₱', flag: 'https://flagcdn.com/w40/ph.png', exchangeRate: 56.5 },
-      { code: 'MYR', name: 'Malaysian Ringgit', symbol: 'RM', flag: 'https://flagcdn.com/w40/my.png', exchangeRate: 4.68 },
-      { code: 'PKR', name: 'Pakistani Rupee', symbol: '₨', flag: 'https://flagcdn.com/w40/pk.png', exchangeRate: 278 },
-      { code: 'BDT', name: 'Bangladeshi Taka', symbol: '৳', flag: 'https://flagcdn.com/w40/bd.png', exchangeRate: 110 },
-      { code: 'EGP', name: 'Egyptian Pound', symbol: 'E£', flag: 'https://flagcdn.com/w40/eg.png', exchangeRate: 48.5 },
-      { code: 'GHS', name: 'Ghanaian Cedi', symbol: '₵', flag: 'https://flagcdn.com/w40/gh.png', exchangeRate: 12.5 },
-      { code: 'TZS', name: 'Tanzanian Shilling', symbol: 'TSh', flag: 'https://flagcdn.com/w40/tz.png', exchangeRate: 2600 },
-      { code: 'UGX', name: 'Ugandan Shilling', symbol: 'USh', flag: 'https://flagcdn.com/w40/ug.png', exchangeRate: 3800 },
-      { code: 'RWF', name: 'Rwandan Franc', symbol: 'FRw', flag: 'https://flagcdn.com/w40/rw.png', exchangeRate: 1300 },
-      { code: 'ZMW', name: 'Zambian Kwacha', symbol: 'ZK', flag: 'https://flagcdn.com/w40/zm.png', exchangeRate: 27 },
-      { code: 'MAD', name: 'Moroccan Dirham', symbol: 'د.م.', flag: 'https://flagcdn.com/w40/ma.png', exchangeRate: 10.1 },
-      { code: 'TND', name: 'Tunisian Dinar', symbol: 'د.ت', flag: 'https://flagcdn.com/w40/tn.png', exchangeRate: 3.12 },
-      { code: 'DZD', name: 'Algerian Dinar', symbol: 'د.ج', flag: 'https://flagcdn.com/w40/dz.png', exchangeRate: 134 },
-      { code: 'LKR', name: 'Sri Lankan Rupee', symbol: 'Rs', flag: 'https://flagcdn.com/w40/lk.png', exchangeRate: 300 },
-      { code: 'NPR', name: 'Nepalese Rupee', symbol: 'रु', flag: 'https://flagcdn.com/w40/np.png', exchangeRate: 133 },
-      { code: 'MMK', name: 'Myanmar Kyat', symbol: 'K', flag: 'https://flagcdn.com/w40/mm.png', exchangeRate: 2100 },
-      { code: 'KHR', name: 'Cambodian Riel', symbol: '៛', flag: 'https://flagcdn.com/w40/kh.png', exchangeRate: 4100 },
-      { code: 'LAK', name: 'Lao Kip', symbol: '₭', flag: 'https://flagcdn.com/w40/la.png', exchangeRate: 22000 },
-      { code: 'MNT', name: 'Mongolian Tugrik', symbol: '₮', flag: 'https://flagcdn.com/w40/mn.png', exchangeRate: 3400 },
-      { code: 'UZS', name: 'Uzbekistani Som', symbol: 'soʻm', flag: 'https://flagcdn.com/w40/uz.png', exchangeRate: 12700 },
-      { code: 'KZT', name: 'Kazakhstani Tenge', symbol: '₸', flag: 'https://flagcdn.com/w40/kz.png', exchangeRate: 445 },
-      { code: 'AZN', name: 'Azerbaijani Manat', symbol: '₼', flag: 'https://flagcdn.com/w40/az.png', exchangeRate: 1.7 },
-      { code: 'GEL', name: 'Georgian Lari', symbol: '₾', flag: 'https://flagcdn.com/w40/ge.png', exchangeRate: 2.68 },
-      { code: 'AMD', name: 'Armenian Dram', symbol: '֏', flag: 'https://flagcdn.com/w40/am.png', exchangeRate: 388 },
-      { code: 'BYN', name: 'Belarusian Ruble', symbol: 'Br', flag: 'https://flagcdn.com/w40/by.png', exchangeRate: 3.27 },
-      { code: 'MDL', name: 'Moldovan Leu', symbol: 'L', flag: 'https://flagcdn.com/w40/md.png', exchangeRate: 17.7 },
-      { code: 'UAH', name: 'Ukrainian Hryvnia', symbol: '₴', flag: 'https://flagcdn.com/w40/ua.png', exchangeRate: 38.5 },
-      { code: 'RON', name: 'Romanian Leu', symbol: 'lei', flag: 'https://flagcdn.com/w40/ro.png', exchangeRate: 4.58 },
-      { code: 'BGN', name: 'Bulgarian Lev', symbol: 'лв', flag: 'https://flagcdn.com/w40/bg.png', exchangeRate: 1.8 },
-      { code: 'HRK', name: 'Croatian Kuna', symbol: 'kn', flag: 'https://flagcdn.com/w40/hr.png', exchangeRate: 7.1 },
-      { code: 'RSD', name: 'Serbian Dinar', symbol: 'дин.', flag: 'https://flagcdn.com/w40/rs.png', exchangeRate: 107 },
-      { code: 'ALL', name: 'Albanian Lek', symbol: 'L', flag: 'https://flagcdn.com/w40/al.png', exchangeRate: 93.5 },
-      { code: 'MKD', name: 'Macedonian Denar', symbol: 'ден', flag: 'https://flagcdn.com/w40/mk.png', exchangeRate: 56.8 },
-      { code: 'BAM', name: 'Bosnian Mark', symbol: 'KM', flag: 'https://flagcdn.com/w40/ba.png', exchangeRate: 1.8 },
-      { code: 'ISK', name: 'Icelandic Króna', symbol: 'kr', flag: 'https://flagcdn.com/w40/is.png', exchangeRate: 138 }
+      { code: 'USD', name: 'US Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/us.png', exchangeRate: 1.0000 },
+      { code: 'EUR', name: 'Euro', symbol: '€', flag: 'https://flagcdn.com/w40/eu.png', exchangeRate: 0.9200 },
+      { code: 'GBP', name: 'British Pound', symbol: '£', flag: 'https://flagcdn.com/w40/gb.png', exchangeRate: 0.7900 },
+      { code: 'JPY', name: 'Japanese Yen', symbol: '¥', flag: 'https://flagcdn.com/w40/jp.png', exchangeRate: 150.5000 },
+      { code: 'CAD', name: 'Canadian Dollar', symbol: 'C$', flag: 'https://flagcdn.com/w40/ca.png', exchangeRate: 1.3600 },
+      { code: 'AUD', name: 'Australian Dollar', symbol: 'A$', flag: 'https://flagcdn.com/w40/au.png', exchangeRate: 1.5200 },
+      { code: 'CHF', name: 'Swiss Franc', symbol: 'Fr', flag: 'https://flagcdn.com/w40/ch.png', exchangeRate: 0.8800 },
+      { code: 'CNY', name: 'Chinese Yuan', symbol: '¥', flag: 'https://flagcdn.com/w40/cn.png', exchangeRate: 7.2400 },
+      { code: 'INR', name: 'Indian Rupee', symbol: '₹', flag: 'https://flagcdn.com/w40/in.png', exchangeRate: 83.5000 },
+      { code: 'BRL', name: 'Brazilian Real', symbol: 'R$', flag: 'https://flagcdn.com/w40/br.png', exchangeRate: 5.0500 },
+      { code: 'MXN', name: 'Mexican Peso', symbol: '$', flag: 'https://flagcdn.com/w40/mx.png', exchangeRate: 16.8000 },
+      { code: 'KRW', name: 'South Korean Won', symbol: '₩', flag: 'https://flagcdn.com/w40/kr.png', exchangeRate: 1330.0000 },
+      { code: 'SGD', name: 'Singapore Dollar', symbol: 'S$', flag: 'https://flagcdn.com/w40/sg.png', exchangeRate: 1.3400 },
+      { code: 'NZD', name: 'New Zealand Dollar', symbol: 'NZ$', flag: 'https://flagcdn.com/w40/nz.png', exchangeRate: 1.6400 },
+      { code: 'HKD', name: 'Hong Kong Dollar', symbol: 'HK$', flag: 'https://flagcdn.com/w40/hk.png', exchangeRate: 7.8200 },
+      { code: 'SEK', name: 'Swedish Krona', symbol: 'kr', flag: 'https://flagcdn.com/w40/se.png', exchangeRate: 10.5000 },
+      { code: 'NOK', name: 'Norwegian Krone', symbol: 'kr', flag: 'https://flagcdn.com/w40/no.png', exchangeRate: 10.7000 },
+      { code: 'DKK', name: 'Danish Krone', symbol: 'kr', flag: 'https://flagcdn.com/w40/dk.png', exchangeRate: 6.8600 },
+      { code: 'PLN', name: 'Polish Zloty', symbol: 'zł', flag: 'https://flagcdn.com/w40/pl.png', exchangeRate: 4.0000 },
+      { code: 'TRY', name: 'Turkish Lira', symbol: '₺', flag: 'https://flagcdn.com/w40/tr.png', exchangeRate: 32.0000 },
+      { code: 'RUB', name: 'Russian Ruble', symbol: '₽', flag: 'https://flagcdn.com/w40/ru.png', exchangeRate: 92.0000 },
+      { code: 'ZAR', name: 'South African Rand', symbol: 'R', flag: 'https://flagcdn.com/w40/za.png', exchangeRate: 18.5000 },
+      { code: 'AED', name: 'UAE Dirham', symbol: 'د.إ', flag: 'https://flagcdn.com/w40/ae.png', exchangeRate: 3.6700 },
+      { code: 'SAR', name: 'Saudi Riyal', symbol: '﷼', flag: 'https://flagcdn.com/w40/sa.png', exchangeRate: 3.7500 },
+      { code: 'ILS', name: 'Israeli Shekel', symbol: '₪', flag: 'https://flagcdn.com/w40/il.png', exchangeRate: 3.7000 },
+      { code: 'MYR', name: 'Malaysian Ringgit', symbol: 'RM', flag: 'https://flagcdn.com/w40/my.png', exchangeRate: 4.6900 },
+      { code: 'THB', name: 'Thai Baht', symbol: '฿', flag: 'https://flagcdn.com/w40/th.png', exchangeRate: 36.5000 },
+      { code: 'VND', name: 'Vietnamese Dong', symbol: '₫', flag: 'https://flagcdn.com/w40/vn.png', exchangeRate: 25400.0000 },
+      { code: 'IDR', name: 'Indonesian Rupiah', symbol: 'Rp', flag: 'https://flagcdn.com/w40/id.png', exchangeRate: 15600.0000 },
+      { code: 'PHP', name: 'Philippine Peso', symbol: '₱', flag: 'https://flagcdn.com/w40/ph.png', exchangeRate: 56.0000 },
+      { code: 'PKR', name: 'Pakistani Rupee', symbol: '₨', flag: 'https://flagcdn.com/w40/pk.png', exchangeRate: 278.0000 },
+      { code: 'BDT', name: 'Bangladeshi Taka', symbol: '৳', flag: 'https://flagcdn.com/w40/bd.png', exchangeRate: 110.0000 },
+      { code: 'NGN', name: 'Nigerian Naira', symbol: '₦', flag: 'https://flagcdn.com/w40/ng.png', exchangeRate: 1480.0000 },
+      { code: 'KES', name: 'Kenyan Shilling', symbol: 'KSh', flag: 'https://flagcdn.com/w40/ke.png', exchangeRate: 132.0000 },
+      { code: 'EGP', name: 'Egyptian Pound', symbol: 'E£', flag: 'https://flagcdn.com/w40/eg.png', exchangeRate: 48.0000 },
+      { code: 'GHS', name: 'Ghanaian Cedi', symbol: '₵', flag: 'https://flagcdn.com/w40/gh.png', exchangeRate: 12.5000 },
+      { code: 'TZS', name: 'Tanzanian Shilling', symbol: 'TSh', flag: 'https://flagcdn.com/w40/tz.png', exchangeRate: 2600.0000 },
+      { code: 'UGX', name: 'Ugandan Shilling', symbol: 'USh', flag: 'https://flagcdn.com/w40/ug.png', exchangeRate: 3800.0000 },
+      { code: 'RWF', name: 'Rwandan Franc', symbol: 'FRw', flag: 'https://flagcdn.com/w40/rw.png', exchangeRate: 1300.0000 },
+      { code: 'ZMW', name: 'Zambian Kwacha', symbol: 'ZK', flag: 'https://flagcdn.com/w40/zm.png', exchangeRate: 25.0000 },
+      { code: 'MAD', name: 'Moroccan Dirham', symbol: 'DH', flag: 'https://flagcdn.com/w40/ma.png', exchangeRate: 10.0000 },
+      { code: 'DZD', name: 'Algerian Dinar', symbol: 'د.ج', flag: 'https://flagcdn.com/w40/dz.png', exchangeRate: 135.0000 },
+      { code: 'TND', name: 'Tunisian Dinar', symbol: 'DT', flag: 'https://flagcdn.com/w40/tn.png', exchangeRate: 3.1000 },
+      { code: 'LYD', name: 'Libyan Dinar', symbol: 'LD', flag: 'https://flagcdn.com/w40/ly.png', exchangeRate: 4.8000 },
+      { code: 'SDG', name: 'Sudanese Pound', symbol: '£', flag: 'https://flagcdn.com/w40/sd.png', exchangeRate: 600.0000 },
+      { code: 'ETB', name: 'Ethiopian Birr', symbol: 'Br', flag: 'https://flagcdn.com/w40/et.png', exchangeRate: 56.0000 },
+      { code: 'SOS', name: 'Somali Shilling', symbol: 'Sh', flag: 'https://flagcdn.com/w40/so.png', exchangeRate: 570.0000 },
+      { code: 'DJF', name: 'Djiboutian Franc', symbol: 'Fdj', flag: 'https://flagcdn.com/w40/dj.png', exchangeRate: 178.0000 },
+      { code: 'KMF', name: 'Comorian Franc', symbol: 'CF', flag: 'https://flagcdn.com/w40/km.png', exchangeRate: 450.0000 },
+      { code: 'MUR', name: 'Mauritian Rupee', symbol: '₨', flag: 'https://flagcdn.com/w40/mu.png', exchangeRate: 46.0000 },
+      { code: 'SCR', name: 'Seychellois Rupee', symbol: '₨', flag: 'https://flagcdn.com/w40/sc.png', exchangeRate: 14.0000 },
+      { code: 'CDF', name: 'Congolese Franc', symbol: 'FC', flag: 'https://flagcdn.com/w40/cd.png', exchangeRate: 2800.0000 },
+      { code: 'AOA', name: 'Angolan Kwanza', symbol: 'Kz', flag: 'https://flagcdn.com/w40/ao.png', exchangeRate: 830.0000 },
+      { code: 'BWP', name: 'Botswana Pula', symbol: 'P', flag: 'https://flagcdn.com/w40/bw.png', exchangeRate: 13.5000 },
+      { code: 'NAD', name: 'Namibian Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/na.png', exchangeRate: 18.5000 },
+      { code: 'MZN', name: 'Mozambican Metical', symbol: 'MT', flag: 'https://flagcdn.com/w40/mz.png', exchangeRate: 64.0000 },
+      { code: 'MWK', name: 'Malawian Kwacha', symbol: 'MK', flag: 'https://flagcdn.com/w40/mw.png', exchangeRate: 1700.0000 },
+      { code: 'ZWL', name: 'Zimbabwean Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/zw.png', exchangeRate: 360.0000 },
+      { code: 'AFN', name: 'Afghan Afghani', symbol: '؋', flag: 'https://flagcdn.com/w40/af.png', exchangeRate: 71.0000 },
+      { code: 'PKR', name: 'Pakistani Rupee', symbol: '₨', flag: 'https://flagcdn.com/w40/pk.png', exchangeRate: 278.0000 },
+      { code: 'LKR', name: 'Sri Lankan Rupee', symbol: 'Rs', flag: 'https://flagcdn.com/w40/lk.png', exchangeRate: 300.0000 },
+      { code: 'NPR', name: 'Nepalese Rupee', symbol: 'Rs', flag: 'https://flagcdn.com/w40/np.png', exchangeRate: 133.0000 },
+      { code: 'BTN', name: 'Bhutanese Ngultrum', symbol: 'Nu', flag: 'https://flagcdn.com/w40/bt.png', exchangeRate: 83.5000 },
+      { code: 'MMK', name: 'Myanmar Kyat', symbol: 'K', flag: 'https://flagcdn.com/w40/mm.png', exchangeRate: 2100.0000 },
+      { code: 'KHR', name: 'Cambodian Riel', symbol: '៛', flag: 'https://flagcdn.com/w40/kh.png', exchangeRate: 4100.0000 },
+      { code: 'LAK', name: 'Lao Kip', symbol: '₭', flag: 'https://flagcdn.com/w40/la.png', exchangeRate: 21000.0000 },
+      { code: 'MNT', name: 'Mongolian Tugrik', symbol: '₮', flag: 'https://flagcdn.com/w40/mn.png', exchangeRate: 3400.0000 },
+      { code: 'KZT', name: 'Kazakhstani Tenge', symbol: '₸', flag: 'https://flagcdn.com/w40/kz.png', exchangeRate: 450.0000 },
+      { code: 'UZS', name: 'Uzbekistani Som', symbol: 'soʻm', flag: 'https://flagcdn.com/w40/uz.png', exchangeRate: 12600.0000 },
+      { code: 'TJS', name: 'Tajikistani Somoni', symbol: 'SM', flag: 'https://flagcdn.com/w40/tj.png', exchangeRate: 10.9000 },
+      { code: 'KGS', name: 'Kyrgyzstani Som', symbol: 'с', flag: 'https://flagcdn.com/w40/kg.png', exchangeRate: 89.0000 },
+      { code: 'TMT', name: 'Turkmenistan Manat', symbol: 'm', flag: 'https://flagcdn.com/w40/tm.png', exchangeRate: 3.5000 },
+      { code: 'AZN', name: 'Azerbaijani Manat', symbol: '₼', flag: 'https://flagcdn.com/w40/az.png', exchangeRate: 1.7000 },
+      { code: 'GEL', name: 'Georgian Lari', symbol: '₾', flag: 'https://flagcdn.com/w40/ge.png', exchangeRate: 2.6800 },
+      { code: 'AMD', name: 'Armenian Dram', symbol: '֏', flag: 'https://flagcdn.com/w40/am.png', exchangeRate: 405.0000 },
+      { code: 'MDL', name: 'Moldovan Leu', symbol: 'L', flag: 'https://flagcdn.com/w40/md.png', exchangeRate: 17.8000 },
+      { code: 'BYN', name: 'Belarusian Ruble', symbol: 'Br', flag: 'https://flagcdn.com/w40/by.png', exchangeRate: 3.2500 },
+      { code: 'UAH', name: 'Ukrainian Hryvnia', symbol: '₴', flag: 'https://flagcdn.com/w40/ua.png', exchangeRate: 38.5000 },
+      { code: 'RON', name: 'Romanian Leu', symbol: 'lei', flag: 'https://flagcdn.com/w40/ro.png', exchangeRate: 4.5600 },
+      { code: 'BGN', name: 'Bulgarian Lev', symbol: 'лв', flag: 'https://flagcdn.com/w40/bg.png', exchangeRate: 1.8000 },
+      { code: 'RSD', name: 'Serbian Dinar', symbol: 'дин', flag: 'https://flagcdn.com/w40/rs.png', exchangeRate: 107.0000 },
+      { code: 'HRK', name: 'Croatian Kuna', symbol: 'kn', flag: 'https://flagcdn.com/w40/hr.png', exchangeRate: 7.5000 },
+      { code: 'HUF', name: 'Hungarian Forint', symbol: 'Ft', flag: 'https://flagcdn.com/w40/hu.png', exchangeRate: 360.0000 },
+      { code: 'CZK', name: 'Czech Koruna', symbol: 'Kč', flag: 'https://flagcdn.com/w40/cz.png', exchangeRate: 23.0000 },
+      { code: 'ISK', name: 'Icelandic Króna', symbol: 'kr', flag: 'https://flagcdn.com/w40/is.png', exchangeRate: 138.0000 },
+      { code: 'ALL', name: 'Albanian Lek', symbol: 'L', flag: 'https://flagcdn.com/w40/al.png', exchangeRate: 94.0000 },
+      { code: 'MKD', name: 'Macedonian Denar', symbol: 'ден', flag: 'https://flagcdn.com/w40/mk.png', exchangeRate: 56.5000 },
+      { code: 'BAM', name: 'Bosnian Convertible Mark', symbol: 'KM', flag: 'https://flagcdn.com/w40/ba.png', exchangeRate: 1.8000 },
+      { code: 'EUR', name: 'Euro', symbol: '€', flag: 'https://flagcdn.com/w40/eu.png', exchangeRate: 0.9200 }
     ];
-
-    // Optionally fetch real exchange rates from an API to update the rates
-    try {
-      const exchangeResponse = await axios.get('https://api.exchangerate-api.com/v4/latest/USD', { timeout: 3000 });
-      if (exchangeResponse.data && exchangeResponse.data.rates) {
-        const rates = exchangeResponse.data.rates;
-        fiatCurrencies.forEach(currency => {
-          if (rates[currency.code]) {
-            currency.exchangeRate = rates[currency.code];
-          }
-        });
-      }
-    } catch (apiError) {
-      console.warn('Could not fetch live exchange rates, using default rates:', apiError.message);
-    }
 
     res.status(200).json({
       status: 'success',
       currencies: fiatCurrencies
     });
   } catch (error) {
-    console.error('Error fetching fiat currencies:', error);
-    // Fallback response with basic currencies
-    res.status(200).json({
-      status: 'success',
-      currencies: [
-        { code: 'USD', name: 'US Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/us.png', exchangeRate: 1 },
-        { code: 'EUR', name: 'Euro', symbol: '€', flag: 'https://flagcdn.com/w40/eu.png', exchangeRate: 0.92 },
-        { code: 'GBP', name: 'British Pound', symbol: '£', flag: 'https://flagcdn.com/w40/gb.png', exchangeRate: 0.79 },
-        { code: 'JPY', name: 'Japanese Yen', symbol: '¥', flag: 'https://flagcdn.com/w40/jp.png', exchangeRate: 150.5 },
-        { code: 'KES', name: 'Kenyan Shilling', symbol: 'KSh', flag: 'https://flagcdn.com/w40/ke.png', exchangeRate: 130 }
-      ]
+    console.error('Error in /api/fiat-currencies:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch fiat currencies',
+      error: error.message
     });
   }
 });
+
+
+
+
+
+
+
+
 
 
 // Error handling middleware
