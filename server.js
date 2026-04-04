@@ -22339,16 +22339,7 @@ app.post('/api/users/preferences/save', protect, [
 });
 
 
-const getOSFromUserAgent = (userAgent) => {
-  if (!userAgent) return 'Unknown';
-  if (/Windows NT 10.0/i.test(userAgent)) return 'Windows 10';
-  if (/Windows NT 6.1/i.test(userAgent)) return 'Windows 7';
-  if (/Mac OS X/i.test(userAgent)) return 'macOS';
-  if (/iPhone|iPad|iPod/i.test(userAgent)) return 'iOS';
-  if (/Android/i.test(userAgent)) return 'Android';
-  if (/Linux/i.test(userAgent)) return 'Linux';
-  return 'Unknown';
-};
+
 
 const getBrowserFromUserAgent = (userAgent) => {
   if (!userAgent) return 'Unknown';
