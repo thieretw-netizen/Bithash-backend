@@ -4126,8 +4126,7 @@ const calculateReferralCommissions = async (investment) => {
 
 
 
-// Enhanced 
-Email service with professional, highly visible templates - Edge to Edge Layout
+// Enhanced Email service with professional, highly visible templates - Edge to Edge Layout
 const sendAutomatedEmail = async (user, action, data = {}) => {
   try {
     // Helper function to get real-time exchange rate from multiple APIs
