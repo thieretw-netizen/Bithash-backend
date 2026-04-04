@@ -23354,191 +23354,9 @@ app.use((req, res) => {
   });
 });
 
-// Create HTTP server and Socket.IO
+// Create HTTP server
 const PORT = process.env.PORT || 3000;
 const httpServer = createServer(app);
-const io = new Server(httpServer, {
-  cors: {
-    origin: ['https://bithhash.vercel.app', 'https://website-backendd-1.onrender.com'],
-    methods: ['GET', 'POST']
-  }
-});
-
-// Setup Socket.IO with real-time balance updates
-const setupSocketIO = (server) => {
-  const io = new Server(server, {
-    cors: {
-      origin: ['https://bithhash.vercel.app', 'https://website-backendd-1.onrender.com', 'https://bithash-rental.vercel.app'],
-      methods: ['GET', 'POST'],
-      credentials: true
-    }
-  });
-
-  io.use(async (socket, next) => {
-    try {
-      const token = socket.handshake.auth.token;
-      if (!token) {
-        return next(new Error('Authentication required'));
-      }
-      const decoded = verifyJWT(token);
-      const user = await User.findById(decoded.id);
-      if (!user) {
-        return next(new Error('User not found'));
-      }
-      socket.userId = decoded.id;
-      next();
-    } catch (err) {
-      next(new Error('Invalid token'));
-    }
-  });
-
-  io.on('connection', async (socket) => {
-    console.log(`Socket connected: ${socket.id} for user ${socket.userId}`);
-    
-    // Join user-specific room
-    socket.join(`user_${socket.userId}`);
-    
-    // Send initial balances
-    const user = await User.findById(socket.userId).select('balances');
-    if (user) {
-      socket.emit('balance_update', {
-        main: user.balances.main,
-        active: user.balances.active,
-        matured: user.balances.matured
-      });
-    }
-    
-    // Send initial asset balances
-    const userAssetBalDoc = await UserAssetBalance.findOne({ user: socket.userId });
-    if (userAssetBalDoc) {
-      const cryptoPrices = await fetchAllCryptoPrices();
-      const assetsWithValues = [];
-      for (const [asset, balance] of Object.entries(userAssetBalDoc.balances)) {
-        if (balance > 0) {
-          const assetIdMap = {
-            'btc': 'bitcoin', 'eth': 'ethereum', 'usdt': 'tether', 'bnb': 'binancecoin',
-            'sol': 'solana', 'usdc': 'usd-coin', 'xrp': 'ripple', 'doge': 'dogecoin',
-            'ada': 'cardano', 'shib': 'shiba-inu', 'avax': 'avalanche-2', 'dot': 'polkadot',
-            'trx': 'tron', 'link': 'chainlink', 'matic': 'matic-network', 'wbtc': 'wrapped-bitcoin',
-            'ltc': 'litecoin', 'near': 'near', 'uni': 'uniswap', 'bch': 'bitcoin-cash'
-          };
-          const coinId = assetIdMap[asset];
-          const currentPrice = cryptoPrices[coinId]?.usd || 0;
-          
-          assetsWithValues.push({
-            symbol: asset,
-            balance: balance,
-            currentValue: balance * currentPrice,
-            currentPrice: currentPrice
-          });
-        }
-      }
-      socket.emit('asset_balances_update', assetsWithValues);
-    }
-    
-    // Send user preferences
-    const userPrefs = await UserPreference.findOne({ user: socket.userId });
-    if (userPrefs) {
-      socket.emit('preferences_update', {
-        displayAsset: userPrefs.displayAsset,
-        fiatCurrency: userPrefs.currency,
-        language: userPrefs.language
-      });
-    }
-    
-    // Real-time price fluctuation updates (every 30 seconds)
-    const priceInterval = setInterval(async () => {
-      try {
-        const cryptoPrices = await fetchAllCryptoPrices();
-        const userAssetBalDoc = await UserAssetBalance.findOne({ user: socket.userId });
-        
-        if (userAssetBalDoc) {
-          let totalMainValue = 0;
-          const assetIdMap = {
-            'btc': 'bitcoin', 'eth': 'ethereum', 'usdt': 'tether', 'bnb': 'binancecoin',
-            'sol': 'solana', 'usdc': 'usd-coin', 'xrp': 'ripple', 'doge': 'dogecoin',
-            'ada': 'cardano', 'shib': 'shiba-inu', 'avax': 'avalanche-2', 'dot': 'polkadot',
-            'trx': 'tron', 'link': 'chainlink', 'matic': 'matic-network', 'wbtc': 'wrapped-bitcoin',
-            'ltc': 'litecoin', 'near': 'near', 'uni': 'uniswap', 'bch': 'bitcoin-cash'
-          };
-          
-          // Calculate total value from asset balances
-          for (const [asset, balance] of Object.entries(userAssetBalDoc.balances)) {
-            if (balance > 0 && assetIdMap[asset]) {
-              const price = cryptoPrices[assetIdMap[asset]]?.usd || 0;
-              totalMainValue += balance * price;
-            }
-          }
-          
-          // Send PnL updates (based on real price changes)
-          // Calculate PnL by comparing to previous values (simplified)
-          socket.emit('pnl_update', {
-            main: { amount: totalMainValue * 0.02, percentage: 2.0 },
-            matured: { amount: totalMainValue * 0.015, percentage: 1.5 }
-          });
-          
-          // Send updated asset balances with new prices
-          const updatedAssets = [];
-          for (const [asset, balance] of Object.entries(userAssetBalDoc.balances)) {
-            if (balance > 0 && assetIdMap[asset]) {
-              const currentPrice = cryptoPrices[assetIdMap[asset]]?.usd || 0;
-              updatedAssets.push({
-                symbol: asset,
-                balance: balance,
-                currentValue: balance * currentPrice,
-                currentPrice: currentPrice
-              });
-            }
-          }
-          socket.emit('asset_balances_update', updatedAssets);
-        }
-        
-        // Send money flow update
-        socket.emit('money_flow_update', {
-          deposits: Math.random() * 10000,
-          withdrawals: Math.random() * 5000,
-          conversions: Math.random() * 3000,
-          investments: Math.random() * 8000
-        });
-        
-      } catch (err) {
-        console.error('Price fluctuation update error:', err);
-      }
-    }, 30000);
-    
-    socket.on('disconnect', () => {
-      clearInterval(priceInterval);
-      console.log(`Socket disconnected: ${socket.id}`);
-    });
-    
-    socket.on('refresh_pnl', async () => {
-      const cryptoPrices = await fetchAllCryptoPrices();
-      const userAssetBalDoc = await UserAssetBalance.findOne({ user: socket.userId });
-      if (userAssetBalDoc) {
-        let totalMainValue = 0;
-        const assetIdMap = {
-          'btc': 'bitcoin', 'eth': 'ethereum', 'usdt': 'tether', 'bnb': 'binancecoin',
-          'sol': 'solana', 'usdc': 'usd-coin', 'xrp': 'ripple', 'doge': 'dogecoin',
-          'ada': 'cardano', 'shib': 'shiba-inu', 'avax': 'avalanche-2', 'dot': 'polkadot',
-          'trx': 'tron', 'link': 'chainlink', 'matic': 'matic-network', 'wbtc': 'wrapped-bitcoin',
-          'ltc': 'litecoin', 'near': 'near', 'uni': 'uniswap', 'bch': 'bitcoin-cash'
-        };
-        for (const [asset, balance] of Object.entries(userAssetBalDoc.balances)) {
-          if (balance > 0 && assetIdMap[asset]) {
-            const price = cryptoPrices[assetIdMap[asset]]?.usd || 0;
-            totalMainValue += balance * price;
-          }
-        }
-        socket.emit('pnl_update', {
-          main: { amount: totalMainValue * 0.02, percentage: 2.0 },
-          matured: { amount: totalMainValue * 0.015, percentage: 1.5 }
-        });
-      }
-    });
-  });
-  
-  return io;
-};
 
 // =============================================
 // IP-BASED PREFERENCE DETECTION FOR FIRST VISITORS
@@ -23786,9 +23604,10 @@ const broadcastStats = async () => {
     };
     
     // Broadcast to all connected Socket.IO clients
-    io.emit('stats-update', stats);
-    
-    console.log(`📡 Broadcasted stats to ${io.engine.clientsCount} clients: ${count.toLocaleString()} investors`);
+    if (io) {
+      io.emit('stats-update', stats);
+      console.log(`📡 Broadcasted stats to ${io.engine.clientsCount} clients: ${count.toLocaleString()} investors`);
+    }
   } catch (err) {
     console.error('Error broadcasting stats:', err);
   }
@@ -23991,44 +23810,229 @@ const setupMarketWebSocket = (server) => {
   });
 };
 
-// Call this after creating your HTTP server
-// setupMarketWebSocket(server);
-
-// Socket.IO connection handler with stats broadcast
-io.on('connection', async (socket) => {
-  console.log('New client connected:', socket.id);
-  
-  // Send current stats immediately to new client
-  const currentStats = await getCurrentStats();
-  socket.emit('stats-update', currentStats);
-  console.log(`📡 Sent initial stats to new client ${socket.id}: ${currentStats.totalInvestors.toLocaleString()} investors`);
-
-  // Verify admin token for admin connections
-  socket.on('authenticate', async (token) => {
-    try {
-      const decoded = verifyJWT(token);
-      if (!decoded.isAdmin) {
-        socket.disconnect();
-        return;
-      }
-
-      const admin = await Admin.findById(decoded.id);
-      if (!admin) {
-        socket.disconnect();
-        return;
-      }
-
-      socket.adminId = admin._id;
-      console.log(`Admin ${admin.email} connected`);
-    } catch (err) {
-      socket.disconnect();
+// Setup Socket.IO with real-time balance updates
+const setupSocketIO = (server) => {
+  const socketIO = new Server(server, {
+    cors: {
+      origin: ['https://bithhash.vercel.app', 'https://website-backendd-1.onrender.com', 'https://bithash-rental.vercel.app'],
+      methods: ['GET', 'POST'],
+      credentials: true
     }
   });
 
-  socket.on('disconnect', () => {
-    console.log('Client disconnected:', socket.id);
+  socketIO.use(async (socket, next) => {
+    try {
+      const token = socket.handshake.auth.token;
+      if (!token) {
+        return next(new Error('Authentication required'));
+      }
+      const decoded = verifyJWT(token);
+      const user = await User.findById(decoded.id);
+      if (!user) {
+        return next(new Error('User not found'));
+      }
+      socket.userId = decoded.id;
+      next();
+    } catch (err) {
+      next(new Error('Invalid token'));
+    }
   });
-});
+
+  socketIO.on('connection', async (socket) => {
+    console.log(`Socket connected: ${socket.id} for user ${socket.userId}`);
+    
+    // Join user-specific room
+    socket.join(`user_${socket.userId}`);
+    
+    // Send initial balances
+    const user = await User.findById(socket.userId).select('balances');
+    if (user) {
+      socket.emit('balance_update', {
+        main: user.balances.main,
+        active: user.balances.active,
+        matured: user.balances.matured
+      });
+    }
+    
+    // Send initial asset balances
+    const userAssetBalDoc = await UserAssetBalance.findOne({ user: socket.userId });
+    if (userAssetBalDoc) {
+      const cryptoPrices = await fetchAllCryptoPrices();
+      const assetsWithValues = [];
+      for (const [asset, balance] of Object.entries(userAssetBalDoc.balances)) {
+        if (balance > 0) {
+          const assetIdMap = {
+            'btc': 'bitcoin', 'eth': 'ethereum', 'usdt': 'tether', 'bnb': 'binancecoin',
+            'sol': 'solana', 'usdc': 'usd-coin', 'xrp': 'ripple', 'doge': 'dogecoin',
+            'ada': 'cardano', 'shib': 'shiba-inu', 'avax': 'avalanche-2', 'dot': 'polkadot',
+            'trx': 'tron', 'link': 'chainlink', 'matic': 'matic-network', 'wbtc': 'wrapped-bitcoin',
+            'ltc': 'litecoin', 'near': 'near', 'uni': 'uniswap', 'bch': 'bitcoin-cash'
+          };
+          const coinId = assetIdMap[asset];
+          const currentPrice = cryptoPrices[coinId]?.usd || 0;
+          
+          assetsWithValues.push({
+            symbol: asset,
+            balance: balance,
+            currentValue: balance * currentPrice,
+            currentPrice: currentPrice
+          });
+        }
+      }
+      socket.emit('asset_balances_update', assetsWithValues);
+    }
+    
+    // Send user preferences
+    const userPrefs = await UserPreference.findOne({ user: socket.userId });
+    if (userPrefs) {
+      socket.emit('preferences_update', {
+        displayAsset: userPrefs.displayAsset,
+        fiatCurrency: userPrefs.currency,
+        language: userPrefs.language
+      });
+    }
+    
+    // Real-time price fluctuation updates (every 30 seconds)
+    const priceInterval = setInterval(async () => {
+      try {
+        const cryptoPrices = await fetchAllCryptoPrices();
+        const userAssetBalDoc = await UserAssetBalance.findOne({ user: socket.userId });
+        
+        if (userAssetBalDoc) {
+          let totalMainValue = 0;
+          const assetIdMap = {
+            'btc': 'bitcoin', 'eth': 'ethereum', 'usdt': 'tether', 'bnb': 'binancecoin',
+            'sol': 'solana', 'usdc': 'usd-coin', 'xrp': 'ripple', 'doge': 'dogecoin',
+            'ada': 'cardano', 'shib': 'shiba-inu', 'avax': 'avalanche-2', 'dot': 'polkadot',
+            'trx': 'tron', 'link': 'chainlink', 'matic': 'matic-network', 'wbtc': 'wrapped-bitcoin',
+            'ltc': 'litecoin', 'near': 'near', 'uni': 'uniswap', 'bch': 'bitcoin-cash'
+          };
+          
+          // Calculate total value from asset balances
+          for (const [asset, balance] of Object.entries(userAssetBalDoc.balances)) {
+            if (balance > 0 && assetIdMap[asset]) {
+              const price = cryptoPrices[assetIdMap[asset]]?.usd || 0;
+              totalMainValue += balance * price;
+            }
+          }
+          
+          // Send PnL updates (based on real price changes)
+          socket.emit('pnl_update', {
+            main: { amount: totalMainValue * 0.02, percentage: 2.0 },
+            matured: { amount: totalMainValue * 0.015, percentage: 1.5 }
+          });
+          
+          // Send updated asset balances with new prices
+          const updatedAssets = [];
+          for (const [asset, balance] of Object.entries(userAssetBalDoc.balances)) {
+            if (balance > 0 && assetIdMap[asset]) {
+              const currentPrice = cryptoPrices[assetIdMap[asset]]?.usd || 0;
+              updatedAssets.push({
+                symbol: asset,
+                balance: balance,
+                currentValue: balance * currentPrice,
+                currentPrice: currentPrice
+              });
+            }
+          }
+          socket.emit('asset_balances_update', updatedAssets);
+        }
+        
+        // Send money flow update
+        socket.emit('money_flow_update', {
+          deposits: Math.random() * 10000,
+          withdrawals: Math.random() * 5000,
+          conversions: Math.random() * 3000,
+          investments: Math.random() * 8000
+        });
+        
+      } catch (err) {
+        console.error('Price fluctuation update error:', err);
+      }
+    }, 30000);
+    
+    socket.on('disconnect', () => {
+      clearInterval(priceInterval);
+      console.log(`Socket disconnected: ${socket.id}`);
+    });
+    
+    socket.on('refresh_pnl', async () => {
+      const cryptoPrices = await fetchAllCryptoPrices();
+      const userAssetBalDoc = await UserAssetBalance.findOne({ user: socket.userId });
+      if (userAssetBalDoc) {
+        let totalMainValue = 0;
+        const assetIdMap = {
+          'btc': 'bitcoin', 'eth': 'ethereum', 'usdt': 'tether', 'bnb': 'binancecoin',
+          'sol': 'solana', 'usdc': 'usd-coin', 'xrp': 'ripple', 'doge': 'dogecoin',
+          'ada': 'cardano', 'shib': 'shiba-inu', 'avax': 'avalanche-2', 'dot': 'polkadot',
+          'trx': 'tron', 'link': 'chainlink', 'matic': 'matic-network', 'wbtc': 'wrapped-bitcoin',
+          'ltc': 'litecoin', 'near': 'near', 'uni': 'uniswap', 'bch': 'bitcoin-cash'
+        };
+        for (const [asset, balance] of Object.entries(userAssetBalDoc.balances)) {
+          if (balance > 0 && assetIdMap[asset]) {
+            const price = cryptoPrices[assetIdMap[asset]]?.usd || 0;
+            totalMainValue += balance * price;
+          }
+        }
+        socket.emit('pnl_update', {
+          main: { amount: totalMainValue * 0.02, percentage: 2.0 },
+          matured: { amount: totalMainValue * 0.015, percentage: 1.5 }
+        });
+      }
+    });
+  });
+  
+  return socketIO;
+};
+
+// Global io variable for Socket.IO
+let io;
+
+// Function to initialize Socket.IO after server is created
+const initializeSocketIO = () => {
+  io = setupSocketIO(httpServer);
+  return io;
+};
+
+// Socket.IO connection handler with stats broadcast (to be called after io is initialized)
+const setupStatsBroadcast = () => {
+  if (!io) return;
+  
+  io.on('connection', async (socket) => {
+    console.log('New client connected:', socket.id);
+    
+    // Send current stats immediately to new client
+    const currentStats = await getCurrentStats();
+    socket.emit('stats-update', currentStats);
+    console.log(`📡 Sent initial stats to new client ${socket.id}: ${currentStats.totalInvestors.toLocaleString()} investors`);
+
+    // Verify admin token for admin connections
+    socket.on('authenticate', async (token) => {
+      try {
+        const decoded = verifyJWT(token);
+        if (!decoded.isAdmin) {
+          socket.disconnect();
+          return;
+        }
+
+        const admin = await Admin.findById(decoded.id);
+        if (!admin) {
+          socket.disconnect();
+          return;
+        }
+
+        socket.adminId = admin._id;
+        console.log(`Admin ${admin.email} connected`);
+      } catch (err) {
+        socket.disconnect();
+      }
+    });
+
+    socket.on('disconnect', () => {
+      console.log('Client disconnected:', socket.id);
+    });
+  });
+};
 
 // Function to automatically complete matured investments
 const processMaturedInvestments = async () => {
@@ -24106,8 +24110,11 @@ processMaturedInvestments();
 // Start the investor growth job
 startInvestorGrowthJob();
 
-// Setup Socket.IO for real-time updates
-setupSocketIO(httpServer);
+// Initialize Socket.IO
+initializeSocketIO();
+
+// Setup stats broadcast
+setupStatsBroadcast();
 
 // IP-based preference detection middleware for first-time visitors
 app.use(async (req, res, next) => {
@@ -24135,6 +24142,9 @@ app.use(async (req, res, next) => {
 const gracefulShutdown = () => {
   console.log('Received shutdown signal. Cleaning up...');
   stopInvestorGrowthJob();
+  if (io) {
+    io.close();
+  }
   process.exit(0);
 };
 
