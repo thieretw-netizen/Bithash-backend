@@ -22341,15 +22341,6 @@ app.post('/api/users/preferences/save', protect, [
 
 
 
-const getBrowserFromUserAgent = (userAgent) => {
-  if (!userAgent) return 'Unknown';
-  if (/Edg/i.test(userAgent)) return 'Edge';
-  if (/Chrome/i.test(userAgent) && !/Edg/i.test(userAgent)) return 'Chrome';
-  if (/Firefox/i.test(userAgent)) return 'Firefox';
-  if (/Safari/i.test(userAgent) && !/Chrome/i.test(userAgent)) return 'Safari';
-  return 'Unknown';
-};
-
 
 
 
