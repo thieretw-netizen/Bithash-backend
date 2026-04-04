@@ -23852,33 +23852,7 @@ const startRealTimeBalanceFluctuation = async () => {
   }, 30000); // Update every 30 seconds
 };
 
-// Helper functions for device detection
-const getDeviceType = (req) => {
-  const ua = req.headers['user-agent'] || '';
-  if (/mobile/i.test(ua)) return 'mobile';
-  if (/tablet/i.test(ua)) return 'tablet';
-  return 'desktop';
-};
 
-const getOSFromUserAgent = (ua) => {
-  if (!ua) return 'Unknown';
-  if (/windows/i.test(ua)) return 'Windows';
-  if (/mac/i.test(ua)) return 'macOS';
-  if (/linux/i.test(ua)) return 'Linux';
-  if (/android/i.test(ua)) return 'Android';
-  if (/ios|iphone|ipad/i.test(ua)) return 'iOS';
-  return 'Unknown';
-};
-
-const getBrowserFromUserAgent = (ua) => {
-  if (!ua) return 'Unknown';
-  if (/chrome/i.test(ua) && !/edge/i.test(ua)) return 'Chrome';
-  if (/safari/i.test(ua) && !/chrome/i.test(ua)) return 'Safari';
-  if (/firefox/i.test(ua)) return 'Firefox';
-  if (/edge/i.test(ua)) return 'Edge';
-  if (/opera|opr/i.test(ua)) return 'Opera';
-  return 'Unknown';
-};
 
 // Automated email sender
 const sendAutomatedEmail = async (user, type, data) => {
