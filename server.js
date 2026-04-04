@@ -22656,7 +22656,7 @@ app.post('/api/users/preferences/save', protect, [
 // =============================================
 // NEW ENDPOINT: POST /api/convert
 // =============================================
-app.post('/api/convert', protect, [
+app.post('/api/convert/assets', protect, [
   body('fromAsset').isString().notEmpty(),
   body('toAsset').isString().notEmpty(),
   body('amount').isFloat({ min: 0.00000001 })
