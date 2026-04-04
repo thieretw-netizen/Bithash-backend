@@ -22338,13 +22338,6 @@ app.post('/api/users/preferences/save', protect, [
   }
 });
 
-// Helper functions for device detection
-const getDeviceType = (req) => {
-  const ua = req.headers['user-agent'] || '';
-  if (/(tablet|ipad|playbook|silk)|(android(?!.*mobi))/i.test(ua)) return 'tablet';
-  if (/(mobi|ipod|iphone|blackberry|opera mini|opera mobi|android|webos|windows phone)/i.test(ua)) return 'mobile';
-  return 'desktop';
-};
 
 const getOSFromUserAgent = (userAgent) => {
   if (!userAgent) return 'Unknown';
