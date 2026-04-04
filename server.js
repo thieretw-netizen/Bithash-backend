@@ -838,10 +838,6 @@ const UserLogSchema = new mongoose.Schema({
     usdValue: Number,
     
     // Buy/Sell (Replacing Conversion)
-    asset: String,
-    assetAmount: Number,
-    assetPrice: Number,
-    usdValue: Number,
     profitLoss: Number,
     profitLossPercentage: Number,
     tradeType: String, // 'buy' or 'sell'
@@ -1621,7 +1617,7 @@ const UserPreferenceSchema = new mongoose.Schema({
     sms: { type: Boolean, default: false }
   },
   language: { type: String, default: 'en' },
-  currency: { type: String, enum: ['USD', 'EUR', 'GBP', 'JPY'], default: 'USD' }
+  fiatCurrency: { type: String, default: 'USD' }
 }, { timestamps: true });
 
 UserPreferenceSchema.index({ user: 1 });
@@ -4112,7 +4108,106 @@ const calculateReferralCommissions = async (investment) => {
   }
 };
 
+// =============================================
+// IP-BASED PREFERENCE DETECTION FUNCTION
+// =============================================
 
+// Function to detect user's location from IP and set default preferences
+const detectAndSetUserPreferencesFromIP = async (userId, req) => {
+  try {
+    // Get the user's IP address
+    const clientIp = getRealClientIP(req);
+    
+    // Default values
+    let detectedLanguage = 'en';
+    let detectedCurrency = 'USD';
+    let detectedCountry = null;
+    
+    if (clientIp && clientIp !== '0.0.0.0' && clientIp !== 'Unknown') {
+      try {
+        // Use ipapi.co for IP-based location detection (free, reliable, no API key needed)
+        const response = await axios.get(`https://ipapi.co/${clientIp}/json/`, { timeout: 5000 });
+        
+        if (response.data && !response.data.error) {
+          const countryCode = response.data.country_code || null;
+          const currencyCode = response.data.currency || null;
+          
+          detectedCountry = countryCode;
+          
+          // Map country code to language
+          const languageMap = {
+            'US': 'en', 'GB': 'en', 'AU': 'en', 'CA': 'en', 'NZ': 'en',
+            'ES': 'es', 'MX': 'es', 'AR': 'es', 'CO': 'es', 'CL': 'es', 'PE': 'es',
+            'FR': 'fr', 'BE': 'fr', 'CH': 'fr', 'CA': 'fr',
+            'DE': 'de', 'AT': 'de', 'CH': 'de',
+            'IT': 'it', 'CH': 'it',
+            'PT': 'pt', 'BR': 'pt',
+            'JP': 'ja',
+            'CN': 'zh',
+            'RU': 'ru',
+            'KR': 'ko',
+            'NL': 'nl',
+            'PL': 'pl',
+            'TR': 'tr'
+          };
+          
+          if (countryCode && languageMap[countryCode]) {
+            detectedLanguage = languageMap[countryCode];
+          }
+          
+          // Map country to preferred currency if available
+          const currencyMap = {
+            'US': 'USD', 'GB': 'GBP', 'EU': 'EUR', 'CA': 'CAD', 'AU': 'AUD',
+            'JP': 'JPY', 'CN': 'CNY', 'CH': 'CHF', 'IN': 'INR', 'BR': 'BRL',
+            'RU': 'RUB', 'KR': 'KRW', 'MX': 'MXN', 'ZA': 'ZAR', 'SG': 'SGD',
+            'NZ': 'NZD', 'TR': 'TRY', 'SE': 'SEK', 'NO': 'NOK', 'DK': 'DKK',
+            'PL': 'PLN', 'IL': 'ILS', 'AE': 'AED', 'SA': 'SAR', 'HK': 'HKD'
+          };
+          
+          if (currencyCode && currencyMap[countryCode]) {
+            detectedCurrency = currencyMap[countryCode];
+          } else if (currencyCode) {
+            detectedCurrency = currencyCode;
+          }
+          
+          console.log(`📍 IP detection for user ${userId}: IP=${clientIp}, Country=${countryCode}, Language=${detectedLanguage}, Currency=${detectedCurrency}`);
+        }
+      } catch (ipError) {
+        console.warn('IP detection failed, using defaults:', ipError.message);
+      }
+    }
+    
+    // Update user's preferences in database
+    await User.findByIdAndUpdate(userId, {
+      $set: {
+        'preferences.language': detectedLanguage,
+        'preferences.fiatCurrency': detectedCurrency
+      }
+    });
+    
+    // Also update UserPreference collection if it exists
+    const existingPref = await UserPreference.findOne({ user: userId });
+    if (existingPref) {
+      existingPref.language = detectedLanguage;
+      existingPref.fiatCurrency = detectedCurrency;
+      await existingPref.save();
+    } else {
+      await UserPreference.create({
+        user: userId,
+        language: detectedLanguage,
+        fiatCurrency: detectedCurrency,
+        displayAsset: 'btc',
+        theme: 'dark',
+        notifications: { email: true, push: true, sms: false }
+      });
+    }
+    
+    return { language: detectedLanguage, fiatCurrency: detectedCurrency, country: detectedCountry };
+  } catch (error) {
+    console.error('Error detecting user preferences from IP:', error);
+    return null;
+  }
+};
 
 
 
@@ -22085,8 +22180,525 @@ fetchMarketData();
 
 
 
+// =============================================
+// POST /api/users/preferences/save - Save user preferences (language, fiat currency)
+// =============================================
+app.post('/api/users/preferences/save', protect, [
+  body('language').optional().isString().isLength({ min: 2, max: 10 }),
+  body('fiatCurrency').optional().isString().isLength({ min: 2, max: 5 }),
+  body('detectedFromIP').optional().isBoolean()
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid input data',
+        errors: errors.array()
+      });
+    }
 
-// Admin Approve Deposit Endpoint - FIXED VERSION
+    const { language, fiatCurrency, detectedFromIP } = req.body;
+    const userId = req.user._id;
+
+    // Update User model preferences
+    const updateData = {};
+    if (language) updateData['preferences.language'] = language;
+    if (fiatCurrency) updateData['preferences.fiatCurrency'] = fiatCurrency;
+
+    if (Object.keys(updateData).length > 0) {
+      await User.findByIdAndUpdate(userId, { $set: updateData });
+    }
+
+    // Update UserPreference collection
+    let userPref = await UserPreference.findOne({ user: userId });
+    if (userPref) {
+      if (language) userPref.language = language;
+      if (fiatCurrency) userPref.fiatCurrency = fiatCurrency;
+      await userPref.save();
+    } else if (language || fiatCurrency) {
+      userPref = await UserPreference.create({
+        user: userId,
+        language: language || 'en',
+        fiatCurrency: fiatCurrency || 'USD',
+        displayAsset: 'btc',
+        theme: 'dark',
+        notifications: { email: true, push: true, sms: false }
+      });
+    }
+
+    // Emit real-time update via Socket.IO
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${userId}`).emit('preferences_update', {
+        language: language || req.user.preferences?.language,
+        fiatCurrency: fiatCurrency || req.user.preferences?.fiatCurrency
+      });
+    }
+
+    // Log the preference save action
+    await UserLog.create({
+      user: userId,
+      username: req.user.email,
+      email: req.user.email,
+      userFullName: `${req.user.firstName} ${req.user.lastName}`,
+      action: 'profile_update',
+      actionCategory: 'profile',
+      ipAddress: getRealClientIP(req),
+      userAgent: req.headers['user-agent'] || 'Unknown',
+      status: 'success',
+      metadata: {
+        changes: {
+          language: language || req.user.preferences?.language,
+          fiatCurrency: fiatCurrency || req.user.preferences?.fiatCurrency,
+          detectedFromIP: detectedFromIP || false
+        }
+      }
+    });
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Preferences saved successfully',
+      data: {
+        language: language || req.user.preferences?.language || 'en',
+        fiatCurrency: fiatCurrency || req.user.preferences?.fiatCurrency || 'USD'
+      }
+    });
+
+  } catch (err) {
+    console.error('Error saving user preferences:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to save preferences',
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+  }
+});
+
+// =============================================
+// POST /api/convert - Convert crypto to crypto
+// =============================================
+app.post('/api/convert', protect, [
+  body('fromAsset').isString().isLength({ min: 2, max: 10 }),
+  body('toAsset').isString().isLength({ min: 2, max: 10 }),
+  body('amount').isFloat({ min: 0.00000001 })
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid input data',
+        errors: errors.array()
+      });
+    }
+
+    const { fromAsset, toAsset, amount } = req.body;
+    const userId = req.user._id;
+    const fromAssetLower = fromAsset.toLowerCase();
+    const toAssetLower = toAsset.toLowerCase();
+
+    // Get user's asset balances
+    let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
+    if (!userAssetBalance) {
+      userAssetBalance = await UserAssetBalance.create({ user: userId, balances: {} });
+    }
+
+    // Check if user has enough balance of fromAsset
+    const fromBalance = userAssetBalance.balances[fromAssetLower] || 0;
+    if (fromBalance < amount) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Insufficient ${fromAsset.toUpperCase()} balance. You have ${fromBalance} ${fromAsset.toUpperCase()}`
+      });
+    }
+
+    // Get real-time prices for both assets
+    const fromPrice = await getCryptoPrice(fromAsset.toUpperCase());
+    const toPrice = await getCryptoPrice(toAsset.toUpperCase());
+
+    if (!fromPrice || !toPrice) {
+      return res.status(503).json({
+        status: 'fail',
+        message: 'Unable to fetch current exchange rates. Please try again.'
+      });
+    }
+
+    // Calculate conversion
+    const usdValue = amount * fromPrice;
+    const toAmount = usdValue / toPrice;
+
+    // Apply small conversion fee (0.1%)
+    const feePercent = 0.001;
+    const feeUSD = usdValue * feePercent;
+    const feeToAsset = feeUSD / toPrice;
+    const finalToAmount = toAmount - feeToAsset;
+
+    // Update balances
+    userAssetBalance.balances[fromAssetLower] = (userAssetBalance.balances[fromAssetLower] || 0) - amount;
+    userAssetBalance.balances[toAssetLower] = (userAssetBalance.balances[toAssetLower] || 0) + finalToAmount;
+    userAssetBalance.lastUpdated = new Date();
+    
+    // Add to history
+    userAssetBalance.history.push({
+      asset: fromAssetLower,
+      type: 'sell',
+      amount: amount,
+      balance: userAssetBalance.balances[fromAssetLower],
+      usdValue: usdValue,
+      price: fromPrice,
+      profitLoss: 0,
+      profitLossPercentage: 0,
+      timestamp: new Date(),
+      transactionId: null
+    });
+    
+    userAssetBalance.history.push({
+      asset: toAssetLower,
+      type: 'buy',
+      amount: finalToAmount,
+      balance: userAssetBalance.balances[toAssetLower],
+      usdValue: usdValue - feeUSD,
+      price: toPrice,
+      profitLoss: 0,
+      profitLossPercentage: 0,
+      timestamp: new Date(),
+      transactionId: null
+    });
+
+    await userAssetBalance.save();
+
+    // Create transaction record
+    const transaction = await Transaction.create({
+      user: userId,
+      type: 'buy',
+      amount: usdValue - feeUSD,
+      asset: toAsset.toUpperCase(),
+      assetAmount: finalToAmount,
+      currency: 'USD',
+      status: 'completed',
+      method: 'INTERNAL',
+      reference: `CONVERT-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+      details: {
+        fromAsset: fromAsset.toUpperCase(),
+        toAsset: toAsset.toUpperCase(),
+        fromAmount: amount,
+        toAmount: finalToAmount,
+        exchangeRate: toPrice / fromPrice,
+        fee: feeUSD,
+        feeAsset: toAsset.toUpperCase(),
+        feeAmount: feeToAsset
+      },
+      fee: feeUSD,
+      netAmount: usdValue - feeUSD,
+      exchangeRateAtTime: toPrice / fromPrice
+    });
+
+    // Also create a sell transaction for the source asset
+    await Transaction.create({
+      user: userId,
+      type: 'sell',
+      amount: usdValue,
+      asset: fromAsset.toUpperCase(),
+      assetAmount: amount,
+      currency: 'USD',
+      status: 'completed',
+      method: 'INTERNAL',
+      reference: `CONVERT-SELL-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+      details: {
+        fromAsset: fromAsset.toUpperCase(),
+        toAsset: toAsset.toUpperCase(),
+        fromAmount: amount,
+        toAmount: finalToAmount,
+        exchangeRate: fromPrice,
+        fee: feeUSD
+      },
+      fee: 0,
+      netAmount: usdValue,
+      exchangeRateAtTime: fromPrice
+    });
+
+    // Record platform revenue from conversion fee
+    await PlatformRevenue.create({
+      source: 'buy_fee',
+      amount: feeUSD,
+      currency: 'USD',
+      transactionId: transaction._id,
+      userId: userId,
+      description: `Conversion fee from ${fromAsset.toUpperCase()} to ${toAsset.toUpperCase()}`,
+      metadata: {
+        fromAsset,
+        toAsset,
+        fromAmount: amount,
+        toAmount: finalToAmount,
+        feePercent: 0.1
+      }
+    });
+
+    // Emit real-time balance update via Socket.IO
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${userId}`).emit('asset_balances_update', [
+        {
+          symbol: fromAssetLower,
+          balance: userAssetBalance.balances[fromAssetLower],
+          id: fromAssetLower
+        },
+        {
+          symbol: toAssetLower,
+          balance: userAssetBalance.balances[toAssetLower],
+          id: toAssetLower
+        }
+      ]);
+    }
+
+    // Log the conversion
+    await UserLog.create({
+      user: userId,
+      username: req.user.email,
+      email: req.user.email,
+      userFullName: `${req.user.firstName} ${req.user.lastName}`,
+      action: 'buy_completed',
+      actionCategory: 'financial',
+      ipAddress: getRealClientIP(req),
+      userAgent: req.headers['user-agent'] || 'Unknown',
+      status: 'success',
+      metadata: {
+        fromAsset: fromAsset.toUpperCase(),
+        toAsset: toAsset.toUpperCase(),
+        fromAmount: amount,
+        toAmount: finalToAmount,
+        usdValue: usdValue,
+        fee: feeUSD
+      },
+      relatedEntity: transaction._id,
+      relatedEntityModel: 'Transaction'
+    });
+
+    res.status(200).json({
+      status: 'success',
+      message: `Successfully converted ${amount} ${fromAsset.toUpperCase()} to ${finalToAmount.toFixed(8)} ${toAsset.toUpperCase()}`,
+      data: {
+        fromAsset: fromAsset.toUpperCase(),
+        toAsset: toAsset.toUpperCase(),
+        fromAmount: amount,
+        toAmount: finalToAmount,
+        rate: toPrice / fromPrice,
+        fee: feeUSD,
+        transactionId: transaction.reference
+      }
+    });
+
+  } catch (err) {
+    console.error('Error converting crypto:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to complete conversion',
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+  }
+});
+
+// =============================================
+// GET /api/fiat-currencies - Get all fiat currencies with exchange rates
+// =============================================
+app.get('/api/fiat-currencies', async (req, res) => {
+  try {
+    // Comprehensive list of all currencies in the world
+    const allCurrencies = [
+      { code: 'USD', name: 'US Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/us.png' },
+      { code: 'EUR', name: 'Euro', symbol: '€', flag: 'https://flagcdn.com/w40/eu.png' },
+      { code: 'GBP', name: 'British Pound', symbol: '£', flag: 'https://flagcdn.com/w40/gb.png' },
+      { code: 'JPY', name: 'Japanese Yen', symbol: '¥', flag: 'https://flagcdn.com/w40/jp.png' },
+      { code: 'CNY', name: 'Chinese Yuan', symbol: '¥', flag: 'https://flagcdn.com/w40/cn.png' },
+      { code: 'AUD', name: 'Australian Dollar', symbol: 'A$', flag: 'https://flagcdn.com/w40/au.png' },
+      { code: 'CAD', name: 'Canadian Dollar', symbol: 'C$', flag: 'https://flagcdn.com/w40/ca.png' },
+      { code: 'CHF', name: 'Swiss Franc', symbol: 'Fr', flag: 'https://flagcdn.com/w40/ch.png' },
+      { code: 'HKD', name: 'Hong Kong Dollar', symbol: 'HK$', flag: 'https://flagcdn.com/w40/hk.png' },
+      { code: 'SGD', name: 'Singapore Dollar', symbol: 'S$', flag: 'https://flagcdn.com/w40/sg.png' },
+      { code: 'INR', name: 'Indian Rupee', symbol: '₹', flag: 'https://flagcdn.com/w40/in.png' },
+      { code: 'BRL', name: 'Brazilian Real', symbol: 'R$', flag: 'https://flagcdn.com/w40/br.png' },
+      { code: 'RUB', name: 'Russian Ruble', symbol: '₽', flag: 'https://flagcdn.com/w40/ru.png' },
+      { code: 'KRW', name: 'South Korean Won', symbol: '₩', flag: 'https://flagcdn.com/w40/kr.png' },
+      { code: 'MXN', name: 'Mexican Peso', symbol: 'MX$', flag: 'https://flagcdn.com/w40/mx.png' },
+      { code: 'ZAR', name: 'South African Rand', symbol: 'R', flag: 'https://flagcdn.com/w40/za.png' },
+      { code: 'TRY', name: 'Turkish Lira', symbol: '₺', flag: 'https://flagcdn.com/w40/tr.png' },
+      { code: 'SEK', name: 'Swedish Krona', symbol: 'kr', flag: 'https://flagcdn.com/w40/se.png' },
+      { code: 'NOK', name: 'Norwegian Krone', symbol: 'kr', flag: 'https://flagcdn.com/w40/no.png' },
+      { code: 'DKK', name: 'Danish Krone', symbol: 'kr', flag: 'https://flagcdn.com/w40/dk.png' },
+      { code: 'PLN', name: 'Polish Zloty', symbol: 'zł', flag: 'https://flagcdn.com/w40/pl.png' },
+      { code: 'AED', name: 'UAE Dirham', symbol: 'د.إ', flag: 'https://flagcdn.com/w40/ae.png' },
+      { code: 'SAR', name: 'Saudi Riyal', symbol: '﷼', flag: 'https://flagcdn.com/w40/sa.png' },
+      { code: 'ILS', name: 'Israeli Shekel', symbol: '₪', flag: 'https://flagcdn.com/w40/il.png' },
+      { code: 'THB', name: 'Thai Baht', symbol: '฿', flag: 'https://flagcdn.com/w40/th.png' },
+      { code: 'VND', name: 'Vietnamese Dong', symbol: '₫', flag: 'https://flagcdn.com/w40/vn.png' },
+      { code: 'IDR', name: 'Indonesian Rupiah', symbol: 'Rp', flag: 'https://flagcdn.com/w40/id.png' },
+      { code: 'MYR', name: 'Malaysian Ringgit', symbol: 'RM', flag: 'https://flagcdn.com/w40/my.png' },
+      { code: 'PHP', name: 'Philippine Peso', symbol: '₱', flag: 'https://flagcdn.com/w40/ph.png' },
+      { code: 'NZD', name: 'New Zealand Dollar', symbol: 'NZ$', flag: 'https://flagcdn.com/w40/nz.png' },
+      { code: 'CZK', name: 'Czech Koruna', symbol: 'Kč', flag: 'https://flagcdn.com/w40/cz.png' },
+      { code: 'HUF', name: 'Hungarian Forint', symbol: 'Ft', flag: 'https://flagcdn.com/w40/hu.png' },
+      { code: 'RON', name: 'Romanian Leu', symbol: 'lei', flag: 'https://flagcdn.com/w40/ro.png' },
+      { code: 'CLP', name: 'Chilean Peso', symbol: 'CLP$', flag: 'https://flagcdn.com/w40/cl.png' },
+      { code: 'COP', name: 'Colombian Peso', symbol: 'COL$', flag: 'https://flagcdn.com/w40/co.png' },
+      { code: 'PEN', name: 'Peruvian Sol', symbol: 'S/', flag: 'https://flagcdn.com/w40/pe.png' },
+      { code: 'ARS', name: 'Argentine Peso', symbol: 'AR$', flag: 'https://flagcdn.com/w40/ar.png' },
+      { code: 'NGN', name: 'Nigerian Naira', symbol: '₦', flag: 'https://flagcdn.com/w40/ng.png' },
+      { code: 'EGP', name: 'Egyptian Pound', symbol: 'E£', flag: 'https://flagcdn.com/w40/eg.png' },
+      { code: 'PKR', name: 'Pakistani Rupee', symbol: '₨', flag: 'https://flagcdn.com/w40/pk.png' },
+      { code: 'BDT', name: 'Bangladeshi Taka', symbol: '৳', flag: 'https://flagcdn.com/w40/bd.png' },
+      { code: 'LKR', name: 'Sri Lankan Rupee', symbol: 'Rs', flag: 'https://flagcdn.com/w40/lk.png' },
+      { code: 'MMK', name: 'Myanmar Kyat', symbol: 'K', flag: 'https://flagcdn.com/w40/mm.png' },
+      { code: 'KHR', name: 'Cambodian Riel', symbol: '៛', flag: 'https://flagcdn.com/w40/kh.png' },
+      { code: 'LAK', name: 'Lao Kip', symbol: '₭', flag: 'https://flagcdn.com/w40/la.png' },
+      { code: 'TWD', name: 'New Taiwan Dollar', symbol: 'NT$', flag: 'https://flagcdn.com/w40/tw.png' },
+      { code: 'ISK', name: 'Icelandic Króna', symbol: 'kr', flag: 'https://flagcdn.com/w40/is.png' },
+      { code: 'HRK', name: 'Croatian Kuna', symbol: 'kn', flag: 'https://flagcdn.com/w40/hr.png' },
+      { code: 'BGN', name: 'Bulgarian Lev', symbol: 'лв', flag: 'https://flagcdn.com/w40/bg.png' },
+      { code: 'RSD', name: 'Serbian Dinar', symbol: 'дин', flag: 'https://flagcdn.com/w40/rs.png' },
+      { code: 'ALL', name: 'Albanian Lek', symbol: 'L', flag: 'https://flagcdn.com/w40/al.png' },
+      { code: 'MKD', name: 'Macedonian Denar', symbol: 'ден', flag: 'https://flagcdn.com/w40/mk.png' },
+      { code: 'BAM', name: 'Bosnian Mark', symbol: 'KM', flag: 'https://flagcdn.com/w40/ba.png' },
+      { code: 'GEL', name: 'Georgian Lari', symbol: '₾', flag: 'https://flagcdn.com/w40/ge.png' },
+      { code: 'AMD', name: 'Armenian Dram', symbol: '֏', flag: 'https://flagcdn.com/w40/am.png' },
+      { code: 'AZN', name: 'Azerbaijani Manat', symbol: '₼', flag: 'https://flagcdn.com/w40/az.png' },
+      { code: 'KZT', name: 'Kazakhstani Tenge', symbol: '₸', flag: 'https://flagcdn.com/w40/kz.png' },
+      { code: 'UZS', name: 'Uzbekistani Som', symbol: 'soʻm', flag: 'https://flagcdn.com/w40/uz.png' },
+      { code: 'TMT', name: 'Turkmenistani Manat', symbol: 'm', flag: 'https://flagcdn.com/w40/tm.png' },
+      { code: 'KGS', name: 'Kyrgyzstani Som', symbol: 'с', flag: 'https://flagcdn.com/w40/kg.png' },
+      { code: 'TJS', name: 'Tajikistani Somoni', symbol: 'SM', flag: 'https://flagcdn.com/w40/tj.png' },
+      { code: 'MNT', name: 'Mongolian Tögrög', symbol: '₮', flag: 'https://flagcdn.com/w40/mn.png' },
+      { code: 'AFN', name: 'Afghan Afghani', symbol: '؋', flag: 'https://flagcdn.com/w40/af.png' },
+      { code: 'IQD', name: 'Iraqi Dinar', symbol: 'ع.د', flag: 'https://flagcdn.com/w40/iq.png' },
+      { code: 'JOD', name: 'Jordanian Dinar', symbol: 'د.ا', flag: 'https://flagcdn.com/w40/jo.png' },
+      { code: 'KWD', name: 'Kuwaiti Dinar', symbol: 'د.ك', flag: 'https://flagcdn.com/w40/kw.png' },
+      { code: 'BHD', name: 'Bahraini Dinar', symbol: 'ب.د', flag: 'https://flagcdn.com/w40/bh.png' },
+      { code: 'QAR', name: 'Qatari Riyal', symbol: '﷼', flag: 'https://flagcdn.com/w40/qa.png' },
+      { code: 'OMR', name: 'Omani Rial', symbol: 'ر.ع.', flag: 'https://flagcdn.com/w40/om.png' },
+      { code: 'YER', name: 'Yemeni Rial', symbol: '﷼', flag: 'https://flagcdn.com/w40/ye.png' },
+      { code: 'LBP', name: 'Lebanese Pound', symbol: 'ل.ل', flag: 'https://flagcdn.com/w40/lb.png' },
+      { code: 'SYP', name: 'Syrian Pound', symbol: '£S', flag: 'https://flagcdn.com/w40/sy.png' },
+      { code: 'GHS', name: 'Ghanaian Cedi', symbol: '₵', flag: 'https://flagcdn.com/w40/gh.png' },
+      { code: 'KES', name: 'Kenyan Shilling', symbol: 'KSh', flag: 'https://flagcdn.com/w40/ke.png' },
+      { code: 'UGX', name: 'Ugandan Shilling', symbol: 'USh', flag: 'https://flagcdn.com/w40/ug.png' },
+      { code: 'TZS', name: 'Tanzanian Shilling', symbol: 'TSh', flag: 'https://flagcdn.com/w40/tz.png' },
+      { code: 'RWF', name: 'Rwandan Franc', symbol: 'FRw', flag: 'https://flagcdn.com/w40/rw.png' },
+      { code: 'MUR', name: 'Mauritian Rupee', symbol: '₨', flag: 'https://flagcdn.com/w40/mu.png' },
+      { code: 'SCR', name: 'Seychellois Rupee', symbol: '₨', flag: 'https://flagcdn.com/w40/sc.png' },
+      { code: 'ETB', name: 'Ethiopian Birr', symbol: 'Br', flag: 'https://flagcdn.com/w40/et.png' },
+      { code: 'MAD', name: 'Moroccan Dirham', symbol: 'د.م.', flag: 'https://flagcdn.com/w40/ma.png' },
+      { code: 'DZD', name: 'Algerian Dinar', symbol: 'د.ج', flag: 'https://flagcdn.com/w40/dz.png' },
+      { code: 'TND', name: 'Tunisian Dinar', symbol: 'د.ت', flag: 'https://flagcdn.com/w40/tn.png' },
+      { code: 'LYD', name: 'Libyan Dinar', symbol: 'ل.د', flag: 'https://flagcdn.com/w40/ly.png' },
+      { code: 'SDG', name: 'Sudanese Pound', symbol: 'ج.س.', flag: 'https://flagcdn.com/w40/sd.png' },
+      { code: 'GMD', name: 'Gambian Dalasi', symbol: 'D', flag: 'https://flagcdn.com/w40/gm.png' },
+      { code: 'SLL', name: 'Sierra Leonean Leone', symbol: 'Le', flag: 'https://flagcdn.com/w40/sl.png' },
+      { code: 'LRD', name: 'Liberian Dollar', symbol: 'L$', flag: 'https://flagcdn.com/w40/lr.png' },
+      { code: 'CVE', name: 'Cape Verdean Escudo', symbol: 'Esc', flag: 'https://flagcdn.com/w40/cv.png' },
+      { code: 'MZN', name: 'Mozambican Metical', symbol: 'MT', flag: 'https://flagcdn.com/w40/mz.png' },
+      { code: 'MWK', name: 'Malawian Kwacha', symbol: 'MK', flag: 'https://flagcdn.com/w40/mw.png' },
+      { code: 'ZMW', name: 'Zambian Kwacha', symbol: 'ZK', flag: 'https://flagcdn.com/w40/zm.png' },
+      { code: 'BWP', name: 'Botswana Pula', symbol: 'P', flag: 'https://flagcdn.com/w40/bw.png' },
+      { code: 'NAD', name: 'Namibian Dollar', symbol: 'N$', flag: 'https://flagcdn.com/w40/na.png' },
+      { code: 'SZL', name: 'Swazi Lilangeni', symbol: 'L', flag: 'https://flagcdn.com/w40/sz.png' },
+      { code: 'LSL', name: 'Lesotho Loti', symbol: 'L', flag: 'https://flagcdn.com/w40/ls.png' }
+    ];
+
+    // Fetch real-time exchange rates from a free API (ExchangeRate-API or similar)
+    let exchangeRates = {};
+    let ratesFetched = false;
+
+    try {
+      // Try multiple free exchange rate APIs
+      const apiSources = [
+        `https://api.exchangerate-api.com/v4/latest/USD`,
+        `https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json`,
+        `https://open.er-api.com/v6/latest/USD`
+      ];
+
+      for (const apiUrl of apiSources) {
+        try {
+          const response = await axios.get(apiUrl, { timeout: 3000 });
+          if (response.data && (response.data.rates || response.data.usd)) {
+            if (response.data.rates) {
+              exchangeRates = response.data.rates;
+            } else if (response.data.usd) {
+              // Convert from usd.json format
+              for (const [currency, rate] of Object.entries(response.data.usd)) {
+                exchangeRates[currency.toUpperCase()] = 1 / rate;
+              }
+            }
+            ratesFetched = true;
+            break;
+          }
+        } catch (apiErr) {
+          console.warn(`Exchange rate API failed: ${apiUrl}`, apiErr.message);
+        }
+      }
+    } catch (rateError) {
+      console.warn('All exchange rate APIs failed, using fallback rates');
+    }
+
+    // Prepare final currencies with exchange rates
+    const currenciesWithRates = allCurrencies.map(currency => {
+      let exchangeRate = 1;
+      if (ratesFetched && exchangeRates[currency.code]) {
+        exchangeRate = exchangeRates[currency.code];
+      } else {
+        // Fallback approximate rates for common currencies
+        const fallbackRates = {
+          'USD': 1, 'EUR': 0.92, 'GBP': 0.79, 'JPY': 150.5, 'CNY': 7.25,
+          'AUD': 1.52, 'CAD': 1.36, 'CHF': 0.91, 'HKD': 7.82, 'SGD': 1.35,
+          'INR': 83.5, 'BRL': 5.05, 'RUB': 92.5, 'KRW': 1350, 'MXN': 16.8,
+          'ZAR': 18.9, 'TRY': 32.5, 'SEK': 10.6, 'NOK': 10.8, 'DKK': 6.9,
+          'PLN': 4.0, 'AED': 3.67, 'SAR': 3.75, 'ILS': 3.65, 'THB': 36.5,
+          'VND': 25400, 'IDR': 15900, 'MYR': 4.73, 'PHP': 56.5, 'NZD': 1.66,
+          'CZK': 23.5, 'HUF': 368, 'RON': 4.62, 'CLP': 950, 'COP': 3900,
+          'PEN': 3.73, 'ARS': 880, 'NGN': 1480, 'EGP': 47.5, 'PKR': 278,
+          'BDT': 110, 'LKR': 300, 'MMK': 2100, 'KHR': 4075, 'LAK': 21500,
+          'TWD': 32.2, 'ISK': 140, 'HRK': 7.53, 'BGN': 1.96, 'RSD': 117,
+          'ALL': 100, 'MKD': 61.5, 'BAM': 1.96, 'GEL': 2.68, 'AMD': 405,
+          'AZN': 1.70, 'KZT': 452, 'UZS': 12600, 'TMT': 3.50, 'KGS': 89.5,
+          'TJS': 10.9, 'MNT': 3400, 'AFN': 71.5, 'IQD': 1310, 'JOD': 0.71,
+          'KWD': 0.307, 'BHD': 0.376, 'QAR': 3.64, 'OMR': 0.384, 'YER': 250,
+          'LBP': 89500, 'SYP': 13000, 'GHS': 12.0, 'KES': 132, 'UGX': 3800,
+          'TZS': 2580, 'RWF': 1280, 'MUR': 46.5, 'SCR': 14.5, 'ETB': 56.8,
+          'MAD': 10.1, 'DZD': 134, 'TND': 3.12, 'LYD': 4.82, 'SDG': 600,
+          'GMD': 68, 'SLL': 22900, 'LRD': 193, 'CVE': 103, 'MZN': 63.8,
+          'MWK': 1740, 'ZMW': 26.8, 'BWP': 13.7, 'NAD': 18.9, 'SZL': 18.9,
+          'LSL': 18.9
+        };
+        exchangeRate = fallbackRates[currency.code] || 1;
+      }
+      
+      return {
+        ...currency,
+        exchangeRate: parseFloat(exchangeRate.toFixed(4))
+      };
+    });
+
+    // Sort by currency code
+    currenciesWithRates.sort((a, b) => a.code.localeCompare(b.code));
+
+    res.status(200).json({
+      status: 'success',
+      count: currenciesWithRates.length,
+      currencies: currenciesWithRates
+    });
+
+  } catch (err) {
+    console.error('Error fetching fiat currencies:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch fiat currencies',
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+  }
+});
+
+// =============================================
+// ENHANCED ADMIN DEPOSIT APPROVAL - Updates asset balances correctly
+// =============================================
 app.post('/api/admin/deposits/:id/approve', adminProtect, [
   body('notes').optional().trim()
 ], async (req, res) => {
@@ -22120,52 +22732,88 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       });
     }
     
-    // If payment method is crypto, add the exact crypto balance to user's asset section
-    const isCryptoPayment = deposit.method && deposit.method !== 'BANK' && deposit.method !== 'CARD' && deposit.method !== 'INTERNAL';
+    // Determine if this is a crypto deposit
+    const isCryptoDeposit = deposit.method && 
+      ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'ADA', 'SHIB', 
+       'AVAX', 'DOT', 'TRX', 'LINK', 'MATIC', 'WBTC', 'LTC', 'NEAR', 'UNI', 'BCH',
+       'XLM', 'ATOM', 'XMR', 'FLOW', 'VET', 'FIL', 'THETA', 'HBAR', 'FTM', 'XTZ']
+      .includes(deposit.method);
     
-    if (isCryptoPayment && deposit.asset && deposit.assetAmount) {
-      // Get or create user asset balance
+    let assetSymbol = null;
+    let assetAmount = null;
+    let cryptoPrice = null;
+    
+    if (isCryptoDeposit) {
+      assetSymbol = deposit.method.toLowerCase();
+      assetAmount = deposit.assetAmount || deposit.amount;
+      
+      // Get real-time crypto price
+      cryptoPrice = await getCryptoPrice(deposit.method);
+      if (cryptoPrice) {
+        deposit.amount = assetAmount * cryptoPrice;
+        await deposit.save();
+      }
+    }
+    
+    // Update user's main balance (USD value)
+    user.balances.main += deposit.amount;
+    await user.save();
+    
+    // If crypto deposit, also update user's asset balances
+    if (isCryptoDeposit && assetSymbol) {
       let userAssetBalance = await UserAssetBalance.findOne({ user: user._id });
       if (!userAssetBalance) {
-        userAssetBalance = new UserAssetBalance({ user: user._id, balances: {} });
+        userAssetBalance = await UserAssetBalance.create({ user: user._id, balances: {} });
       }
       
-      const assetKey = deposit.asset.toLowerCase();
-      const currentBalance = userAssetBalance.balances[assetKey] || 0;
-      userAssetBalance.balances[assetKey] = currentBalance + deposit.assetAmount;
+      // Add to asset balance
+      userAssetBalance.balances[assetSymbol] = (userAssetBalance.balances[assetSymbol] || 0) + assetAmount;
       userAssetBalance.lastUpdated = new Date();
       
       // Add to history
       userAssetBalance.history.push({
-        asset: assetKey,
+        asset: assetSymbol,
         type: 'deposit',
-        amount: deposit.assetAmount,
-        balance: userAssetBalance.balances[assetKey],
+        amount: assetAmount,
+        balance: userAssetBalance.balances[assetSymbol],
         usdValue: deposit.amount,
-        price: deposit.exchangeRateAtTime || (deposit.amount / deposit.assetAmount),
+        price: cryptoPrice || deposit.exchangeRateAtTime || 0,
         timestamp: new Date(),
         transactionId: deposit._id
       });
       
       await userAssetBalance.save();
-      console.log(`✅ Added ${deposit.assetAmount} ${deposit.asset} to user ${user.email} asset balance`);
+      
+      // Create DepositAsset record
+      await DepositAsset.create({
+        user: user._id,
+        asset: assetSymbol,
+        amount: assetAmount,
+        usdValue: deposit.amount,
+        transactionId: deposit._id,
+        status: 'confirmed',
+        confirmedAt: new Date(),
+        metadata: {
+          exchangeRate: cryptoPrice,
+          assetPriceAtTime: cryptoPrice
+        }
+      });
     }
-    
-    // Update user balance (USD value goes to main balance)
-    user.balances.main += deposit.amount;
-    await user.save();
     
     // Update deposit status
     deposit.status = 'completed';
     deposit.processedBy = req.admin._id;
     deposit.processedAt = new Date();
     deposit.adminNotes = notes;
+    if (cryptoPrice) {
+      deposit.exchangeRateAtTime = cryptoPrice;
+    }
     await deposit.save();
 
     // Get device info for exact location
     const deviceInfo = await getUserDeviceInfo(req);
     
-    // ✅ CREATE LOG FOR DEPOSIT APPROVAL - FIXED STRUCTURE
+    // Create log for deposit approval
     await UserLog.create({
       user: user._id,
       username: user.email,
@@ -22210,8 +22858,8 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       status: 'success',
       metadata: {
         amount: deposit.amount,
-        asset: deposit.asset,
-        assetAmount: deposit.assetAmount,
+        asset: deposit.method,
+        assetAmount: assetAmount,
         method: deposit.method,
         reference: deposit.reference,
         adminId: req.admin._id,
@@ -22223,12 +22871,13 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       relatedEntityModel: 'Transaction'
     });
 
-    // ✅ SEND DEPOSIT APPROVED EMAIL
+    // Send deposit approved email
     try {
       await sendAutomatedEmail(user, 'deposit_approved', {
         name: user.firstName,
-        amount: deposit.assetAmount || deposit.amount,
-        asset: deposit.asset || 'USD',
+        amount: assetAmount || deposit.amount,
+        asset: deposit.method || 'USD',
+        usdValue: deposit.amount,
         method: deposit.method,
         reference: deposit.reference,
         newBalance: user.balances.main,
@@ -22237,29 +22886,30 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       console.log(`📧 Deposit approval email sent to ${user.email}`);
     } catch (emailError) {
       console.error('Failed to send deposit approval email:', emailError);
-      // Don't fail the deposit approval if email fails
     }
     
-    // ✅ TRIGGER RESTRICTION CHECK ON TRANSACTION COMPLETION
+    // Trigger restriction check on transaction completion
     await AccountRestrictions.checkAndUpdateRestrictions(user._id, 'transaction_completion');
     
-    // Broadcast updated balances via Socket.IO
-    io.emit('balance_update', {
-      main: user.balances.main,
-      active: user.balances.active,
-      matured: user.balances.matured
-    });
-    
-    // Broadcast asset balances update
-    if (isCryptoPayment && deposit.asset) {
-      const updatedAssetBalance = await UserAssetBalance.findOne({ user: user._id });
-      if (updatedAssetBalance) {
-        const assetData = {
-          symbol: deposit.asset.toLowerCase(),
-          balance: updatedAssetBalance.balances[deposit.asset.toLowerCase()] || 0,
-          usdValue: (updatedAssetBalance.balances[deposit.asset.toLowerCase()] || 0) * (deposit.exchangeRateAtTime || 1)
-        };
-        io.emit('asset_balances_update', [assetData]);
+    // Emit real-time balance updates via Socket.IO
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${user._id}`).emit('balance_update', {
+        main: user.balances.main,
+        active: user.balances.active,
+        matured: user.balances.matured
+      });
+      
+      if (isCryptoDeposit && assetSymbol) {
+        const updatedAssetBalance = await UserAssetBalance.findOne({ user: user._id });
+        if (updatedAssetBalance) {
+          const assetData = {
+            symbol: assetSymbol,
+            balance: updatedAssetBalance.balances[assetSymbol] || 0,
+            id: assetSymbol
+          };
+          io.to(`user_${user._id}`).emit('asset_balances_update', [assetData]);
+        }
       }
     }
     
@@ -22270,9 +22920,10 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
     
     await logActivity('approve-deposit', 'transaction', deposit._id, req.admin._id, 'Admin', req, {
       amount: deposit.amount,
-      asset: deposit.asset,
-      assetAmount: deposit.assetAmount,
-      userId: user._id
+      userId: user._id,
+      isCrypto: isCryptoDeposit,
+      asset: assetSymbol,
+      assetAmount: assetAmount
     });
   } catch (err) {
     console.error('Admin approve deposit error:', err);
@@ -22284,9 +22935,9 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
   }
 });
 
-
-
-// Admin Approve Withdrawal Endpoint - FIXED VERSION
+// =============================================
+// ENHANCED ADMIN WITHDRAWAL APPROVAL - Removes from asset balances
+// =============================================
 app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
   body('notes').optional().trim(),
   body('txid').optional().trim()
@@ -22312,35 +22963,19 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
       });
     }
     
-    // If withdrawal is for crypto, remove from user's asset section
-    const isCryptoWithdrawal = withdrawal.method && withdrawal.method !== 'BANK' && withdrawal.method !== 'CARD';
+    // Determine if this is a crypto withdrawal
+    const isCryptoWithdrawal = withdrawal.method && 
+      ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'ADA', 'SHIB',
+       'AVAX', 'DOT', 'TRX', 'LINK', 'MATIC', 'WBTC', 'LTC', 'NEAR', 'UNI', 'BCH',
+       'XLM', 'ATOM', 'XMR', 'FLOW', 'VET', 'FIL', 'THETA', 'HBAR', 'FTM', 'XTZ']
+      .includes(withdrawal.method);
     
-    if (isCryptoWithdrawal && withdrawal.asset && withdrawal.assetAmount) {
-      const userAssetBalance = await UserAssetBalance.findOne({ user: withdrawal.user._id });
-      if (userAssetBalance) {
-        const assetKey = withdrawal.asset.toLowerCase();
-        const currentBalance = userAssetBalance.balances[assetKey] || 0;
-        
-        if (currentBalance >= withdrawal.assetAmount) {
-          userAssetBalance.balances[assetKey] = currentBalance - withdrawal.assetAmount;
-          userAssetBalance.lastUpdated = new Date();
-          
-          // Add to history
-          userAssetBalance.history.push({
-            asset: assetKey,
-            type: 'withdrawal',
-            amount: -withdrawal.assetAmount,
-            balance: userAssetBalance.balances[assetKey],
-            usdValue: withdrawal.amount,
-            price: withdrawal.exchangeRateAtTime || (withdrawal.amount / withdrawal.assetAmount),
-            timestamp: new Date(),
-            transactionId: withdrawal._id
-          });
-          
-          await userAssetBalance.save();
-          console.log(`✅ Removed ${withdrawal.assetAmount} ${withdrawal.asset} from user ${withdrawal.user.email} asset balance`);
-        }
-      }
+    let assetSymbol = null;
+    let assetAmount = null;
+    
+    if (isCryptoWithdrawal) {
+      assetSymbol = withdrawal.method.toLowerCase();
+      assetAmount = withdrawal.assetAmount || (withdrawal.amount / (withdrawal.exchangeRateAtTime || 1));
     }
     
     // Get real-time crypto price for the withdrawal asset
@@ -22351,13 +22986,38 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
     if (withdrawal.asset && withdrawal.asset !== 'USD') {
       cryptoPrice = await getCryptoPrice(withdrawal.asset);
       if (cryptoPrice) {
-        // Calculate USD value based on crypto amount
         if (withdrawal.assetAmount) {
           usdValue = withdrawal.assetAmount * cryptoPrice;
         } else {
           usdValue = withdrawal.amount;
         }
         feeUsd = (withdrawal.fee || 0) * cryptoPrice;
+      }
+    }
+    
+    // If crypto withdrawal, remove from user's asset balances
+    if (isCryptoWithdrawal && assetSymbol) {
+      let userAssetBalance = await UserAssetBalance.findOne({ user: withdrawal.user._id });
+      if (userAssetBalance) {
+        const currentBalance = userAssetBalance.balances[assetSymbol] || 0;
+        if (currentBalance >= assetAmount) {
+          userAssetBalance.balances[assetSymbol] = currentBalance - assetAmount;
+          userAssetBalance.lastUpdated = new Date();
+          
+          // Add to history
+          userAssetBalance.history.push({
+            asset: assetSymbol,
+            type: 'withdrawal',
+            amount: assetAmount,
+            balance: userAssetBalance.balances[assetSymbol],
+            usdValue: usdValue,
+            price: cryptoPrice || withdrawal.exchangeRateAtTime || 0,
+            timestamp: new Date(),
+            transactionId: withdrawal._id
+          });
+          
+          await userAssetBalance.save();
+        }
       }
     }
     
@@ -22374,7 +23034,7 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
     // Get device info for exact location
     const deviceInfo = await getUserDeviceInfo(req);
     
-    // ✅ CREATE LOG FOR WITHDRAWAL APPROVAL - FIXED STRUCTURE
+    // Create log for withdrawal approval
     await UserLog.create({
       user: withdrawal.user._id,
       username: withdrawal.user.email,
@@ -22433,7 +23093,7 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
       relatedEntityModel: 'Transaction'
     });
 
-    // ✅ SEND WITHDRAWAL APPROVED EMAIL
+    // Send withdrawal approved email
     try {
       await sendAutomatedEmail(withdrawal.user, 'withdrawal_approved', {
         name: withdrawal.user.firstName,
@@ -22451,22 +23111,24 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
       console.log(`📧 Withdrawal approval email sent to ${withdrawal.user.email}`);
     } catch (emailError) {
       console.error('Failed to send withdrawal approval email:', emailError);
-      // Don't fail the withdrawal approval if email fails
     }
     
-    // ✅ TRIGGER RESTRICTION CHECK ON TRANSACTION COMPLETION
+    // Trigger restriction check on transaction completion
     await AccountRestrictions.checkAndUpdateRestrictions(withdrawal.user._id, 'transaction_completion');
     
-    // Broadcast updated asset balances
-    if (isCryptoWithdrawal && withdrawal.asset) {
-      const updatedAssetBalance = await UserAssetBalance.findOne({ user: withdrawal.user._id });
-      if (updatedAssetBalance) {
-        const assetData = {
-          symbol: withdrawal.asset.toLowerCase(),
-          balance: updatedAssetBalance.balances[withdrawal.asset.toLowerCase()] || 0,
-          usdValue: (updatedAssetBalance.balances[withdrawal.asset.toLowerCase()] || 0) * (cryptoPrice || 1)
-        };
-        io.emit('asset_balances_update', [assetData]);
+    // Emit real-time balance updates via Socket.IO
+    const io = req.app.get('io');
+    if (io) {
+      if (isCryptoWithdrawal && assetSymbol) {
+        const updatedAssetBalance = await UserAssetBalance.findOne({ user: withdrawal.user._id });
+        if (updatedAssetBalance) {
+          const assetData = {
+            symbol: assetSymbol,
+            balance: updatedAssetBalance.balances[assetSymbol] || 0,
+            id: assetSymbol
+          };
+          io.to(`user_${withdrawal.user._id}`).emit('asset_balances_update', [assetData]);
+        }
       }
     }
     
@@ -22477,9 +23139,10 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
     
     await logActivity('approve-withdrawal', 'transaction', withdrawal._id, req.admin._id, 'Admin', req, {
       amount: withdrawal.amount,
-      asset: withdrawal.asset,
-      assetAmount: withdrawal.assetAmount,
-      userId: withdrawal.user
+      userId: withdrawal.user._id,
+      isCrypto: isCryptoWithdrawal,
+      asset: assetSymbol,
+      assetAmount: assetAmount
     });
   } catch (err) {
     console.error('Admin approve withdrawal error:', err);
@@ -22492,467 +23155,169 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
 });
 
 // =============================================
-// USER PREFERENCES SAVE ENDPOINT - WITH IP-BASED AUTO-DETECTION
+// ENHANCED BUY ENDPOINT - Adds to asset balances
 // =============================================
-app.post('/api/users/preferences/save', protect, [
-  body('language').optional().isString().isLength({ min: 2, max: 5 }),
-  body('fiatCurrency').optional().isString().isLength({ min: 2, max: 5 }),
-  body('displayAsset').optional().isString(),
-  body('detectedFromIP').optional().isBoolean()
+app.post('/api/buy', protect, [
+  body('asset').isString().isLength({ min: 2, max: 10 }),
+  body('amountUSD').isFloat({ min: 1 }),
+  body('assetAmount').isFloat({ min: 0.00000001 }),
+  body('price').isFloat({ min: 0 })
 ], async (req, res) => {
   try {
-    const { language, fiatCurrency, displayAsset, detectedFromIP } = req.body;
-    const userId = req.user._id;
-    
-    // Find or create user preference
-    let userPref = await UserPreference.findOne({ user: userId });
-    if (!userPref) {
-      userPref = new UserPreference({ user: userId });
-    }
-    
-    // Update language if provided
-    if (language) {
-      userPref.language = language;
-      // Also update user's preferences.language in User model
-      await User.findByIdAndUpdate(userId, {
-        'preferences.language': language
-      });
-    }
-    
-    // Update fiat currency if provided
-    if (fiatCurrency) {
-      userPref.currency = fiatCurrency;
-      // Also update user's preferences.fiatCurrency in User model
-      await User.findByIdAndUpdate(userId, {
-        'preferences.fiatCurrency': fiatCurrency
-      });
-    }
-    
-    // Update display asset if provided
-    if (displayAsset) {
-      userPref.displayAsset = displayAsset;
-    }
-    
-    await userPref.save();
-    
-    // Log the preference save
-    await UserLog.create({
-      user: userId,
-      username: req.user.email,
-      email: req.user.email,
-      userFullName: `${req.user.firstName} ${req.user.lastName}`,
-      action: 'profile_update',
-      actionCategory: 'profile',
-      ipAddress: getRealClientIP(req),
-      userAgent: req.headers['user-agent'] || 'Unknown',
-      status: 'success',
-      metadata: {
-        preferences: { language, fiatCurrency, displayAsset },
-        detectedFromIP: detectedFromIP || false
-      }
-    });
-    
-    // Broadcast via Socket.IO
-    io.emit('preferences_update', {
-      language: userPref.language,
-      fiatCurrency: userPref.currency,
-      displayAsset: userPref.displayAsset
-    });
-    
-    res.status(200).json({
-      status: 'success',
-      message: 'Preferences saved successfully',
-      data: {
-        language: userPref.language,
-        fiatCurrency: userPref.currency,
-        displayAsset: userPref.displayAsset
-      }
-    });
-  } catch (err) {
-    console.error('Save preferences error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to save preferences'
-    });
-  }
-});
-
-// =============================================
-// FIAT CURRENCIES ENDPOINT - ALL CURRENCIES IN THE WORLD
-// =============================================
-// This endpoint returns ALL currencies in the world with real-time exchange rates
-// Using free online APIs for accurate data (no mock/placeholder fallbacks)
-app.get('/api/fiat-currencies', async (req, res) => {
-  try {
-    // Comprehensive list of all world currencies with their symbols and flags
-    const allWorldCurrencies = [
-      { code: 'USD', name: 'US Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/us.png' },
-      { code: 'EUR', name: 'Euro', symbol: '€', flag: 'https://flagcdn.com/w40/eu.png' },
-      { code: 'GBP', name: 'British Pound', symbol: '£', flag: 'https://flagcdn.com/w40/gb.png' },
-      { code: 'JPY', name: 'Japanese Yen', symbol: '¥', flag: 'https://flagcdn.com/w40/jp.png' },
-      { code: 'CNY', name: 'Chinese Yuan', symbol: '¥', flag: 'https://flagcdn.com/w40/cn.png' },
-      { code: 'AUD', name: 'Australian Dollar', symbol: 'A$', flag: 'https://flagcdn.com/w40/au.png' },
-      { code: 'CAD', name: 'Canadian Dollar', symbol: 'C$', flag: 'https://flagcdn.com/w40/ca.png' },
-      { code: 'CHF', name: 'Swiss Franc', symbol: 'Fr', flag: 'https://flagcdn.com/w40/ch.png' },
-      { code: 'INR', name: 'Indian Rupee', symbol: '₹', flag: 'https://flagcdn.com/w40/in.png' },
-      { code: 'SGD', name: 'Singapore Dollar', symbol: 'S$', flag: 'https://flagcdn.com/w40/sg.png' },
-      { code: 'HKD', name: 'Hong Kong Dollar', symbol: 'HK$', flag: 'https://flagcdn.com/w40/hk.png' },
-      { code: 'NZD', name: 'New Zealand Dollar', symbol: 'NZ$', flag: 'https://flagcdn.com/w40/nz.png' },
-      { code: 'KRW', name: 'South Korean Won', symbol: '₩', flag: 'https://flagcdn.com/w40/kr.png' },
-      { code: 'RUB', name: 'Russian Ruble', symbol: '₽', flag: 'https://flagcdn.com/w40/ru.png' },
-      { code: 'BRL', name: 'Brazilian Real', symbol: 'R$', flag: 'https://flagcdn.com/w40/br.png' },
-      { code: 'ZAR', name: 'South African Rand', symbol: 'R', flag: 'https://flagcdn.com/w40/za.png' },
-      { code: 'MXN', name: 'Mexican Peso', symbol: '$', flag: 'https://flagcdn.com/w40/mx.png' },
-      { code: 'TRY', name: 'Turkish Lira', symbol: '₺', flag: 'https://flagcdn.com/w40/tr.png' },
-      { code: 'SEK', name: 'Swedish Krona', symbol: 'kr', flag: 'https://flagcdn.com/w40/se.png' },
-      { code: 'NOK', name: 'Norwegian Krone', symbol: 'kr', flag: 'https://flagcdn.com/w40/no.png' },
-      { code: 'DKK', name: 'Danish Krone', symbol: 'kr', flag: 'https://flagcdn.com/w40/dk.png' },
-      { code: 'PLN', name: 'Polish Zloty', symbol: 'zł', flag: 'https://flagcdn.com/w40/pl.png' },
-      { code: 'THB', name: 'Thai Baht', symbol: '฿', flag: 'https://flagcdn.com/w40/th.png' },
-      { code: 'IDR', name: 'Indonesian Rupiah', symbol: 'Rp', flag: 'https://flagcdn.com/w40/id.png' },
-      { code: 'MYR', name: 'Malaysian Ringgit', symbol: 'RM', flag: 'https://flagcdn.com/w40/my.png' },
-      { code: 'PHP', name: 'Philippine Peso', symbol: '₱', flag: 'https://flagcdn.com/w40/ph.png' },
-      { code: 'VND', name: 'Vietnamese Dong', symbol: '₫', flag: 'https://flagcdn.com/w40/vn.png' },
-      { code: 'AED', name: 'UAE Dirham', symbol: 'د.إ', flag: 'https://flagcdn.com/w40/ae.png' },
-      { code: 'SAR', name: 'Saudi Riyal', symbol: '﷼', flag: 'https://flagcdn.com/w40/sa.png' },
-      { code: 'ILS', name: 'Israeli Shekel', symbol: '₪', flag: 'https://flagcdn.com/w40/il.png' },
-      { code: 'EGP', name: 'Egyptian Pound', symbol: 'E£', flag: 'https://flagcdn.com/w40/eg.png' },
-      { code: 'NGN', name: 'Nigerian Naira', symbol: '₦', flag: 'https://flagcdn.com/w40/ng.png' },
-      { code: 'PKR', name: 'Pakistani Rupee', symbol: '₨', flag: 'https://flagcdn.com/w40/pk.png' },
-      { code: 'BDT', name: 'Bangladeshi Taka', symbol: '৳', flag: 'https://flagcdn.com/w40/bd.png' },
-      { code: 'LKR', name: 'Sri Lankan Rupee', symbol: 'Rs', flag: 'https://flagcdn.com/w40/lk.png' },
-      { code: 'NPR', name: 'Nepalese Rupee', symbol: 'Rs', flag: 'https://flagcdn.com/w40/np.png' },
-      { code: 'UAH', name: 'Ukrainian Hryvnia', symbol: '₴', flag: 'https://flagcdn.com/w40/ua.png' },
-      { code: 'KZT', name: 'Kazakhstani Tenge', symbol: '₸', flag: 'https://flagcdn.com/w40/kz.png' },
-      { code: 'GEL', name: 'Georgian Lari', symbol: '₾', flag: 'https://flagcdn.com/w40/ge.png' },
-      { code: 'AZN', name: 'Azerbaijani Manat', symbol: '₼', flag: 'https://flagcdn.com/w40/az.png' },
-      { code: 'AMD', name: 'Armenian Dram', symbol: '֏', flag: 'https://flagcdn.com/w40/am.png' },
-      { code: 'BYN', name: 'Belarusian Ruble', symbol: 'Br', flag: 'https://flagcdn.com/w40/by.png' },
-      { code: 'MDL', name: 'Moldovan Leu', symbol: 'L', flag: 'https://flagcdn.com/w40/md.png' },
-      { code: 'RON', name: 'Romanian Leu', symbol: 'lei', flag: 'https://flagcdn.com/w40/ro.png' },
-      { code: 'BGN', name: 'Bulgarian Lev', symbol: 'лв', flag: 'https://flagcdn.com/w40/bg.png' },
-      { code: 'RSD', name: 'Serbian Dinar', symbol: 'дин', flag: 'https://flagcdn.com/w40/rs.png' },
-      { code: 'HRK', name: 'Croatian Kuna', symbol: 'kn', flag: 'https://flagcdn.com/w40/hr.png' },
-      { code: 'CZK', name: 'Czech Koruna', symbol: 'Kč', flag: 'https://flagcdn.com/w40/cz.png' },
-      { code: 'HUF', name: 'Hungarian Forint', symbol: 'Ft', flag: 'https://flagcdn.com/w40/hu.png' },
-      { code: 'ISK', name: 'Icelandic Króna', symbol: 'kr', flag: 'https://flagcdn.com/w40/is.png' },
-      { code: 'ARS', name: 'Argentine Peso', symbol: '$', flag: 'https://flagcdn.com/w40/ar.png' },
-      { code: 'CLP', name: 'Chilean Peso', symbol: '$', flag: 'https://flagcdn.com/w40/cl.png' },
-      { code: 'COP', name: 'Colombian Peso', symbol: '$', flag: 'https://flagcdn.com/w40/co.png' },
-      { code: 'PEN', name: 'Peruvian Sol', symbol: 'S/', flag: 'https://flagcdn.com/w40/pe.png' },
-      { code: 'VES', name: 'Venezuelan Bolívar', symbol: 'Bs', flag: 'https://flagcdn.com/w40/ve.png' },
-      { code: 'UYU', name: 'Uruguayan Peso', symbol: '$', flag: 'https://flagcdn.com/w40/uy.png' },
-      { code: 'PYG', name: 'Paraguayan Guarani', symbol: '₲', flag: 'https://flagcdn.com/w40/py.png' },
-      { code: 'BOB', name: 'Bolivian Boliviano', symbol: 'Bs', flag: 'https://flagcdn.com/w40/bo.png' },
-      { code: 'CRC', name: 'Costa Rican Colón', symbol: '₡', flag: 'https://flagcdn.com/w40/cr.png' },
-      { code: 'DOP', name: 'Dominican Peso', symbol: '$', flag: 'https://flagcdn.com/w40/do.png' },
-      { code: 'GTQ', name: 'Guatemalan Quetzal', symbol: 'Q', flag: 'https://flagcdn.com/w40/gt.png' },
-      { code: 'HNL', name: 'Honduran Lempira', symbol: 'L', flag: 'https://flagcdn.com/w40/hn.png' },
-      { code: 'NIO', name: 'Nicaraguan Córdoba', symbol: 'C$', flag: 'https://flagcdn.com/w40/ni.png' },
-      { code: 'PAB', name: 'Panamanian Balboa', symbol: 'B/.', flag: 'https://flagcdn.com/w40/pa.png' },
-      { code: 'SVC', name: 'Salvadoran Colón', symbol: '₡', flag: 'https://flagcdn.com/w40/sv.png' },
-      { code: 'JMD', name: 'Jamaican Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/jm.png' },
-      { code: 'TTD', name: 'Trinidad and Tobago Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/tt.png' },
-      { code: 'BSD', name: 'Bahamian Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/bs.png' },
-      { code: 'BBD', name: 'Barbadian Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/bb.png' },
-      { code: 'BMD', name: 'Bermudian Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/bm.png' },
-      { code: 'KYD', name: 'Cayman Islands Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/ky.png' },
-      { code: 'FJD', name: 'Fijian Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/fj.png' },
-      { code: 'PGK', name: 'Papua New Guinean Kina', symbol: 'K', flag: 'https://flagcdn.com/w40/pg.png' },
-      { code: 'SBD', name: 'Solomon Islands Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/sb.png' },
-      { code: 'TOP', name: 'Tongan Paʻanga', symbol: 'T$', flag: 'https://flagcdn.com/w40/to.png' },
-      { code: 'VUV', name: 'Vanuatu Vatu', symbol: 'Vt', flag: 'https://flagcdn.com/w40/vu.png' },
-      { code: 'WST', name: 'Samoan Tālā', symbol: 'T', flag: 'https://flagcdn.com/w40/ws.png' },
-      { code: 'BND', name: 'Brunei Dollar', symbol: 'B$', flag: 'https://flagcdn.com/w40/bn.png' },
-      { code: 'KHR', name: 'Cambodian Riel', symbol: '៛', flag: 'https://flagcdn.com/w40/kh.png' },
-      { code: 'LAK', name: 'Lao Kip', symbol: '₭', flag: 'https://flagcdn.com/w40/la.png' },
-      { code: 'MMK', name: 'Myanmar Kyat', symbol: 'Ks', flag: 'https://flagcdn.com/w40/mm.png' },
-      { code: 'MNT', name: 'Mongolian Tögrög', symbol: '₮', flag: 'https://flagcdn.com/w40/mn.png' },
-      { code: 'AFN', name: 'Afghan Afghani', symbol: '؋', flag: 'https://flagcdn.com/w40/af.png' },
-      { code: 'BHD', name: 'Bahraini Dinar', symbol: '.د.ب', flag: 'https://flagcdn.com/w40/bh.png' },
-      { code: 'IQD', name: 'Iraqi Dinar', symbol: 'ع.د', flag: 'https://flagcdn.com/w40/iq.png' },
-      { code: 'JOD', name: 'Jordanian Dinar', symbol: 'د.ا', flag: 'https://flagcdn.com/w40/jo.png' },
-      { code: 'KWD', name: 'Kuwaiti Dinar', symbol: 'د.ك', flag: 'https://flagcdn.com/w40/kw.png' },
-      { code: 'LBP', name: 'Lebanese Pound', symbol: 'ل.ل', flag: 'https://flagcdn.com/w40/lb.png' },
-      { code: 'OMR', name: 'Omani Rial', symbol: 'ر.ع.', flag: 'https://flagcdn.com/w40/om.png' },
-      { code: 'QAR', name: 'Qatari Riyal', symbol: 'ر.ق', flag: 'https://flagcdn.com/w40/qa.png' },
-      { code: 'YER', name: 'Yemeni Rial', symbol: '﷼', flag: 'https://flagcdn.com/w40/ye.png' }
-    ];
-    
-    // Fetch real-time exchange rates from a free API (no mock fallbacks)
-    let exchangeRates = {};
-    let ratesFetched = false;
-    
-    // Try exchangerate-api.com (free tier)
-    try {
-      const response = await axios.get('https://api.exchangerate-api.com/v4/latest/USD', {
-        timeout: 8000
-      });
-      if (response.data && response.data.rates) {
-        exchangeRates = response.data.rates;
-        ratesFetched = true;
-        console.log('✅ Real-time exchange rates fetched from exchangerate-api.com');
-      }
-    } catch (err) {
-      console.log('Exchangerate-api.com failed, trying fallback API...');
-    }
-    
-    // Try frankfurter.app as first fallback
-    if (!ratesFetched) {
-      try {
-        const response = await axios.get('https://api.frankfurter.app/latest?from=USD', {
-          timeout: 8000
-        });
-        if (response.data && response.data.rates) {
-          exchangeRates = response.data.rates;
-          ratesFetched = true;
-          console.log('✅ Real-time exchange rates fetched from frankfurter.app');
-        }
-      } catch (err) {
-        console.log('Frankfurter.app failed, trying currencyapi.com...');
-      }
-    }
-    
-    // Try currencyapi.com as second fallback
-    if (!ratesFetched) {
-      try {
-        const response = await axios.get('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json', {
-          timeout: 8000
-        });
-        if (response.data && response.data.usd) {
-          // This API returns rates like { usd: { eur: 0.92, ... } }
-          const rates = response.data.usd;
-          for (const [currency, rate] of Object.entries(rates)) {
-            exchangeRates[currency.toUpperCase()] = rate;
-          }
-          ratesFetched = true;
-          console.log('✅ Real-time exchange rates fetched from currency-api');
-        }
-      } catch (err) {
-        console.log('All exchange rate APIs failed');
-      }
-    }
-    
-    // If rates were fetched successfully, apply them
-    if (ratesFetched && Object.keys(exchangeRates).length > 0) {
-      const currenciesWithRates = allWorldCurrencies.map(currency => {
-        let exchangeRate = exchangeRates[currency.code];
-        // Handle special case for codes that might be different
-        if (!exchangeRate) {
-          // Try common alternatives
-          const alternativeMap = {
-            'CNY': exchangeRates['CNH'] || exchangeRates['RMB'],
-            'VES': exchangeRates['VEF'],
-            'BYN': exchangeRates['BYR']
-          };
-          exchangeRate = alternativeMap[currency.code];
-        }
-        return {
-          ...currency,
-          exchangeRate: exchangeRate || 1
-        };
-      });
-      
-      return res.status(200).json({
-        status: 'success',
-        currencies: currenciesWithRates
-      });
-    }
-    
-    // If all APIs failed, return currencies with default rate 1
-    // This is a fallback but still shows all currencies
-    console.warn('⚠️ No real-time exchange rates available, using default rate 1 for all currencies');
-    const defaultCurrencies = allWorldCurrencies.map(currency => ({
-      ...currency,
-      exchangeRate: 1
-    }));
-    
-    return res.status(200).json({
-      status: 'success',
-      currencies: defaultCurrencies,
-      warning: 'Using default exchange rates (1:1). Real-time rates temporarily unavailable.'
-    });
-    
-  } catch (err) {
-    console.error('Error fetching fiat currencies:', err);
-    // Return a basic set of currencies as last resort, but still with rate 1
-    const fallbackCurrencies = [
-      { code: 'USD', name: 'US Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/us.png', exchangeRate: 1 },
-      { code: 'EUR', name: 'Euro', symbol: '€', flag: 'https://flagcdn.com/w40/eu.png', exchangeRate: 1 },
-      { code: 'GBP', name: 'British Pound', symbol: '£', flag: 'https://flagcdn.com/w40/gb.png', exchangeRate: 1 },
-      { code: 'JPY', name: 'Japanese Yen', symbol: '¥', flag: 'https://flagcdn.com/w40/jp.png', exchangeRate: 1 },
-      { code: 'CNY', name: 'Chinese Yuan', symbol: '¥', flag: 'https://flagcdn.com/w40/cn.png', exchangeRate: 1 }
-    ];
-    
-    res.status(200).json({
-      status: 'success',
-      currencies: fallbackCurrencies,
-      warning: 'Limited currency list available. Full list temporarily unavailable.'
-    });
-  }
-});
-
-// =============================================
-// CONVERT ENDPOINT - BUY/SELL CONVERSION WITH ASSET BALANCE UPDATE
-// =============================================
-app.post('/api/convert', protect, [
-  body('fromAsset').isString().notEmpty(),
-  body('toAsset').isString().notEmpty(),
-  body('amount').isFloat({ gt: 0 })
-], async (req, res) => {
-  try {
-    const { fromAsset, toAsset, amount } = req.body;
-    const userId = req.user._id;
-    
-    // Get real-time prices for both assets
-    const fromPrice = await getCryptoPrice(fromAsset);
-    const toPrice = await getCryptoPrice(toAsset);
-    
-    if (!fromPrice || !toPrice) {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
       return res.status(400).json({
         status: 'fail',
-        message: 'Unable to fetch current prices for one or both assets'
+        message: 'Invalid input data',
+        errors: errors.array()
       });
     }
-    
-    // Calculate USD value of the amount being converted
-    const usdValue = amount * fromPrice;
-    const toAmount = usdValue / toPrice;
-    
-    // Get user's asset balance
+
+    const { asset, amountUSD, assetAmount, price } = req.body;
+    const userId = req.user._id;
+    const assetLower = asset.toLowerCase();
+
+    // Check if user has sufficient balance in main or matured
+    const mainBalance = req.user.balances.main || 0;
+    const maturedBalance = req.user.balances.matured || 0;
+    const totalAvailable = mainBalance + maturedBalance;
+
+    if (amountUSD > totalAvailable) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Insufficient balance. You have $${totalAvailable.toFixed(2)} available in Main and Matured wallets.`
+      });
+    }
+
+    // Determine which balance to deduct from (prioritize matured, then main)
+    let remainingToDeduct = amountUSD;
+    let deductedFromMatured = 0;
+    let deductedFromMain = 0;
+
+    if (maturedBalance >= remainingToDeduct) {
+      deductedFromMatured = remainingToDeduct;
+      remainingToDeduct = 0;
+    } else {
+      deductedFromMatured = maturedBalance;
+      remainingToDeduct -= maturedBalance;
+      deductedFromMain = remainingToDeduct;
+    }
+
+    // Update user balances
+    const updateData = {};
+    if (deductedFromMatured > 0) {
+      updateData['balances.matured'] = req.user.balances.matured - deductedFromMatured;
+    }
+    if (deductedFromMain > 0) {
+      updateData['balances.main'] = req.user.balances.main - deductedFromMain;
+    }
+
+    await User.findByIdAndUpdate(userId, { $inc: updateData });
+
+    // Update user's asset balances
     let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
     if (!userAssetBalance) {
-      userAssetBalance = new UserAssetBalance({ user: userId, balances: {} });
+      userAssetBalance = await UserAssetBalance.create({ user: userId, balances: {} });
     }
-    
-    const fromAssetKey = fromAsset.toLowerCase();
-    const toAssetKey = toAsset.toLowerCase();
-    
-    // Check if user has sufficient balance
-    const currentFromBalance = userAssetBalance.balances[fromAssetKey] || 0;
-    if (currentFromBalance < amount) {
-      return res.status(400).json({
-        status: 'fail',
-        message: `Insufficient ${fromAsset.toUpperCase()} balance. You have ${currentFromBalance} ${fromAsset.toUpperCase()}`
-      });
-    }
-    
-    // Calculate profit/loss for sell
-    let profitLoss = 0;
-    let profitLossPercentage = 0;
-    let buyingPrice = null;
-    
-    // Find average buying price from history for profit calculation
-    const buyTransactions = userAssetBalance.history.filter(
-      h => h.asset === fromAssetKey && h.type === 'buy'
-    );
-    if (buyTransactions.length > 0) {
-      let totalSpent = 0;
-      let totalBought = 0;
-      buyTransactions.forEach(tx => {
-        totalSpent += tx.usdValue;
-        totalBought += tx.amount;
-      });
-      buyingPrice = totalSpent / totalBought;
-      const sellingPrice = fromPrice;
-      profitLoss = (sellingPrice - buyingPrice) * amount;
-      profitLossPercentage = ((sellingPrice - buyingPrice) / buyingPrice) * 100;
-    }
-    
-    // Remove fromAsset from user's asset balance
-    userAssetBalance.balances[fromAssetKey] = currentFromBalance - amount;
-    
-    // Add toAsset to user's asset balance
-    const currentToBalance = userAssetBalance.balances[toAssetKey] || 0;
-    userAssetBalance.balances[toAssetKey] = currentToBalance + toAmount;
+
+    // Get current average buying price for P&L calculation
+    const currentBalance = userAssetBalance.balances[assetLower] || 0;
+    const currentTotalValue = currentBalance * price;
+    const newTotalAmount = currentBalance + assetAmount;
+    const newTotalValue = currentTotalValue + amountUSD;
+    const newAveragePrice = newTotalValue / newTotalAmount;
+
+    // Add to asset balance
+    userAssetBalance.balances[assetLower] = newTotalAmount;
     userAssetBalance.lastUpdated = new Date();
-    
-    // Add to history for fromAsset (sell)
+
+    // Add to history
     userAssetBalance.history.push({
-      asset: fromAssetKey,
-      type: 'sell',
-      amount: -amount,
-      balance: userAssetBalance.balances[fromAssetKey],
-      usdValue: usdValue,
-      price: fromPrice,
-      profitLoss: profitLoss,
-      profitLossPercentage: profitLossPercentage,
-      timestamp: new Date()
-    });
-    
-    // Add to history for toAsset (buy)
-    userAssetBalance.history.push({
-      asset: toAssetKey,
+      asset: assetLower,
       type: 'buy',
-      amount: toAmount,
-      balance: userAssetBalance.balances[toAssetKey],
-      usdValue: usdValue,
-      price: toPrice,
-      timestamp: new Date()
+      amount: assetAmount,
+      balance: newTotalAmount,
+      usdValue: amountUSD,
+      price: price,
+      profitLoss: 0,
+      profitLossPercentage: 0,
+      timestamp: new Date(),
+      transactionId: null
     });
-    
+
     await userAssetBalance.save();
-    
+
+    // Create buy record
+    const buy = await Buy.create({
+      user: userId,
+      asset: assetLower,
+      amountUSD: amountUSD,
+      assetAmount: assetAmount,
+      buyingPrice: price,
+      currentPrice: price,
+      profitLoss: 0,
+      profitLossPercentage: 0,
+      status: 'completed',
+      completedAt: new Date(),
+      balanceSource: deductedFromMatured > 0 && deductedFromMain > 0 ? 'both' : (deductedFromMatured > 0 ? 'matured' : 'main')
+    });
+
     // Create transaction record
     const transaction = await Transaction.create({
       user: userId,
       type: 'buy',
-      amount: usdValue,
-      asset: toAsset.toUpperCase(),
-      assetAmount: toAmount,
+      amount: amountUSD,
+      asset: asset.toUpperCase(),
+      assetAmount: assetAmount,
       currency: 'USD',
       status: 'completed',
       method: 'INTERNAL',
-      reference: `CONV-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+      reference: `BUY-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
       details: {
-        fromAsset: fromAsset.toUpperCase(),
-        toAsset: toAsset.toUpperCase(),
-        fromAmount: amount,
-        toAmount: toAmount,
-        fromPrice: fromPrice,
-        toPrice: toPrice,
-        conversionType: 'crypto_to_crypto'
+        asset: asset.toUpperCase(),
+        amountUSD: amountUSD,
+        assetAmount: assetAmount,
+        buyingPrice: price,
+        balanceSource: deductedFromMatured > 0 && deductedFromMain > 0 ? 'both' : (deductedFromMatured > 0 ? 'matured' : 'main'),
+        deductedFromMatured: deductedFromMatured,
+        deductedFromMain: deductedFromMain
       },
       fee: 0,
-      netAmount: usdValue,
-      exchangeRateAtTime: fromPrice
-    });
-    
-    // Create a corresponding sell transaction record
-    await Transaction.create({
-      user: userId,
-      type: 'sell',
-      amount: usdValue,
-      asset: fromAsset.toUpperCase(),
-      assetAmount: amount,
-      currency: 'USD',
-      status: 'completed',
-      method: 'INTERNAL',
-      reference: `CONV-SELL-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
-      details: {
-        fromAsset: fromAsset.toUpperCase(),
-        toAsset: toAsset.toUpperCase(),
-        fromAmount: amount,
-        toAmount: toAmount,
-        fromPrice: fromPrice,
-        toPrice: toPrice,
-        conversionType: 'crypto_to_crypto'
-      },
-      fee: 0,
-      netAmount: usdValue,
-      exchangeRateAtTime: fromPrice,
-      sellDetails: {
-        asset: fromAsset.toUpperCase(),
-        amountUSD: usdValue,
-        assetAmount: amount,
-        sellingPrice: fromPrice,
-        buyingPrice: buyingPrice || fromPrice,
-        profitLoss: profitLoss,
-        profitLossPercentage: profitLossPercentage
+      netAmount: amountUSD,
+      exchangeRateAtTime: price,
+      buyDetails: {
+        asset: asset.toUpperCase(),
+        amountUSD: amountUSD,
+        assetAmount: assetAmount,
+        buyingPrice: price
       }
     });
-    
-    // Log the activity
+
+    // Update buy record with transaction ID
+    buy.transactionId = transaction._id;
+    await buy.save();
+
+    // Emit real-time balance updates via Socket.IO
+    const io = req.app.get('io');
+    if (io) {
+      const updatedUser = await User.findById(userId);
+      io.to(`user_${userId}`).emit('balance_update', {
+        main: updatedUser.balances.main,
+        active: updatedUser.balances.active,
+        matured: updatedUser.balances.matured
+      });
+      
+      io.to(`user_${userId}`).emit('asset_balances_update', [{
+        symbol: assetLower,
+        balance: userAssetBalance.balances[assetLower],
+        id: assetLower,
+        avgPrice: newAveragePrice,
+        unrealizedPnl: 0,
+        unrealizedPnlPercent: 0
+      }]);
+    }
+
+    // Log the buy
     await UserLog.create({
       user: userId,
       username: req.user.email,
@@ -22964,72 +23329,603 @@ app.post('/api/convert', protect, [
       userAgent: req.headers['user-agent'] || 'Unknown',
       status: 'success',
       metadata: {
-        fromAsset: fromAsset.toUpperCase(),
-        toAsset: toAsset.toUpperCase(),
-        fromAmount: amount,
-        toAmount: toAmount,
-        usdValue: usdValue,
+        asset: asset.toUpperCase(),
+        amountUSD: amountUSD,
+        assetAmount: assetAmount,
+        price: price,
+        deductedFromMatured: deductedFromMatured,
+        deductedFromMain: deductedFromMain
+      },
+      relatedEntity: transaction._id,
+      relatedEntityModel: 'Transaction'
+    });
+
+    res.status(200).json({
+      status: 'success',
+      message: `Successfully bought ${assetAmount.toFixed(8)} ${asset.toUpperCase()} for $${amountUSD.toFixed(2)}`,
+      data: {
+        asset: asset.toUpperCase(),
+        amount: assetAmount,
+        usdValue: amountUSD,
+        price: price,
+        newBalance: userAssetBalance.balances[assetLower],
+        transactionId: transaction.reference
+      }
+    });
+
+  } catch (err) {
+    console.error('Error buying asset:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to complete purchase',
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+  }
+});
+
+// =============================================
+// ENHANCED SELL ENDPOINT - Removes from asset balances
+// =============================================
+app.post('/api/sell', protect, [
+  body('asset').isString().isLength({ min: 2, max: 10 }),
+  body('amountUSD').isFloat({ min: 1 }),
+  body('assetAmount').isFloat({ min: 0.00000001 }),
+  body('price').isFloat({ min: 0 })
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid input data',
+        errors: errors.array()
+      });
+    }
+
+    const { asset, amountUSD, assetAmount, price } = req.body;
+    const userId = req.user._id;
+    const assetLower = asset.toLowerCase();
+
+    // Check if user has sufficient asset balance
+    let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
+    if (!userAssetBalance) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `You don't have any ${asset.toUpperCase()} balance`
+      });
+    }
+
+    const currentBalance = userAssetBalance.balances[assetLower] || 0;
+    if (currentBalance < assetAmount) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Insufficient ${asset.toUpperCase()} balance. You have ${currentBalance} ${asset.toUpperCase()}`
+      });
+    }
+
+    // Calculate profit/loss based on average buying price
+    let profitLoss = 0;
+    let profitLossPercentage = 0;
+    
+    // Find average buying price from history
+    const buyTransactions = userAssetBalance.history.filter(h => 
+      h.asset === assetLower && h.type === 'buy'
+    );
+    
+    if (buyTransactions.length > 0) {
+      let totalCost = 0;
+      let totalAmount = 0;
+      buyTransactions.forEach(t => {
+        totalCost += t.usdValue;
+        totalAmount += t.amount;
+      });
+      const avgBuyPrice = totalCost / totalAmount;
+      profitLoss = (price - avgBuyPrice) * assetAmount;
+      profitLossPercentage = (profitLoss / (avgBuyPrice * assetAmount)) * 100;
+    }
+
+    // Remove from asset balance
+    userAssetBalance.balances[assetLower] = currentBalance - assetAmount;
+    userAssetBalance.lastUpdated = new Date();
+
+    // Add to history
+    userAssetBalance.history.push({
+      asset: assetLower,
+      type: 'sell',
+      amount: assetAmount,
+      balance: userAssetBalance.balances[assetLower],
+      usdValue: amountUSD,
+      price: price,
+      profitLoss: profitLoss,
+      profitLossPercentage: profitLossPercentage,
+      timestamp: new Date(),
+      transactionId: null
+    });
+
+    await userAssetBalance.save();
+
+    // Add proceeds to matured wallet
+    await User.findByIdAndUpdate(userId, {
+      $inc: { 'balances.matured': amountUSD }
+    });
+
+    // Create sell record
+    const sell = await Sell.create({
+      user: userId,
+      asset: assetLower,
+      amountUSD: amountUSD,
+      assetAmount: assetAmount,
+      sellingPrice: price,
+      buyingPrice: price - (profitLoss / assetAmount),
+      profitLoss: profitLoss,
+      profitLossPercentage: profitLossPercentage,
+      status: 'completed',
+      completedAt: new Date(),
+      balanceSource: 'matured'
+    });
+
+    // Create transaction record
+    const transaction = await Transaction.create({
+      user: userId,
+      type: 'sell',
+      amount: amountUSD,
+      asset: asset.toUpperCase(),
+      assetAmount: assetAmount,
+      currency: 'USD',
+      status: 'completed',
+      method: 'INTERNAL',
+      reference: `SELL-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+      details: {
+        asset: asset.toUpperCase(),
+        amountUSD: amountUSD,
+        assetAmount: assetAmount,
+        sellingPrice: price,
+        profitLoss: profitLoss,
+        profitLossPercentage: profitLossPercentage
+      },
+      fee: 0,
+      netAmount: amountUSD,
+      exchangeRateAtTime: price,
+      sellDetails: {
+        asset: asset.toUpperCase(),
+        amountUSD: amountUSD,
+        assetAmount: assetAmount,
+        sellingPrice: price,
+        buyingPrice: price - (profitLoss / assetAmount),
+        profitLoss: profitLoss,
+        profitLossPercentage: profitLossPercentage
+      }
+    });
+
+    // Update sell record with transaction ID
+    sell.transactionId = transaction._id;
+    await sell.save();
+
+    // Emit real-time balance updates via Socket.IO
+    const io = req.app.get('io');
+    if (io) {
+      const updatedUser = await User.findById(userId);
+      io.to(`user_${userId}`).emit('balance_update', {
+        main: updatedUser.balances.main,
+        active: updatedUser.balances.active,
+        matured: updatedUser.balances.matured
+      });
+      
+      io.to(`user_${userId}`).emit('asset_balances_update', [{
+        symbol: assetLower,
+        balance: userAssetBalance.balances[assetLower],
+        id: assetLower
+      }]);
+    }
+
+    // Log the sell
+    await UserLog.create({
+      user: userId,
+      username: req.user.email,
+      email: req.user.email,
+      userFullName: `${req.user.firstName} ${req.user.lastName}`,
+      action: 'sell_completed',
+      actionCategory: 'financial',
+      ipAddress: getRealClientIP(req),
+      userAgent: req.headers['user-agent'] || 'Unknown',
+      status: 'success',
+      metadata: {
+        asset: asset.toUpperCase(),
+        amountUSD: amountUSD,
+        assetAmount: assetAmount,
+        price: price,
         profitLoss: profitLoss,
         profitLossPercentage: profitLossPercentage
       },
       relatedEntity: transaction._id,
       relatedEntityModel: 'Transaction'
     });
-    
-    // Broadcast updated asset balances via Socket.IO
-    const updatedBalances = await UserAssetBalance.findOne({ user: userId });
-    if (updatedBalances) {
-      const assetsData = [];
-      for (const [asset, balance] of Object.entries(updatedBalances.balances)) {
-        if (balance > 0) {
-          const price = await getCryptoPrice(asset);
-          assetsData.push({
-            symbol: asset,
-            balance: balance,
-            usdValue: balance * (price || 0)
-          });
-        }
-      }
-      io.emit('asset_balances_update', assetsData);
-    }
-    
-    // Also broadcast money flow update
-    const flowData = {
-      deposits: await Transaction.countDocuments({ user: userId, type: 'deposit', status: 'completed' }),
-      withdrawals: await Transaction.countDocuments({ user: userId, type: 'withdrawal', status: 'completed' }),
-      conversions: await Transaction.countDocuments({ user: userId, type: 'buy', status: 'completed' }),
-      investments: await Investment.countDocuments({ user: userId, status: 'active' })
-    };
-    io.emit('money_flow_update', flowData);
-    
+
     res.status(200).json({
       status: 'success',
-      message: `Successfully converted ${amount} ${fromAsset.toUpperCase()} to ${toAmount.toFixed(8)} ${toAsset.toUpperCase()}`,
+      message: `Successfully sold ${assetAmount.toFixed(8)} ${asset.toUpperCase()} for $${amountUSD.toFixed(2)}`,
       data: {
-        fromAsset: fromAsset.toUpperCase(),
-        toAsset: toAsset.toUpperCase(),
-        fromAmount: amount,
-        toAmount: toAmount,
-        rate: toAmount / amount,
-        usdValue: usdValue,
+        asset: asset.toUpperCase(),
+        amount: assetAmount,
+        usdValue: amountUSD,
+        price: price,
         profitLoss: profitLoss,
-        profitLossPercentage: profitLossPercentage
+        profitLossPercentage: profitLossPercentage,
+        newBalance: userAssetBalance.balances[assetLower],
+        transactionId: transaction.reference
       }
     });
-    
+
   } catch (err) {
-    console.error('Convert error:', err);
+    console.error('Error selling asset:', err);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to process conversion',
+      message: 'Failed to complete sale',
       error: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   }
 });
 
+// =============================================
+// ENHANCED USER REGISTRATION - Sets IP-based preferences
+// =============================================
+app.post('/api/signup', authLimiter, [
+  body('firstName').trim().isLength({ min: 2, max: 50 }),
+  body('lastName').trim().isLength({ min: 2, max: 50 }),
+  body('email').isEmail().normalizeEmail(),
+  body('password').isLength({ min: 8 }),
+  body('referralCode').optional().trim()
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid input data',
+        errors: errors.array()
+      });
+    }
 
+    const { firstName, lastName, email, password, referralCode } = req.body;
 
+    // Check if user already exists
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'User already exists with this email'
+      });
+    }
 
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 12);
+
+    // Generate referral code
+    const newReferralCode = generateReferralCode();
+
+    // Handle referral if provided
+    let referredBy = null;
+    if (referralCode) {
+      const referringUser = await User.findOne({ referralCode });
+      if (referringUser) {
+        referredBy = referringUser._id;
+      }
+    }
+
+    // Create user
+    const user = await User.create({
+      firstName,
+      lastName,
+      email,
+      password: hashedPassword,
+      referralCode: newReferralCode,
+      referredBy,
+      isVerified: false,
+      status: 'active',
+      balances: {
+        main: 0,
+        active: 0,
+        matured: 0,
+        savings: 0,
+        loan: 0
+      }
+    });
+
+    // Detect and set user preferences based on IP address
+    const detectedPrefs = await detectAndSetUserPreferencesFromIP(user._id, req);
+    
+    if (detectedPrefs) {
+      console.log(`🎯 IP-based preferences set for new user ${email}: Language=${detectedPrefs.language}, Currency=${detectedPrefs.fiatCurrency}, Country=${detectedPrefs.country}`);
+    }
+
+    // Create user preference record
+    await UserPreference.create({
+      user: user._id,
+      displayAsset: 'btc',
+      theme: 'dark',
+      notifications: { email: true, push: true, sms: false },
+      language: detectedPrefs?.language || 'en',
+      fiatCurrency: detectedPrefs?.fiatCurrency || 'USD'
+    });
+
+    // Create user asset balance record
+    await UserAssetBalance.create({
+      user: user._id,
+      balances: {}
+    });
+
+    // Send welcome email
+    try {
+      await sendEmail({
+        email: user.email,
+        subject: 'Welcome to BitHash Capital!',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <h2 style="color: #F7A600;">Welcome to BitHash Capital, ${firstName}!</h2>
+            <p>Thank you for joining our cloud mining platform.</p>
+            <p>Your account has been successfully created. You can now:</p>
+            <ul>
+              <li>Make your first deposit to start mining</li>
+              <li>Explore our investment plans</li>
+              <li>Share your referral link to earn commissions</li>
+            </ul>
+            <p>Your referral code: <strong>${newReferralCode}</strong></p>
+            <p>Based on your location, we've set your default language to <strong>${detectedPrefs?.language || 'en'}</strong> and currency to <strong>${detectedPrefs?.fiatCurrency || 'USD'}</strong>. You can change these in your account settings.</p>
+            <hr>
+            <p style="font-size: 12px; color: #666;">BitHash LLC</p>
+          </div>
+        `
+      });
+    } catch (emailError) {
+      console.error('Welcome email failed:', emailError);
+    }
+
+    // Generate JWT
+    const token = generateJWT(user._id);
+
+    // Log signup with location
+    const deviceInfo = await getUserDeviceInfo(req);
+    await UserLog.create({
+      user: user._id,
+      username: user.email,
+      email: user.email,
+      userFullName: `${firstName} ${lastName}`,
+      action: 'signup',
+      actionCategory: 'authentication',
+      ipAddress: getRealClientIP(req),
+      userAgent: req.headers['user-agent'] || 'Unknown',
+      deviceInfo: {
+        type: getDeviceType(req),
+        os: { name: getOSFromUserAgent(req.headers['user-agent']), version: 'Unknown' },
+        browser: { name: getBrowserFromUserAgent(req.headers['user-agent']), version: 'Unknown' },
+        platform: req.headers['user-agent'] || 'Unknown',
+        language: req.headers['accept-language'] || 'Unknown',
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+      },
+      location: {
+        ip: getRealClientIP(req),
+        country: { name: deviceInfo.locationDetails?.country || 'Unknown', code: deviceInfo.locationDetails?.country || 'Unknown' },
+        region: { name: deviceInfo.locationDetails?.region || 'Unknown', code: deviceInfo.locationDetails?.region || 'Unknown' },
+        city: deviceInfo.locationDetails?.city || 'Unknown',
+        latitude: deviceInfo.locationDetails?.latitude,
+        longitude: deviceInfo.locationDetails?.longitude,
+        exactLocation: deviceInfo.exactLocation
+      },
+      status: 'success',
+      metadata: {
+        referralCode: newReferralCode,
+        referredBy: referredBy ? referredBy.toString() : null,
+        detectedLanguage: detectedPrefs?.language,
+        detectedCurrency: detectedPrefs?.fiatCurrency,
+        detectedCountry: detectedPrefs?.country
+      }
+    });
+
+    res.status(201).json({
+      status: 'success',
+      message: 'Account created successfully',
+      data: {
+        user: {
+          id: user._id,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          email: user.email,
+          referralCode: user.referralCode
+        },
+        token,
+        preferences: {
+          language: detectedPrefs?.language || 'en',
+          fiatCurrency: detectedPrefs?.fiatCurrency || 'USD'
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Signup error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to create account',
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+  }
+});
+
+// =============================================
+// REAL-TIME BALANCE FLUCTUATION FUNCTION
+// =============================================
+
+// Function to update asset balances in real-time based on crypto prices
+const startRealTimeBalanceFluctuation = async () => {
+  console.log('📊 Starting real-time balance fluctuation service...');
+  
+  // Update every 30 seconds
+  setInterval(async () => {
+    try {
+      // Fetch latest crypto prices
+      const priceResponse = await axios.get('https://api.coingecko.com/api/v3/simple/price', {
+        params: {
+          ids: 'bitcoin,ethereum,tether,binancecoin,solana,usd-coin,ripple,dogecoin,cardano,shiba-inu,avalanche-2,polkadot,tron,chainlink,polygon,wrapped-bitcoin,litecoin,near,uniswap,bitcoin-cash',
+          vs_currencies: 'usd'
+        },
+        timeout: 5000
+      });
+      
+      const prices = priceResponse.data;
+      
+      // Get all users with asset balances
+      const allAssetBalances = await UserAssetBalance.find({});
+      
+      for (const assetBalance of allAssetBalances) {
+        const userId = assetBalance.user;
+        let totalUSDValue = 0;
+        const updatedAssets = [];
+        
+        // Calculate current USD value of all assets
+        for (const [assetSymbol, amount] of Object.entries(assetBalance.balances)) {
+          if (amount > 0) {
+            let price = 0;
+            // Map asset symbol to CoinGecko ID
+            const assetMap = {
+              'btc': 'bitcoin', 'eth': 'ethereum', 'usdt': 'tether', 'bnb': 'binancecoin',
+              'sol': 'solana', 'usdc': 'usd-coin', 'xrp': 'ripple', 'doge': 'dogecoin',
+              'ada': 'cardano', 'shib': 'shiba-inu', 'avax': 'avalanche-2', 'dot': 'polkadot',
+              'trx': 'tron', 'link': 'chainlink', 'matic': 'polygon', 'wbtc': 'wrapped-bitcoin',
+              'ltc': 'litecoin', 'near': 'near', 'uni': 'uniswap', 'bch': 'bitcoin-cash'
+            };
+            
+            const coinId = assetMap[assetSymbol];
+            if (coinId && prices[coinId]) {
+              price = prices[coinId].usd;
+            }
+            
+            const usdValue = amount * price;
+            totalUSDValue += usdValue;
+            
+            updatedAssets.push({
+              symbol: assetSymbol,
+              balance: amount,
+              usdValue: usdValue,
+              price: price
+            });
+          }
+        }
+        
+        // Get user's main balance from User model
+        const user = await User.findById(userId);
+        if (user) {
+          // Calculate PnL for main and matured balances based on BTC price
+          const btcPrice = prices.bitcoin?.usd || 43000;
+          const btcAmountMain = user.balances.main / btcPrice;
+          const btcAmountMatured = user.balances.matured / btcPrice;
+          
+          // Emit real-time updates via Socket.IO
+          const io = req?.app?.get('io');
+          if (io) {
+            // Send PnL updates
+            io.to(`user_${userId}`).emit('pnl_update', {
+              main: {
+                amount: user.balances.main * 0.02, // Simulated daily return
+                percentage: 2.0
+              },
+              matured: {
+                amount: user.balances.matured * 0.015, // Simulated daily return
+                percentage: 1.5
+              }
+            });
+            
+            // Send money flow updates
+            io.to(`user_${userId}`).emit('money_flow_update', {
+              deposits: user.balances.main * 0.3,
+              withdrawals: user.balances.matured * 0.1,
+              conversions: totalUSDValue * 0.05,
+              investments: user.balances.active
+            });
+          }
+        }
+      }
+      
+      console.log(`📈 Real-time balance fluctuation updated for ${allAssetBalances.length} users`);
+      
+    } catch (error) {
+      console.error('Error in real-time balance fluctuation:', error.message);
+    }
+  }, 30000); // Update every 30 seconds
+};
+
+// Helper functions for device detection
+const getDeviceType = (req) => {
+  const ua = req.headers['user-agent'] || '';
+  if (/mobile/i.test(ua)) return 'mobile';
+  if (/tablet/i.test(ua)) return 'tablet';
+  return 'desktop';
+};
+
+const getOSFromUserAgent = (ua) => {
+  if (!ua) return 'Unknown';
+  if (/windows/i.test(ua)) return 'Windows';
+  if (/mac/i.test(ua)) return 'macOS';
+  if (/linux/i.test(ua)) return 'Linux';
+  if (/android/i.test(ua)) return 'Android';
+  if (/ios|iphone|ipad/i.test(ua)) return 'iOS';
+  return 'Unknown';
+};
+
+const getBrowserFromUserAgent = (ua) => {
+  if (!ua) return 'Unknown';
+  if (/chrome/i.test(ua) && !/edge/i.test(ua)) return 'Chrome';
+  if (/safari/i.test(ua) && !/chrome/i.test(ua)) return 'Safari';
+  if (/firefox/i.test(ua)) return 'Firefox';
+  if (/edge/i.test(ua)) return 'Edge';
+  if (/opera|opr/i.test(ua)) return 'Opera';
+  return 'Unknown';
+};
+
+// Automated email sender
+const sendAutomatedEmail = async (user, type, data) => {
+  const templates = {
+    deposit_approved: {
+      subject: 'Deposit Approved - BitHash Capital',
+      html: (data) => `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <h2 style="color: #F7A600;">Deposit Approved ✓</h2>
+          <p>Hello ${data.name},</p>
+          <p>Your deposit of <strong>${data.amount} ${data.asset || 'USD'}</strong> has been approved and credited to your account.</p>
+          <p>New balance: <strong>$${data.newBalance.toFixed(2)}</strong></p>
+          <p>Transaction reference: ${data.reference}</p>
+          <p>Processed at: ${new Date(data.processedAt).toLocaleString()}</p>
+          <hr>
+          <p style="font-size: 12px; color: #666;">BitHash LLC</p>
+        </div>
+      `
+    },
+    withdrawal_approved: {
+      subject: 'Withdrawal Approved - BitHash Capital',
+      html: (data) => `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <h2 style="color: #F7A600;">Withdrawal Approved ✓</h2>
+          <p>Hello ${data.name},</p>
+          <p>Your withdrawal request for <strong>${data.amount} ${data.asset}</strong> has been approved and processed.</p>
+          <p>USD Value: <strong>$${data.usdValue.toFixed(2)}</strong></p>
+          ${data.fee > 0 ? `<p>Processing Fee: $${data.feeUsd.toFixed(2)}</p>` : ''}
+          <p>Net Amount: <strong>$${data.netAmount.toFixed(2)}</strong></p>
+          <p>Withdrawal address: ${data.withdrawalAddress}</p>
+          ${data.txid ? `<p>Transaction ID: ${data.txid}</p>` : ''}
+          <hr>
+          <p style="font-size: 12px; color: #666;">BitHash LLC</p>
+        </div>
+      `
+    }
+  };
+  
+  const template = templates[type];
+  if (!template) return;
+  
+  await sendEmail({
+    email: user.email,
+    subject: template.subject,
+    html: template.html(data)
+  });
+};
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -23053,10 +23949,13 @@ const PORT = process.env.PORT || 3000;
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: ['https://bithhash.vercel.app', 'https://website-backendd-1.onrender.com'],
+    origin: ['https://bithhash.vercel.app', 'https://website-backendd-1.onrender.com', 'https://bithash-backend.onrender.com'],
     methods: ['GET', 'POST']
   }
 });
+
+// Make io accessible to routes
+app.set('io', io);
 
 // =============================================
 // REAL-TIME STATS WITH REDIS SINGLE SOURCE OF TRUTH
@@ -23300,102 +24199,57 @@ app.get('/api/stats/daily-progress', async (req, res) => {
   }
 });
 
-// Add market WebSocket to your existing server
-const setupMarketWebSocket = (server) => {
-  const marketWss = new WebSocket.Server({ 
-    server, 
-    path: '/ws/market' 
-  });
-
-  const clients = new Set();
-  let priceInterval = null;
-
-  const broadcastPrices = async () => {
-    try {
-      const response = await axios.get(
-        'https://api.coingecko.com/api/v3/coins/markets',
-        {
-          params: {
-            vs_currency: 'usd',
-            per_page: 50,
-            price_change_percentage: '24h'
-          },
-          timeout: 5000
-        }
-      );
-
-      if (response.data && clients.size > 0) {
-        const updates = response.data.map(coin => ({
-          assetId: coin.id,
-          price: coin.current_price,
-          price_change_percentage_24h: coin.price_change_percentage_24h || 0
-        }));
-
-        const message = JSON.stringify({
-          type: 'batch_update',
-          updates: updates,
-          timestamp: Date.now()
-        });
-
-        clients.forEach(client => {
-          if (client.readyState === WebSocket.OPEN) {
-            client.send(message);
-          }
-        });
-      }
-    } catch (error) {
-      console.error('WebSocket price broadcast error:', error);
-    }
-  };
-
-  marketWss.on('connection', (ws) => {
-    clients.add(ws);
-    console.log(`Market WebSocket client connected. Total: ${clients.size}`);
-
-    // Send initial data
-    (async () => {
-      const assets = await fetchMarketData();
-      ws.send(JSON.stringify({
-        type: 'initial_data',
-        assets: assets
-      }));
-    })();
-
-    // Start broadcasting if this is the first client
-    if (clients.size === 1 && !priceInterval) {
-      priceInterval = setInterval(broadcastPrices, 5000);
-    }
-
-    ws.on('message', (message) => {
-      try {
-        const data = JSON.parse(message);
-        if (data.type === 'subscribe') {
-          console.log('Client subscribed to price updates');
-        }
-      } catch (err) {
-        // Ignore invalid messages
-      }
-    });
-
-    ws.on('close', () => {
-      clients.delete(ws);
-      console.log(`Market WebSocket client disconnected. Total: ${clients.size}`);
-      
-      // Stop broadcasting if no clients left
-      if (clients.size === 0 && priceInterval) {
-        clearInterval(priceInterval);
-        priceInterval = null;
-      }
-    });
-  });
-};
-
-// Call this after creating your HTTP server
-// setupMarketWebSocket(server);
-
 // Socket.IO connection handler with stats broadcast
 io.on('connection', async (socket) => {
   console.log('New client connected:', socket.id);
+  
+  // Get user ID from handshake auth
+  const token = socket.handshake.auth.token;
+  if (token) {
+    try {
+      const decoded = verifyJWT(token);
+      if (decoded && !decoded.isAdmin) {
+        const user = await User.findById(decoded.id);
+        if (user) {
+          socket.userId = decoded.id;
+          socket.join(`user_${decoded.id}`);
+          console.log(`User ${user.email} joined their room`);
+          
+          // Send initial balances
+          socket.emit('balance_update', {
+            main: user.balances.main,
+            active: user.balances.active,
+            matured: user.balances.matured
+          });
+          
+          // Send initial asset balances
+          const assetBalances = await UserAssetBalance.findOne({ user: decoded.id });
+          if (assetBalances) {
+            const assetsWithBalances = [];
+            for (const [symbol, balance] of Object.entries(assetBalances.balances)) {
+              if (balance > 0) {
+                assetsWithBalances.push({
+                  symbol: symbol,
+                  balance: balance,
+                  id: symbol
+                });
+              }
+            }
+            socket.emit('asset_balances_update', assetsWithBalances);
+          }
+          
+          // Send user preferences
+          socket.emit('preferences_update', {
+            language: user.preferences?.language || 'en',
+            fiatCurrency: user.preferences?.fiatCurrency || 'USD',
+            displayAsset: user.preferences?.displayAsset || 'btc'
+          });
+        }
+      }
+    } catch (err) {
+      console.error('Socket auth error:', err);
+    }
+  }
   
   // Send current stats immediately to new client
   const currentStats = await getCurrentStats();
@@ -23421,6 +24275,25 @@ io.on('connection', async (socket) => {
       console.log(`Admin ${admin.email} connected`);
     } catch (err) {
       socket.disconnect();
+    }
+  });
+  
+  // Handle refresh PnL request
+  socket.on('refresh_pnl', async () => {
+    if (socket.userId) {
+      const user = await User.findById(socket.userId);
+      if (user) {
+        socket.emit('pnl_update', {
+          main: {
+            amount: user.balances.main * 0.02,
+            percentage: 2.0
+          },
+          matured: {
+            amount: user.balances.matured * 0.015,
+            percentage: 1.5
+          }
+        });
+      }
     }
   });
 
@@ -23465,7 +24338,7 @@ const processMaturedInvestments = async () => {
           amount: totalReturn - investment.amount,
           currency: 'USD',
           status: 'completed',
-          method: 'internal',
+          method: 'INTERNAL',
           reference: `AUTO-RET-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
           details: {
             investmentId: investment._id,
@@ -23478,6 +24351,13 @@ const processMaturedInvestments = async () => {
         });
 
         console.log(`Automatically completed investment ${investment._id} for user ${user.email}`);
+        
+        // Emit balance update via Socket.IO
+        io.to(`user_${user._id}`).emit('balance_update', {
+          main: user.balances.main,
+          active: user.balances.active,
+          matured: user.balances.matured
+        });
       } catch (err) {
         console.error(`Error processing investment ${investment._id}:`, err);
       }
@@ -23492,6 +24372,9 @@ setInterval(processMaturedInvestments, 60 * 60 * 1000);
 
 // Also run once on server start
 processMaturedInvestments();
+
+// Start the real-time balance fluctuation service
+startRealTimeBalanceFluctuation();
 
 // Start the investor growth job
 startInvestorGrowthJob();
@@ -23511,4 +24394,6 @@ httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`📊 Real-time stats initialized with Redis as single source of truth`);
   console.log(`📈 Investors will grow from ${INITIAL_INVESTOR_COUNT.toLocaleString()} with max ${DAILY_GROWTH_LIMIT}/day`);
+  console.log(`🔄 Real-time balance fluctuation service active (updates every 30 seconds)`);
+  console.log(`🌍 IP-based language/currency detection active for new users`);
 });
