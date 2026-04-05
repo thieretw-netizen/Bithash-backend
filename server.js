@@ -3266,7 +3266,7 @@ const generateReferralCode = () => {
   return `BH-${timestamp}-${randomPart}-${checksum}`;
 };
 
-// Function to detect user's location from IP and set preferences automatically
+// Function to detect user's location from IP and set preferences automatically (ONLY for new users who haven't saved preferences)
 const detectAndSetIPPreferences = async (userId, req) => {
   try {
     const user = await User.findById(userId);
@@ -4295,7 +4295,6 @@ const calculateReferralCommissions = async (investment) => {
     // Don't throw error to avoid disrupting investment process
   }
 };
-
 
 
 
@@ -22468,14 +22467,19 @@ app.post('/api/convert', protect, async (req, res) => {
     // Emit socket updates for real-time balance changes
     const io = req.app.get('io');
     if (io) {
-      const updatedBalances = {};
+      const updatedBalances = [];
       for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
         if (balance > 0) {
           const price = await getCryptoPrice(asset.toUpperCase());
-          updatedBalances[asset] = {
+          updatedBalances.push({
+            symbol: asset,
             balance: balance,
-            usdValue: balance * (price || 0)
-          };
+            usdValue: balance * (price || 0),
+            id: asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset,
+            avgPrice: 0,
+            unrealizedPnl: 0,
+            unrealizedPnlPercent: 0
+          });
         }
       }
       io.to(`user_${userId}`).emit('asset_balances_update', updatedBalances);
@@ -22501,7 +22505,7 @@ app.post('/api/convert', protect, async (req, res) => {
 });
 
 // =============================================
-// USER PREFERENCES SAVE ENDPOINT - Save IP-based preferences
+// USER PREFERENCES SAVE ENDPOINT - Save IP-based preferences (only for new users)
 // =============================================
 app.post('/api/users/preferences/save', protect, async (req, res) => {
   try {
@@ -22696,7 +22700,7 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       }
     }
     
-    // Update user balance
+    // Update user balance - Add to main balance (USD value)
     user.balances.main += deposit.amount;
     await user.save();
     
@@ -22845,14 +22849,19 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       if (isCryptoDeposit && assetSymbol) {
         const updatedAssetBalance = await UserAssetBalance.findOne({ user: user._id });
         if (updatedAssetBalance) {
-          const assetData = {};
+          const assetData = [];
           for (const [asset, balance] of Object.entries(updatedAssetBalance.balances)) {
             if (balance > 0) {
               const price = await getCryptoPrice(asset.toUpperCase());
-              assetData[asset] = {
+              assetData.push({
+                symbol: asset,
                 balance: balance,
-                usdValue: balance * (price || 0)
-              };
+                usdValue: balance * (price || 0),
+                id: asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset,
+                avgPrice: 0,
+                unrealizedPnl: 0,
+                unrealizedPnlPercent: 0
+              });
             }
           }
           io.to(`user_${user._id}`).emit('asset_balances_update', assetData);
@@ -23067,14 +23076,19 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
     if (io) {
       io.to(`user_${withdrawal.user._id}`).emit('balance_update', { main: totalMainBalance });
       if (isCryptoWithdrawal && assetSymbol && updatedAssetBalance) {
-        const assetData = {};
+        const assetData = [];
         for (const [asset, balance] of Object.entries(updatedAssetBalance.balances)) {
           if (balance > 0) {
             const price = await getCryptoPrice(asset.toUpperCase());
-            assetData[asset] = {
+            assetData.push({
+              symbol: asset,
               balance: balance,
-              usdValue: balance * (price || 0)
-            };
+              usdValue: balance * (price || 0),
+              id: asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset,
+              avgPrice: 0,
+              unrealizedPnl: 0,
+              unrealizedPnlPercent: 0
+            });
           }
         }
         io.to(`user_${withdrawal.user._id}`).emit('asset_balances_update', assetData);
@@ -23103,7 +23117,7 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
 });
 
 // =============================================
-// BUY ENDPOINT - Buy crypto with USD balance
+// BUY ENDPOINT - Buy crypto with USD balance (adds to My Assets)
 // =============================================
 app.post('/api/buy', protect, async (req, res) => {
   try {
@@ -23147,7 +23161,7 @@ app.post('/api/buy', protect, async (req, res) => {
     
     const actualAssetAmount = amountUSD / actualPrice;
     
-    // Update user asset balances
+    // Update user asset balances (My Assets)
     let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
     if (!userAssetBalance) {
       userAssetBalance = new UserAssetBalance({ user: userId, balances: {} });
@@ -23213,19 +23227,36 @@ app.post('/api/buy', protect, async (req, res) => {
       netAmount: amountUSD
     });
     
+    // Recalculate main balance (value of all crypto assets at current prices)
+    let totalMainBalance = 0;
+    for (const [assetSym, balance] of Object.entries(userAssetBalance.balances)) {
+      if (balance > 0) {
+        const cryptoPrice = await getCryptoPrice(assetSym.toUpperCase());
+        if (cryptoPrice) {
+          totalMainBalance += balance * cryptoPrice;
+        }
+      }
+    }
+    await User.findByIdAndUpdate(userId, { 'balances.main': totalMainBalance });
+    
     // Emit socket updates
     const io = req.app.get('io');
     if (io) {
-      io.to(`user_${userId}`).emit('balance_update', { main: user.balances.main, matured: user.balances.matured });
+      io.to(`user_${userId}`).emit('balance_update', { main: totalMainBalance, matured: user.balances.matured });
       
-      const assetData = {};
+      const assetData = [];
       for (const [a, balance] of Object.entries(userAssetBalance.balances)) {
         if (balance > 0) {
           const cryptoPrice = await getCryptoPrice(a.toUpperCase());
-          assetData[a] = {
+          assetData.push({
+            symbol: a,
             balance: balance,
-            usdValue: balance * (cryptoPrice || 0)
-          };
+            usdValue: balance * (cryptoPrice || 0),
+            id: a === 'btc' ? 'bitcoin' : a === 'eth' ? 'ethereum' : a,
+            avgPrice: 0,
+            unrealizedPnl: 0,
+            unrealizedPnlPercent: 0
+          });
         }
       }
       io.to(`user_${userId}`).emit('asset_balances_update', assetData);
@@ -23243,7 +23274,7 @@ app.post('/api/buy', protect, async (req, res) => {
 });
 
 // =============================================
-// SELL ENDPOINT - Sell crypto for USD balance
+// SELL ENDPOINT - Sell crypto for USD balance (adds proceeds to matured wallet)
 // =============================================
 app.post('/api/sell', protect, async (req, res) => {
   try {
@@ -23297,7 +23328,7 @@ app.post('/api/sell', protect, async (req, res) => {
     
     await userAssetBalance.save();
     
-    // Add proceeds to matured balance
+    // Add proceeds to matured balance (proceeds from sell go to matured wallet)
     const user = await User.findById(userId);
     user.balances.matured += actualUsdValue;
     await user.save();
@@ -23341,19 +23372,36 @@ app.post('/api/sell', protect, async (req, res) => {
       netAmount: actualUsdValue
     });
     
+    // Recalculate main balance (value of remaining crypto assets)
+    let totalMainBalance = 0;
+    for (const [assetSym, balance] of Object.entries(userAssetBalance.balances)) {
+      if (balance > 0) {
+        const cryptoPrice = await getCryptoPrice(assetSym.toUpperCase());
+        if (cryptoPrice) {
+          totalMainBalance += balance * cryptoPrice;
+        }
+      }
+    }
+    await User.findByIdAndUpdate(userId, { 'balances.main': totalMainBalance });
+    
     // Emit socket updates
     const io = req.app.get('io');
     if (io) {
-      io.to(`user_${userId}`).emit('balance_update', { main: user.balances.main, matured: user.balances.matured });
+      io.to(`user_${userId}`).emit('balance_update', { main: totalMainBalance, matured: user.balances.matured });
       
-      const assetData = {};
+      const assetData = [];
       for (const [a, balance] of Object.entries(userAssetBalance.balances)) {
         if (balance > 0) {
           const cryptoPrice = await getCryptoPrice(a.toUpperCase());
-          assetData[a] = {
+          assetData.push({
+            symbol: a,
             balance: balance,
-            usdValue: balance * (cryptoPrice || 0)
-          };
+            usdValue: balance * (cryptoPrice || 0),
+            id: a === 'btc' ? 'bitcoin' : a === 'eth' ? 'ethereum' : a,
+            avgPrice: 0,
+            unrealizedPnl: 0,
+            unrealizedPnlPercent: 0
+          });
         }
       }
       io.to(`user_${userId}`).emit('asset_balances_update', assetData);
@@ -23412,7 +23460,7 @@ const startRealTimePriceUpdates = (io) => {
   }, 10000);
 };
 
-// Function to recalculate user main balances based on current crypto prices
+// Function to recalculate all user main balances based on current crypto prices (real-time fluctuations)
 const recalculateAllUserMainBalances = async (io) => {
   try {
     const users = await User.find({}).select('_id');
@@ -23444,6 +23492,8 @@ const recalculateAllUserMainBalances = async (io) => {
     console.error('Error recalculating user balances:', err);
   }
 };
+
+
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -23833,14 +23883,15 @@ io.on('connection', async (socket) => {
           });
         }
         
-        // Send current asset balances
+        // Send current asset balances (My Assets)
         const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
         if (userAssetBalance) {
-          const assetData = {};
+          const assetData = [];
           for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
             if (balance > 0) {
               const price = await getCryptoPrice(asset.toUpperCase());
-              assetData[asset] = {
+              assetData.push({
+                symbol: asset,
                 balance: balance,
                 usdValue: balance * (price || 0),
                 id: asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset,
@@ -23848,10 +23899,10 @@ io.on('connection', async (socket) => {
                 unrealizedPnl: 0,
                 unrealizedPnlPercent: 0,
                 transactions: userAssetBalance.history.filter(h => h.asset === asset).slice(-10)
-              };
+              });
             }
           }
-          socket.emit('asset_balances_update', Object.values(assetData));
+          socket.emit('asset_balances_update', assetData);
         }
         
         // Send user preferences
@@ -24019,7 +24070,7 @@ startInvestorGrowthJob();
 // Start real-time price updates
 startRealTimePriceUpdates(io);
 
-// Recalculate all user main balances every 5 minutes to ensure accuracy with price fluctuations
+// Recalculate all user main balances every 5 minutes to ensure accuracy with price fluctuations (real-time)
 setInterval(async () => {
   await recalculateAllUserMainBalances(io);
 }, 5 * 60 * 1000);
@@ -24042,4 +24093,6 @@ httpServer.listen(PORT, () => {
   console.log(`📈 Investors will grow from ${INITIAL_INVESTOR_COUNT.toLocaleString()} with max ${DAILY_GROWTH_LIMIT}/day`);
   console.log(`💰 Real-time crypto price updates started (every 10 seconds)`);
   console.log(`🔄 User main balances will recalculate every 5 minutes based on current prices`);
+  console.log(`💎 Crypto deposits automatically reflect in My Assets section`);
+  console.log(`💰 Proceeds from sells go directly to Matured Wallet`);
 });
