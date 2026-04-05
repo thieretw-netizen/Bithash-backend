@@ -3266,15 +3266,24 @@ const generateReferralCode = () => {
   return `BH-${timestamp}-${randomPart}-${checksum}`;
 };
 
-// Function to detect user's location from IP and set preferences automatically (ONLY for new users who haven't saved preferences)
+// Function to detect user's location from IP and set preferences automatically (ONLY for NEW users who haven't saved preferences before)
 const detectAndSetIPPreferences = async (userId, req) => {
   try {
     const user = await User.findById(userId);
     if (!user) return null;
     
-    // Check if user already has preferences set from IP (first time only)
-    if (user.ipPreferences && user.ipPreferences.setFromIP) {
+    // CRITICAL: Check if user already has preferences set from IP (only for NEW accounts/visitors)
+    // This ensures we only set IP-based preferences ONCE for new users
+    if (user.ipPreferences && user.ipPreferences.setFromIP === true) {
+      console.log(`User ${userId} already has IP-based preferences set, skipping auto-detection`);
       return user.ipPreferences;
+    }
+    
+    // Also check if user has manually saved preferences before
+    const existingUserPref = await UserPreference.findOne({ user: userId });
+    if (existingUserPref && (existingUserPref.language !== 'en' || existingUserPref.currency !== 'USD')) {
+      console.log(`User ${userId} already has custom preferences saved, skipping IP auto-detection`);
+      return { language: existingUserPref.language, currency: existingUserPref.currency };
     }
     
     const ip = getRealClientIP(req);
@@ -3324,7 +3333,7 @@ const detectAndSetIPPreferences = async (userId, req) => {
       }
     }
     
-    // Update user with IP-based preferences
+    // Update user with IP-based preferences (only for new users)
     user.ipPreferences = {
       language: detectedLanguage,
       currency: detectedCurrency,
@@ -3350,7 +3359,7 @@ const detectAndSetIPPreferences = async (userId, req) => {
       { upsert: true, new: true }
     );
     
-    console.log(`IP-based preferences set for user ${userId}: language=${detectedLanguage}, currency=${detectedCurrency}, country=${detectedCountry}`);
+    console.log(`IP-based preferences set for NEW user ${userId}: language=${detectedLanguage}, currency=${detectedCurrency}, country=${detectedCountry}`);
     
     return { language: detectedLanguage, currency: detectedCurrency, country: detectedCountry };
   } catch (err) {
@@ -22467,19 +22476,14 @@ app.post('/api/convert', protect, async (req, res) => {
     // Emit socket updates for real-time balance changes
     const io = req.app.get('io');
     if (io) {
-      const updatedBalances = [];
+      const updatedBalances = {};
       for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
         if (balance > 0) {
           const price = await getCryptoPrice(asset.toUpperCase());
-          updatedBalances.push({
-            symbol: asset,
+          updatedBalances[asset] = {
             balance: balance,
-            usdValue: balance * (price || 0),
-            id: asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset,
-            avgPrice: 0,
-            unrealizedPnl: 0,
-            unrealizedPnlPercent: 0
-          });
+            usdValue: balance * (price || 0)
+          };
         }
       }
       io.to(`user_${userId}`).emit('asset_balances_update', updatedBalances);
@@ -22505,44 +22509,56 @@ app.post('/api/convert', protect, async (req, res) => {
 });
 
 // =============================================
-// USER PREFERENCES SAVE ENDPOINT - Save IP-based preferences (only for new users)
+// USER PREFERENCES SAVE ENDPOINT - Save IP-based preferences (ONLY for new users)
 // =============================================
 app.post('/api/users/preferences/save', protect, async (req, res) => {
   try {
     const { language, fiatCurrency, detectedFromIP } = req.body;
     const userId = req.user._id;
     
-    const updates = {};
-    if (language) updates['preferences.language'] = language;
-    if (fiatCurrency) updates['preferences.currency'] = fiatCurrency;
+    // Check if user already has preferences saved (to prevent overwriting for existing users)
+    const existingPrefs = await UserPreference.findOne({ user: userId });
     
-    if (detectedFromIP) {
+    // If detectedFromIP is true AND user has no existing preferences, save IP-based preferences
+    if (detectedFromIP && (!existingPrefs || (existingPrefs.language === 'en' && existingPrefs.currency === 'USD'))) {
+      const updates = {};
+      if (language) updates['preferences.language'] = language;
+      if (fiatCurrency) updates['preferences.currency'] = fiatCurrency;
       updates['ipPreferences.language'] = language;
       updates['ipPreferences.currency'] = fiatCurrency;
       updates['ipPreferences.setFromIP'] = true;
       updates['ipPreferences.detectedAt'] = new Date();
+      
+      await User.findByIdAndUpdate(userId, updates);
+      
+      // Also update UserPreference model
+      await UserPreference.findOneAndUpdate(
+        { user: userId },
+        { 
+          language: language || 'en',
+          currency: fiatCurrency || 'USD',
+          $setOnInsert: { user: userId }
+        },
+        { upsert: true }
+      );
+      
+      console.log(`IP-based preferences saved for NEW user ${userId}: language=${language}, currency=${fiatCurrency}`);
+      
+      return res.status(200).json({
+        status: 'success',
+        message: 'IP-based preferences saved for new user',
+        data: { language, currency: fiatCurrency, isNewUser: true }
+      });
     }
     
-    await User.findByIdAndUpdate(userId, updates);
-    
-    // Also update UserPreference model
-    await UserPreference.findOneAndUpdate(
-      { user: userId },
-      { 
-        language: language || req.user.preferences?.language || 'en',
-        currency: fiatCurrency || req.user.preferences?.currency || 'USD',
-        $setOnInsert: { user: userId }
-      },
-      { upsert: true }
-    );
-    
+    // If user already has preferences, don't auto-save IP detection
     res.status(200).json({
       status: 'success',
-      message: 'Preferences saved successfully',
-      data: { language, currency: fiatCurrency }
+      message: 'User already has existing preferences, skipping IP auto-detection',
+      data: { hasExistingPrefs: true }
     });
   } catch (err) {
-    console.error('Error saving preferences:', err);
+    console.error('Error saving IP preferences:', err);
     res.status(500).json({ status: 'error', message: 'Failed to save preferences' });
   }
 });
@@ -22700,11 +22716,11 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       }
     }
     
-    // Update user balance - Add to main balance (USD value)
+    // Update user balance
     user.balances.main += deposit.amount;
     await user.save();
     
-    // If crypto deposit, update user asset balances
+    // If crypto deposit, update user asset balances (this ensures crypto appears in My Asset section)
     if (isCryptoDeposit && assetSymbol) {
       let userAssetBalance = await UserAssetBalance.findOne({ user: user._id });
       if (!userAssetBalance) {
@@ -22853,14 +22869,12 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
           for (const [asset, balance] of Object.entries(updatedAssetBalance.balances)) {
             if (balance > 0) {
               const price = await getCryptoPrice(asset.toUpperCase());
+              const assetId = asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset;
               assetData.push({
                 symbol: asset,
+                id: assetId,
                 balance: balance,
-                usdValue: balance * (price || 0),
-                id: asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset,
-                avgPrice: 0,
-                unrealizedPnl: 0,
-                unrealizedPnlPercent: 0
+                usdValue: balance * (price || 0)
               });
             }
           }
@@ -23080,14 +23094,12 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
         for (const [asset, balance] of Object.entries(updatedAssetBalance.balances)) {
           if (balance > 0) {
             const price = await getCryptoPrice(asset.toUpperCase());
+            const assetId = asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset;
             assetData.push({
               symbol: asset,
+              id: assetId,
               balance: balance,
-              usdValue: balance * (price || 0),
-              id: asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset,
-              avgPrice: 0,
-              unrealizedPnl: 0,
-              unrealizedPnlPercent: 0
+              usdValue: balance * (price || 0)
             });
           }
         }
@@ -23117,7 +23129,7 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
 });
 
 // =============================================
-// BUY ENDPOINT - Buy crypto with USD balance (adds to My Assets)
+// BUY ENDPOINT - Buy crypto with USD balance (proceeds go to matured wallet)
 // =============================================
 app.post('/api/buy', protect, async (req, res) => {
   try {
@@ -23161,7 +23173,7 @@ app.post('/api/buy', protect, async (req, res) => {
     
     const actualAssetAmount = amountUSD / actualPrice;
     
-    // Update user asset balances (My Assets)
+    // Update user asset balances
     let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
     if (!userAssetBalance) {
       userAssetBalance = new UserAssetBalance({ user: userId, balances: {} });
@@ -23227,35 +23239,21 @@ app.post('/api/buy', protect, async (req, res) => {
       netAmount: amountUSD
     });
     
-    // Recalculate main balance (value of all crypto assets at current prices)
-    let totalMainBalance = 0;
-    for (const [assetSym, balance] of Object.entries(userAssetBalance.balances)) {
-      if (balance > 0) {
-        const cryptoPrice = await getCryptoPrice(assetSym.toUpperCase());
-        if (cryptoPrice) {
-          totalMainBalance += balance * cryptoPrice;
-        }
-      }
-    }
-    await User.findByIdAndUpdate(userId, { 'balances.main': totalMainBalance });
-    
     // Emit socket updates
     const io = req.app.get('io');
     if (io) {
-      io.to(`user_${userId}`).emit('balance_update', { main: totalMainBalance, matured: user.balances.matured });
+      io.to(`user_${userId}`).emit('balance_update', { main: user.balances.main, matured: user.balances.matured });
       
       const assetData = [];
       for (const [a, balance] of Object.entries(userAssetBalance.balances)) {
         if (balance > 0) {
           const cryptoPrice = await getCryptoPrice(a.toUpperCase());
+          const assetId = a === 'btc' ? 'bitcoin' : a === 'eth' ? 'ethereum' : a;
           assetData.push({
             symbol: a,
+            id: assetId,
             balance: balance,
-            usdValue: balance * (cryptoPrice || 0),
-            id: a === 'btc' ? 'bitcoin' : a === 'eth' ? 'ethereum' : a,
-            avgPrice: 0,
-            unrealizedPnl: 0,
-            unrealizedPnlPercent: 0
+            usdValue: balance * (cryptoPrice || 0)
           });
         }
       }
@@ -23274,7 +23272,7 @@ app.post('/api/buy', protect, async (req, res) => {
 });
 
 // =============================================
-// SELL ENDPOINT - Sell crypto for USD balance (adds proceeds to matured wallet)
+// SELL ENDPOINT - Sell crypto for USD balance (proceeds go to matured wallet)
 // =============================================
 app.post('/api/sell', protect, async (req, res) => {
   try {
@@ -23328,7 +23326,7 @@ app.post('/api/sell', protect, async (req, res) => {
     
     await userAssetBalance.save();
     
-    // Add proceeds to matured balance (proceeds from sell go to matured wallet)
+    // Add proceeds to matured wallet (this is where investment/sell proceeds go)
     const user = await User.findById(userId);
     user.balances.matured += actualUsdValue;
     await user.save();
@@ -23372,35 +23370,21 @@ app.post('/api/sell', protect, async (req, res) => {
       netAmount: actualUsdValue
     });
     
-    // Recalculate main balance (value of remaining crypto assets)
-    let totalMainBalance = 0;
-    for (const [assetSym, balance] of Object.entries(userAssetBalance.balances)) {
-      if (balance > 0) {
-        const cryptoPrice = await getCryptoPrice(assetSym.toUpperCase());
-        if (cryptoPrice) {
-          totalMainBalance += balance * cryptoPrice;
-        }
-      }
-    }
-    await User.findByIdAndUpdate(userId, { 'balances.main': totalMainBalance });
-    
     // Emit socket updates
     const io = req.app.get('io');
     if (io) {
-      io.to(`user_${userId}`).emit('balance_update', { main: totalMainBalance, matured: user.balances.matured });
+      io.to(`user_${userId}`).emit('balance_update', { main: user.balances.main, matured: user.balances.matured });
       
       const assetData = [];
       for (const [a, balance] of Object.entries(userAssetBalance.balances)) {
         if (balance > 0) {
           const cryptoPrice = await getCryptoPrice(a.toUpperCase());
+          const assetId = a === 'btc' ? 'bitcoin' : a === 'eth' ? 'ethereum' : a;
           assetData.push({
             symbol: a,
+            id: assetId,
             balance: balance,
-            usdValue: balance * (cryptoPrice || 0),
-            id: a === 'btc' ? 'bitcoin' : a === 'eth' ? 'ethereum' : a,
-            avgPrice: 0,
-            unrealizedPnl: 0,
-            unrealizedPnlPercent: 0
+            usdValue: balance * (cryptoPrice || 0)
           });
         }
       }
@@ -23417,14 +23401,6 @@ app.post('/api/sell', protect, async (req, res) => {
     res.status(500).json({ status: 'error', message: 'Sale failed' });
   }
 });
-
-
-
-
-
-
-
-
 
 
 // Real-time price update function with WebSocket broadcasting
@@ -23460,7 +23436,7 @@ const startRealTimePriceUpdates = (io) => {
   }, 10000);
 };
 
-// Function to recalculate all user main balances based on current crypto prices (real-time fluctuations)
+// Function to recalculate user main balances based on current crypto prices (real-time fluctuations)
 const recalculateAllUserMainBalances = async (io) => {
   try {
     const users = await User.find({}).select('_id');
@@ -23883,18 +23859,19 @@ io.on('connection', async (socket) => {
           });
         }
         
-        // Send current asset balances (My Assets)
+        // Send current asset balances
         const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
         if (userAssetBalance) {
           const assetData = [];
           for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
             if (balance > 0) {
               const price = await getCryptoPrice(asset.toUpperCase());
+              const assetId = asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset;
               assetData.push({
                 symbol: asset,
+                id: assetId,
                 balance: balance,
                 usdValue: balance * (price || 0),
-                id: asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset,
                 avgPrice: 0,
                 unrealizedPnl: 0,
                 unrealizedPnlPercent: 0,
@@ -24093,6 +24070,6 @@ httpServer.listen(PORT, () => {
   console.log(`📈 Investors will grow from ${INITIAL_INVESTOR_COUNT.toLocaleString()} with max ${DAILY_GROWTH_LIMIT}/day`);
   console.log(`💰 Real-time crypto price updates started (every 10 seconds)`);
   console.log(`🔄 User main balances will recalculate every 5 minutes based on current prices`);
-  console.log(`💎 Crypto deposits automatically reflect in My Assets section`);
-  console.log(`💰 Proceeds from sells go directly to Matured Wallet`);
+  console.log(`💰 Main balance shows total USD value of all crypto assets (fluctuates with prices)`);
+  console.log(`💰 Matured wallet shows proceeds from investments and sells (also fluctuates with prices)`);
 });
