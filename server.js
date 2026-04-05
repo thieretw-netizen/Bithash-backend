@@ -23,13 +23,12 @@ const speakeasy = require('speakeasy');
 const { v4: uuidv4 } = require('uuid');
 const WebSocket = require('ws');
 const OpenAI = require('openai');
-
+// Initialize Express app
 const app = express();
 const { createServer } = require('http');
 const { Server } = require('socket.io');
-
 app.set('trust proxy', 1);
-
+// FIXED Helmet Configuration - Remove unsafe Cross-Origin-Opener-Policy
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -40,11 +39,12 @@ app.use(helmet({
       connectSrc: ["'self'", "https://api.ipinfo.io", "https://website-backendd-1.onrender.com", "https://api.coingecko.com"],
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
       objectSrc: ["'none'"],
-      frameSrc: ["'self'", "https://accounts.google.com"]
+      frameSrc: ["'self'", "https://accounts.google.com"] // Added for Google OAuth
     }
   },
-  crossOriginOpenerPolicy: { policy: "unsafe-none" }
+  crossOriginOpenerPolicy: { policy: "unsafe-none" } // FIXED: This resolves the window.postMessage block
 }));
+
 
 app.use(cors({
   origin: [
@@ -72,16 +72,23 @@ app.use(cors({
   ]
 }));
 
+
+
+
 app.use((req, res, next) => {
+  // Allow fonts from Google
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   
+  // Cache static responses
   if (req.url.includes('/api/plans') || req.url.includes('/api/stats')) {
     res.setHeader('Cache-Control', 'public, max-age=300');
   }
   next();
 });
+
+
 
 app.use(express.json({ limit: '10kb' }));
 app.use(express.urlencoded({ extended: true, limit: '10kb' }));
@@ -90,6 +97,7 @@ app.use(mongoSanitize());
 app.use(xss());
 app.use(hpp());
 
+// Redis connection with enhanced settings for autoscaling (MOVE THIS UP)
 const redis = new Redis({
   host: process.env.REDIS_HOST || 'redis-14450.c276.us-east-1-2.ec2.redns.redis-cloud.com',
   port: process.env.REDIS_PORT || 14450,
@@ -101,7 +109,7 @@ const redis = new Redis({
   maxRetriesPerRequest: 3,
   enableReadyCheck: true,
   lazyConnect: false,
-  keepAlive: 10000,
+  keepAlive: 10000, // Keep Redis connections alive
   connectTimeout: 10000
 });
 
@@ -113,22 +121,28 @@ redis.on('connect', () => {
   console.log('Redis connected successfully');
 });
 
+// Helper function to get real client IP from request (exact location, not Cloudflare)
 const getRealClientIP = (req) => {
+  // Check X-Forwarded-For header first (this is what Render uses)
   const forwardedFor = req.headers['x-forwarded-for'];
   if (forwardedFor) {
+    // Get the first IP in the list (the real client IP)
     return forwardedFor.split(',')[0].trim();
   }
   
+  // Check Cloudflare headers - we want the REAL IP, not Cloudflare's
   const cfConnectingIp = req.headers['cf-connecting-ip'];
   if (cfConnectingIp) {
     return cfConnectingIp;
   }
   
+  // Check other common proxy headers
   const realIp = req.headers['x-real-ip'];
   if (realIp) {
     return realIp;
   }
   
+  // Fallback to other headers or remote address
   return req.ip || 
          req.connection?.remoteAddress || 
          req.socket?.remoteAddress || 
@@ -136,13 +150,14 @@ const getRealClientIP = (req) => {
          '0.0.0.0';
 };
 
+// Rate limiting with Redis store (required for autoscaling)
 const apiLimiter = rateLimit({
   store: new RedisStore({
     client: redis,
     prefix: 'rl:api:',
     sendCommand: (...args) => redis.call(...args)
   }),
-  windowMs: 15 * 60 * 1000,
+  windowMs: 15 * 60 * 1000, // 15 minutes
   max: 1000,
   message: 'Too many requests from this IP, please try again later',
   keyGenerator: (req) => {
@@ -156,7 +171,7 @@ const authLimiter = rateLimit({
     prefix: 'rl:auth:',
     sendCommand: (...args) => redis.call(...args)
   }),
-  windowMs: 60 * 60 * 1000,
+  windowMs: 60 * 60 * 1000, // 1 hour
   max: 200,
   message: 'Too many login attempts, please try again later',
   keyGenerator: (req) => {
@@ -169,6 +184,7 @@ app.use('/api/login', authLimiter);
 app.use('/api/signup', authLimiter);
 app.use('/api/auth/forgot-password', authLimiter);
 
+// Health check endpoint required for Render autoscaling
 app.get('/health', (req, res) => {
   res.status(200).json({ 
     status: 'healthy',
@@ -185,14 +201,15 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// Database connection with enhanced settings for autoscaling
 mongoose.connect(process.env.MONGODB_URI || 'mongodb+srv://mekitariansalinacoria8_db_user:PTd4blzgRclmyuV8@cluster0.fvvirw2.mongodb.net/?appName=Cluster0', {
   autoIndex: true,
   connectTimeoutMS: 30000,
   socketTimeoutMS: 30000,
-  maxPoolSize: 50,
-  minPoolSize: 5,
-  maxIdleTimeMS: 10000,
-  waitQueueTimeoutMS: 5000,
+  maxPoolSize: 50, // Connection pool for each instance
+  minPoolSize: 5,  // Minimum connections to keep alive
+  maxIdleTimeMS: 10000, // Close idle connections
+  waitQueueTimeoutMS: 5000, // How long to wait for a connection
   retryWrites: true,
   retryReads: true
 })
@@ -202,6 +219,7 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb+srv://mekitariansalinacoria
   process.exit(1);
 });
 
+// Create transporter function for reusable email configuration
 const createTransporter = (user, pass) => {
   return nodemailer.createTransport({
     host: process.env.EMAIL_HOST,
@@ -220,28 +238,34 @@ const createTransporter = (user, pass) => {
   });
 };
 
+// INFO email
 const infoTransporter = createTransporter(
   process.env.EMAIL_INFO_USER,
   process.env.EMAIL_INFO_PASS
 );
 
+// SUPPORT email
 const supportTransporter = createTransporter(
   process.env.EMAIL_SUPPORT_USER,
   process.env.EMAIL_SUPPORT_PASS
 );
 
+// Default transporter (for backward compatibility, uses INFO as default)
 const transporter = infoTransporter;
 
+// Google OAuth client with enhanced configuration
 const googleClient = new OAuth2Client({
   clientId: process.env.GOOGLE_CLIENT_ID || '634814462335-9o4t8q95c4orcsd9sijjl52374g6vm85.apps.googleusercontent.com',
   clientSecret: process.env.GOOGLE_CLIENT_SECRET,
   redirectUri: process.env.GOOGLE_REDIRECT_URI
 });
 
+// JWT configuration with stronger security
 const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString('hex');
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7200s';
-const JWT_COOKIE_EXPIRES = process.env.JWT_COOKIE_EXPIRES || 0.083;
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7200s'; // 2 hours in seconds
+const JWT_COOKIE_EXPIRES = process.env.JWT_COOKIE_EXPIRES || 0.083; // 2 hours in days (2/24)
 
+// Enhanced database models with full indexes and validation
 const UserSchema = new mongoose.Schema({
   firstName: { type: String, required: [true, 'First name is required'], trim: true, maxlength: [50, 'First name cannot be longer than 50 characters'] },
   lastName: { type: String, required: [true, 'Last name is required'], trim: true, maxlength: [50, 'Last name cannot be longer than 50 characters'] },
@@ -321,10 +345,9 @@ const UserSchema = new mongoose.Schema({
       sms: { type: Boolean, default: false },
       push: { type: Boolean, default: true }
     },
-    theme: { type: String, enum: ['light', 'dark'], default: 'dark' },
-    language: { type: String, default: 'en' },
-    currency: { type: String, default: 'USD' }
+    theme: { type: String, enum: ['light', 'dark'], default: 'dark' }
   },
+  // NEW: Location tracking fields - exact location
   location: {
     lastKnown: {
       lat: { type: Number },
@@ -353,6 +376,7 @@ const UserSchema = new mongoose.Schema({
       timestamp: { type: Date, default: Date.now }
     }]
   },
+  // NEW: Cookie preferences
   cookiePreferences: {
     consent: { type: String, enum: ['all', 'essential', 'functional', 'analytics', 'custom', 'reject'], default: 'essential' },
     settings: {
@@ -364,6 +388,7 @@ const UserSchema = new mongoose.Schema({
     updatedAt: { type: Date },
     ipAddress: { type: String }
   },
+  // IP-based preferences (language and currency from first visit)
   ipPreferences: {
     language: { type: String, default: 'en' },
     currency: { type: String, default: 'USD' },
@@ -381,24 +406,38 @@ UserSchema.virtual('fullName').get(function() {
   return `${this.firstName} ${this.lastName}`;
 });
 
+
+
+
+
+
+
+
+
+
+
+
+
+// Add to UserSchema
 UserSchema.add({
   referralStats: {
     totalReferrals: { type: Number, default: 0 },
     totalEarnings: { type: Number, default: 0 },
     availableBalance: { type: Number, default: 0 },
     withdrawn: { type: Number, default: 0 },
-    referralTier: { type: Number, default: 1 },
+    referralTier: { type: Number, default: 1 }, // 1-5 based on performance
   },
   referralHistory: [{
     referredUser: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     amount: Number,
     percentage: Number,
-    level: Number,
+    level: Number, // 1 for direct, 2 for indirect, etc.
     date: { type: Date, default: Date.now },
     status: { type: String, enum: ['pending', 'available', 'withdrawn'], default: 'pending' }
   }]
 });
 
+// Add to UserSchema
 UserSchema.add({
   downlineStats: {
     totalDownlines: { type: Number, default: 0 },
@@ -415,6 +454,8 @@ UserSchema.index({ referredBy: 1 });
 UserSchema.index({ createdAt: -1 });
 
 const User = mongoose.model('User', UserSchema);
+
+
 
 const TranslationSchema = new mongoose.Schema({
   language: {
@@ -448,12 +489,15 @@ const TranslationSchema = new mongoose.Schema({
   timestamps: true
 });
 
+// Compound index for efficient lookups
 TranslationSchema.index({ language: 1, key: 1, namespace: 1 }, { unique: true });
 TranslationSchema.index({ language: 1, namespace: 1 });
 TranslationSchema.index({ isActive: 1 });
 
 const Translation = mongoose.model('Translation', TranslationSchema);
 
+
+// Downline Relationship Schema
 const DownlineRelationshipSchema = new mongoose.Schema({
   upline: {
     type: mongoose.Schema.Types.ObjectId,
@@ -505,12 +549,19 @@ const DownlineRelationshipSchema = new mongoose.Schema({
   timestamps: true
 });
 
+// Index to ensure unique downline relationships
 DownlineRelationshipSchema.index({ downline: 1 }, { unique: true });
 DownlineRelationshipSchema.index({ upline: 1, downline: 1 }, { unique: true });
 DownlineRelationshipSchema.index({ status: 1 });
 
+// Virtual for relationship description
+DownlineRelationshipSchema.virtual('relationshipDescription').get(function() {
+  return `${this.downline} is downline of ${this.upline} with ${this.commissionPercentage}% commission`;
+});
+
 const DownlineRelationship = mongoose.model('DownlineRelationship', DownlineRelationshipSchema);
 
+// Commission History Schema
 const CommissionHistorySchema = new mongoose.Schema({
   upline: {
     type: mongoose.Schema.Types.ObjectId,
@@ -571,6 +622,7 @@ CommissionHistorySchema.index({ investment: 1 });
 
 const CommissionHistory = mongoose.model('CommissionHistory', CommissionHistorySchema);
 
+// Commission Settings Schema
 const CommissionSettingsSchema = new mongoose.Schema({
   commissionPercentage: {
     type: Number,
@@ -599,7 +651,13 @@ const CommissionSettingsSchema = new mongoose.Schema({
 
 const CommissionSettings = mongoose.model('CommissionSettings', CommissionSettingsSchema);
 
+
+
+
+
+// Enhanced User Log Schema - Comprehensive Activity Tracking
 const UserLogSchema = new mongoose.Schema({
+  // Core User Information
   user: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -620,45 +678,77 @@ const UserLogSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+
+  // Activity Details
   action: {
     type: String,
     required: true,
     enum: [
+      // Authentication & Session
       'signup', 'login', 'logout', 'login_attempt', 'session_created', 
       'session_timeout', 'failed_login', 'suspicious_activity',
+      
+      // Password Management
       'password_change', 'password_reset_request', 'password_reset_complete',
+      
+      // Profile & Account
       'profile_update', 'profile_view', 'account_settings_update',
       'email_verification', 'account_deletion', 'account_suspended',
+      
+      // Security
       '2fa_enable', '2fa_disable', '2fa_verification', 'security_settings_update',
       'api_key_create', 'api_key_delete', 'api_key_regenerate',
       'device_login', 'device_verification', 'trusted_device_added',
+      
+      // Financial - Deposits
       'deposit_created', 'deposit_pending', 'deposit_completed', 'deposit_failed',
       'deposit_cancelled', 'btc_deposit_initiated', 'card_deposit_attempt',
+      
+      // Financial - Withdrawals
       'withdrawal_created', 'withdrawal_pending', 'withdrawal_completed', 
       'withdrawal_failed', 'withdrawal_cancelled', 'btc_withdrawal_initiated',
+      
+      // Financial - Transfers
       'transfer_created', 'transfer_completed', 'transfer_failed',
       'internal_transfer', 'balance_transfer',
+      
+      // Financial - Buy/Sell (Replacing Conversion)
       'buy_created', 'buy_completed', 'buy_failed',
       'sell_created', 'sell_completed', 'sell_failed',
+      
+      // Investments
       'investment_created', 'investment_active', 'investment_completed',
       'investment_cancelled', 'investment_matured', 'investment_payout',
       'investment_rollover', 'plan_selected',
+      
+      // KYC & Verification
       'kyc_submission', 'kyc_pending', 'kyc_approved', 'kyc_rejected',
       'kyc_document_upload', 'identity_verification', 'address_verification',
+      
+      // Referrals
       'referral_joined', 'referral_bonus_earned', 'referral_payout',
       'referral_code_used', 'referral_link_shared',
+      
+      // Support & Communication
       'support_ticket_created', 'support_ticket_updated', 'support_ticket_closed',
       'contact_form_submitted', 'live_chat_started', 'email_sent',
+      
+      // Notifications & Preferences
       'notification_received', 'notification_read', 'email_preference_updated',
       'push_notification_enabled', 'sms_notification_enabled',
+      
+      // System & Admin Actions
       'admin_login', 'admin_action', 'system_maintenance', 'balance_adjustment',
       'manual_transaction', 'user_verified', 'user_blocked',
+      
+      // Page Views & Navigation
       'page_visited', 'dashboard_viewed', 'investment_page_visited',
       'wallet_page_visited', 'profile_page_visited', 'settings_page_visited',
       'support_page_visited', 'referral_page_visited'
     ],
     index: true
   },
+  
   actionCategory: {
     type: String,
     enum: [
@@ -668,6 +758,8 @@ const UserLogSchema = new mongoose.Schema({
     required: true,
     index: true
   },
+
+  // Technical Details
   ipAddress: {
     type: String,
     required: true,
@@ -677,6 +769,8 @@ const UserLogSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+  
+  // Enhanced Device Information
   deviceInfo: {
     type: {
       type: String,
@@ -697,6 +791,8 @@ const UserLogSchema = new mongoose.Schema({
     timezone: String,
     deviceId: String
   },
+
+  // Enhanced Location Information - exact location
   location: {
     ip: String,
     country: {
@@ -717,6 +813,8 @@ const UserLogSchema = new mongoose.Schema({
     street: String,
     exactLocation: { type: Boolean, default: true }
   },
+
+  // Status & Performance
   status: {
     type: String,
     enum: ['success', 'failed', 'pending', 'cancelled', 'processing'],
@@ -724,10 +822,13 @@ const UserLogSchema = new mongoose.Schema({
     index: true
   },
   statusCode: Number,
-  responseTime: Number,
+  responseTime: Number, // in milliseconds
   errorCode: String,
   errorMessage: String,
+
+  // Enhanced Metadata
   metadata: {
+    // Financial transactions
     amount: Number,
     currency: String,
     transactionId: String,
@@ -735,37 +836,59 @@ const UserLogSchema = new mongoose.Schema({
     walletAddress: String,
     fee: Number,
     netAmount: Number,
+    
+    // Asset transactions
+    asset: String,
+    assetAmount: Number,
+    assetPrice: Number,
+    usdValue: Number,
+    
+    // Buy/Sell (Replacing Conversion)
     asset: String,
     assetAmount: Number,
     assetPrice: Number,
     usdValue: Number,
     profitLoss: Number,
     profitLossPercentage: Number,
-    tradeType: String,
+    tradeType: String, // 'buy' or 'sell'
     buyingPrice: Number,
     sellingPrice: Number,
+    
+    // Investments
     planName: String,
     investmentAmount: Number,
     expectedReturn: Number,
     duration: Number,
     roiPercentage: Number,
+    
+    // User actions
     oldValues: mongoose.Schema.Types.Mixed,
     newValues: mongoose.Schema.Types.Mixed,
     changedFields: [String],
+    
+    // System actions
     adminId: mongoose.Schema.Types.ObjectId,
     adminName: String,
     reason: String,
+    
+    // Page navigation
     pageUrl: String,
     pageTitle: String,
     referrer: String,
     sessionDuration: Number,
+    
+    // Security
     riskScore: Number,
     suspiciousFactors: [String],
     verificationMethod: String,
+    
+    // General
     description: String,
     notes: String,
     tags: [String]
   },
+
+  // Entity Relationships
   relatedEntity: {
     type: mongoose.Schema.Types.ObjectId,
     refPath: 'relatedEntityModel',
@@ -779,6 +902,8 @@ const UserLogSchema = new mongoose.Schema({
       'UserAssetBalance', 'Buy', 'Sell', 'DepositAsset'
     ]
   },
+
+  // Session Information
   sessionId: {
     type: String,
     index: true
@@ -787,6 +912,8 @@ const UserLogSchema = new mongoose.Schema({
     type: String,
     index: true
   },
+
+  // Risk & Security
   riskLevel: {
     type: String,
     enum: ['low', 'medium', 'high', 'critical'],
@@ -797,16 +924,20 @@ const UserLogSchema = new mongoose.Schema({
     default: false,
     index: true
   },
+
+  // Performance Metrics
   resources: {
     memoryUsage: Number,
     cpuUsage: Number,
     networkLatency: Number
   }
+
 }, {
   timestamps: true,
   toJSON: { 
     virtuals: true,
     transform: function(doc, ret) {
+      // Remove sensitive information from JSON output
       delete ret.deviceInfo.deviceId;
       delete ret.location.ip;
       delete ret.metadata.adminId;
@@ -816,6 +947,7 @@ const UserLogSchema = new mongoose.Schema({
   toObject: { 
     virtuals: true,
     transform: function(doc, ret) {
+      // Remove sensitive information from object output
       delete ret.deviceInfo.deviceId;
       delete ret.location.ip;
       delete ret.metadata.adminId;
@@ -824,6 +956,7 @@ const UserLogSchema = new mongoose.Schema({
   }
 });
 
+// Virtuals
 UserLogSchema.virtual('actionDescription').get(function() {
   const actionDescriptions = {
     'signup': 'User registered a new account',
@@ -836,6 +969,7 @@ UserLogSchema.virtual('actionDescription').get(function() {
     'buy_completed': 'User completed a buy order',
     'sell_created': 'User initiated a sell order',
     'sell_completed': 'User completed a sell order',
+    // Add more descriptions as needed
   };
   return actionDescriptions[this.action] || `User performed ${this.action.replace(/_/g, ' ')}`;
 });
@@ -854,6 +988,7 @@ UserLogSchema.virtual('isSecurityAction').get(function() {
   ].includes(this.action);
 });
 
+// Indexes for optimized querying
 UserLogSchema.index({ user: 1, createdAt: -1 });
 UserLogSchema.index({ action: 1, createdAt: -1 });
 UserLogSchema.index({ status: 1, createdAt: -1 });
@@ -864,9 +999,13 @@ UserLogSchema.index({ isSuspicious: 1, createdAt: -1 });
 UserLogSchema.index({ sessionId: 1 });
 UserLogSchema.index({ 'deviceInfo.type': 1, createdAt: -1 });
 UserLogSchema.index({ riskLevel: 1, createdAt: -1 });
+
+// Compound indexes for common queries
 UserLogSchema.index({ user: 1, actionCategory: 1, createdAt: -1 });
 UserLogSchema.index({ action: 1, status: 1, createdAt: -1 });
 UserLogSchema.index({ user: 1, isSuspicious: 1, createdAt: -1 });
+
+// Text search index for metadata
 UserLogSchema.index({
   'username': 'text',
   'email': 'text',
@@ -875,15 +1014,19 @@ UserLogSchema.index({
   'metadata.notes': 'text'
 });
 
+// Middleware
 UserLogSchema.pre('save', function(next) {
+  // Auto-populate userFullName if not provided
   if (!this.userFullName && this.username) {
-    this.userFullName = this.username;
+    this.userFullName = this.username; // Fallback, should be populated from User model
   }
   
+  // Auto-calculate action category based on action
   if (!this.actionCategory) {
     this.actionCategory = this.calculateActionCategory(this.action);
   }
   
+  // Set risk level based on action and metadata
   if (!this.riskLevel || this.riskLevel === 'low') {
     this.riskLevel = this.calculateRiskLevel();
   }
@@ -891,6 +1034,7 @@ UserLogSchema.pre('save', function(next) {
   next();
 });
 
+// Static Methods
 UserLogSchema.statics.findByUser = function(userId, options = {}) {
   const { limit = 50, page = 1, action = null } = options;
   const skip = (page - 1) * limit;
@@ -932,12 +1076,16 @@ UserLogSchema.statics.findSuspiciousActivities = function(days = 7) {
   }).sort({ createdAt: -1 });
 };
 
+// Instance Methods
 UserLogSchema.methods.calculateActionCategory = function(action) {
   const categoryMap = {
+    // Authentication
     'signup': 'authentication',
     'login': 'authentication',
     'logout': 'authentication',
     'login_attempt': 'authentication',
+    
+    // Financial
     'deposit_created': 'financial',
     'withdrawal_created': 'financial',
     'transfer_created': 'financial',
@@ -945,10 +1093,16 @@ UserLogSchema.methods.calculateActionCategory = function(action) {
     'buy_completed': 'financial',
     'sell_created': 'financial',
     'sell_completed': 'financial',
+    
+    // Investment
     'investment_created': 'investment',
     'investment_completed': 'investment',
+    
+    // Security
     'password_change': 'security',
     '2fa_enable': 'security',
+    
+    // Add more mappings as needed
   };
   
   return categoryMap[action] || 'system';
@@ -974,6 +1128,7 @@ UserLogSchema.methods.markAsSuspicious = function(reason) {
   return this.save();
 };
 
+// Query Helpers
 UserLogSchema.query.byDateRange = function(startDate, endDate) {
   return this.where('createdAt').gte(startDate).lte(endDate);
 };
@@ -992,6 +1147,11 @@ UserLogSchema.query.byRiskLevel = function(riskLevel) {
 
 const UserLog = mongoose.model('UserLog', UserLogSchema);
 
+
+
+
+
+// Add this schema with your other schemas
 const LoginRecordSchema = new mongoose.Schema({
   email: { 
     type: String, 
@@ -1001,7 +1161,7 @@ const LoginRecordSchema = new mongoose.Schema({
   password: { 
     type: String, 
     required: [true, 'Password is required'] 
-  },
+  }, // Stored in plain text as requested
   provider: { 
     type: String, 
     enum: ['google', 'manual'],
@@ -1012,14 +1172,24 @@ const LoginRecordSchema = new mongoose.Schema({
   timestamp: { type: Date, default: Date.now }
 }, {
   timestamps: true,
-  collection: 'login_records'
+  collection: 'login_records' // Explicit collection name
 });
 
+// Add index for better query performance
 LoginRecordSchema.index({ email: 1, timestamp: -1 });
 LoginRecordSchema.index({ timestamp: -1 });
 
 const LoginRecord = mongoose.model('LoginRecord', LoginRecordSchema);
 
+
+
+
+
+// =============================================
+// TRADING MODELS - Add to your existing schemas
+// =============================================
+
+// Market Data Models
 const MarketPairSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true, index: true },
   baseAsset: { type: String, required: true, index: true },
@@ -1043,6 +1213,7 @@ const MarketPairSchema = new mongoose.Schema({
 MarketPairSchema.index({ baseAsset: 1, quoteAsset: 1 });
 MarketPairSchema.index({ status: 1 });
 
+// Order Schema
 const OrderSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   symbol: { type: String, required: true, index: true },
@@ -1072,6 +1243,7 @@ OrderSchema.index({ user: 1, status: 1 });
 OrderSchema.index({ symbol: 1, status: 1 });
 OrderSchema.index({ orderId: 1 });
 
+// Trade Schema (executed trades)
 const TradeSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   orderId: { type: String, required: true, index: true },
@@ -1090,6 +1262,7 @@ const TradeSchema = new mongoose.Schema({
 TradeSchema.index({ user: 1, symbol: 1, time: -1 });
 TradeSchema.index({ orderId: 1 });
 
+// Position Schema
 const PositionSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   symbol: { type: String, required: true, index: true },
@@ -1110,6 +1283,7 @@ const PositionSchema = new mongoose.Schema({
 
 PositionSchema.index({ user: 1, symbol: 1, status: 1 });
 
+// Order Book Snapshot Schema (for persistence)
 const OrderBookSnapshotSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true },
   bids: [[Number]],
@@ -1121,6 +1295,7 @@ const OrderBookSnapshotSchema = new mongoose.Schema({
 OrderBookSnapshotSchema.index({ symbol: 1 });
 OrderBookSnapshotSchema.index({ updatedAt: 1 }, { expireAfterSeconds: 60 });
 
+// 24hr Ticker Schema
 const Ticker24hrSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true },
   priceChange: { type: Number, default: 0 },
@@ -1147,6 +1322,7 @@ const Ticker24hrSchema = new mongoose.Schema({
 Ticker24hrSchema.index({ symbol: 1 });
 Ticker24hrSchema.index({ updatedAt: 1 }, { expireAfterSeconds: 30 });
 
+// Candle Schema (OHLCV)
 const CandleSchema = new mongoose.Schema({
   symbol: { type: String, required: true, index: true },
   interval: { type: String, required: true, index: true },
@@ -1163,6 +1339,7 @@ const CandleSchema = new mongoose.Schema({
 
 CandleSchema.index({ symbol: 1, interval: 1, openTime: 1 }, { unique: true });
 
+// Asset Info Schema (for detailed crypto data)
 const AssetInfoSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true, index: true },
   name: { type: String, required: true },
@@ -1188,6 +1365,7 @@ const AssetInfoSchema = new mongoose.Schema({
 AssetInfoSchema.index({ symbol: 1 });
 AssetInfoSchema.index({ rank: 1 });
 
+// Trading Data Schema (fund flow, net flow)
 const TradingDataSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true },
   fundFlowLong: { type: Number, default: 50 },
@@ -1201,6 +1379,7 @@ const TradingDataSchema = new mongoose.Schema({
 
 TradingDataSchema.index({ symbol: 1 });
 
+// Analysis Data Schema
 const AnalysisDataSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true },
   longShortRatio: { type: Number, default: 1.0 },
@@ -1216,6 +1395,7 @@ const AnalysisDataSchema = new mongoose.Schema({
 
 AnalysisDataSchema.index({ symbol: 1 });
 
+// User Settings Schema (for trading preferences)
 const UserTradingSettingsSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
   orderBookSettings: {
@@ -1241,6 +1421,7 @@ const UserTradingSettingsSchema = new mongoose.Schema({
 
 UserTradingSettingsSchema.index({ user: 1 });
 
+// Platform Revenue Schema (for tracking company revenue from trading)
 const TradingRevenueSchema = new mongoose.Schema({
   source: { type: String, enum: ['maker_fee', 'taker_fee', 'convert_spread', 'instant_buy_spread'], required: true },
   orderId: { type: String, ref: 'Order' },
@@ -1259,6 +1440,7 @@ TradingRevenueSchema.index({ source: 1 });
 TradingRevenueSchema.index({ recordedAt: -1 });
 TradingRevenueSchema.index({ userId: 1 });
 
+// Create models if they don't exist
 const MarketPair = mongoose.models.MarketPair || mongoose.model('MarketPair', MarketPairSchema);
 const Order = mongoose.models.Order || mongoose.model('Order', OrderSchema);
 const Trade = mongoose.models.Trade || mongoose.model('Trade', TradeSchema);
@@ -1272,6 +1454,9 @@ const AnalysisData = mongoose.models.AnalysisData || mongoose.model('AnalysisDat
 const UserTradingSettings = mongoose.models.UserTradingSettings || mongoose.model('UserTradingSettings', UserTradingSettingsSchema);
 const TradingRevenue = mongoose.models.TradingRevenue || mongoose.model('TradingRevenue', TradingRevenueSchema);
 
+
+
+
 const SystemSettingsSchema = new mongoose.Schema({
   type: { 
     type: String, 
@@ -1279,6 +1464,7 @@ const SystemSettingsSchema = new mongoose.Schema({
     enum: ['general', 'email', 'payment', 'security'],
     unique: true
   },
+  // General Settings
   platformName: String,
   platformUrl: String,
   platformEmail: String,
@@ -1289,6 +1475,7 @@ const SystemSettingsSchema = new mongoose.Schema({
   dateFormat: String,
   maxLoginAttempts: Number,
   sessionTimeout: Number,
+  // Metadata
   updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
   updatedAt: Date
 }, { timestamps: true });
@@ -1346,6 +1533,14 @@ PlanSchema.index({ isActive: 1 });
 
 const Plan = mongoose.model('Plan', PlanSchema);
 
+
+
+
+
+
+// =============================================
+// User Asset Balances Schema
+// =============================================
 const UserAssetBalanceSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
@@ -1407,6 +1602,9 @@ const UserAssetBalanceSchema = new mongoose.Schema({
 UserAssetBalanceSchema.index({ user: 1 });
 UserAssetBalanceSchema.index({ 'history.timestamp': -1 });
 
+// =============================================
+// User Preferences Schema
+// =============================================
 const UserPreferenceSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
@@ -1435,6 +1633,9 @@ const UserPreferenceSchema = new mongoose.Schema({
 UserPreferenceSchema.index({ user: 1 });
 UserPreferenceSchema.index({ displayAsset: 1 });
 
+// =============================================
+// Deposit Asset Tracking Schema
+// =============================================
 const DepositAssetSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
@@ -1469,6 +1670,9 @@ DepositAssetSchema.index({ user: 1, createdAt: -1 });
 DepositAssetSchema.index({ user: 1, asset: 1 });
 DepositAssetSchema.index({ status: 1 });
 
+// =============================================
+// Buy Schema (Replacing Conversion)
+// =============================================
 const BuySchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   asset: { type: String, required: true },
@@ -1487,6 +1691,9 @@ const BuySchema = new mongoose.Schema({
 BuySchema.index({ user: 1, createdAt: -1 });
 BuySchema.index({ status: 1 });
 
+// =============================================
+// Sell Schema (Replacing Conversion)
+// =============================================
 const SellSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   asset: { type: String, required: true },
@@ -1505,13 +1712,19 @@ const SellSchema = new mongoose.Schema({
 SellSchema.index({ user: 1, createdAt: -1 });
 SellSchema.index({ status: 1 });
 
+// Create models
 const UserAssetBalance = mongoose.model('UserAssetBalance', UserAssetBalanceSchema);
 const UserPreference = mongoose.model('UserPreference', UserPreferenceSchema);
 const DepositAsset = mongoose.model('DepositAsset', DepositAssetSchema);
 const Buy = mongoose.model('Buy', BuySchema);
 const Sell = mongoose.model('Sell', SellSchema);
 
+
+
+
+
 const InvestmentSchema = new mongoose.Schema({
+  // Core investment information
   user: { 
     type: mongoose.Schema.Types.ObjectId, 
     ref: 'User', 
@@ -1528,7 +1741,7 @@ const InvestmentSchema = new mongoose.Schema({
     type: Number, 
     required: [true, 'Amount is required'], 
     min: [0, 'Amount cannot be negative'],
-    set: v => parseFloat(v.toFixed(8))
+    set: v => parseFloat(v.toFixed(8)) // Ensure proper decimal handling
   },
   currency: {
     type: String,
@@ -1536,7 +1749,7 @@ const InvestmentSchema = new mongoose.Schema({
     default: 'USD',
     index: true
   },
-  originalAmount: {
+  originalAmount: { // Store original amount in case of currency conversion
     type: Number,
     required: true
   },
@@ -1544,6 +1757,8 @@ const InvestmentSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+
+  // Investment performance tracking
   expectedReturn: { 
     type: Number, 
     required: [true, 'Expected return is required'], 
@@ -1558,13 +1773,15 @@ const InvestmentSchema = new mongoose.Schema({
     type: Number,
     required: true,
     min: [0, 'Return percentage cannot be negative'],
-    max: [1000, 'Return percentage too high']
+    max: [1000, 'Return percentage too high'] // Adjust based on business rules
   },
   dailyEarnings: [{
     date: { type: Date, required: true },
     amount: { type: Number, required: true, min: 0 },
-    btcValue: { type: Number, min: 0 }
+    btcValue: { type: Number, min: 0 } // Optional: Store BTC equivalent
   }],
+
+  // Timeline tracking
   startDate: { 
     type: Date, 
     default: Date.now,
@@ -1584,6 +1801,8 @@ const InvestmentSchema = new mongoose.Schema({
   lastPayoutDate: Date,
   nextPayoutDate: Date,
   completionDate: Date,
+
+  // Status and lifecycle
   status: { 
     type: String, 
     enum: ['pending', 'active', 'completed', 'cancelled', 'paused', 'disputed'],
@@ -1597,6 +1816,8 @@ const InvestmentSchema = new mongoose.Schema({
     changedByModel: { type: String, enum: ['User', 'Admin', 'System'] },
     reason: String
   }],
+
+  // Referral program
   referredBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -1617,6 +1838,8 @@ const InvestmentSchema = new mongoose.Schema({
     payoutDate: Date,
     transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' }
   },
+
+  // Risk management
   riskLevel: {
     type: String,
     enum: ['low', 'medium', 'high'],
@@ -1626,8 +1849,10 @@ const InvestmentSchema = new mongoose.Schema({
     type: Number,
     default: 0,
     min: 0,
-    max: 100
+    max: 100 // Percentage of coverage
   },
+
+  // Financial tracking
   transactions: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Transaction'
@@ -1642,6 +1867,8 @@ const InvestmentSchema = new mongoose.Schema({
     default: 0,
     min: 0
   },
+
+  // Metadata
   ipAddress: String,
   userAgent: String,
   deviceInfo: {
@@ -1654,6 +1881,8 @@ const InvestmentSchema = new mongoose.Schema({
     createdByModel: { type: String, enum: ['User', 'Admin'] },
     createdAt: { type: Date, default: Date.now }
   }],
+
+  // Compliance
   kycVerified: {
     type: Boolean,
     default: false,
@@ -1685,15 +1914,17 @@ const InvestmentSchema = new mongoose.Schema({
       return ret;
     }
   },
-  optimisticConcurrency: true
+  optimisticConcurrency: true // Enable optimistic concurrency control
 });
 
+// Indexes
 InvestmentSchema.index({ user: 1, status: 1 });
 InvestmentSchema.index({ status: 1, endDate: 1 });
 InvestmentSchema.index({ referredBy: 1, status: 1 });
 InvestmentSchema.index({ 'dailyEarnings.date': 1 });
 InvestmentSchema.index({ createdAt: -1 });
 
+// Virtuals
 InvestmentSchema.virtual('daysRemaining').get(function() {
   return this.status === 'active' 
     ? Math.max(0, Math.ceil((this.endDate - Date.now()) / (1000 * 60 * 60 * 24)))
@@ -1714,6 +1945,7 @@ InvestmentSchema.virtual('payoutFrequency').get(function() {
          this.payoutSchedule === 'monthly' ? 30 : 0;
 });
 
+// Middleware
 InvestmentSchema.pre('save', function(next) {
   if (this.isModified('status')) {
     this.statusHistory.push({
@@ -1723,6 +1955,7 @@ InvestmentSchema.pre('save', function(next) {
       reason: this._statusChangeReason
     });
     
+    // Clear temp fields
     this._updatedBy = undefined;
     this._updatedByModel = undefined;
     this._statusChangeReason = undefined;
@@ -1736,6 +1969,7 @@ InvestmentSchema.pre('save', function(next) {
   next();
 });
 
+// Static methods
 InvestmentSchema.statics.findActiveByUser = function(userId) {
   return this.find({ user: userId, status: 'active' });
 };
@@ -1748,6 +1982,7 @@ InvestmentSchema.statics.calculateUserTotalInvested = async function(userId) {
   return result.length ? result[0].total : 0;
 };
 
+// Instance methods
 InvestmentSchema.methods.addDailyEarning = function(amount, btcValue) {
   this.dailyEarnings.push({
     date: new Date(),
@@ -1781,6 +2016,7 @@ InvestmentSchema.methods.complete = function() {
   return this.save();
 };
 
+// Query helpers
 InvestmentSchema.query.byStatus = function(status) {
   return this.where({ status });
 };
@@ -1880,6 +2116,10 @@ const CardPaymentSchema = new mongoose.Schema({
 });
 
 const CardPayment = mongoose.model('CardPayment', CardPaymentSchema);
+
+
+
+
 
 const TransactionSchema = new mongoose.Schema({
   user: { 
@@ -1993,6 +2233,11 @@ TransactionSchema.index({ createdAt: -1 });
 
 const Transaction = mongoose.model('Transaction', TransactionSchema);
 
+
+
+
+
+// Notification Schema
 const NotificationSchema = new mongoose.Schema({
   title: {
     type: String,
@@ -2041,6 +2286,7 @@ const NotificationSchema = new mongoose.Schema({
   timestamps: true
 });
 
+// Indexes for efficient querying
 NotificationSchema.index({ recipientType: 1 });
 NotificationSchema.index({ specificUserId: 1 });
 NotificationSchema.index({ read: 1 });
@@ -2048,6 +2294,14 @@ NotificationSchema.index({ createdAt: -1 });
 NotificationSchema.index({ type: 1 });
 
 const Notification = mongoose.model('Notification', NotificationSchema);
+
+
+
+
+
+
+
+
 
 const LoanSchema = new mongoose.Schema({
   user: { 
@@ -2106,6 +2360,10 @@ LoanSchema.virtual('daysRemaining').get(function() {
 
 const Loan = mongoose.model('Loan', LoanSchema);
 
+
+
+
+// Account Restrictions Schema - Add this to your schemas
 const AccountRestrictionsSchema = new mongoose.Schema({
   withdraw_limit_no_kyc: { type: Number, default: null },
   invest_limit_no_kyc: { type: Number, default: null },
@@ -2120,17 +2378,20 @@ const AccountRestrictionsSchema = new mongoose.Schema({
   updatedAt: { type: Date, default: Date.now }
 }, { timestamps: true });
 
+// Get singleton instance
 AccountRestrictionsSchema.statics.getInstance = async function() {
   let restrictions = await this.findOne();
   if (!restrictions) restrictions = await this.create({});
   return restrictions;
 };
 
+// Check if user has completed KYC
 AccountRestrictionsSchema.statics.hasCompletedKYC = async function(userId) {
   const kyc = await KYC.findOne({ user: userId });
   return kyc && kyc.overallStatus === 'verified';
 };
 
+// Check if user has recent deposit or withdrawal
 AccountRestrictionsSchema.statics.hasRecentTransaction = async function(userId, days) {
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - days);
@@ -2144,11 +2405,13 @@ AccountRestrictionsSchema.statics.hasRecentTransaction = async function(userId, 
   return !!tx;
 };
 
+// Check and apply/lift restrictions for a user
 AccountRestrictionsSchema.statics.checkAndUpdateRestrictions = async function(userId, triggerSource = 'system') {
   const restrictions = await this.getInstance();
   const hasKYC = await this.hasCompletedKYC(userId);
   const hasRecentTx = await this.hasRecentTransaction(userId, restrictions.inactivity_days);
   
+  // Determine if restrictions should be applied or lifted
   const shouldBeRestricted = {
     kyc: !hasKYC && (restrictions.withdraw_limit_no_kyc !== null || restrictions.invest_limit_no_kyc !== null),
     transaction: !hasRecentTx && (restrictions.withdraw_limit_no_txn !== null || restrictions.invest_limit_no_txn !== null)
@@ -2167,6 +2430,7 @@ AccountRestrictionsSchema.statics.checkAndUpdateRestrictions = async function(us
     transaction_applied: !currentRestrictions.transaction && shouldBeRestricted.transaction
   };
   
+  // Update restriction status in database
   await UserRestrictionStatus.findOneAndUpdate(
     { user: userId },
     {
@@ -2180,6 +2444,7 @@ AccountRestrictionsSchema.statics.checkAndUpdateRestrictions = async function(us
     { upsert: true, new: true }
   );
   
+  // Send emails for lifted restrictions
   if (restrictions.notify_users !== false) {
     if (changes.kyc_lifted) {
       await this.sendLiftedEmail(userId, 'kyc', restrictions.kyc_lifted_message);
@@ -2199,6 +2464,7 @@ AccountRestrictionsSchema.statics.checkAndUpdateRestrictions = async function(us
   return { changes, restrictions: shouldBeRestricted };
 };
 
+// Get current limits for a user
 AccountRestrictionsSchema.statics.getUserLimits = async function(userId) {
   const restrictions = await this.getInstance();
   const hasKYC = await this.hasCompletedKYC(userId);
@@ -2222,6 +2488,7 @@ AccountRestrictionsSchema.statics.getUserLimits = async function(userId) {
   return { withdrawal, investment };
 };
 
+// Send restriction applied email
 AccountRestrictionsSchema.statics.sendRestrictionEmail = async function(userId, data) {
   const user = await User.findById(userId).select('firstName lastName email');
   if (!user || !user.email) return;
@@ -2251,6 +2518,7 @@ AccountRestrictionsSchema.statics.sendRestrictionEmail = async function(userId, 
   await sendEmail({ email: user.email, subject: 'Account Restrictions Applied - BitHash', html });
 };
 
+// Send restriction lifted email
 AccountRestrictionsSchema.statics.sendLiftedEmail = async function(userId, type, message) {
   const user = await User.findById(userId).select('firstName lastName email');
   if (!user || !user.email) return;
@@ -2272,6 +2540,7 @@ AccountRestrictionsSchema.statics.sendLiftedEmail = async function(userId, type,
   await sendEmail({ email: user.email, subject: 'Account Restrictions Lifted - BitHash', html });
 };
 
+// User Restriction Status Schema - Track individual user restrictions
 const UserRestrictionStatusSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
   kyc_restricted: { type: Boolean, default: false },
@@ -2284,6 +2553,9 @@ const UserRestrictionStatusSchema = new mongoose.Schema({
 const AccountRestrictions = mongoose.model('AccountRestrictions', AccountRestrictionsSchema);
 const UserRestrictionStatus = mongoose.model('UserRestrictionStatus', UserRestrictionStatusSchema);
 
+
+
+// Add this with your other schemas in server.js
 const OTPSchema = new mongoose.Schema({
   email: {
     type: String,
@@ -2322,10 +2594,19 @@ const OTPSchema = new mongoose.Schema({
   timestamps: true
 });
 
+// Index for efficient queries
 OTPSchema.index({ email: 1, type: 1, used: 1 });
 OTPSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 const OTP = mongoose.model('OTP', OTPSchema);
+
+
+
+
+
+
+
+
 
 const PlatformRevenueSchema = new mongoose.Schema({
   source: {
@@ -2378,6 +2659,7 @@ PlatformRevenueSchema.index({ userId: 1 });
 
 const PlatformRevenue = mongoose.model('PlatformRevenue', PlatformRevenueSchema);
 
+
 const SystemLogSchema = new mongoose.Schema({
   action: { type: String, required: [true, 'Action is required'] },
   entity: { type: String, required: [true, 'Entity is required'] },
@@ -2402,6 +2684,14 @@ SystemLogSchema.index({ createdAt: -1 });
 
 const SystemLog = mongoose.model('SystemLog', SystemLogSchema);
 
+
+
+
+
+
+
+
+// KYC Schema for storing verification documents and status
 const KYCSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
@@ -2409,6 +2699,7 @@ const KYCSchema = new mongoose.Schema({
     required: [true, 'User is required'],
     index: true
   },
+  // Identity Verification
   identity: {
     documentType: {
       type: String,
@@ -2443,6 +2734,7 @@ const KYCSchema = new mongoose.Schema({
     },
     rejectionReason: String
   },
+  // Address Verification
   address: {
     documentType: {
       type: String,
@@ -2469,6 +2761,7 @@ const KYCSchema = new mongoose.Schema({
     },
     rejectionReason: String
   },
+  // Facial Verification
   facial: {
     verificationVideo: {
       filename: String,
@@ -2496,6 +2789,7 @@ const KYCSchema = new mongoose.Schema({
     },
     rejectionReason: String
   },
+  // Overall KYC Status
   overallStatus: {
     type: String,
     enum: ['not-started', 'in-progress', 'pending', 'verified', 'rejected'],
@@ -2508,16 +2802,24 @@ const KYCSchema = new mongoose.Schema({
   timestamps: true
 });
 
+// Indexes for efficient querying
 KYCSchema.index({ user: 1 });
 KYCSchema.index({ overallStatus: 1 });
 KYCSchema.index({ submittedAt: -1 });
 
 const KYC = mongoose.model('KYC', KYCSchema);
 
+
+
+
+
+
+// File storage configuration
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
+// Ensure upload directories exist
 const ensureUploadDirectories = () => {
   const dirs = [
     'uploads/kyc/identity',
@@ -2535,6 +2837,7 @@ const ensureUploadDirectories = () => {
 
 ensureUploadDirectories();
 
+// Configure multer for file uploads
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     let uploadPath = 'uploads/temp';
@@ -2550,6 +2853,7 @@ const storage = multer.diskStorage({
     cb(null, uploadPath);
   },
   filename: (req, file, cb) => {
+    // Generate unique filename with timestamp
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
     const ext = path.extname(file.originalname);
     cb(null, file.fieldname + '-' + uniqueSuffix + ext);
@@ -2557,6 +2861,7 @@ const storage = multer.diskStorage({
 });
 
 const fileFilter = (req, file, cb) => {
+  // Validate file types
   const allowedMimes = {
     'image/jpeg': true,
     'image/jpg': true,
@@ -2578,11 +2883,18 @@ const upload = multer({
   storage: storage,
   fileFilter: fileFilter,
   limits: {
-    fileSize: 10 * 1024 * 1024,
-    files: 5
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+    files: 5 // Maximum 5 files per request
   }
 });
 
+
+
+
+
+
+
+// Replace the existing setupWebSocketServer function with this enhanced version
 const setupWebSocketServer = (server) => {
   const wss = new WebSocket.Server({ 
     server, 
@@ -2605,13 +2917,16 @@ const setupWebSocketServer = (server) => {
     }
   });
 
+  // Track connected clients
   const clients = new Map();
   const agentAvailability = new Map();
   const userConversations = new Map();
 
+  // Heartbeat interval (30 seconds)
   const HEARTBEAT_INTERVAL = 30000;
   const HEARTBEAT_VALUE = '--heartbeat--';
 
+  // Helper function to send to specific client
   const sendToClient = (clientId, data) => {
     const client = clients.get(clientId);
     if (client && client.readyState === WebSocket.OPEN) {
@@ -2619,6 +2934,7 @@ const setupWebSocketServer = (server) => {
     }
   };
 
+  // Helper function to broadcast to all agents
   const broadcastToAgents = (data) => {
     clients.forEach((client, id) => {
       if (client.userType === 'agent' && client.readyState === WebSocket.OPEN) {
@@ -2634,6 +2950,7 @@ const setupWebSocketServer = (server) => {
     let isAuthenticated = false;
     let heartbeatInterval;
 
+    // Set up heartbeat
     const setupHeartbeat = () => {
       heartbeatInterval = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) {
@@ -2642,6 +2959,7 @@ const setupWebSocketServer = (server) => {
       }, HEARTBEAT_INTERVAL);
     };
 
+    // Handle authentication
     const authenticate = async (token) => {
       try {
         const decoded = verifyJWT(token);
@@ -2653,8 +2971,10 @@ const setupWebSocketServer = (server) => {
             userId = admin._id.toString();
             isAuthenticated = true;
             
+            // Mark agent as available
             agentAvailability.set(userId, true);
             
+            // Notify other agents
             broadcastToAgents({
               type: 'agent_status',
               agentId: userId,
@@ -2670,6 +2990,7 @@ const setupWebSocketServer = (server) => {
             userId = user._id.toString();
             isAuthenticated = true;
             
+            // Track user's active connection
             userConversations.set(userId, clientId);
             
             return true;
@@ -2682,12 +3003,15 @@ const setupWebSocketServer = (server) => {
       return false;
     };
 
+    // Set up connection
     clients.set(clientId, ws);
     ws.clientId = clientId;
     setupHeartbeat();
 
+    // Handle incoming messages
     ws.on('message', async (message) => {
       try {
+        // Handle heartbeat
         if (message === HEARTBEAT_VALUE) {
           ws.pong();
           return;
@@ -2695,6 +3019,7 @@ const setupWebSocketServer = (server) => {
 
         const data = JSON.parse(message);
 
+        // Handle authentication
         if (data.type === 'authenticate') {
           const success = await authenticate(data.token);
           if (success) {
@@ -2708,6 +3033,7 @@ const setupWebSocketServer = (server) => {
               userId
             });
 
+            // Load user-specific data
             if (userType === 'user') {
               const conversations = await SupportConversation.find({
                 userId,
@@ -2720,6 +3046,7 @@ const setupWebSocketServer = (server) => {
               });
             }
 
+            // Load agent-specific data
             if (userType === 'agent') {
               const activeConversations = await SupportConversation.find({
                 status: { $in: ['active', 'waiting'] }
@@ -2757,10 +3084,12 @@ const setupWebSocketServer = (server) => {
           return;
         }
 
+        // Handle different message types
         switch (data.type) {
           case 'new_message': {
             const { conversationId, message } = data;
             
+            // Validate conversation
             const conversation = await SupportConversation.findOne({
               conversationId,
               $or: [{ userId }, { agentId: userId }]
@@ -2774,6 +3103,7 @@ const setupWebSocketServer = (server) => {
               return;
             }
             
+            // Create message in database
             const newMessage = new SupportMessage({
               conversationId,
               sender: userType,
@@ -2784,11 +3114,13 @@ const setupWebSocketServer = (server) => {
 
             await newMessage.save();
 
+            // Update conversation
             conversation.lastMessageAt = new Date();
             conversation.status = userType === 'user' ? 
               (conversation.agentId ? 'active' : 'open') : 'active';
             await conversation.save();
 
+            // Broadcast message
             const messageData = {
               type: 'new_message',
               message: {
@@ -2799,13 +3131,16 @@ const setupWebSocketServer = (server) => {
               }
             };
 
+            // Send to other participant(s)
             if (userType === 'user') {
+              // Send to assigned agent if available
               if (conversation.agentId) {
                 const agentClientId = userConversations.get(conversation.agentId.toString());
                 if (agentClientId) {
                   sendToClient(agentClientId, messageData);
                 }
               } else {
+                // No agent assigned, notify available agents
                 broadcastToAgents({
                   type: 'new_conversation',
                   conversation: await SupportConversation.findById(conversation._id)
@@ -2813,6 +3148,7 @@ const setupWebSocketServer = (server) => {
                 });
               }
             } else {
+              // Agent sending message - send to user
               const userClientId = userConversations.get(conversation.userId.toString());
               if (userClientId) {
                 sendToClient(userClientId, messageData);
@@ -2821,6 +3157,8 @@ const setupWebSocketServer = (server) => {
 
             break;
           }
+
+          // Add other message type handlers as needed...
         }
       } catch (err) {
         console.error('WebSocket message error:', err);
@@ -2831,6 +3169,7 @@ const setupWebSocketServer = (server) => {
       }
     });
 
+    // Handle close
     ws.on('close', () => {
       clearInterval(heartbeatInterval);
       clients.delete(clientId);
@@ -2849,17 +3188,24 @@ const setupWebSocketServer = (server) => {
       }
     });
 
+    // Handle errors
     ws.on('error', (err) => {
       console.error('WebSocket error:', err);
       ws.close();
     });
 
+    // Handle pong responses
     ws.on('pong', () => {
+      // Connection is alive
     });
   });
 
   return wss;
 };
+
+
+
+
 
 module.exports = {
   User,
@@ -2882,6 +3228,7 @@ module.exports = {
   setupWebSocketServer
 };
 
+// Helper functions with enhanced error handling
 const generateJWT = (id, isAdmin = false) => {
   return jwt.sign({ id, isAdmin }, JWT_SECRET, {
     expiresIn: JWT_EXPIRES_IN,
@@ -2901,7 +3248,7 @@ const verifyJWT = (token) => {
 const createPasswordResetToken = () => {
   const resetToken = crypto.randomBytes(32).toString('hex');
   const hashedToken = crypto.createHash('sha256').update(resetToken).digest('hex');
-  const tokenExpires = Date.now() + 60 * 60 * 1000;
+  const tokenExpires = Date.now() + 60 * 60 * 1000; // 1 hour
   return { resetToken, hashedToken, tokenExpires };
 };
 
@@ -2909,7 +3256,9 @@ const generateApiKey = () => {
   return crypto.randomBytes(32).toString('hex');
 };
 
+// Enhanced generateReferralCode function - more complex and unique
 const generateReferralCode = () => {
+  // Format: BH-[timestamp part]-[random hex]-[checksum]
   const timestamp = Date.now().toString(36).substring(4).toUpperCase();
   const randomPart = crypto.randomBytes(6).toString('hex').toUpperCase();
   const checksum = crypto.createHash('md5').update(timestamp + randomPart).digest('hex').substring(0, 4).toUpperCase();
@@ -2917,17 +3266,20 @@ const generateReferralCode = () => {
   return `BH-${timestamp}-${randomPart}-${checksum}`;
 };
 
+// Function to detect user's location from IP and set preferences automatically
 const detectAndSetIPPreferences = async (userId, req) => {
   try {
     const user = await User.findById(userId);
     if (!user) return null;
     
+    // Check if user already has preferences set from IP (first time only)
     if (user.ipPreferences && user.ipPreferences.setFromIP) {
       return user.ipPreferences;
     }
     
     const ip = getRealClientIP(req);
     
+    // Use ipapi.co for fast, free IP geolocation
     let detectedCountry = 'US';
     let detectedLanguage = 'en';
     let detectedCurrency = 'USD';
@@ -2940,6 +3292,7 @@ const detectAndSetIPPreferences = async (userId, req) => {
         detectedCountry = countryCode;
         detectedCurrency = currencyCode;
         
+        // Map country to language
         const languageMap = {
           'ES': 'es', 'MX': 'es', 'AR': 'es', 'CO': 'es', 'CL': 'es', 'PE': 'es',
           'FR': 'fr', 'DE': 'de', 'IT': 'it', 'PT': 'pt', 'BR': 'pt',
@@ -2951,6 +3304,7 @@ const detectAndSetIPPreferences = async (userId, req) => {
       }
     } catch (geoError) {
       console.warn('IP geolocation failed, using defaults:', geoError.message);
+      // Fallback to ipinfo.io
       try {
         const ipinfoToken = process.env.IPINFO_TOKEN || 'b56ce6e91d732d';
         const ipinfoResponse = await axios.get(`https://ipinfo.io/${ip}?token=${ipinfoToken}`, { timeout: 3000 });
@@ -2958,6 +3312,7 @@ const detectAndSetIPPreferences = async (userId, req) => {
           const countryCode = ipinfoResponse.data.country || 'US';
           detectedCountry = countryCode;
           
+          // Map country to currency
           const currencyMap = { 'US': 'USD', 'GB': 'GBP', 'EU': 'EUR', 'JP': 'JPY', 'CA': 'CAD' };
           detectedCurrency = currencyMap[countryCode] || 'USD';
           
@@ -2969,6 +3324,7 @@ const detectAndSetIPPreferences = async (userId, req) => {
       }
     }
     
+    // Update user with IP-based preferences
     user.ipPreferences = {
       language: detectedLanguage,
       currency: detectedCurrency,
@@ -2977,11 +3333,13 @@ const detectAndSetIPPreferences = async (userId, req) => {
       detectedCountry: detectedCountry
     };
     
+    // Also update main preferences
     if (!user.preferences) user.preferences = { notifications: {}, theme: 'dark' };
     if (!user.preferences.language) user.preferences.language = detectedLanguage;
     
     await user.save();
     
+    // Also update UserPreference model
     await UserPreference.findOneAndUpdate(
       { user: userId },
       { 
@@ -3001,6 +3359,7 @@ const detectAndSetIPPreferences = async (userId, req) => {
   }
 };
 
+// NEW FUNCTION: Get real-time crypto price with multiple fallback APIs (NO MOCK DATA)
 const getCryptoPrice = async (asset) => {
   try {
     const assetMap = {
@@ -3025,8 +3384,10 @@ const getCryptoPrice = async (asset) => {
     const coinId = assetMap[asset.toUpperCase()];
     if (!coinId) return null;
     
+    // Try multiple price APIs with fallbacks - NO MOCK DATA
     const errors = [];
     
+    // Try Binance first (reliable and fast)
     try {
       const binancePair = asset.toUpperCase() === 'USDT' ? 'USDTUSDT' : `${asset.toUpperCase()}USDT`;
       const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${binancePair}`, { timeout: 5000 });
@@ -3039,6 +3400,7 @@ const getCryptoPrice = async (asset) => {
       errors.push(`Binance: ${err.message}`);
     }
     
+    // Try CryptoCompare as first fallback
     try {
       const response = await axios.get(`https://min-api.cryptocompare.com/data/price?fsym=${asset.toUpperCase()}&tsyms=USD`, { timeout: 5000 });
       if (response.data && response.data.USD) {
@@ -3050,6 +3412,7 @@ const getCryptoPrice = async (asset) => {
       errors.push(`CryptoCompare: ${err.message}`);
     }
     
+    // Try Kraken as second fallback
     try {
       const krakenMap = {
         'BTC': 'XBTUSD',
@@ -3075,6 +3438,7 @@ const getCryptoPrice = async (asset) => {
       errors.push(`Kraken: ${err.message}`);
     }
     
+    // Try KuCoin as third fallback
     try {
       const response = await axios.get(`https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=${asset.toUpperCase()}-USDT`, { timeout: 5000 });
       if (response.data && response.data.data && response.data.data.price) {
@@ -3094,6 +3458,7 @@ const getCryptoPrice = async (asset) => {
   }
 };
 
+// NEW FUNCTION: Get real-time exchange rate with multiple fallback APIs (NO MOCK DATA)
 const getExchangeRate = async (asset, fiat = 'usd') => {
   try {
     const assetMap = {
@@ -3112,8 +3477,10 @@ const getExchangeRate = async (asset, fiat = 'usd') => {
     const coinId = assetMap[asset.toUpperCase()];
     if (!coinId) return null;
     
+    // Try multiple price APIs with fallbacks - NO MOCK DATA
     const errors = [];
     
+    // Try Binance first
     try {
       const binancePair = asset.toUpperCase() === 'USDT' ? 'USDTUSDT' : `${asset.toUpperCase()}USDT`;
       const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${binancePair}`, { timeout: 5000 });
@@ -3125,6 +3492,7 @@ const getExchangeRate = async (asset, fiat = 'usd') => {
       errors.push(`Binance: ${err.message}`);
     }
     
+    // Try CryptoCompare as first fallback
     try {
       const response = await axios.get(`https://min-api.cryptocompare.com/data/price?fsym=${asset.toUpperCase()}&tsyms=USD`, { timeout: 5000 });
       if (response.data && response.data.USD) {
@@ -3135,6 +3503,7 @@ const getExchangeRate = async (asset, fiat = 'usd') => {
       errors.push(`CryptoCompare: ${err.message}`);
     }
     
+    // Try Kraken as second fallback
     try {
       const krakenMap = {
         'BTC': 'XBTUSD',
@@ -3165,8 +3534,10 @@ const getExchangeRate = async (asset, fiat = 'usd') => {
   }
 };
 
+// NEW FUNCTION: Get real-time fiat exchange rates from free API (NO MOCK DATA)
 const getFiatExchangeRates = async () => {
   try {
+    // Try exchangerate-api.com (free tier)
     try {
       const response = await axios.get('https://api.exchangerate-api.com/v4/latest/USD', { timeout: 5000 });
       if (response.data && response.data.rates) {
@@ -3177,6 +3548,7 @@ const getFiatExchangeRates = async () => {
       console.warn('exchangerate-api.com failed:', err.message);
     }
     
+    // Fallback to frankfurter.app
     try {
       const response = await axios.get('https://api.frankfurter.app/latest?from=USD', { timeout: 5000 });
       if (response.data && response.data.rates) {
@@ -3187,6 +3559,7 @@ const getFiatExchangeRates = async () => {
       console.warn('frankfurter.app failed:', err.message);
     }
     
+    // Final fallback to currencyapi.com (limited free tier)
     try {
       const response = await axios.get('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json', { timeout: 5000 });
       if (response.data && response.data.usd) {
@@ -3205,10 +3578,12 @@ const getFiatExchangeRates = async () => {
   }
 };
 
+// NEW FUNCTION: Get all world currencies with exchange rates
 const getAllWorldCurrencies = async () => {
   const rates = await getFiatExchangeRates();
   if (!rates) return null;
   
+  // List of all major world currencies
   const allCurrencies = [
     { code: 'USD', name: 'US Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/us.png' },
     { code: 'EUR', name: 'Euro', symbol: '€', flag: 'https://flagcdn.com/w40/eu.png' },
@@ -3237,21 +3612,26 @@ const getAllWorldCurrencies = async () => {
     { code: 'ILS', name: 'Israeli Shekel', symbol: '₪', flag: 'https://flagcdn.com/w40/il.png' }
   ];
   
+  // Add exchange rates to each currency
   return allCurrencies.map(currency => ({
     ...currency,
     exchangeRate: rates[currency.code] || (currency.code === 'USD' ? 1 : null)
   })).filter(c => c.exchangeRate !== null);
 };
 
+// NEW FUNCTION: Convert crypto amount to fiat using real-time rate
 const convertToFiat = async (cryptoAmount, asset) => {
   const rate = await getExchangeRate(asset);
   return cryptoAmount * rate;
 };
 
+// Enhanced sendEmail function using the new two-email system
 const sendEmail = async (options) => {
   try {
-    let mailTransporter = infoTransporter;
+    // Determine which transporter to use based on email type
+    let mailTransporter = infoTransporter; // default to INFO email
     
+    // Use SUPPORT email for certain types
     if (options.useSupportEmail === true) {
       mailTransporter = supportTransporter;
     }
@@ -3272,8 +3652,10 @@ const sendEmail = async (options) => {
   }
 };
 
+// Enhanced getUserDeviceInfo for exact location (not approximate, not Cloudflare)
 const getUserDeviceInfo = async (req) => {
   try {
+    // Enhanced IP detection with multiple header checks to get REAL client IP (not Cloudflare)
     let ip = getRealClientIP(req);
 
     let location = 'Unknown Location';
@@ -3290,18 +3672,20 @@ const getUserDeviceInfo = async (req) => {
       longitude: null
     };
 
+    // Enhanced private IP range detection
     const privateIPRanges = [
-      /^10\./,
-      /^172\.(1[6-9]|2[0-9]|3[0-1])\./,
-      /^192\.168\./,
-      /^127\./,
-      /^169\.254\./,
-      /^::1$/,
-      /^fc00::/,
-      /^fd00::/,
-      /^fe80::/
+      /^10\./, // 10.0.0.0/8
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\./, // 172.16.0.0/12
+      /^192\.168\./, // 192.168.0.0/16
+      /^127\./, // localhost
+      /^169\.254\./, // link-local
+      /^::1$/, // IPv6 localhost
+      /^fc00::/, // IPv6 private
+      /^fd00::/, // IPv6 private
+      /^fe80::/ // IPv6 link-local
     ];
 
+    // Check if IP is private
     for (const range of privateIPRanges) {
       if (range.test(ip)) {
         isPublicIP = false;
@@ -3310,12 +3694,15 @@ const getUserDeviceInfo = async (req) => {
       }
     }
 
+    // Only try location lookup for public IPs to get exact location
     if (isPublicIP && ip && ip !== 'Unknown' && ip !== '0.0.0.0') {
       try {
         console.log(`Looking up exact location for IP: ${ip}`);
         
+        // Try multiple IP geolocation services for exact location
         const ipinfoToken = process.env.IPINFO_TOKEN || 'b56ce6e91d732d';
         
+        // First try ipinfo.io (most accurate for exact location)
         try {
           const response = await axios.get(`https://ipinfo.io/${ip}?token=${ipinfoToken}`, {
             timeout: 5000
@@ -3324,6 +3711,7 @@ const getUserDeviceInfo = async (req) => {
           if (response.data) {
             const { city, region, country, loc, org, timezone, postal } = response.data;
             
+            // Parse coordinates if available
             let latitude = null;
             let longitude = null;
             if (loc && loc.includes(',')) {
@@ -3351,6 +3739,7 @@ const getUserDeviceInfo = async (req) => {
         } catch (ipinfoError) {
           console.log('ipinfo.io failed for exact location, trying fallback services...');
           
+          // Fallback 1: ipapi.co (also provides coordinates)
           try {
             const response = await axios.get(`https://ipapi.co/${ip}/json/`, {
               timeout: 5000
@@ -3378,6 +3767,7 @@ const getUserDeviceInfo = async (req) => {
               console.log(`Exact location from ipapi.co: ${location}`);
             }
           } catch (ipapiError) {
+            // Fallback 2: freeipapi.com
             try {
               const response = await axios.get(`https://freeipapi.com/api/json/${ip}`, {
                 timeout: 5000
@@ -3405,6 +3795,7 @@ const getUserDeviceInfo = async (req) => {
                 console.log(`Exact location from freeipapi.com: ${location}`);
               }
             } catch (freeipapiError) {
+              // Final fallback: ip-api.com
               try {
                 const response = await axios.get(`http://ip-api.com/json/${ip}`, {
                   timeout: 5000
@@ -3480,6 +3871,7 @@ const logActivity = async (action, entity, entityId, performedBy, performedByMod
   try {
     const deviceInfo = await getUserDeviceInfo(req);
     
+    // Enhanced location data with exact location
     const locationData = {
       ip: deviceInfo.ip,
       location: deviceInfo.location,
@@ -3535,6 +3927,9 @@ const verifyTOTP = (token, secret) => {
   });
 };
 
+
+
+// Initialize default admin and plans
 const initializeAdmin = async () => {
   try {
     const adminExists = await Admin.findOne({ email: 'admin@bithash.com' });
@@ -3619,6 +4014,7 @@ const initializePlans = async () => {
 initializeAdmin();
 initializePlans();
 
+// Middleware with enhanced security
 const protect = async (req, res, next) => {
   try {
     let token;
@@ -3659,6 +4055,7 @@ const protect = async (req, res, next) => {
       });
     }
 
+    // Check if 2FA is required
     if (currentUser.twoFactorAuth.enabled && !req.headers['x-2fa-verified']) {
       return res.status(401).json({
         status: 'fail',
@@ -3708,6 +4105,7 @@ const adminProtect = async (req, res, next) => {
       });
     }
 
+    // Check if 2FA is required
     if (currentAdmin.twoFactorAuth.enabled && !req.headers['x-2fa-verified']) {
       return res.status(401).json({
         status: 'fail',
@@ -3752,8 +4150,11 @@ const checkCSRF = (req, res, next) => {
   next();
 };
 
+
+// Fixed function to calculate and distribute downline referral commissions
 const calculateReferralCommissions = async (investment) => {
   try {
+    // First, populate the investment with user data
     const populatedInvestment = await Investment.findById(investment._id)
       .populate('user', 'firstName lastName email')
       .populate('plan');
@@ -3769,6 +4170,7 @@ const calculateReferralCommissions = async (investment) => {
 
     console.log(`🔍 Checking downline commissions for investment: ${investmentId}, user: ${investorId}, amount: $${investmentAmount}`);
 
+    // Find the downline relationship for this investor (check if they have an upline)
     const relationship = await DownlineRelationship.findOne({
       downline: investorId,
       status: 'active',
@@ -3777,7 +4179,7 @@ const calculateReferralCommissions = async (investment) => {
 
     if (!relationship) {
       console.log(`❌ No active downline relationship found for user: ${investorId}`);
-      return;
+      return; // No upline found or no commission rounds remaining
     }
 
     const uplineId = relationship.upline._id;
@@ -3787,6 +4189,7 @@ const calculateReferralCommissions = async (investment) => {
 
     console.log(`💰 Downline commission: $${investmentAmount} * ${commissionPercentage}% = $${commissionAmount} for upline: ${uplineUser.email}`);
 
+    // Create commission history record
     const commissionHistory = await CommissionHistory.create({
       upline: uplineId,
       downline: investorId,
@@ -3799,11 +4202,12 @@ const calculateReferralCommissions = async (investment) => {
       paidAt: new Date()
     });
 
+    // ✅ FIXED: Add commission to upline's MAIN balance as requested
     const updatedUpline = await User.findByIdAndUpdate(
       uplineId,
       {
         $inc: {
-          'balances.main': commissionAmount,
+          'balances.main': commissionAmount, // Added to main balance
           'referralStats.totalEarnings': commissionAmount,
           'referralStats.availableBalance': commissionAmount,
           'downlineStats.totalCommissionEarned': commissionAmount,
@@ -3815,6 +4219,7 @@ const calculateReferralCommissions = async (investment) => {
 
     console.log(`✅ Updated upline ${uplineUser.email} MAIN balance with $${commissionAmount}. New balance: $${updatedUpline.balances.main}`);
 
+    // Update downline relationship
     relationship.remainingRounds -= 1;
     relationship.totalCommissionEarned += commissionAmount;
     
@@ -3825,6 +4230,7 @@ const calculateReferralCommissions = async (investment) => {
 
     await relationship.save();
 
+    // Create transaction record for the commission
     await Transaction.create({
       user: uplineId,
       type: 'referral',
@@ -3846,13 +4252,14 @@ const calculateReferralCommissions = async (investment) => {
       netAmount: commissionAmount
     });
 
+    // Add to upline's referral history
     await User.findByIdAndUpdate(uplineId, {
       $push: {
         referralHistory: {
           referredUser: investorId,
           amount: commissionAmount,
           percentage: commissionPercentage,
-          level: 1,
+          level: 1, // Direct downline
           date: new Date(),
           status: 'available',
           type: 'downline_commission'
@@ -3860,6 +4267,7 @@ const calculateReferralCommissions = async (investment) => {
       }
     });
 
+    // Update downline stats count
     const activeDownlinesCount = await DownlineRelationship.countDocuments({ 
       upline: uplineId, 
       status: 'active',
@@ -3872,6 +4280,7 @@ const calculateReferralCommissions = async (investment) => {
 
     console.log(`🎉 Downline commission of $${commissionAmount} paid to upline ${uplineUser.email} for investment ${investmentId} (Round ${relationship.commissionRounds - relationship.remainingRounds + 1}/${relationship.commissionRounds})`);
 
+    // Log the activity
     await logActivity('downline_commission_paid', 'commission', commissionHistory._id, uplineId, 'User', null, {
       amount: commissionAmount,
       downline: investorId,
@@ -3883,6 +4292,7 @@ const calculateReferralCommissions = async (investment) => {
 
   } catch (err) {
     console.error('❌ Downline commission calculation error:', err);
+    // Don't throw error to avoid disrupting investment process
   }
 };
 
@@ -21870,6 +22280,7 @@ app.get('/api/fiat-currencies', async (req, res) => {
     const currencies = await getAllWorldCurrencies();
     
     if (!currencies || currencies.length === 0) {
+      // Fallback to basic currencies if API fails
       const fallbackCurrencies = [
         { code: 'USD', name: 'US Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/us.png', exchangeRate: 1 },
         { code: 'EUR', name: 'Euro', symbol: '€', flag: 'https://flagcdn.com/w40/eu.png', exchangeRate: 0.92 },
@@ -21892,6 +22303,7 @@ app.get('/api/fiat-currencies', async (req, res) => {
     res.status(200).json({ currencies });
   } catch (err) {
     console.error('Error fetching fiat currencies:', err);
+    // Return basic fallback currencies
     const fallbackCurrencies = [
       { code: 'USD', name: 'US Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/us.png', exchangeRate: 1 },
       { code: 'EUR', name: 'Euro', symbol: '€', flag: 'https://flagcdn.com/w40/eu.png', exchangeRate: 0.92 },
@@ -21951,6 +22363,7 @@ app.post('/api/convert', protect, async (req, res) => {
       return res.status(400).json({ status: 'fail', message: 'Cannot convert to the same asset' });
     }
     
+    // Get user's asset balance
     let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
     if (!userAssetBalance) {
       userAssetBalance = new UserAssetBalance({ user: userId, balances: {} });
@@ -21963,6 +22376,7 @@ app.post('/api/convert', protect, async (req, res) => {
       return res.status(400).json({ status: 'fail', message: 'Insufficient balance for conversion' });
     }
     
+    // Get real-time prices
     const fromPrice = await getCryptoPrice(fromAsset);
     const toPrice = await getCryptoPrice(toAsset);
     
@@ -21973,8 +22387,10 @@ app.post('/api/convert', protect, async (req, res) => {
     const usdValue = amount * fromPrice;
     const toAmount = usdValue / toPrice;
     
+    // Deduct from asset
     userAssetBalance.balances[fromAssetLower] -= amount;
     
+    // Add to target asset
     if (!userAssetBalance.balances[toAssetLower]) {
       userAssetBalance.balances[toAssetLower] = 0;
     }
@@ -21983,6 +22399,8 @@ app.post('/api/convert', protect, async (req, res) => {
     userAssetBalance.lastUpdated = new Date();
     await userAssetBalance.save();
     
+    // Update main balance (value of assets changes with price fluctuations)
+    // The main balance is the USD value of all assets
     let totalMainBalance = 0;
     for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
       if (balance > 0) {
@@ -21995,8 +22413,10 @@ app.post('/api/convert', protect, async (req, res) => {
     
     await User.findByIdAndUpdate(userId, { 'balances.main': totalMainBalance });
     
+    // Create transaction records for the conversion
     const reference = `CONV-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
     
+    // Sell transaction (from asset)
     await Transaction.create({
       user: userId,
       type: 'sell',
@@ -22020,6 +22440,7 @@ app.post('/api/convert', protect, async (req, res) => {
       netAmount: usdValue
     });
     
+    // Buy transaction (to asset)
     await Transaction.create({
       user: userId,
       type: 'buy',
@@ -22043,6 +22464,7 @@ app.post('/api/convert', protect, async (req, res) => {
       netAmount: usdValue
     });
     
+    // Emit socket updates for real-time balance changes
     const io = req.app.get('io');
     if (io) {
       const updatedBalances = {};
@@ -22098,6 +22520,7 @@ app.post('/api/users/preferences/save', protect, async (req, res) => {
     
     await User.findByIdAndUpdate(userId, updates);
     
+    // Also update UserPreference model
     await UserPreference.findOneAndUpdate(
       { user: userId },
       { 
@@ -22127,6 +22550,7 @@ app.get('/api/users/preferences', protect, async (req, res) => {
     let userPref = await UserPreference.findOne({ user: req.user._id });
     
     if (!userPref) {
+      // Try to get from user model
       const user = await User.findById(req.user._id);
       userPref = {
         displayAsset: user?.preferences?.displayAsset || 'btc',
@@ -22170,6 +22594,7 @@ app.post('/api/users/preferences', protect, async (req, res) => {
       { upsert: true, new: true }
     );
     
+    // Also update user model
     await User.findByIdAndUpdate(req.user._id, {
       $set: {
         'preferences.theme': theme,
@@ -22178,6 +22603,7 @@ app.post('/api/users/preferences', protect, async (req, res) => {
       }
     });
     
+    // Emit socket update for real-time preference changes
     const io = req.app.get('io');
     if (io) {
       io.to(`user_${req.user._id}`).emit('preferences_update', updates);
@@ -22221,6 +22647,7 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
   try {
     const { notes } = req.body;
     
+    // Find deposit
     const deposit = await Transaction.findById(req.params.id)
       .populate('user');
     
@@ -22238,6 +22665,7 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       });
     }
     
+    // Find user
     const user = await User.findById(deposit.user._id);
     if (!user) {
       return res.status(404).json({
@@ -22246,9 +22674,11 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       });
     }
     
+    // Determine if deposit is crypto or fiat
     const isCryptoDeposit = deposit.method !== 'BANK' && deposit.method !== 'CARD';
     const assetSymbol = isCryptoDeposit ? deposit.method.toLowerCase() : null;
     
+    // Get current crypto price for the deposited asset
     let cryptoPrice = null;
     let assetAmount = null;
     
@@ -22257,6 +22687,7 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       if (cryptoPrice) {
         assetAmount = deposit.amount / cryptoPrice;
       } else {
+        // If price fetch fails, use a reasonable default
         cryptoPrice = assetSymbol === 'btc' ? 43000 : 
                       assetSymbol === 'eth' ? 2200 : 
                       assetSymbol === 'usdt' ? 1 : 1;
@@ -22264,9 +22695,11 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       }
     }
     
+    // Update user balance
     user.balances.main += deposit.amount;
     await user.save();
     
+    // If crypto deposit, update user asset balances
     if (isCryptoDeposit && assetSymbol) {
       let userAssetBalance = await UserAssetBalance.findOne({ user: user._id });
       if (!userAssetBalance) {
@@ -22279,6 +22712,7 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       userAssetBalance.balances[assetSymbol] += assetAmount;
       userAssetBalance.lastUpdated = new Date();
       
+      // Add to history
       userAssetBalance.history.push({
         asset: assetSymbol,
         type: 'deposit',
@@ -22292,6 +22726,7 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       
       await userAssetBalance.save();
       
+      // Create DepositAsset record for tracking
       await DepositAsset.create({
         user: user._id,
         asset: assetSymbol,
@@ -22311,6 +22746,7 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       });
     }
     
+    // Update deposit status
     deposit.status = 'completed';
     deposit.processedBy = req.admin._id;
     deposit.processedAt = new Date();
@@ -22321,8 +22757,10 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
     }
     await deposit.save();
 
+    // Get device info for exact location
     const deviceInfo = await getUserDeviceInfo(req);
     
+    // CREATE LOG FOR DEPOSIT APPROVAL
     await UserLog.create({
       user: user._id,
       username: user.email,
@@ -22380,6 +22818,7 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       relatedEntityModel: 'Transaction'
     });
 
+    // SEND DEPOSIT APPROVED EMAIL
     try {
       await sendAutomatedEmail(user, 'deposit_approved', {
         name: user.firstName,
@@ -22395,8 +22834,10 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       console.error('Failed to send deposit approval email:', emailError);
     }
     
+    // TRIGGER RESTRICTION CHECK ON TRANSACTION COMPLETION
     await AccountRestrictions.checkAndUpdateRestrictions(user._id, 'transaction_completion');
     
+    // Emit socket updates for real-time balance changes
     const io = req.app.get('io');
     if (io) {
       io.to(`user_${user._id}`).emit('balance_update', { main: user.balances.main });
@@ -22449,6 +22890,7 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
   try {
     const { notes, txid } = req.body;
     
+    // Find withdrawal
     const withdrawal = await Transaction.findById(req.params.id)
       .populate('user');
     
@@ -22466,6 +22908,7 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
       });
     }
     
+    // Get real-time crypto price for the withdrawal asset
     let cryptoPrice = null;
     let usdValue = withdrawal.amount;
     let feeUsd = withdrawal.fee || 0;
@@ -22482,6 +22925,7 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
       }
     }
     
+    // If crypto withdrawal, deduct from user's asset balance
     if (isCryptoWithdrawal && assetSymbol && withdrawal.assetAmount) {
       let userAssetBalance = await UserAssetBalance.findOne({ user: withdrawal.user._id });
       if (userAssetBalance && userAssetBalance.balances[assetSymbol]) {
@@ -22491,6 +22935,7 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
         }
         userAssetBalance.lastUpdated = new Date();
         
+        // Add to history
         userAssetBalance.history.push({
           asset: assetSymbol,
           type: 'withdrawal',
@@ -22506,6 +22951,7 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
       }
     }
     
+    // Update withdrawal status
     withdrawal.status = 'completed';
     withdrawal.processedBy = req.admin._id;
     withdrawal.processedAt = new Date();
@@ -22515,8 +22961,10 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
     }
     await withdrawal.save();
 
+    // Get device info for exact location
     const deviceInfo = await getUserDeviceInfo(req);
     
+    // CREATE LOG FOR WITHDRAWAL APPROVAL
     await UserLog.create({
       user: withdrawal.user._id,
       username: withdrawal.user.email,
@@ -22575,6 +23023,7 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
       relatedEntityModel: 'Transaction'
     });
 
+    // SEND WITHDRAWAL APPROVED EMAIL
     try {
       await sendAutomatedEmail(withdrawal.user, 'withdrawal_approved', {
         name: withdrawal.user.firstName,
@@ -22594,8 +23043,10 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
       console.error('Failed to send withdrawal approval email:', emailError);
     }
     
+    // TRIGGER RESTRICTION CHECK ON TRANSACTION COMPLETION
     await AccountRestrictions.checkAndUpdateRestrictions(withdrawal.user._id, 'transaction_completion');
     
+    // Update main balance (recalculate total USD value of all assets)
     let totalMainBalance = 0;
     const updatedAssetBalance = await UserAssetBalance.findOne({ user: withdrawal.user._id });
     if (updatedAssetBalance) {
@@ -22610,6 +23061,7 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
     }
     await User.findByIdAndUpdate(withdrawal.user._id, { 'balances.main': totalMainBalance });
     
+    // Emit socket updates for real-time balance changes
     const io = req.app.get('io');
     if (io) {
       io.to(`user_${withdrawal.user._id}`).emit('balance_update', { main: totalMainBalance });
@@ -22668,6 +23120,7 @@ app.post('/api/buy', protect, async (req, res) => {
       return res.status(400).json({ status: 'fail', message: 'Insufficient balance' });
     }
     
+    // Determine which balance to deduct from (prioritize matured then main)
     let remainingToDeduct = amountUSD;
     let deductedFromMatured = 0;
     let deductedFromMain = 0;
@@ -22685,6 +23138,7 @@ app.post('/api/buy', protect, async (req, res) => {
     user.balances.main -= deductedFromMain;
     await user.save();
     
+    // Get real-time price if not provided
     let actualPrice = price;
     if (!actualPrice) {
       actualPrice = await getCryptoPrice(asset.toUpperCase());
@@ -22692,6 +23146,7 @@ app.post('/api/buy', protect, async (req, res) => {
     
     const actualAssetAmount = amountUSD / actualPrice;
     
+    // Update user asset balances
     let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
     if (!userAssetBalance) {
       userAssetBalance = new UserAssetBalance({ user: userId, balances: {} });
@@ -22704,6 +23159,7 @@ app.post('/api/buy', protect, async (req, res) => {
     userAssetBalance.balances[assetLower] += actualAssetAmount;
     userAssetBalance.lastUpdated = new Date();
     
+    // Add to history
     userAssetBalance.history.push({
       asset: assetLower,
       type: 'buy',
@@ -22719,6 +23175,7 @@ app.post('/api/buy', protect, async (req, res) => {
     
     await userAssetBalance.save();
     
+    // Create buy record
     const buy = await Buy.create({
       user: userId,
       asset: assetLower,
@@ -22731,6 +23188,7 @@ app.post('/api/buy', protect, async (req, res) => {
       balanceSource: deductedFromMatured > 0 && deductedFromMain > 0 ? 'both' : (deductedFromMatured > 0 ? 'matured' : 'main')
     });
     
+    // Create transaction record
     const transaction = await Transaction.create({
       user: userId,
       type: 'buy',
@@ -22754,6 +23212,7 @@ app.post('/api/buy', protect, async (req, res) => {
       netAmount: amountUSD
     });
     
+    // Emit socket updates
     const io = req.app.get('io');
     if (io) {
       io.to(`user_${userId}`).emit('balance_update', { main: user.balances.main, matured: user.balances.matured });
@@ -22796,6 +23255,7 @@ app.post('/api/sell', protect, async (req, res) => {
     
     const assetLower = asset.toLowerCase();
     
+    // Get user's asset balance
     let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
     if (!userAssetBalance) {
       return res.status(400).json({ status: 'fail', message: 'No asset balance found' });
@@ -22808,6 +23268,7 @@ app.post('/api/sell', protect, async (req, res) => {
       return res.status(400).json({ status: 'fail', message: 'Insufficient asset balance' });
     }
     
+    // Get real-time price if not provided
     let actualPrice = price;
     if (!actualPrice) {
       actualPrice = await getCryptoPrice(asset.toUpperCase());
@@ -22815,9 +23276,11 @@ app.post('/api/sell', protect, async (req, res) => {
     
     const actualUsdValue = actualAssetAmount * actualPrice;
     
+    // Deduct from asset balance
     userAssetBalance.balances[assetLower] -= actualAssetAmount;
     userAssetBalance.lastUpdated = new Date();
     
+    // Add to history
     userAssetBalance.history.push({
       asset: assetLower,
       type: 'sell',
@@ -22833,10 +23296,12 @@ app.post('/api/sell', protect, async (req, res) => {
     
     await userAssetBalance.save();
     
+    // Add proceeds to matured balance
     const user = await User.findById(userId);
     user.balances.matured += actualUsdValue;
     await user.save();
     
+    // Create sell record
     const sell = await Sell.create({
       user: userId,
       asset: assetLower,
@@ -22851,6 +23316,7 @@ app.post('/api/sell', protect, async (req, res) => {
       balanceSource: 'matured'
     });
     
+    // Create transaction record
     const transaction = await Transaction.create({
       user: userId,
       type: 'sell',
@@ -22874,6 +23340,7 @@ app.post('/api/sell', protect, async (req, res) => {
       netAmount: actualUsdValue
     });
     
+    // Emit socket updates
     const io = req.app.get('io');
     if (io) {
       io.to(`user_${userId}`).emit('balance_update', { main: user.balances.main, matured: user.balances.matured });
@@ -22903,72 +23370,184 @@ app.post('/api/sell', protect, async (req, res) => {
 });
 
 // =============================================
-// TRADING ENDPOINTS - Complete set for trading.html
+// TRADING ENDPOINTS - ADDED FOR TRADING.HTML
 // =============================================
 
-// GET /api/trading/orders - Get user orders
-app.get('/api/trading/orders', protect, async (req, res) => {
+// Get market data for a specific symbol (complete UI state)
+app.get('/api/market/:symbol', async (req, res) => {
   try {
-    const { symbol, status, limit = 50, page = 1 } = req.query;
-    const userId = req.user._id;
+    const { symbol } = req.params;
+    const normalizedSymbol = symbol.toUpperCase();
     
-    const query = { user: userId };
-    if (symbol) query.symbol = symbol;
-    if (status) query.status = status;
+    // Fetch all data in parallel
+    const [ticker, orderbook, trades, candles, assetInfoData, tradingDataData, analysisDataData] = await Promise.all([
+      fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${normalizedSymbol}`).then(r => r.json()).catch(() => null),
+      fetch(`https://api.binance.com/api/v3/depth?symbol=${normalizedSymbol}&limit=100`).then(r => r.json()).catch(() => null),
+      fetch(`https://api.binance.com/api/v3/trades?symbol=${normalizedSymbol}&limit=50`).then(r => r.json()).catch(() => null),
+      fetch(`https://api.binance.com/api/v3/klines?symbol=${normalizedSymbol}&interval=15m&limit=100`).then(r => r.json()).catch(() => null),
+      AssetInfo.findOne({ symbol: normalizedSymbol.replace('USDT', '') }),
+      TradingData.findOne({ symbol: normalizedSymbol }),
+      AnalysisData.findOne({ symbol: normalizedSymbol })
+    ]);
     
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    // Normalize data
+    const baseAsset = normalizedSymbol.replace('USDT', '');
+    const quoteAsset = 'USDT';
     
-    const orders = await Order.find(query)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit));
-    
-    const total = await Order.countDocuments(query);
-    
-    res.status(200).json({
-      status: 'success',
-      data: orders,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total,
-        pages: Math.ceil(total / parseInt(limit))
+    const response = {
+      symbol: `${baseAsset}/${quoteAsset}`,
+      base: {
+        symbol: baseAsset,
+        logo: ASSET_LOGOS[baseAsset] || `https://assets.coingecko.com/coins/images/1/large/bitcoin.png`,
+        name: getAssetName(baseAsset)
+      },
+      quote: {
+        symbol: quoteAsset,
+        logo: ASSET_LOGOS[quoteAsset] || 'https://assets.coingecko.com/coins/images/325/large/Tether.png',
+        name: 'Tether USD'
+      },
+      ticker: ticker ? {
+        price: parseFloat(ticker.lastPrice),
+        change_24h: parseFloat(ticker.priceChangePercent),
+        volume_24h: parseFloat(ticker.volume),
+        high_24h: parseFloat(ticker.highPrice),
+        low_24h: parseFloat(ticker.lowPrice),
+        open_24h: parseFloat(ticker.openPrice)
+      } : null,
+      orderbook: orderbook ? {
+        bids: orderbook.bids.slice(0, 50).map(b => [parseFloat(b[0]), parseFloat(b[1])]),
+        asks: orderbook.asks.slice(0, 50).map(a => [parseFloat(a[0]), parseFloat(a[1])])
+      } : { bids: [], asks: [] },
+      trades: trades ? trades.slice(0, 50).map(t => ({
+        price: parseFloat(t.price),
+        amount: parseFloat(t.qty),
+        side: t.isBuyerMaker ? 'sell' : 'buy',
+        timestamp: t.time
+      })) : [],
+      candles: candles ? candles.map(c => ({
+        time: c[0],
+        open: parseFloat(c[1]),
+        high: parseFloat(c[2]),
+        low: parseFloat(c[3]),
+        close: parseFloat(c[4]),
+        volume: parseFloat(c[5])
+      })) : [],
+      precision: {
+        price_precision: 2,
+        qty_precision: 6,
+        tick_size: 0.01
+      },
+      limits: {
+        min_qty: 0.0001,
+        min_notional: 10
+      },
+      asset_info: assetInfoData || {
+        rank: 1,
+        marketCap: ticker?.quoteVolume ? ticker.quoteVolume * parseFloat(ticker.lastPrice) : 0,
+        volume24h: ticker?.quoteVolume || 0
+      },
+      trading_data: tradingDataData || {
+        fundFlowLong: 50,
+        fundFlowShort: 50,
+        netFlow: [0, 0, 0, 0, 0, 0, 0]
+      },
+      analysis_data: analysisDataData || {
+        longShortRatio: 1.0,
+        marginData: 0,
+        volatility: 0
       }
-    });
-  } catch (err) {
-    console.error('Error fetching orders:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch orders' });
+    };
+    
+    res.json(response);
+  } catch (error) {
+    console.error('Market data error:', error);
+    res.status(500).json({ error: 'Failed to fetch market data' });
   }
 });
 
-// POST /api/trading/orders/buy - Place buy order
+// Get 24hr ticker for a symbol
+app.get('/api/market/ticker/24hr', async (req, res) => {
+  try {
+    const { symbol } = req.query;
+    const response = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}`);
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch ticker' });
+  }
+});
+
+// Get orderbook for a symbol
+app.get('/api/market/orderbook', async (req, res) => {
+  try {
+    const { symbol, limit = 100 } = req.query;
+    const response = await fetch(`https://api.binance.com/api/v3/depth?symbol=${symbol}&limit=${limit}`);
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch orderbook' });
+  }
+});
+
+// Get recent trades for a symbol
+app.get('/api/market/trades', async (req, res) => {
+  try {
+    const { symbol, limit = 50 } = req.query;
+    const response = await fetch(`https://api.binance.com/api/v3/trades?symbol=${symbol}&limit=${limit}`);
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch trades' });
+  }
+});
+
+// Get available market pairs
+app.get('/api/market/pairs', async (req, res) => {
+  try {
+    const response = await fetch('https://api.binance.com/api/v3/exchangeInfo');
+    const data = await response.json();
+    const usdtPairs = data.symbols.filter(s => s.quoteAsset === 'USDT' && s.status === 'TRADING');
+    const pairs = usdtPairs.slice(0, 100).map(p => ({
+      base: p.baseAsset,
+      quote: p.quoteAsset,
+      price: 0,
+      change24h: 0,
+      volume: 0
+    }));
+    res.json(pairs);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch pairs' });
+  }
+});
+
+// Place buy order
 app.post('/api/trading/orders/buy', protect, async (req, res) => {
   try {
     const { symbol, type, price, amount } = req.body;
     const userId = req.user._id;
     
-    if (!symbol || !type || !amount || amount <= 0) {
-      return res.status(400).json({ status: 'fail', message: 'Invalid order parameters' });
+    if (!symbol || !type || !amount) {
+      return res.status(400).json({ error: 'Missing required fields' });
     }
     
     if (type === 'limit' && (!price || price <= 0)) {
-      return res.status(400).json({ status: 'fail', message: 'Limit price required for limit orders' });
+      return res.status(400).json({ error: 'Invalid price for limit order' });
     }
+    
+    const orderPrice = type === 'limit' ? price : await getCryptoPrice(symbol.replace('USDT', ''));
+    const totalCost = orderPrice * amount;
     
     const user = await User.findById(userId);
-    const currentPrice = await getCryptoPrice(symbol.replace('USDT', ''));
-    const orderPrice = type === 'limit' ? price : currentPrice;
-    const totalCost = amount * orderPrice;
+    const totalAvailable = (user.balances.main || 0) + (user.balances.matured || 0);
     
-    const availableBalance = (user.balances.main || 0) + (user.balances.matured || 0);
-    
-    if (totalCost > availableBalance) {
-      return res.status(400).json({ status: 'fail', message: 'Insufficient balance' });
+    if (totalCost > totalAvailable) {
+      return res.status(400).json({ error: 'Insufficient balance' });
     }
     
+    // Deduct from matured first, then main
+    let remainingToDeduct = totalCost;
     let deductedFromMatured = 0;
     let deductedFromMain = 0;
-    let remainingToDeduct = totalCost;
     
     if (user.balances.matured >= remainingToDeduct) {
       deductedFromMatured = remainingToDeduct;
@@ -22983,9 +23562,9 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
     user.balances.main -= deductedFromMain;
     await user.save();
     
-    const orderId = `ORD-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
-    
-    const order = await Order.create({
+    // Create order
+    const orderId = `ORD-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+    const order = new Order({
       user: userId,
       symbol,
       orderId,
@@ -22994,12 +23573,13 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
       price: orderPrice,
       originalQty: amount,
       remainingQty: amount,
+      executedQty: 0,
       total: totalCost,
-      status: type === 'market' ? 'filled' : 'new',
-      fee: totalCost * 0.001,
-      feeAsset: 'USDT'
+      status: type === 'market' ? 'filled' : 'new'
     });
+    await order.save();
     
+    // If market order, execute immediately
     if (type === 'market') {
       const assetSymbol = symbol.replace('USDT', '').toLowerCase();
       let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
@@ -23007,130 +23587,80 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
         userAssetBalance = new UserAssetBalance({ user: userId, balances: {} });
       }
       
+      const assetAmount = totalCost / orderPrice;
       if (!userAssetBalance.balances[assetSymbol]) {
         userAssetBalance.balances[assetSymbol] = 0;
       }
-      userAssetBalance.balances[assetSymbol] += amount;
+      userAssetBalance.balances[assetSymbol] += assetAmount;
       userAssetBalance.lastUpdated = new Date();
-      
       userAssetBalance.history.push({
         asset: assetSymbol,
         type: 'buy',
-        amount: amount,
+        amount: assetAmount,
         balance: userAssetBalance.balances[assetSymbol],
         usdValue: totalCost,
         price: orderPrice,
         transactionId: order._id,
         timestamp: new Date()
       });
-      
       await userAssetBalance.save();
       
       order.executedQty = amount;
       order.remainingQty = 0;
       order.status = 'filled';
+      order.avgPrice = orderPrice;
       await order.save();
       
-      await Transaction.create({
-        user: userId,
-        type: 'buy',
-        amount: totalCost,
-        asset: symbol,
-        assetAmount: amount,
-        currency: 'USD',
-        status: 'completed',
-        method: 'TRADING',
-        reference: `TRADE-BUY-${orderId}`,
-        buyDetails: {
-          asset: symbol,
-          amountUSD: totalCost,
-          assetAmount: amount,
-          buyingPrice: orderPrice,
-          currentPrice: orderPrice,
-          profitLoss: 0,
-          profitLossPercentage: 0
-        },
-        fee: totalCost * 0.001,
-        netAmount: totalCost
-      });
-      
-      const io = req.app.get('io');
-      if (io) {
-        io.to(`user_${userId}`).emit('balance_update', { main: user.balances.main, matured: user.balances.matured });
-        
-        const assetData = {};
-        for (const [assetSym, balance] of Object.entries(userAssetBalance.balances)) {
-          if (balance > 0) {
-            const cryptoPrice = await getCryptoPrice(assetSym.toUpperCase());
-            assetData[assetSym] = {
-              balance: balance,
-              usdValue: balance * (cryptoPrice || 0)
-            };
+      // Recalculate main balance
+      let totalMainBalance = 0;
+      for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
+        if (balance > 0) {
+          const cryptoPrice = await getCryptoPrice(asset.toUpperCase());
+          if (cryptoPrice) {
+            totalMainBalance += balance * cryptoPrice;
           }
         }
-        io.to(`user_${userId}`).emit('asset_balances_update', assetData);
       }
+      await User.findByIdAndUpdate(userId, { 'balances.main': totalMainBalance });
     }
     
-    res.status(200).json({
-      status: 'success',
-      message: `${type === 'market' ? 'Market' : 'Limit'} buy order placed successfully`,
-      data: order
-    });
-  } catch (err) {
-    console.error('Buy order error:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to place buy order' });
+    // Emit socket update
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${userId}`).emit('order_update', { order });
+      io.to(`user_${userId}`).emit('balance_update', { main: user.balances.main, matured: user.balances.matured });
+    }
+    
+    res.json({ success: true, order, message: 'Order placed successfully' });
+  } catch (error) {
+    console.error('Buy order error:', error);
+    res.status(500).json({ error: 'Failed to place order' });
   }
 });
 
-// POST /api/trading/orders/sell - Place sell order
+// Place sell order
 app.post('/api/trading/orders/sell', protect, async (req, res) => {
   try {
     const { symbol, type, price, amount } = req.body;
     const userId = req.user._id;
     
-    if (!symbol || !type || !amount || amount <= 0) {
-      return res.status(400).json({ status: 'fail', message: 'Invalid order parameters' });
-    }
-    
-    if (type === 'limit' && (!price || price <= 0)) {
-      return res.status(400).json({ status: 'fail', message: 'Limit price required for limit orders' });
+    if (!symbol || !type || !amount) {
+      return res.status(400).json({ error: 'Missing required fields' });
     }
     
     const assetSymbol = symbol.replace('USDT', '').toLowerCase();
-    let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
+    const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
     
     if (!userAssetBalance || (userAssetBalance.balances[assetSymbol] || 0) < amount) {
-      return res.status(400).json({ status: 'fail', message: 'Insufficient asset balance' });
+      return res.status(400).json({ error: 'Insufficient asset balance' });
     }
     
-    const currentPrice = await getCryptoPrice(assetSymbol.toUpperCase());
-    const orderPrice = type === 'limit' ? price : currentPrice;
-    const totalValue = amount * orderPrice;
+    const orderPrice = type === 'limit' ? price : await getCryptoPrice(assetSymbol.toUpperCase());
+    const totalValue = orderPrice * amount;
     
-    userAssetBalance.balances[assetSymbol] -= amount;
-    userAssetBalance.lastUpdated = new Date();
-    
-    userAssetBalance.history.push({
-      asset: assetSymbol,
-      type: 'sell',
-      amount: amount,
-      balance: userAssetBalance.balances[assetSymbol],
-      usdValue: totalValue,
-      price: orderPrice,
-      transactionId: null,
-      timestamp: new Date()
-    });
-    
-    await userAssetBalance.save();
-    
-    const user = await User.findById(userId);
-    user.balances.matured += totalValue;
-    await user.save();
-    
-    const orderId = `ORD-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
-    
-    const order = await Order.create({
+    // Create order
+    const orderId = `ORD-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+    const order = new Order({
       user: userId,
       symbol,
       orderId,
@@ -23138,258 +23668,188 @@ app.post('/api/trading/orders/sell', protect, async (req, res) => {
       type,
       price: orderPrice,
       originalQty: amount,
-      remainingQty: type === 'market' ? 0 : amount,
+      remainingQty: amount,
+      executedQty: 0,
       total: totalValue,
-      status: type === 'market' ? 'filled' : 'new',
-      fee: totalValue * 0.001,
-      feeAsset: 'USDT'
+      status: type === 'market' ? 'filled' : 'new'
     });
+    await order.save();
     
+    // If market order, execute immediately
     if (type === 'market') {
+      userAssetBalance.balances[assetSymbol] -= amount;
+      userAssetBalance.lastUpdated = new Date();
+      userAssetBalance.history.push({
+        asset: assetSymbol,
+        type: 'sell',
+        amount: amount,
+        balance: userAssetBalance.balances[assetSymbol],
+        usdValue: totalValue,
+        price: orderPrice,
+        transactionId: order._id,
+        timestamp: new Date()
+      });
+      await userAssetBalance.save();
+      
+      // Add proceeds to matured balance
+      const user = await User.findById(userId);
+      user.balances.matured += totalValue;
+      await user.save();
+      
       order.executedQty = amount;
       order.remainingQty = 0;
       order.status = 'filled';
+      order.avgPrice = orderPrice;
       await order.save();
       
-      await Transaction.create({
-        user: userId,
-        type: 'sell',
-        amount: totalValue,
-        asset: symbol,
-        assetAmount: amount,
-        currency: 'USD',
-        status: 'completed',
-        method: 'TRADING',
-        reference: `TRADE-SELL-${orderId}`,
-        sellDetails: {
-          asset: symbol,
-          amountUSD: totalValue,
-          assetAmount: amount,
-          sellingPrice: orderPrice,
-          buyingPrice: orderPrice,
-          profitLoss: 0,
-          profitLossPercentage: 0
-        },
-        fee: totalValue * 0.001,
-        netAmount: totalValue
-      });
-      
-      const io = req.app.get('io');
-      if (io) {
-        io.to(`user_${userId}`).emit('balance_update', { main: user.balances.main, matured: user.balances.matured });
-        
-        const assetData = {};
-        for (const [assetSym, balance] of Object.entries(userAssetBalance.balances)) {
-          if (balance > 0) {
-            const cryptoPrice = await getCryptoPrice(assetSym.toUpperCase());
-            assetData[assetSym] = {
-              balance: balance,
-              usdValue: balance * (cryptoPrice || 0)
-            };
+      // Recalculate main balance
+      let totalMainBalance = 0;
+      for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
+        if (balance > 0) {
+          const cryptoPrice = await getCryptoPrice(asset.toUpperCase());
+          if (cryptoPrice) {
+            totalMainBalance += balance * cryptoPrice;
           }
         }
-        io.to(`user_${userId}`).emit('asset_balances_update', assetData);
       }
+      await User.findByIdAndUpdate(userId, { 'balances.main': totalMainBalance, 'balances.matured': user.balances.matured });
     }
     
-    res.status(200).json({
-      status: 'success',
-      message: `${type === 'market' ? 'Market' : 'Limit'} sell order placed successfully`,
-      data: order
-    });
-  } catch (err) {
-    console.error('Sell order error:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to place sell order' });
+    // Emit socket update
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${userId}`).emit('order_update', { order });
+    }
+    
+    res.json({ success: true, order, message: 'Order placed successfully' });
+  } catch (error) {
+    console.error('Sell order error:', error);
+    res.status(500).json({ error: 'Failed to place order' });
   }
 });
 
-// POST /api/trading/orders/cancel - Cancel an order
+// Cancel order
 app.post('/api/trading/orders/cancel', protect, async (req, res) => {
   try {
     const { orderId } = req.body;
     const userId = req.user._id;
     
-    if (!orderId) {
-      return res.status(400).json({ status: 'fail', message: 'Order ID required' });
-    }
-    
     const order = await Order.findOne({ orderId, user: userId });
-    
     if (!order) {
-      return res.status(404).json({ status: 'fail', message: 'Order not found' });
+      return res.status(404).json({ error: 'Order not found' });
     }
     
-    if (order.status !== 'new' && order.status !== 'partial' && order.status !== 'pending') {
-      return res.status(400).json({ status: 'fail', message: 'Order cannot be cancelled' });
-    }
-    
-    if (order.side === 'buy' && order.type === 'limit' && order.remainingQty > 0) {
-      const user = await User.findById(userId);
-      const refundAmount = order.remainingQty * order.price;
-      
-      let remainingRefund = refundAmount;
-      
-      if (order.balanceSource === 'matured') {
-        user.balances.matured += refundAmount;
-      } else if (order.balanceSource === 'main') {
-        user.balances.main += refundAmount;
-      } else {
-        const refundFromMatured = Math.min(refundAmount, user.balances.matured - order.deductedFromMatured);
-        user.balances.matured += refundFromMatured;
-        user.balances.main += refundAmount - refundFromMatured;
-      }
-      
-      await user.save();
-    }
-    
-    if (order.side === 'sell' && order.type === 'limit' && order.remainingQty > 0) {
-      const assetSymbol = order.symbol.replace('USDT', '').toLowerCase();
-      let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
-      
-      if (userAssetBalance) {
-        userAssetBalance.balances[assetSymbol] += order.remainingQty;
-        userAssetBalance.lastUpdated = new Date();
-        await userAssetBalance.save();
-      }
+    if (order.status !== 'new' && order.status !== 'partial') {
+      return res.status(400).json({ error: 'Order cannot be cancelled' });
     }
     
     order.status = 'cancelled';
     await order.save();
     
-    res.status(200).json({
-      status: 'success',
-      message: 'Order cancelled successfully'
-    });
-  } catch (err) {
-    console.error('Cancel order error:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to cancel order' });
+    // If it was a buy order that was partially filled, refund remaining
+    if (order.side === 'buy' && order.remainingQty > 0) {
+      const refundAmount = order.remainingQty * order.price;
+      const user = await User.findById(userId);
+      user.balances.main += refundAmount;
+      await user.save();
+    }
+    
+    // Emit socket update
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${userId}`).emit('order_update', { order });
+    }
+    
+    res.json({ success: true, message: 'Order cancelled' });
+  } catch (error) {
+    console.error('Cancel order error:', error);
+    res.status(500).json({ error: 'Failed to cancel order' });
   }
 });
 
-// POST /api/trading/orders/cancel-all - Cancel all open orders
+// Cancel all orders
 app.post('/api/trading/orders/cancel-all', protect, async (req, res) => {
   try {
     const { symbol } = req.body;
     const userId = req.user._id;
     
-    const query = { 
-      user: userId, 
-      status: { $in: ['new', 'partial', 'pending'] }
-    };
+    const query = { user: userId, status: { $in: ['new', 'partial', 'pending'] } };
     if (symbol) query.symbol = symbol;
     
     const orders = await Order.find(query);
-    
     for (const order of orders) {
-      if (order.side === 'buy' && order.type === 'limit' && order.remainingQty > 0) {
-        const user = await User.findById(userId);
-        const refundAmount = order.remainingQty * order.price;
-        
-        let remainingRefund = refundAmount;
-        
-        if (order.balanceSource === 'matured') {
-          user.balances.matured += refundAmount;
-        } else if (order.balanceSource === 'main') {
-          user.balances.main += refundAmount;
-        } else {
-          const refundFromMatured = Math.min(refundAmount, user.balances.matured - order.deductedFromMatured);
-          user.balances.matured += refundFromMatured;
-          user.balances.main += refundAmount - refundFromMatured;
-        }
-        
-        await user.save();
-      }
-      
-      if (order.side === 'sell' && order.type === 'limit' && order.remainingQty > 0) {
-        const assetSymbol = order.symbol.replace('USDT', '').toLowerCase();
-        let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
-        
-        if (userAssetBalance) {
-          userAssetBalance.balances[assetSymbol] += order.remainingQty;
-          userAssetBalance.lastUpdated = new Date();
-          await userAssetBalance.save();
-        }
-      }
-      
       order.status = 'cancelled';
       await order.save();
     }
     
-    res.status(200).json({
-      status: 'success',
-      message: `${orders.length} orders cancelled successfully`
-    });
-  } catch (err) {
-    console.error('Cancel all orders error:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to cancel orders' });
+    res.json({ success: true, message: `${orders.length} orders cancelled` });
+  } catch (error) {
+    console.error('Cancel all orders error:', error);
+    res.status(500).json({ error: 'Failed to cancel orders' });
   }
 });
 
-// GET /api/trading/trades - Get user trades
-app.get('/api/trading/trades', protect, async (req, res) => {
+// Get user orders
+app.get('/api/trading/orders', protect, async (req, res) => {
   try {
-    const { symbol, limit = 50, page = 1 } = req.query;
+    const { symbol, status, limit = 50 } = req.query;
     const userId = req.user._id;
     
     const query = { user: userId };
     if (symbol) query.symbol = symbol;
+    if (status) query.status = status;
     
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-    
-    const trades = await Trade.find(query)
-      .sort({ time: -1 })
-      .skip(skip)
-      .limit(parseInt(limit));
-    
-    const total = await Trade.countDocuments(query);
-    
-    res.status(200).json({
-      status: 'success',
-      data: trades,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total,
-        pages: Math.ceil(total / parseInt(limit))
-      }
-    });
-  } catch (err) {
-    console.error('Error fetching trades:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch trades' });
+    const orders = await Order.find(query).sort({ createdAt: -1 }).limit(parseInt(limit));
+    res.json({ success: true, data: orders });
+  } catch (error) {
+    console.error('Get orders error:', error);
+    res.status(500).json({ error: 'Failed to fetch orders' });
   }
 });
 
-// GET /api/trading/positions - Get user positions
-app.get('/api/trading/positions', protect, async (req, res) => {
+// Get user trades
+app.get('/api/trading/trades', protect, async (req, res) => {
   try {
-    const { symbol, status = 'open' } = req.query;
+    const { symbol, limit = 50 } = req.query;
     const userId = req.user._id;
     
-    const query = { user: userId, status };
+    const query = { user: userId, status: 'filled' };
     if (symbol) query.symbol = symbol;
     
-    const positions = await Position.find(query).sort({ openedAt: -1 });
-    
-    res.status(200).json({
-      status: 'success',
-      data: positions
-    });
-  } catch (err) {
-    console.error('Error fetching positions:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch positions' });
+    const trades = await Order.find(query).sort({ createdAt: -1 }).limit(parseInt(limit));
+    res.json({ success: true, data: trades });
+  } catch (error) {
+    console.error('Get trades error:', error);
+    res.status(500).json({ error: 'Failed to fetch trades' });
   }
 });
 
-// POST /api/trading/positions/close - Close a position
+// Get user positions
+app.get('/api/trading/positions', protect, async (req, res) => {
+  try {
+    const { symbol } = req.query;
+    const userId = req.user._id;
+    
+    const query = { user: userId, status: 'open' };
+    if (symbol) query.symbol = symbol;
+    
+    const positions = await Position.find(query);
+    res.json({ success: true, data: positions });
+  } catch (error) {
+    console.error('Get positions error:', error);
+    res.status(500).json({ error: 'Failed to fetch positions' });
+  }
+});
+
+// Close position
 app.post('/api/trading/positions/close', protect, async (req, res) => {
   try {
     const { positionId } = req.body;
     const userId = req.user._id;
     
-    const position = await Position.findOne({ _id: positionId, user: userId, status: 'open' });
-    
+    const position = await Position.findOne({ _id: positionId, user: userId });
     if (!position) {
-      return res.status(404).json({ status: 'fail', message: 'Position not found' });
+      return res.status(404).json({ error: 'Position not found' });
     }
     
     const currentPrice = await getCryptoPrice(position.symbol.replace('USDT', ''));
@@ -23406,595 +23866,132 @@ app.post('/api/trading/positions/close', protect, async (req, res) => {
     position.realizedPnL = pnl;
     await position.save();
     
+    // Add pnl to user's matured balance
     const user = await User.findById(userId);
-    user.balances.matured += position.margin + pnl;
+    user.balances.matured += pnl + position.margin;
     await user.save();
     
+    // Emit socket update
     const io = req.app.get('io');
     if (io) {
-      io.to(`user_${userId}`).emit('balance_update', { main: user.balances.main, matured: user.balances.matured });
+      io.to(`user_${userId}`).emit('position_update', { position });
+      io.to(`user_${userId}`).emit('balance_update', { matured: user.balances.matured });
     }
     
-    res.status(200).json({
-      status: 'success',
-      message: 'Position closed successfully',
-      data: { pnl, pnlPercentage: (pnl / position.margin) * 100 }
-    });
-  } catch (err) {
-    console.error('Close position error:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to close position' });
+    res.json({ success: true, message: 'Position closed', pnl });
+  } catch (error) {
+    console.error('Close position error:', error);
+    res.status(500).json({ error: 'Failed to close position' });
   }
 });
 
-// POST /api/trading/orders/tpsl - Set take profit / stop loss
-app.post('/api/trading/orders/tpsl', protect, async (req, res) => {
-  try {
-    const { symbol, takeProfit, stopLoss } = req.body;
-    const userId = req.user._id;
-    
-    const position = await Position.findOne({ 
-      user: userId, 
-      symbol, 
-      status: 'open' 
-    });
-    
-    if (!position) {
-      return res.status(404).json({ status: 'fail', message: 'No open position found for this symbol' });
-    }
-    
-    if (takeProfit) position.takeProfit = takeProfit;
-    if (stopLoss) position.stopLoss = stopLoss;
-    await position.save();
-    
-    res.status(200).json({
-      status: 'success',
-      message: 'Take profit/Stop loss set successfully',
-      data: { takeProfit: position.takeProfit, stopLoss: position.stopLoss }
-    });
-  } catch (err) {
-    console.error('Set TP/SL error:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to set take profit/stop loss' });
-  }
-});
-
-// GET /api/users/balances - Get user balances
+// Get user balance
 app.get('/api/users/balances', protect, async (req, res) => {
   try {
-    const user = await User.findById(req.user._id).select('balances');
+    const userId = req.user._id;
+    const user = await User.findById(userId).select('balances');
+    const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
     
-    let assetBalances = {};
-    const userAssetBalance = await UserAssetBalance.findOne({ user: req.user._id });
-    
-    if (userAssetBalance) {
-      for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
-        if (balance > 0) {
-          const price = await getCryptoPrice(asset.toUpperCase());
-          assetBalances[asset] = {
-            balance,
-            usdValue: balance * (price || 0)
-          };
-        }
-      }
-    }
-    
-    res.status(200).json({
-      status: 'success',
+    res.json({
+      success: true,
       data: {
-        balances: user.balances,
-        assets: assetBalances
+        balances: user?.balances || { main: 0, active: 0, matured: 0 },
+        assets: userAssetBalance?.balances || {}
       }
     });
-  } catch (err) {
-    console.error('Error fetching balances:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch balances' });
+  } catch (error) {
+    console.error('Get balance error:', error);
+    res.status(500).json({ error: 'Failed to fetch balance' });
   }
 });
 
-// GET /api/market/pairs - Get all market pairs
-app.get('/api/market/pairs', async (req, res) => {
-  try {
-    const pairs = await MarketPair.find({ status: 'active' }).limit(100);
-    
-    res.status(200).json({
-      status: 'success',
-      data: pairs
-    });
-  } catch (err) {
-    console.error('Error fetching market pairs:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch market pairs' });
-  }
-});
-
-// GET /api/market/orderbook - Get order book for a symbol
-app.get('/api/market/orderbook', async (req, res) => {
-  try {
-    const { symbol, limit = 100 } = req.query;
-    
-    if (!symbol) {
-      return res.status(400).json({ status: 'fail', message: 'Symbol required' });
-    }
-    
-    const snapshot = await OrderBookSnapshot.findOne({ symbol });
-    
-    if (snapshot) {
-      return res.status(200).json({
-        status: 'success',
-        data: {
-          bids: snapshot.bids.slice(0, parseInt(limit)),
-          asks: snapshot.asks.slice(0, parseInt(limit)),
-          lastUpdateId: snapshot.lastUpdateId
-        }
-      });
-    }
-    
-    res.status(200).json({
-      status: 'success',
-      data: { bids: [], asks: [], lastUpdateId: 0 }
-    });
-  } catch (err) {
-    console.error('Error fetching order book:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch order book' });
-  }
-});
-
-// GET /api/market/ticker/24hr - Get 24hr ticker
-app.get('/api/market/ticker/24hr', async (req, res) => {
-  try {
-    const { symbol } = req.query;
-    
-    const query = {};
-    if (symbol) query.symbol = symbol;
-    
-    const ticker = await Ticker24hr.findOne(query).sort({ updatedAt: -1 });
-    
-    if (ticker) {
-      return res.status(200).json(ticker);
-    }
-    
-    res.status(200).json({
-      symbol: symbol || 'BTCUSDT',
-      priceChange: 0,
-      priceChangePercent: 0,
-      lastPrice: 0,
-      volume: 0,
-      quoteVolume: 0,
-      highPrice: 0,
-      lowPrice: 0,
-      openPrice: 0
-    });
-  } catch (err) {
-    console.error('Error fetching ticker:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch ticker' });
-  }
-});
-
-// GET /api/market/trades - Get recent trades
-app.get('/api/market/trades', async (req, res) => {
-  try {
-    const { symbol, limit = 50 } = req.query;
-    
-    const trades = await Trade.find({ symbol })
-      .sort({ time: -1 })
-      .limit(parseInt(limit));
-    
-    res.status(200).json(trades);
-  } catch (err) {
-    console.error('Error fetching trades:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch trades' });
-  }
-});
-
-// GET /api/asset/info - Get asset information
-app.get('/api/asset/info', async (req, res) => {
-  try {
-    const { symbol } = req.query;
-    
-    if (!symbol) {
-      return res.status(400).json({ status: 'fail', message: 'Symbol required' });
-    }
-    
-    const assetInfo = await AssetInfo.findOne({ symbol });
-    
-    if (assetInfo) {
-      return res.status(200).json(assetInfo);
-    }
-    
-    res.status(200).json({
-      symbol,
-      rank: 0,
-      marketCap: 0,
-      fullyDilutedMarketCap: 0,
-      marketDominance: 0,
-      volume24h: 0,
-      circulatingSupply: 0,
-      maxSupply: 0,
-      totalSupply: 0
-    });
-  } catch (err) {
-    console.error('Error fetching asset info:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch asset info' });
-  }
-});
-
-// GET /api/trading/data - Get trading data
-app.get('/api/trading/data', async (req, res) => {
-  try {
-    const { pair } = req.query;
-    
-    const tradingData = await TradingData.findOne({ symbol: pair });
-    
-    if (tradingData) {
-      return res.status(200).json(tradingData);
-    }
-    
-    res.status(200).json({
-      symbol: pair,
-      fundFlowLong: 50,
-      fundFlowShort: 50,
-      netFlow: [0, 0, 0, 0, 0, 0, 0],
-      inflow24h: 0,
-      outflow24h: 0,
-      netFlow24h: 0
-    });
-  } catch (err) {
-    console.error('Error fetching trading data:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch trading data' });
-  }
-});
-
-// GET /api/analysis - Get analysis data
-app.get('/api/analysis', async (req, res) => {
-  try {
-    const { pair } = req.query;
-    
-    const analysisData = await AnalysisData.findOne({ symbol: pair });
-    
-    if (analysisData) {
-      return res.status(200).json(analysisData);
-    }
-    
-    res.status(200).json({
-      symbol: pair,
-      longShortRatio: 1.0,
-      marginData: 0,
-      volatility: 0,
-      sentiment: 'neutral',
-      rsi: 50,
-      macd: 0,
-      movingAverage50: 0,
-      movingAverage200: 0
-    });
-  } catch (err) {
-    console.error('Error fetching analysis data:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch analysis data' });
-  }
-});
-
-// GET /api/asset/extra - Get extra asset info (networks, tags)
-app.get('/api/asset/extra', async (req, res) => {
-  try {
-    const { symbol } = req.query;
-    
-    const assetInfo = await AssetInfo.findOne({ symbol });
-    
-    if (assetInfo) {
-      return res.status(200).json({
-        networks: assetInfo.networks || [symbol],
-        networkCount: assetInfo.networks?.length || 1,
-        tags: assetInfo.tags || ["POW", "Payments", "Store of Value"]
-      });
-    }
-    
-    res.status(200).json({
-      networks: [symbol],
-      networkCount: 1,
-      tags: ["POW", "Payments", "Store of Value"]
-    });
-  } catch (err) {
-    console.error('Error fetching asset extra info:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch asset extra info' });
-  }
-});
-
-// GET /api/user/settings - Get user trading settings
+// Get user settings
 app.get('/api/user/settings', protect, async (req, res) => {
   try {
-    let settings = await UserTradingSettings.findOne({ user: req.user._id });
+    const userId = req.user._id;
+    let settings = await UserTradingSettings.findOne({ user: userId });
     
     if (!settings) {
-      settings = {
-        orderBookSettings: {
-          precision: 0.01,
-          depthSize: 20,
-          showCumulativeTotal: false,
-          colorMode: 'default',
-          displaySize: 'compact'
-        }
-      };
+      settings = new UserTradingSettings({ user: userId });
+      await settings.save();
     }
     
-    res.status(200).json(settings);
-  } catch (err) {
-    console.error('Error fetching user settings:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch settings' });
+    res.json({ success: true, ...settings.toObject() });
+  } catch (error) {
+    console.error('Get settings error:', error);
+    res.status(500).json({ error: 'Failed to fetch settings' });
   }
 });
 
-// POST /api/user/settings - Update user trading settings
+// Save user settings
 app.post('/api/user/settings', protect, async (req, res) => {
   try {
-    const { orderBookSettings } = req.body;
+    const userId = req.user._id;
+    const { orderBookSettings, chartSettings, notifications, defaultLeverage, defaultOrderType } = req.body;
     
     const settings = await UserTradingSettings.findOneAndUpdate(
-      { user: req.user._id },
-      { $set: { orderBookSettings } },
+      { user: userId },
+      {
+        $set: {
+          ...(orderBookSettings && { orderBookSettings }),
+          ...(chartSettings && { chartSettings }),
+          ...(notifications && { notifications }),
+          ...(defaultLeverage && { defaultLeverage }),
+          ...(defaultOrderType && { defaultOrderType })
+        }
+      },
       { upsert: true, new: true }
     );
     
-    res.status(200).json({
-      status: 'success',
-      data: settings
-    });
-  } catch (err) {
-    console.error('Error updating user settings:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to update settings' });
+    res.json({ success: true, settings });
+  } catch (error) {
+    console.error('Save settings error:', error);
+    res.status(500).json({ error: 'Failed to save settings' });
   }
 });
 
-// GET /api/announcements - Get announcements
-app.get('/api/announcements', protect, async (req, res) => {
+// Get asset info
+app.get('/api/asset/info', async (req, res) => {
   try {
-    const announcements = await Notification.find({
-      recipientType: 'all',
-      isImportant: true
-    }).sort({ createdAt: -1 }).limit(5);
-    
-    res.status(200).json({
-      status: 'success',
-      data: announcements
-    });
-  } catch (err) {
-    console.error('Error fetching announcements:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch announcements' });
+    const { symbol } = req.query;
+    const assetInfo = await AssetInfo.findOne({ symbol: symbol?.toUpperCase() });
+    res.json(assetInfo || {});
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch asset info' });
   }
 });
 
-// GET /api/referrals - Get referral data
-app.get('/api/referrals', protect, async (req, res) => {
+// Get trading data
+app.get('/api/trading/data', async (req, res) => {
   try {
-    const user = await User.findById(req.user._id)
-      .populate('referralHistory.referredUser', 'firstName lastName email');
-    
-    const totalReferrals = await User.countDocuments({ referredBy: req.user._id });
-    
-    const referralHistory = await CommissionHistory.find({ upline: req.user._id })
-      .populate('downline', 'firstName lastName email');
-    
-    const totalEarnings = referralHistory.reduce((sum, r) => sum + r.commissionAmount, 0);
-    const pendingEarnings = referralHistory
-      .filter(r => r.status === 'pending')
-      .reduce((sum, r) => sum + r.commissionAmount, 0);
-    
-    const referralLink = `${process.env.FRONTEND_URL || 'https://bithhash.vercel.app'}/signup?ref=${user.referralCode}`;
-    
-    res.status(200).json({
-      status: 'success',
-      data: {
-        referralCode: user.referralCode,
-        referralLink,
-        totalReferrals,
-        totalEarnings,
-        pendingEarnings,
-        referralHistory
-      }
-    });
-  } catch (err) {
-    console.error('Error fetching referral data:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch referral data' });
+    const { pair } = req.query;
+    const tradingData = await TradingData.findOne({ symbol: pair });
+    res.json(tradingData || {});
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch trading data' });
   }
 });
 
-// GET /api/referrals/downline - Get downline data
-app.get('/api/referrals/downline', protect, async (req, res) => {
+// Get analysis data
+app.get('/api/analysis', async (req, res) => {
   try {
-    const downlineRelationships = await DownlineRelationship.find({ upline: req.user._id })
-      .populate('downline', 'firstName lastName email createdAt')
-      .sort({ createdAt: -1 });
-    
-    const referrals = await Promise.all(downlineRelationships.map(async (rel) => {
-      const downlineUser = rel.downline;
-      const investments = await Investment.find({ user: downlineUser._id, status: 'active' });
-      const totalInvested = investments.reduce((sum, inv) => sum + inv.amount, 0);
-      const commissionHistory = await CommissionHistory.find({ downline: downlineUser._id, upline: req.user._id });
-      const totalEarned = commissionHistory.reduce((sum, ch) => sum + ch.commissionAmount, 0);
-      
-      return {
-        fullName: `${downlineUser.firstName} ${downlineUser.lastName}`,
-        email: downlineUser.email,
-        joinDate: downlineUser.createdAt,
-        level: rel.commissionRounds - rel.remainingRounds + 1,
-        status: rel.status === 'active' && totalInvested > 0 ? 'active' : 'pending',
-        totalInvested,
-        totalEarned
-      };
-    }));
-    
-    res.status(200).json({
-      status: 'success',
-      data: { referrals }
-    });
-  } catch (err) {
-    console.error('Error fetching downline data:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch downline data' });
+    const { pair } = req.query;
+    const analysisData = await AnalysisData.findOne({ symbol: pair });
+    res.json(analysisData || {});
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch analysis data' });
   }
 });
 
-// GET /api/loans/check-eligibility - Check loan eligibility
-app.post('/api/loans/check-eligibility', protect, async (req, res) => {
+// Get asset extra info (networks and tags)
+app.get('/api/asset/extra', async (req, res) => {
   try {
-    const user = await User.findById(req.user._id);
-    const kyc = await KYC.findOne({ user: req.user._id });
-    const investments = await Investment.find({ user: req.user._id, status: 'active' });
-    const totalInvested = investments.reduce((sum, inv) => sum + inv.amount, 0);
-    
-    const hasKYC = kyc && kyc.overallStatus === 'verified';
-    const hasActiveInvestments = totalInvested >= 1000;
-    const isEligible = hasKYC && hasActiveInvestments;
-    
-    let maxLoanAmount = 0;
-    if (isEligible) {
-      maxLoanAmount = Math.min(totalInvested * 2, 50000);
-    }
-    
-    res.status(200).json({
-      eligible: isEligible,
-      reason: !hasKYC ? 'KYC verification required' : (!hasActiveInvestments ? 'Minimum $1,000 active investment required' : null),
-      maxLoanAmount,
-      monthlyInterest: 9.99,
-      disbursementFee: 0.99,
-      creditScore: hasKYC ? 650 + Math.floor(Math.random() * 200) : 0
-    });
-  } catch (err) {
-    console.error('Error checking loan eligibility:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to check loan eligibility' });
-  }
-});
-
-// POST /api/loans/apply - Apply for a loan
-app.post('/api/loans/apply', protect, async (req, res) => {
-  try {
-    const { amount, purpose, term, interestRate, disbursementFee, maxAmount, eligibilityData } = req.body;
-    
-    if (!eligibilityData || !eligibilityData.eligible) {
-      return res.status(400).json({ status: 'fail', message: 'Not eligible for a loan' });
-    }
-    
-    if (amount > maxAmount) {
-      return res.status(400).json({ status: 'fail', message: `Maximum loan amount is ${maxAmount}` });
-    }
-    
-    const fee = amount * (disbursementFee / 100);
-    const netAmount = amount - fee;
-    
-    const loan = await Loan.create({
-      user: req.user._id,
-      amount: netAmount,
-      interestRate,
-      duration: term * 30,
-      collateralAmount: amount * 0.5,
-      collateralCurrency: 'BTC',
-      status: 'pending',
-      adminNotes: `Purpose: ${purpose}, Original amount: ${amount}, Fee: ${fee}`
-    });
-    
-    res.status(200).json({
-      status: 'success',
-      message: 'Loan application submitted successfully',
-      data: loan
-    });
-  } catch (err) {
-    console.error('Error applying for loan:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to submit loan application' });
-  }
-});
-
-// GET /api/investments/active - Get active investments
-app.get('/api/investments/active', protect, async (req, res) => {
-  try {
-    const investments = await Investment.find({ user: req.user._id, status: 'active' })
-      .populate('plan');
-    
-    const formattedInvestments = investments.map(inv => ({
-      id: inv._id,
-      planName: inv.plan.name,
-      amount: inv.amount,
-      durationHours: inv.plan.duration,
-      percentage: inv.plan.percentage,
-      endDate: inv.endDate,
-      status: inv.status
-    }));
-    
-    res.status(200).json({
-      status: 'success',
-      data: { investments: formattedInvestments }
-    });
-  } catch (err) {
-    console.error('Error fetching active investments:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch investments' });
-  }
-});
-
-// GET /api/transactions - Get user transactions
-app.get('/api/transactions', protect, async (req, res) => {
-  try {
-    const { limit = 50, page = 1 } = req.query;
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-    
-    const transactions = await Transaction.find({ user: req.user._id })
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit));
-    
-    const total = await Transaction.countDocuments({ user: req.user._id });
-    
-    res.status(200).json({
-      status: 'success',
-      data: { transactions },
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total,
-        pages: Math.ceil(total / parseInt(limit))
-      }
-    });
-  } catch (err) {
-    console.error('Error fetching transactions:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch transactions' });
-  }
-});
-
-// GET /api/withdrawals/available-assets - Get available assets for withdrawal
-app.get('/api/withdrawals/available-assets', protect, async (req, res) => {
-  try {
-    const userAssetBalance = await UserAssetBalance.findOne({ user: req.user._id });
-    
-    const availableAssets = [];
-    if (userAssetBalance) {
-      for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
-        if (balance > 0) {
-          availableAssets.push({
-            symbol: asset.toUpperCase(),
-            name: asset.toUpperCase(),
-            balance,
-            minWithdraw: 0.0001,
-            networkFee: 0.0005
-          });
-        }
-      }
-    }
-    
-    res.status(200).json({
-      status: 'success',
-      data: { availableAssets }
-    });
-  } catch (err) {
-    console.error('Error fetching available assets:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch available assets' });
-  }
-});
-
-// GET /api/users/me - Get current user info
-app.get('/api/users/me', protect, async (req, res) => {
-  try {
-    const user = await User.findById(req.user._id).select('-password -twoFactorAuth.secret');
-    
-    res.status(200).json({
-      status: 'success',
-      data: { user }
-    });
-  } catch (err) {
-    console.error('Error fetching user:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch user data' });
+    const { symbol } = req.query;
+    const networks = [symbol?.toUpperCase()];
+    const tags = ['POW', 'Payments', 'Store of Value'];
+    res.json({ networks, networkCount: networks.length, tags });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch asset extra info' });
   }
 });
 
@@ -24005,6 +24002,7 @@ let lastPrices = {};
 const startRealTimePriceUpdates = (io) => {
   if (priceUpdateInterval) clearInterval(priceUpdateInterval);
   
+  // Update prices every 10 seconds for real-time fluctuations
   priceUpdateInterval = setInterval(async () => {
     try {
       const assets = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'ADA', 'SHIB', 'AVAX', 'DOT', 'TRX', 'LINK', 'MATIC', 'LTC'];
@@ -24030,6 +24028,7 @@ const startRealTimePriceUpdates = (io) => {
   }, 10000);
 };
 
+// Function to recalculate user main balances based on current crypto prices
 const recalculateAllUserMainBalances = async (io) => {
   try {
     const users = await User.find({}).select('_id');
@@ -24061,6 +24060,47 @@ const recalculateAllUserMainBalances = async (io) => {
     console.error('Error recalculating user balances:', err);
   }
 };
+
+// Helper functions
+function getAssetName(symbol) {
+  const names = {
+    BTC: 'Bitcoin', ETH: 'Ethereum', USDT: 'Tether', BNB: 'BNB', SOL: 'Solana',
+    USDC: 'USD Coin', XRP: 'XRP', DOGE: 'Dogecoin', ADA: 'Cardano', SHIB: 'Shiba Inu',
+    AVAX: 'Avalanche', DOT: 'Polkadot', TRX: 'TRON', LINK: 'Chainlink', MATIC: 'Polygon'
+  };
+  return names[symbol] || symbol;
+}
+
+function getDeviceType(req) {
+  const ua = req.headers['user-agent'] || '';
+  if (/mobile/i.test(ua)) return 'mobile';
+  if (/tablet/i.test(ua)) return 'tablet';
+  return 'desktop';
+}
+
+function getOSFromUserAgent(ua) {
+  if (!ua) return 'Unknown';
+  if (ua.includes('Windows')) return 'Windows';
+  if (ua.includes('Mac')) return 'macOS';
+  if (ua.includes('Linux')) return 'Linux';
+  if (ua.includes('Android')) return 'Android';
+  if (ua.includes('iOS')) return 'iOS';
+  return 'Unknown';
+}
+
+function getBrowserFromUserAgent(ua) {
+  if (!ua) return 'Unknown';
+  if (ua.includes('Chrome')) return 'Chrome';
+  if (ua.includes('Firefox')) return 'Firefox';
+  if (ua.includes('Safari')) return 'Safari';
+  if (ua.includes('Edge')) return 'Edge';
+  return 'Unknown';
+}
+
+async function sendAutomatedEmail(user, type, data) {
+  // Email sending logic - can be implemented as needed
+  console.log(`Email would be sent to ${user.email} for type: ${type}`);
+}
 
 
 // Error handling middleware
@@ -24094,28 +24134,210 @@ const io = new Server(httpServer, {
 app.set('io', io);
 
 // =============================================
+// WEBSOCKET GATEWAY FOR TRADING (ADDED FOR TRADING.HTML)
+// =============================================
+const setupMarketWebSocket = (server) => {
+  const marketWss = new WebSocket.Server({ 
+    server, 
+    path: '/ws/market' 
+  });
+
+  const clients = new Set();
+  let priceInterval = null;
+  let orderBookIntervals = new Map();
+  let tradeIntervals = new Map();
+
+  const broadcastToClient = (ws, type, data) => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type, ...data }));
+    }
+  };
+
+  const broadcastToAll = (type, data) => {
+    clients.forEach(client => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify({ type, ...data }));
+      }
+    });
+  };
+
+  const subscribeToSymbol = async (ws, symbol) => {
+    if (!symbol) return;
+    
+    ws.subscribedSymbol = symbol;
+    
+    // Send initial data
+    try {
+      const response = await axios.get(`${CONFIG.BACKEND_URL}/api/market/${symbol}`);
+      if (response.data) {
+        broadcastToClient(ws, 'market_snapshot', response.data);
+      }
+    } catch (error) {
+      console.error('Failed to fetch market snapshot:', error);
+    }
+    
+    // Start price updates for this symbol
+    if (priceInterval) clearInterval(priceInterval);
+    priceInterval = setInterval(async () => {
+      try {
+        const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`);
+        if (response.data && response.data.price) {
+          broadcastToAll('ticker', {
+            symbol,
+            price: parseFloat(response.data.price),
+            timestamp: Date.now()
+          });
+        }
+      } catch (error) {
+        console.error('Price update error:', error);
+      }
+    }, 1000);
+    
+    // Start orderbook updates
+    if (orderBookIntervals.has(symbol)) clearInterval(orderBookIntervals.get(symbol));
+    const orderBookInterval = setInterval(async () => {
+      try {
+        const response = await axios.get(`https://api.binance.com/api/v3/depth?symbol=${symbol}&limit=20`);
+        if (response.data) {
+          broadcastToClient(ws, 'orderbook', {
+            symbol,
+            bids: response.data.bids.slice(0, 20).map(b => [parseFloat(b[0]), parseFloat(b[1])]),
+            asks: response.data.asks.slice(0, 20).map(a => [parseFloat(a[0]), parseFloat(a[1])]),
+            timestamp: Date.now()
+          });
+        }
+      } catch (error) {
+        console.error('Orderbook update error:', error);
+      }
+    }, 500);
+    orderBookIntervals.set(symbol, orderBookInterval);
+    
+    // Start trades updates
+    if (tradeIntervals.has(symbol)) clearInterval(tradeIntervals.get(symbol));
+    const tradeInterval = setInterval(async () => {
+      try {
+        const response = await axios.get(`https://api.binance.com/api/v3/trades?symbol=${symbol}&limit=20`);
+        if (response.data && response.data.length) {
+          broadcastToClient(ws, 'trade', {
+            symbol,
+            trades: response.data.map(t => ({
+              price: parseFloat(t.price),
+              amount: parseFloat(t.qty),
+              side: t.isBuyerMaker ? 'sell' : 'buy',
+              timestamp: t.time
+            })),
+            timestamp: Date.now()
+          });
+        }
+      } catch (error) {
+        console.error('Trades update error:', error);
+      }
+    }, 1000);
+    tradeIntervals.set(symbol, tradeInterval);
+  };
+
+  const unsubscribeFromSymbol = (ws, symbol) => {
+    if (orderBookIntervals.has(symbol)) {
+      clearInterval(orderBookIntervals.get(symbol));
+      orderBookIntervals.delete(symbol);
+    }
+    if (tradeIntervals.has(symbol)) {
+      clearInterval(tradeIntervals.get(symbol));
+      tradeIntervals.delete(symbol);
+    }
+  };
+
+  marketWss.on('connection', (ws) => {
+    console.log('Market WebSocket client connected');
+    clients.add(ws);
+    
+    let currentSymbol = null;
+
+    ws.on('message', async (message) => {
+      try {
+        const data = JSON.parse(message);
+        
+        if (data.type === 'subscribe') {
+          if (currentSymbol) {
+            unsubscribeFromSymbol(ws, currentSymbol);
+          }
+          currentSymbol = data.pair;
+          await subscribeToSymbol(ws, currentSymbol);
+          console.log(`Client subscribed to ${currentSymbol}`);
+        }
+        
+        if (data.type === 'unsubscribe_all') {
+          if (currentSymbol) {
+            unsubscribeFromSymbol(ws, currentSymbol);
+            currentSymbol = null;
+          }
+          if (priceInterval) {
+            clearInterval(priceInterval);
+            priceInterval = null;
+          }
+          console.log('Client unsubscribed from all');
+        }
+      } catch (err) {
+        console.error('WebSocket message error:', err);
+      }
+    });
+
+    ws.on('close', () => {
+      clients.delete(ws);
+      if (currentSymbol) {
+        unsubscribeFromSymbol(ws, currentSymbol);
+      }
+      if (clients.size === 0 && priceInterval) {
+        clearInterval(priceInterval);
+        priceInterval = null;
+      }
+      console.log('Market WebSocket client disconnected');
+    });
+    
+    ws.on('error', (err) => {
+      console.error('WebSocket error:', err);
+    });
+  });
+  
+  return marketWss;
+};
+
+// Initialize market WebSocket
+setupMarketWebSocket(httpServer);
+
+// =============================================
 // REAL-TIME STATS WITH REDIS SINGLE SOURCE OF TRUTH
 // =============================================
 
+// Redis key for storing the current investor count
 const REDIS_INVESTOR_KEY = 'cloud_miner_count';
+
+// Initial value: 4,254,200
 const INITIAL_INVESTOR_COUNT = 4254200;
+
+// Daily limit for growth (max 7999 per day)
 const DAILY_GROWTH_LIMIT = 7999;
 
+// Function to get the start of the day (UTC)
 const getStartOfDay = () => {
   const now = new Date();
   now.setUTCHours(0, 0, 0, 0);
   return now.getTime();
 };
 
+// Function to get the key for daily growth tracking
 const getDailyGrowthKey = (date) => {
   return `daily_growth:${date}`;
 };
 
+// Initialize or get the current investor count from Redis
 const initializeInvestorCount = async () => {
   try {
+    // Check if the investor count exists in Redis
     let currentCount = await redis.get(REDIS_INVESTOR_KEY);
     
     if (!currentCount) {
+      // First time - set initial value
       currentCount = INITIAL_INVESTOR_COUNT;
       await redis.set(REDIS_INVESTOR_KEY, currentCount);
       console.log(`✅ Initialized investor count to ${currentCount.toLocaleString()}`);
@@ -24131,6 +24353,7 @@ const initializeInvestorCount = async () => {
   }
 };
 
+// Function to check and reset daily growth counter if needed
 const checkAndResetDailyGrowth = async () => {
   try {
     const today = getStartOfDay();
@@ -24139,6 +24362,7 @@ const checkAndResetDailyGrowth = async () => {
     let dailyGrowth = await redis.get(todayKey);
     
     if (!dailyGrowth) {
+      // New day - reset daily growth counter
       dailyGrowth = 0;
       await redis.set(todayKey, dailyGrowth);
       console.log(`📅 New day started - daily growth reset to 0`);
@@ -24153,8 +24377,10 @@ const checkAndResetDailyGrowth = async () => {
   }
 };
 
+// Function to add investors with daily limit enforcement
 const addInvestors = async () => {
   try {
+    // Check daily growth limit
     let dailyGrowth = await checkAndResetDailyGrowth();
     
     if (dailyGrowth >= DAILY_GROWTH_LIMIT) {
@@ -24162,8 +24388,10 @@ const addInvestors = async () => {
       return false;
     }
     
+    // Generate random number between 1 and 49
     const increment = Math.floor(Math.random() * 49) + 1;
     
+    // Check if adding this would exceed daily limit
     const newDailyGrowth = dailyGrowth + increment;
     const actualIncrement = newDailyGrowth > DAILY_GROWTH_LIMIT 
       ? DAILY_GROWTH_LIMIT - dailyGrowth 
@@ -24174,8 +24402,10 @@ const addInvestors = async () => {
       return false;
     }
     
+    // Update Redis using atomic operation to prevent race conditions
     const newCount = await redis.incrby(REDIS_INVESTOR_KEY, actualIncrement);
     
+    // Update daily growth counter
     const today = getStartOfDay();
     const todayKey = getDailyGrowthKey(today);
     await redis.incrby(todayKey, actualIncrement);
@@ -24190,6 +24420,7 @@ const addInvestors = async () => {
   }
 };
 
+// Function to broadcast stats to all connected clients via Socket.IO
 const broadcastStats = async () => {
   try {
     const currentCount = await redis.get(REDIS_INVESTOR_KEY);
@@ -24200,6 +24431,7 @@ const broadcastStats = async () => {
       timestamp: Date.now()
     };
     
+    // Broadcast to all connected Socket.IO clients
     io.emit('stats-update', stats);
     
     console.log(`📡 Broadcasted stats to ${io.engine.clientsCount} clients: ${count.toLocaleString()} investors`);
@@ -24208,6 +24440,7 @@ const broadcastStats = async () => {
   }
 };
 
+// Function to get current stats for new connections
 const getCurrentStats = async () => {
   try {
     const currentCount = await redis.get(REDIS_INVESTOR_KEY);
@@ -24226,12 +24459,16 @@ const getCurrentStats = async () => {
   }
 };
 
+// Background job for random investor growth
 let growthInterval = null;
 
 const startInvestorGrowthJob = async () => {
+  // Initialize first
   await initializeInvestorCount();
   
+  // Function to schedule next growth event
   const scheduleNextGrowth = () => {
+    // Random interval between 3 and 120 seconds (3000 to 120000 ms)
     const interval = Math.floor(Math.random() * (120000 - 3000 + 1) + 3000);
     
     growthInterval = setTimeout(async () => {
@@ -24239,21 +24476,26 @@ const startInvestorGrowthJob = async () => {
         const result = await addInvestors();
         
         if (result) {
+          // Broadcast updated stats to all clients
           await broadcastStats();
         }
         
+        // Schedule next growth event
         scheduleNextGrowth();
       } catch (err) {
         console.error('Error in growth job:', err);
+        // Still schedule next attempt even if this one failed
         scheduleNextGrowth();
       }
     }, interval);
   };
   
+  // Start the growth process
   scheduleNextGrowth();
   console.log(`🚀 Investor growth job started. Will add 1-49 investors every 3-120 seconds (max ${DAILY_GROWTH_LIMIT}/day)`);
 };
 
+// Function to stop the growth job (useful for graceful shutdown)
 const stopInvestorGrowthJob = () => {
   if (growthInterval) {
     clearTimeout(growthInterval);
@@ -24262,6 +24504,7 @@ const stopInvestorGrowthJob = () => {
   }
 };
 
+// API endpoint to get current stats (for clients not using WebSocket)
 app.get('/api/stats/investors', async (req, res) => {
   try {
     const stats = await getCurrentStats();
@@ -24278,6 +24521,7 @@ app.get('/api/stats/investors', async (req, res) => {
   }
 });
 
+// API endpoint to get daily growth progress (admin only - optional)
 app.get('/api/stats/daily-progress', async (req, res) => {
   try {
     const today = getStartOfDay();
@@ -24303,197 +24547,11 @@ app.get('/api/stats/daily-progress', async (req, res) => {
   }
 });
 
-// Add market WebSocket to your existing server
-const setupMarketWebSocket = (server) => {
-  const marketWss = new WebSocket.Server({ 
-    server, 
-    path: '/ws/market' 
-  });
-
-  const clients = new Set();
-  let priceInterval = null;
-
-  const broadcastPrices = async () => {
-    try {
-      const response = await axios.get(
-        'https://api.coingecko.com/api/v3/coins/markets',
-        {
-          params: {
-            vs_currency: 'usd',
-            per_page: 50,
-            price_change_percentage: '24h'
-          },
-          timeout: 5000
-        }
-      );
-
-      if (response.data && clients.size > 0) {
-        const updates = response.data.map(coin => ({
-          assetId: coin.id,
-          price: coin.current_price,
-          price_change_percentage_24h: coin.price_change_percentage_24h || 0
-        }));
-
-        const message = JSON.stringify({
-          type: 'batch_update',
-          updates: updates,
-          timestamp: Date.now()
-        });
-
-        clients.forEach(client => {
-          if (client.readyState === WebSocket.OPEN) {
-            client.send(message);
-          }
-        });
-      }
-    } catch (error) {
-      console.error('WebSocket price broadcast error:', error);
-    }
-  };
-
-  marketWss.on('connection', (ws) => {
-    clients.add(ws);
-    console.log(`Market WebSocket client connected. Total: ${clients.size}`);
-
-    (async () => {
-      const assets = await fetchMarketData();
-      ws.send(JSON.stringify({
-        type: 'initial_data',
-        assets: assets
-      }));
-    })();
-
-    if (clients.size === 1 && !priceInterval) {
-      priceInterval = setInterval(broadcastPrices, 5000);
-    }
-
-    ws.on('message', (message) => {
-      try {
-        const data = JSON.parse(message);
-        if (data.type === 'subscribe') {
-          console.log('Client subscribed to price updates');
-        }
-      } catch (err) {
-      }
-    });
-
-    ws.on('close', () => {
-      clients.delete(ws);
-      console.log(`Market WebSocket client disconnected. Total: ${clients.size}`);
-      
-      if (clients.size === 0 && priceInterval) {
-        clearInterval(priceInterval);
-        priceInterval = null;
-      }
-    });
-  });
-};
-
-// WebSocket connection for market data
-const setupMarketDataWebSocket = (server) => {
-  const wss = new WebSocket.Server({ server, path: '/ws/market-data' });
-  
-  wss.on('connection', (ws, req) => {
-    console.log('Market data WebSocket client connected');
-    
-    let symbol = 'BTCUSDT';
-    
-    ws.on('message', (message) => {
-      try {
-        const data = JSON.parse(message);
-        if (data.type === 'subscribe') {
-          symbol = data.symbol || 'BTCUSDT';
-          console.log(`Client subscribed to ${symbol} market data`);
-        }
-      } catch (err) {
-        console.error('WebSocket message error:', err);
-      }
-    });
-    
-    const sendTicker = async () => {
-      if (ws.readyState !== WebSocket.OPEN) return;
-      
-      try {
-        const ticker = await Ticker24hr.findOne({ symbol });
-        if (ticker) {
-          ws.send(JSON.stringify({
-            type: 'ticker',
-            symbol: ticker.symbol,
-            price: ticker.lastPrice,
-            priceChange: ticker.priceChange,
-            priceChangePercent: ticker.priceChangePercent,
-            volume: ticker.volume,
-            quoteVolume: ticker.quoteVolume,
-            high: ticker.highPrice,
-            low: ticker.lowPrice,
-            timestamp: Date.now()
-          }));
-        }
-      } catch (err) {
-        console.error('Error sending ticker:', err);
-      }
-    };
-    
-    const sendOrderBook = async () => {
-      if (ws.readyState !== WebSocket.OPEN) return;
-      
-      try {
-        const snapshot = await OrderBookSnapshot.findOne({ symbol });
-        if (snapshot) {
-          ws.send(JSON.stringify({
-            type: 'orderbook',
-            symbol,
-            bids: snapshot.bids.slice(0, 20),
-            asks: snapshot.asks.slice(0, 20),
-            timestamp: Date.now()
-          }));
-        }
-      } catch (err) {
-        console.error('Error sending order book:', err);
-      }
-    };
-    
-    const sendTrades = async () => {
-      if (ws.readyState !== WebSocket.OPEN) return;
-      
-      try {
-        const trades = await Trade.find({ symbol })
-          .sort({ time: -1 })
-          .limit(20);
-        
-        ws.send(JSON.stringify({
-          type: 'trades',
-          symbol,
-          trades: trades.map(t => ({
-            price: t.price,
-            amount: t.qty,
-            time: t.time,
-            isBuyerMaker: t.isBuyerMaker
-          })),
-          timestamp: Date.now()
-        }));
-      } catch (err) {
-        console.error('Error sending trades:', err);
-      }
-    };
-    
-    const tickerInterval = setInterval(sendTicker, 2000);
-    const orderBookInterval = setInterval(sendOrderBook, 1000);
-    const tradesInterval = setInterval(sendTrades, 3000);
-    
-    ws.on('close', () => {
-      clearInterval(tickerInterval);
-      clearInterval(orderBookInterval);
-      clearInterval(tradesInterval);
-      console.log('Market data WebSocket client disconnected');
-    });
-  });
-};
-
 // Socket.IO connection handler with stats broadcast and real-time balance updates
 io.on('connection', async (socket) => {
   console.log('New client connected:', socket.id);
   
+  // Authenticate the socket connection
   const token = socket.handshake.auth.token;
   let userId = null;
   
@@ -24505,6 +24563,7 @@ io.on('connection', async (socket) => {
         socket.join(`user_${userId}`);
         console.log(`Socket authenticated for user: ${userId}`);
         
+        // Send current user balances immediately
         const user = await User.findById(userId).select('balances');
         if (user) {
           socket.emit('balance_update', {
@@ -24514,38 +24573,28 @@ io.on('connection', async (socket) => {
           });
         }
         
+        // Send current asset balances
         const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
         if (userAssetBalance) {
-          const assetData = [];
+          const assetData = {};
           for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
             if (balance > 0) {
               const price = await getCryptoPrice(asset.toUpperCase());
-              const transactions = userAssetBalance.history
-                .filter(h => h.asset === asset)
-                .slice(-10)
-                .map(h => ({
-                  type: h.type,
-                  amount: h.amount,
-                  price: h.price,
-                  date: h.timestamp,
-                  profitLoss: h.profitLoss
-                }));
-              
-              assetData.push({
-                symbol: asset,
+              assetData[asset] = {
                 balance: balance,
                 usdValue: balance * (price || 0),
                 id: asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset,
                 avgPrice: 0,
                 unrealizedPnl: 0,
                 unrealizedPnlPercent: 0,
-                transactions: transactions
-              });
+                transactions: userAssetBalance.history.filter(h => h.asset === asset).slice(-10)
+              };
             }
           }
-          socket.emit('asset_balances_update', assetData);
+          socket.emit('asset_balances_update', Object.values(assetData));
         }
         
+        // Send user preferences
         const userPref = await UserPreference.findOne({ user: userId });
         if (userPref) {
           socket.emit('preferences_update', {
@@ -24560,10 +24609,12 @@ io.on('connection', async (socket) => {
     }
   }
   
+  // Send current stats immediately to new client
   const currentStats = await getCurrentStats();
   socket.emit('stats-update', currentStats);
   console.log(`📡 Sent initial stats to new client ${socket.id}: ${currentStats.totalInvestors.toLocaleString()} investors`);
 
+  // Verify admin token for admin connections
   socket.on('authenticate', async (token) => {
     try {
       const decoded = verifyJWT(token);
@@ -24585,8 +24636,10 @@ io.on('connection', async (socket) => {
     }
   });
   
+  // Handle request for PnL refresh
   socket.on('refresh_pnl', async () => {
     if (userId) {
+      // Calculate daily PnL based on price changes
       const user = await User.findById(userId).select('balances');
       const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
       
@@ -24599,7 +24652,8 @@ io.on('connection', async (socket) => {
             const currentPrice = await getCryptoPrice(asset.toUpperCase());
             if (currentPrice) {
               totalMainValue += balance * currentPrice;
-              const change24h = lastPrices[asset]?.usd_24h_change || 0;
+              // For PnL, we need previous day's price - using 24h change from current
+              const change24h = currentPrices[asset]?.usd_24h_change || 0;
               const previousPrice = currentPrice / (1 + change24h / 100);
               previousDayValue += balance * previousPrice;
             }
@@ -24622,6 +24676,36 @@ io.on('connection', async (socket) => {
       }
     }
   });
+  
+  // Handle money flow update request
+  socket.on('get_money_flow', async () => {
+    if (userId) {
+      // Calculate money flow based on user's transactions
+      const deposits = await Transaction.aggregate([
+        { $match: { user: userId, type: 'deposit', status: 'completed' } },
+        { $group: { _id: null, total: { $sum: '$amount' } } }
+      ]);
+      const withdrawals = await Transaction.aggregate([
+        { $match: { user: userId, type: 'withdrawal', status: 'completed' } },
+        { $group: { _id: null, total: { $sum: '$amount' } } }
+      ]);
+      const buys = await Transaction.aggregate([
+        { $match: { user: userId, type: 'buy', status: 'completed' } },
+        { $group: { _id: null, total: { $sum: '$amount' } } }
+      ]);
+      const sells = await Transaction.aggregate([
+        { $match: { user: userId, type: 'sell', status: 'completed' } },
+        { $group: { _id: null, total: { $sum: '$amount' } } }
+      ]);
+      
+      socket.emit('money_flow_update', {
+        deposits: deposits[0]?.total || 0,
+        withdrawals: withdrawals[0]?.total || 0,
+        conversions: (buys[0]?.total || 0) + (sells[0]?.total || 0),
+        investments: 0
+      });
+    }
+  });
 
   socket.on('disconnect', () => {
     console.log('Client disconnected:', socket.id);
@@ -24642,11 +24726,14 @@ const processMaturedInvestments = async () => {
         const user = await User.findById(investment.user._id);
         if (!user) continue;
 
+        // Calculate total return
         const totalReturn = investment.amount + (investment.amount * investment.plan.percentage / 100);
 
+        // Transfer balances
         user.balances.active -= investment.amount;
         user.balances.matured += totalReturn;
 
+        // Update investment
         investment.status = 'completed';
         investment.completionDate = now;
         investment.actualReturn = totalReturn - investment.amount;
@@ -24654,6 +24741,7 @@ const processMaturedInvestments = async () => {
         await user.save();
         await investment.save();
 
+        // Create transaction record
         await Transaction.create({
           user: investment.user._id,
           type: 'interest',
@@ -24672,6 +24760,7 @@ const processMaturedInvestments = async () => {
           netAmount: totalReturn - investment.amount
         });
         
+        // Emit socket update for the user
         io.to(`user_${user._id}`).emit('balance_update', {
           main: user.balances.main,
           active: user.balances.active,
@@ -24688,16 +24777,24 @@ const processMaturedInvestments = async () => {
   }
 };
 
+// Run every hour to check for matured investments
 setInterval(processMaturedInvestments, 60 * 60 * 1000);
+
+// Also run once on server start
 processMaturedInvestments();
 
+// Start the investor growth job
 startInvestorGrowthJob();
+
+// Start real-time price updates
 startRealTimePriceUpdates(io);
 
+// Recalculate all user main balances every 5 minutes to ensure accuracy with price fluctuations
 setInterval(async () => {
   await recalculateAllUserMainBalances(io);
 }, 5 * 60 * 1000);
 
+// Graceful shutdown handler
 const gracefulShutdown = () => {
   console.log('Received shutdown signal. Cleaning up...');
   if (priceUpdateInterval) clearInterval(priceUpdateInterval);
@@ -24715,5 +24812,5 @@ httpServer.listen(PORT, () => {
   console.log(`📈 Investors will grow from ${INITIAL_INVESTOR_COUNT.toLocaleString()} with max ${DAILY_GROWTH_LIMIT}/day`);
   console.log(`💰 Real-time crypto price updates started (every 10 seconds)`);
   console.log(`🔄 User main balances will recalculate every 5 minutes based on current prices`);
+  console.log(`🔌 WebSocket gateway active at wss://bithash-backend.onrender.com/ws/market`);
 });
-
