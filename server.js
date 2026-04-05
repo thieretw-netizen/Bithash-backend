@@ -22267,11 +22267,6 @@ fetchMarketData();
 
 
 
-
-/ =============================================
-// SNIPPET B - ALL ENDPOINTS (including missing ones)
-// =============================================
-
 // =============================================
 // FIAT CURRENCIES ENDPOINT - Get all world currencies with real-time exchange rates
 // =============================================
