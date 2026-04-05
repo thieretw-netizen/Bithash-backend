@@ -320,7 +320,9 @@ const UserSchema = new mongoose.Schema({
       sms: { type: Boolean, default: false },
       push: { type: Boolean, default: true }
     },
-    theme: { type: String, enum: ['light', 'dark'], default: 'dark' }
+    theme: { type: String, enum: ['light', 'dark'], default: 'dark' },
+    language: { type: String, default: 'en' },
+    currency: { type: String, default: 'USD' }
   },
   location: {
     lastKnown: {
@@ -384,7 +386,7 @@ UserSchema.add({
     totalEarnings: { type: Number, default: 0 },
     availableBalance: { type: Number, default: 0 },
     withdrawn: { type: Number, default: 0 },
-    referralTier: { type: Number, default: 1 },
+    referralTier: { type: Number, default: 1 }
   },
   referralHistory: [{
     referredUser: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
@@ -836,7 +838,7 @@ UserLogSchema.virtual('actionDescription').get(function() {
     'buy_created': 'User initiated a buy order',
     'buy_completed': 'User completed a buy order',
     'sell_created': 'User initiated a sell order',
-    'sell_completed': 'User completed a sell order',
+    'sell_completed': 'User completed a sell order'
   };
   return actionDescriptions[this.action] || `User performed ${this.action.replace(/_/g, ' ')}`;
 });
@@ -949,7 +951,7 @@ UserLogSchema.methods.calculateActionCategory = function(action) {
     'investment_created': 'investment',
     'investment_completed': 'investment',
     'password_change': 'security',
-    '2fa_enable': 'security',
+    '2fa_enable': 'security'
   };
   
   return categoryMap[action] || 'system';
@@ -2979,7 +2981,8 @@ const detectAndSetIPPreferences = async (userId, req) => {
     };
     
     if (!user.preferences) user.preferences = { notifications: {}, theme: 'dark' };
-    if (!user.preferences.language) user.preferences.language = detectedLanguage;
+    user.preferences.language = detectedLanguage;
+    user.preferences.currency = detectedCurrency;
     
     await user.save();
     
@@ -21860,6 +21863,10 @@ fetchMarketData();
 
 
 // =============================================
+// SNIPPET B - ALL ENDPOINTS
+// =============================================
+
+// =============================================
 // FIAT CURRENCIES ENDPOINT - Get all world currencies with real-time exchange rates
 // =============================================
 app.get('/api/fiat-currencies', async (req, res) => {
@@ -22104,11 +22111,6 @@ app.post('/api/users/preferences/save', protect, async (req, res) => {
       },
       { upsert: true }
     );
-    
-    const io = req.app.get('io');
-    if (io) {
-      io.to(`user_${userId}`).emit('preferences_update', { language, fiatCurrency });
-    }
     
     res.status(200).json({
       status: 'success',
@@ -22733,7 +22735,7 @@ app.post('/api/buy', protect, async (req, res) => {
       balanceSource: deductedFromMatured > 0 && deductedFromMain > 0 ? 'both' : (deductedFromMatured > 0 ? 'matured' : 'main')
     });
     
-    await Transaction.create({
+    const transaction = await Transaction.create({
       user: userId,
       type: 'buy',
       amount: amountUSD,
@@ -22785,7 +22787,7 @@ app.post('/api/buy', protect, async (req, res) => {
 });
 
 // =============================================
-// SELL ENDPOINT - Sell crypto for USD balance
+// SELL ENDPOINT - Sell crypto for USD balance (proceeds go to matured wallet)
 // =============================================
 app.post('/api/sell', protect, async (req, res) => {
   try {
@@ -22853,7 +22855,7 @@ app.post('/api/sell', protect, async (req, res) => {
       balanceSource: 'matured'
     });
     
-    await Transaction.create({
+    const transaction = await Transaction.create({
       user: userId,
       type: 'sell',
       amount: actualUsdValue,
@@ -22967,7 +22969,8 @@ const recalculateAllUserMainBalances = async (io) => {
   }
 };
 
-                  app.use((err, req, res, next) => {
+          // Error handling middleware
+app.use((err, req, res, next) => {
   console.error('Global error handler:', err);
   res.status(500).json({
     status: 'error',
@@ -22975,6 +22978,7 @@ const recalculateAllUserMainBalances = async (io) => {
   });
 });
 
+// 404 handler
 app.use((req, res) => {
   res.status(404).json({
     status: 'fail',
@@ -22994,7 +22998,9 @@ const io = new Server(httpServer, {
 app.set('io', io);
 
 const REDIS_INVESTOR_KEY = 'cloud_miner_count';
+
 const INITIAL_INVESTOR_COUNT = 4254200;
+
 const DAILY_GROWTH_LIMIT = 7999;
 
 const getStartOfDay = () => {
