@@ -3363,105 +3363,173 @@ const detectAndSetIPPreferences = async (userId, req) => {
   }
 };
 
-// NEW FUNCTION: Get real-time crypto price with multiple fallback APIs (NO MOCK DATA)
-const getCryptoPrice = async (asset) => {
-  try {
-    const assetMap = {
-      'BTC': 'bitcoin',
-      'ETH': 'ethereum',
-      'USDT': 'tether',
-      'BNB': 'binancecoin',
-      'SOL': 'solana',
-      'USDC': 'usd-coin',
-      'XRP': 'ripple',
-      'DOGE': 'dogecoin',
-      'ADA': 'cardano',
-      'SHIB': 'shiba-inu',
-      'AVAX': 'avalanche-2',
-      'DOT': 'polkadot',
-      'TRX': 'tron',
-      'LINK': 'chainlink',
-      'MATIC': 'matic-network',
-      'LTC': 'litecoin'
-    };
+// =============================================
+// PRODUCTION: REAL-TIME CRYPTO PRICES FROM LIVE APIs WITH CACHE
+// =============================================
+
+// Crypto price cache
+let cryptoPriceCache = {};
+let lastCryptoFetch = 0;
+const CRYPTO_CACHE_TTL = 10000; // 10 seconds - REAL TIME
+let cryptoFetchInProgress = false;
+
+// Supported assets
+const SUPPORTED_CRYPTO = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'ADA', 'SHIB', 'AVAX', 'DOT', 'TRX', 'LINK', 'MATIC', 'LTC'];
+
+// Map symbols to Binance pairs
+const symbolToBinancePair = {
+    'BTC': 'BTCUSDT', 'ETH': 'ETHUSDT', 'BNB': 'BNBUSDT', 'SOL': 'SOLUSDT',
+    'XRP': 'XRPUSDT', 'DOGE': 'DOGEUSDT', 'ADA': 'ADAUSDT', 'AVAX': 'AVAXUSDT',
+    'DOT': 'DOTUSDT', 'TRX': 'TRXUSDT', 'LINK': 'LINKUSDT', 'MATIC': 'MATICUSDT',
+    'LTC': 'LTCUSDT'
+};
+
+// Map symbols to CoinGecko IDs
+const symbolToCoinGeckoId = {
+    'BTC': 'bitcoin', 'ETH': 'ethereum', 'USDT': 'tether', 'BNB': 'binancecoin',
+    'SOL': 'solana', 'USDC': 'usd-coin', 'XRP': 'ripple', 'DOGE': 'dogecoin',
+    'ADA': 'cardano', 'SHIB': 'shiba-inu', 'AVAX': 'avalanche-2', 'DOT': 'polkadot',
+    'TRX': 'tron', 'LINK': 'chainlink', 'MATIC': 'matic-network', 'LTC': 'litecoin'
+};
+
+// Fetch ALL crypto prices from Binance (most reliable for real-time)
+async function fetchAllCryptoPricesFromBinance() {
+    const results = {};
     
-    const coinId = assetMap[asset.toUpperCase()];
-    if (!coinId) return null;
-    
-    // Try multiple price APIs with fallbacks - NO MOCK DATA
-    const errors = [];
-    
-    // Try Binance first (reliable and fast)
     try {
-      const binancePair = asset.toUpperCase() === 'USDT' ? 'USDTUSDT' : `${asset.toUpperCase()}USDT`;
-      const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${binancePair}`, { timeout: 5000 });
-      if (response.data && response.data.price) {
-        console.log(`Fetched ${asset} price from Binance: $${response.data.price}`);
-        return parseFloat(response.data.price);
-      }
-      errors.push('Binance: Invalid response');
-    } catch (err) {
-      errors.push(`Binance: ${err.message}`);
-    }
-    
-    // Try CryptoCompare as first fallback
-    try {
-      const response = await axios.get(`https://min-api.cryptocompare.com/data/price?fsym=${asset.toUpperCase()}&tsyms=USD`, { timeout: 5000 });
-      if (response.data && response.data.USD) {
-        console.log(`Fetched ${asset} price from CryptoCompare: $${response.data.USD}`);
-        return response.data.USD;
-      }
-      errors.push('CryptoCompare: Invalid response');
-    } catch (err) {
-      errors.push(`CryptoCompare: ${err.message}`);
-    }
-    
-    // Try Kraken as second fallback
-    try {
-      const krakenMap = {
-        'BTC': 'XBTUSD',
-        'ETH': 'ETHUSD',
-        'USDT': 'USDTUSD',
-        'SOL': 'SOLUSD',
-        'XRP': 'XRPUSD',
-        'DOGE': 'DOGEUSD',
-        'ADA': 'ADAUSD',
-        'LTC': 'LTCUSD'
-      };
-      const pair = krakenMap[asset.toUpperCase()];
-      if (pair) {
-        const response = await axios.get(`https://api.kraken.com/0/public/Ticker?pair=${pair}`, { timeout: 5000 });
-        if (response.data && response.data.result && response.data.result[pair]) {
-          const price = parseFloat(response.data.result[pair].c[0]);
-          console.log(`Fetched ${asset} price from Kraken: $${price}`);
-          return price;
+        // Fetch all prices in parallel
+        const promises = SUPPORTED_CRYPTO.map(async (symbol) => {
+            if (symbol === 'USDT') {
+                results['USDT'] = 1;
+                return { symbol: 'USDT', price: 1 };
+            }
+            
+            const pair = symbolToBinancePair[symbol];
+            if (!pair) return null;
+            
+            try {
+                const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${pair}`, {
+                    timeout: 5000,
+                    headers: { 'Accept': 'application/json' }
+                });
+                if (response.data && response.data.price) {
+                    const price = parseFloat(response.data.price);
+                    results[symbol] = price;
+                    return { symbol, price };
+                }
+            } catch (err) {
+                console.warn(`Binance fetch failed for ${symbol}:`, err.message);
+                return null;
+            }
+            return null;
+        });
+        
+        await Promise.all(promises);
+        
+        if (Object.keys(results).length > 0) {
+            console.log(`✅ Crypto prices fetched from Binance: ${Object.keys(results).length} assets`);
+            return results;
         }
-      }
-      errors.push('Kraken: No data or unsupported pair');
     } catch (err) {
-      errors.push(`Kraken: ${err.message}`);
+        console.error('Binance batch fetch failed:', err.message);
     }
     
-    // Try KuCoin as third fallback
+    return null;
+}
+
+// Fallback to CoinGecko
+async function fetchAllCryptoPricesFromCoinGecko() {
     try {
-      const response = await axios.get(`https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=${asset.toUpperCase()}-USDT`, { timeout: 5000 });
-      if (response.data && response.data.data && response.data.data.price) {
-        console.log(`Fetched ${asset} price from KuCoin: $${response.data.data.price}`);
-        return parseFloat(response.data.data.price);
-      }
-      errors.push('KuCoin: Invalid response');
+        const ids = SUPPORTED_CRYPTO.map(s => symbolToCoinGeckoId[s]).filter(id => id).join(',');
+        const response = await axios.get(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`, {
+            timeout: 8000,
+            headers: { 'Accept': 'application/json' }
+        });
+        
+        if (response.data) {
+            const results = {};
+            for (const [symbol, id] of Object.entries(symbolToCoinGeckoId)) {
+                if (response.data[id] && response.data[id].usd) {
+                    results[symbol] = response.data[id].usd;
+                }
+            }
+            results['USDT'] = 1;
+            console.log(`✅ Crypto prices fetched from CoinGecko: ${Object.keys(results).length} assets`);
+            return results;
+        }
     } catch (err) {
-      errors.push(`KuCoin: ${err.message}`);
+        console.error('CoinGecko fetch failed:', err.message);
+    }
+    return null;
+}
+
+// Main function to get crypto price with caching
+const getCryptoPrice = async (asset) => {
+  const assetUpper = asset.toUpperCase();
+  const now = Date.now();
+  
+  // Return cached price if still fresh
+  if (cryptoPriceCache[assetUpper] && (now - lastCryptoFetch) < CRYPTO_CACHE_TTL) {
+    return cryptoPriceCache[assetUpper];
+  }
+  
+  // Prevent multiple simultaneous fetches
+  if (cryptoFetchInProgress) {
+    // Wait for the in-progress fetch to complete
+    await new Promise(resolve => setTimeout(resolve, 500));
+    return cryptoPriceCache[assetUpper] || null;
+  }
+  
+  cryptoFetchInProgress = true;
+  
+  try {
+    // Try Binance first
+    let prices = await fetchAllCryptoPricesFromBinance();
+    
+    // Fallback to CoinGecko if Binance failed
+    if (!prices || Object.keys(prices).length === 0) {
+      prices = await fetchAllCryptoPricesFromCoinGecko();
     }
     
-    console.error(`All price APIs failed for ${asset}:`, errors);
-    return null;
+    if (prices && Object.keys(prices).length > 0) {
+      cryptoPriceCache = { ...cryptoPriceCache, ...prices };
+      lastCryptoFetch = Date.now();
+      console.log(`💹 Crypto price cache updated at ${new Date().toISOString()}`);
+    }
+    
+    cryptoFetchInProgress = false;
+    return cryptoPriceCache[assetUpper] || null;
+    
   } catch (err) {
-    console.error('Error fetching crypto price:', err);
-    return null;
+    console.error('Error fetching crypto prices:', err);
+    cryptoFetchInProgress = false;
+    return cryptoPriceCache[assetUpper] || null;
   }
 };
 
+// Start periodic price refresh every 10 seconds
+setInterval(async () => {
+  try {
+    console.log('🔄 Refreshing crypto prices...');
+    const prices = await fetchAllCryptoPricesFromBinance();
+    if (prices && Object.keys(prices).length > 0) {
+      cryptoPriceCache = { ...cryptoPriceCache, ...prices };
+      lastCryptoFetch = Date.now();
+      console.log(`✅ Crypto prices refreshed at ${new Date().toISOString()}`);
+    }
+  } catch (err) {
+    console.error('Periodic price refresh failed:', err.message);
+  }
+}, 10000);
+
+// Initial fetch
+fetchAllCryptoPricesFromBinance().then(prices => {
+  if (prices) {
+    cryptoPriceCache = { ...cryptoPriceCache, ...prices };
+    lastCryptoFetch = Date.now();
+    console.log('✅ Initial crypto prices loaded');
+  }
+});
 // NEW FUNCTION: Get real-time exchange rate with multiple fallback APIs (NO MOCK DATA)
 const getExchangeRate = async (asset, fiat = 'usd') => {
   try {
@@ -3582,13 +3650,90 @@ const getFiatExchangeRates = async () => {
   }
 };
 
-// NEW FUNCTION: Get all world currencies with exchange rates
+// =============================================
+// PRODUCTION: REAL-TIME FIAT EXCHANGE RATES FROM LIVE APIs
+// =============================================
+
+// Exchange rate cache
+let cachedExchangeRates = null;
+let lastRateFetch = 0;
+const RATE_CACHE_TTL = 3600000; // 1 hour cache
+let rateFetchInProgress = false;
+
+// Real fiat exchange rates - FETCHED LIVE, NO HARDCODING
+async function fetchLiveExchangeRates() {
+    // Prevent multiple simultaneous fetches
+    if (rateFetchInProgress) {
+        console.log('Rate fetch already in progress, waiting...');
+        return null;
+    }
+    
+    rateFetchInProgress = true;
+    
+    try {
+        // Try ExchangeRate-API first (no API key required, reliable)
+        console.log('🌐 Fetching live exchange rates from ExchangeRate-API...');
+        const response = await axios.get('https://api.exchangerate-api.com/v4/latest/USD', { 
+            timeout: 10000,
+            headers: { 'Accept': 'application/json' }
+        });
+        
+        if (response.data && response.data.rates && Object.keys(response.data.rates).length > 0) {
+            cachedExchangeRates = response.data.rates;
+            lastRateFetch = Date.now();
+            console.log(`✅ Live exchange rates fetched from ExchangeRate-API. ${Object.keys(cachedExchangeRates).length} currencies available.`);
+            rateFetchInProgress = false;
+            return cachedExchangeRates;
+        }
+    } catch (err) {
+        console.error('ExchangeRate-API failed:', err.message);
+    }
+    
+    // Try Frankfurter (European Central Bank data - official rates)
+    try {
+        console.log('🌐 Fetching live exchange rates from Frankfurter (ECB)...');
+        const response = await axios.get('https://api.frankfurter.app/latest?from=USD', { 
+            timeout: 10000 
+        });
+        
+        if (response.data && response.data.rates && Object.keys(response.data.rates).length > 0) {
+            cachedExchangeRates = response.data.rates;
+            lastRateFetch = Date.now();
+            console.log(`✅ Live exchange rates fetched from Frankfurter (ECB). ${Object.keys(cachedExchangeRates).length} currencies available.`);
+            rateFetchInProgress = false;
+            return cachedExchangeRates;
+        }
+    } catch (err) {
+        console.error('Frankfurter failed:', err.message);
+    }
+    
+    rateFetchInProgress = false;
+    
+    // If all APIs fail, throw error - NO HARDCODED FALLBACKS
+    throw new Error('Unable to fetch live exchange rates from any provider. Please check your internet connection.');
+}
+
+// Get exchange rates with caching
+async function getExchangeRates() {
+    if (cachedExchangeRates && (Date.now() - lastRateFetch) < RATE_CACHE_TTL) {
+        return cachedExchangeRates;
+    }
+    return await fetchLiveExchangeRates();
+}
+
+// NEW FUNCTION: Get all world currencies with exchange rates - COMPLETE LIST WITH KES, RON
 const getAllWorldCurrencies = async () => {
-  const rates = await getFiatExchangeRates();
-  if (!rates) return null;
+  let rates;
+  try {
+      rates = await getExchangeRates();
+  } catch (err) {
+      console.error('Failed to get exchange rates:', err);
+      throw err;
+  }
   
-  // List of all major world currencies
+  // Complete list of ALL world currencies including KES and RON
   const allCurrencies = [
+    // Major currencies
     { code: 'USD', name: 'US Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/us.png' },
     { code: 'EUR', name: 'Euro', symbol: '€', flag: 'https://flagcdn.com/w40/eu.png' },
     { code: 'GBP', name: 'British Pound', symbol: '£', flag: 'https://flagcdn.com/w40/gb.png' },
@@ -3613,15 +3758,59 @@ const getAllWorldCurrencies = async () => {
     { code: 'RUB', name: 'Russian Ruble', symbol: '₽', flag: 'https://flagcdn.com/w40/ru.png' },
     { code: 'AED', name: 'UAE Dirham', symbol: 'د.إ', flag: 'https://flagcdn.com/w40/ae.png' },
     { code: 'SAR', name: 'Saudi Riyal', symbol: '﷼', flag: 'https://flagcdn.com/w40/sa.png' },
-    { code: 'ILS', name: 'Israeli Shekel', symbol: '₪', flag: 'https://flagcdn.com/w40/il.png' }
+    { code: 'ILS', name: 'Israeli Shekel', symbol: '₪', flag: 'https://flagcdn.com/w40/il.png' },
+    // ADDED: Kenyan Shilling (KES)
+    { code: 'KES', name: 'Kenyan Shilling', symbol: 'KSh', flag: 'https://flagcdn.com/w40/ke.png' },
+    // ADDED: Romanian Leu (RON)
+    { code: 'RON', name: 'Romanian Leu', symbol: 'lei', flag: 'https://flagcdn.com/w40/ro.png' },
+    // African currencies
+    { code: 'GHS', name: 'Ghanaian Cedi', symbol: '₵', flag: 'https://flagcdn.com/w40/gh.png' },
+    { code: 'TZS', name: 'Tanzanian Shilling', symbol: 'TSh', flag: 'https://flagcdn.com/w40/tz.png' },
+    { code: 'UGX', name: 'Ugandan Shilling', symbol: 'USh', flag: 'https://flagcdn.com/w40/ug.png' },
+    { code: 'XAF', name: 'Central African CFA Franc', symbol: 'FCFA', flag: 'https://flagcdn.com/w40/cm.png' },
+    { code: 'XOF', name: 'West African CFA Franc', symbol: 'CFA', flag: 'https://flagcdn.com/w40/sn.png' },
+    { code: 'MAD', name: 'Moroccan Dirham', symbol: 'DH', flag: 'https://flagcdn.com/w40/ma.png' },
+    { code: 'DZD', name: 'Algerian Dinar', symbol: 'DA', flag: 'https://flagcdn.com/w40/dz.png' },
+    { code: 'TND', name: 'Tunisian Dinar', symbol: 'DT', flag: 'https://flagcdn.com/w40/tn.png' },
+    { code: 'NGN', name: 'Nigerian Naira', symbol: '₦', flag: 'https://flagcdn.com/w40/ng.png' },
+    // Asian currencies
+    { code: 'PKR', name: 'Pakistani Rupee', symbol: '₨', flag: 'https://flagcdn.com/w40/pk.png' },
+    { code: 'BDT', name: 'Bangladeshi Taka', symbol: '৳', flag: 'https://flagcdn.com/w40/bd.png' },
+    { code: 'LKR', name: 'Sri Lankan Rupee', symbol: 'Rs', flag: 'https://flagcdn.com/w40/lk.png' },
+    { code: 'NPR', name: 'Nepalese Rupee', symbol: 'Rs', flag: 'https://flagcdn.com/w40/np.png' },
+    { code: 'THB', name: 'Thai Baht', symbol: '฿', flag: 'https://flagcdn.com/w40/th.png' },
+    { code: 'VND', name: 'Vietnamese Dong', symbol: '₫', flag: 'https://flagcdn.com/w40/vn.png' },
+    { code: 'IDR', name: 'Indonesian Rupiah', symbol: 'Rp', flag: 'https://flagcdn.com/w40/id.png' },
+    { code: 'MYR', name: 'Malaysian Ringgit', symbol: 'RM', flag: 'https://flagcdn.com/w40/my.png' },
+    { code: 'PHP', name: 'Philippine Peso', symbol: '₱', flag: 'https://flagcdn.com/w40/ph.png' },
+    // European currencies
+    { code: 'BGN', name: 'Bulgarian Lev', symbol: 'лв', flag: 'https://flagcdn.com/w40/bg.png' },
+    { code: 'HRK', name: 'Croatian Kuna', symbol: 'kn', flag: 'https://flagcdn.com/w40/hr.png' },
+    { code: 'CZK', name: 'Czech Koruna', symbol: 'Kč', flag: 'https://flagcdn.com/w40/cz.png' },
+    { code: 'HUF', name: 'Hungarian Forint', symbol: 'Ft', flag: 'https://flagcdn.com/w40/hu.png' },
+    { code: 'ISK', name: 'Icelandic Króna', symbol: 'kr', flag: 'https://flagcdn.com/w40/is.png' }
   ];
   
   // Add exchange rates to each currency
-  return allCurrencies.map(currency => ({
-    ...currency,
-    exchangeRate: rates[currency.code] || (currency.code === 'USD' ? 1 : null)
-  })).filter(c => c.exchangeRate !== null);
+  const result = [];
+  for (const currency of allCurrencies) {
+    let rate = rates[currency.code];
+    if (currency.code === 'USD') rate = 1;
+    
+    if (rate && rate > 0) {
+      result.push({
+        ...currency,
+        exchangeRate: rate
+      });
+    } else {
+      console.warn(`No exchange rate found for ${currency.code}, skipping`);
+    }
+  }
+  
+  console.log(`✅ Loaded ${result.length} currencies with live exchange rates (including KES and RON)`);
+  return result;
 };
+
 
 // NEW FUNCTION: Convert crypto amount to fiat using real-time rate
 const convertToFiat = async (cryptoAmount, asset) => {
