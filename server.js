@@ -345,9 +345,7 @@ const UserSchema = new mongoose.Schema({
       sms: { type: Boolean, default: false },
       push: { type: Boolean, default: true }
     },
-    theme: { type: String, enum: ['light', 'dark'], default: 'dark' },
-    language: { type: String, default: 'en' },
-    currency: { type: String, default: 'USD' }
+    theme: { type: String, enum: ['light', 'dark'], default: 'dark' }
   },
   // NEW: Location tracking fields - exact location
   location: {
@@ -1605,7 +1603,7 @@ UserAssetBalanceSchema.index({ user: 1 });
 UserAssetBalanceSchema.index({ 'history.timestamp': -1 });
 
 // =============================================
-// User Preferences Schema (Enhanced - Saves both crypto display asset AND fiat preference)
+// User Preferences Schema
 // =============================================
 const UserPreferenceSchema = new mongoose.Schema({
   user: {
@@ -1629,7 +1627,7 @@ const UserPreferenceSchema = new mongoose.Schema({
     sms: { type: Boolean, default: false }
   },
   language: { type: String, default: 'en' },
-  fiatCurrency: { type: String, default: 'USD' }
+  currency: { type: String, default: 'USD' }
 }, { timestamps: true });
 
 UserPreferenceSchema.index({ user: 1 });
@@ -3338,24 +3336,23 @@ const detectAndSetIPPreferences = async (userId, req) => {
     // Also update main preferences
     if (!user.preferences) user.preferences = { notifications: {}, theme: 'dark' };
     if (!user.preferences.language) user.preferences.language = detectedLanguage;
-    if (!user.preferences.currency) user.preferences.currency = detectedCurrency;
     
     await user.save();
     
-    // Also update UserPreference model (saves both displayAsset AND fiatCurrency)
+    // Also update UserPreference model
     await UserPreference.findOneAndUpdate(
       { user: userId },
       { 
         language: detectedLanguage,
-        fiatCurrency: detectedCurrency,
-        $setOnInsert: { user: userId, displayAsset: 'btc' }
+        currency: detectedCurrency,
+        $setOnInsert: { user: userId }
       },
       { upsert: true, new: true }
     );
     
-    console.log(`IP-based preferences set for user ${userId}: language=${detectedLanguage}, fiatCurrency=${detectedCurrency}, country=${detectedCountry}`);
+    console.log(`IP-based preferences set for user ${userId}: language=${detectedLanguage}, currency=${detectedCurrency}, country=${detectedCountry}`);
     
-    return { language: detectedLanguage, fiatCurrency: detectedCurrency, country: detectedCountry };
+    return { language: detectedLanguage, currency: detectedCurrency, country: detectedCountry };
   } catch (err) {
     console.error('Error detecting IP preferences:', err);
     return null;
@@ -22271,6 +22268,7 @@ fetchMarketData();
 
 
 
+// =============================================
 // SNIPPET B - ALL ENDPOINTS (including missing ones)
 // =============================================
 
@@ -22501,16 +22499,17 @@ app.post('/api/convert', protect, async (req, res) => {
 });
 
 // =============================================
-// USER PREFERENCES SAVE ENDPOINT - Save IP-based preferences (both language and fiat)
+// USER PREFERENCES SAVE ENDPOINT - Save IP-based preferences (fiat AND crypto)
 // =============================================
 app.post('/api/users/preferences/save', protect, async (req, res) => {
   try {
-    const { language, fiatCurrency, detectedFromIP } = req.body;
+    const { language, fiatCurrency, cryptoCurrency, detectedFromIP } = req.body;
     const userId = req.user._id;
     
     const updates = {};
     if (language) updates['preferences.language'] = language;
     if (fiatCurrency) updates['preferences.currency'] = fiatCurrency;
+    if (cryptoCurrency) updates['preferences.displayAsset'] = cryptoCurrency;
     
     if (detectedFromIP) {
       updates['ipPreferences.language'] = language;
@@ -22521,13 +22520,14 @@ app.post('/api/users/preferences/save', protect, async (req, res) => {
     
     await User.findByIdAndUpdate(userId, updates);
     
-    // Also update UserPreference model (saves BOTH displayAsset AND fiatCurrency)
+    // Also update UserPreference model (crypto preference)
     await UserPreference.findOneAndUpdate(
       { user: userId },
       { 
         language: language || req.user.preferences?.language || 'en',
-        fiatCurrency: fiatCurrency || req.user.preferences?.currency || 'USD',
-        $setOnInsert: { user: userId, displayAsset: 'btc' }
+        currency: fiatCurrency || req.user.preferences?.currency || 'USD',
+        displayAsset: cryptoCurrency || req.user.preferences?.displayAsset || 'btc',
+        $setOnInsert: { user: userId }
       },
       { upsert: true }
     );
@@ -22535,7 +22535,7 @@ app.post('/api/users/preferences/save', protect, async (req, res) => {
     res.status(200).json({
       status: 'success',
       message: 'Preferences saved successfully',
-      data: { language, fiatCurrency: fiatCurrency }
+      data: { language, fiatCurrency, cryptoCurrency }
     });
   } catch (err) {
     console.error('Error saving preferences:', err);
@@ -22556,7 +22556,7 @@ app.get('/api/users/preferences', protect, async (req, res) => {
       userPref = {
         displayAsset: user?.preferences?.displayAsset || 'btc',
         language: user?.preferences?.language || user?.ipPreferences?.language || 'en',
-        fiatCurrency: user?.preferences?.currency || user?.ipPreferences?.currency || 'USD',
+        currency: user?.preferences?.currency || user?.ipPreferences?.currency || 'USD',
         theme: user?.preferences?.theme || 'dark'
       };
     }
@@ -22566,7 +22566,7 @@ app.get('/api/users/preferences', protect, async (req, res) => {
       data: {
         displayAsset: userPref.displayAsset || 'btc',
         language: userPref.language || 'en',
-        fiatCurrency: userPref.fiatCurrency || 'USD',
+        currency: userPref.currency || 'USD',
         theme: userPref.theme || 'dark'
       }
     });
@@ -22577,17 +22577,18 @@ app.get('/api/users/preferences', protect, async (req, res) => {
 });
 
 // =============================================
-// USER PREFERENCES UPDATE ENDPOINT (POST) - Saves BOTH crypto display AND fiat preference
+// USER PREFERENCES UPDATE ENDPOINT (POST) - Saves both fiat AND crypto preferences to database
 // =============================================
 app.post('/api/users/preferences', protect, async (req, res) => {
   try {
-    const { displayAsset, theme, language, fiatCurrency } = req.body;
+    const { displayAsset, theme, language, currency, fiatCurrency, cryptoCurrency } = req.body;
     
     const updates = {};
     if (displayAsset) updates.displayAsset = displayAsset;
+    if (cryptoCurrency) updates.displayAsset = cryptoCurrency;
     if (theme) updates.theme = theme;
     if (language) updates.language = language;
-    if (fiatCurrency) updates.fiatCurrency = fiatCurrency;
+    if (currency || fiatCurrency) updates.currency = currency || fiatCurrency;
     
     await UserPreference.findOneAndUpdate(
       { user: req.user._id },
@@ -22596,14 +22597,14 @@ app.post('/api/users/preferences', protect, async (req, res) => {
     );
     
     // Also update user model
-    const userUpdates = {};
-    if (theme) userUpdates['preferences.theme'] = theme;
-    if (language) userUpdates['preferences.language'] = language;
-    if (fiatCurrency) userUpdates['preferences.currency'] = fiatCurrency;
-    
-    if (Object.keys(userUpdates).length > 0) {
-      await User.findByIdAndUpdate(req.user._id, { $set: userUpdates });
-    }
+    await User.findByIdAndUpdate(req.user._id, {
+      $set: {
+        'preferences.theme': theme,
+        'preferences.language': language,
+        'preferences.currency': currency || fiatCurrency,
+        'preferences.displayAsset': displayAsset || cryptoCurrency
+      }
+    });
     
     // Emit socket update for real-time preference changes
     const io = req.app.get('io');
@@ -22642,6 +22643,7 @@ app.get('/api/users/deposit-asset', protect, async (req, res) => {
 
 // =============================================
 // ADMIN APPROVE DEPOSIT ENDPOINT - FIXED VERSION (with asset balance update)
+// If user deposits crypto, exact amount is added to that crypto and reflects in My Assets
 // =============================================
 app.post('/api/admin/deposits/:id/approve', adminProtect, [
   body('notes').optional().trim()
@@ -22701,7 +22703,7 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
     user.balances.main += deposit.amount;
     await user.save();
     
-    // If crypto deposit, update user asset balances
+    // If crypto deposit, update user asset balances - exact amount added to that crypto
     if (isCryptoDeposit && assetSymbol) {
       let userAssetBalance = await UserAssetBalance.findOne({ user: user._id });
       if (!userAssetBalance) {
@@ -23371,14 +23373,115 @@ app.post('/api/sell', protect, async (req, res) => {
   }
 });
 
+// =============================================
+// GET USER ASSETS ENDPOINT - Returns all crypto assets user is holding
+// =============================================
+app.get('/api/users/assets', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    
+    const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
+    
+    if (!userAssetBalance) {
+      return res.status(200).json([]);
+    }
+    
+    const assets = [];
+    
+    for (const [assetSymbol, balance] of Object.entries(userAssetBalance.balances)) {
+      if (balance > 0) {
+        const currentPrice = await getCryptoPrice(assetSymbol.toUpperCase());
+        const currentValue = balance * (currentPrice || 0);
+        
+        // Calculate average buying price from history
+        let totalSpent = 0;
+        let totalBought = 0;
+        let totalSold = 0;
+        let realizedProfit = 0;
+        let realizedLoss = 0;
+        
+        if (userAssetBalance.history && userAssetBalance.history.length > 0) {
+          const assetHistory = userAssetBalance.history.filter(h => h.asset === assetSymbol);
+          
+          for (const record of assetHistory) {
+            if (record.type === 'buy') {
+              totalSpent += record.usdValue;
+              totalBought += record.amount;
+            } else if (record.type === 'sell') {
+              totalSold += record.amount;
+              if (record.profitLoss && record.profitLoss > 0) {
+                realizedProfit += record.profitLoss;
+              } else if (record.profitLoss && record.profitLoss < 0) {
+                realizedLoss += Math.abs(record.profitLoss);
+              }
+            }
+          }
+        }
+        
+        const averageBuyingPrice = totalBought > 0 ? totalSpent / totalBought : 0;
+        const unrealizedProfitLoss = currentValue - (totalSpent - (totalSold * averageBuyingPrice));
+        const unrealizedPercentage = averageBuyingPrice > 0 ? (unrealizedProfitLoss / (totalSpent - (totalSold * averageBuyingPrice))) * 100 : 0;
+        
+        assets.push({
+          symbol: assetSymbol,
+          balance: balance,
+          currentValue: currentValue,
+          averageBuyingPrice: averageBuyingPrice,
+          currentPrice: currentPrice,
+          unrealizedProfitLoss: unrealizedProfitLoss,
+          unrealizedPercentage: unrealizedPercentage,
+          totalSpent: totalSpent,
+          totalSold: totalSold,
+          realizedProfit: realizedProfit,
+          realizedLoss: realizedLoss,
+          transactions: userAssetBalance.history.filter(h => h.asset === assetSymbol).slice(-20)
+        });
+      }
+    }
+    
+    res.status(200).json(assets);
+  } catch (err) {
+    console.error('Error fetching user assets:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch assets' });
+  }
+});
 
-
-
-
-
-
-
-
+// =============================================
+// GET USER BALANCES ENDPOINT
+// =============================================
+app.get('/api/users/balances', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    
+    const user = await User.findById(userId).select('balances');
+    const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
+    
+    // Calculate total main balance from asset values
+    let totalMainBalance = user?.balances?.main || 0;
+    
+    if (userAssetBalance) {
+      let calculatedBalance = 0;
+      for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
+        if (balance > 0) {
+          const price = await getCryptoPrice(asset.toUpperCase());
+          if (price) {
+            calculatedBalance += balance * price;
+          }
+        }
+      }
+      totalMainBalance = calculatedBalance;
+    }
+    
+    res.status(200).json({
+      main: totalMainBalance,
+      active: user?.balances?.active || 0,
+      matured: user?.balances?.matured || 0
+    });
+  } catch (err) {
+    console.error('Error fetching balances:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch balances' });
+  }
+});
 
 // Real-time price update function with WebSocket broadcasting
 let priceUpdateInterval = null;
@@ -23413,7 +23516,7 @@ const startRealTimePriceUpdates = (io) => {
   }, 10000);
 };
 
-// Function to recalculate user main balances based on current crypto prices
+// Function to recalculate user main balances based on current crypto prices (real-time fluctuation)
 const recalculateAllUserMainBalances = async (io) => {
   try {
     const users = await User.find({}).select('_id');
@@ -23446,6 +23549,41 @@ const recalculateAllUserMainBalances = async (io) => {
   }
 };
 
+// Function to recalculate matured wallet based on all proceeds (investments, sells, etc.)
+const recalculateMaturedWallet = async (userId) => {
+  try {
+    // Sum all investment proceeds (completed investments)
+    const completedInvestments = await Investment.aggregate([
+      { $match: { user: mongoose.Types.ObjectId(userId), status: 'completed' } },
+      { $group: { _id: null, total: { $sum: '$amount' } } }
+    ]);
+    
+    // Sum all sell proceeds
+    const sellTransactions = await Transaction.aggregate([
+      { $match: { user: mongoose.Types.ObjectId(userId), type: 'sell', status: 'completed' } },
+      { $group: { _id: null, total: { $sum: '$amount' } } }
+    ]);
+    
+    // Sum all referral commissions
+    const referralTransactions = await Transaction.aggregate([
+      { $match: { user: mongoose.Types.ObjectId(userId), type: 'referral', status: 'completed' } },
+      { $group: { _id: null, total: { $sum: '$amount' } } }
+    ]);
+    
+    const investmentTotal = completedInvestments[0]?.total || 0;
+    const sellTotal = sellTransactions[0]?.total || 0;
+    const referralTotal = referralTransactions[0]?.total || 0;
+    
+    const maturedTotal = investmentTotal + sellTotal + referralTotal;
+    
+    await User.findByIdAndUpdate(userId, { 'balances.matured': maturedTotal });
+    
+    return maturedTotal;
+  } catch (err) {
+    console.error('Error recalculating matured wallet:', err);
+    return 0;
+  }
+};
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -23825,18 +23963,29 @@ io.on('connection', async (socket) => {
         socket.join(`user_${userId}`);
         console.log(`Socket authenticated for user: ${userId}`);
         
-        // Send current user balances immediately
-        const user = await User.findById(userId).select('balances');
-        if (user) {
-          socket.emit('balance_update', {
-            main: user.balances.main,
-            active: user.balances.active,
-            matured: user.balances.matured
-          });
+        // Send current user balances immediately (main fluctuates with real-time prices)
+        const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
+        let mainBalance = 0;
+        
+        if (userAssetBalance) {
+          for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
+            if (balance > 0) {
+              const price = await getCryptoPrice(asset.toUpperCase());
+              if (price) {
+                mainBalance += balance * price;
+              }
+            }
+          }
         }
         
+        const user = await User.findById(userId).select('balances');
+        socket.emit('balance_update', {
+          main: mainBalance,
+          active: user?.balances?.active || 0,
+          matured: user?.balances?.matured || 0
+        });
+        
         // Send current asset balances
-        const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
         if (userAssetBalance) {
           const assetData = {};
           for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
@@ -23856,13 +24005,13 @@ io.on('connection', async (socket) => {
           socket.emit('asset_balances_update', Object.values(assetData));
         }
         
-        // Send user preferences (includes both displayAsset AND fiatCurrency)
+        // Send user preferences (including fiat and crypto preferences saved in database)
         const userPref = await UserPreference.findOne({ user: userId });
         if (userPref) {
           socket.emit('preferences_update', {
             displayAsset: userPref.displayAsset,
             language: userPref.language,
-            fiatCurrency: userPref.fiatCurrency
+            currency: userPref.currency
           });
         }
       }
@@ -23898,11 +24047,10 @@ io.on('connection', async (socket) => {
     }
   });
   
-  // Handle request for PnL refresh
+  // Handle request for PnL refresh (real-time fluctuation tracking)
   socket.on('refresh_pnl', async () => {
     if (userId) {
       // Calculate daily PnL based on price changes
-      const user = await User.findById(userId).select('balances');
       const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
       
       if (userAssetBalance) {
@@ -24018,13 +24166,26 @@ processMaturedInvestments();
 // Start the investor growth job
 startInvestorGrowthJob();
 
-// Start real-time price updates
+// Start real-time price updates (crypto prices fluctuate every 10 seconds)
 startRealTimePriceUpdates(io);
 
 // Recalculate all user main balances every 5 minutes to ensure accuracy with price fluctuations
 setInterval(async () => {
   await recalculateAllUserMainBalances(io);
 }, 5 * 60 * 1000);
+
+// Recalculate matured wallets every hour to ensure accuracy
+setInterval(async () => {
+  try {
+    const users = await User.find({}).select('_id');
+    for (const user of users) {
+      await recalculateMaturedWallet(user._id);
+    }
+    console.log('Recalculated matured wallets for all users');
+  } catch (err) {
+    console.error('Error recalculating matured wallets:', err);
+  }
+}, 60 * 60 * 1000);
 
 // Graceful shutdown handler
 const gracefulShutdown = () => {
@@ -24044,4 +24205,5 @@ httpServer.listen(PORT, () => {
   console.log(`📈 Investors will grow from ${INITIAL_INVESTOR_COUNT.toLocaleString()} with max ${DAILY_GROWTH_LIMIT}/day`);
   console.log(`💰 Real-time crypto price updates started (every 10 seconds)`);
   console.log(`🔄 User main balances will recalculate every 5 minutes based on current prices`);
+  console.log(`💸 Matured wallets recalculate every hour based on all proceeds`);
 });
