@@ -345,7 +345,9 @@ const UserSchema = new mongoose.Schema({
       sms: { type: Boolean, default: false },
       push: { type: Boolean, default: true }
     },
-    theme: { type: String, enum: ['light', 'dark'], default: 'dark' }
+    theme: { type: String, enum: ['light', 'dark'], default: 'dark' },
+    language: { type: String, default: 'en' },
+    currency: { type: String, default: 'USD' }
   },
   // NEW: Location tracking fields - exact location
   location: {
@@ -22268,7 +22270,7 @@ fetchMarketData();
 
 
 
-// =============================================
+/ =============================================
 // SNIPPET B - ALL ENDPOINTS (including missing ones)
 // =============================================
 
