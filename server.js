@@ -1605,7 +1605,7 @@ UserAssetBalanceSchema.index({ user: 1 });
 UserAssetBalanceSchema.index({ 'history.timestamp': -1 });
 
 // =============================================
-// User Preferences Schema (Enhanced with fiat and language)
+// User Preferences Schema
 // =============================================
 const UserPreferenceSchema = new mongoose.Schema({
   user: {
@@ -1629,8 +1629,7 @@ const UserPreferenceSchema = new mongoose.Schema({
     sms: { type: Boolean, default: false }
   },
   language: { type: String, default: 'en' },
-  currency: { type: String, default: 'USD' },
-  fiatCurrency: { type: String, default: 'USD' }
+  currency: { type: String, default: 'USD' }
 }, { timestamps: true });
 
 UserPreferenceSchema.index({ user: 1 });
@@ -3339,6 +3338,7 @@ const detectAndSetIPPreferences = async (userId, req) => {
     // Also update main preferences
     if (!user.preferences) user.preferences = { notifications: {}, theme: 'dark' };
     if (!user.preferences.language) user.preferences.language = detectedLanguage;
+    if (!user.preferences.currency) user.preferences.currency = detectedCurrency;
     
     await user.save();
     
@@ -3348,7 +3348,6 @@ const detectAndSetIPPreferences = async (userId, req) => {
       { 
         language: detectedLanguage,
         currency: detectedCurrency,
-        fiatCurrency: detectedCurrency,
         $setOnInsert: { user: userId }
       },
       { upsert: true, new: true }
@@ -3363,173 +3362,105 @@ const detectAndSetIPPreferences = async (userId, req) => {
   }
 };
 
-// =============================================
-// PRODUCTION: REAL-TIME CRYPTO PRICES FROM LIVE APIs WITH CACHE
-// =============================================
-
-// Crypto price cache
-let cryptoPriceCache = {};
-let lastCryptoFetch = 0;
-const CRYPTO_CACHE_TTL = 10000; // 10 seconds - REAL TIME
-let cryptoFetchInProgress = false;
-
-// Supported assets
-const SUPPORTED_CRYPTO = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'ADA', 'SHIB', 'AVAX', 'DOT', 'TRX', 'LINK', 'MATIC', 'LTC'];
-
-// Map symbols to Binance pairs
-const symbolToBinancePair = {
-    'BTC': 'BTCUSDT', 'ETH': 'ETHUSDT', 'BNB': 'BNBUSDT', 'SOL': 'SOLUSDT',
-    'XRP': 'XRPUSDT', 'DOGE': 'DOGEUSDT', 'ADA': 'ADAUSDT', 'AVAX': 'AVAXUSDT',
-    'DOT': 'DOTUSDT', 'TRX': 'TRXUSDT', 'LINK': 'LINKUSDT', 'MATIC': 'MATICUSDT',
-    'LTC': 'LTCUSDT'
-};
-
-// Map symbols to CoinGecko IDs
-const symbolToCoinGeckoId = {
-    'BTC': 'bitcoin', 'ETH': 'ethereum', 'USDT': 'tether', 'BNB': 'binancecoin',
-    'SOL': 'solana', 'USDC': 'usd-coin', 'XRP': 'ripple', 'DOGE': 'dogecoin',
-    'ADA': 'cardano', 'SHIB': 'shiba-inu', 'AVAX': 'avalanche-2', 'DOT': 'polkadot',
-    'TRX': 'tron', 'LINK': 'chainlink', 'MATIC': 'matic-network', 'LTC': 'litecoin'
-};
-
-// Fetch ALL crypto prices from Binance (most reliable for real-time)
-async function fetchAllCryptoPricesFromBinance() {
-    const results = {};
-    
-    try {
-        // Fetch all prices in parallel
-        const promises = SUPPORTED_CRYPTO.map(async (symbol) => {
-            if (symbol === 'USDT') {
-                results['USDT'] = 1;
-                return { symbol: 'USDT', price: 1 };
-            }
-            
-            const pair = symbolToBinancePair[symbol];
-            if (!pair) return null;
-            
-            try {
-                const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${pair}`, {
-                    timeout: 5000,
-                    headers: { 'Accept': 'application/json' }
-                });
-                if (response.data && response.data.price) {
-                    const price = parseFloat(response.data.price);
-                    results[symbol] = price;
-                    return { symbol, price };
-                }
-            } catch (err) {
-                console.warn(`Binance fetch failed for ${symbol}:`, err.message);
-                return null;
-            }
-            return null;
-        });
-        
-        await Promise.all(promises);
-        
-        if (Object.keys(results).length > 0) {
-            console.log(`✅ Crypto prices fetched from Binance: ${Object.keys(results).length} assets`);
-            return results;
-        }
-    } catch (err) {
-        console.error('Binance batch fetch failed:', err.message);
-    }
-    
-    return null;
-}
-
-// Fallback to CoinGecko
-async function fetchAllCryptoPricesFromCoinGecko() {
-    try {
-        const ids = SUPPORTED_CRYPTO.map(s => symbolToCoinGeckoId[s]).filter(id => id).join(',');
-        const response = await axios.get(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`, {
-            timeout: 8000,
-            headers: { 'Accept': 'application/json' }
-        });
-        
-        if (response.data) {
-            const results = {};
-            for (const [symbol, id] of Object.entries(symbolToCoinGeckoId)) {
-                if (response.data[id] && response.data[id].usd) {
-                    results[symbol] = response.data[id].usd;
-                }
-            }
-            results['USDT'] = 1;
-            console.log(`✅ Crypto prices fetched from CoinGecko: ${Object.keys(results).length} assets`);
-            return results;
-        }
-    } catch (err) {
-        console.error('CoinGecko fetch failed:', err.message);
-    }
-    return null;
-}
-
-// Main function to get crypto price with caching
+// NEW FUNCTION: Get real-time crypto price with multiple fallback APIs (NO MOCK DATA)
 const getCryptoPrice = async (asset) => {
-  const assetUpper = asset.toUpperCase();
-  const now = Date.now();
-  
-  // Return cached price if still fresh
-  if (cryptoPriceCache[assetUpper] && (now - lastCryptoFetch) < CRYPTO_CACHE_TTL) {
-    return cryptoPriceCache[assetUpper];
-  }
-  
-  // Prevent multiple simultaneous fetches
-  if (cryptoFetchInProgress) {
-    // Wait for the in-progress fetch to complete
-    await new Promise(resolve => setTimeout(resolve, 500));
-    return cryptoPriceCache[assetUpper] || null;
-  }
-  
-  cryptoFetchInProgress = true;
-  
   try {
-    // Try Binance first
-    let prices = await fetchAllCryptoPricesFromBinance();
+    const assetMap = {
+      'BTC': 'bitcoin',
+      'ETH': 'ethereum',
+      'USDT': 'tether',
+      'BNB': 'binancecoin',
+      'SOL': 'solana',
+      'USDC': 'usd-coin',
+      'XRP': 'ripple',
+      'DOGE': 'dogecoin',
+      'ADA': 'cardano',
+      'SHIB': 'shiba-inu',
+      'AVAX': 'avalanche-2',
+      'DOT': 'polkadot',
+      'TRX': 'tron',
+      'LINK': 'chainlink',
+      'MATIC': 'matic-network',
+      'LTC': 'litecoin'
+    };
     
-    // Fallback to CoinGecko if Binance failed
-    if (!prices || Object.keys(prices).length === 0) {
-      prices = await fetchAllCryptoPricesFromCoinGecko();
+    const coinId = assetMap[asset.toUpperCase()];
+    if (!coinId) return null;
+    
+    // Try multiple price APIs with fallbacks - NO MOCK DATA
+    const errors = [];
+    
+    // Try Binance first (reliable and fast)
+    try {
+      const binancePair = asset.toUpperCase() === 'USDT' ? 'USDTUSDT' : `${asset.toUpperCase()}USDT`;
+      const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${binancePair}`, { timeout: 5000 });
+      if (response.data && response.data.price) {
+        console.log(`Fetched ${asset} price from Binance: $${response.data.price}`);
+        return parseFloat(response.data.price);
+      }
+      errors.push('Binance: Invalid response');
+    } catch (err) {
+      errors.push(`Binance: ${err.message}`);
     }
     
-    if (prices && Object.keys(prices).length > 0) {
-      cryptoPriceCache = { ...cryptoPriceCache, ...prices };
-      lastCryptoFetch = Date.now();
-      console.log(`💹 Crypto price cache updated at ${new Date().toISOString()}`);
+    // Try CryptoCompare as first fallback
+    try {
+      const response = await axios.get(`https://min-api.cryptocompare.com/data/price?fsym=${asset.toUpperCase()}&tsyms=USD`, { timeout: 5000 });
+      if (response.data && response.data.USD) {
+        console.log(`Fetched ${asset} price from CryptoCompare: $${response.data.USD}`);
+        return response.data.USD;
+      }
+      errors.push('CryptoCompare: Invalid response');
+    } catch (err) {
+      errors.push(`CryptoCompare: ${err.message}`);
     }
     
-    cryptoFetchInProgress = false;
-    return cryptoPriceCache[assetUpper] || null;
+    // Try Kraken as second fallback
+    try {
+      const krakenMap = {
+        'BTC': 'XBTUSD',
+        'ETH': 'ETHUSD',
+        'USDT': 'USDTUSD',
+        'SOL': 'SOLUSD',
+        'XRP': 'XRPUSD',
+        'DOGE': 'DOGEUSD',
+        'ADA': 'ADAUSD',
+        'LTC': 'LTCUSD'
+      };
+      const pair = krakenMap[asset.toUpperCase()];
+      if (pair) {
+        const response = await axios.get(`https://api.kraken.com/0/public/Ticker?pair=${pair}`, { timeout: 5000 });
+        if (response.data && response.data.result && response.data.result[pair]) {
+          const price = parseFloat(response.data.result[pair].c[0]);
+          console.log(`Fetched ${asset} price from Kraken: $${price}`);
+          return price;
+        }
+      }
+      errors.push('Kraken: No data or unsupported pair');
+    } catch (err) {
+      errors.push(`Kraken: ${err.message}`);
+    }
     
+    // Try KuCoin as third fallback
+    try {
+      const response = await axios.get(`https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=${asset.toUpperCase()}-USDT`, { timeout: 5000 });
+      if (response.data && response.data.data && response.data.data.price) {
+        console.log(`Fetched ${asset} price from KuCoin: $${response.data.data.price}`);
+        return parseFloat(response.data.data.price);
+      }
+      errors.push('KuCoin: Invalid response');
+    } catch (err) {
+      errors.push(`KuCoin: ${err.message}`);
+    }
+    
+    console.error(`All price APIs failed for ${asset}:`, errors);
+    return null;
   } catch (err) {
-    console.error('Error fetching crypto prices:', err);
-    cryptoFetchInProgress = false;
-    return cryptoPriceCache[assetUpper] || null;
+    console.error('Error fetching crypto price:', err);
+    return null;
   }
 };
 
-// Start periodic price refresh every 10 seconds
-setInterval(async () => {
-  try {
-    console.log('🔄 Refreshing crypto prices...');
-    const prices = await fetchAllCryptoPricesFromBinance();
-    if (prices && Object.keys(prices).length > 0) {
-      cryptoPriceCache = { ...cryptoPriceCache, ...prices };
-      lastCryptoFetch = Date.now();
-      console.log(`✅ Crypto prices refreshed at ${new Date().toISOString()}`);
-    }
-  } catch (err) {
-    console.error('Periodic price refresh failed:', err.message);
-  }
-}, 10000);
-
-// Initial fetch
-fetchAllCryptoPricesFromBinance().then(prices => {
-  if (prices) {
-    cryptoPriceCache = { ...cryptoPriceCache, ...prices };
-    lastCryptoFetch = Date.now();
-    console.log('✅ Initial crypto prices loaded');
-  }
-});
 // NEW FUNCTION: Get real-time exchange rate with multiple fallback APIs (NO MOCK DATA)
 const getExchangeRate = async (asset, fiat = 'usd') => {
   try {
@@ -3650,90 +3581,13 @@ const getFiatExchangeRates = async () => {
   }
 };
 
-// =============================================
-// PRODUCTION: REAL-TIME FIAT EXCHANGE RATES FROM LIVE APIs
-// =============================================
-
-// Exchange rate cache
-let cachedExchangeRates = null;
-let lastRateFetch = 0;
-const RATE_CACHE_TTL = 3600000; // 1 hour cache
-let rateFetchInProgress = false;
-
-// Real fiat exchange rates - FETCHED LIVE, NO HARDCODING
-async function fetchLiveExchangeRates() {
-    // Prevent multiple simultaneous fetches
-    if (rateFetchInProgress) {
-        console.log('Rate fetch already in progress, waiting...');
-        return null;
-    }
-    
-    rateFetchInProgress = true;
-    
-    try {
-        // Try ExchangeRate-API first (no API key required, reliable)
-        console.log('🌐 Fetching live exchange rates from ExchangeRate-API...');
-        const response = await axios.get('https://api.exchangerate-api.com/v4/latest/USD', { 
-            timeout: 10000,
-            headers: { 'Accept': 'application/json' }
-        });
-        
-        if (response.data && response.data.rates && Object.keys(response.data.rates).length > 0) {
-            cachedExchangeRates = response.data.rates;
-            lastRateFetch = Date.now();
-            console.log(`✅ Live exchange rates fetched from ExchangeRate-API. ${Object.keys(cachedExchangeRates).length} currencies available.`);
-            rateFetchInProgress = false;
-            return cachedExchangeRates;
-        }
-    } catch (err) {
-        console.error('ExchangeRate-API failed:', err.message);
-    }
-    
-    // Try Frankfurter (European Central Bank data - official rates)
-    try {
-        console.log('🌐 Fetching live exchange rates from Frankfurter (ECB)...');
-        const response = await axios.get('https://api.frankfurter.app/latest?from=USD', { 
-            timeout: 10000 
-        });
-        
-        if (response.data && response.data.rates && Object.keys(response.data.rates).length > 0) {
-            cachedExchangeRates = response.data.rates;
-            lastRateFetch = Date.now();
-            console.log(`✅ Live exchange rates fetched from Frankfurter (ECB). ${Object.keys(cachedExchangeRates).length} currencies available.`);
-            rateFetchInProgress = false;
-            return cachedExchangeRates;
-        }
-    } catch (err) {
-        console.error('Frankfurter failed:', err.message);
-    }
-    
-    rateFetchInProgress = false;
-    
-    // If all APIs fail, throw error - NO HARDCODED FALLBACKS
-    throw new Error('Unable to fetch live exchange rates from any provider. Please check your internet connection.');
-}
-
-// Get exchange rates with caching
-async function getExchangeRates() {
-    if (cachedExchangeRates && (Date.now() - lastRateFetch) < RATE_CACHE_TTL) {
-        return cachedExchangeRates;
-    }
-    return await fetchLiveExchangeRates();
-}
-
-// NEW FUNCTION: Get all world currencies with exchange rates - COMPLETE LIST WITH KES, RON
+// NEW FUNCTION: Get all world currencies with exchange rates
 const getAllWorldCurrencies = async () => {
-  let rates;
-  try {
-      rates = await getExchangeRates();
-  } catch (err) {
-      console.error('Failed to get exchange rates:', err);
-      throw err;
-  }
+  const rates = await getFiatExchangeRates();
+  if (!rates) return null;
   
-  // Complete list of ALL world currencies including KES and RON
+  // List of all major world currencies
   const allCurrencies = [
-    // Major currencies
     { code: 'USD', name: 'US Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/us.png' },
     { code: 'EUR', name: 'Euro', symbol: '€', flag: 'https://flagcdn.com/w40/eu.png' },
     { code: 'GBP', name: 'British Pound', symbol: '£', flag: 'https://flagcdn.com/w40/gb.png' },
@@ -3758,59 +3612,15 @@ const getAllWorldCurrencies = async () => {
     { code: 'RUB', name: 'Russian Ruble', symbol: '₽', flag: 'https://flagcdn.com/w40/ru.png' },
     { code: 'AED', name: 'UAE Dirham', symbol: 'د.إ', flag: 'https://flagcdn.com/w40/ae.png' },
     { code: 'SAR', name: 'Saudi Riyal', symbol: '﷼', flag: 'https://flagcdn.com/w40/sa.png' },
-    { code: 'ILS', name: 'Israeli Shekel', symbol: '₪', flag: 'https://flagcdn.com/w40/il.png' },
-    // ADDED: Kenyan Shilling (KES)
-    { code: 'KES', name: 'Kenyan Shilling', symbol: 'KSh', flag: 'https://flagcdn.com/w40/ke.png' },
-    // ADDED: Romanian Leu (RON)
-    { code: 'RON', name: 'Romanian Leu', symbol: 'lei', flag: 'https://flagcdn.com/w40/ro.png' },
-    // African currencies
-    { code: 'GHS', name: 'Ghanaian Cedi', symbol: '₵', flag: 'https://flagcdn.com/w40/gh.png' },
-    { code: 'TZS', name: 'Tanzanian Shilling', symbol: 'TSh', flag: 'https://flagcdn.com/w40/tz.png' },
-    { code: 'UGX', name: 'Ugandan Shilling', symbol: 'USh', flag: 'https://flagcdn.com/w40/ug.png' },
-    { code: 'XAF', name: 'Central African CFA Franc', symbol: 'FCFA', flag: 'https://flagcdn.com/w40/cm.png' },
-    { code: 'XOF', name: 'West African CFA Franc', symbol: 'CFA', flag: 'https://flagcdn.com/w40/sn.png' },
-    { code: 'MAD', name: 'Moroccan Dirham', symbol: 'DH', flag: 'https://flagcdn.com/w40/ma.png' },
-    { code: 'DZD', name: 'Algerian Dinar', symbol: 'DA', flag: 'https://flagcdn.com/w40/dz.png' },
-    { code: 'TND', name: 'Tunisian Dinar', symbol: 'DT', flag: 'https://flagcdn.com/w40/tn.png' },
-    { code: 'NGN', name: 'Nigerian Naira', symbol: '₦', flag: 'https://flagcdn.com/w40/ng.png' },
-    // Asian currencies
-    { code: 'PKR', name: 'Pakistani Rupee', symbol: '₨', flag: 'https://flagcdn.com/w40/pk.png' },
-    { code: 'BDT', name: 'Bangladeshi Taka', symbol: '৳', flag: 'https://flagcdn.com/w40/bd.png' },
-    { code: 'LKR', name: 'Sri Lankan Rupee', symbol: 'Rs', flag: 'https://flagcdn.com/w40/lk.png' },
-    { code: 'NPR', name: 'Nepalese Rupee', symbol: 'Rs', flag: 'https://flagcdn.com/w40/np.png' },
-    { code: 'THB', name: 'Thai Baht', symbol: '฿', flag: 'https://flagcdn.com/w40/th.png' },
-    { code: 'VND', name: 'Vietnamese Dong', symbol: '₫', flag: 'https://flagcdn.com/w40/vn.png' },
-    { code: 'IDR', name: 'Indonesian Rupiah', symbol: 'Rp', flag: 'https://flagcdn.com/w40/id.png' },
-    { code: 'MYR', name: 'Malaysian Ringgit', symbol: 'RM', flag: 'https://flagcdn.com/w40/my.png' },
-    { code: 'PHP', name: 'Philippine Peso', symbol: '₱', flag: 'https://flagcdn.com/w40/ph.png' },
-    // European currencies
-    { code: 'BGN', name: 'Bulgarian Lev', symbol: 'лв', flag: 'https://flagcdn.com/w40/bg.png' },
-    { code: 'HRK', name: 'Croatian Kuna', symbol: 'kn', flag: 'https://flagcdn.com/w40/hr.png' },
-    { code: 'CZK', name: 'Czech Koruna', symbol: 'Kč', flag: 'https://flagcdn.com/w40/cz.png' },
-    { code: 'HUF', name: 'Hungarian Forint', symbol: 'Ft', flag: 'https://flagcdn.com/w40/hu.png' },
-    { code: 'ISK', name: 'Icelandic Króna', symbol: 'kr', flag: 'https://flagcdn.com/w40/is.png' }
+    { code: 'ILS', name: 'Israeli Shekel', symbol: '₪', flag: 'https://flagcdn.com/w40/il.png' }
   ];
   
   // Add exchange rates to each currency
-  const result = [];
-  for (const currency of allCurrencies) {
-    let rate = rates[currency.code];
-    if (currency.code === 'USD') rate = 1;
-    
-    if (rate && rate > 0) {
-      result.push({
-        ...currency,
-        exchangeRate: rate
-      });
-    } else {
-      console.warn(`No exchange rate found for ${currency.code}, skipping`);
-    }
-  }
-  
-  console.log(`✅ Loaded ${result.length} currencies with live exchange rates (including KES and RON)`);
-  return result;
+  return allCurrencies.map(currency => ({
+    ...currency,
+    exchangeRate: rates[currency.code] || (currency.code === 'USD' ? 1 : null)
+  })).filter(c => c.exchangeRate !== null);
 };
-
 
 // NEW FUNCTION: Convert crypto amount to fiat using real-time rate
 const convertToFiat = async (cryptoAmount, asset) => {
@@ -4488,7 +4298,6 @@ const calculateReferralCommissions = async (investment) => {
     // Don't throw error to avoid disrupting investment process
   }
 };
-
 
 
 
@@ -22464,7 +22273,7 @@ fetchMarketData();
 
 // =============================================
 // SNIPPET B - ALL ENDPOINTS (including missing ones)
-// = ============================================
+// =============================================
 
 // =============================================
 // FIAT CURRENCIES ENDPOINT - Get all world currencies with real-time exchange rates
@@ -22539,7 +22348,7 @@ app.get('/api/convert/assets', protect, async (req, res) => {
 });
 
 // =============================================
-// CONVERT ENDPOINT - Execute crypto conversion with fee and revenue tracking
+// CONVERT ENDPOINT - Execute crypto conversion (buy/sell pattern) with 0.5% fee added to revenue
 // =============================================
 app.post('/api/convert', protect, async (req, res) => {
   try {
@@ -22579,52 +22388,24 @@ app.post('/api/convert', protect, async (req, res) => {
     }
     
     const usdValue = amount * fromPrice;
-    const toAmount = usdValue / toPrice;
+    // Apply 0.5% fee
+    const fee = usdValue * 0.005;
+    const usdValueAfterFee = usdValue - fee;
+    const toAmount = usdValueAfterFee / toPrice;
     
-    // Calculate conversion fee (0.5% fee)
-    const conversionFee = usdValue * 0.005;
-    const netUsdValue = usdValue - conversionFee;
-    const netToAmount = netUsdValue / toPrice;
-    
-    // Deduct from source asset
+    // Deduct from asset
     userAssetBalance.balances[fromAssetLower] -= amount;
     
-    // Add to target asset (after fee)
+    // Add to target asset
     if (!userAssetBalance.balances[toAssetLower]) {
       userAssetBalance.balances[toAssetLower] = 0;
     }
-    userAssetBalance.balances[toAssetLower] += netToAmount;
+    userAssetBalance.balances[toAssetLower] += toAmount;
     
     userAssetBalance.lastUpdated = new Date();
-    
-    // Add to history
-    userAssetBalance.history.push({
-      asset: fromAssetLower,
-      type: 'sell',
-      amount: amount,
-      balance: userAssetBalance.balances[fromAssetLower],
-      usdValue: usdValue,
-      price: fromPrice,
-      profitLoss: 0,
-      profitLossPercentage: 0,
-      timestamp: new Date()
-    });
-    
-    userAssetBalance.history.push({
-      asset: toAssetLower,
-      type: 'buy',
-      amount: netToAmount,
-      balance: userAssetBalance.balances[toAssetLower],
-      usdValue: netUsdValue,
-      price: toPrice,
-      profitLoss: 0,
-      profitLossPercentage: 0,
-      timestamp: new Date()
-    });
-    
     await userAssetBalance.save();
     
-    // Update main balance (value of all assets)
+    // Update main balance (value of assets changes with price fluctuations)
     let totalMainBalance = 0;
     for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
       if (balance > 0) {
@@ -22637,7 +22418,7 @@ app.post('/api/convert', protect, async (req, res) => {
     
     await User.findByIdAndUpdate(userId, { 'balances.main': totalMainBalance });
     
-    // Create transaction records
+    // Create transaction records for the conversion
     const reference = `CONV-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
     
     // Sell transaction (from asset)
@@ -22651,6 +22432,8 @@ app.post('/api/convert', protect, async (req, res) => {
       status: 'completed',
       method: fromAsset.toUpperCase(),
       reference: `${reference}-SELL`,
+      fee: fee,
+      netAmount: usdValueAfterFee,
       sellDetails: {
         asset: fromAsset.toUpperCase(),
         amountUSD: usdValue,
@@ -22659,53 +22442,47 @@ app.post('/api/convert', protect, async (req, res) => {
         buyingPrice: fromPrice,
         profitLoss: 0,
         profitLossPercentage: 0
-      },
-      fee: conversionFee,
-      netAmount: netUsdValue
+      }
     });
     
     // Buy transaction (to asset)
     await Transaction.create({
       user: userId,
       type: 'buy',
-      amount: netUsdValue,
+      amount: usdValueAfterFee,
       asset: toAsset.toUpperCase(),
-      assetAmount: netToAmount,
+      assetAmount: toAmount,
       currency: 'USD',
       status: 'completed',
       method: toAsset.toUpperCase(),
       reference: `${reference}-BUY`,
+      fee: 0,
+      netAmount: usdValueAfterFee,
       buyDetails: {
         asset: toAsset.toUpperCase(),
-        amountUSD: netUsdValue,
-        assetAmount: netToAmount,
+        amountUSD: usdValueAfterFee,
+        assetAmount: toAmount,
         buyingPrice: toPrice,
         currentPrice: toPrice,
         profitLoss: 0,
         profitLossPercentage: 0
-      },
-      fee: 0,
-      netAmount: netUsdValue
+      }
     });
     
-    // ADD TO REVENUE - Track conversion fee as platform revenue
+    // Add fee to platform revenue
     await PlatformRevenue.create({
-      source: 'conversion_fee',
-      amount: conversionFee,
+      source: 'convert_fee',
+      amount: fee,
       currency: 'USD',
-      transactionId: reference,
       userId: userId,
-      description: `Conversion fee for ${amount} ${fromAsset.toUpperCase()} to ${toAsset.toUpperCase()}`,
+      description: `Conversion fee from ${fromAsset.toUpperCase()} to ${toAsset.toUpperCase()}`,
       metadata: {
-        fromAsset: fromAssetLower,
-        toAsset: toAssetLower,
-        originalAmount: amount,
-        convertedAmount: netToAmount,
-        fromPrice: fromPrice,
-        toPrice: toPrice,
+        fromAsset,
+        toAsset,
+        amount,
+        usdValue,
         feePercentage: 0.5
-      },
-      recordedAt: new Date()
+      }
     });
     
     // Emit socket updates for real-time balance changes
@@ -22721,20 +22498,20 @@ app.post('/api/convert', protect, async (req, res) => {
           };
         }
       }
-      io.to(`user_${userId}`).emit('asset_balances_update', Object.values(updatedBalances));
+      io.to(`user_${userId}`).emit('asset_balances_update', updatedBalances);
       io.to(`user_${userId}`).emit('balance_update', { main: totalMainBalance });
     }
     
     res.status(200).json({
       status: 'success',
-      message: `Conversion completed successfully. Fee: ${conversionFee.toFixed(2)} USD`,
+      message: 'Conversion completed successfully',
       data: {
         fromAsset: fromAssetLower,
         fromAmount: amount,
         toAsset: toAssetLower,
-        toAmount: netToAmount,
-        usdValue: netUsdValue,
-        fee: conversionFee,
+        toAmount: toAmount,
+        usdValue: usdValueAfterFee,
+        fee: fee,
         exchangeRate: fromPrice / toPrice
       }
     });
@@ -22745,12 +22522,23 @@ app.post('/api/convert', protect, async (req, res) => {
 });
 
 // =============================================
-// USER PREFERENCES SAVE ENDPOINT - Save IP-based preferences (fiat and language)
+// USER PREFERENCES SAVE ENDPOINT - Save IP-based preferences (only for new users)
 // =============================================
 app.post('/api/users/preferences/save', protect, async (req, res) => {
   try {
     const { language, fiatCurrency, detectedFromIP } = req.body;
     const userId = req.user._id;
+    
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ status: 'fail', message: 'User not found' });
+    }
+    
+    // Only save if user hasn't set preferences before (new user) OR if explicitly allowed
+    if (detectedFromIP && user.ipPreferences && user.ipPreferences.setFromIP) {
+      // Already set from IP, don't override
+      return res.status(200).json({ status: 'success', message: 'Preferences already set' });
+    }
     
     const updates = {};
     if (language) updates['preferences.language'] = language;
@@ -22765,13 +22553,12 @@ app.post('/api/users/preferences/save', protect, async (req, res) => {
     
     await User.findByIdAndUpdate(userId, updates);
     
-    // Also update UserPreference model with fiat currency
+    // Also update UserPreference model
     await UserPreference.findOneAndUpdate(
       { user: userId },
       { 
-        language: language || req.user.preferences?.language || 'en',
-        currency: fiatCurrency || req.user.preferences?.currency || 'USD',
-        fiatCurrency: fiatCurrency || req.user.preferences?.currency || 'USD',
+        language: language || user.preferences?.language || 'en',
+        currency: fiatCurrency || user.preferences?.currency || 'USD',
         $setOnInsert: { user: userId }
       },
       { upsert: true }
@@ -22802,7 +22589,6 @@ app.get('/api/users/preferences', protect, async (req, res) => {
         displayAsset: user?.preferences?.displayAsset || 'btc',
         language: user?.preferences?.language || user?.ipPreferences?.language || 'en',
         currency: user?.preferences?.currency || user?.ipPreferences?.currency || 'USD',
-        fiatCurrency: user?.preferences?.currency || user?.ipPreferences?.currency || 'USD',
         theme: user?.preferences?.theme || 'dark'
       };
     }
@@ -22813,7 +22599,6 @@ app.get('/api/users/preferences', protect, async (req, res) => {
         displayAsset: userPref.displayAsset || 'btc',
         language: userPref.language || 'en',
         currency: userPref.currency || 'USD',
-        fiatCurrency: userPref.fiatCurrency || userPref.currency || 'USD',
         theme: userPref.theme || 'dark'
       }
     });
@@ -22824,7 +22609,7 @@ app.get('/api/users/preferences', protect, async (req, res) => {
 });
 
 // =============================================
-// USER PREFERENCES UPDATE ENDPOINT (POST) - Save fiat preference to database
+// USER PREFERENCES UPDATE ENDPOINT (POST) - Saves to database
 // =============================================
 app.post('/api/users/preferences', protect, async (req, res) => {
   try {
@@ -22834,10 +22619,7 @@ app.post('/api/users/preferences', protect, async (req, res) => {
     if (displayAsset) updates.displayAsset = displayAsset;
     if (theme) updates.theme = theme;
     if (language) updates.language = language;
-    if (currency || fiatCurrency) {
-      updates.currency = currency || fiatCurrency;
-      updates.fiatCurrency = currency || fiatCurrency;
-    }
+    if (currency || fiatCurrency) updates.currency = currency || fiatCurrency;
     
     await UserPreference.findOneAndUpdate(
       { user: req.user._id },
@@ -22890,7 +22672,7 @@ app.get('/api/users/deposit-asset', protect, async (req, res) => {
 });
 
 // =============================================
-// ADMIN APPROVE DEPOSIT ENDPOINT - FIXED VERSION (with asset balance update for crypto)
+// ADMIN APPROVE DEPOSIT ENDPOINT - FIXED VERSION (with asset balance update)
 // =============================================
 app.post('/api/admin/deposits/:id/approve', adminProtect, [
   body('notes').optional().trim()
@@ -22950,7 +22732,7 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
     user.balances.main += deposit.amount;
     await user.save();
     
-    // If crypto deposit, update user asset balances - ADD EXACT AMOUNT TO THAT CRYPTO
+    // If crypto deposit, update user asset balances
     if (isCryptoDeposit && assetSymbol) {
       let userAssetBalance = await UserAssetBalance.findOne({ user: user._id });
       if (!userAssetBalance) {
@@ -22960,7 +22742,6 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       if (!userAssetBalance.balances[assetSymbol]) {
         userAssetBalance.balances[assetSymbol] = 0;
       }
-      // ADD THE EXACT CRYPTO AMOUNT TO USER'S ASSET BALANCE
       userAssetBalance.balances[assetSymbol] += assetAmount;
       userAssetBalance.lastUpdated = new Date();
       
@@ -23096,16 +22877,14 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       if (isCryptoDeposit && assetSymbol) {
         const updatedAssetBalance = await UserAssetBalance.findOne({ user: user._id });
         if (updatedAssetBalance) {
-          const assetData = [];
+          const assetData = {};
           for (const [asset, balance] of Object.entries(updatedAssetBalance.balances)) {
             if (balance > 0) {
               const price = await getCryptoPrice(asset.toUpperCase());
-              assetData.push({
-                symbol: asset,
+              assetData[asset] = {
                 balance: balance,
-                usdValue: balance * (price || 0),
-                id: asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset
-              });
+                usdValue: balance * (price || 0)
+              };
             }
           }
           io.to(`user_${user._id}`).emit('asset_balances_update', assetData);
@@ -23320,16 +23099,14 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
     if (io) {
       io.to(`user_${withdrawal.user._id}`).emit('balance_update', { main: totalMainBalance });
       if (isCryptoWithdrawal && assetSymbol && updatedAssetBalance) {
-        const assetData = [];
+        const assetData = {};
         for (const [asset, balance] of Object.entries(updatedAssetBalance.balances)) {
           if (balance > 0) {
             const price = await getCryptoPrice(asset.toUpperCase());
-            assetData.push({
-              symbol: asset,
+            assetData[asset] = {
               balance: balance,
-              usdValue: balance * (price || 0),
-              id: asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset
-            });
+              usdValue: balance * (price || 0)
+            };
           }
         }
         io.to(`user_${withdrawal.user._id}`).emit('asset_balances_update', assetData);
@@ -23358,7 +23135,7 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
 });
 
 // =============================================
-// BUY ENDPOINT - Buy crypto with USD balance (adds to matured balance proceeds)
+// BUY ENDPOINT - Buy crypto with USD balance
 // =============================================
 app.post('/api/buy', protect, async (req, res) => {
   try {
@@ -23473,16 +23250,14 @@ app.post('/api/buy', protect, async (req, res) => {
     if (io) {
       io.to(`user_${userId}`).emit('balance_update', { main: user.balances.main, matured: user.balances.matured });
       
-      const assetData = [];
+      const assetData = {};
       for (const [a, balance] of Object.entries(userAssetBalance.balances)) {
         if (balance > 0) {
           const cryptoPrice = await getCryptoPrice(a.toUpperCase());
-          assetData.push({
-            symbol: a,
+          assetData[a] = {
             balance: balance,
-            usdValue: balance * (cryptoPrice || 0),
-            id: a === 'btc' ? 'bitcoin' : a === 'eth' ? 'ethereum' : a
-          });
+            usdValue: balance * (cryptoPrice || 0)
+          };
         }
       }
       io.to(`user_${userId}`).emit('asset_balances_update', assetData);
@@ -23500,7 +23275,7 @@ app.post('/api/buy', protect, async (req, res) => {
 });
 
 // =============================================
-// SELL ENDPOINT - Sell crypto for USD balance (adds to matured balance)
+// SELL ENDPOINT - Sell crypto for USD balance
 // =============================================
 app.post('/api/sell', protect, async (req, res) => {
   try {
@@ -23534,28 +23309,6 @@ app.post('/api/sell', protect, async (req, res) => {
     
     const actualUsdValue = actualAssetAmount * actualPrice;
     
-    // Calculate profit/loss based on average buying price
-    let profitLoss = 0;
-    let profitLossPercentage = 0;
-    
-    // Find average buying price from portfolio
-    const userPortfolio = await UserAssetBalance.aggregate([
-      { $match: { user: userId } },
-      { $unwind: '$history' },
-      { $match: { 'history.asset': assetLower, 'history.type': 'buy' } },
-      { $group: {
-        _id: null,
-        totalSpent: { $sum: { $multiply: ['$history.amount', '$history.price'] } },
-        totalAmount: { $sum: '$history.amount' }
-      } }
-    ]);
-    
-    if (userPortfolio.length > 0 && userPortfolio[0].totalAmount > 0) {
-      const avgBuyPrice = userPortfolio[0].totalSpent / userPortfolio[0].totalAmount;
-      profitLoss = (actualPrice - avgBuyPrice) * actualAssetAmount;
-      profitLossPercentage = (profitLoss / (avgBuyPrice * actualAssetAmount)) * 100;
-    }
-    
     // Deduct from asset balance
     userAssetBalance.balances[assetLower] -= actualAssetAmount;
     userAssetBalance.lastUpdated = new Date();
@@ -23568,15 +23321,15 @@ app.post('/api/sell', protect, async (req, res) => {
       balance: userAssetBalance.balances[assetLower],
       usdValue: actualUsdValue,
       price: actualPrice,
-      profitLoss: profitLoss,
-      profitLossPercentage: profitLossPercentage,
+      profitLoss: 0,
+      profitLossPercentage: 0,
       transactionId: null,
       timestamp: new Date()
     });
     
     await userAssetBalance.save();
     
-    // Add proceeds to matured balance (all proceeds from sells go to matured wallet)
+    // Add proceeds to matured balance
     const user = await User.findById(userId);
     user.balances.matured += actualUsdValue;
     await user.save();
@@ -23589,8 +23342,8 @@ app.post('/api/sell', protect, async (req, res) => {
       assetAmount: actualAssetAmount,
       sellingPrice: actualPrice,
       buyingPrice: actualPrice,
-      profitLoss: profitLoss,
-      profitLossPercentage: profitLossPercentage,
+      profitLoss: 0,
+      profitLossPercentage: 0,
       status: 'completed',
       completedAt: new Date(),
       balanceSource: 'matured'
@@ -23613,8 +23366,8 @@ app.post('/api/sell', protect, async (req, res) => {
         assetAmount: actualAssetAmount,
         sellingPrice: actualPrice,
         buyingPrice: actualPrice,
-        profitLoss: profitLoss,
-        profitLossPercentage: profitLossPercentage
+        profitLoss: 0,
+        profitLossPercentage: 0
       },
       fee: 0,
       netAmount: actualUsdValue
@@ -23625,16 +23378,14 @@ app.post('/api/sell', protect, async (req, res) => {
     if (io) {
       io.to(`user_${userId}`).emit('balance_update', { main: user.balances.main, matured: user.balances.matured });
       
-      const assetData = [];
+      const assetData = {};
       for (const [a, balance] of Object.entries(userAssetBalance.balances)) {
         if (balance > 0) {
           const cryptoPrice = await getCryptoPrice(a.toUpperCase());
-          assetData.push({
-            symbol: a,
+          assetData[a] = {
             balance: balance,
-            usdValue: balance * (cryptoPrice || 0),
-            id: a === 'btc' ? 'bitcoin' : a === 'eth' ? 'ethereum' : a
-          });
+            usdValue: balance * (cryptoPrice || 0)
+          };
         }
       }
       io.to(`user_${userId}`).emit('asset_balances_update', assetData);
@@ -23651,341 +23402,80 @@ app.post('/api/sell', protect, async (req, res) => {
   }
 });
 
-// =============================================
-// USER ASSETS ENDPOINT - Get user's crypto assets with real-time values
-// =============================================
-app.get('/api/users/assets', protect, async (req, res) => {
-  try {
-    const userId = req.user._id;
-    
-    const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
-    
-    if (!userAssetBalance) {
-      return res.status(200).json([]);
-    }
-    
-    const assetsWithValues = [];
-    
-    for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
-      if (balance > 0) {
-        const currentPrice = await getCryptoPrice(asset.toUpperCase());
-        const currentValue = balance * (currentPrice || 0);
-        
-        // Calculate average buying price and PnL
-        const buyTransactions = userAssetBalance.history.filter(
-          h => h.asset === asset && h.type === 'buy'
-        );
-        
-        let totalSpent = 0;
-        let totalAmount = 0;
-        buyTransactions.forEach(t => {
-          totalSpent += t.amount * t.price;
-          totalAmount += t.amount;
-        });
-        
-        const avgBuyPrice = totalAmount > 0 ? totalSpent / totalAmount : 0;
-        const unrealizedPnL = (currentPrice - avgBuyPrice) * balance;
-        const unrealizedPercentage = avgBuyPrice > 0 ? (unrealizedPnL / (avgBuyPrice * balance)) * 100 : 0;
-        
-        assetsWithValues.push({
-          symbol: asset,
-          balance: balance,
-          currentValue: currentValue,
-          currentPrice: currentPrice || 0,
-          averageBuyingPrice: avgBuyPrice,
-          unrealizedPnl: unrealizedPnL,
-          unrealizedPnlPercent: unrealizedPercentage,
-          transactions: userAssetBalance.history.filter(h => h.asset === asset).slice(-20)
-        });
+
+
+
+
+
+
+
+
+
+// Real-time price update function with WebSocket broadcasting
+let priceUpdateInterval = null;
+let lastPrices = {};
+
+const startRealTimePriceUpdates = (io) => {
+  if (priceUpdateInterval) clearInterval(priceUpdateInterval);
+  
+  // Update prices every 10 seconds for real-time fluctuations
+  priceUpdateInterval = setInterval(async () => {
+    try {
+      const assets = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'ADA', 'SHIB', 'AVAX', 'DOT', 'TRX', 'LINK', 'MATIC', 'LTC'];
+      const priceUpdates = {};
+      
+      for (const asset of assets) {
+        const price = await getCryptoPrice(asset);
+        if (price) {
+          priceUpdates[asset.toLowerCase()] = {
+            price: price,
+            timestamp: Date.now()
+          };
+        }
       }
-    }
-    
-    res.status(200).json(assetsWithValues);
-  } catch (err) {
-    console.error('Error fetching user assets:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch assets' });
-  }
-});
-
-// =============================================
-// USER BALANCES ENDPOINT - Get user's fiat balances
-// =============================================
-app.get('/api/users/balances', protect, async (req, res) => {
-  try {
-    const user = await User.findById(req.user._id).select('balances');
-    
-    res.status(200).json({
-      main: user?.balances?.main || 0,
-      active: user?.balances?.active || 0,
-      matured: user?.balances?.matured || 0
-    });
-  } catch (err) {
-    console.error('Error fetching balances:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch balances' });
-  }
-});
-
-// =============================================
-// USER ME ENDPOINT - Get current user data
-// =============================================
-app.get('/api/users/me', protect, async (req, res) => {
-  try {
-    const user = await User.findById(req.user._id).select('-password');
-    
-    res.status(200).json({
-      status: 'success',
-      data: { user }
-    });
-  } catch (err) {
-    console.error('Error fetching user:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch user data' });
-  }
-});
-
-// =============================================
-// ACTIVE INVESTMENTS ENDPOINT
-// =============================================
-app.get('/api/investments/active', protect, async (req, res) => {
-  try {
-    const investments = await Investment.find({
-      user: req.user._id,
-      status: 'active'
-    }).populate('plan');
-    
-    const formattedInvestments = investments.map(inv => ({
-      id: inv._id,
-      planName: inv.plan?.name || 'Cloud Mining Plan',
-      amount: inv.amount,
-      durationHours: inv.plan?.duration || 24,
-      percentage: inv.plan?.percentage || 12,
-      endDate: inv.endDate,
-      status: inv.status
-    }));
-    
-    res.status(200).json({
-      status: 'success',
-      data: { investments: formattedInvestments }
-    });
-  } catch (err) {
-    console.error('Error fetching investments:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch investments' });
-  }
-});
-
-// =============================================
-// TRANSACTIONS ENDPOINT
-// =============================================
-app.get('/api/transactions', protect, async (req, res) => {
-  try {
-    const transactions = await Transaction.find({ user: req.user._id })
-      .sort({ createdAt: -1 })
-      .limit(50);
-    
-    res.status(200).json({
-      status: 'success',
-      data: { transactions }
-    });
-  } catch (err) {
-    console.error('Error fetching transactions:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch transactions' });
-  }
-});
-
-// =============================================
-// REFERRALS ENDPOINT
-// =============================================
-app.get('/api/referrals', protect, async (req, res) => {
-  try {
-    const user = await User.findById(req.user._id).select('referralCode referralStats');
-    
-    const referralLink = `${process.env.FRONTEND_URL || 'https://bithashcapital.live'}/signup?ref=${user.referralCode}`;
-    
-    res.status(200).json({
-      status: 'success',
-      data: {
-        referralLink: referralLink,
-        totalReferrals: user.referralStats?.totalReferrals || 0,
-        totalEarnings: user.referralStats?.totalEarnings || 0,
-        pendingEarnings: user.referralStats?.availableBalance || 0
+      
+      if (Object.keys(priceUpdates).length > 0 && io) {
+        io.emit('price_update', priceUpdates);
+        lastPrices = priceUpdates;
       }
-    });
-  } catch (err) {
-    console.error('Error fetching referrals:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch referral data' });
-  }
-});
-
-// =============================================
-// DOWNLINE ENDPOINT
-// =============================================
-app.get('/api/referrals/downline', protect, async (req, res) => {
-  try {
-    const downlineRelations = await DownlineRelationship.find({ upline: req.user._id, status: 'active' })
-      .populate('downline', 'firstName lastName email createdAt balances');
-    
-    const referrals = downlineRelations.map(rel => ({
-      id: rel.downline._id,
-      fullName: `${rel.downline.firstName} ${rel.downline.lastName}`,
-      email: rel.downline.email,
-      joinDate: rel.createdAt,
-      level: 1,
-      status: 'active',
-      totalInvested: 0,
-      totalEarned: rel.totalCommissionEarned
-    }));
-    
-    res.status(200).json({
-      status: 'success',
-      data: { referrals }
-    });
-  } catch (err) {
-    console.error('Error fetching downline:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch downline data' });
-  }
-});
-
-// =============================================
-// LOAN CHECK ELIGIBILITY ENDPOINT
-// =============================================
-app.post('/api/loans/check-eligibility', protect, async (req, res) => {
-  try {
-    const user = await User.findById(req.user._id);
-    const hasKYC = await KYC.findOne({ user: req.user._id, overallStatus: 'verified' });
-    const hasCompletedInvestment = await Investment.findOne({ user: req.user._id, status: 'completed' });
-    const totalBalance = (user.balances.main || 0) + (user.balances.matured || 0);
-    
-    let eligible = false;
-    let reason = '';
-    let maxLoanAmount = 0;
-    
-    if (!hasKYC) {
-      reason = 'KYC verification required';
-    } else if (totalBalance < 1000) {
-      reason = 'Minimum balance of $1,000 required';
-    } else if (!hasCompletedInvestment) {
-      reason = 'At least one completed investment required';
-    } else {
-      eligible = true;
-      maxLoanAmount = Math.min(totalBalance * 3, 50000);
+    } catch (err) {
+      console.error('Error in price update interval:', err);
     }
-    
-    res.status(200).json({
-      eligible,
-      reason,
-      maxLoanAmount,
-      monthlyInterest: 9.99,
-      disbursementFee: 0.99,
-      creditScore: 700
-    });
-  } catch (err) {
-    console.error('Error checking loan eligibility:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to check eligibility' });
-  }
-});
+  }, 10000);
+};
 
-// =============================================
-// LOAN APPLY ENDPOINT
-// =============================================
-app.post('/api/loans/apply', protect, async (req, res) => {
+// Function to recalculate user main balances based on current crypto prices
+const recalculateAllUserMainBalances = async (io) => {
   try {
-    const { amount, purpose, term, interestRate, disbursementFee, maxAmount, eligibilityData } = req.body;
+    const users = await User.find({}).select('_id');
     
-    if (amount > maxAmount) {
-      return res.status(400).json({ status: 'fail', message: 'Loan amount exceeds maximum allowed' });
-    }
-    
-    const disbursementAmount = amount * (1 - disbursementFee / 100);
-    
-    const loan = await Loan.create({
-      user: req.user._id,
-      amount: amount,
-      interestRate: interestRate,
-      duration: term * 30,
-      collateralAmount: amount * 0.5,
-      collateralCurrency: 'BTC',
-      status: 'pending',
-      startDate: new Date(),
-      endDate: new Date(Date.now() + term * 30 * 24 * 60 * 60 * 1000),
-      repaymentAmount: amount * (1 + interestRate / 100)
-    });
-    
-    res.status(200).json({
-      status: 'success',
-      message: 'Loan application submitted successfully',
-      data: { loan }
-    });
-  } catch (err) {
-    console.error('Error applying for loan:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to submit loan application' });
-  }
-});
-
-// =============================================
-// ANNOUNCEMENTS ENDPOINT
-// =============================================
-app.get('/api/announcements', protect, async (req, res) => {
-  try {
-    const announcements = await Notification.find({
-      $or: [
-        { recipientType: 'all' },
-        { specificUserId: req.user._id }
-      ]
-    }).sort({ createdAt: -1 }).limit(10);
-    
-    res.status(200).json({
-      status: 'success',
-      data: announcements
-    });
-  } catch (err) {
-    console.error('Error fetching announcements:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch announcements' });
-  }
-});
-
-// =============================================
-// WITHDRAWAL AVAILABLE ASSETS ENDPOINT
-// =============================================
-app.get('/api/withdrawals/available-assets', protect, async (req, res) => {
-  try {
-    const userAssetBalance = await UserAssetBalance.findOne({ user: req.user._id });
-    const availableAssets = [];
-    
-    if (userAssetBalance) {
-      for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
-        if (balance > 0) {
-          availableAssets.push({
-            symbol: asset.toUpperCase(),
-            balance: balance,
-            name: asset.charAt(0).toUpperCase() + asset.slice(1)
-          });
+    for (const user of users) {
+      const userAssetBalance = await UserAssetBalance.findOne({ user: user._id });
+      if (userAssetBalance) {
+        let totalMainBalance = 0;
+        
+        for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
+          if (balance > 0) {
+            const price = await getCryptoPrice(asset.toUpperCase());
+            if (price) {
+              totalMainBalance += balance * price;
+            }
+          }
+        }
+        
+        await User.findByIdAndUpdate(user._id, { 'balances.main': totalMainBalance });
+        
+        if (io) {
+          io.to(`user_${user._id}`).emit('balance_update', { main: totalMainBalance });
         }
       }
     }
     
-    res.status(200).json({
-      status: 'success',
-      data: { availableAssets }
-    });
+    console.log('Recalculated all user main balances based on current crypto prices');
   } catch (err) {
-    console.error('Error fetching available assets:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch available assets' });
+    console.error('Error recalculating user balances:', err);
   }
-});
-
-
-
-
-
-
-
-
-
-
-
-
-// =============================================
-// SNIPPET C - Server Startup, WebSocket & Real-time Updates
-// =============================================
+};
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -24259,140 +23749,6 @@ app.get('/api/stats/daily-progress', async (req, res) => {
   }
 });
 
-// =============================================
-// REAL-TIME CRYPTO PRICE UPDATES (fluctuate every 10 seconds)
-// =============================================
-
-let priceUpdateInterval = null;
-let lastPrices = {};
-
-// Store current prices for quick access
-let currentMarketPrices = {};
-
-const startRealTimePriceUpdates = (io) => {
-  if (priceUpdateInterval) clearInterval(priceUpdateInterval);
-  
-  // Update prices every 10 seconds for real-time fluctuations
-  priceUpdateInterval = setInterval(async () => {
-    try {
-      const assets = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'ADA', 'SHIB', 'AVAX', 'DOT', 'TRX', 'LINK', 'MATIC', 'LTC'];
-      const priceUpdates = {};
-      
-      for (const asset of assets) {
-        const price = await getCryptoPrice(asset);
-        if (price) {
-          priceUpdates[asset.toLowerCase()] = {
-            price: price,
-            timestamp: Date.now(),
-            change24h: await get24hChange(asset)
-          };
-          currentMarketPrices[asset.toLowerCase()] = price;
-        }
-      }
-      
-      if (Object.keys(priceUpdates).length > 0 && io) {
-        // Broadcast to all connected clients
-        io.emit('price_update', priceUpdates);
-        lastPrices = priceUpdates;
-        
-        // Also broadcast to specific user rooms for balance updates
-        const allUsers = await User.find({}).select('_id');
-        for (const user of allUsers) {
-          const userAssetBalance = await UserAssetBalance.findOne({ user: user._id });
-          if (userAssetBalance) {
-            let totalMainBalance = 0;
-            const assetData = [];
-            
-            for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
-              if (balance > 0) {
-                const currentPrice = currentMarketPrices[asset] || await getCryptoPrice(asset.toUpperCase());
-                if (currentPrice) {
-                  const usdValue = balance * currentPrice;
-                  totalMainBalance += usdValue;
-                  assetData.push({
-                    symbol: asset,
-                    balance: balance,
-                    usdValue: usdValue,
-                    id: asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset
-                  });
-                }
-              }
-            }
-            
-            // Update user's main balance with current crypto values
-            await User.findByIdAndUpdate(user._id, { 'balances.main': totalMainBalance });
-            
-            // Send updates to specific user
-            io.to(`user_${user._id}`).emit('balance_update', { main: totalMainBalance });
-            io.to(`user_${user._id}`).emit('asset_balances_update', assetData);
-          }
-        }
-        
-        console.log(`💰 Real-time price update sent: ${Object.keys(priceUpdates).length} assets updated`);
-      }
-    } catch (err) {
-      console.error('Error in price update interval:', err);
-    }
-  }, 10000);
-};
-
-// Helper function to get 24h change percentage
-const get24hChange = async (asset) => {
-  try {
-    const response = await axios.get(`https://api.coingecko.com/api/v3/simple/price?ids=${asset.toLowerCase()}&vs_currencies=usd&include_24hr_change=true`, { timeout: 5000 });
-    if (response.data && response.data[asset.toLowerCase()]) {
-      return response.data[asset.toLowerCase()].usd_24h_change || 0;
-    }
-    return 0;
-  } catch (err) {
-    return 0;
-  }
-};
-
-// Function to recalculate all user main balances based on current crypto prices
-const recalculateAllUserMainBalances = async (io) => {
-  try {
-    const users = await User.find({}).select('_id');
-    let updatedCount = 0;
-    
-    for (const user of users) {
-      const userAssetBalance = await UserAssetBalance.findOne({ user: user._id });
-      if (userAssetBalance) {
-        let totalMainBalance = 0;
-        const assetData = [];
-        
-        for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
-          if (balance > 0) {
-            const price = currentMarketPrices[asset] || await getCryptoPrice(asset.toUpperCase());
-            if (price) {
-              const usdValue = balance * price;
-              totalMainBalance += usdValue;
-              assetData.push({
-                symbol: asset,
-                balance: balance,
-                usdValue: usdValue,
-                id: asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset
-              });
-            }
-          }
-        }
-        
-        await User.findByIdAndUpdate(user._id, { 'balances.main': totalMainBalance });
-        
-        if (io) {
-          io.to(`user_${user._id}`).emit('balance_update', { main: totalMainBalance });
-          io.to(`user_${user._id}`).emit('asset_balances_update', assetData);
-        }
-        updatedCount++;
-      }
-    }
-    
-    console.log(`🔄 Recalculated all user main balances based on current crypto prices. Updated ${updatedCount} users`);
-  } catch (err) {
-    console.error('Error recalculating user balances:', err);
-  }
-};
-
 // Add market WebSocket to your existing server
 const setupMarketWebSocket = (server) => {
   const marketWss = new WebSocket.Server({ 
@@ -24483,12 +23839,6 @@ const setupMarketWebSocket = (server) => {
   });
 };
 
-
-
-// =============================================
-// SOCKET.IO CONNECTION HANDLER
-// =============================================
-
 // Socket.IO connection handler with stats broadcast and real-time balance updates
 io.on('connection', async (socket) => {
   console.log('New client connected:', socket.id);
@@ -24518,24 +23868,22 @@ io.on('connection', async (socket) => {
         // Send current asset balances
         const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
         if (userAssetBalance) {
-          const assetData = [];
+          const assetData = {};
           for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
             if (balance > 0) {
-              const price = currentMarketPrices[asset] || await getCryptoPrice(asset.toUpperCase());
-              const usdValue = balance * (price || 0);
-              assetData.push({
-                symbol: asset,
+              const price = await getCryptoPrice(asset.toUpperCase());
+              assetData[asset] = {
                 balance: balance,
-                usdValue: usdValue,
+                usdValue: balance * (price || 0),
                 id: asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset,
                 avgPrice: 0,
                 unrealizedPnl: 0,
                 unrealizedPnlPercent: 0,
                 transactions: userAssetBalance.history.filter(h => h.asset === asset).slice(-10)
-              });
+              };
             }
           }
-          socket.emit('asset_balances_update', assetData);
+          socket.emit('asset_balances_update', Object.values(assetData));
         }
         
         // Send user preferences
@@ -24544,8 +23892,7 @@ io.on('connection', async (socket) => {
           socket.emit('preferences_update', {
             displayAsset: userPref.displayAsset,
             language: userPref.language,
-            currency: userPref.currency,
-            fiatCurrency: userPref.fiatCurrency || userPref.currency
+            currency: userPref.currency
           });
         }
       }
@@ -24594,11 +23941,11 @@ io.on('connection', async (socket) => {
         
         for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
           if (balance > 0) {
-            const currentPrice = currentMarketPrices[asset] || await getCryptoPrice(asset.toUpperCase());
+            const currentPrice = await getCryptoPrice(asset.toUpperCase());
             if (currentPrice) {
               totalMainValue += balance * currentPrice;
               // For PnL, we need previous day's price - using 24h change from current
-              const change24h = await get24hChange(asset);
+              const change24h = currentPrices[asset]?.usd_24h_change || 0;
               const previousPrice = currentPrice / (1 + change24h / 100);
               previousDayValue += balance * previousPrice;
             }
@@ -24626,10 +23973,6 @@ io.on('connection', async (socket) => {
     console.log('Client disconnected:', socket.id);
   });
 });
-
-// =============================================
-// MATURED INVESTMENTS PROCESSING
-// =============================================
 
 // Function to automatically complete matured investments
 const processMaturedInvestments = async () => {
@@ -24702,10 +24045,6 @@ setInterval(processMaturedInvestments, 60 * 60 * 1000);
 // Also run once on server start
 processMaturedInvestments();
 
-// =============================================
-// START ALL BACKGROUND SERVICES
-// =============================================
-
 // Start the investor growth job
 startInvestorGrowthJob();
 
@@ -24717,24 +24056,10 @@ setInterval(async () => {
   await recalculateAllUserMainBalances(io);
 }, 5 * 60 * 1000);
 
-// Also recalculate on every 10th price update (approx every 100 seconds)
-let priceUpdateCounter = 0;
-const originalUpdateInterval = setInterval(async () => {
-  priceUpdateCounter++;
-  if (priceUpdateCounter >= 10) {
-    await recalculateAllUserMainBalances(io);
-    priceUpdateCounter = 0;
-  }
-}, 10000);
-
-// =============================================
-// GRACEFUL SHUTDOWN HANDLER
-// =============================================
-
+// Graceful shutdown handler
 const gracefulShutdown = () => {
   console.log('Received shutdown signal. Cleaning up...');
   if (priceUpdateInterval) clearInterval(priceUpdateInterval);
-  if (originalUpdateInterval) clearInterval(originalUpdateInterval);
   stopInvestorGrowthJob();
   process.exit(0);
 };
@@ -24742,17 +24067,11 @@ const gracefulShutdown = () => {
 process.on('SIGTERM', gracefulShutdown);
 process.on('SIGINT', gracefulShutdown);
 
-// =============================================
-// START SERVER
-// =============================================
-
+// Start server
 httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`📊 Real-time stats initialized with Redis as single source of truth`);
   console.log(`📈 Investors will grow from ${INITIAL_INVESTOR_COUNT.toLocaleString()} with max ${DAILY_GROWTH_LIMIT}/day`);
   console.log(`💰 Real-time crypto price updates started (every 10 seconds)`);
   console.log(`🔄 User main balances will recalculate every 5 minutes based on current prices`);
-  console.log(`💱 Conversion fee: 0.5% added to platform revenue`);
-  console.log(`🌍 All world fiat currencies available with real-time exchange rates`);
-  console.log(`🗣️ IP-based language detection active for new users`);
 });
