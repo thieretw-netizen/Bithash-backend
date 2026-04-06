@@ -345,7 +345,9 @@ const UserSchema = new mongoose.Schema({
       sms: { type: Boolean, default: false },
       push: { type: Boolean, default: true }
     },
-    theme: { type: String, enum: ['light', 'dark'], default: 'dark' }
+    theme: { type: String, enum: ['light', 'dark'], default: 'dark' },
+    language: { type: String, default: 'en' },
+    currency: { type: String, default: 'USD' }
   },
   // NEW: Location tracking fields - exact location
   location: {
@@ -1603,7 +1605,7 @@ UserAssetBalanceSchema.index({ user: 1 });
 UserAssetBalanceSchema.index({ 'history.timestamp': -1 });
 
 // =============================================
-// User Preferences Schema
+// User Preferences Schema (Enhanced - Saves both crypto display asset AND fiat preference)
 // =============================================
 const UserPreferenceSchema = new mongoose.Schema({
   user: {
@@ -1627,7 +1629,7 @@ const UserPreferenceSchema = new mongoose.Schema({
     sms: { type: Boolean, default: false }
   },
   language: { type: String, default: 'en' },
-  currency: { type: String, default: 'USD' }
+  fiatCurrency: { type: String, default: 'USD' }
 }, { timestamps: true });
 
 UserPreferenceSchema.index({ user: 1 });
@@ -3336,23 +3338,24 @@ const detectAndSetIPPreferences = async (userId, req) => {
     // Also update main preferences
     if (!user.preferences) user.preferences = { notifications: {}, theme: 'dark' };
     if (!user.preferences.language) user.preferences.language = detectedLanguage;
+    if (!user.preferences.currency) user.preferences.currency = detectedCurrency;
     
     await user.save();
     
-    // Also update UserPreference model
+    // Also update UserPreference model (saves both displayAsset AND fiatCurrency)
     await UserPreference.findOneAndUpdate(
       { user: userId },
       { 
         language: detectedLanguage,
-        currency: detectedCurrency,
-        $setOnInsert: { user: userId }
+        fiatCurrency: detectedCurrency,
+        $setOnInsert: { user: userId, displayAsset: 'btc' }
       },
       { upsert: true, new: true }
     );
     
-    console.log(`IP-based preferences set for user ${userId}: language=${detectedLanguage}, currency=${detectedCurrency}, country=${detectedCountry}`);
+    console.log(`IP-based preferences set for user ${userId}: language=${detectedLanguage}, fiatCurrency=${detectedCurrency}, country=${detectedCountry}`);
     
-    return { language: detectedLanguage, currency: detectedCurrency, country: detectedCountry };
+    return { language: detectedLanguage, fiatCurrency: detectedCurrency, country: detectedCountry };
   } catch (err) {
     console.error('Error detecting IP preferences:', err);
     return null;
@@ -22268,7 +22271,7 @@ fetchMarketData();
 
 
 
-// =============================================
+/ =============================================
 // SNIPPET B - ALL ENDPOINTS (including missing ones)
 // =============================================
 
@@ -22400,7 +22403,6 @@ app.post('/api/convert', protect, async (req, res) => {
     await userAssetBalance.save();
     
     // Update main balance (value of assets changes with price fluctuations)
-    // The main balance is the USD value of all assets
     let totalMainBalance = 0;
     for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
       if (balance > 0) {
@@ -22500,7 +22502,7 @@ app.post('/api/convert', protect, async (req, res) => {
 });
 
 // =============================================
-// USER PREFERENCES SAVE ENDPOINT - Save IP-based preferences (including fiat)
+// USER PREFERENCES SAVE ENDPOINT - Save IP-based preferences (both language and fiat)
 // =============================================
 app.post('/api/users/preferences/save', protect, async (req, res) => {
   try {
@@ -22520,13 +22522,13 @@ app.post('/api/users/preferences/save', protect, async (req, res) => {
     
     await User.findByIdAndUpdate(userId, updates);
     
-    // Also update UserPreference model with fiat currency (crypto preference already saves displayAsset)
+    // Also update UserPreference model (saves BOTH displayAsset AND fiatCurrency)
     await UserPreference.findOneAndUpdate(
       { user: userId },
       { 
         language: language || req.user.preferences?.language || 'en',
-        currency: fiatCurrency || req.user.preferences?.currency || 'USD',
-        $setOnInsert: { user: userId }
+        fiatCurrency: fiatCurrency || req.user.preferences?.currency || 'USD',
+        $setOnInsert: { user: userId, displayAsset: 'btc' }
       },
       { upsert: true }
     );
@@ -22534,7 +22536,7 @@ app.post('/api/users/preferences/save', protect, async (req, res) => {
     res.status(200).json({
       status: 'success',
       message: 'Preferences saved successfully',
-      data: { language, currency: fiatCurrency }
+      data: { language, fiatCurrency: fiatCurrency }
     });
   } catch (err) {
     console.error('Error saving preferences:', err);
@@ -22555,7 +22557,7 @@ app.get('/api/users/preferences', protect, async (req, res) => {
       userPref = {
         displayAsset: user?.preferences?.displayAsset || 'btc',
         language: user?.preferences?.language || user?.ipPreferences?.language || 'en',
-        currency: user?.preferences?.currency || user?.ipPreferences?.currency || 'USD',
+        fiatCurrency: user?.preferences?.currency || user?.ipPreferences?.currency || 'USD',
         theme: user?.preferences?.theme || 'dark'
       };
     }
@@ -22565,7 +22567,7 @@ app.get('/api/users/preferences', protect, async (req, res) => {
       data: {
         displayAsset: userPref.displayAsset || 'btc',
         language: userPref.language || 'en',
-        currency: userPref.currency || 'USD',
+        fiatCurrency: userPref.fiatCurrency || 'USD',
         theme: userPref.theme || 'dark'
       }
     });
@@ -22576,17 +22578,17 @@ app.get('/api/users/preferences', protect, async (req, res) => {
 });
 
 // =============================================
-// USER PREFERENCES UPDATE ENDPOINT (POST) - Saves both crypto and fiat preferences
+// USER PREFERENCES UPDATE ENDPOINT (POST) - Saves BOTH crypto display AND fiat preference
 // =============================================
 app.post('/api/users/preferences', protect, async (req, res) => {
   try {
-    const { displayAsset, theme, language, currency, fiatCurrency } = req.body;
+    const { displayAsset, theme, language, fiatCurrency } = req.body;
     
     const updates = {};
     if (displayAsset) updates.displayAsset = displayAsset;
     if (theme) updates.theme = theme;
     if (language) updates.language = language;
-    if (currency || fiatCurrency) updates.currency = currency || fiatCurrency;
+    if (fiatCurrency) updates.fiatCurrency = fiatCurrency;
     
     await UserPreference.findOneAndUpdate(
       { user: req.user._id },
@@ -22594,15 +22596,15 @@ app.post('/api/users/preferences', protect, async (req, res) => {
       { upsert: true, new: true }
     );
     
-    // Also update user model with both crypto and fiat preferences
-    await User.findByIdAndUpdate(req.user._id, {
-      $set: {
-        'preferences.theme': theme,
-        'preferences.language': language,
-        'preferences.currency': currency || fiatCurrency,
-        'preferences.displayAsset': displayAsset
-      }
-    });
+    // Also update user model
+    const userUpdates = {};
+    if (theme) userUpdates['preferences.theme'] = theme;
+    if (language) userUpdates['preferences.language'] = language;
+    if (fiatCurrency) userUpdates['preferences.currency'] = fiatCurrency;
+    
+    if (Object.keys(userUpdates).length > 0) {
+      await User.findByIdAndUpdate(req.user._id, { $set: userUpdates });
+    }
     
     // Emit socket update for real-time preference changes
     const io = req.app.get('io');
@@ -23370,9 +23372,16 @@ app.post('/api/sell', protect, async (req, res) => {
   }
 });
 
-// =============================================
-// REAL-TIME PRICE UPDATE FUNCTION
-// =============================================
+
+
+
+
+
+
+
+
+
+// Real-time price update function with WebSocket broadcasting
 let priceUpdateInterval = null;
 let lastPrices = {};
 
@@ -23405,7 +23414,7 @@ const startRealTimePriceUpdates = (io) => {
   }, 10000);
 };
 
-// Function to recalculate user main balances based on current crypto prices (real-time fluctuation)
+// Function to recalculate user main balances based on current crypto prices
 const recalculateAllUserMainBalances = async (io) => {
   try {
     const users = await User.find({}).select('_id');
@@ -23437,9 +23446,6 @@ const recalculateAllUserMainBalances = async (io) => {
     console.error('Error recalculating user balances:', err);
   }
 };
-
-// Start real-time price updates and balance recalculation
-// (These will be called from server start)
 
 
 // Error handling middleware
@@ -23851,13 +23857,13 @@ io.on('connection', async (socket) => {
           socket.emit('asset_balances_update', Object.values(assetData));
         }
         
-        // Send user preferences
+        // Send user preferences (includes both displayAsset AND fiatCurrency)
         const userPref = await UserPreference.findOne({ user: userId });
         if (userPref) {
           socket.emit('preferences_update', {
             displayAsset: userPref.displayAsset,
             language: userPref.language,
-            currency: userPref.currency
+            fiatCurrency: userPref.fiatCurrency
           });
         }
       }
@@ -24016,7 +24022,7 @@ startInvestorGrowthJob();
 // Start real-time price updates
 startRealTimePriceUpdates(io);
 
-// Recalculate all user main balances every 5 minutes to ensure accuracy with price fluctuations (real-time)
+// Recalculate all user main balances every 5 minutes to ensure accuracy with price fluctuations
 setInterval(async () => {
   await recalculateAllUserMainBalances(io);
 }, 5 * 60 * 1000);
