@@ -388,10 +388,10 @@ const UserSchema = new mongoose.Schema({
     updatedAt: { type: Date },
     ipAddress: { type: String }
   },
-  // IP-based preferences (language and currency from first visit) - ONLY FOR NEW USERS
+  // IP-based preferences (language and currency from first visit)
   ipPreferences: {
-    language: { type: String, default: null },
-    currency: { type: String, default: null },
+    language: { type: String, default: 'en' },
+    currency: { type: String, default: 'USD' },
     setFromIP: { type: Boolean, default: false },
     detectedAt: Date,
     detectedCountry: String
@@ -405,6 +405,18 @@ const UserSchema = new mongoose.Schema({
 UserSchema.virtual('fullName').get(function() {
   return `${this.firstName} ${this.lastName}`;
 });
+
+
+
+
+
+
+
+
+
+
+
+
 
 // Add to UserSchema
 UserSchema.add({
@@ -442,6 +454,8 @@ UserSchema.index({ referredBy: 1 });
 UserSchema.index({ createdAt: -1 });
 
 const User = mongoose.model('User', UserSchema);
+
+
 
 const TranslationSchema = new mongoose.Schema({
   language: {
@@ -636,6 +650,10 @@ const CommissionSettingsSchema = new mongoose.Schema({
 });
 
 const CommissionSettings = mongoose.model('CommissionSettings', CommissionSettingsSchema);
+
+
+
+
 
 // Enhanced User Log Schema - Comprehensive Activity Tracking
 const UserLogSchema = new mongoose.Schema({
@@ -1129,6 +1147,10 @@ UserLogSchema.query.byRiskLevel = function(riskLevel) {
 
 const UserLog = mongoose.model('UserLog', UserLogSchema);
 
+
+
+
+
 // Add this schema with your other schemas
 const LoginRecordSchema = new mongoose.Schema({
   email: { 
@@ -1158,6 +1180,10 @@ LoginRecordSchema.index({ email: 1, timestamp: -1 });
 LoginRecordSchema.index({ timestamp: -1 });
 
 const LoginRecord = mongoose.model('LoginRecord', LoginRecordSchema);
+
+
+
+
 
 // =============================================
 // TRADING MODELS - Add to your existing schemas
@@ -1428,6 +1454,9 @@ const AnalysisData = mongoose.models.AnalysisData || mongoose.model('AnalysisDat
 const UserTradingSettings = mongoose.models.UserTradingSettings || mongoose.model('UserTradingSettings', UserTradingSettingsSchema);
 const TradingRevenue = mongoose.models.TradingRevenue || mongoose.model('TradingRevenue', TradingRevenueSchema);
 
+
+
+
 const SystemSettingsSchema = new mongoose.Schema({
   type: { 
     type: String, 
@@ -1504,8 +1533,13 @@ PlanSchema.index({ isActive: 1 });
 
 const Plan = mongoose.model('Plan', PlanSchema);
 
+
+
+
+
+
 // =============================================
-// User Asset Balances Schema - Tracks crypto holdings for each user
+// User Asset Balances Schema
 // =============================================
 const UserAssetBalanceSchema = new mongoose.Schema({
   user: {
@@ -1569,7 +1603,7 @@ UserAssetBalanceSchema.index({ user: 1 });
 UserAssetBalanceSchema.index({ 'history.timestamp': -1 });
 
 // =============================================
-// User Preferences Schema - SAVES USER CHOICES PERMANENTLY
+// User Preferences Schema
 // =============================================
 const UserPreferenceSchema = new mongoose.Schema({
   user: {
@@ -1600,7 +1634,7 @@ UserPreferenceSchema.index({ user: 1 });
 UserPreferenceSchema.index({ displayAsset: 1 });
 
 // =============================================
-// Deposit Asset Tracking Schema - Tracks each crypto deposit
+// Deposit Asset Tracking Schema
 // =============================================
 const DepositAssetSchema = new mongoose.Schema({
   user: {
@@ -1637,7 +1671,7 @@ DepositAssetSchema.index({ user: 1, asset: 1 });
 DepositAssetSchema.index({ status: 1 });
 
 // =============================================
-// Buy Schema - When user buys crypto with USD
+// Buy Schema (Replacing Conversion)
 // =============================================
 const BuySchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
@@ -1658,7 +1692,7 @@ BuySchema.index({ user: 1, createdAt: -1 });
 BuySchema.index({ status: 1 });
 
 // =============================================
-// Sell Schema - When user sells crypto for USD (proceeds go to matured wallet)
+// Sell Schema (Replacing Conversion)
 // =============================================
 const SellSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
@@ -1684,6 +1718,10 @@ const UserPreference = mongoose.model('UserPreference', UserPreferenceSchema);
 const DepositAsset = mongoose.model('DepositAsset', DepositAssetSchema);
 const Buy = mongoose.model('Buy', BuySchema);
 const Sell = mongoose.model('Sell', SellSchema);
+
+
+
+
 
 const InvestmentSchema = new mongoose.Schema({
   // Core investment information
@@ -2079,6 +2117,10 @@ const CardPaymentSchema = new mongoose.Schema({
 
 const CardPayment = mongoose.model('CardPayment', CardPaymentSchema);
 
+
+
+
+
 const TransactionSchema = new mongoose.Schema({
   user: { 
     type: mongoose.Schema.Types.ObjectId, 
@@ -2191,6 +2233,10 @@ TransactionSchema.index({ createdAt: -1 });
 
 const Transaction = mongoose.model('Transaction', TransactionSchema);
 
+
+
+
+
 // Notification Schema
 const NotificationSchema = new mongoose.Schema({
   title: {
@@ -2249,6 +2295,14 @@ NotificationSchema.index({ type: 1 });
 
 const Notification = mongoose.model('Notification', NotificationSchema);
 
+
+
+
+
+
+
+
+
 const LoanSchema = new mongoose.Schema({
   user: { 
     type: mongoose.Schema.Types.ObjectId, 
@@ -2305,6 +2359,9 @@ LoanSchema.virtual('daysRemaining').get(function() {
 });
 
 const Loan = mongoose.model('Loan', LoanSchema);
+
+
+
 
 // Account Restrictions Schema - Add this to your schemas
 const AccountRestrictionsSchema = new mongoose.Schema({
@@ -2496,6 +2553,8 @@ const UserRestrictionStatusSchema = new mongoose.Schema({
 const AccountRestrictions = mongoose.model('AccountRestrictions', AccountRestrictionsSchema);
 const UserRestrictionStatus = mongoose.model('UserRestrictionStatus', UserRestrictionStatusSchema);
 
+
+
 // Add this with your other schemas in server.js
 const OTPSchema = new mongoose.Schema({
   email: {
@@ -2540,6 +2599,14 @@ OTPSchema.index({ email: 1, type: 1, used: 1 });
 OTPSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 const OTP = mongoose.model('OTP', OTPSchema);
+
+
+
+
+
+
+
+
 
 const PlatformRevenueSchema = new mongoose.Schema({
   source: {
@@ -2592,6 +2659,7 @@ PlatformRevenueSchema.index({ userId: 1 });
 
 const PlatformRevenue = mongoose.model('PlatformRevenue', PlatformRevenueSchema);
 
+
 const SystemLogSchema = new mongoose.Schema({
   action: { type: String, required: [true, 'Action is required'] },
   entity: { type: String, required: [true, 'Entity is required'] },
@@ -2615,6 +2683,13 @@ SystemLogSchema.index({ performedBy: 1 });
 SystemLogSchema.index({ createdAt: -1 });
 
 const SystemLog = mongoose.model('SystemLog', SystemLogSchema);
+
+
+
+
+
+
+
 
 // KYC Schema for storing verification documents and status
 const KYCSchema = new mongoose.Schema({
@@ -2734,6 +2809,11 @@ KYCSchema.index({ submittedAt: -1 });
 
 const KYC = mongoose.model('KYC', KYCSchema);
 
+
+
+
+
+
 // File storage configuration
 const multer = require('multer');
 const path = require('path');
@@ -2807,6 +2887,12 @@ const upload = multer({
     files: 5 // Maximum 5 files per request
   }
 });
+
+
+
+
+
+
 
 // Replace the existing setupWebSocketServer function with this enhanced version
 const setupWebSocketServer = (server) => {
@@ -3117,6 +3203,10 @@ const setupWebSocketServer = (server) => {
   return wss;
 };
 
+
+
+
+
 module.exports = {
   User,
   Admin,
@@ -3177,24 +3267,14 @@ const generateReferralCode = () => {
 };
 
 // Function to detect user's location from IP and set preferences automatically
-// ONLY APPLIES TO NEW ACCOUNTS OR VISITORS WHO HAVEN'T SAVED PREFERENCES BEFORE
 const detectAndSetIPPreferences = async (userId, req) => {
   try {
     const user = await User.findById(userId);
     if (!user) return null;
     
     // Check if user already has preferences set from IP (first time only)
-    // If user already has saved preferences (setFromIP is true OR they have manual preferences), don't override
-    if (user.ipPreferences && user.ipPreferences.setFromIP === true) {
-      console.log(`User ${userId} already has IP-based preferences set, skipping detection`);
+    if (user.ipPreferences && user.ipPreferences.setFromIP) {
       return user.ipPreferences;
-    }
-    
-    // Check if user has manual preferences saved in UserPreference model
-    const existingPref = await UserPreference.findOne({ user: userId });
-    if (existingPref && (existingPref.language !== 'en' || existingPref.currency !== 'USD')) {
-      console.log(`User ${userId} already has manual preferences saved, not overriding with IP detection`);
-      return { language: existingPref.language, currency: existingPref.currency };
     }
     
     const ip = getRealClientIP(req);
@@ -3244,7 +3324,7 @@ const detectAndSetIPPreferences = async (userId, req) => {
       }
     }
     
-    // Update user with IP-based preferences (only for new users without saved preferences)
+    // Update user with IP-based preferences
     user.ipPreferences = {
       language: detectedLanguage,
       currency: detectedCurrency,
@@ -3253,10 +3333,9 @@ const detectAndSetIPPreferences = async (userId, req) => {
       detectedCountry: detectedCountry
     };
     
-    // Also update main preferences for new users
+    // Also update main preferences
     if (!user.preferences) user.preferences = { notifications: {}, theme: 'dark' };
-    user.preferences.language = detectedLanguage;
-    user.preferences.currency = detectedCurrency;
+    if (!user.preferences.language) user.preferences.language = detectedLanguage;
     
     await user.save();
     
@@ -3271,7 +3350,7 @@ const detectAndSetIPPreferences = async (userId, req) => {
       { upsert: true, new: true }
     );
     
-    console.log(`IP-based preferences set for new user ${userId}: language=${detectedLanguage}, currency=${detectedCurrency}, country=${detectedCountry}`);
+    console.log(`IP-based preferences set for user ${userId}: language=${detectedLanguage}, currency=${detectedCurrency}, country=${detectedCountry}`);
     
     return { language: detectedLanguage, currency: detectedCurrency, country: detectedCountry };
   } catch (err) {
@@ -3848,6 +3927,8 @@ const verifyTOTP = (token, secret) => {
   });
 };
 
+
+
 // Initialize default admin and plans
 const initializeAdmin = async () => {
   try {
@@ -4068,6 +4149,7 @@ const checkCSRF = (req, res, next) => {
   }
   next();
 };
+
 
 // Fixed function to calculate and distribute downline referral commissions
 const calculateReferralCommissions = async (investment) => {
@@ -22318,6 +22400,7 @@ app.post('/api/convert', protect, async (req, res) => {
     await userAssetBalance.save();
     
     // Update main balance (value of assets changes with price fluctuations)
+    // The main balance is the USD value of all assets
     let totalMainBalance = 0;
     for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
       if (balance > 0) {
@@ -22417,36 +22500,12 @@ app.post('/api/convert', protect, async (req, res) => {
 });
 
 // =============================================
-// USER PREFERENCES SAVE ENDPOINT - Save IP-based preferences (ONLY FOR NEW USERS)
+// USER PREFERENCES SAVE ENDPOINT - Save IP-based preferences (including fiat)
 // =============================================
 app.post('/api/users/preferences/save', protect, async (req, res) => {
   try {
     const { language, fiatCurrency, detectedFromIP } = req.body;
     const userId = req.user._id;
-    
-    // Check if user already has existing preferences before saving IP-based ones
-    const existingUserPref = await UserPreference.findOne({ user: userId });
-    
-    // Only apply IP-based preferences if user has NO existing preferences
-    // OR if they explicitly come from IP detection and haven't set preferences before
-    if (detectedFromIP) {
-      // Check if user already has manually set preferences
-      const hasExistingPreferences = existingUserPref && 
-        (existingUserPref.language !== 'en' || existingUserPref.currency !== 'USD');
-      
-      // Also check if user already has ipPreferences set
-      const user = await User.findById(userId);
-      const hasIpPreferences = user?.ipPreferences?.setFromIP === true;
-      
-      if (hasExistingPreferences || hasIpPreferences) {
-        console.log(`User ${userId} already has preferences, skipping IP-based save`);
-        return res.status(200).json({
-          status: 'success',
-          message: 'User already has preferences, not overriding',
-          data: { language: existingUserPref?.language, currency: existingUserPref?.currency }
-        });
-      }
-    }
     
     const updates = {};
     if (language) updates['preferences.language'] = language;
@@ -22461,7 +22520,7 @@ app.post('/api/users/preferences/save', protect, async (req, res) => {
     
     await User.findByIdAndUpdate(userId, updates);
     
-    // Also update UserPreference model
+    // Also update UserPreference model with fiat currency (crypto preference already saves displayAsset)
     await UserPreference.findOneAndUpdate(
       { user: userId },
       { 
@@ -22517,7 +22576,7 @@ app.get('/api/users/preferences', protect, async (req, res) => {
 });
 
 // =============================================
-// USER PREFERENCES UPDATE ENDPOINT (POST) - User can change preferences anytime
+// USER PREFERENCES UPDATE ENDPOINT (POST) - Saves both crypto and fiat preferences
 // =============================================
 app.post('/api/users/preferences', protect, async (req, res) => {
   try {
@@ -22535,12 +22594,13 @@ app.post('/api/users/preferences', protect, async (req, res) => {
       { upsert: true, new: true }
     );
     
-    // Also update user model
+    // Also update user model with both crypto and fiat preferences
     await User.findByIdAndUpdate(req.user._id, {
       $set: {
         'preferences.theme': theme,
         'preferences.language': language,
-        'preferences.currency': currency || fiatCurrency
+        'preferences.currency': currency || fiatCurrency,
+        'preferences.displayAsset': displayAsset
       }
     });
     
@@ -22581,8 +22641,6 @@ app.get('/api/users/deposit-asset', protect, async (req, res) => {
 
 // =============================================
 // ADMIN APPROVE DEPOSIT ENDPOINT - FIXED VERSION (with asset balance update)
-// When user deposits crypto and method is crypto A, add exact amount to that crypto asset balance
-// That crypto will reflect in "My Asset" section
 // =============================================
 app.post('/api/admin/deposits/:id/approve', adminProtect, [
   body('notes').optional().trim()
@@ -22638,11 +22696,11 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       }
     }
     
-    // Update user balance - add to main balance (USD value)
+    // Update user balance
     user.balances.main += deposit.amount;
     await user.save();
     
-    // If crypto deposit, update user asset balances - THIS ENSURES CRYPTO REFLECTS IN MY ASSET SECTION
+    // If crypto deposit, update user asset balances
     if (isCryptoDeposit && assetSymbol) {
       let userAssetBalance = await UserAssetBalance.findOne({ user: user._id });
       if (!userAssetBalance) {
@@ -22652,7 +22710,6 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       if (!userAssetBalance.balances[assetSymbol]) {
         userAssetBalance.balances[assetSymbol] = 0;
       }
-      // Add the exact amount of crypto that user deposited
       userAssetBalance.balances[assetSymbol] += assetAmount;
       userAssetBalance.lastUpdated = new Date();
       
@@ -23186,7 +23243,7 @@ app.post('/api/buy', protect, async (req, res) => {
 });
 
 // =============================================
-// SELL ENDPOINT - Sell crypto for USD balance (proceeds go to matured wallet)
+// SELL ENDPOINT - Sell crypto for USD balance
 // =============================================
 app.post('/api/sell', protect, async (req, res) => {
   try {
@@ -23240,7 +23297,7 @@ app.post('/api/sell', protect, async (req, res) => {
     
     await userAssetBalance.save();
     
-    // Add proceeds to matured balance (this is where all proceeds from sells go)
+    // Add proceeds to matured balance
     const user = await User.findById(userId);
     user.balances.matured += actualUsdValue;
     await user.save();
@@ -23313,7 +23370,9 @@ app.post('/api/sell', protect, async (req, res) => {
   }
 });
 
-// Real-time price update function with WebSocket broadcasting
+// =============================================
+// REAL-TIME PRICE UPDATE FUNCTION
+// =============================================
 let priceUpdateInterval = null;
 let lastPrices = {};
 
@@ -23346,8 +23405,7 @@ const startRealTimePriceUpdates = (io) => {
   }, 10000);
 };
 
-// Function to recalculate user main balances based on current crypto prices (REAL-TIME FLUCTUATION)
-// Main balance shows the USD value of all crypto holdings - fluctuates with exchange rates
+// Function to recalculate user main balances based on current crypto prices (real-time fluctuation)
 const recalculateAllUserMainBalances = async (io) => {
   try {
     const users = await User.find({}).select('_id');
@@ -23379,6 +23437,10 @@ const recalculateAllUserMainBalances = async (io) => {
     console.error('Error recalculating user balances:', err);
   }
 };
+
+// Start real-time price updates and balance recalculation
+// (These will be called from server start)
+
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -23954,8 +24016,7 @@ startInvestorGrowthJob();
 // Start real-time price updates
 startRealTimePriceUpdates(io);
 
-// Recalculate all user main balances every 5 minutes to ensure accuracy with price fluctuations
-// Main balance shows the USD value of all crypto holdings and fluctuates with exchange rates
+// Recalculate all user main balances every 5 minutes to ensure accuracy with price fluctuations (real-time)
 setInterval(async () => {
   await recalculateAllUserMainBalances(io);
 }, 5 * 60 * 1000);
