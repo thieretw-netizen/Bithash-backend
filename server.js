@@ -23837,14 +23837,9 @@ const recalculateAllUserMainBalances = async (io) => {
 
 
 
-
-
-
-
-
 // =============================================
 // COMPLETE SNIPPET C - CORRECTED VERSION
-// Socket.IO + WebSocket Integration for Render.com
+// NO DUPLICATE FUNCTIONS - FULLY INTEGRATED
 // =============================================
 
 // Error handling middleware
@@ -23944,11 +23939,9 @@ const getDailyGrowthKey = (date) => {
 // Initialize or get the current investor count from Redis
 const initializeInvestorCount = async () => {
   try {
-    // Check if the investor count exists in Redis
     let currentCount = await redis.get(REDIS_INVESTOR_KEY);
     
     if (!currentCount) {
-      // First time - set initial value
       currentCount = INITIAL_INVESTOR_COUNT;
       await redis.set(REDIS_INVESTOR_KEY, currentCount);
       console.log(`✅ Initialized investor count to ${currentCount.toLocaleString()}`);
@@ -23973,7 +23966,6 @@ const checkAndResetDailyGrowth = async () => {
     let dailyGrowth = await redis.get(todayKey);
     
     if (!dailyGrowth) {
-      // New day - reset daily growth counter
       dailyGrowth = 0;
       await redis.set(todayKey, dailyGrowth);
       console.log(`📅 New day started - daily growth reset to 0`);
@@ -23991,7 +23983,6 @@ const checkAndResetDailyGrowth = async () => {
 // Function to add investors with daily limit enforcement
 const addInvestors = async () => {
   try {
-    // Check daily growth limit
     let dailyGrowth = await checkAndResetDailyGrowth();
     
     if (dailyGrowth >= DAILY_GROWTH_LIMIT) {
@@ -23999,10 +23990,7 @@ const addInvestors = async () => {
       return false;
     }
     
-    // Generate random number between 1 and 49
     const increment = Math.floor(Math.random() * 49) + 1;
-    
-    // Check if adding this would exceed daily limit
     const newDailyGrowth = dailyGrowth + increment;
     const actualIncrement = newDailyGrowth > DAILY_GROWTH_LIMIT 
       ? DAILY_GROWTH_LIMIT - dailyGrowth 
@@ -24013,10 +24001,7 @@ const addInvestors = async () => {
       return false;
     }
     
-    // Update Redis using atomic operation to prevent race conditions
     const newCount = await redis.incrby(REDIS_INVESTOR_KEY, actualIncrement);
-    
-    // Update daily growth counter
     const today = getStartOfDay();
     const todayKey = getDailyGrowthKey(today);
     await redis.incrby(todayKey, actualIncrement);
@@ -24042,9 +24027,7 @@ const broadcastStats = async () => {
       timestamp: Date.now()
     };
     
-    // Broadcast to all connected Socket.IO clients
     io.emit('stats-update', stats);
-    
     console.log(`📡 Broadcasted stats to ${io.engine.clientsCount} clients: ${count.toLocaleString()} investors`);
   } catch (err) {
     console.error('Error broadcasting stats:', err);
@@ -24074,39 +24057,29 @@ const getCurrentStats = async () => {
 let growthInterval = null;
 
 const startInvestorGrowthJob = async () => {
-  // Initialize first
   await initializeInvestorCount();
   
-  // Function to schedule next growth event
   const scheduleNextGrowth = () => {
-    // Random interval between 3 and 120 seconds (3000 to 120000 ms)
     const interval = Math.floor(Math.random() * (120000 - 3000 + 1) + 3000);
     
     growthInterval = setTimeout(async () => {
       try {
         const result = await addInvestors();
-        
         if (result) {
-          // Broadcast updated stats to all clients
           await broadcastStats();
         }
-        
-        // Schedule next growth event
         scheduleNextGrowth();
       } catch (err) {
         console.error('Error in growth job:', err);
-        // Still schedule next attempt even if this one failed
         scheduleNextGrowth();
       }
     }, interval);
   };
   
-  // Start the growth process
   scheduleNextGrowth();
   console.log(`🚀 Investor growth job started. Will add 1-49 investors every 3-120 seconds (max ${DAILY_GROWTH_LIMIT}/day)`);
 };
 
-// Function to stop the growth job (useful for graceful shutdown)
 const stopInvestorGrowthJob = () => {
   if (growthInterval) {
     clearTimeout(growthInterval);
@@ -24115,7 +24088,7 @@ const stopInvestorGrowthJob = () => {
   }
 };
 
-// API endpoint to get current stats (for clients not using WebSocket)
+// API endpoint to get current stats
 app.get('/api/stats/investors', async (req, res) => {
   try {
     const stats = await getCurrentStats();
@@ -24132,7 +24105,6 @@ app.get('/api/stats/investors', async (req, res) => {
   }
 });
 
-// API endpoint to get daily growth progress (admin only - optional)
 app.get('/api/stats/daily-progress', async (req, res) => {
   try {
     const today = getStartOfDay();
@@ -24159,63 +24131,55 @@ app.get('/api/stats/daily-progress', async (req, res) => {
 });
 
 // =============================================
-// INTEGRATED MARKET DATA (Using Socket.IO - NO SEPARATE WebSocket)
+// INTEGRATED MARKET DATA BROADCAST (NO DUPLICATE FUNCTIONS)
 // =============================================
 
 let marketPriceInterval = null;
 
-// Helper function to fetch market data
-const fetchMarketData = async () => {
-  try {
-    const response = await axios.get(
-      'https://api.coingecko.com/api/v3/coins/markets',
-      {
-        params: {
-          vs_currency: 'usd',
-          per_page: 50,
-          price_change_percentage: '24h'
-        },
-        timeout: 5000
-      }
-    );
-    
-    return response.data.map(coin => ({
-      assetId: coin.id,
-      symbol: coin.symbol,
-      name: coin.name,
-      price: coin.current_price,
-      price_change_percentage_24h: coin.price_change_percentage_24h || 0,
-      volume: coin.total_volume,
-      market_cap: coin.market_cap,
-      image: coin.image,
-      high_24h: coin.high_24h,
-      low_24h: coin.low_24h
-    }));
-  } catch (error) {
-    console.error('Error fetching market data:', error);
-    return [];
-  }
-};
-
 const setupMarketDataBroadcast = () => {
   console.log('📊 Setting up market data broadcast via Socket.IO...');
   
-  // Broadcast market data to subscribed clients every 5 seconds
   if (marketPriceInterval) clearInterval(marketPriceInterval);
   
   marketPriceInterval = setInterval(async () => {
     try {
-      // Get all sockets with market subscriptions
       const sockets = await io.fetchSockets();
       const subscribedSockets = sockets.filter(s => s.hasMarketSubscription === true);
       
       if (subscribedSockets.length === 0) return;
       
-      // Fetch latest market data
-      const marketData = await fetchMarketData();
+      // Direct API call - no external function dependency
+      let marketData = [];
+      try {
+        const response = await axios.get(
+          'https://api.coingecko.com/api/v3/coins/markets',
+          {
+            params: {
+              vs_currency: 'usd',
+              per_page: 50,
+              price_change_percentage: '24h'
+            },
+            timeout: 5000
+          }
+        );
+        
+        marketData = response.data.map(coin => ({
+          assetId: coin.id,
+          symbol: coin.symbol,
+          name: coin.name,
+          price: coin.current_price,
+          price_change_percentage_24h: coin.price_change_percentage_24h || 0,
+          volume: coin.total_volume,
+          market_cap: coin.market_cap,
+          image: coin.image,
+          high_24h: coin.high_24h,
+          low_24h: coin.low_24h
+        }));
+      } catch (err) {
+        console.error('Error fetching market data:', err.message);
+      }
       
       if (marketData && marketData.length > 0) {
-        // Send to all subscribed clients
         subscribedSockets.forEach(socket => {
           socket.emit('market_data', {
             type: 'update',
@@ -24223,7 +24187,6 @@ const setupMarketDataBroadcast = () => {
             timestamp: Date.now()
           });
         });
-        
         console.log(`📡 Broadcast market data to ${subscribedSockets.length} subscribers`);
       }
     } catch (error) {
@@ -24235,17 +24198,215 @@ const setupMarketDataBroadcast = () => {
 };
 
 // =============================================
-// ENHANCED: Socket.IO Connection Handler
+// REAL-TIME PRICE UPDATE FUNCTION
+// =============================================
+
+let priceUpdateInterval = null;
+let globalCurrentPrices = {};
+
+const startRealTimePriceUpdates = () => {
+  if (priceUpdateInterval) clearInterval(priceUpdateInterval);
+  
+  priceUpdateInterval = setInterval(async () => {
+    try {
+      const assets = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'ADA', 'SHIB', 'AVAX', 'DOT', 'TRX', 'LINK', 'MATIC', 'LTC'];
+      const priceUpdates = {};
+      
+      for (const asset of assets) {
+        const price = await getCryptoPrice(asset);
+        if (price) {
+          priceUpdates[asset.toLowerCase()] = {
+            price: price,
+            timestamp: Date.now()
+          };
+        }
+      }
+      
+      if (Object.keys(priceUpdates).length > 0 && io) {
+        io.emit('price_update', priceUpdates);
+        globalCurrentPrices = priceUpdates;
+        console.log(`💰 Price update sent: ${Object.keys(priceUpdates).length} assets updated`);
+      }
+    } catch (err) {
+      console.error('Error in price update interval:', err);
+    }
+  }, 10000);
+};
+
+// =============================================
+// RECALCULATE ALL USER BALANCES
+// =============================================
+
+const recalculateAllUserBalances = async () => {
+  try {
+    console.log('🔄 Recalculating ALL user balances based on current crypto prices...');
+    
+    const users = await User.find({}).select('_id balances');
+    let updatedCount = 0;
+    
+    for (const user of users) {
+      let totalMainValue = 0;
+      let totalActiveValue = 0;
+      let totalMaturedValue = 0;
+      
+      const userAssetBalance = await UserAssetBalance.findOne({ user: user._id });
+      if (userAssetBalance) {
+        for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
+          if (balance > 0) {
+            const price = await getCryptoPrice(asset.toUpperCase());
+            if (price) {
+              totalMainValue += balance * price;
+            }
+          }
+        }
+      }
+      
+      const activeInvestments = await Investment.find({
+        user: user._id,
+        status: 'active'
+      }).populate('plan');
+      
+      for (const investment of activeInvestments) {
+        const currentBTCPrice = await getCryptoPrice('BTC');
+        if (currentBTCPrice && investment.originalAmount) {
+          const originalBTCAmount = investment.originalAmount / (investment.originalBTCPrice || 43000);
+          const currentUSDValue = originalBTCAmount * currentBTCPrice;
+          totalActiveValue += currentUSDValue;
+        } else {
+          totalActiveValue += investment.amount;
+        }
+      }
+      
+      const maturedInvestments = await Investment.find({
+        user: user._id,
+        status: 'completed'
+      }).populate('plan');
+      
+      for (const investment of maturedInvestments) {
+        const currentBTCPrice = await getCryptoPrice('BTC');
+        if (currentBTCPrice && investment.originalAmount) {
+          const originalBTCAmount = investment.originalAmount / (investment.originalBTCPrice || 43000);
+          const currentUSDValue = originalBTCAmount * currentBTCPrice;
+          totalMaturedValue += currentUSDValue;
+        } else {
+          totalMaturedValue += investment.amount + (investment.actualReturn || 0);
+        }
+      }
+      
+      const updates = {};
+      if (Math.abs(user.balances.main - totalMainValue) > 0.01) updates['balances.main'] = totalMainValue;
+      if (Math.abs(user.balances.active - totalActiveValue) > 0.01) updates['balances.active'] = totalActiveValue;
+      if (Math.abs(user.balances.matured - totalMaturedValue) > 0.01) updates['balances.matured'] = totalMaturedValue;
+      
+      if (Object.keys(updates).length > 0) {
+        await User.findByIdAndUpdate(user._id, updates);
+        updatedCount++;
+        
+        io.to(`user_${user._id}`).emit('balance_update', {
+          main: totalMainValue,
+          active: totalActiveValue,
+          matured: totalMaturedValue
+        });
+        
+        const previousDayValue = user.balances.main || totalMainValue;
+        const dailyPnL = totalMainValue - previousDayValue;
+        const dailyPnLPercentage = previousDayValue > 0 ? (dailyPnL / previousDayValue) * 100 : 0;
+        
+        io.to(`user_${user._id}`).emit('pnl_update', {
+          main: {
+            amount: dailyPnL,
+            percentage: dailyPnLPercentage
+          },
+          matured: {
+            amount: 0,
+            percentage: 0
+          }
+        });
+      }
+    }
+    
+    if (updatedCount > 0) {
+      console.log(`✅ Recalculated balances for ${updatedCount} users`);
+    }
+    
+  } catch (err) {
+    console.error('❌ Error recalculating user balances:', err);
+  }
+};
+
+// =============================================
+// PROCESS MATURED INVESTMENTS
+// =============================================
+
+const processMaturedInvestments = async () => {
+  try {
+    const now = new Date();
+    const maturedInvestments = await Investment.find({
+      status: 'active',
+      endDate: { $lte: now }
+    }).populate('user plan');
+
+    for (const investment of maturedInvestments) {
+      try {
+        const user = await User.findById(investment.user._id);
+        if (!user) continue;
+
+        const totalReturn = investment.amount + (investment.amount * investment.plan.percentage / 100);
+
+        user.balances.active -= investment.amount;
+        user.balances.matured += totalReturn;
+
+        investment.status = 'completed';
+        investment.completionDate = now;
+        investment.actualReturn = totalReturn - investment.amount;
+
+        await user.save();
+        await investment.save();
+
+        await Transaction.create({
+          user: investment.user._id,
+          type: 'interest',
+          amount: totalReturn - investment.amount,
+          currency: 'USD',
+          status: 'completed',
+          method: 'internal',
+          reference: `AUTO-RET-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          details: {
+            investmentId: investment._id,
+            planName: investment.plan.name,
+            principal: investment.amount,
+            interest: totalReturn - investment.amount
+          },
+          fee: 0,
+          netAmount: totalReturn - investment.amount
+        });
+        
+        io.to(`user_${user._id}`).emit('balance_update', {
+          main: user.balances.main,
+          active: user.balances.active,
+          matured: user.balances.matured
+        });
+
+        console.log(`Automatically completed investment ${investment._id} for user ${user.email}`);
+      } catch (err) {
+        console.error(`Error processing investment ${investment._id}:`, err);
+      }
+    }
+  } catch (err) {
+    console.error('Error processing matured investments:', err);
+  }
+};
+
+// =============================================
+// ENHANCED SOCKET.IO CONNECTION HANDLER
 // =============================================
 
 io.on('connection', async (socket) => {
   console.log('✅ New client connected:', socket.id);
   console.log(`📊 Total connected clients: ${io.engine.clientsCount}`);
   
-  // Initialize subscription flags
   socket.hasMarketSubscription = false;
   
-  // Authenticate the socket connection
   const token = socket.handshake.auth.token;
   let userId = null;
   
@@ -24257,7 +24418,6 @@ io.on('connection', async (socket) => {
         socket.join(`user_${userId}`);
         console.log(`🔐 Socket authenticated for user: ${userId}`);
         
-        // Send current user balances immediately
         const user = await User.findById(userId).select('balances');
         if (user) {
           socket.emit('balance_update', {
@@ -24268,14 +24428,12 @@ io.on('connection', async (socket) => {
           console.log(`📤 Sent initial balances to user ${userId}: main=$${user.balances.main}`);
         }
         
-        // Send current asset balances
         const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
         if (userAssetBalance) {
           const assetData = [];
           for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
             if (balance > 0) {
               const price = await getCryptoPrice(asset.toUpperCase());
-              // Calculate average buying price from history
               const buyTransactions = userAssetBalance.history.filter(h => h.asset === asset && h.type === 'buy');
               let totalSpent = 0;
               let totalBought = 0;
@@ -24304,7 +24462,6 @@ io.on('connection', async (socket) => {
           console.log(`📤 Sent asset balances to user ${userId}: ${assetData.length} assets`);
         }
         
-        // Send user preferences
         const userPref = await UserPreference.findOne({ user: userId });
         if (userPref) {
           socket.emit('preferences_update', {
@@ -24320,24 +24477,46 @@ io.on('connection', async (socket) => {
     }
   }
   
-  // Send current stats immediately to new client
   const currentStats = await getCurrentStats();
   socket.emit('stats-update', currentStats);
   console.log(`📡 Sent initial stats to client ${socket.id}: ${currentStats.totalInvestors.toLocaleString()} investors`);
   
-  // Handle market data subscription
   socket.on('subscribe_market', async () => {
     console.log(`📊 Client ${socket.id} subscribed to market data`);
     
-    // Send initial market data immediately
-    const initialData = await fetchMarketData();
+    let marketData = [];
+    try {
+      const response = await axios.get(
+        'https://api.coingecko.com/api/v3/coins/markets',
+        {
+          params: {
+            vs_currency: 'usd',
+            per_page: 50,
+            price_change_percentage: '24h'
+          },
+          timeout: 5000
+        }
+      );
+      
+      marketData = response.data.map(coin => ({
+        assetId: coin.id,
+        symbol: coin.symbol,
+        name: coin.name,
+        price: coin.current_price,
+        price_change_percentage_24h: coin.price_change_percentage_24h || 0,
+        volume: coin.total_volume,
+        market_cap: coin.market_cap
+      }));
+    } catch (err) {
+      console.error('Error fetching initial market data:', err.message);
+    }
+    
     socket.emit('market_data', {
       type: 'initial',
-      data: initialData,
+      data: marketData,
       timestamp: Date.now()
     });
     
-    // Mark this socket as subscribed to market data
     socket.hasMarketSubscription = true;
   });
   
@@ -24346,16 +24525,13 @@ io.on('connection', async (socket) => {
     socket.hasMarketSubscription = false;
   });
   
-  // Handle ping/pong for connection health
   socket.on('ping', () => {
     socket.emit('pong');
   });
   
-  // Handle refresh PnL
   socket.on('refresh_pnl', async () => {
     if (userId) {
       try {
-        const user = await User.findById(userId).select('balances');
         const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
         
         if (userAssetBalance) {
@@ -24367,8 +24543,7 @@ io.on('connection', async (socket) => {
               const currentPrice = await getCryptoPrice(asset.toUpperCase());
               if (currentPrice) {
                 totalMainValue += balance * currentPrice;
-                // For PnL, get 24h change
-                const change24h = currentPrices[asset]?.usd_24h_change || 0;
+                const change24h = globalCurrentPrices[asset]?.usd_24h_change || 0;
                 const previousPrice = currentPrice / (1 + change24h / 100);
                 previousDayValue += balance * previousPrice;
               }
@@ -24395,257 +24570,31 @@ io.on('connection', async (socket) => {
     }
   });
   
-  // Handle disconnection
   socket.on('disconnect', (reason) => {
     console.log(`❌ Client disconnected: ${socket.id}, reason: ${reason}`);
     console.log(`📊 Total connected clients: ${io.engine.clientsCount}`);
   });
   
-  // Handle errors
   socket.on('error', (err) => {
     console.error(`Socket error for ${socket.id}:`, err);
   });
 });
 
 // =============================================
-// REAL-TIME PRICE UPDATE FUNCTION
-// =============================================
-
-let priceUpdateInterval = null;
-let currentPrices = {};
-
-const startRealTimePriceUpdates = () => {
-  if (priceUpdateInterval) clearInterval(priceUpdateInterval);
-  
-  // Update prices every 10 seconds for real-time fluctuations
-  priceUpdateInterval = setInterval(async () => {
-    try {
-      const assets = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'ADA', 'SHIB', 'AVAX', 'DOT', 'TRX', 'LINK', 'MATIC', 'LTC'];
-      const priceUpdates = {};
-      
-      for (const asset of assets) {
-        const price = await getCryptoPrice(asset);
-        if (price) {
-          priceUpdates[asset.toLowerCase()] = {
-            price: price,
-            timestamp: Date.now()
-          };
-        }
-      }
-      
-      if (Object.keys(priceUpdates).length > 0 && io) {
-        io.emit('price_update', priceUpdates);
-        currentPrices = priceUpdates;
-        console.log(`💰 Price update sent: ${Object.keys(priceUpdates).length} assets updated`);
-      }
-    } catch (err) {
-      console.error('Error in price update interval:', err);
-    }
-  }, 10000);
-};
-
-// =============================================
-// RECALCULATE ALL USER BALANCES (Main, Active, Matured)
-// =============================================
-
-const recalculateAllUserBalances = async () => {
-  try {
-    console.log('🔄 Recalculating ALL user balances based on current crypto prices...');
-    
-    const users = await User.find({}).select('_id balances');
-    let updatedCount = 0;
-    
-    for (const user of users) {
-      let totalMainValue = 0;
-      let totalActiveValue = 0;
-      let totalMaturedValue = 0;
-      
-      // Get user's asset balances
-      const userAssetBalance = await UserAssetBalance.findOne({ user: user._id });
-      if (userAssetBalance) {
-        // Calculate main balance (current value of all crypto holdings)
-        for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
-          if (balance > 0) {
-            const price = await getCryptoPrice(asset.toUpperCase());
-            if (price) {
-              totalMainValue += balance * price;
-            }
-          }
-        }
-      }
-      
-      // Calculate active balance (current value of active investments)
-      const activeInvestments = await Investment.find({
-        user: user._id,
-        status: 'active'
-      }).populate('plan');
-      
-      for (const investment of activeInvestments) {
-        // Get current BTC price for conversion
-        const currentBTCPrice = await getCryptoPrice('BTC');
-        if (currentBTCPrice && investment.originalAmount) {
-          // Calculate current value based on BTC price fluctuation
-          const originalBTCAmount = investment.originalAmount / (investment.originalBTCPrice || 43000);
-          const currentUSDValue = originalBTCAmount * currentBTCPrice;
-          totalActiveValue += currentUSDValue;
-        } else {
-          totalActiveValue += investment.amount;
-        }
-      }
-      
-      // Calculate matured balance (current value of completed investments)
-      const maturedInvestments = await Investment.find({
-        user: user._id,
-        status: 'completed'
-      }).populate('plan');
-      
-      for (const investment of maturedInvestments) {
-        // Get current BTC price for conversion
-        const currentBTCPrice = await getCryptoPrice('BTC');
-        if (currentBTCPrice && investment.originalAmount) {
-          const originalBTCAmount = investment.originalAmount / (investment.originalBTCPrice || 43000);
-          const currentUSDValue = originalBTCAmount * currentBTCPrice;
-          totalMaturedValue += currentUSDValue;
-        } else {
-          totalMaturedValue += investment.amount + (investment.actualReturn || 0);
-        }
-      }
-      
-      // Update user balances if changed
-      const updates = {};
-      if (Math.abs(user.balances.main - totalMainValue) > 0.01) updates['balances.main'] = totalMainValue;
-      if (Math.abs(user.balances.active - totalActiveValue) > 0.01) updates['balances.active'] = totalActiveValue;
-      if (Math.abs(user.balances.matured - totalMaturedValue) > 0.01) updates['balances.matured'] = totalMaturedValue;
-      
-      if (Object.keys(updates).length > 0) {
-        await User.findByIdAndUpdate(user._id, updates);
-        updatedCount++;
-        
-        // Emit real-time updates via Socket.IO
-        io.to(`user_${user._id}`).emit('balance_update', {
-          main: totalMainValue,
-          active: totalActiveValue,
-          matured: totalMaturedValue
-        });
-        
-        // Calculate and emit PnL for main balance
-        const previousDayValue = user.balances.main || totalMainValue;
-        const dailyPnL = totalMainValue - previousDayValue;
-        const dailyPnLPercentage = previousDayValue > 0 ? (dailyPnL / previousDayValue) * 100 : 0;
-        
-        io.to(`user_${user._id}`).emit('pnl_update', {
-          main: {
-            amount: dailyPnL,
-            percentage: dailyPnLPercentage
-          },
-          matured: {
-            amount: 0,
-            percentage: 0
-          }
-        });
-      }
-    }
-    
-    if (updatedCount > 0) {
-      console.log(`✅ Recalculated balances for ${updatedCount} users (Main, Active, Matured all fluctuate with prices)`);
-    }
-    
-  } catch (err) {
-    console.error('❌ Error recalculating user balances:', err);
-  }
-};
-
-// =============================================
-// PROCESS MATURED INVESTMENTS
-// =============================================
-
-// Function to automatically complete matured investments
-const processMaturedInvestments = async () => {
-  try {
-    const now = new Date();
-    const maturedInvestments = await Investment.find({
-      status: 'active',
-      endDate: { $lte: now }
-    }).populate('user plan');
-
-    for (const investment of maturedInvestments) {
-      try {
-        const user = await User.findById(investment.user._id);
-        if (!user) continue;
-
-        // Calculate total return
-        const totalReturn = investment.amount + (investment.amount * investment.plan.percentage / 100);
-
-        // Transfer balances
-        user.balances.active -= investment.amount;
-        user.balances.matured += totalReturn;
-
-        // Update investment
-        investment.status = 'completed';
-        investment.completionDate = now;
-        investment.actualReturn = totalReturn - investment.amount;
-
-        await user.save();
-        await investment.save();
-
-        // Create transaction record
-        await Transaction.create({
-          user: investment.user._id,
-          type: 'interest',
-          amount: totalReturn - investment.amount,
-          currency: 'USD',
-          status: 'completed',
-          method: 'internal',
-          reference: `AUTO-RET-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-          details: {
-            investmentId: investment._id,
-            planName: investment.plan.name,
-            principal: investment.amount,
-            interest: totalReturn - investment.amount
-          },
-          fee: 0,
-          netAmount: totalReturn - investment.amount
-        });
-        
-        // Emit socket update for the user
-        io.to(`user_${user._id}`).emit('balance_update', {
-          main: user.balances.main,
-          active: user.balances.active,
-          matured: user.balances.matured
-        });
-
-        console.log(`Automatically completed investment ${investment._id} for user ${user.email}`);
-      } catch (err) {
-        console.error(`Error processing investment ${investment._id}:`, err);
-      }
-    }
-  } catch (err) {
-    console.error('Error processing matured investments:', err);
-  }
-};
-
-// =============================================
 // START ALL BACKGROUND SERVICES
 // =============================================
 
-// Start the investor growth job
 startInvestorGrowthJob();
-
-// Start real-time price updates
 startRealTimePriceUpdates();
-
-// Start market data broadcast
 setupMarketDataBroadcast();
 
-// Recalculate ALL user balances every 30 seconds for REAL-TIME price fluctuations
+// Recalculate ALL user balances every 30 seconds
 setInterval(async () => {
   await recalculateAllUserBalances();
-}, 30 * 1000); // Every 30 seconds
+}, 30 * 1000);
 
 // Run every hour to check for matured investments
 setInterval(processMaturedInvestments, 60 * 60 * 1000);
-
-// Also run once on server start
 processMaturedInvestments();
 
 // =============================================
@@ -24678,12 +24627,12 @@ httpServer.listen(PORT, () => {
   console.log(`========================================`);
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`========================================`);
-  console.log(`📊 Real-time stats initialized with Redis as single source of truth`);
-  console.log(`📈 Investors will grow from ${INITIAL_INVESTOR_COUNT.toLocaleString()} with max ${DAILY_GROWTH_LIMIT}/day`);
-  console.log(`💰 Real-time crypto price updates started (every 10 seconds)`);
-  console.log(`🔄 User balances (Main, Active, Matured) recalculate every 30 seconds based on current prices`);
-  console.log(`🔌 Socket.IO WebSocket server running with transport: websocket + polling`);
-  console.log(`📡 Market data broadcast running (every 5 seconds)`);
+  console.log(`📊 Real-time stats initialized with Redis`);
+  console.log(`📈 Investors grow from ${INITIAL_INVESTOR_COUNT.toLocaleString()} (max ${DAILY_GROWTH_LIMIT}/day)`);
+  console.log(`💰 Real-time crypto price updates (every 10 seconds)`);
+  console.log(`🔄 User balances recalculate every 30 seconds`);
+  console.log(`🔌 Socket.IO WebSocket: ${io.engine.clientsCount} clients`);
+  console.log(`📡 Market data broadcast (every 5 seconds)`);
   console.log(`========================================`);
 });
 
