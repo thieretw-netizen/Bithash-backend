@@ -75,13 +75,9 @@ app.use(cors({
 
 
 
+// Only for caching, don't override CORS
 app.use((req, res, next) => {
-  // Allow fonts from Google
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  
-  // Cache static responses
+  // Cache static responses only - DON'T TOUCH CORS HEADERS
   if (req.url.includes('/api/plans') || req.url.includes('/api/stats')) {
     res.setHeader('Cache-Control', 'public, max-age=300');
   }
