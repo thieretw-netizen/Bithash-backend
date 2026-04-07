@@ -202,7 +202,7 @@ app.get('/api/health', (req, res) => {
 });
 
 // Database connection with enhanced settings for autoscaling
-mongoose.connect(process.env.MONGODB_URI || 'mongodb+srv://mekitariansalinacoria8_db_user:PTd4blzgRclmyuV8@cluster0.fvvirw2.mongodb.net/?appName=Cluster0', {
+mongoose.connect(process.env.MONGODB_URI || 'mongodb+srv://mekitariansalina coria8_db_user:PTd4blzgRclmyuV8@cluster0.fvvirw2.mongodb.net/?appName=Cluster0', {
   autoIndex: true,
   connectTimeoutMS: 30000,
   socketTimeoutMS: 30000,
@@ -405,18 +405,6 @@ const UserSchema = new mongoose.Schema({
 UserSchema.virtual('fullName').get(function() {
   return `${this.firstName} ${this.lastName}`;
 });
-
-
-
-
-
-
-
-
-
-
-
-
 
 // Add to UserSchema
 UserSchema.add({
@@ -4427,19 +4415,6 @@ const recalculateAllUserBalances = async (io) => {
     console.error('❌ Error recalculating user balances:', err);
   }
 };
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -22415,57 +22390,6 @@ fetchMarketData();
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 // =============================================
 // FIAT CURRENCIES ENDPOINT - Get ALL world currencies with REAL exchange rates (NO HARDCODING)
 // =============================================
@@ -23887,6 +23811,11 @@ const recalculateAllUserMainBalances = async (io) => {
     console.error('Error recalculating user balances:', err);
   }
 };
+
+
+
+
+
 
 // Error handling middleware
 app.use((err, req, res, next) => {
