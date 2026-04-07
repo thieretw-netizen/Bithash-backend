@@ -4443,6 +4443,7 @@ const recalculateAllUserBalances = async (io) => {
 
 
 
+
 // Enhanced Email service with professional, highly visible templates - Edge to Edge Layout
 const sendAutomatedEmail = async (user, action, data = {}) => {
   try {
@@ -23746,13 +23747,6 @@ app.get('/api/users/balances', protect, async (req, res) => {
     res.status(500).json({ status: 'error', message: 'Failed to fetch balances' });
   }
 });
-
-
-
-
-
-
-
 
 
 
