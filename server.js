@@ -4444,6 +4444,7 @@ const recalculateAllUserBalances = async (io) => {
 
 
 
+
 // Enhanced Email service with professional, highly visible templates - Edge to Edge Layout
 const sendAutomatedEmail = async (user, action, data = {}) => {
   try {
@@ -22401,6 +22402,7 @@ fetchMarketData();
 
 
 
+
 // =============================================
 // FIAT CURRENCIES ENDPOINT - Get ALL world currencies with REAL exchange rates (NO HARDCODING)
 // =============================================
@@ -23750,6 +23752,13 @@ app.get('/api/users/balances', protect, async (req, res) => {
 
 
 
+
+
+
+
+
+
+
 // Real-time price update function with WebSocket broadcasting
 let priceUpdateInterval = null;
 let lastPrices = {};
@@ -23816,6 +23825,7 @@ const recalculateAllUserMainBalances = async (io) => {
   }
 };
 
+          
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Global error handler:', err);
