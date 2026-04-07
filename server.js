@@ -24201,7 +24201,7 @@ const setupMarketDataBroadcast = () => {
 // REAL-TIME PRICE UPDATE FUNCTION
 // =============================================
 
-let priceUpdateInterval = null;
+
 let globalCurrentPrices = {};
 
 const startRealTimePriceUpdates = () => {
