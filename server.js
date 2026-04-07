@@ -22262,10 +22262,6 @@ fetchMarketData();
 
 
 
-
-
-
-
 // SNIPPET B - ALL ENDPOINTS (including missing ones)
 // =============================================
 
@@ -23440,8 +23436,7 @@ const recalculateAllUserMainBalances = async (io) => {
     console.error('Error recalculating user balances:', err);
   }
 };
-
-// Error handling middleware
+                                            // Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Global error handler:', err);
   res.status(500).json({
