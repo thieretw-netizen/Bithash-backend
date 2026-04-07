@@ -23854,28 +23854,14 @@ app.use((req, res) => {
   });
 });
 
-// =============================================
-// FIXED: Create HTTP server and Socket.IO with proper configuration
-// =============================================
+// Create HTTP server and Socket.IO
 const PORT = process.env.PORT || 3000;
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: [
-      'https://bithhash.vercel.app', 
-      'https://website-backendd-1.onrender.com', 
-      'https://www.bithashcapital.live',
-      'https://bithash-rental.vercel.app',
-      'http://localhost:3000',
-      'http://localhost:5500'
-    ],
-    methods: ['GET', 'POST'],
-    credentials: true
-  },
-  transports: ['websocket', 'polling'],
-  allowEIO3: true,
-  pingTimeout: 60000,
-  pingInterval: 25000
+    origin: ['https://bithhash.vercel.app', 'https://website-backendd-1.onrender.com', 'https://www.bithashcapital.live'],
+    methods: ['GET', 'POST']
+  }
 });
 
 // Store io instance in app for use in routes
@@ -24123,55 +24109,18 @@ app.get('/api/stats/daily-progress', async (req, res) => {
   }
 });
 
-// =============================================
-// FIXED: Market WebSocket using Socket.IO (integrated, no conflict)
-// =============================================
-
-let marketPriceInterval = null;
-
-const setupMarketWebSocket = (io) => {
-  console.log('📊 Setting up integrated market WebSocket via Socket.IO...');
-  
-  // Handle market data subscriptions through Socket.IO
-  io.on('connection', (socket) => {
-    // Handle market data subscription
-    socket.on('subscribe_market', async () => {
-      console.log(`Client ${socket.id} subscribed to market data`);
-      
-      // Send initial market data immediately
-      const initialData = await fetchMarketData();
-      socket.emit('market_data', {
-        type: 'initial',
-        data: initialData,
-        timestamp: Date.now()
-      });
-      
-      // Mark this socket as subscribed to market data
-      socket.hasMarketSubscription = true;
-    });
-    
-    socket.on('unsubscribe_market', () => {
-      console.log(`Client ${socket.id} unsubscribed from market data`);
-      socket.hasMarketSubscription = false;
-    });
-    
-    socket.on('disconnect', () => {
-      console.log(`Client ${socket.id} disconnected`);
-    });
+// Add market WebSocket to your existing server
+const setupMarketWebSocket = (server) => {
+  const marketWss = new WebSocket.Server({ 
+    server, 
+    path: '/ws/market' 
   });
-  
-  // Broadcast market data to subscribed clients every 5 seconds
-  if (marketPriceInterval) clearInterval(marketPriceInterval);
-  
-  marketPriceInterval = setInterval(async () => {
+
+  const clients = new Set();
+  let priceInterval = null;
+
+  const broadcastPrices = async () => {
     try {
-      // Get all sockets with market subscriptions
-      const sockets = await io.fetchSockets();
-      const subscribedSockets = sockets.filter(s => s.hasMarketSubscription === true);
-      
-      if (subscribedSockets.length === 0) return;
-      
-      // Fetch latest market data
       const response = await axios.get(
         'https://api.coingecko.com/api/v3/coins/markets',
         {
@@ -24183,69 +24132,74 @@ const setupMarketWebSocket = (io) => {
           timeout: 5000
         }
       );
-      
-      if (response.data) {
+
+      if (response.data && clients.size > 0) {
         const updates = response.data.map(coin => ({
           assetId: coin.id,
-          symbol: coin.symbol,
-          name: coin.name,
           price: coin.current_price,
-          price_change_percentage_24h: coin.price_change_percentage_24h || 0,
-          volume: coin.total_volume,
-          market_cap: coin.market_cap
+          price_change_percentage_24h: coin.price_change_percentage_24h || 0
         }));
-        
-        // Send to all subscribed clients
-        subscribedSockets.forEach(socket => {
-          socket.emit('market_data', {
-            type: 'update',
-            data: updates,
-            timestamp: Date.now()
-          });
+
+        const message = JSON.stringify({
+          type: 'batch_update',
+          updates: updates,
+          timestamp: Date.now()
+        });
+
+        clients.forEach(client => {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(message);
+          }
         });
       }
     } catch (error) {
-      console.error('Market data broadcast error:', error);
+      console.error('WebSocket price broadcast error:', error);
     }
-  }, 5000);
-  
-  console.log('✅ Integrated market WebSocket running');
-};
+  };
 
-// Helper function to fetch market data
-const fetchMarketData = async () => {
-  try {
-    const response = await axios.get(
-      'https://api.coingecko.com/api/v3/coins/markets',
-      {
-        params: {
-          vs_currency: 'usd',
-          per_page: 50,
-          price_change_percentage: '24h'
-        },
-        timeout: 5000
+  marketWss.on('connection', (ws) => {
+    clients.add(ws);
+    console.log(`Market WebSocket client connected. Total: ${clients.size}`);
+
+    // Send initial data
+    (async () => {
+      const assets = await fetchMarketData();
+      ws.send(JSON.stringify({
+        type: 'initial_data',
+        assets: assets
+      }));
+    })();
+
+    // Start broadcasting if this is the first client
+    if (clients.size === 1 && !priceInterval) {
+      priceInterval = setInterval(broadcastPrices, 5000);
+    }
+
+    ws.on('message', (message) => {
+      try {
+        const data = JSON.parse(message);
+        if (data.type === 'subscribe') {
+          console.log('Client subscribed to price updates');
+        }
+      } catch (err) {
+        // Ignore invalid messages
       }
-    );
-    
-    return response.data.map(coin => ({
-      assetId: coin.id,
-      symbol: coin.symbol,
-      name: coin.name,
-      price: coin.current_price,
-      price_change_percentage_24h: coin.price_change_percentage_24h || 0,
-      volume: coin.total_volume,
-      market_cap: coin.market_cap
-    }));
-  } catch (error) {
-    console.error('Error fetching market data:', error);
-    return [];
-  }
+    });
+
+    ws.on('close', () => {
+      clients.delete(ws);
+      console.log(`Market WebSocket client disconnected. Total: ${clients.size}`);
+      
+      // Stop broadcasting if no clients left
+      if (clients.size === 0 && priceInterval) {
+        clearInterval(priceInterval);
+        priceInterval = null;
+      }
+    });
+  });
 };
 
-// =============================================
-// FIXED: Socket.IO connection handler with better error handling
-// =============================================
-
+// Socket.IO connection handler with stats broadcast and real-time balance updates
 io.on('connection', async (socket) => {
   console.log('New client connected:', socket.id);
   
@@ -24468,96 +24422,18 @@ processMaturedInvestments();
 // Start the investor growth job
 startInvestorGrowthJob();
 
-// =============================================
-// FIXED: Real-time price update function
-// =============================================
-
-let priceUpdateInterval = null;
-let currentPrices = {};
-
-const startRealTimePriceUpdates = () => {
-  if (priceUpdateInterval) clearInterval(priceUpdateInterval);
-  
-  // Update prices every 10 seconds for real-time fluctuations
-  priceUpdateInterval = setInterval(async () => {
-    try {
-      const assets = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'ADA', 'SHIB', 'AVAX', 'DOT', 'TRX', 'LINK', 'MATIC', 'LTC'];
-      const priceUpdates = {};
-      
-      for (const asset of assets) {
-        const price = await getCryptoPrice(asset);
-        if (price) {
-          priceUpdates[asset.toLowerCase()] = {
-            price: price,
-            timestamp: Date.now()
-          };
-        }
-      }
-      
-      if (Object.keys(priceUpdates).length > 0 && io) {
-        io.emit('price_update', priceUpdates);
-        currentPrices = priceUpdates;
-      }
-    } catch (err) {
-      console.error('Error in price update interval:', err);
-    }
-  }, 10000);
-};
-
-// =============================================
-// FIXED: Recalculate all user main balances
-// =============================================
-
-const recalculateAllUserMainBalances = async () => {
-  try {
-    const users = await User.find({}).select('_id');
-    
-    for (const user of users) {
-      const userAssetBalance = await UserAssetBalance.findOne({ user: user._id });
-      if (userAssetBalance) {
-        let totalMainBalance = 0;
-        
-        for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
-          if (balance > 0) {
-            const price = await getCryptoPrice(asset.toUpperCase());
-            if (price) {
-              totalMainBalance += balance * price;
-            }
-          }
-        }
-        
-        await User.findByIdAndUpdate(user._id, { 'balances.main': totalMainBalance });
-        
-        if (io) {
-          io.to(`user_${user._id}`).emit('balance_update', { main: totalMainBalance });
-        }
-      }
-    }
-    
-    console.log('Recalculated all user main balances based on current crypto prices');
-  } catch (err) {
-    console.error('Error recalculating user balances:', err);
-  }
-};
-
 // Start real-time price updates
-startRealTimePriceUpdates();
+startRealTimePriceUpdates(io);
 
 // Recalculate all user main balances every 5 minutes to ensure accuracy with price fluctuations
 setInterval(async () => {
-  await recalculateAllUserMainBalances();
+  await recalculateAllUserMainBalances(io);
 }, 5 * 60 * 1000);
-
-// =============================================
-// FIXED: Call setupMarketWebSocket with io instance
-// =============================================
-setupMarketWebSocket(io);
 
 // Graceful shutdown handler
 const gracefulShutdown = () => {
   console.log('Received shutdown signal. Cleaning up...');
   if (priceUpdateInterval) clearInterval(priceUpdateInterval);
-  if (marketPriceInterval) clearInterval(marketPriceInterval);
   stopInvestorGrowthJob();
   process.exit(0);
 };
@@ -24572,5 +24448,6 @@ httpServer.listen(PORT, () => {
   console.log(`📈 Investors will grow from ${INITIAL_INVESTOR_COUNT.toLocaleString()} with max ${DAILY_GROWTH_LIMIT}/day`);
   console.log(`💰 Real-time crypto price updates started (every 10 seconds)`);
   console.log(`🔄 User main balances will recalculate every 5 minutes based on current prices`);
-  console.log(`🔌 Socket.IO WebSocket server running on path: /socket.io/`);
 });
+
+
