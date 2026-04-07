@@ -46,35 +46,13 @@ app.use(helmet({
 }));
 
 
-// =============================================
-// ENHANCED CORS CONFIGURATION - FIXED FOR PRODUCTION
-// =============================================
-
-const allowedOrigins = [
-  'https://www.bithashcapital.live',
-  'https://bithashcapital.live',
-  'https://bithash-rental.vercel.app',
-  'https://bithash-backend.onrender.com',
-  'http://localhost:3000',
-  'http://localhost:5500',
-  'http://127.0.0.1:5500'
-];
-
-// Main CORS middleware
 app.use(cors({
-  origin: function(origin, callback) {
-    // Allow requests with no origin (like mobile apps, Postman, etc.)
-    if (!origin) return callback(null, true);
-    
-    if (allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, true);
-    } else {
-      console.warn(`CORS blocked request from origin: ${origin}`);
-      // For development, you might want to allow all
-      // callback(null, true); // Uncomment to allow all during debugging
-      callback(new Error('CORS policy: Origin not allowed'));
-    }
-  },
+  origin: [
+    'https://www.bithashcapital.live', 
+    'https://website-backendd-tzep.onrender.com', 
+    'https://bithash-rental.vercel.app/',
+    'https://bithash-backend.onrender.com'
+  ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: [
@@ -91,35 +69,24 @@ app.use(cors({
     'X-Rate-Limit-Limit',
     'X-Rate-Limit-Remaining',
     'X-Rate-Limit-Reset'
-  ],
-  preflightContinue: false,
-  optionsSuccessStatus: 204
+  ]
 }));
 
-// Handle preflight requests explicitly
-app.options('*', cors());
 
-// Fallback CORS headers for all responses
+
+
 app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  if (origin && allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CSRF-Token, X-Rate-Limit, X-Requested-With, Accept, Origin, X-2FA-Verified');
-  }
+  // Allow fonts from Google
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   
-  // Handle OPTIONS preflight
-  if (req.method === 'OPTIONS') {
-    return res.status(204).send();
+  // Cache static responses
+  if (req.url.includes('/api/plans') || req.url.includes('/api/stats')) {
+    res.setHeader('Cache-Control', 'public, max-age=300');
   }
-  
   next();
 });
-
-// Remove the old CORS configuration that's commented out
-// And remove the duplicate CORS middleware further down
-
 
 
 
@@ -4460,8 +4427,6 @@ const recalculateAllUserBalances = async (io) => {
     console.error('❌ Error recalculating user balances:', err);
   }
 };
-
-
 
 
 
@@ -22434,8 +22399,6 @@ fetchMarketData();
 
 
 
-
-
 // =============================================
 // FIAT CURRENCIES ENDPOINT - Get ALL world currencies with REAL exchange rates (NO HARDCODING)
 // =============================================
@@ -23858,7 +23821,6 @@ const recalculateAllUserMainBalances = async (io) => {
   }
 };
 
-          
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Global error handler:', err);
