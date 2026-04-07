@@ -46,13 +46,28 @@ app.use(helmet({
 }));
 
 
+// FIXED CORS Configuration - Allow your frontend domain properly
+const allowedOrigins = [
+  'https://www.bithashcapital.live',
+  'https://bithashcapital.live',
+  'https://bithash-rental.vercel.app',
+  'https://bithash-backend.onrender.com',
+  'http://localhost:3000',
+  'http://localhost:5500'
+];
+
 app.use(cors({
-  origin: [
-    'https://www.bithashcapital.live', 
-    'https://website-backendd-tzep.onrender.com', 
-    'https://bithash-rental.vercel.app/',
-    'https://bithash-backend.onrender.com'
-  ],
+  origin: function(origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.log('Blocked CORS request from origin:', origin);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: [
@@ -69,10 +84,30 @@ app.use(cors({
     'X-Rate-Limit-Limit',
     'X-Rate-Limit-Remaining',
     'X-Rate-Limit-Reset'
-  ]
+  ],
+  preflightContinue: false,
+  optionsSuccessStatus: 204
 }));
 
+// Handle preflight requests explicitly
+app.options('*', cors());
 
+// Also add manual CORS headers as a fallback
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CSRF-Token, X-Rate-Limit, X-Requested-With, Accept, Origin, X-2FA-Verified');
+  }
+  
+  // Handle preflight
+  if (req.method === 'OPTIONS') {
+    return res.status(204).send();
+  }
+  next();
+});
 
 
 app.use((req, res, next) => {
