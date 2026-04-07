@@ -3292,13 +3292,18 @@ const detectAndSetIPPreferences = async (userId, req) => {
         detectedCountry = countryCode;
         detectedCurrency = currencyCode;
         
-        // Map country to language
+        // Map country to language - CORRECT MAPPING WITH ROMANIAN
         const languageMap = {
           'ES': 'es', 'MX': 'es', 'AR': 'es', 'CO': 'es', 'CL': 'es', 'PE': 'es',
           'FR': 'fr', 'DE': 'de', 'IT': 'it', 'PT': 'pt', 'BR': 'pt',
           'JP': 'ja', 'CN': 'zh', 'RU': 'ru', 'KR': 'ko', 'NL': 'nl',
           'PL': 'pl', 'TR': 'tr', 'SE': 'sv', 'NO': 'no', 'DK': 'da',
-          'FI': 'fi', 'GR': 'el', 'CZ': 'cs', 'HU': 'hu', 'RO': 'ro'
+          'FI': 'fi', 'GR': 'el', 'CZ': 'cs', 'HU': 'hu', 'RO': 'ro', // ROMANIAN FIXED
+          'BG': 'bg', 'SK': 'sk', 'HR': 'hr', 'RS': 'sr', 'SI': 'sl',
+          'LT': 'lt', 'LV': 'lv', 'EE': 'et', 'IS': 'is', 'ZA': 'en',
+          'IN': 'hi', 'PK': 'ur', 'BD': 'bn', 'VN': 'vi', 'TH': 'th',
+          'ID': 'id', 'MY': 'ms', 'PH': 'tl', 'NG': 'en', 'KE': 'en',
+          'EG': 'ar', 'SA': 'ar', 'AE': 'ar', 'IL': 'he', 'IR': 'fa'
         };
         detectedLanguage = languageMap[countryCode] || 'en';
       }
@@ -3313,10 +3318,10 @@ const detectAndSetIPPreferences = async (userId, req) => {
           detectedCountry = countryCode;
           
           // Map country to currency
-          const currencyMap = { 'US': 'USD', 'GB': 'GBP', 'EU': 'EUR', 'JP': 'JPY', 'CA': 'CAD' };
+          const currencyMap = { 'US': 'USD', 'GB': 'GBP', 'EU': 'EUR', 'JP': 'JPY', 'CA': 'CAD', 'RO': 'RON' };
           detectedCurrency = currencyMap[countryCode] || 'USD';
           
-          const languageMap = { 'US': 'en', 'GB': 'en', 'EU': 'en', 'JP': 'ja', 'CA': 'en' };
+          const languageMap = { 'US': 'en', 'GB': 'en', 'EU': 'en', 'JP': 'ja', 'CA': 'en', 'RO': 'ro' };
           detectedLanguage = languageMap[countryCode] || 'en';
         }
       } catch (fallbackError) {
@@ -3583,7 +3588,7 @@ const getAllWorldCurrencies = async () => {
   const rates = await getFiatExchangeRates();
   if (!rates) return null;
   
-  // List of all major world currencies
+  // List of all major world currencies - COMPLETE LIST
   const allCurrencies = [
     { code: 'USD', name: 'US Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/us.png' },
     { code: 'EUR', name: 'Euro', symbol: '€', flag: 'https://flagcdn.com/w40/eu.png' },
@@ -3609,7 +3614,23 @@ const getAllWorldCurrencies = async () => {
     { code: 'RUB', name: 'Russian Ruble', symbol: '₽', flag: 'https://flagcdn.com/w40/ru.png' },
     { code: 'AED', name: 'UAE Dirham', symbol: 'د.إ', flag: 'https://flagcdn.com/w40/ae.png' },
     { code: 'SAR', name: 'Saudi Riyal', symbol: '﷼', flag: 'https://flagcdn.com/w40/sa.png' },
-    { code: 'ILS', name: 'Israeli Shekel', symbol: '₪', flag: 'https://flagcdn.com/w40/il.png' }
+    { code: 'ILS', name: 'Israeli Shekel', symbol: '₪', flag: 'https://flagcdn.com/w40/il.png' },
+    { code: 'RON', name: 'Romanian Leu', symbol: 'lei', flag: 'https://flagcdn.com/w40/ro.png' },
+    { code: 'KES', name: 'Kenyan Shilling', symbol: 'KSh', flag: 'https://flagcdn.com/w40/ke.png' },
+    { code: 'NGN', name: 'Nigerian Naira', symbol: '₦', flag: 'https://flagcdn.com/w40/ng.png' },
+    { code: 'THB', name: 'Thai Baht', symbol: '฿', flag: 'https://flagcdn.com/w40/th.png' },
+    { code: 'VND', name: 'Vietnamese Dong', symbol: '₫', flag: 'https://flagcdn.com/w40/vn.png' },
+    { code: 'IDR', name: 'Indonesian Rupiah', symbol: 'Rp', flag: 'https://flagcdn.com/w40/id.png' },
+    { code: 'MYR', name: 'Malaysian Ringgit', symbol: 'RM', flag: 'https://flagcdn.com/w40/my.png' },
+    { code: 'PHP', name: 'Philippine Peso', symbol: '₱', flag: 'https://flagcdn.com/w40/ph.png' },
+    { code: 'PKR', name: 'Pakistani Rupee', symbol: '₨', flag: 'https://flagcdn.com/w40/pk.png' },
+    { code: 'BDT', name: 'Bangladeshi Taka', symbol: '৳', flag: 'https://flagcdn.com/w40/bd.png' },
+    { code: 'EGP', name: 'Egyptian Pound', symbol: 'E£', flag: 'https://flagcdn.com/w40/eg.png' },
+    { code: 'UAH', name: 'Ukrainian Hryvnia', symbol: '₴', flag: 'https://flagcdn.com/w40/ua.png' },
+    { code: 'KZT', name: 'Kazakhstani Tenge', symbol: '₸', flag: 'https://flagcdn.com/w40/kz.png' },
+    { code: 'CLP', name: 'Chilean Peso', symbol: '$', flag: 'https://flagcdn.com/w40/cl.png' },
+    { code: 'COP', name: 'Colombian Peso', symbol: '$', flag: 'https://flagcdn.com/w40/co.png' },
+    { code: 'PEN', name: 'Peruvian Sol', symbol: 'S/', flag: 'https://flagcdn.com/w40/pe.png' }
   ];
   
   // Add exchange rates to each currency
@@ -4295,6 +4316,8 @@ const calculateReferralCommissions = async (investment) => {
     // Don't throw error to avoid disrupting investment process
   }
 };
+
+
 
 
 
@@ -22262,6 +22285,13 @@ fetchMarketData();
 
 
 
+
+
+
+
+
+
+// =============================================
 // SNIPPET B - ALL ENDPOINTS (including missing ones)
 // =============================================
 
@@ -22288,7 +22318,9 @@ app.get('/api/fiat-currencies', async (req, res) => {
         { code: 'KRW', name: 'South Korean Won', symbol: '₩', flag: 'https://flagcdn.com/w40/kr.png', exchangeRate: 1330 },
         { code: 'SGD', name: 'Singapore Dollar', symbol: 'S$', flag: 'https://flagcdn.com/w40/sg.png', exchangeRate: 1.34 },
         { code: 'CHF', name: 'Swiss Franc', symbol: 'Fr', flag: 'https://flagcdn.com/w40/ch.png', exchangeRate: 0.88 },
-        { code: 'ZAR', name: 'South African Rand', symbol: 'R', flag: 'https://flagcdn.com/w40/za.png', exchangeRate: 18.5 }
+        { code: 'ZAR', name: 'South African Rand', symbol: 'R', flag: 'https://flagcdn.com/w40/za.png', exchangeRate: 18.5 },
+        { code: 'RON', name: 'Romanian Leu', symbol: 'lei', flag: 'https://flagcdn.com/w40/ro.png', exchangeRate: 4.97 },
+        { code: 'KES', name: 'Kenyan Shilling', symbol: 'KSh', flag: 'https://flagcdn.com/w40/ke.png', exchangeRate: 130.5 }
       ];
       return res.status(200).json({ currencies: fallbackCurrencies });
     }
@@ -22300,7 +22332,9 @@ app.get('/api/fiat-currencies', async (req, res) => {
     const fallbackCurrencies = [
       { code: 'USD', name: 'US Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/us.png', exchangeRate: 1 },
       { code: 'EUR', name: 'Euro', symbol: '€', flag: 'https://flagcdn.com/w40/eu.png', exchangeRate: 0.92 },
-      { code: 'GBP', name: 'British Pound', symbol: '£', flag: 'https://flagcdn.com/w40/gb.png', exchangeRate: 0.79 }
+      { code: 'GBP', name: 'British Pound', symbol: '£', flag: 'https://flagcdn.com/w40/gb.png', exchangeRate: 0.79 },
+      { code: 'RON', name: 'Romanian Leu', symbol: 'lei', flag: 'https://flagcdn.com/w40/ro.png', exchangeRate: 4.97 },
+      { code: 'KES', name: 'Kenyan Shilling', symbol: 'KSh', flag: 'https://flagcdn.com/w40/ke.png', exchangeRate: 130.5 }
     ];
     res.status(200).json({ currencies: fallbackCurrencies });
   }
@@ -22338,7 +22372,7 @@ app.get('/api/convert/assets', protect, async (req, res) => {
 });
 
 // =============================================
-// CONVERT ENDPOINT - Execute crypto conversion (buy/sell pattern)
+// CONVERT ENDPOINT - Execute crypto conversion (buy/sell pattern) WITH FEE
 // =============================================
 app.post('/api/convert', protect, async (req, res) => {
   try {
@@ -22378,7 +22412,10 @@ app.post('/api/convert', protect, async (req, res) => {
     }
     
     const usdValue = amount * fromPrice;
-    const toAmount = usdValue / toPrice;
+    const CONVERSION_FEE_PERCENT = 0.5; // 0.5% fee
+    const feeAmount = usdValue * (CONVERSION_FEE_PERCENT / 100);
+    const usdValueAfterFee = usdValue - feeAmount;
+    const toAmount = usdValueAfterFee / toPrice;
     
     // Deduct from asset
     userAssetBalance.balances[fromAssetLower] -= amount;
@@ -22392,8 +22429,24 @@ app.post('/api/convert', protect, async (req, res) => {
     userAssetBalance.lastUpdated = new Date();
     await userAssetBalance.save();
     
+    // Track revenue from conversion fee
+    await PlatformRevenue.create({
+      source: 'buy_fee',
+      amount: feeAmount,
+      currency: 'USD',
+      userId: userId,
+      description: `Conversion fee from ${fromAssetLower} to ${toAssetLower}`,
+      metadata: {
+        fromAsset: fromAssetLower,
+        toAsset: toAssetLower,
+        amount: amount,
+        toAmount: toAmount,
+        usdValue: usdValue,
+        feePercentage: CONVERSION_FEE_PERCENT
+      }
+    });
+    
     // Update main balance (value of assets changes with price fluctuations)
-    // The main balance is the USD value of all assets
     let totalMainBalance = 0;
     for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
       if (balance > 0) {
@@ -22420,6 +22473,8 @@ app.post('/api/convert', protect, async (req, res) => {
       status: 'completed',
       method: fromAsset.toUpperCase(),
       reference: `${reference}-SELL`,
+      fee: feeAmount,
+      netAmount: usdValueAfterFee,
       sellDetails: {
         asset: fromAsset.toUpperCase(),
         amountUSD: usdValue,
@@ -22428,33 +22483,31 @@ app.post('/api/convert', protect, async (req, res) => {
         buyingPrice: fromPrice,
         profitLoss: 0,
         profitLossPercentage: 0
-      },
-      fee: 0,
-      netAmount: usdValue
+      }
     });
     
     // Buy transaction (to asset)
     await Transaction.create({
       user: userId,
       type: 'buy',
-      amount: usdValue,
+      amount: usdValueAfterFee,
       asset: toAsset.toUpperCase(),
       assetAmount: toAmount,
       currency: 'USD',
       status: 'completed',
       method: toAsset.toUpperCase(),
       reference: `${reference}-BUY`,
+      fee: 0,
+      netAmount: usdValueAfterFee,
       buyDetails: {
         asset: toAsset.toUpperCase(),
-        amountUSD: usdValue,
+        amountUSD: usdValueAfterFee,
         assetAmount: toAmount,
         buyingPrice: toPrice,
         currentPrice: toPrice,
         profitLoss: 0,
         profitLossPercentage: 0
-      },
-      fee: 0,
-      netAmount: usdValue
+      }
     });
     
     // Emit socket updates for real-time balance changes
@@ -22466,11 +22519,16 @@ app.post('/api/convert', protect, async (req, res) => {
           const price = await getCryptoPrice(asset.toUpperCase());
           updatedBalances[asset] = {
             balance: balance,
-            usdValue: balance * (price || 0)
+            usdValue: balance * (price || 0),
+            id: asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset,
+            avgPrice: 0,
+            unrealizedPnl: 0,
+            unrealizedPnlPercent: 0,
+            transactions: []
           };
         }
       }
-      io.to(`user_${userId}`).emit('asset_balances_update', updatedBalances);
+      io.to(`user_${userId}`).emit('asset_balances_update', Object.values(updatedBalances));
       io.to(`user_${userId}`).emit('balance_update', { main: totalMainBalance });
     }
     
@@ -22483,6 +22541,9 @@ app.post('/api/convert', protect, async (req, res) => {
         toAsset: toAssetLower,
         toAmount: toAmount,
         usdValue: usdValue,
+        fee: feeAmount,
+        feePercentage: CONVERSION_FEE_PERCENT,
+        usdValueAfterFee: usdValueAfterFee,
         exchangeRate: fromPrice / toPrice
       }
     });
@@ -22837,14 +22898,20 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       if (isCryptoDeposit && assetSymbol) {
         const updatedAssetBalance = await UserAssetBalance.findOne({ user: user._id });
         if (updatedAssetBalance) {
-          const assetData = {};
+          const assetData = [];
           for (const [asset, balance] of Object.entries(updatedAssetBalance.balances)) {
             if (balance > 0) {
               const price = await getCryptoPrice(asset.toUpperCase());
-              assetData[asset] = {
+              assetData.push({
+                symbol: asset,
                 balance: balance,
-                usdValue: balance * (price || 0)
-              };
+                usdValue: balance * (price || 0),
+                id: asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset,
+                avgPrice: 0,
+                unrealizedPnl: 0,
+                unrealizedPnlPercent: 0,
+                transactions: updatedAssetBalance.history.filter(h => h.asset === asset).slice(-10)
+              });
             }
           }
           io.to(`user_${user._id}`).emit('asset_balances_update', assetData);
@@ -23059,14 +23126,20 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
     if (io) {
       io.to(`user_${withdrawal.user._id}`).emit('balance_update', { main: totalMainBalance });
       if (isCryptoWithdrawal && assetSymbol && updatedAssetBalance) {
-        const assetData = {};
+        const assetData = [];
         for (const [asset, balance] of Object.entries(updatedAssetBalance.balances)) {
           if (balance > 0) {
             const price = await getCryptoPrice(asset.toUpperCase());
-            assetData[asset] = {
+            assetData.push({
+              symbol: asset,
               balance: balance,
-              usdValue: balance * (price || 0)
-            };
+              usdValue: balance * (price || 0),
+              id: asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset,
+              avgPrice: 0,
+              unrealizedPnl: 0,
+              unrealizedPnlPercent: 0,
+              transactions: updatedAssetBalance.history.filter(h => h.asset === asset).slice(-10)
+            });
           }
         }
         io.to(`user_${withdrawal.user._id}`).emit('asset_balances_update', assetData);
@@ -23210,14 +23283,20 @@ app.post('/api/buy', protect, async (req, res) => {
     if (io) {
       io.to(`user_${userId}`).emit('balance_update', { main: user.balances.main, matured: user.balances.matured });
       
-      const assetData = {};
+      const assetData = [];
       for (const [a, balance] of Object.entries(userAssetBalance.balances)) {
         if (balance > 0) {
           const cryptoPrice = await getCryptoPrice(a.toUpperCase());
-          assetData[a] = {
+          assetData.push({
+            symbol: a,
             balance: balance,
-            usdValue: balance * (cryptoPrice || 0)
-          };
+            usdValue: balance * (cryptoPrice || 0),
+            id: a === 'btc' ? 'bitcoin' : a === 'eth' ? 'ethereum' : a,
+            avgPrice: 0,
+            unrealizedPnl: 0,
+            unrealizedPnlPercent: 0,
+            transactions: userAssetBalance.history.filter(h => h.asset === a).slice(-10)
+          });
         }
       }
       io.to(`user_${userId}`).emit('asset_balances_update', assetData);
@@ -23338,14 +23417,20 @@ app.post('/api/sell', protect, async (req, res) => {
     if (io) {
       io.to(`user_${userId}`).emit('balance_update', { main: user.balances.main, matured: user.balances.matured });
       
-      const assetData = {};
+      const assetData = [];
       for (const [a, balance] of Object.entries(userAssetBalance.balances)) {
         if (balance > 0) {
           const cryptoPrice = await getCryptoPrice(a.toUpperCase());
-          assetData[a] = {
+          assetData.push({
+            symbol: a,
             balance: balance,
-            usdValue: balance * (cryptoPrice || 0)
-          };
+            usdValue: balance * (cryptoPrice || 0),
+            id: a === 'btc' ? 'bitcoin' : a === 'eth' ? 'ethereum' : a,
+            avgPrice: 0,
+            unrealizedPnl: 0,
+            unrealizedPnlPercent: 0,
+            transactions: userAssetBalance.history.filter(h => h.asset === a).slice(-10)
+          });
         }
       }
       io.to(`user_${userId}`).emit('asset_balances_update', assetData);
@@ -23359,6 +23444,73 @@ app.post('/api/sell', protect, async (req, res) => {
   } catch (err) {
     console.error('Sell error:', err);
     res.status(500).json({ status: 'error', message: 'Sale failed' });
+  }
+});
+
+// =============================================
+// GET USER ASSETS BALANCES ENDPOINT
+// =============================================
+app.get('/api/users/assets', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
+    
+    if (!userAssetBalance) {
+      return res.status(200).json([]);
+    }
+    
+    const assetData = [];
+    for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
+      if (balance > 0) {
+        const price = await getCryptoPrice(asset.toUpperCase());
+        const currentValue = balance * (price || 0);
+        
+        // Calculate average buying price from history
+        const buyTransactions = userAssetBalance.history.filter(h => h.asset === asset && h.type === 'buy');
+        let totalSpent = 0;
+        let totalBought = 0;
+        buyTransactions.forEach(t => {
+          totalSpent += t.usdValue;
+          totalBought += t.amount;
+        });
+        const avgPrice = totalBought > 0 ? totalSpent / totalBought : 0;
+        const unrealizedPnl = currentValue - totalSpent;
+        const unrealizedPercentage = totalSpent > 0 ? (unrealizedPnl / totalSpent) * 100 : 0;
+        
+        assetData.push({
+          symbol: asset,
+          balance: balance,
+          currentValue: currentValue,
+          avgPrice: avgPrice,
+          unrealizedPnl: unrealizedPnl,
+          unrealizedPnlPercent: unrealizedPercentage,
+          id: asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset,
+          transactions: userAssetBalance.history.filter(h => h.asset === asset).slice(-20)
+        });
+      }
+    }
+    
+    res.status(200).json(assetData);
+  } catch (err) {
+    console.error('Error fetching user assets:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch assets' });
+  }
+});
+
+// =============================================
+// GET USER BALANCES ENDPOINT
+// =============================================
+app.get('/api/users/balances', protect, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).select('balances');
+    res.status(200).json({
+      main: user.balances.main,
+      active: user.balances.active,
+      matured: user.balances.matured
+    });
+  } catch (err) {
+    console.error('Error fetching balances:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch balances' });
   }
 });
 
@@ -23404,7 +23556,7 @@ const startRealTimePriceUpdates = (io) => {
   }, 10000);
 };
 
-// Function to recalculate user main balances based on current crypto prices
+// Function to recalculate all user main balances based on current crypto prices
 const recalculateAllUserMainBalances = async (io) => {
   try {
     const users = await User.find({}).select('_id');
@@ -23436,7 +23588,8 @@ const recalculateAllUserMainBalances = async (io) => {
     console.error('Error recalculating user balances:', err);
   }
 };
-                                            // Error handling middleware
+
+// Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Global error handler:', err);
   res.status(500).json({
@@ -23827,22 +23980,36 @@ io.on('connection', async (socket) => {
         // Send current asset balances
         const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
         if (userAssetBalance) {
-          const assetData = {};
+          const assetData = [];
           for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
             if (balance > 0) {
               const price = await getCryptoPrice(asset.toUpperCase());
-              assetData[asset] = {
+              // Calculate average buying price from history
+              const buyTransactions = userAssetBalance.history.filter(h => h.asset === asset && h.type === 'buy');
+              let totalSpent = 0;
+              let totalBought = 0;
+              buyTransactions.forEach(t => {
+                totalSpent += t.usdValue;
+                totalBought += t.amount;
+              });
+              const avgPrice = totalBought > 0 ? totalSpent / totalBought : 0;
+              const currentValue = balance * (price || 0);
+              const unrealizedPnl = currentValue - totalSpent;
+              const unrealizedPercentage = totalSpent > 0 ? (unrealizedPnl / totalSpent) * 100 : 0;
+              
+              assetData.push({
+                symbol: asset,
                 balance: balance,
-                usdValue: balance * (price || 0),
+                currentValue: currentValue,
+                avgPrice: avgPrice,
+                unrealizedPnl: unrealizedPnl,
+                unrealizedPnlPercent: unrealizedPercentage,
                 id: asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset,
-                avgPrice: 0,
-                unrealizedPnl: 0,
-                unrealizedPnlPercent: 0,
                 transactions: userAssetBalance.history.filter(h => h.asset === asset).slice(-10)
-              };
+              });
             }
           }
-          socket.emit('asset_balances_update', Object.values(assetData));
+          socket.emit('asset_balances_update', assetData);
         }
         
         // Send user preferences
