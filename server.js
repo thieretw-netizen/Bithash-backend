@@ -47,28 +47,12 @@ app.use(helmet({
 
 
 app.use(cors({
-  origin: function(origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
-    
-    const allowedOrigins = [
-      'https://www.bithashcapital.live',
-      'https://bithashcapital.live',
-      'https://website-backendd-tzep.onrender.com',
-      'https://bithash-rental.vercel.app',
-      'https://bithash-backend.onrender.com',
-      'http://localhost:3000',
-      'http://localhost:5500',
-      'http://127.0.0.1:5500'
-    ];
-    
-    if (allowedOrigins.indexOf(origin) !== -1 || origin.endsWith('.vercel.app')) {
-      callback(null, true);
-    } else {
-      console.log('Blocked origin:', origin);
-      callback(null, true); // Still allow but log - change to false to block
-    }
-  },
+  origin: [
+    'https://www.bithashcapital.live', 
+    'https://website-backendd-tzep.onrender.com', 
+    'https://bithash-rental.vercel.app/',
+    'https://bithash-backend.onrender.com'
+  ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: [
@@ -85,13 +69,9 @@ app.use(cors({
     'X-Rate-Limit-Limit',
     'X-Rate-Limit-Remaining',
     'X-Rate-Limit-Reset'
-  ],
-  preflightContinue: false,
-  optionsSuccessStatus: 204
+  ]
 }));
 
-// Add OPTIONS handling for all routes
-app.options('*', cors());
 
 
 
@@ -22419,6 +22399,7 @@ fetchMarketData();
 
 
 
+
 // =============================================
 // FIAT CURRENCIES ENDPOINT - Get ALL world currencies with REAL exchange rates (NO HARDCODING)
 // =============================================
@@ -22592,6 +22573,7 @@ app.get('/api/fiat-currencies', async (req, res) => {
     });
   }
 });
+
 // =============================================
 // CONVERT ASSETS ENDPOINT - Get available target cryptos for conversion
 // =============================================
@@ -23841,7 +23823,7 @@ const recalculateAllUserMainBalances = async (io) => {
   }
 };
 
-// Error handling middleware
+      // Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Global error handler:', err);
   res.status(500).json({
@@ -23863,14 +23845,9 @@ const PORT = process.env.PORT || 3000;
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: ['https://www.bithashcapital.live', 'https://bithashcapital.live', 'https://bithash-backend.onrender.com', 'https://bithhash.vercel.app', 'https://website-backendd-1.onrender.com'],
-    methods: ['GET', 'POST'],
-    credentials: true,
-    transports: ['websocket', 'polling']
-  },
-  allowEIO3: true,
-  pingTimeout: 60000,
-  pingInterval: 25000
+    origin: ['https://bithhash.vercel.app', 'https://website-backendd-1.onrender.com', 'https://www.bithashcapital.live'],
+    methods: ['GET', 'POST']
+  }
 });
 
 // Store io instance in app for use in routes
