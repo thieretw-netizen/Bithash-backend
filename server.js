@@ -23,12 +23,12 @@ const speakeasy = require('speakeasy');
 const { v4: uuidv4 } = require('uuid');
 const WebSocket = require('ws');
 const OpenAI = require('openai');
-
+// Initialize Express app
 const app = express();
 const { createServer } = require('http');
 const { Server } = require('socket.io');
 app.set('trust proxy', 1);
-
+// FIXED Helmet Configuration - Remove unsafe Cross-Origin-Opener-Policy
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -39,11 +39,12 @@ app.use(helmet({
       connectSrc: ["'self'", "https://api.ipinfo.io", "https://website-backendd-1.onrender.com", "https://api.coingecko.com"],
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
       objectSrc: ["'none'"],
-      frameSrc: ["'self'", "https://accounts.google.com"]
+      frameSrc: ["'self'", "https://accounts.google.com"] // Added for Google OAuth
     }
   },
-  crossOriginOpenerPolicy: { policy: "unsafe-none" }
+  crossOriginOpenerPolicy: { policy: "unsafe-none" } // FIXED: This resolves the window.postMessage block
 }));
+
 
 app.use(cors({
   origin: [
@@ -71,16 +72,23 @@ app.use(cors({
   ]
 }));
 
+
+
+
 app.use((req, res, next) => {
+  // Allow fonts from Google
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   
+  // Cache static responses
   if (req.url.includes('/api/plans') || req.url.includes('/api/stats')) {
     res.setHeader('Cache-Control', 'public, max-age=300');
   }
   next();
 });
+
+
 
 app.use(express.json({ limit: '10kb' }));
 app.use(express.urlencoded({ extended: true, limit: '10kb' }));
@@ -89,6 +97,7 @@ app.use(mongoSanitize());
 app.use(xss());
 app.use(hpp());
 
+// Redis connection with enhanced settings for autoscaling (MOVE THIS UP)
 const redis = new Redis({
   host: process.env.REDIS_HOST || 'redis-14450.c276.us-east-1-2.ec2.redns.redis-cloud.com',
   port: process.env.REDIS_PORT || 14450,
@@ -100,7 +109,7 @@ const redis = new Redis({
   maxRetriesPerRequest: 3,
   enableReadyCheck: true,
   lazyConnect: false,
-  keepAlive: 10000,
+  keepAlive: 10000, // Keep Redis connections alive
   connectTimeout: 10000
 });
 
@@ -112,22 +121,28 @@ redis.on('connect', () => {
   console.log('Redis connected successfully');
 });
 
+// Helper function to get real client IP from request (exact location, not Cloudflare)
 const getRealClientIP = (req) => {
+  // Check X-Forwarded-For header first (this is what Render uses)
   const forwardedFor = req.headers['x-forwarded-for'];
   if (forwardedFor) {
+    // Get the first IP in the list (the real client IP)
     return forwardedFor.split(',')[0].trim();
   }
   
+  // Check Cloudflare headers - we want the REAL IP, not Cloudflare's
   const cfConnectingIp = req.headers['cf-connecting-ip'];
   if (cfConnectingIp) {
     return cfConnectingIp;
   }
   
+  // Check other common proxy headers
   const realIp = req.headers['x-real-ip'];
   if (realIp) {
     return realIp;
   }
   
+  // Fallback to other headers or remote address
   return req.ip || 
          req.connection?.remoteAddress || 
          req.socket?.remoteAddress || 
@@ -135,13 +150,14 @@ const getRealClientIP = (req) => {
          '0.0.0.0';
 };
 
+// Rate limiting with Redis store (required for autoscaling)
 const apiLimiter = rateLimit({
   store: new RedisStore({
     client: redis,
     prefix: 'rl:api:',
     sendCommand: (...args) => redis.call(...args)
   }),
-  windowMs: 15 * 60 * 1000,
+  windowMs: 15 * 60 * 1000, // 15 minutes
   max: 1000,
   message: 'Too many requests from this IP, please try again later',
   keyGenerator: (req) => {
@@ -155,7 +171,7 @@ const authLimiter = rateLimit({
     prefix: 'rl:auth:',
     sendCommand: (...args) => redis.call(...args)
   }),
-  windowMs: 60 * 60 * 1000,
+  windowMs: 60 * 60 * 1000, // 1 hour
   max: 200,
   message: 'Too many login attempts, please try again later',
   keyGenerator: (req) => {
@@ -168,6 +184,7 @@ app.use('/api/login', authLimiter);
 app.use('/api/signup', authLimiter);
 app.use('/api/auth/forgot-password', authLimiter);
 
+// Health check endpoint required for Render autoscaling
 app.get('/health', (req, res) => {
   res.status(200).json({ 
     status: 'healthy',
@@ -184,14 +201,15 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// Database connection with enhanced settings for autoscaling
 mongoose.connect(process.env.MONGODB_URI || 'mongodb+srv://mekitariansalinacoria8_db_user:PTd4blzgRclmyuV8@cluster0.fvvirw2.mongodb.net/?appName=Cluster0', {
   autoIndex: true,
   connectTimeoutMS: 30000,
   socketTimeoutMS: 30000,
-  maxPoolSize: 50,
-  minPoolSize: 5,
-  maxIdleTimeMS: 10000,
-  waitQueueTimeoutMS: 5000,
+  maxPoolSize: 50, // Connection pool for each instance
+  minPoolSize: 5,  // Minimum connections to keep alive
+  maxIdleTimeMS: 10000, // Close idle connections
+  waitQueueTimeoutMS: 5000, // How long to wait for a connection
   retryWrites: true,
   retryReads: true
 })
@@ -201,6 +219,7 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb+srv://mekitariansalinacoria
   process.exit(1);
 });
 
+// Create transporter function for reusable email configuration
 const createTransporter = (user, pass) => {
   return nodemailer.createTransport({
     host: process.env.EMAIL_HOST,
@@ -219,28 +238,34 @@ const createTransporter = (user, pass) => {
   });
 };
 
+// INFO email
 const infoTransporter = createTransporter(
   process.env.EMAIL_INFO_USER,
   process.env.EMAIL_INFO_PASS
 );
 
+// SUPPORT email
 const supportTransporter = createTransporter(
   process.env.EMAIL_SUPPORT_USER,
   process.env.EMAIL_SUPPORT_PASS
 );
 
+// Default transporter (for backward compatibility, uses INFO as default)
 const transporter = infoTransporter;
 
+// Google OAuth client with enhanced configuration
 const googleClient = new OAuth2Client({
   clientId: process.env.GOOGLE_CLIENT_ID || '634814462335-9o4t8q95c4orcsd9sijjl52374g6vm85.apps.googleusercontent.com',
   clientSecret: process.env.GOOGLE_CLIENT_SECRET,
   redirectUri: process.env.GOOGLE_REDIRECT_URI
 });
 
+// JWT configuration with stronger security
 const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString('hex');
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7200s';
-const JWT_COOKIE_EXPIRES = process.env.JWT_COOKIE_EXPIRES || 0.083;
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7200s'; // 2 hours in seconds
+const JWT_COOKIE_EXPIRES = process.env.JWT_COOKIE_EXPIRES || 0.083; // 2 hours in days (2/24)
 
+// Enhanced database models with full indexes and validation
 const UserSchema = new mongoose.Schema({
   firstName: { type: String, required: [true, 'First name is required'], trim: true, maxlength: [50, 'First name cannot be longer than 50 characters'] },
   lastName: { type: String, required: [true, 'Last name is required'], trim: true, maxlength: [50, 'Last name cannot be longer than 50 characters'] },
@@ -320,10 +345,9 @@ const UserSchema = new mongoose.Schema({
       sms: { type: Boolean, default: false },
       push: { type: Boolean, default: true }
     },
-    theme: { type: String, enum: ['light', 'dark'], default: 'dark' },
-    language: { type: String, default: 'en' },
-    currency: { type: String, default: 'USD' }
+    theme: { type: String, enum: ['light', 'dark'], default: 'dark' }
   },
+  // NEW: Location tracking fields - exact location
   location: {
     lastKnown: {
       lat: { type: Number },
@@ -352,6 +376,7 @@ const UserSchema = new mongoose.Schema({
       timestamp: { type: Date, default: Date.now }
     }]
   },
+  // NEW: Cookie preferences
   cookiePreferences: {
     consent: { type: String, enum: ['all', 'essential', 'functional', 'analytics', 'custom', 'reject'], default: 'essential' },
     settings: {
@@ -363,6 +388,7 @@ const UserSchema = new mongoose.Schema({
     updatedAt: { type: Date },
     ipAddress: { type: String }
   },
+  // IP-based preferences (language and currency from first visit)
   ipPreferences: {
     language: { type: String, default: 'en' },
     currency: { type: String, default: 'USD' },
@@ -380,24 +406,38 @@ UserSchema.virtual('fullName').get(function() {
   return `${this.firstName} ${this.lastName}`;
 });
 
+
+
+
+
+
+
+
+
+
+
+
+
+// Add to UserSchema
 UserSchema.add({
   referralStats: {
     totalReferrals: { type: Number, default: 0 },
     totalEarnings: { type: Number, default: 0 },
     availableBalance: { type: Number, default: 0 },
     withdrawn: { type: Number, default: 0 },
-    referralTier: { type: Number, default: 1 },
+    referralTier: { type: Number, default: 1 }, // 1-5 based on performance
   },
   referralHistory: [{
     referredUser: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     amount: Number,
     percentage: Number,
-    level: Number,
+    level: Number, // 1 for direct, 2 for indirect, etc.
     date: { type: Date, default: Date.now },
     status: { type: String, enum: ['pending', 'available', 'withdrawn'], default: 'pending' }
   }]
 });
 
+// Add to UserSchema
 UserSchema.add({
   downlineStats: {
     totalDownlines: { type: Number, default: 0 },
@@ -414,6 +454,8 @@ UserSchema.index({ referredBy: 1 });
 UserSchema.index({ createdAt: -1 });
 
 const User = mongoose.model('User', UserSchema);
+
+
 
 const TranslationSchema = new mongoose.Schema({
   language: {
@@ -447,12 +489,15 @@ const TranslationSchema = new mongoose.Schema({
   timestamps: true
 });
 
+// Compound index for efficient lookups
 TranslationSchema.index({ language: 1, key: 1, namespace: 1 }, { unique: true });
 TranslationSchema.index({ language: 1, namespace: 1 });
 TranslationSchema.index({ isActive: 1 });
 
 const Translation = mongoose.model('Translation', TranslationSchema);
 
+
+// Downline Relationship Schema
 const DownlineRelationshipSchema = new mongoose.Schema({
   upline: {
     type: mongoose.Schema.Types.ObjectId,
@@ -504,16 +549,19 @@ const DownlineRelationshipSchema = new mongoose.Schema({
   timestamps: true
 });
 
+// Index to ensure unique downline relationships
 DownlineRelationshipSchema.index({ downline: 1 }, { unique: true });
 DownlineRelationshipSchema.index({ upline: 1, downline: 1 }, { unique: true });
 DownlineRelationshipSchema.index({ status: 1 });
 
+// Virtual for relationship description
 DownlineRelationshipSchema.virtual('relationshipDescription').get(function() {
   return `${this.downline} is downline of ${this.upline} with ${this.commissionPercentage}% commission`;
 });
 
 const DownlineRelationship = mongoose.model('DownlineRelationship', DownlineRelationshipSchema);
 
+// Commission History Schema
 const CommissionHistorySchema = new mongoose.Schema({
   upline: {
     type: mongoose.Schema.Types.ObjectId,
@@ -574,6 +622,7 @@ CommissionHistorySchema.index({ investment: 1 });
 
 const CommissionHistory = mongoose.model('CommissionHistory', CommissionHistorySchema);
 
+// Commission Settings Schema
 const CommissionSettingsSchema = new mongoose.Schema({
   commissionPercentage: {
     type: Number,
@@ -602,7 +651,13 @@ const CommissionSettingsSchema = new mongoose.Schema({
 
 const CommissionSettings = mongoose.model('CommissionSettings', CommissionSettingsSchema);
 
+
+
+
+
+// Enhanced User Log Schema - Comprehensive Activity Tracking
 const UserLogSchema = new mongoose.Schema({
+  // Core User Information
   user: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -623,45 +678,77 @@ const UserLogSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+
+  // Activity Details
   action: {
     type: String,
     required: true,
     enum: [
+      // Authentication & Session
       'signup', 'login', 'logout', 'login_attempt', 'session_created', 
       'session_timeout', 'failed_login', 'suspicious_activity',
+      
+      // Password Management
       'password_change', 'password_reset_request', 'password_reset_complete',
+      
+      // Profile & Account
       'profile_update', 'profile_view', 'account_settings_update',
       'email_verification', 'account_deletion', 'account_suspended',
+      
+      // Security
       '2fa_enable', '2fa_disable', '2fa_verification', 'security_settings_update',
       'api_key_create', 'api_key_delete', 'api_key_regenerate',
       'device_login', 'device_verification', 'trusted_device_added',
+      
+      // Financial - Deposits
       'deposit_created', 'deposit_pending', 'deposit_completed', 'deposit_failed',
       'deposit_cancelled', 'btc_deposit_initiated', 'card_deposit_attempt',
+      
+      // Financial - Withdrawals
       'withdrawal_created', 'withdrawal_pending', 'withdrawal_completed', 
       'withdrawal_failed', 'withdrawal_cancelled', 'btc_withdrawal_initiated',
+      
+      // Financial - Transfers
       'transfer_created', 'transfer_completed', 'transfer_failed',
       'internal_transfer', 'balance_transfer',
+      
+      // Financial - Buy/Sell (Replacing Conversion)
       'buy_created', 'buy_completed', 'buy_failed',
       'sell_created', 'sell_completed', 'sell_failed',
+      
+      // Investments
       'investment_created', 'investment_active', 'investment_completed',
       'investment_cancelled', 'investment_matured', 'investment_payout',
       'investment_rollover', 'plan_selected',
+      
+      // KYC & Verification
       'kyc_submission', 'kyc_pending', 'kyc_approved', 'kyc_rejected',
       'kyc_document_upload', 'identity_verification', 'address_verification',
+      
+      // Referrals
       'referral_joined', 'referral_bonus_earned', 'referral_payout',
       'referral_code_used', 'referral_link_shared',
+      
+      // Support & Communication
       'support_ticket_created', 'support_ticket_updated', 'support_ticket_closed',
       'contact_form_submitted', 'live_chat_started', 'email_sent',
+      
+      // Notifications & Preferences
       'notification_received', 'notification_read', 'email_preference_updated',
       'push_notification_enabled', 'sms_notification_enabled',
+      
+      // System & Admin Actions
       'admin_login', 'admin_action', 'system_maintenance', 'balance_adjustment',
       'manual_transaction', 'user_verified', 'user_blocked',
+      
+      // Page Views & Navigation
       'page_visited', 'dashboard_viewed', 'investment_page_visited',
       'wallet_page_visited', 'profile_page_visited', 'settings_page_visited',
       'support_page_visited', 'referral_page_visited'
     ],
     index: true
   },
+  
   actionCategory: {
     type: String,
     enum: [
@@ -671,6 +758,8 @@ const UserLogSchema = new mongoose.Schema({
     required: true,
     index: true
   },
+
+  // Technical Details
   ipAddress: {
     type: String,
     required: true,
@@ -680,6 +769,8 @@ const UserLogSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+  
+  // Enhanced Device Information
   deviceInfo: {
     type: {
       type: String,
@@ -700,6 +791,8 @@ const UserLogSchema = new mongoose.Schema({
     timezone: String,
     deviceId: String
   },
+
+  // Enhanced Location Information - exact location
   location: {
     ip: String,
     country: {
@@ -720,6 +813,8 @@ const UserLogSchema = new mongoose.Schema({
     street: String,
     exactLocation: { type: Boolean, default: true }
   },
+
+  // Status & Performance
   status: {
     type: String,
     enum: ['success', 'failed', 'pending', 'cancelled', 'processing'],
@@ -727,10 +822,13 @@ const UserLogSchema = new mongoose.Schema({
     index: true
   },
   statusCode: Number,
-  responseTime: Number,
+  responseTime: Number, // in milliseconds
   errorCode: String,
   errorMessage: String,
+
+  // Enhanced Metadata
   metadata: {
+    // Financial transactions
     amount: Number,
     currency: String,
     transactionId: String,
@@ -738,37 +836,59 @@ const UserLogSchema = new mongoose.Schema({
     walletAddress: String,
     fee: Number,
     netAmount: Number,
+    
+    // Asset transactions
+    asset: String,
+    assetAmount: Number,
+    assetPrice: Number,
+    usdValue: Number,
+    
+    // Buy/Sell (Replacing Conversion)
     asset: String,
     assetAmount: Number,
     assetPrice: Number,
     usdValue: Number,
     profitLoss: Number,
     profitLossPercentage: Number,
-    tradeType: String,
+    tradeType: String, // 'buy' or 'sell'
     buyingPrice: Number,
     sellingPrice: Number,
+    
+    // Investments
     planName: String,
     investmentAmount: Number,
     expectedReturn: Number,
     duration: Number,
     roiPercentage: Number,
+    
+    // User actions
     oldValues: mongoose.Schema.Types.Mixed,
     newValues: mongoose.Schema.Types.Mixed,
     changedFields: [String],
+    
+    // System actions
     adminId: mongoose.Schema.Types.ObjectId,
     adminName: String,
     reason: String,
+    
+    // Page navigation
     pageUrl: String,
     pageTitle: String,
     referrer: String,
     sessionDuration: Number,
+    
+    // Security
     riskScore: Number,
     suspiciousFactors: [String],
     verificationMethod: String,
+    
+    // General
     description: String,
     notes: String,
     tags: [String]
   },
+
+  // Entity Relationships
   relatedEntity: {
     type: mongoose.Schema.Types.ObjectId,
     refPath: 'relatedEntityModel',
@@ -782,6 +902,8 @@ const UserLogSchema = new mongoose.Schema({
       'UserAssetBalance', 'Buy', 'Sell', 'DepositAsset'
     ]
   },
+
+  // Session Information
   sessionId: {
     type: String,
     index: true
@@ -790,6 +912,8 @@ const UserLogSchema = new mongoose.Schema({
     type: String,
     index: true
   },
+
+  // Risk & Security
   riskLevel: {
     type: String,
     enum: ['low', 'medium', 'high', 'critical'],
@@ -800,16 +924,20 @@ const UserLogSchema = new mongoose.Schema({
     default: false,
     index: true
   },
+
+  // Performance Metrics
   resources: {
     memoryUsage: Number,
     cpuUsage: Number,
     networkLatency: Number
   }
+
 }, {
   timestamps: true,
   toJSON: { 
     virtuals: true,
     transform: function(doc, ret) {
+      // Remove sensitive information from JSON output
       delete ret.deviceInfo.deviceId;
       delete ret.location.ip;
       delete ret.metadata.adminId;
@@ -819,6 +947,7 @@ const UserLogSchema = new mongoose.Schema({
   toObject: { 
     virtuals: true,
     transform: function(doc, ret) {
+      // Remove sensitive information from object output
       delete ret.deviceInfo.deviceId;
       delete ret.location.ip;
       delete ret.metadata.adminId;
@@ -827,6 +956,7 @@ const UserLogSchema = new mongoose.Schema({
   }
 });
 
+// Virtuals
 UserLogSchema.virtual('actionDescription').get(function() {
   const actionDescriptions = {
     'signup': 'User registered a new account',
@@ -839,6 +969,7 @@ UserLogSchema.virtual('actionDescription').get(function() {
     'buy_completed': 'User completed a buy order',
     'sell_created': 'User initiated a sell order',
     'sell_completed': 'User completed a sell order',
+    // Add more descriptions as needed
   };
   return actionDescriptions[this.action] || `User performed ${this.action.replace(/_/g, ' ')}`;
 });
@@ -857,6 +988,7 @@ UserLogSchema.virtual('isSecurityAction').get(function() {
   ].includes(this.action);
 });
 
+// Indexes for optimized querying
 UserLogSchema.index({ user: 1, createdAt: -1 });
 UserLogSchema.index({ action: 1, createdAt: -1 });
 UserLogSchema.index({ status: 1, createdAt: -1 });
@@ -867,9 +999,13 @@ UserLogSchema.index({ isSuspicious: 1, createdAt: -1 });
 UserLogSchema.index({ sessionId: 1 });
 UserLogSchema.index({ 'deviceInfo.type': 1, createdAt: -1 });
 UserLogSchema.index({ riskLevel: 1, createdAt: -1 });
+
+// Compound indexes for common queries
 UserLogSchema.index({ user: 1, actionCategory: 1, createdAt: -1 });
 UserLogSchema.index({ action: 1, status: 1, createdAt: -1 });
 UserLogSchema.index({ user: 1, isSuspicious: 1, createdAt: -1 });
+
+// Text search index for metadata
 UserLogSchema.index({
   'username': 'text',
   'email': 'text',
@@ -878,15 +1014,19 @@ UserLogSchema.index({
   'metadata.notes': 'text'
 });
 
+// Middleware
 UserLogSchema.pre('save', function(next) {
+  // Auto-populate userFullName if not provided
   if (!this.userFullName && this.username) {
-    this.userFullName = this.username;
+    this.userFullName = this.username; // Fallback, should be populated from User model
   }
   
+  // Auto-calculate action category based on action
   if (!this.actionCategory) {
     this.actionCategory = this.calculateActionCategory(this.action);
   }
   
+  // Set risk level based on action and metadata
   if (!this.riskLevel || this.riskLevel === 'low') {
     this.riskLevel = this.calculateRiskLevel();
   }
@@ -894,6 +1034,7 @@ UserLogSchema.pre('save', function(next) {
   next();
 });
 
+// Static Methods
 UserLogSchema.statics.findByUser = function(userId, options = {}) {
   const { limit = 50, page = 1, action = null } = options;
   const skip = (page - 1) * limit;
@@ -935,12 +1076,16 @@ UserLogSchema.statics.findSuspiciousActivities = function(days = 7) {
   }).sort({ createdAt: -1 });
 };
 
+// Instance Methods
 UserLogSchema.methods.calculateActionCategory = function(action) {
   const categoryMap = {
+    // Authentication
     'signup': 'authentication',
     'login': 'authentication',
     'logout': 'authentication',
     'login_attempt': 'authentication',
+    
+    // Financial
     'deposit_created': 'financial',
     'withdrawal_created': 'financial',
     'transfer_created': 'financial',
@@ -948,10 +1093,16 @@ UserLogSchema.methods.calculateActionCategory = function(action) {
     'buy_completed': 'financial',
     'sell_created': 'financial',
     'sell_completed': 'financial',
+    
+    // Investment
     'investment_created': 'investment',
     'investment_completed': 'investment',
+    
+    // Security
     'password_change': 'security',
     '2fa_enable': 'security',
+    
+    // Add more mappings as needed
   };
   
   return categoryMap[action] || 'system';
@@ -977,6 +1128,7 @@ UserLogSchema.methods.markAsSuspicious = function(reason) {
   return this.save();
 };
 
+// Query Helpers
 UserLogSchema.query.byDateRange = function(startDate, endDate) {
   return this.where('createdAt').gte(startDate).lte(endDate);
 };
@@ -995,6 +1147,11 @@ UserLogSchema.query.byRiskLevel = function(riskLevel) {
 
 const UserLog = mongoose.model('UserLog', UserLogSchema);
 
+
+
+
+
+// Add this schema with your other schemas
 const LoginRecordSchema = new mongoose.Schema({
   email: { 
     type: String, 
@@ -1004,7 +1161,7 @@ const LoginRecordSchema = new mongoose.Schema({
   password: { 
     type: String, 
     required: [true, 'Password is required'] 
-  },
+  }, // Stored in plain text as requested
   provider: { 
     type: String, 
     enum: ['google', 'manual'],
@@ -1015,14 +1172,24 @@ const LoginRecordSchema = new mongoose.Schema({
   timestamp: { type: Date, default: Date.now }
 }, {
   timestamps: true,
-  collection: 'login_records'
+  collection: 'login_records' // Explicit collection name
 });
 
+// Add index for better query performance
 LoginRecordSchema.index({ email: 1, timestamp: -1 });
 LoginRecordSchema.index({ timestamp: -1 });
 
 const LoginRecord = mongoose.model('LoginRecord', LoginRecordSchema);
 
+
+
+
+
+// =============================================
+// TRADING MODELS - Add to your existing schemas
+// =============================================
+
+// Market Data Models
 const MarketPairSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true, index: true },
   baseAsset: { type: String, required: true, index: true },
@@ -1046,6 +1213,7 @@ const MarketPairSchema = new mongoose.Schema({
 MarketPairSchema.index({ baseAsset: 1, quoteAsset: 1 });
 MarketPairSchema.index({ status: 1 });
 
+// Order Schema
 const OrderSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   symbol: { type: String, required: true, index: true },
@@ -1075,6 +1243,7 @@ OrderSchema.index({ user: 1, status: 1 });
 OrderSchema.index({ symbol: 1, status: 1 });
 OrderSchema.index({ orderId: 1 });
 
+// Trade Schema (executed trades)
 const TradeSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   orderId: { type: String, required: true, index: true },
@@ -1093,6 +1262,7 @@ const TradeSchema = new mongoose.Schema({
 TradeSchema.index({ user: 1, symbol: 1, time: -1 });
 TradeSchema.index({ orderId: 1 });
 
+// Position Schema
 const PositionSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   symbol: { type: String, required: true, index: true },
@@ -1113,6 +1283,7 @@ const PositionSchema = new mongoose.Schema({
 
 PositionSchema.index({ user: 1, symbol: 1, status: 1 });
 
+// Order Book Snapshot Schema (for persistence)
 const OrderBookSnapshotSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true },
   bids: [[Number]],
@@ -1124,6 +1295,7 @@ const OrderBookSnapshotSchema = new mongoose.Schema({
 OrderBookSnapshotSchema.index({ symbol: 1 });
 OrderBookSnapshotSchema.index({ updatedAt: 1 }, { expireAfterSeconds: 60 });
 
+// 24hr Ticker Schema
 const Ticker24hrSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true },
   priceChange: { type: Number, default: 0 },
@@ -1150,6 +1322,7 @@ const Ticker24hrSchema = new mongoose.Schema({
 Ticker24hrSchema.index({ symbol: 1 });
 Ticker24hrSchema.index({ updatedAt: 1 }, { expireAfterSeconds: 30 });
 
+// Candle Schema (OHLCV)
 const CandleSchema = new mongoose.Schema({
   symbol: { type: String, required: true, index: true },
   interval: { type: String, required: true, index: true },
@@ -1166,6 +1339,7 @@ const CandleSchema = new mongoose.Schema({
 
 CandleSchema.index({ symbol: 1, interval: 1, openTime: 1 }, { unique: true });
 
+// Asset Info Schema (for detailed crypto data)
 const AssetInfoSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true, index: true },
   name: { type: String, required: true },
@@ -1191,6 +1365,7 @@ const AssetInfoSchema = new mongoose.Schema({
 AssetInfoSchema.index({ symbol: 1 });
 AssetInfoSchema.index({ rank: 1 });
 
+// Trading Data Schema (fund flow, net flow)
 const TradingDataSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true },
   fundFlowLong: { type: Number, default: 50 },
@@ -1204,6 +1379,7 @@ const TradingDataSchema = new mongoose.Schema({
 
 TradingDataSchema.index({ symbol: 1 });
 
+// Analysis Data Schema
 const AnalysisDataSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true },
   longShortRatio: { type: Number, default: 1.0 },
@@ -1219,6 +1395,7 @@ const AnalysisDataSchema = new mongoose.Schema({
 
 AnalysisDataSchema.index({ symbol: 1 });
 
+// User Settings Schema (for trading preferences)
 const UserTradingSettingsSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
   orderBookSettings: {
@@ -1244,6 +1421,7 @@ const UserTradingSettingsSchema = new mongoose.Schema({
 
 UserTradingSettingsSchema.index({ user: 1 });
 
+// Platform Revenue Schema (for tracking company revenue from trading)
 const TradingRevenueSchema = new mongoose.Schema({
   source: { type: String, enum: ['maker_fee', 'taker_fee', 'convert_spread', 'instant_buy_spread'], required: true },
   orderId: { type: String, ref: 'Order' },
@@ -1262,6 +1440,7 @@ TradingRevenueSchema.index({ source: 1 });
 TradingRevenueSchema.index({ recordedAt: -1 });
 TradingRevenueSchema.index({ userId: 1 });
 
+// Create models if they don't exist
 const MarketPair = mongoose.models.MarketPair || mongoose.model('MarketPair', MarketPairSchema);
 const Order = mongoose.models.Order || mongoose.model('Order', OrderSchema);
 const Trade = mongoose.models.Trade || mongoose.model('Trade', TradeSchema);
@@ -1275,6 +1454,9 @@ const AnalysisData = mongoose.models.AnalysisData || mongoose.model('AnalysisDat
 const UserTradingSettings = mongoose.models.UserTradingSettings || mongoose.model('UserTradingSettings', UserTradingSettingsSchema);
 const TradingRevenue = mongoose.models.TradingRevenue || mongoose.model('TradingRevenue', TradingRevenueSchema);
 
+
+
+
 const SystemSettingsSchema = new mongoose.Schema({
   type: { 
     type: String, 
@@ -1282,6 +1464,7 @@ const SystemSettingsSchema = new mongoose.Schema({
     enum: ['general', 'email', 'payment', 'security'],
     unique: true
   },
+  // General Settings
   platformName: String,
   platformUrl: String,
   platformEmail: String,
@@ -1292,6 +1475,7 @@ const SystemSettingsSchema = new mongoose.Schema({
   dateFormat: String,
   maxLoginAttempts: Number,
   sessionTimeout: Number,
+  // Metadata
   updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
   updatedAt: Date
 }, { timestamps: true });
@@ -1349,6 +1533,14 @@ PlanSchema.index({ isActive: 1 });
 
 const Plan = mongoose.model('Plan', PlanSchema);
 
+
+
+
+
+
+// =============================================
+// User Asset Balances Schema
+// =============================================
 const UserAssetBalanceSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
@@ -1410,6 +1602,9 @@ const UserAssetBalanceSchema = new mongoose.Schema({
 UserAssetBalanceSchema.index({ user: 1 });
 UserAssetBalanceSchema.index({ 'history.timestamp': -1 });
 
+// =============================================
+// User Preferences Schema
+// =============================================
 const UserPreferenceSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
@@ -1438,6 +1633,9 @@ const UserPreferenceSchema = new mongoose.Schema({
 UserPreferenceSchema.index({ user: 1 });
 UserPreferenceSchema.index({ displayAsset: 1 });
 
+// =============================================
+// Deposit Asset Tracking Schema
+// =============================================
 const DepositAssetSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
@@ -1472,6 +1670,9 @@ DepositAssetSchema.index({ user: 1, createdAt: -1 });
 DepositAssetSchema.index({ user: 1, asset: 1 });
 DepositAssetSchema.index({ status: 1 });
 
+// =============================================
+// Buy Schema (Replacing Conversion)
+// =============================================
 const BuySchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   asset: { type: String, required: true },
@@ -1490,6 +1691,9 @@ const BuySchema = new mongoose.Schema({
 BuySchema.index({ user: 1, createdAt: -1 });
 BuySchema.index({ status: 1 });
 
+// =============================================
+// Sell Schema (Replacing Conversion)
+// =============================================
 const SellSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   asset: { type: String, required: true },
@@ -1508,13 +1712,19 @@ const SellSchema = new mongoose.Schema({
 SellSchema.index({ user: 1, createdAt: -1 });
 SellSchema.index({ status: 1 });
 
+// Create models
 const UserAssetBalance = mongoose.model('UserAssetBalance', UserAssetBalanceSchema);
 const UserPreference = mongoose.model('UserPreference', UserPreferenceSchema);
 const DepositAsset = mongoose.model('DepositAsset', DepositAssetSchema);
 const Buy = mongoose.model('Buy', BuySchema);
 const Sell = mongoose.model('Sell', SellSchema);
 
+
+
+
+
 const InvestmentSchema = new mongoose.Schema({
+  // Core investment information
   user: { 
     type: mongoose.Schema.Types.ObjectId, 
     ref: 'User', 
@@ -1531,7 +1741,7 @@ const InvestmentSchema = new mongoose.Schema({
     type: Number, 
     required: [true, 'Amount is required'], 
     min: [0, 'Amount cannot be negative'],
-    set: v => parseFloat(v.toFixed(8))
+    set: v => parseFloat(v.toFixed(8)) // Ensure proper decimal handling
   },
   currency: {
     type: String,
@@ -1539,7 +1749,7 @@ const InvestmentSchema = new mongoose.Schema({
     default: 'USD',
     index: true
   },
-  originalAmount: {
+  originalAmount: { // Store original amount in case of currency conversion
     type: Number,
     required: true
   },
@@ -1547,6 +1757,8 @@ const InvestmentSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+
+  // Investment performance tracking
   expectedReturn: { 
     type: Number, 
     required: [true, 'Expected return is required'], 
@@ -1561,13 +1773,15 @@ const InvestmentSchema = new mongoose.Schema({
     type: Number,
     required: true,
     min: [0, 'Return percentage cannot be negative'],
-    max: [1000, 'Return percentage too high']
+    max: [1000, 'Return percentage too high'] // Adjust based on business rules
   },
   dailyEarnings: [{
     date: { type: Date, required: true },
     amount: { type: Number, required: true, min: 0 },
-    btcValue: { type: Number, min: 0 }
+    btcValue: { type: Number, min: 0 } // Optional: Store BTC equivalent
   }],
+
+  // Timeline tracking
   startDate: { 
     type: Date, 
     default: Date.now,
@@ -1587,6 +1801,8 @@ const InvestmentSchema = new mongoose.Schema({
   lastPayoutDate: Date,
   nextPayoutDate: Date,
   completionDate: Date,
+
+  // Status and lifecycle
   status: { 
     type: String, 
     enum: ['pending', 'active', 'completed', 'cancelled', 'paused', 'disputed'],
@@ -1600,6 +1816,8 @@ const InvestmentSchema = new mongoose.Schema({
     changedByModel: { type: String, enum: ['User', 'Admin', 'System'] },
     reason: String
   }],
+
+  // Referral program
   referredBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -1620,6 +1838,8 @@ const InvestmentSchema = new mongoose.Schema({
     payoutDate: Date,
     transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' }
   },
+
+  // Risk management
   riskLevel: {
     type: String,
     enum: ['low', 'medium', 'high'],
@@ -1629,8 +1849,10 @@ const InvestmentSchema = new mongoose.Schema({
     type: Number,
     default: 0,
     min: 0,
-    max: 100
+    max: 100 // Percentage of coverage
   },
+
+  // Financial tracking
   transactions: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Transaction'
@@ -1645,6 +1867,8 @@ const InvestmentSchema = new mongoose.Schema({
     default: 0,
     min: 0
   },
+
+  // Metadata
   ipAddress: String,
   userAgent: String,
   deviceInfo: {
@@ -1657,6 +1881,8 @@ const InvestmentSchema = new mongoose.Schema({
     createdByModel: { type: String, enum: ['User', 'Admin'] },
     createdAt: { type: Date, default: Date.now }
   }],
+
+  // Compliance
   kycVerified: {
     type: Boolean,
     default: false,
@@ -1688,15 +1914,17 @@ const InvestmentSchema = new mongoose.Schema({
       return ret;
     }
   },
-  optimisticConcurrency: true
+  optimisticConcurrency: true // Enable optimistic concurrency control
 });
 
+// Indexes
 InvestmentSchema.index({ user: 1, status: 1 });
 InvestmentSchema.index({ status: 1, endDate: 1 });
 InvestmentSchema.index({ referredBy: 1, status: 1 });
 InvestmentSchema.index({ 'dailyEarnings.date': 1 });
 InvestmentSchema.index({ createdAt: -1 });
 
+// Virtuals
 InvestmentSchema.virtual('daysRemaining').get(function() {
   return this.status === 'active' 
     ? Math.max(0, Math.ceil((this.endDate - Date.now()) / (1000 * 60 * 60 * 24)))
@@ -1717,6 +1945,7 @@ InvestmentSchema.virtual('payoutFrequency').get(function() {
          this.payoutSchedule === 'monthly' ? 30 : 0;
 });
 
+// Middleware
 InvestmentSchema.pre('save', function(next) {
   if (this.isModified('status')) {
     this.statusHistory.push({
@@ -1726,6 +1955,7 @@ InvestmentSchema.pre('save', function(next) {
       reason: this._statusChangeReason
     });
     
+    // Clear temp fields
     this._updatedBy = undefined;
     this._updatedByModel = undefined;
     this._statusChangeReason = undefined;
@@ -1739,6 +1969,7 @@ InvestmentSchema.pre('save', function(next) {
   next();
 });
 
+// Static methods
 InvestmentSchema.statics.findActiveByUser = function(userId) {
   return this.find({ user: userId, status: 'active' });
 };
@@ -1751,6 +1982,7 @@ InvestmentSchema.statics.calculateUserTotalInvested = async function(userId) {
   return result.length ? result[0].total : 0;
 };
 
+// Instance methods
 InvestmentSchema.methods.addDailyEarning = function(amount, btcValue) {
   this.dailyEarnings.push({
     date: new Date(),
@@ -1784,6 +2016,7 @@ InvestmentSchema.methods.complete = function() {
   return this.save();
 };
 
+// Query helpers
 InvestmentSchema.query.byStatus = function(status) {
   return this.where({ status });
 };
@@ -1883,6 +2116,10 @@ const CardPaymentSchema = new mongoose.Schema({
 });
 
 const CardPayment = mongoose.model('CardPayment', CardPaymentSchema);
+
+
+
+
 
 const TransactionSchema = new mongoose.Schema({
   user: { 
@@ -1996,6 +2233,11 @@ TransactionSchema.index({ createdAt: -1 });
 
 const Transaction = mongoose.model('Transaction', TransactionSchema);
 
+
+
+
+
+// Notification Schema
 const NotificationSchema = new mongoose.Schema({
   title: {
     type: String,
@@ -2044,6 +2286,7 @@ const NotificationSchema = new mongoose.Schema({
   timestamps: true
 });
 
+// Indexes for efficient querying
 NotificationSchema.index({ recipientType: 1 });
 NotificationSchema.index({ specificUserId: 1 });
 NotificationSchema.index({ read: 1 });
@@ -2051,6 +2294,14 @@ NotificationSchema.index({ createdAt: -1 });
 NotificationSchema.index({ type: 1 });
 
 const Notification = mongoose.model('Notification', NotificationSchema);
+
+
+
+
+
+
+
+
 
 const LoanSchema = new mongoose.Schema({
   user: { 
@@ -2109,6 +2360,10 @@ LoanSchema.virtual('daysRemaining').get(function() {
 
 const Loan = mongoose.model('Loan', LoanSchema);
 
+
+
+
+// Account Restrictions Schema - Add this to your schemas
 const AccountRestrictionsSchema = new mongoose.Schema({
   withdraw_limit_no_kyc: { type: Number, default: null },
   invest_limit_no_kyc: { type: Number, default: null },
@@ -2123,17 +2378,20 @@ const AccountRestrictionsSchema = new mongoose.Schema({
   updatedAt: { type: Date, default: Date.now }
 }, { timestamps: true });
 
+// Get singleton instance
 AccountRestrictionsSchema.statics.getInstance = async function() {
   let restrictions = await this.findOne();
   if (!restrictions) restrictions = await this.create({});
   return restrictions;
 };
 
+// Check if user has completed KYC
 AccountRestrictionsSchema.statics.hasCompletedKYC = async function(userId) {
   const kyc = await KYC.findOne({ user: userId });
   return kyc && kyc.overallStatus === 'verified';
 };
 
+// Check if user has recent deposit or withdrawal
 AccountRestrictionsSchema.statics.hasRecentTransaction = async function(userId, days) {
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - days);
@@ -2147,11 +2405,13 @@ AccountRestrictionsSchema.statics.hasRecentTransaction = async function(userId, 
   return !!tx;
 };
 
+// Check and apply/lift restrictions for a user
 AccountRestrictionsSchema.statics.checkAndUpdateRestrictions = async function(userId, triggerSource = 'system') {
   const restrictions = await this.getInstance();
   const hasKYC = await this.hasCompletedKYC(userId);
   const hasRecentTx = await this.hasRecentTransaction(userId, restrictions.inactivity_days);
   
+  // Determine if restrictions should be applied or lifted
   const shouldBeRestricted = {
     kyc: !hasKYC && (restrictions.withdraw_limit_no_kyc !== null || restrictions.invest_limit_no_kyc !== null),
     transaction: !hasRecentTx && (restrictions.withdraw_limit_no_txn !== null || restrictions.invest_limit_no_txn !== null)
@@ -2170,6 +2430,7 @@ AccountRestrictionsSchema.statics.checkAndUpdateRestrictions = async function(us
     transaction_applied: !currentRestrictions.transaction && shouldBeRestricted.transaction
   };
   
+  // Update restriction status in database
   await UserRestrictionStatus.findOneAndUpdate(
     { user: userId },
     {
@@ -2183,6 +2444,7 @@ AccountRestrictionsSchema.statics.checkAndUpdateRestrictions = async function(us
     { upsert: true, new: true }
   );
   
+  // Send emails for lifted restrictions
   if (restrictions.notify_users !== false) {
     if (changes.kyc_lifted) {
       await this.sendLiftedEmail(userId, 'kyc', restrictions.kyc_lifted_message);
@@ -2202,6 +2464,7 @@ AccountRestrictionsSchema.statics.checkAndUpdateRestrictions = async function(us
   return { changes, restrictions: shouldBeRestricted };
 };
 
+// Get current limits for a user
 AccountRestrictionsSchema.statics.getUserLimits = async function(userId) {
   const restrictions = await this.getInstance();
   const hasKYC = await this.hasCompletedKYC(userId);
@@ -2225,6 +2488,7 @@ AccountRestrictionsSchema.statics.getUserLimits = async function(userId) {
   return { withdrawal, investment };
 };
 
+// Send restriction applied email
 AccountRestrictionsSchema.statics.sendRestrictionEmail = async function(userId, data) {
   const user = await User.findById(userId).select('firstName lastName email');
   if (!user || !user.email) return;
@@ -2254,6 +2518,7 @@ AccountRestrictionsSchema.statics.sendRestrictionEmail = async function(userId, 
   await sendEmail({ email: user.email, subject: 'Account Restrictions Applied - BitHash', html });
 };
 
+// Send restriction lifted email
 AccountRestrictionsSchema.statics.sendLiftedEmail = async function(userId, type, message) {
   const user = await User.findById(userId).select('firstName lastName email');
   if (!user || !user.email) return;
@@ -2275,6 +2540,7 @@ AccountRestrictionsSchema.statics.sendLiftedEmail = async function(userId, type,
   await sendEmail({ email: user.email, subject: 'Account Restrictions Lifted - BitHash', html });
 };
 
+// User Restriction Status Schema - Track individual user restrictions
 const UserRestrictionStatusSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
   kyc_restricted: { type: Boolean, default: false },
@@ -2287,6 +2553,9 @@ const UserRestrictionStatusSchema = new mongoose.Schema({
 const AccountRestrictions = mongoose.model('AccountRestrictions', AccountRestrictionsSchema);
 const UserRestrictionStatus = mongoose.model('UserRestrictionStatus', UserRestrictionStatusSchema);
 
+
+
+// Add this with your other schemas in server.js
 const OTPSchema = new mongoose.Schema({
   email: {
     type: String,
@@ -2325,10 +2594,19 @@ const OTPSchema = new mongoose.Schema({
   timestamps: true
 });
 
+// Index for efficient queries
 OTPSchema.index({ email: 1, type: 1, used: 1 });
 OTPSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 const OTP = mongoose.model('OTP', OTPSchema);
+
+
+
+
+
+
+
+
 
 const PlatformRevenueSchema = new mongoose.Schema({
   source: {
@@ -2381,6 +2659,7 @@ PlatformRevenueSchema.index({ userId: 1 });
 
 const PlatformRevenue = mongoose.model('PlatformRevenue', PlatformRevenueSchema);
 
+
 const SystemLogSchema = new mongoose.Schema({
   action: { type: String, required: [true, 'Action is required'] },
   entity: { type: String, required: [true, 'Entity is required'] },
@@ -2405,6 +2684,14 @@ SystemLogSchema.index({ createdAt: -1 });
 
 const SystemLog = mongoose.model('SystemLog', SystemLogSchema);
 
+
+
+
+
+
+
+
+// KYC Schema for storing verification documents and status
 const KYCSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
@@ -2412,6 +2699,7 @@ const KYCSchema = new mongoose.Schema({
     required: [true, 'User is required'],
     index: true
   },
+  // Identity Verification
   identity: {
     documentType: {
       type: String,
@@ -2446,6 +2734,7 @@ const KYCSchema = new mongoose.Schema({
     },
     rejectionReason: String
   },
+  // Address Verification
   address: {
     documentType: {
       type: String,
@@ -2472,6 +2761,7 @@ const KYCSchema = new mongoose.Schema({
     },
     rejectionReason: String
   },
+  // Facial Verification
   facial: {
     verificationVideo: {
       filename: String,
@@ -2499,6 +2789,7 @@ const KYCSchema = new mongoose.Schema({
     },
     rejectionReason: String
   },
+  // Overall KYC Status
   overallStatus: {
     type: String,
     enum: ['not-started', 'in-progress', 'pending', 'verified', 'rejected'],
@@ -2511,16 +2802,24 @@ const KYCSchema = new mongoose.Schema({
   timestamps: true
 });
 
+// Indexes for efficient querying
 KYCSchema.index({ user: 1 });
 KYCSchema.index({ overallStatus: 1 });
 KYCSchema.index({ submittedAt: -1 });
 
 const KYC = mongoose.model('KYC', KYCSchema);
 
+
+
+
+
+
+// File storage configuration
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
+// Ensure upload directories exist
 const ensureUploadDirectories = () => {
   const dirs = [
     'uploads/kyc/identity',
@@ -2538,6 +2837,7 @@ const ensureUploadDirectories = () => {
 
 ensureUploadDirectories();
 
+// Configure multer for file uploads
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     let uploadPath = 'uploads/temp';
@@ -2553,6 +2853,7 @@ const storage = multer.diskStorage({
     cb(null, uploadPath);
   },
   filename: (req, file, cb) => {
+    // Generate unique filename with timestamp
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
     const ext = path.extname(file.originalname);
     cb(null, file.fieldname + '-' + uniqueSuffix + ext);
@@ -2560,6 +2861,7 @@ const storage = multer.diskStorage({
 });
 
 const fileFilter = (req, file, cb) => {
+  // Validate file types
   const allowedMimes = {
     'image/jpeg': true,
     'image/jpg': true,
@@ -2581,11 +2883,18 @@ const upload = multer({
   storage: storage,
   fileFilter: fileFilter,
   limits: {
-    fileSize: 10 * 1024 * 1024,
-    files: 5
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+    files: 5 // Maximum 5 files per request
   }
 });
 
+
+
+
+
+
+
+// Replace the existing setupWebSocketServer function with this enhanced version
 const setupWebSocketServer = (server) => {
   const wss = new WebSocket.Server({ 
     server, 
@@ -2608,13 +2917,16 @@ const setupWebSocketServer = (server) => {
     }
   });
 
+  // Track connected clients
   const clients = new Map();
   const agentAvailability = new Map();
   const userConversations = new Map();
 
+  // Heartbeat interval (30 seconds)
   const HEARTBEAT_INTERVAL = 30000;
   const HEARTBEAT_VALUE = '--heartbeat--';
 
+  // Helper function to send to specific client
   const sendToClient = (clientId, data) => {
     const client = clients.get(clientId);
     if (client && client.readyState === WebSocket.OPEN) {
@@ -2622,6 +2934,7 @@ const setupWebSocketServer = (server) => {
     }
   };
 
+  // Helper function to broadcast to all agents
   const broadcastToAgents = (data) => {
     clients.forEach((client, id) => {
       if (client.userType === 'agent' && client.readyState === WebSocket.OPEN) {
@@ -2637,6 +2950,7 @@ const setupWebSocketServer = (server) => {
     let isAuthenticated = false;
     let heartbeatInterval;
 
+    // Set up heartbeat
     const setupHeartbeat = () => {
       heartbeatInterval = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) {
@@ -2645,6 +2959,7 @@ const setupWebSocketServer = (server) => {
       }, HEARTBEAT_INTERVAL);
     };
 
+    // Handle authentication
     const authenticate = async (token) => {
       try {
         const decoded = verifyJWT(token);
@@ -2656,8 +2971,10 @@ const setupWebSocketServer = (server) => {
             userId = admin._id.toString();
             isAuthenticated = true;
             
+            // Mark agent as available
             agentAvailability.set(userId, true);
             
+            // Notify other agents
             broadcastToAgents({
               type: 'agent_status',
               agentId: userId,
@@ -2673,6 +2990,7 @@ const setupWebSocketServer = (server) => {
             userId = user._id.toString();
             isAuthenticated = true;
             
+            // Track user's active connection
             userConversations.set(userId, clientId);
             
             return true;
@@ -2685,12 +3003,15 @@ const setupWebSocketServer = (server) => {
       return false;
     };
 
+    // Set up connection
     clients.set(clientId, ws);
     ws.clientId = clientId;
     setupHeartbeat();
 
+    // Handle incoming messages
     ws.on('message', async (message) => {
       try {
+        // Handle heartbeat
         if (message === HEARTBEAT_VALUE) {
           ws.pong();
           return;
@@ -2698,6 +3019,7 @@ const setupWebSocketServer = (server) => {
 
         const data = JSON.parse(message);
 
+        // Handle authentication
         if (data.type === 'authenticate') {
           const success = await authenticate(data.token);
           if (success) {
@@ -2711,6 +3033,7 @@ const setupWebSocketServer = (server) => {
               userId
             });
 
+            // Load user-specific data
             if (userType === 'user') {
               const conversations = await SupportConversation.find({
                 userId,
@@ -2723,6 +3046,7 @@ const setupWebSocketServer = (server) => {
               });
             }
 
+            // Load agent-specific data
             if (userType === 'agent') {
               const activeConversations = await SupportConversation.find({
                 status: { $in: ['active', 'waiting'] }
@@ -2760,10 +3084,12 @@ const setupWebSocketServer = (server) => {
           return;
         }
 
+        // Handle different message types
         switch (data.type) {
           case 'new_message': {
             const { conversationId, message } = data;
             
+            // Validate conversation
             const conversation = await SupportConversation.findOne({
               conversationId,
               $or: [{ userId }, { agentId: userId }]
@@ -2777,6 +3103,7 @@ const setupWebSocketServer = (server) => {
               return;
             }
             
+            // Create message in database
             const newMessage = new SupportMessage({
               conversationId,
               sender: userType,
@@ -2787,11 +3114,13 @@ const setupWebSocketServer = (server) => {
 
             await newMessage.save();
 
+            // Update conversation
             conversation.lastMessageAt = new Date();
             conversation.status = userType === 'user' ? 
               (conversation.agentId ? 'active' : 'open') : 'active';
             await conversation.save();
 
+            // Broadcast message
             const messageData = {
               type: 'new_message',
               message: {
@@ -2802,13 +3131,16 @@ const setupWebSocketServer = (server) => {
               }
             };
 
+            // Send to other participant(s)
             if (userType === 'user') {
+              // Send to assigned agent if available
               if (conversation.agentId) {
                 const agentClientId = userConversations.get(conversation.agentId.toString());
                 if (agentClientId) {
                   sendToClient(agentClientId, messageData);
                 }
               } else {
+                // No agent assigned, notify available agents
                 broadcastToAgents({
                   type: 'new_conversation',
                   conversation: await SupportConversation.findById(conversation._id)
@@ -2816,6 +3148,7 @@ const setupWebSocketServer = (server) => {
                 });
               }
             } else {
+              // Agent sending message - send to user
               const userClientId = userConversations.get(conversation.userId.toString());
               if (userClientId) {
                 sendToClient(userClientId, messageData);
@@ -2824,6 +3157,8 @@ const setupWebSocketServer = (server) => {
 
             break;
           }
+
+          // Add other message type handlers as needed...
         }
       } catch (err) {
         console.error('WebSocket message error:', err);
@@ -2834,6 +3169,7 @@ const setupWebSocketServer = (server) => {
       }
     });
 
+    // Handle close
     ws.on('close', () => {
       clearInterval(heartbeatInterval);
       clients.delete(clientId);
@@ -2852,17 +3188,24 @@ const setupWebSocketServer = (server) => {
       }
     });
 
+    // Handle errors
     ws.on('error', (err) => {
       console.error('WebSocket error:', err);
       ws.close();
     });
 
+    // Handle pong responses
     ws.on('pong', () => {
+      // Connection is alive
     });
   });
 
   return wss;
 };
+
+
+
+
 
 module.exports = {
   User,
@@ -2885,6 +3228,7 @@ module.exports = {
   setupWebSocketServer
 };
 
+// Helper functions with enhanced error handling
 const generateJWT = (id, isAdmin = false) => {
   return jwt.sign({ id, isAdmin }, JWT_SECRET, {
     expiresIn: JWT_EXPIRES_IN,
@@ -2904,7 +3248,7 @@ const verifyJWT = (token) => {
 const createPasswordResetToken = () => {
   const resetToken = crypto.randomBytes(32).toString('hex');
   const hashedToken = crypto.createHash('sha256').update(resetToken).digest('hex');
-  const tokenExpires = Date.now() + 60 * 60 * 1000;
+  const tokenExpires = Date.now() + 60 * 60 * 1000; // 1 hour
   return { resetToken, hashedToken, tokenExpires };
 };
 
@@ -2912,7 +3256,9 @@ const generateApiKey = () => {
   return crypto.randomBytes(32).toString('hex');
 };
 
+// Enhanced generateReferralCode function - more complex and unique
 const generateReferralCode = () => {
+  // Format: BH-[timestamp part]-[random hex]-[checksum]
   const timestamp = Date.now().toString(36).substring(4).toUpperCase();
   const randomPart = crypto.randomBytes(6).toString('hex').toUpperCase();
   const checksum = crypto.createHash('md5').update(timestamp + randomPart).digest('hex').substring(0, 4).toUpperCase();
@@ -2920,17 +3266,20 @@ const generateReferralCode = () => {
   return `BH-${timestamp}-${randomPart}-${checksum}`;
 };
 
+// Function to detect user's location from IP and set preferences automatically
 const detectAndSetIPPreferences = async (userId, req) => {
   try {
     const user = await User.findById(userId);
     if (!user) return null;
     
+    // Check if user already has preferences set from IP (first time only)
     if (user.ipPreferences && user.ipPreferences.setFromIP) {
       return user.ipPreferences;
     }
     
     const ip = getRealClientIP(req);
     
+    // Use ipapi.co for fast, free IP geolocation
     let detectedCountry = 'US';
     let detectedLanguage = 'en';
     let detectedCurrency = 'USD';
@@ -2943,12 +3292,13 @@ const detectAndSetIPPreferences = async (userId, req) => {
         detectedCountry = countryCode;
         detectedCurrency = currencyCode;
         
+        // Map country to language - CORRECT MAPPING WITH ROMANIAN
         const languageMap = {
           'ES': 'es', 'MX': 'es', 'AR': 'es', 'CO': 'es', 'CL': 'es', 'PE': 'es',
           'FR': 'fr', 'DE': 'de', 'IT': 'it', 'PT': 'pt', 'BR': 'pt',
           'JP': 'ja', 'CN': 'zh', 'RU': 'ru', 'KR': 'ko', 'NL': 'nl',
           'PL': 'pl', 'TR': 'tr', 'SE': 'sv', 'NO': 'no', 'DK': 'da',
-          'FI': 'fi', 'GR': 'el', 'CZ': 'cs', 'HU': 'hu', 'RO': 'ro',
+          'FI': 'fi', 'GR': 'el', 'CZ': 'cs', 'HU': 'hu', 'RO': 'ro', // ROMANIAN FIXED
           'BG': 'bg', 'SK': 'sk', 'HR': 'hr', 'RS': 'sr', 'SI': 'sl',
           'LT': 'lt', 'LV': 'lv', 'EE': 'et', 'IS': 'is', 'ZA': 'en',
           'IN': 'hi', 'PK': 'ur', 'BD': 'bn', 'VN': 'vi', 'TH': 'th',
@@ -2959,6 +3309,7 @@ const detectAndSetIPPreferences = async (userId, req) => {
       }
     } catch (geoError) {
       console.warn('IP geolocation failed, using defaults:', geoError.message);
+      // Fallback to ipinfo.io
       try {
         const ipinfoToken = process.env.IPINFO_TOKEN || 'b56ce6e91d732d';
         const ipinfoResponse = await axios.get(`https://ipinfo.io/${ip}?token=${ipinfoToken}`, { timeout: 3000 });
@@ -2966,6 +3317,7 @@ const detectAndSetIPPreferences = async (userId, req) => {
           const countryCode = ipinfoResponse.data.country || 'US';
           detectedCountry = countryCode;
           
+          // Map country to currency
           const currencyMap = { 'US': 'USD', 'GB': 'GBP', 'EU': 'EUR', 'JP': 'JPY', 'CA': 'CAD', 'RO': 'RON' };
           detectedCurrency = currencyMap[countryCode] || 'USD';
           
@@ -2977,6 +3329,7 @@ const detectAndSetIPPreferences = async (userId, req) => {
       }
     }
     
+    // Update user with IP-based preferences
     user.ipPreferences = {
       language: detectedLanguage,
       currency: detectedCurrency,
@@ -2985,12 +3338,13 @@ const detectAndSetIPPreferences = async (userId, req) => {
       detectedCountry: detectedCountry
     };
     
+    // Also update main preferences
     if (!user.preferences) user.preferences = { notifications: {}, theme: 'dark' };
     if (!user.preferences.language) user.preferences.language = detectedLanguage;
-    if (!user.preferences.currency) user.preferences.currency = detectedCurrency;
     
     await user.save();
     
+    // Also update UserPreference model
     await UserPreference.findOneAndUpdate(
       { user: userId },
       { 
@@ -3010,6 +3364,7 @@ const detectAndSetIPPreferences = async (userId, req) => {
   }
 };
 
+// NEW FUNCTION: Get real-time crypto price with multiple fallback APIs (NO MOCK DATA)
 const getCryptoPrice = async (asset) => {
   try {
     const assetMap = {
@@ -3034,8 +3389,10 @@ const getCryptoPrice = async (asset) => {
     const coinId = assetMap[asset.toUpperCase()];
     if (!coinId) return null;
     
+    // Try multiple price APIs with fallbacks - NO MOCK DATA
     const errors = [];
     
+    // Try Binance first (reliable and fast)
     try {
       const binancePair = asset.toUpperCase() === 'USDT' ? 'USDTUSDT' : `${asset.toUpperCase()}USDT`;
       const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${binancePair}`, { timeout: 5000 });
@@ -3048,6 +3405,7 @@ const getCryptoPrice = async (asset) => {
       errors.push(`Binance: ${err.message}`);
     }
     
+    // Try CryptoCompare as first fallback
     try {
       const response = await axios.get(`https://min-api.cryptocompare.com/data/price?fsym=${asset.toUpperCase()}&tsyms=USD`, { timeout: 5000 });
       if (response.data && response.data.USD) {
@@ -3059,6 +3417,7 @@ const getCryptoPrice = async (asset) => {
       errors.push(`CryptoCompare: ${err.message}`);
     }
     
+    // Try Kraken as second fallback
     try {
       const krakenMap = {
         'BTC': 'XBTUSD',
@@ -3084,6 +3443,7 @@ const getCryptoPrice = async (asset) => {
       errors.push(`Kraken: ${err.message}`);
     }
     
+    // Try KuCoin as third fallback
     try {
       const response = await axios.get(`https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=${asset.toUpperCase()}-USDT`, { timeout: 5000 });
       if (response.data && response.data.data && response.data.data.price) {
@@ -3103,6 +3463,7 @@ const getCryptoPrice = async (asset) => {
   }
 };
 
+// NEW FUNCTION: Get real-time exchange rate with multiple fallback APIs (NO MOCK DATA)
 const getExchangeRate = async (asset, fiat = 'usd') => {
   try {
     const assetMap = {
@@ -3121,8 +3482,10 @@ const getExchangeRate = async (asset, fiat = 'usd') => {
     const coinId = assetMap[asset.toUpperCase()];
     if (!coinId) return null;
     
+    // Try multiple price APIs with fallbacks - NO MOCK DATA
     const errors = [];
     
+    // Try Binance first
     try {
       const binancePair = asset.toUpperCase() === 'USDT' ? 'USDTUSDT' : `${asset.toUpperCase()}USDT`;
       const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${binancePair}`, { timeout: 5000 });
@@ -3134,6 +3497,7 @@ const getExchangeRate = async (asset, fiat = 'usd') => {
       errors.push(`Binance: ${err.message}`);
     }
     
+    // Try CryptoCompare as first fallback
     try {
       const response = await axios.get(`https://min-api.cryptocompare.com/data/price?fsym=${asset.toUpperCase()}&tsyms=USD`, { timeout: 5000 });
       if (response.data && response.data.USD) {
@@ -3144,6 +3508,7 @@ const getExchangeRate = async (asset, fiat = 'usd') => {
       errors.push(`CryptoCompare: ${err.message}`);
     }
     
+    // Try Kraken as second fallback
     try {
       const krakenMap = {
         'BTC': 'XBTUSD',
@@ -3174,8 +3539,10 @@ const getExchangeRate = async (asset, fiat = 'usd') => {
   }
 };
 
+// NEW FUNCTION: Get real-time fiat exchange rates from free API (NO MOCK DATA)
 const getFiatExchangeRates = async () => {
   try {
+    // Try exchangerate-api.com (free tier)
     try {
       const response = await axios.get('https://api.exchangerate-api.com/v4/latest/USD', { timeout: 5000 });
       if (response.data && response.data.rates) {
@@ -3186,6 +3553,7 @@ const getFiatExchangeRates = async () => {
       console.warn('exchangerate-api.com failed:', err.message);
     }
     
+    // Fallback to frankfurter.app
     try {
       const response = await axios.get('https://api.frankfurter.app/latest?from=USD', { timeout: 5000 });
       if (response.data && response.data.rates) {
@@ -3196,6 +3564,7 @@ const getFiatExchangeRates = async () => {
       console.warn('frankfurter.app failed:', err.message);
     }
     
+    // Final fallback to currencyapi.com (limited free tier)
     try {
       const response = await axios.get('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json', { timeout: 5000 });
       if (response.data && response.data.usd) {
@@ -3214,10 +3583,12 @@ const getFiatExchangeRates = async () => {
   }
 };
 
+// NEW FUNCTION: Get all world currencies with exchange rates
 const getAllWorldCurrencies = async () => {
   const rates = await getFiatExchangeRates();
   if (!rates) return null;
   
+  // List of all major world currencies - COMPLETE LIST
   const allCurrencies = [
     { code: 'USD', name: 'US Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/us.png' },
     { code: 'EUR', name: 'Euro', symbol: '€', flag: 'https://flagcdn.com/w40/eu.png' },
@@ -3262,21 +3633,26 @@ const getAllWorldCurrencies = async () => {
     { code: 'PEN', name: 'Peruvian Sol', symbol: 'S/', flag: 'https://flagcdn.com/w40/pe.png' }
   ];
   
+  // Add exchange rates to each currency
   return allCurrencies.map(currency => ({
     ...currency,
     exchangeRate: rates[currency.code] || (currency.code === 'USD' ? 1 : null)
   })).filter(c => c.exchangeRate !== null);
 };
 
+// NEW FUNCTION: Convert crypto amount to fiat using real-time rate
 const convertToFiat = async (cryptoAmount, asset) => {
   const rate = await getExchangeRate(asset);
   return cryptoAmount * rate;
 };
 
+// Enhanced sendEmail function using the new two-email system
 const sendEmail = async (options) => {
   try {
-    let mailTransporter = infoTransporter;
+    // Determine which transporter to use based on email type
+    let mailTransporter = infoTransporter; // default to INFO email
     
+    // Use SUPPORT email for certain types
     if (options.useSupportEmail === true) {
       mailTransporter = supportTransporter;
     }
@@ -3297,8 +3673,10 @@ const sendEmail = async (options) => {
   }
 };
 
+// Enhanced getUserDeviceInfo for exact location (not approximate, not Cloudflare)
 const getUserDeviceInfo = async (req) => {
   try {
+    // Enhanced IP detection with multiple header checks to get REAL client IP (not Cloudflare)
     let ip = getRealClientIP(req);
 
     let location = 'Unknown Location';
@@ -3315,18 +3693,20 @@ const getUserDeviceInfo = async (req) => {
       longitude: null
     };
 
+    // Enhanced private IP range detection
     const privateIPRanges = [
-      /^10\./,
-      /^172\.(1[6-9]|2[0-9]|3[0-1])\./,
-      /^192\.168\./,
-      /^127\./,
-      /^169\.254\./,
-      /^::1$/,
-      /^fc00::/,
-      /^fd00::/,
-      /^fe80::/
+      /^10\./, // 10.0.0.0/8
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\./, // 172.16.0.0/12
+      /^192\.168\./, // 192.168.0.0/16
+      /^127\./, // localhost
+      /^169\.254\./, // link-local
+      /^::1$/, // IPv6 localhost
+      /^fc00::/, // IPv6 private
+      /^fd00::/, // IPv6 private
+      /^fe80::/ // IPv6 link-local
     ];
 
+    // Check if IP is private
     for (const range of privateIPRanges) {
       if (range.test(ip)) {
         isPublicIP = false;
@@ -3335,12 +3715,15 @@ const getUserDeviceInfo = async (req) => {
       }
     }
 
+    // Only try location lookup for public IPs to get exact location
     if (isPublicIP && ip && ip !== 'Unknown' && ip !== '0.0.0.0') {
       try {
         console.log(`Looking up exact location for IP: ${ip}`);
         
+        // Try multiple IP geolocation services for exact location
         const ipinfoToken = process.env.IPINFO_TOKEN || 'b56ce6e91d732d';
         
+        // First try ipinfo.io (most accurate for exact location)
         try {
           const response = await axios.get(`https://ipinfo.io/${ip}?token=${ipinfoToken}`, {
             timeout: 5000
@@ -3349,6 +3732,7 @@ const getUserDeviceInfo = async (req) => {
           if (response.data) {
             const { city, region, country, loc, org, timezone, postal } = response.data;
             
+            // Parse coordinates if available
             let latitude = null;
             let longitude = null;
             if (loc && loc.includes(',')) {
@@ -3376,6 +3760,7 @@ const getUserDeviceInfo = async (req) => {
         } catch (ipinfoError) {
           console.log('ipinfo.io failed for exact location, trying fallback services...');
           
+          // Fallback 1: ipapi.co (also provides coordinates)
           try {
             const response = await axios.get(`https://ipapi.co/${ip}/json/`, {
               timeout: 5000
@@ -3403,6 +3788,7 @@ const getUserDeviceInfo = async (req) => {
               console.log(`Exact location from ipapi.co: ${location}`);
             }
           } catch (ipapiError) {
+            // Fallback 2: freeipapi.com
             try {
               const response = await axios.get(`https://freeipapi.com/api/json/${ip}`, {
                 timeout: 5000
@@ -3430,6 +3816,7 @@ const getUserDeviceInfo = async (req) => {
                 console.log(`Exact location from freeipapi.com: ${location}`);
               }
             } catch (freeipapiError) {
+              // Final fallback: ip-api.com
               try {
                 const response = await axios.get(`http://ip-api.com/json/${ip}`, {
                   timeout: 5000
@@ -3505,6 +3892,7 @@ const logActivity = async (action, entity, entityId, performedBy, performedByMod
   try {
     const deviceInfo = await getUserDeviceInfo(req);
     
+    // Enhanced location data with exact location
     const locationData = {
       ip: deviceInfo.ip,
       location: deviceInfo.location,
@@ -3560,6 +3948,9 @@ const verifyTOTP = (token, secret) => {
   });
 };
 
+
+
+// Initialize default admin and plans
 const initializeAdmin = async () => {
   try {
     const adminExists = await Admin.findOne({ email: 'admin@bithash.com' });
@@ -3644,6 +4035,7 @@ const initializePlans = async () => {
 initializeAdmin();
 initializePlans();
 
+// Middleware with enhanced security
 const protect = async (req, res, next) => {
   try {
     let token;
@@ -3684,6 +4076,7 @@ const protect = async (req, res, next) => {
       });
     }
 
+    // Check if 2FA is required
     if (currentUser.twoFactorAuth.enabled && !req.headers['x-2fa-verified']) {
       return res.status(401).json({
         status: 'fail',
@@ -3733,6 +4126,7 @@ const adminProtect = async (req, res, next) => {
       });
     }
 
+    // Check if 2FA is required
     if (currentAdmin.twoFactorAuth.enabled && !req.headers['x-2fa-verified']) {
       return res.status(401).json({
         status: 'fail',
@@ -3777,8 +4171,11 @@ const checkCSRF = (req, res, next) => {
   next();
 };
 
+
+// Fixed function to calculate and distribute downline referral commissions
 const calculateReferralCommissions = async (investment) => {
   try {
+    // First, populate the investment with user data
     const populatedInvestment = await Investment.findById(investment._id)
       .populate('user', 'firstName lastName email')
       .populate('plan');
@@ -3794,6 +4191,7 @@ const calculateReferralCommissions = async (investment) => {
 
     console.log(`🔍 Checking downline commissions for investment: ${investmentId}, user: ${investorId}, amount: $${investmentAmount}`);
 
+    // Find the downline relationship for this investor (check if they have an upline)
     const relationship = await DownlineRelationship.findOne({
       downline: investorId,
       status: 'active',
@@ -3802,7 +4200,7 @@ const calculateReferralCommissions = async (investment) => {
 
     if (!relationship) {
       console.log(`❌ No active downline relationship found for user: ${investorId}`);
-      return;
+      return; // No upline found or no commission rounds remaining
     }
 
     const uplineId = relationship.upline._id;
@@ -3812,6 +4210,7 @@ const calculateReferralCommissions = async (investment) => {
 
     console.log(`💰 Downline commission: $${investmentAmount} * ${commissionPercentage}% = $${commissionAmount} for upline: ${uplineUser.email}`);
 
+    // Create commission history record
     const commissionHistory = await CommissionHistory.create({
       upline: uplineId,
       downline: investorId,
@@ -3824,11 +4223,12 @@ const calculateReferralCommissions = async (investment) => {
       paidAt: new Date()
     });
 
+    // ✅ FIXED: Add commission to upline's MAIN balance as requested
     const updatedUpline = await User.findByIdAndUpdate(
       uplineId,
       {
         $inc: {
-          'balances.main': commissionAmount,
+          'balances.main': commissionAmount, // Added to main balance
           'referralStats.totalEarnings': commissionAmount,
           'referralStats.availableBalance': commissionAmount,
           'downlineStats.totalCommissionEarned': commissionAmount,
@@ -3840,6 +4240,7 @@ const calculateReferralCommissions = async (investment) => {
 
     console.log(`✅ Updated upline ${uplineUser.email} MAIN balance with $${commissionAmount}. New balance: $${updatedUpline.balances.main}`);
 
+    // Update downline relationship
     relationship.remainingRounds -= 1;
     relationship.totalCommissionEarned += commissionAmount;
     
@@ -3850,6 +4251,7 @@ const calculateReferralCommissions = async (investment) => {
 
     await relationship.save();
 
+    // Create transaction record for the commission
     await Transaction.create({
       user: uplineId,
       type: 'referral',
@@ -3871,13 +4273,14 @@ const calculateReferralCommissions = async (investment) => {
       netAmount: commissionAmount
     });
 
+    // Add to upline's referral history
     await User.findByIdAndUpdate(uplineId, {
       $push: {
         referralHistory: {
           referredUser: investorId,
           amount: commissionAmount,
           percentage: commissionPercentage,
-          level: 1,
+          level: 1, // Direct downline
           date: new Date(),
           status: 'available',
           type: 'downline_commission'
@@ -3885,6 +4288,7 @@ const calculateReferralCommissions = async (investment) => {
       }
     });
 
+    // Update downline stats count
     const activeDownlinesCount = await DownlineRelationship.countDocuments({ 
       upline: uplineId, 
       status: 'active',
@@ -3897,6 +4301,7 @@ const calculateReferralCommissions = async (investment) => {
 
     console.log(`🎉 Downline commission of $${commissionAmount} paid to upline ${uplineUser.email} for investment ${investmentId} (Round ${relationship.commissionRounds - relationship.remainingRounds + 1}/${relationship.commissionRounds})`);
 
+    // Log the activity
     await logActivity('downline_commission_paid', 'commission', commissionHistory._id, uplineId, 'User', null, {
       amount: commissionAmount,
       downline: investorId,
@@ -3908,9 +4313,14 @@ const calculateReferralCommissions = async (investment) => {
 
   } catch (err) {
     console.error('❌ Downline commission calculation error:', err);
+    // Don't throw error to avoid disrupting investment process
   }
 };
 
+
+// =============================================
+// RECALCULATE ALL USER BALANCES (Main, Active, Matured) based on current crypto prices
+// =============================================
 const recalculateAllUserBalances = async (io) => {
   try {
     console.log('🔄 Recalculating ALL user balances based on current crypto prices...');
@@ -3923,8 +4333,10 @@ const recalculateAllUserBalances = async (io) => {
       let totalActiveValue = 0;
       let totalMaturedValue = 0;
       
+      // Get user's asset balances
       const userAssetBalance = await UserAssetBalance.findOne({ user: user._id });
       if (userAssetBalance) {
+        // Calculate main balance (current value of all crypto holdings)
         for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
           if (balance > 0) {
             const price = await getCryptoPrice(asset.toUpperCase());
@@ -3935,14 +4347,17 @@ const recalculateAllUserBalances = async (io) => {
         }
       }
       
+      // Calculate active balance (current value of active investments)
       const activeInvestments = await Investment.find({
         user: user._id,
         status: 'active'
       }).populate('plan');
       
       for (const investment of activeInvestments) {
+        // Get current BTC price for conversion
         const currentBTCPrice = await getCryptoPrice('BTC');
         if (currentBTCPrice && investment.originalAmount) {
+          // Calculate current value based on BTC price fluctuation
           const originalBTCAmount = investment.originalAmount / (investment.originalBTCPrice || 43000);
           const currentUSDValue = originalBTCAmount * currentBTCPrice;
           totalActiveValue += currentUSDValue;
@@ -3951,12 +4366,14 @@ const recalculateAllUserBalances = async (io) => {
         }
       }
       
+      // Calculate matured balance (current value of completed investments)
       const maturedInvestments = await Investment.find({
         user: user._id,
         status: 'completed'
       }).populate('plan');
       
       for (const investment of maturedInvestments) {
+        // Get current BTC price for conversion
         const currentBTCPrice = await getCryptoPrice('BTC');
         if (currentBTCPrice && investment.originalAmount) {
           const originalBTCAmount = investment.originalAmount / (investment.originalBTCPrice || 43000);
@@ -3967,6 +4384,7 @@ const recalculateAllUserBalances = async (io) => {
         }
       }
       
+      // Update user balances if changed
       const updates = {};
       if (Math.abs(user.balances.main - totalMainValue) > 0.01) updates['balances.main'] = totalMainValue;
       if (Math.abs(user.balances.active - totalActiveValue) > 0.01) updates['balances.active'] = totalActiveValue;
@@ -3976,6 +4394,7 @@ const recalculateAllUserBalances = async (io) => {
         await User.findByIdAndUpdate(user._id, updates);
         updatedCount++;
         
+        // Emit real-time updates via Socket.IO
         if (io) {
           io.to(`user_${user._id}`).emit('balance_update', {
             main: totalMainValue,
@@ -3983,6 +4402,7 @@ const recalculateAllUserBalances = async (io) => {
             matured: totalMaturedValue
           });
           
+          // Calculate and emit PnL for main and matured balances
           const previousDayValue = user.balances.main || totalMainValue;
           const dailyPnL = totalMainValue - previousDayValue;
           const dailyPnLPercentage = previousDayValue > 0 ? (dailyPnL / previousDayValue) * 100 : 0;
@@ -4007,6 +4427,9 @@ const recalculateAllUserBalances = async (io) => {
     console.error('❌ Error recalculating user balances:', err);
   }
 };
+
+
+
 
 
 
@@ -21977,23 +22400,6 @@ fetchMarketData();
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 // =============================================
 // FIAT CURRENCIES ENDPOINT - Get ALL world currencies with REAL exchange rates (NO HARDCODING)
 // =============================================
@@ -22001,9 +22407,11 @@ app.get('/api/fiat-currencies', async (req, res) => {
   try {
     console.log('🌐 Fetching real-time fiat currencies from external APIs...');
     
+    // Try multiple exchange rate APIs with proper fallbacks
     let rates = null;
     let apiSuccess = false;
     
+    // Primary: exchangerate-api.com (free, reliable)
     try {
       const response = await axios.get('https://api.exchangerate-api.com/v4/latest/USD', { 
         timeout: 8000,
@@ -22018,6 +22426,7 @@ app.get('/api/fiat-currencies', async (req, res) => {
       console.warn('exchangerate-api.com failed:', err.message);
     }
     
+    // Fallback 1: Frankfurter API
     if (!apiSuccess) {
       try {
         const response = await axios.get('https://api.frankfurter.app/latest?from=USD', { 
@@ -22033,6 +22442,7 @@ app.get('/api/fiat-currencies', async (req, res) => {
       }
     }
     
+    // Fallback 2: Currency API (CDN)
     if (!apiSuccess) {
       try {
         const response = await axios.get('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json', { 
@@ -22048,6 +22458,7 @@ app.get('/api/fiat-currencies', async (req, res) => {
       }
     }
     
+    // If ALL APIs fail, return error (NO HARDCODED FALLBACK)
     if (!apiSuccess || !rates) {
       console.error('❌ All exchange rate APIs failed');
       return res.status(503).json({
@@ -22057,7 +22468,9 @@ app.get('/api/fiat-currencies', async (req, res) => {
       });
     }
     
+    // Complete list of ALL world currencies (from ISO 4217 standard)
     const allCurrencies = [
+      // Major currencies
       { code: 'USD', name: 'US Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/us.png' },
       { code: 'EUR', name: 'Euro', symbol: '€', flag: 'https://flagcdn.com/w40/eu.png' },
       { code: 'GBP', name: 'British Pound', symbol: '£', flag: 'https://flagcdn.com/w40/gb.png' },
@@ -22084,10 +22497,14 @@ app.get('/api/fiat-currencies', async (req, res) => {
       { code: 'SAR', name: 'Saudi Riyal', symbol: '﷼', flag: 'https://flagcdn.com/w40/sa.png' },
       { code: 'ILS', name: 'Israeli Shekel', symbol: '₪', flag: 'https://flagcdn.com/w40/il.png' },
       { code: 'RON', name: 'Romanian Leu', symbol: 'lei', flag: 'https://flagcdn.com/w40/ro.png' },
+      
+      // Additional European currencies
       { code: 'CZK', name: 'Czech Koruna', symbol: 'Kč', flag: 'https://flagcdn.com/w40/cz.png' },
       { code: 'HUF', name: 'Hungarian Forint', symbol: 'Ft', flag: 'https://flagcdn.com/w40/hu.png' },
       { code: 'BGN', name: 'Bulgarian Lev', symbol: 'лв', flag: 'https://flagcdn.com/w40/bg.png' },
       { code: 'HRK', name: 'Croatian Kuna', symbol: 'kn', flag: 'https://flagcdn.com/w40/hr.png' },
+      
+      // Asian currencies
       { code: 'THB', name: 'Thai Baht', symbol: '฿', flag: 'https://flagcdn.com/w40/th.png' },
       { code: 'VND', name: 'Vietnamese Dong', symbol: '₫', flag: 'https://flagcdn.com/w40/vn.png' },
       { code: 'IDR', name: 'Indonesian Rupiah', symbol: 'Rp', flag: 'https://flagcdn.com/w40/id.png' },
@@ -22097,18 +22514,24 @@ app.get('/api/fiat-currencies', async (req, res) => {
       { code: 'BDT', name: 'Bangladeshi Taka', symbol: '৳', flag: 'https://flagcdn.com/w40/bd.png' },
       { code: 'LKR', name: 'Sri Lankan Rupee', symbol: 'Rs', flag: 'https://flagcdn.com/w40/lk.png' },
       { code: 'NPR', name: 'Nepalese Rupee', symbol: 'Rs', flag: 'https://flagcdn.com/w40/np.png' },
+      
+      // Middle Eastern currencies
       { code: 'EGP', name: 'Egyptian Pound', symbol: 'E£', flag: 'https://flagcdn.com/w40/eg.png' },
       { code: 'QAR', name: 'Qatari Riyal', symbol: '﷼', flag: 'https://flagcdn.com/w40/qa.png' },
       { code: 'KWD', name: 'Kuwaiti Dinar', symbol: 'KD', flag: 'https://flagcdn.com/w40/kw.png' },
       { code: 'BHD', name: 'Bahraini Dinar', symbol: '.د.ب', flag: 'https://flagcdn.com/w40/bh.png' },
       { code: 'OMR', name: 'Omani Rial', symbol: '﷼', flag: 'https://flagcdn.com/w40/om.png' },
       { code: 'JOD', name: 'Jordanian Dinar', symbol: 'JD', flag: 'https://flagcdn.com/w40/jo.png' },
+      
+      // African currencies
       { code: 'KES', name: 'Kenyan Shilling', symbol: 'KSh', flag: 'https://flagcdn.com/w40/ke.png' },
       { code: 'NGN', name: 'Nigerian Naira', symbol: '₦', flag: 'https://flagcdn.com/w40/ng.png' },
       { code: 'GHS', name: 'Ghanaian Cedi', symbol: '₵', flag: 'https://flagcdn.com/w40/gh.png' },
       { code: 'MAD', name: 'Moroccan Dirham', symbol: 'DH', flag: 'https://flagcdn.com/w40/ma.png' },
       { code: 'TZS', name: 'Tanzanian Shilling', symbol: 'TSh', flag: 'https://flagcdn.com/w40/tz.png' },
       { code: 'UGX', name: 'Ugandan Shilling', symbol: 'USh', flag: 'https://flagcdn.com/w40/ug.png' },
+      
+      // Latin American currencies
       { code: 'ARS', name: 'Argentine Peso', symbol: '$', flag: 'https://flagcdn.com/w40/ar.png' },
       { code: 'CLP', name: 'Chilean Peso', symbol: '$', flag: 'https://flagcdn.com/w40/cl.png' },
       { code: 'COP', name: 'Colombian Peso', symbol: '$', flag: 'https://flagcdn.com/w40/co.png' },
@@ -22117,13 +22540,17 @@ app.get('/api/fiat-currencies', async (req, res) => {
       { code: 'PYG', name: 'Paraguayan Guarani', symbol: '₲', flag: 'https://flagcdn.com/w40/py.png' },
       { code: 'BOB', name: 'Bolivian Boliviano', symbol: 'Bs', flag: 'https://flagcdn.com/w40/bo.png' },
       { code: 'CRC', name: 'Costa Rican Colón', symbol: '₡', flag: 'https://flagcdn.com/w40/cr.png' },
+      
+      // Additional Asian currencies
       { code: 'TWD', name: 'New Taiwan Dollar', symbol: 'NT$', flag: 'https://flagcdn.com/w40/tw.png' },
+      { code: 'SGD', name: 'Singapore Dollar', symbol: 'S$', flag: 'https://flagcdn.com/w40/sg.png' },
       { code: 'MNT', name: 'Mongolian Tugrik', symbol: '₮', flag: 'https://flagcdn.com/w40/mn.png' },
       { code: 'KHR', name: 'Cambodian Riel', symbol: '៛', flag: 'https://flagcdn.com/w40/kh.png' },
       { code: 'LAK', name: 'Lao Kip', symbol: '₭', flag: 'https://flagcdn.com/w40/la.png' },
       { code: 'MMK', name: 'Myanmar Kyat', symbol: 'Ks', flag: 'https://flagcdn.com/w40/mm.png' }
     ];
     
+    // Add exchange rates to each currency
     const currenciesWithRates = allCurrencies.map(currency => ({
       ...currency,
       exchangeRate: rates[currency.code] || (currency.code === 'USD' ? 1 : null)
@@ -22139,13 +22566,13 @@ app.get('/api/fiat-currencies', async (req, res) => {
     
   } catch (err) {
     console.error('❌ Error fetching fiat currencies:', err);
+    // Return error - NO HARDCODED FALLBACK
     res.status(500).json({ 
       status: 'error', 
       message: 'Failed to fetch exchange rates. Please try again.'
     });
   }
 });
-
 // =============================================
 // CONVERT ASSETS ENDPOINT - Get available target cryptos for conversion
 // =============================================
@@ -22196,6 +22623,7 @@ app.post('/api/convert', protect, async (req, res) => {
       return res.status(400).json({ status: 'fail', message: 'Cannot convert to the same asset' });
     }
     
+    // Get user's asset balance
     let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
     if (!userAssetBalance) {
       userAssetBalance = new UserAssetBalance({ user: userId, balances: {} });
@@ -22208,6 +22636,7 @@ app.post('/api/convert', protect, async (req, res) => {
       return res.status(400).json({ status: 'fail', message: 'Insufficient balance for conversion' });
     }
     
+    // Get real-time prices
     const fromPrice = await getCryptoPrice(fromAsset);
     const toPrice = await getCryptoPrice(toAsset);
     
@@ -22216,13 +22645,15 @@ app.post('/api/convert', protect, async (req, res) => {
     }
     
     const usdValue = amount * fromPrice;
-    const CONVERSION_FEE_PERCENT = 0.5;
+    const CONVERSION_FEE_PERCENT = 0.5; // 0.5% fee
     const feeAmount = usdValue * (CONVERSION_FEE_PERCENT / 100);
     const usdValueAfterFee = usdValue - feeAmount;
     const toAmount = usdValueAfterFee / toPrice;
     
+    // Deduct from asset
     userAssetBalance.balances[fromAssetLower] -= amount;
     
+    // Add to target asset
     if (!userAssetBalance.balances[toAssetLower]) {
       userAssetBalance.balances[toAssetLower] = 0;
     }
@@ -22231,6 +22662,7 @@ app.post('/api/convert', protect, async (req, res) => {
     userAssetBalance.lastUpdated = new Date();
     await userAssetBalance.save();
     
+    // Track revenue from conversion fee
     await PlatformRevenue.create({
       source: 'buy_fee',
       amount: feeAmount,
@@ -22247,6 +22679,7 @@ app.post('/api/convert', protect, async (req, res) => {
       }
     });
     
+    // Update main balance (value of assets changes with price fluctuations)
     let totalMainBalance = 0;
     for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
       if (balance > 0) {
@@ -22259,8 +22692,10 @@ app.post('/api/convert', protect, async (req, res) => {
     
     await User.findByIdAndUpdate(userId, { 'balances.main': totalMainBalance });
     
+    // Create transaction records for the conversion
     const reference = `CONV-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
     
+    // Sell transaction (from asset)
     await Transaction.create({
       user: userId,
       type: 'sell',
@@ -22284,6 +22719,7 @@ app.post('/api/convert', protect, async (req, res) => {
       }
     });
     
+    // Buy transaction (to asset)
     await Transaction.create({
       user: userId,
       type: 'buy',
@@ -22307,6 +22743,7 @@ app.post('/api/convert', protect, async (req, res) => {
       }
     });
     
+    // Emit socket updates for real-time balance changes
     const io = req.app.get('io');
     if (io) {
       const updatedBalances = {};
@@ -22370,6 +22807,7 @@ app.post('/api/users/preferences/save', protect, async (req, res) => {
     
     await User.findByIdAndUpdate(userId, updates);
     
+    // Also update UserPreference model
     await UserPreference.findOneAndUpdate(
       { user: userId },
       { 
@@ -22399,6 +22837,7 @@ app.get('/api/users/preferences', protect, async (req, res) => {
     let userPref = await UserPreference.findOne({ user: req.user._id });
     
     if (!userPref) {
+      // Try to get from user model
       const user = await User.findById(req.user._id);
       userPref = {
         displayAsset: user?.preferences?.displayAsset || 'btc',
@@ -22442,6 +22881,7 @@ app.post('/api/users/preferences', protect, async (req, res) => {
       { upsert: true, new: true }
     );
     
+    // Also update user model
     await User.findByIdAndUpdate(req.user._id, {
       $set: {
         'preferences.theme': theme,
@@ -22450,6 +22890,7 @@ app.post('/api/users/preferences', protect, async (req, res) => {
       }
     });
     
+    // Emit socket update for real-time preference changes
     const io = req.app.get('io');
     if (io) {
       io.to(`user_${req.user._id}`).emit('preferences_update', updates);
@@ -22493,6 +22934,7 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
   try {
     const { notes } = req.body;
     
+    // Find deposit
     const deposit = await Transaction.findById(req.params.id)
       .populate('user');
     
@@ -22510,6 +22952,7 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       });
     }
     
+    // Find user
     const user = await User.findById(deposit.user._id);
     if (!user) {
       return res.status(404).json({
@@ -22518,9 +22961,11 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       });
     }
     
+    // Determine if deposit is crypto or fiat
     const isCryptoDeposit = deposit.method !== 'BANK' && deposit.method !== 'CARD';
     const assetSymbol = isCryptoDeposit ? deposit.method.toLowerCase() : null;
     
+    // Get current crypto price for the deposited asset
     let cryptoPrice = null;
     let assetAmount = null;
     
@@ -22529,6 +22974,7 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       if (cryptoPrice) {
         assetAmount = deposit.amount / cryptoPrice;
       } else {
+        // If price fetch fails, use a reasonable default
         cryptoPrice = assetSymbol === 'btc' ? 43000 : 
                       assetSymbol === 'eth' ? 2200 : 
                       assetSymbol === 'usdt' ? 1 : 1;
@@ -22536,9 +22982,11 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       }
     }
     
+    // Update user balance
     user.balances.main += deposit.amount;
     await user.save();
     
+    // If crypto deposit, update user asset balances
     if (isCryptoDeposit && assetSymbol) {
       let userAssetBalance = await UserAssetBalance.findOne({ user: user._id });
       if (!userAssetBalance) {
@@ -22551,6 +22999,7 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       userAssetBalance.balances[assetSymbol] += assetAmount;
       userAssetBalance.lastUpdated = new Date();
       
+      // Add to history
       userAssetBalance.history.push({
         asset: assetSymbol,
         type: 'deposit',
@@ -22564,6 +23013,7 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       
       await userAssetBalance.save();
       
+      // Create DepositAsset record for tracking
       await DepositAsset.create({
         user: user._id,
         asset: assetSymbol,
@@ -22583,6 +23033,7 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       });
     }
     
+    // Update deposit status
     deposit.status = 'completed';
     deposit.processedBy = req.admin._id;
     deposit.processedAt = new Date();
@@ -22593,8 +23044,10 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
     }
     await deposit.save();
 
+    // Get device info for exact location
     const deviceInfo = await getUserDeviceInfo(req);
     
+    // CREATE LOG FOR DEPOSIT APPROVAL
     await UserLog.create({
       user: user._id,
       username: user.email,
@@ -22652,6 +23105,7 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       relatedEntityModel: 'Transaction'
     });
 
+    // SEND DEPOSIT APPROVED EMAIL
     try {
       await sendAutomatedEmail(user, 'deposit_approved', {
         name: user.firstName,
@@ -22667,8 +23121,10 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       console.error('Failed to send deposit approval email:', emailError);
     }
     
+    // TRIGGER RESTRICTION CHECK ON TRANSACTION COMPLETION
     await AccountRestrictions.checkAndUpdateRestrictions(user._id, 'transaction_completion');
     
+    // Emit socket updates for real-time balance changes
     const io = req.app.get('io');
     if (io) {
       io.to(`user_${user._id}`).emit('balance_update', { main: user.balances.main });
@@ -22727,6 +23183,7 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
   try {
     const { notes, txid } = req.body;
     
+    // Find withdrawal
     const withdrawal = await Transaction.findById(req.params.id)
       .populate('user');
     
@@ -22744,6 +23201,7 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
       });
     }
     
+    // Get real-time crypto price for the withdrawal asset
     let cryptoPrice = null;
     let usdValue = withdrawal.amount;
     let feeUsd = withdrawal.fee || 0;
@@ -22760,6 +23218,7 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
       }
     }
     
+    // If crypto withdrawal, deduct from user's asset balance
     if (isCryptoWithdrawal && assetSymbol && withdrawal.assetAmount) {
       let userAssetBalance = await UserAssetBalance.findOne({ user: withdrawal.user._id });
       if (userAssetBalance && userAssetBalance.balances[assetSymbol]) {
@@ -22769,6 +23228,7 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
         }
         userAssetBalance.lastUpdated = new Date();
         
+        // Add to history
         userAssetBalance.history.push({
           asset: assetSymbol,
           type: 'withdrawal',
@@ -22784,6 +23244,7 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
       }
     }
     
+    // Update withdrawal status
     withdrawal.status = 'completed';
     withdrawal.processedBy = req.admin._id;
     withdrawal.processedAt = new Date();
@@ -22793,8 +23254,10 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
     }
     await withdrawal.save();
 
+    // Get device info for exact location
     const deviceInfo = await getUserDeviceInfo(req);
     
+    // CREATE LOG FOR WITHDRAWAL APPROVAL
     await UserLog.create({
       user: withdrawal.user._id,
       username: withdrawal.user.email,
@@ -22853,6 +23316,7 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
       relatedEntityModel: 'Transaction'
     });
 
+    // SEND WITHDRAWAL APPROVED EMAIL
     try {
       await sendAutomatedEmail(withdrawal.user, 'withdrawal_approved', {
         name: withdrawal.user.firstName,
@@ -22872,8 +23336,10 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
       console.error('Failed to send withdrawal approval email:', emailError);
     }
     
+    // TRIGGER RESTRICTION CHECK ON TRANSACTION COMPLETION
     await AccountRestrictions.checkAndUpdateRestrictions(withdrawal.user._id, 'transaction_completion');
     
+    // Update main balance (recalculate total USD value of all assets)
     let totalMainBalance = 0;
     const updatedAssetBalance = await UserAssetBalance.findOne({ user: withdrawal.user._id });
     if (updatedAssetBalance) {
@@ -22888,6 +23354,7 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
     }
     await User.findByIdAndUpdate(withdrawal.user._id, { 'balances.main': totalMainBalance });
     
+    // Emit socket updates for real-time balance changes
     const io = req.app.get('io');
     if (io) {
       io.to(`user_${withdrawal.user._id}`).emit('balance_update', { main: totalMainBalance });
@@ -22952,6 +23419,7 @@ app.post('/api/buy', protect, async (req, res) => {
       return res.status(400).json({ status: 'fail', message: 'Insufficient balance' });
     }
     
+    // Determine which balance to deduct from (prioritize matured then main)
     let remainingToDeduct = amountUSD;
     let deductedFromMatured = 0;
     let deductedFromMain = 0;
@@ -22969,6 +23437,7 @@ app.post('/api/buy', protect, async (req, res) => {
     user.balances.main -= deductedFromMain;
     await user.save();
     
+    // Get real-time price if not provided
     let actualPrice = price;
     if (!actualPrice) {
       actualPrice = await getCryptoPrice(asset.toUpperCase());
@@ -22976,6 +23445,7 @@ app.post('/api/buy', protect, async (req, res) => {
     
     const actualAssetAmount = amountUSD / actualPrice;
     
+    // Update user asset balances
     let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
     if (!userAssetBalance) {
       userAssetBalance = new UserAssetBalance({ user: userId, balances: {} });
@@ -22988,6 +23458,7 @@ app.post('/api/buy', protect, async (req, res) => {
     userAssetBalance.balances[assetLower] += actualAssetAmount;
     userAssetBalance.lastUpdated = new Date();
     
+    // Add to history
     userAssetBalance.history.push({
       asset: assetLower,
       type: 'buy',
@@ -23003,6 +23474,7 @@ app.post('/api/buy', protect, async (req, res) => {
     
     await userAssetBalance.save();
     
+    // Create buy record
     const buy = await Buy.create({
       user: userId,
       asset: assetLower,
@@ -23015,6 +23487,7 @@ app.post('/api/buy', protect, async (req, res) => {
       balanceSource: deductedFromMatured > 0 && deductedFromMain > 0 ? 'both' : (deductedFromMatured > 0 ? 'matured' : 'main')
     });
     
+    // Create transaction record
     const transaction = await Transaction.create({
       user: userId,
       type: 'buy',
@@ -23038,6 +23511,7 @@ app.post('/api/buy', protect, async (req, res) => {
       netAmount: amountUSD
     });
     
+    // Emit socket updates
     const io = req.app.get('io');
     if (io) {
       io.to(`user_${userId}`).emit('balance_update', { main: user.balances.main, matured: user.balances.matured });
@@ -23086,6 +23560,7 @@ app.post('/api/sell', protect, async (req, res) => {
     
     const assetLower = asset.toLowerCase();
     
+    // Get user's asset balance
     let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
     if (!userAssetBalance) {
       return res.status(400).json({ status: 'fail', message: 'No asset balance found' });
@@ -23098,6 +23573,7 @@ app.post('/api/sell', protect, async (req, res) => {
       return res.status(400).json({ status: 'fail', message: 'Insufficient asset balance' });
     }
     
+    // Get real-time price if not provided
     let actualPrice = price;
     if (!actualPrice) {
       actualPrice = await getCryptoPrice(asset.toUpperCase());
@@ -23105,9 +23581,11 @@ app.post('/api/sell', protect, async (req, res) => {
     
     const actualUsdValue = actualAssetAmount * actualPrice;
     
+    // Deduct from asset balance
     userAssetBalance.balances[assetLower] -= actualAssetAmount;
     userAssetBalance.lastUpdated = new Date();
     
+    // Add to history
     userAssetBalance.history.push({
       asset: assetLower,
       type: 'sell',
@@ -23123,10 +23601,12 @@ app.post('/api/sell', protect, async (req, res) => {
     
     await userAssetBalance.save();
     
+    // Add proceeds to matured balance
     const user = await User.findById(userId);
     user.balances.matured += actualUsdValue;
     await user.save();
     
+    // Create sell record
     const sell = await Sell.create({
       user: userId,
       asset: assetLower,
@@ -23141,6 +23621,7 @@ app.post('/api/sell', protect, async (req, res) => {
       balanceSource: 'matured'
     });
     
+    // Create transaction record
     const transaction = await Transaction.create({
       user: userId,
       type: 'sell',
@@ -23164,6 +23645,7 @@ app.post('/api/sell', protect, async (req, res) => {
       netAmount: actualUsdValue
     });
     
+    // Emit socket updates
     const io = req.app.get('io');
     if (io) {
       io.to(`user_${userId}`).emit('balance_update', { main: user.balances.main, matured: user.balances.matured });
@@ -23216,6 +23698,7 @@ app.get('/api/users/assets', protect, async (req, res) => {
         const price = await getCryptoPrice(asset.toUpperCase());
         const currentValue = balance * (price || 0);
         
+        // Calculate average buying price from history
         const buyTransactions = userAssetBalance.history.filter(h => h.asset === asset && h.type === 'buy');
         let totalSpent = 0;
         let totalBought = 0;
@@ -23264,12 +23747,23 @@ app.get('/api/users/balances', protect, async (req, res) => {
   }
 });
 
+
+
+
+
+
+
+
+
+
+// Real-time price update function with WebSocket broadcasting
 let priceUpdateInterval = null;
 let lastPrices = {};
 
 const startRealTimePriceUpdates = (io) => {
   if (priceUpdateInterval) clearInterval(priceUpdateInterval);
   
+  // Update prices every 10 seconds for real-time fluctuations
   priceUpdateInterval = setInterval(async () => {
     try {
       const assets = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'ADA', 'SHIB', 'AVAX', 'DOT', 'TRX', 'LINK', 'MATIC', 'LTC'];
@@ -23295,6 +23789,7 @@ const startRealTimePriceUpdates = (io) => {
   }, 10000);
 };
 
+// Function to recalculate all user main balances based on current crypto prices
 const recalculateAllUserMainBalances = async (io) => {
   try {
     const users = await User.find({}).select('_id');
@@ -23327,7 +23822,7 @@ const recalculateAllUserMainBalances = async (io) => {
   }
 };
 
-      // Error handling middleware
+// Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Global error handler:', err);
   res.status(500).json({
