@@ -75,9 +75,13 @@ app.use(cors({
 
 
 
-// Only for caching, don't override CORS
 app.use((req, res, next) => {
-  // Cache static responses only - DON'T TOUCH CORS HEADERS
+  // Allow fonts from Google
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  
+  // Cache static responses
   if (req.url.includes('/api/plans') || req.url.includes('/api/stats')) {
     res.setHeader('Cache-Control', 'public, max-age=300');
   }
@@ -22569,7 +22573,6 @@ app.get('/api/fiat-currencies', async (req, res) => {
     });
   }
 });
-
 // =============================================
 // CONVERT ASSETS ENDPOINT - Get available target cryptos for conversion
 // =============================================
@@ -23819,7 +23822,7 @@ const recalculateAllUserMainBalances = async (io) => {
   }
 };
 
-      // Error handling middleware
+// Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Global error handler:', err);
   res.status(500).json({
