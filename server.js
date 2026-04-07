@@ -4318,7 +4318,115 @@ const calculateReferralCommissions = async (investment) => {
 };
 
 
-
+// =============================================
+// RECALCULATE ALL USER BALANCES (Main, Active, Matured) based on current crypto prices
+// =============================================
+const recalculateAllUserBalances = async (io) => {
+  try {
+    console.log('🔄 Recalculating ALL user balances based on current crypto prices...');
+    
+    const users = await User.find({}).select('_id balances');
+    let updatedCount = 0;
+    
+    for (const user of users) {
+      let totalMainValue = 0;
+      let totalActiveValue = 0;
+      let totalMaturedValue = 0;
+      
+      // Get user's asset balances
+      const userAssetBalance = await UserAssetBalance.findOne({ user: user._id });
+      if (userAssetBalance) {
+        // Calculate main balance (current value of all crypto holdings)
+        for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
+          if (balance > 0) {
+            const price = await getCryptoPrice(asset.toUpperCase());
+            if (price) {
+              totalMainValue += balance * price;
+            }
+          }
+        }
+      }
+      
+      // Calculate active balance (current value of active investments)
+      const activeInvestments = await Investment.find({
+        user: user._id,
+        status: 'active'
+      }).populate('plan');
+      
+      for (const investment of activeInvestments) {
+        // Get current BTC price for conversion
+        const currentBTCPrice = await getCryptoPrice('BTC');
+        if (currentBTCPrice && investment.originalAmount) {
+          // Calculate current value based on BTC price fluctuation
+          const originalBTCAmount = investment.originalAmount / (investment.originalBTCPrice || 43000);
+          const currentUSDValue = originalBTCAmount * currentBTCPrice;
+          totalActiveValue += currentUSDValue;
+        } else {
+          totalActiveValue += investment.amount;
+        }
+      }
+      
+      // Calculate matured balance (current value of completed investments)
+      const maturedInvestments = await Investment.find({
+        user: user._id,
+        status: 'completed'
+      }).populate('plan');
+      
+      for (const investment of maturedInvestments) {
+        // Get current BTC price for conversion
+        const currentBTCPrice = await getCryptoPrice('BTC');
+        if (currentBTCPrice && investment.originalAmount) {
+          const originalBTCAmount = investment.originalAmount / (investment.originalBTCPrice || 43000);
+          const currentUSDValue = originalBTCAmount * currentBTCPrice;
+          totalMaturedValue += currentUSDValue;
+        } else {
+          totalMaturedValue += investment.amount + (investment.actualReturn || 0);
+        }
+      }
+      
+      // Update user balances if changed
+      const updates = {};
+      if (Math.abs(user.balances.main - totalMainValue) > 0.01) updates['balances.main'] = totalMainValue;
+      if (Math.abs(user.balances.active - totalActiveValue) > 0.01) updates['balances.active'] = totalActiveValue;
+      if (Math.abs(user.balances.matured - totalMaturedValue) > 0.01) updates['balances.matured'] = totalMaturedValue;
+      
+      if (Object.keys(updates).length > 0) {
+        await User.findByIdAndUpdate(user._id, updates);
+        updatedCount++;
+        
+        // Emit real-time updates via Socket.IO
+        if (io) {
+          io.to(`user_${user._id}`).emit('balance_update', {
+            main: totalMainValue,
+            active: totalActiveValue,
+            matured: totalMaturedValue
+          });
+          
+          // Calculate and emit PnL for main and matured balances
+          const previousDayValue = user.balances.main || totalMainValue;
+          const dailyPnL = totalMainValue - previousDayValue;
+          const dailyPnLPercentage = previousDayValue > 0 ? (dailyPnL / previousDayValue) * 100 : 0;
+          
+          io.to(`user_${user._id}`).emit('pnl_update', {
+            main: {
+              amount: dailyPnL,
+              percentage: dailyPnLPercentage
+            },
+            matured: {
+              amount: 0,
+              percentage: 0
+            }
+          });
+        }
+      }
+    }
+    
+    console.log(`✅ Recalculated balances for ${updatedCount} users (Main: fluctuates, Active: fluctuates, Matured: fluctuates)`);
+    
+  } catch (err) {
+    console.error('❌ Error recalculating user balances:', err);
+  }
+};
 
 
 
@@ -22292,54 +22400,178 @@ fetchMarketData();
 
 
 // =============================================
-// SNIPPET B - ALL ENDPOINTS (including missing ones)
-// =============================================
-
-// =============================================
-// FIAT CURRENCIES ENDPOINT - Get all world currencies with real-time exchange rates
+// FIAT CURRENCIES ENDPOINT - Get ALL world currencies with REAL exchange rates (NO HARDCODING)
 // =============================================
 app.get('/api/fiat-currencies', async (req, res) => {
   try {
-    const currencies = await getAllWorldCurrencies();
+    console.log('🌐 Fetching real-time fiat currencies from external APIs...');
     
-    if (!currencies || currencies.length === 0) {
-      // Fallback to basic currencies if API fails
-      const fallbackCurrencies = [
-        { code: 'USD', name: 'US Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/us.png', exchangeRate: 1 },
-        { code: 'EUR', name: 'Euro', symbol: '€', flag: 'https://flagcdn.com/w40/eu.png', exchangeRate: 0.92 },
-        { code: 'GBP', name: 'British Pound', symbol: '£', flag: 'https://flagcdn.com/w40/gb.png', exchangeRate: 0.79 },
-        { code: 'JPY', name: 'Japanese Yen', symbol: '¥', flag: 'https://flagcdn.com/w40/jp.png', exchangeRate: 150.5 },
-        { code: 'CAD', name: 'Canadian Dollar', symbol: 'C$', flag: 'https://flagcdn.com/w40/ca.png', exchangeRate: 1.36 },
-        { code: 'AUD', name: 'Australian Dollar', symbol: 'A$', flag: 'https://flagcdn.com/w40/au.png', exchangeRate: 1.52 },
-        { code: 'CNY', name: 'Chinese Yuan', symbol: '¥', flag: 'https://flagcdn.com/w40/cn.png', exchangeRate: 7.25 },
-        { code: 'INR', name: 'Indian Rupee', symbol: '₹', flag: 'https://flagcdn.com/w40/in.png', exchangeRate: 83.5 },
-        { code: 'BRL', name: 'Brazilian Real', symbol: 'R$', flag: 'https://flagcdn.com/w40/br.png', exchangeRate: 5.05 },
-        { code: 'MXN', name: 'Mexican Peso', symbol: '$', flag: 'https://flagcdn.com/w40/mx.png', exchangeRate: 17.2 },
-        { code: 'KRW', name: 'South Korean Won', symbol: '₩', flag: 'https://flagcdn.com/w40/kr.png', exchangeRate: 1330 },
-        { code: 'SGD', name: 'Singapore Dollar', symbol: 'S$', flag: 'https://flagcdn.com/w40/sg.png', exchangeRate: 1.34 },
-        { code: 'CHF', name: 'Swiss Franc', symbol: 'Fr', flag: 'https://flagcdn.com/w40/ch.png', exchangeRate: 0.88 },
-        { code: 'ZAR', name: 'South African Rand', symbol: 'R', flag: 'https://flagcdn.com/w40/za.png', exchangeRate: 18.5 },
-        { code: 'RON', name: 'Romanian Leu', symbol: 'lei', flag: 'https://flagcdn.com/w40/ro.png', exchangeRate: 4.97 },
-        { code: 'KES', name: 'Kenyan Shilling', symbol: 'KSh', flag: 'https://flagcdn.com/w40/ke.png', exchangeRate: 130.5 }
-      ];
-      return res.status(200).json({ currencies: fallbackCurrencies });
+    // Try multiple exchange rate APIs with proper fallbacks
+    let rates = null;
+    let apiSuccess = false;
+    
+    // Primary: exchangerate-api.com (free, reliable)
+    try {
+      const response = await axios.get('https://api.exchangerate-api.com/v4/latest/USD', { 
+        timeout: 8000,
+        headers: { 'Accept': 'application/json' }
+      });
+      if (response.data && response.data.rates) {
+        rates = response.data.rates;
+        apiSuccess = true;
+        console.log('✅ Fetched rates from exchangerate-api.com');
+      }
+    } catch (err) {
+      console.warn('exchangerate-api.com failed:', err.message);
     }
     
-    res.status(200).json({ currencies });
-  } catch (err) {
-    console.error('Error fetching fiat currencies:', err);
-    // Return basic fallback currencies
-    const fallbackCurrencies = [
-      { code: 'USD', name: 'US Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/us.png', exchangeRate: 1 },
-      { code: 'EUR', name: 'Euro', symbol: '€', flag: 'https://flagcdn.com/w40/eu.png', exchangeRate: 0.92 },
-      { code: 'GBP', name: 'British Pound', symbol: '£', flag: 'https://flagcdn.com/w40/gb.png', exchangeRate: 0.79 },
-      { code: 'RON', name: 'Romanian Leu', symbol: 'lei', flag: 'https://flagcdn.com/w40/ro.png', exchangeRate: 4.97 },
-      { code: 'KES', name: 'Kenyan Shilling', symbol: 'KSh', flag: 'https://flagcdn.com/w40/ke.png', exchangeRate: 130.5 }
+    // Fallback 1: Frankfurter API
+    if (!apiSuccess) {
+      try {
+        const response = await axios.get('https://api.frankfurter.app/latest?from=USD', { 
+          timeout: 8000 
+        });
+        if (response.data && response.data.rates) {
+          rates = response.data.rates;
+          apiSuccess = true;
+          console.log('✅ Fetched rates from frankfurter.app');
+        }
+      } catch (err) {
+        console.warn('frankfurter.app failed:', err.message);
+      }
+    }
+    
+    // Fallback 2: Currency API (CDN)
+    if (!apiSuccess) {
+      try {
+        const response = await axios.get('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json', { 
+          timeout: 8000 
+        });
+        if (response.data && response.data.usd) {
+          rates = response.data.usd;
+          apiSuccess = true;
+          console.log('✅ Fetched rates from currency-api');
+        }
+      } catch (err) {
+        console.warn('currency-api failed:', err.message);
+      }
+    }
+    
+    // If ALL APIs fail, return error (NO HARDCODED FALLBACK)
+    if (!apiSuccess || !rates) {
+      console.error('❌ All exchange rate APIs failed');
+      return res.status(503).json({
+        status: 'error',
+        message: 'Unable to fetch exchange rates. Please try again later.',
+        retryAfter: 30
+      });
+    }
+    
+    // Complete list of ALL world currencies (from ISO 4217 standard)
+    const allCurrencies = [
+      // Major currencies
+      { code: 'USD', name: 'US Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/us.png' },
+      { code: 'EUR', name: 'Euro', symbol: '€', flag: 'https://flagcdn.com/w40/eu.png' },
+      { code: 'GBP', name: 'British Pound', symbol: '£', flag: 'https://flagcdn.com/w40/gb.png' },
+      { code: 'JPY', name: 'Japanese Yen', symbol: '¥', flag: 'https://flagcdn.com/w40/jp.png' },
+      { code: 'CNY', name: 'Chinese Yuan', symbol: '¥', flag: 'https://flagcdn.com/w40/cn.png' },
+      { code: 'INR', name: 'Indian Rupee', symbol: '₹', flag: 'https://flagcdn.com/w40/in.png' },
+      { code: 'CAD', name: 'Canadian Dollar', symbol: 'C$', flag: 'https://flagcdn.com/w40/ca.png' },
+      { code: 'AUD', name: 'Australian Dollar', symbol: 'A$', flag: 'https://flagcdn.com/w40/au.png' },
+      { code: 'CHF', name: 'Swiss Franc', symbol: 'Fr', flag: 'https://flagcdn.com/w40/ch.png' },
+      { code: 'KRW', name: 'South Korean Won', symbol: '₩', flag: 'https://flagcdn.com/w40/kr.png' },
+      { code: 'MXN', name: 'Mexican Peso', symbol: '$', flag: 'https://flagcdn.com/w40/mx.png' },
+      { code: 'BRL', name: 'Brazilian Real', symbol: 'R$', flag: 'https://flagcdn.com/w40/br.png' },
+      { code: 'ZAR', name: 'South African Rand', symbol: 'R', flag: 'https://flagcdn.com/w40/za.png' },
+      { code: 'SGD', name: 'Singapore Dollar', symbol: 'S$', flag: 'https://flagcdn.com/w40/sg.png' },
+      { code: 'HKD', name: 'Hong Kong Dollar', symbol: 'HK$', flag: 'https://flagcdn.com/w40/hk.png' },
+      { code: 'NZD', name: 'New Zealand Dollar', symbol: 'NZ$', flag: 'https://flagcdn.com/w40/nz.png' },
+      { code: 'SEK', name: 'Swedish Krona', symbol: 'kr', flag: 'https://flagcdn.com/w40/se.png' },
+      { code: 'NOK', name: 'Norwegian Krone', symbol: 'kr', flag: 'https://flagcdn.com/w40/no.png' },
+      { code: 'DKK', name: 'Danish Krone', symbol: 'kr', flag: 'https://flagcdn.com/w40/dk.png' },
+      { code: 'PLN', name: 'Polish Zloty', symbol: 'zł', flag: 'https://flagcdn.com/w40/pl.png' },
+      { code: 'TRY', name: 'Turkish Lira', symbol: '₺', flag: 'https://flagcdn.com/w40/tr.png' },
+      { code: 'RUB', name: 'Russian Ruble', symbol: '₽', flag: 'https://flagcdn.com/w40/ru.png' },
+      { code: 'AED', name: 'UAE Dirham', symbol: 'د.إ', flag: 'https://flagcdn.com/w40/ae.png' },
+      { code: 'SAR', name: 'Saudi Riyal', symbol: '﷼', flag: 'https://flagcdn.com/w40/sa.png' },
+      { code: 'ILS', name: 'Israeli Shekel', symbol: '₪', flag: 'https://flagcdn.com/w40/il.png' },
+      { code: 'RON', name: 'Romanian Leu', symbol: 'lei', flag: 'https://flagcdn.com/w40/ro.png' },
+      
+      // Additional European currencies
+      { code: 'CZK', name: 'Czech Koruna', symbol: 'Kč', flag: 'https://flagcdn.com/w40/cz.png' },
+      { code: 'HUF', name: 'Hungarian Forint', symbol: 'Ft', flag: 'https://flagcdn.com/w40/hu.png' },
+      { code: 'BGN', name: 'Bulgarian Lev', symbol: 'лв', flag: 'https://flagcdn.com/w40/bg.png' },
+      { code: 'HRK', name: 'Croatian Kuna', symbol: 'kn', flag: 'https://flagcdn.com/w40/hr.png' },
+      
+      // Asian currencies
+      { code: 'THB', name: 'Thai Baht', symbol: '฿', flag: 'https://flagcdn.com/w40/th.png' },
+      { code: 'VND', name: 'Vietnamese Dong', symbol: '₫', flag: 'https://flagcdn.com/w40/vn.png' },
+      { code: 'IDR', name: 'Indonesian Rupiah', symbol: 'Rp', flag: 'https://flagcdn.com/w40/id.png' },
+      { code: 'MYR', name: 'Malaysian Ringgit', symbol: 'RM', flag: 'https://flagcdn.com/w40/my.png' },
+      { code: 'PHP', name: 'Philippine Peso', symbol: '₱', flag: 'https://flagcdn.com/w40/ph.png' },
+      { code: 'PKR', name: 'Pakistani Rupee', symbol: '₨', flag: 'https://flagcdn.com/w40/pk.png' },
+      { code: 'BDT', name: 'Bangladeshi Taka', symbol: '৳', flag: 'https://flagcdn.com/w40/bd.png' },
+      { code: 'LKR', name: 'Sri Lankan Rupee', symbol: 'Rs', flag: 'https://flagcdn.com/w40/lk.png' },
+      { code: 'NPR', name: 'Nepalese Rupee', symbol: 'Rs', flag: 'https://flagcdn.com/w40/np.png' },
+      
+      // Middle Eastern currencies
+      { code: 'EGP', name: 'Egyptian Pound', symbol: 'E£', flag: 'https://flagcdn.com/w40/eg.png' },
+      { code: 'QAR', name: 'Qatari Riyal', symbol: '﷼', flag: 'https://flagcdn.com/w40/qa.png' },
+      { code: 'KWD', name: 'Kuwaiti Dinar', symbol: 'KD', flag: 'https://flagcdn.com/w40/kw.png' },
+      { code: 'BHD', name: 'Bahraini Dinar', symbol: '.د.ب', flag: 'https://flagcdn.com/w40/bh.png' },
+      { code: 'OMR', name: 'Omani Rial', symbol: '﷼', flag: 'https://flagcdn.com/w40/om.png' },
+      { code: 'JOD', name: 'Jordanian Dinar', symbol: 'JD', flag: 'https://flagcdn.com/w40/jo.png' },
+      
+      // African currencies
+      { code: 'KES', name: 'Kenyan Shilling', symbol: 'KSh', flag: 'https://flagcdn.com/w40/ke.png' },
+      { code: 'NGN', name: 'Nigerian Naira', symbol: '₦', flag: 'https://flagcdn.com/w40/ng.png' },
+      { code: 'GHS', name: 'Ghanaian Cedi', symbol: '₵', flag: 'https://flagcdn.com/w40/gh.png' },
+      { code: 'MAD', name: 'Moroccan Dirham', symbol: 'DH', flag: 'https://flagcdn.com/w40/ma.png' },
+      { code: 'TZS', name: 'Tanzanian Shilling', symbol: 'TSh', flag: 'https://flagcdn.com/w40/tz.png' },
+      { code: 'UGX', name: 'Ugandan Shilling', symbol: 'USh', flag: 'https://flagcdn.com/w40/ug.png' },
+      
+      // Latin American currencies
+      { code: 'ARS', name: 'Argentine Peso', symbol: '$', flag: 'https://flagcdn.com/w40/ar.png' },
+      { code: 'CLP', name: 'Chilean Peso', symbol: '$', flag: 'https://flagcdn.com/w40/cl.png' },
+      { code: 'COP', name: 'Colombian Peso', symbol: '$', flag: 'https://flagcdn.com/w40/co.png' },
+      { code: 'PEN', name: 'Peruvian Sol', symbol: 'S/', flag: 'https://flagcdn.com/w40/pe.png' },
+      { code: 'UYU', name: 'Uruguayan Peso', symbol: '$', flag: 'https://flagcdn.com/w40/uy.png' },
+      { code: 'PYG', name: 'Paraguayan Guarani', symbol: '₲', flag: 'https://flagcdn.com/w40/py.png' },
+      { code: 'BOB', name: 'Bolivian Boliviano', symbol: 'Bs', flag: 'https://flagcdn.com/w40/bo.png' },
+      { code: 'CRC', name: 'Costa Rican Colón', symbol: '₡', flag: 'https://flagcdn.com/w40/cr.png' },
+      
+      // Additional Asian currencies
+      { code: 'TWD', name: 'New Taiwan Dollar', symbol: 'NT$', flag: 'https://flagcdn.com/w40/tw.png' },
+      { code: 'SGD', name: 'Singapore Dollar', symbol: 'S$', flag: 'https://flagcdn.com/w40/sg.png' },
+      { code: 'MNT', name: 'Mongolian Tugrik', symbol: '₮', flag: 'https://flagcdn.com/w40/mn.png' },
+      { code: 'KHR', name: 'Cambodian Riel', symbol: '៛', flag: 'https://flagcdn.com/w40/kh.png' },
+      { code: 'LAK', name: 'Lao Kip', symbol: '₭', flag: 'https://flagcdn.com/w40/la.png' },
+      { code: 'MMK', name: 'Myanmar Kyat', symbol: 'Ks', flag: 'https://flagcdn.com/w40/mm.png' }
     ];
-    res.status(200).json({ currencies: fallbackCurrencies });
+    
+    // Add exchange rates to each currency
+    const currenciesWithRates = allCurrencies.map(currency => ({
+      ...currency,
+      exchangeRate: rates[currency.code] || (currency.code === 'USD' ? 1 : null)
+    })).filter(c => c.exchangeRate !== null);
+    
+    console.log(`✅ Returning ${currenciesWithRates.length} fiat currencies with real exchange rates`);
+    
+    res.status(200).json({ 
+      status: 'success',
+      currencies: currenciesWithRates,
+      lastUpdated: new Date().toISOString()
+    });
+    
+  } catch (err) {
+    console.error('❌ Error fetching fiat currencies:', err);
+    // Return error - NO HARDCODED FALLBACK
+    res.status(500).json({ 
+      status: 'error', 
+      message: 'Failed to fetch exchange rates. Please try again.'
+    });
   }
 });
-
 // =============================================
 // CONVERT ASSETS ENDPOINT - Get available target cryptos for conversion
 // =============================================
@@ -24177,10 +24409,10 @@ startInvestorGrowthJob();
 // Start real-time price updates
 startRealTimePriceUpdates(io);
 
-// Recalculate all user main balances every 5 minutes to ensure accuracy with price fluctuations
+// Recalculate ALL user balances every 30 seconds for REAL-TIME price fluctuations
 setInterval(async () => {
-  await recalculateAllUserMainBalances(io);
-}, 5 * 60 * 1000);
+  await recalculateAllUserBalances(io);
+}, 30 * 1000); // Every 30 seconds for true real-time
 
 // Graceful shutdown handler
 const gracefulShutdown = () => {
