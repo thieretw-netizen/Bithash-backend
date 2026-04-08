@@ -4443,8 +4443,6 @@ const recalculateAllUserBalances = async (io) => {
 
 
 
-
-
 // Enhanced Email service with professional, highly visible templates - Edge to Edge Layout
 const sendAutomatedEmail = async (user, action, data = {}) => {
   try {
@@ -22402,6 +22400,31 @@ fetchMarketData();
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // =============================================
 // FIAT CURRENCIES ENDPOINT - Get ALL world currencies with REAL exchange rates (NO HARDCODING)
 // =============================================
@@ -22575,6 +22598,7 @@ app.get('/api/fiat-currencies', async (req, res) => {
     });
   }
 });
+
 // =============================================
 // CONVERT ASSETS ENDPOINT - Get available target cryptos for conversion
 // =============================================
