@@ -23249,16 +23249,19 @@ app.get('/api/users/balances', protect, async (req, res) => {
 
 let priceUpdateInterval = null;
 let lastPrices = {};
+let isRecalculating = false;
 
 const startRealTimePriceUpdates = (io) => {
   if (priceUpdateInterval) clearInterval(priceUpdateInterval);
   
+  // UPDATE PRICES EVERY 1 SECOND FOR TRUE REAL-TIME
   priceUpdateInterval = setInterval(async () => {
     try {
       const assets = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'ADA', 'SHIB', 'AVAX', 'DOT', 'TRX', 'LINK', 'MATIC', 'LTC'];
       const priceUpdates = {};
       
-      for (const asset of assets) {
+      // Fetch all prices in parallel for speed
+      const pricePromises = assets.map(async (asset) => {
         const price = await getCryptoPrice(asset);
         if (price) {
           priceUpdates[asset.toLowerCase()] = {
@@ -23266,49 +23269,144 @@ const startRealTimePriceUpdates = (io) => {
             timestamp: Date.now()
           };
         }
-      }
+      });
+      
+      await Promise.all(pricePromises);
       
       if (Object.keys(priceUpdates).length > 0 && io) {
+        // Broadcast price updates to all clients
         io.emit('price_update', priceUpdates);
         lastPrices = priceUpdates;
+        
+        // IMMEDIATELY recalculate ALL user wallet values based on new prices
+        await recalculateAllWalletValuesRealtime(io, priceUpdates);
       }
     } catch (err) {
       console.error('Error in price update interval:', err);
     }
-  }, 10000);
+  }, 1000); // EVERY SECOND
 };
 
-const recalculateAllUserMainBalances = async (io) => {
+// NEW FUNCTION: Recalculate wallet values in real-time based on current crypto prices
+const recalculateAllWalletValuesRealtime = async (io, currentPrices) => {
+  if (isRecalculating) return;
+  isRecalculating = true;
+  
   try {
-    const users = await User.find({}).select('_id');
+    // Get all users with their asset balances
+    const users = await User.find({}).select('_id balances');
+    const userAssetBalances = await UserAssetBalance.find({});
+    const userAssetMap = new Map();
+    userAssetBalances.forEach(ub => {
+      userAssetMap.set(ub.user.toString(), ub);
+    });
+    
+    // Get all completed investments for matured calculations
+    const allMaturedInvestments = await Investment.find({ 
+      status: 'completed' 
+    }).populate('plan');
+    const maturedByUser = new Map();
+    allMaturedInvestments.forEach(inv => {
+      const userId = inv.user.toString();
+      if (!maturedByUser.has(userId)) maturedByUser.set(userId, []);
+      maturedByUser.get(userId).push(inv);
+    });
+    
+    const batchUpdates = [];
     
     for (const user of users) {
-      const userAssetBalance = await UserAssetBalance.findOne({ user: user._id });
-      if (userAssetBalance) {
-        let totalMainBalance = 0;
-        
-        for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
+      let totalMainValue = 0;
+      let totalMaturedValue = 0;
+      
+      // Calculate MAIN wallet value (all crypto holdings at current prices)
+      const userAssets = userAssetMap.get(user._id.toString());
+      if (userAssets && userAssets.balances) {
+        for (const [assetSymbol, balance] of Object.entries(userAssets.balances)) {
           if (balance > 0) {
-            const price = await getCryptoPrice(asset.toUpperCase());
-            if (price) {
-              totalMainBalance += balance * price;
+            const priceData = currentPrices[assetSymbol.toLowerCase()];
+            const price = priceData ? priceData.price : await getCryptoPrice(assetSymbol.toUpperCase());
+            if (price && price > 0) {
+              totalMainValue += balance * price;
             }
           }
         }
-        
-        await User.findByIdAndUpdate(user._id, { 'balances.main': totalMainBalance });
-        
-        if (io) {
-          io.to(`user_${user._id}`).emit('balance_update', { main: totalMainBalance });
+      }
+      
+      // Calculate MATURED wallet value (completed investments valued at current prices)
+      const maturedInvestments = maturedByUser.get(user._id.toString()) || [];
+      for (const investment of maturedInvestments) {
+        // If investment has specific crypto asset, value it at current price
+        if (investment.asset && investment.assetAmount) {
+          const priceData = currentPrices[investment.asset.toLowerCase()];
+          const currentPrice = priceData ? priceData.price : await getCryptoPrice(investment.asset.toUpperCase());
+          if (currentPrice && currentPrice > 0) {
+            totalMaturedValue += investment.assetAmount * currentPrice;
+          } else {
+            totalMaturedValue += investment.amount + (investment.actualReturn || 0);
+          }
+        } else {
+          // Fallback: use original USD value
+          totalMaturedValue += investment.amount + (investment.actualReturn || 0);
         }
+      }
+      
+      // Calculate PnL for main wallet (based on previous value)
+      const previousMainValue = user.balances.main || totalMainValue;
+      const mainPnL = totalMainValue - previousMainValue;
+      const mainPnLPercentage = previousMainValue > 0 ? (mainPnL / previousMainValue) * 100 : 0;
+      
+      // Calculate PnL for matured wallet
+      const previousMaturedValue = user.balances.matured || totalMaturedValue;
+      const maturedPnL = totalMaturedValue - previousMaturedValue;
+      const maturedPnLPercentage = previousMaturedValue > 0 ? (maturedPnL / previousMaturedValue) * 100 : 0;
+      
+      // Prepare batch update
+      batchUpdates.push({
+        userId: user._id,
+        main: totalMainValue,
+        matured: totalMaturedValue,
+        mainPnL: mainPnL,
+        mainPnLPercent: mainPnLPercentage,
+        maturedPnL: maturedPnL,
+        maturedPnLPercent: maturedPnLPercentage
+      });
+      
+      // Send real-time updates via Socket.IO to each specific user
+      if (io) {
+        io.to(`user_${user._id}`).emit('wallet_realtime_update', {
+          main: totalMainValue,
+          matured: totalMaturedValue,
+          mainPnL: mainPnL,
+          mainPnLPercent: mainPnLPercentage,
+          maturedPnL: maturedPnL,
+          maturedPnLPercent: maturedPnLPercentage,
+          timestamp: Date.now()
+        });
       }
     }
     
-    console.log('Recalculated all user main balances based on current crypto prices');
+    // Batch update database (non-blocking)
+    for (const update of batchUpdates) {
+      await User.findByIdAndUpdate(update.userId, {
+        'balances.main': update.main,
+        'balances.matured': update.matured
+      });
+    }
+    
   } catch (err) {
-    console.error('Error recalculating user balances:', err);
+    console.error('Error in real-time wallet recalculation:', err);
+  } finally {
+    isRecalculating = false;
   }
 };
+
+// Keep compatibility with existing function
+const recalculateAllUserMainBalances = async (io) => {
+  const currentPrices = lastPrices;
+  await recalculateAllWalletValuesRealtime(io, currentPrices);
+};
+
+
 
 // SNIPPET C - COMPLETE REWRITE
 
@@ -23843,9 +23941,11 @@ startInvestorGrowthJob();
 
 startRealTimePriceUpdates(io);
 
+// Real-time updates already happen every second with price changes
+// This is just a fallback sync every 30 seconds for any missed updates
 setInterval(async () => {
   await recalculateAllUserMainBalances(io);
-}, 5 * 60 * 1000);
+}, 30000);
 
 const gracefulShutdown = () => {
   console.log('Received shutdown signal. Cleaning up...');
