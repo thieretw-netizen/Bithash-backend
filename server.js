@@ -23748,6 +23748,80 @@ app.get('/api/users/balances', protect, async (req, res) => {
 });
 
 
+
+
+
+
+
+
+
+
+// Real-time price update function with WebSocket broadcasting
+let priceUpdateInterval = null;
+let lastPrices = {};
+
+const startRealTimePriceUpdates = (io) => {
+  if (priceUpdateInterval) clearInterval(priceUpdateInterval);
+  
+  // Update prices every 10 seconds for real-time fluctuations
+  priceUpdateInterval = setInterval(async () => {
+    try {
+      const assets = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'ADA', 'SHIB', 'AVAX', 'DOT', 'TRX', 'LINK', 'MATIC', 'LTC'];
+      const priceUpdates = {};
+      
+      for (const asset of assets) {
+        const price = await getCryptoPrice(asset);
+        if (price) {
+          priceUpdates[asset.toLowerCase()] = {
+            price: price,
+            timestamp: Date.now()
+          };
+        }
+      }
+      
+      if (Object.keys(priceUpdates).length > 0 && io) {
+        io.emit('price_update', priceUpdates);
+        lastPrices = priceUpdates;
+      }
+    } catch (err) {
+      console.error('Error in price update interval:', err);
+    }
+  }, 10000);
+};
+
+// Function to recalculate all user main balances based on current crypto prices
+const recalculateAllUserMainBalances = async (io) => {
+  try {
+    const users = await User.find({}).select('_id');
+    
+    for (const user of users) {
+      const userAssetBalance = await UserAssetBalance.findOne({ user: user._id });
+      if (userAssetBalance) {
+        let totalMainBalance = 0;
+        
+        for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
+          if (balance > 0) {
+            const price = await getCryptoPrice(asset.toUpperCase());
+            if (price) {
+              totalMainBalance += balance * price;
+            }
+          }
+        }
+        
+        await User.findByIdAndUpdate(user._id, { 'balances.main': totalMainBalance });
+        
+        if (io) {
+          io.to(`user_${user._id}`).emit('balance_update', { main: totalMainBalance });
+        }
+      }
+    }
+    
+    console.log('Recalculated all user main balances based on current crypto prices');
+  } catch (err) {
+    console.error('Error recalculating user balances:', err);
+  }
+};
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Global error handler:', err);
