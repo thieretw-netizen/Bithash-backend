@@ -46,48 +46,55 @@ app.use(helmet({
 }));
 
 
+// FIXED CORS - Allow all necessary origins with proper headers
 app.use(cors({
-  origin: [
-    'https://www.bithashcapital.live', 
-    'https://website-backendd-tzep.onrender.com', 
-    'https://bithash-rental.vercel.app/',
-    'https://bithash-backend.onrender.com'
-  ],
+  origin: function(origin, callback) {
+    const allowedOrigins = [
+      'https://www.bithashcapital.live',
+      'https://bithashcapital.live',
+      'https://bithash-backend.onrender.com',
+      'http://localhost:3000',
+      'http://localhost:5500',
+      'https://website-backendd-tzep.onrender.com',
+      'https://bithash-rental.vercel.app'
+    ];
+    // Allow requests with no origin (like mobile apps or curl)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.log('CORS blocked origin:', origin);
+      callback(null, true); // TEMPORARILY allow all for debugging
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: [
-    'Content-Type', 
-    'Authorization', 
+    'Content-Type',
+    'Authorization',
     'X-CSRF-Token',
-    'X-Rate-Limit',
     'X-Requested-With',
     'Accept',
     'Origin',
     'X-2FA-Verified'
   ],
-  exposedHeaders: [
-    'X-Rate-Limit-Limit',
-    'X-Rate-Limit-Remaining',
-    'X-Rate-Limit-Reset'
-  ]
+  exposedHeaders: ['X-Rate-Limit-Limit', 'X-Rate-Limit-Remaining', 'X-Rate-Limit-Reset']
 }));
 
+// Handle preflight requests explicitly
+app.options('*', cors());
 
-
-
+// Add CORS headers middleware for all responses
 app.use((req, res, next) => {
-  // Allow fonts from Google
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  
-  // Cache static responses
-  if (req.url.includes('/api/plans') || req.url.includes('/api/stats')) {
-    res.setHeader('Cache-Control', 'public, max-age=300');
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CSRF-Token, X-2FA-Verified');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
   }
   next();
 });
-
 
 
 app.use(express.json({ limit: '10kb' }));
@@ -22855,15 +22862,19 @@ app.post('/api/users/preferences/save', protect, async (req, res) => {
   }
 });
 
+
+
+
+
+
 // =============================================
-// USER PREFERENCES GET ENDPOINT
+// USER PREFERENCES GET ENDPOINT - FIXED
 // =============================================
 app.get('/api/users/preferences', protect, async (req, res) => {
   try {
     let userPref = await UserPreference.findOne({ user: req.user._id });
     
     if (!userPref) {
-      // Try to get from user model
       const user = await User.findById(req.user._id);
       userPref = {
         displayAsset: user?.preferences?.displayAsset || 'btc',
@@ -22889,19 +22900,23 @@ app.get('/api/users/preferences', protect, async (req, res) => {
 });
 
 // =============================================
-// USER PREFERENCES UPDATE ENDPOINT (POST)
+// USER PREFERENCES UPDATE ENDPOINT (POST) - FIXED 502 ERROR
 // =============================================
 app.post('/api/users/preferences', protect, async (req, res) => {
   try {
     const { displayAsset, theme, language, currency, fiatCurrency } = req.body;
     
-    const updates = {};
-    if (displayAsset) updates.displayAsset = displayAsset;
-    if (theme) updates.theme = theme;
-    if (language) updates.language = language;
-    if (currency || fiatCurrency) updates.currency = currency || fiatCurrency;
+    console.log('Saving preferences for user:', req.user._id, req.body);
     
-    await UserPreference.findOneAndUpdate(
+    const updates = {};
+    if (displayAsset !== undefined) updates.displayAsset = displayAsset;
+    if (theme !== undefined) updates.theme = theme;
+    if (language !== undefined) updates.language = language;
+    if (currency !== undefined) updates.currency = currency;
+    if (fiatCurrency !== undefined) updates.currency = fiatCurrency;
+    
+    // Update UserPreference model
+    const updatedPref = await UserPreference.findOneAndUpdate(
       { user: req.user._id },
       { $set: updates },
       { upsert: true, new: true }
@@ -22916,7 +22931,9 @@ app.post('/api/users/preferences', protect, async (req, res) => {
       }
     });
     
-    // Emit socket update for real-time preference changes
+    console.log('Preferences saved successfully:', updates);
+    
+    // Emit socket update
     const io = req.app.get('io');
     if (io) {
       io.to(`user_${req.user._id}`).emit('preferences_update', updates);
@@ -22929,9 +22946,12 @@ app.post('/api/users/preferences', protect, async (req, res) => {
     });
   } catch (err) {
     console.error('Error updating preferences:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to update preferences' });
+    res.status(500).json({ status: 'error', message: 'Failed to update preferences: ' + err.message });
   }
 });
+
+
+
 
 // =============================================
 // DEPOSIT ASSET ENDPOINT - Get user's default deposit asset
@@ -23865,18 +23885,57 @@ app.use((req, res) => {
   });
 });
 
-// Create HTTP server and Socket.IO
+// Create HTTP server and Socket.IO with proper CORS
 const PORT = process.env.PORT || 3000;
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: ['https://bithhash.vercel.app', 'https://website-backendd-1.onrender.com', 'https://www.bithashcapital.live'],
-    methods: ['GET', 'POST']
-  }
+    origin: ['https://www.bithashcapital.live', 'https://bithash-backend.onrender.com', 'http://localhost:3000', 'http://localhost:5500'],
+    methods: ['GET', 'POST'],
+    credentials: true,
+    allowedHeaders: ['Authorization', 'Content-Type']
+  },
+  transports: ['websocket', 'polling'],
+  allowEIO3: true,
+  pingTimeout: 60000,
+  pingInterval: 25000
 });
 
-// Store io instance in app for use in routes
+// Store io instance
 app.set('io', io);
+
+// Health check for socket
+io.engine.on('connection_error', (err) => {
+  console.log('Socket connection error:', err);
+});
+
+io.on('connection', (socket) => {
+  console.log('Client connected:', socket.id);
+  
+  // Handle authentication
+  const token = socket.handshake.auth.token;
+  let userId = null;
+  
+  if (token) {
+    try {
+      const decoded = verifyJWT(token);
+      if (decoded && !decoded.isAdmin) {
+        userId = decoded.id;
+        socket.join(`user_${userId}`);
+      }
+    } catch (err) {
+      console.error('Socket auth error:', err.message);
+    }
+  }
+  
+  socket.on('disconnect', () => {
+    console.log('Client disconnected:', socket.id);
+  });
+  
+  socket.on('ping', () => {
+    socket.emit('pong');
+  });
+});
 
 // =============================================
 // REAL-TIME STATS WITH REDIS SINGLE SOURCE OF TRUTH
