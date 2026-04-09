@@ -24362,6 +24362,101 @@ const gracefulShutdown = () => {
 process.on('SIGTERM', gracefulShutdown);
 process.on('SIGINT', gracefulShutdown);
 
+// Setup chart WebSocket after httpServer is created
+const setupChartWebSocket = (server) => {
+  const chartWss = new WebSocket.Server({ server, path: '/ws/chart' });
+  
+  const chartClients = new Map();
+  
+  const setupChartHeartbeat = (ws) => {
+    let isAlive = true;
+    ws.on('pong', () => { isAlive = true; });
+    const interval = setInterval(() => {
+      if (!isAlive) {
+        clearInterval(interval);
+        return ws.terminate();
+      }
+      isAlive = false;
+      ws.ping();
+    }, 30000);
+    ws.on('close', () => clearInterval(interval));
+  };
+  
+  chartWss.on('connection', (ws, req) => {
+    const clientId = uuidv4();
+    let subscribedSymbols = new Set();
+    
+    setupChartHeartbeat(ws);
+    chartClients.set(clientId, { ws, subscribedSymbols });
+    
+    ws.on('message', async (message) => {
+      try {
+        const data = JSON.parse(message);
+        
+        if (data.type === 'subscribe') {
+          const { symbol, channels } = data;
+          if (symbol) {
+            subscribedSymbols.add(symbol);
+            
+            const cachedPrice = await redis.hgetall(`ticker:${symbol}`);
+            if (cachedPrice && cachedPrice.price) {
+              ws.send(JSON.stringify({
+                type: 'price',
+                symbol: symbol,
+                price: parseFloat(cachedPrice.price),
+                change: parseFloat(cachedPrice.priceChangePercent || 0),
+                timestamp: Date.now()
+              }));
+            }
+          }
+        }
+        
+        else if (data.type === 'unsubscribe') {
+          const { symbol } = data;
+          if (symbol) subscribedSymbols.delete(symbol);
+        }
+        
+      } catch (err) {
+        console.error('Chart WebSocket message error:', err);
+      }
+    });
+    
+    ws.on('close', () => {
+      chartClients.delete(clientId);
+    });
+  });
+  
+  const redisSubscriber = new Redis({
+    host: process.env.REDIS_HOST || 'redis-14450.c276.us-east-1-2.ec2.redns.redis-cloud.com',
+    port: process.env.REDIS_PORT || 14450,
+    password: process.env.REDIS_PASSWORD || 'qjXgsg0YrsLaSumlEW9HkIZbvLjXEwXR'
+  });
+  
+  redisSubscriber.subscribe('price:updates', 'orderbook:updates', 'trade:updates', 'candle:updates');
+  
+  redisSubscriber.on('message', (channel, message) => {
+    try {
+      const data = JSON.parse(message);
+      const broadcastData = { type: channel.replace(':updates', ''), ...data };
+      
+      chartClients.forEach((client) => {
+        if (client.subscribedSymbols.has(data.symbol) || data.symbol === undefined) {
+          if (client.ws.readyState === WebSocket.OPEN) {
+            client.ws.send(JSON.stringify(broadcastData));
+          }
+        }
+      });
+    } catch (err) {
+      console.error('Redis subscriber error:', err);
+    }
+  });
+  
+  return chartWss;
+};
+
+// Setup chart WebSocket after httpServer is created
+setupChartWebSocket(httpServer);
+
 httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`📊 Real-time stats initialized with Redis as single source of truth`);
