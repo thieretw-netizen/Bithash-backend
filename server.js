@@ -23241,27 +23241,7 @@ async function calculateTotalBalance(userId) {
 
 
 
-async function sendAutomatedEmail(user, type, data) {
-  const templates = {
-    deposit_approved: {
-      subject: 'Deposit Approved - BitHash',
-      html: (d) => `<div><h2>Deposit Approved</h2><p>Dear ${d.name},</p><p>Your deposit of ${d.amount} ${d.asset || 'USD'} has been approved.</p></div>`
-    },
-    withdrawal_approved: {
-      subject: 'Withdrawal Approved - BitHash',
-      html: (d) => `<div><h2>Withdrawal Approved</h2><p>Dear ${d.name},</p><p>Your withdrawal of ${d.amount} ${d.asset} has been processed.</p></div>`
-    }
-  };
-  
-  const template = templates[type];
-  if (template && user.email) {
-    await sendEmail({
-      email: user.email,
-      subject: template.subject,
-      html: template.html(data)
-    });
-  }
-}
+
 
 let priceUpdateInterval = null;
 let lastPrices = {};
