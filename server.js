@@ -24370,7 +24370,27 @@ const calculateUserMainBalance = async (userId) => {
 };
 
 
-// SNIPPET C - COMPLETE REWRITE (PRESERVING ALL EXISTING CODE, ADDING WEBSOCKET INITIALIZATION)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// SNIPPET C - COMPLETE REWRITE
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -24614,7 +24634,7 @@ app.get('/api/stats/daily-progress', async (req, res) => {
 });
 
 // =============================================
-// WEBSOCKET SERVER SETUP (ADDED - DO NOT MODIFY EXISTING CODE ABOVE)
+// WEBSOCKET SERVER SETUP
 // =============================================
 
 // Setup Market WebSocket at /ws/market
@@ -24624,7 +24644,7 @@ const marketWss = setupMarketWebSocket(httpServer);
 const tickerWss = setupTickerWebSocket(httpServer);
 
 // =============================================
-// SOCKET.IO CONNECTION HANDLER (PRESERVED AS IS)
+// SOCKET.IO CONNECTION HANDLER
 // =============================================
 
 io.on('connection', async (socket) => {
@@ -24766,7 +24786,7 @@ io.on('connection', async (socket) => {
 });
 
 // =============================================
-// MATURED INVESTMENTS PROCESSING (PRESERVED AS IS)
+// MATURED INVESTMENTS PROCESSING
 // =============================================
 
 const processMaturedInvestments = async () => {
@@ -24833,7 +24853,143 @@ setInterval(processMaturedInvestments, 60 * 60 * 1000);
 processMaturedInvestments();
 
 // =============================================
-// START SERVICES (PRESERVED AS IS)
+// REAL-TIME PRICE UPDATE FUNCTIONS
+// =============================================
+
+let priceUpdateInterval = null;
+let lastPrices = {};
+let isRecalculating = false;
+
+const startRealTimePriceUpdates = (io) => {
+  if (priceUpdateInterval) clearInterval(priceUpdateInterval);
+  
+  priceUpdateInterval = setInterval(async () => {
+    try {
+      const assets = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'ADA', 'SHIB', 'AVAX', 'DOT', 'TRX', 'LINK', 'MATIC', 'LTC'];
+      const priceUpdates = {};
+      
+      const pricePromises = assets.map(async (asset) => {
+        const price = await getCryptoPrice(asset);
+        if (price) {
+          priceUpdates[asset.toLowerCase()] = {
+            price: price,
+            timestamp: Date.now()
+          };
+        }
+      });
+      
+      await Promise.all(pricePromises);
+      
+      if (Object.keys(priceUpdates).length > 0 && io) {
+        io.emit('price_update', priceUpdates);
+        lastPrices = priceUpdates;
+        
+        await recalculateAllWalletValuesRealtime(io, priceUpdates);
+      }
+    } catch (err) {
+      console.error('Error in price update interval:', err);
+    }
+  }, 1000);
+};
+
+const recalculateAllWalletValuesRealtime = async (io, currentPrices) => {
+  if (isRecalculating) return;
+  isRecalculating = true;
+  
+  try {
+    const users = await User.find({}).select('_id balances');
+    const userAssetBalances = await UserAssetBalance.find({});
+    const userAssetMap = new Map();
+    userAssetBalances.forEach(ub => {
+      userAssetMap.set(ub.user.toString(), ub);
+    });
+    
+    const allMaturedInvestments = await Investment.find({ 
+      status: 'completed' 
+    }).populate('plan');
+    const maturedByUser = new Map();
+    allMaturedInvestments.forEach(inv => {
+      const userId = inv.user.toString();
+      if (!maturedByUser.has(userId)) maturedByUser.set(userId, []);
+      maturedByUser.get(userId).push(inv);
+    });
+    
+    for (const user of users) {
+      let totalMainValue = 0;
+      let totalMaturedValue = 0;
+      
+      const userAssets = userAssetMap.get(user._id.toString());
+      if (userAssets && userAssets.balances) {
+        for (const [assetSymbol, balance] of Object.entries(userAssets.balances)) {
+          if (balance > 0) {
+            const priceData = currentPrices[assetSymbol.toLowerCase()];
+            const price = priceData ? priceData.price : await getCryptoPrice(assetSymbol.toUpperCase());
+            if (price && price > 0) {
+              totalMainValue += balance * price;
+            }
+          }
+        }
+      }
+      
+      const maturedInvestments = maturedByUser.get(user._id.toString()) || [];
+      for (const investment of maturedInvestments) {
+        if (investment.asset && investment.assetAmount) {
+          const priceData = currentPrices[investment.asset.toLowerCase()];
+          const currentPrice = priceData ? priceData.price : await getCryptoPrice(investment.asset.toUpperCase());
+          if (currentPrice && currentPrice > 0) {
+            totalMaturedValue += investment.assetAmount * currentPrice;
+          } else {
+            totalMaturedValue += investment.amount + (investment.actualReturn || 0);
+          }
+        } else {
+          totalMaturedValue += investment.amount + (investment.actualReturn || 0);
+        }
+      }
+      
+      const previousMainValue = user.balances.main || totalMainValue;
+      const mainPnL = totalMainValue - previousMainValue;
+      const mainPnLPercentage = previousMainValue > 0 ? (mainPnL / previousMainValue) * 100 : 0;
+      
+      const previousMaturedValue = user.balances.matured || totalMaturedValue;
+      const maturedPnL = totalMaturedValue - previousMaturedValue;
+      const maturedPnLPercentage = previousMaturedValue > 0 ? (maturedPnL / previousMaturedValue) * 100 : 0;
+      
+      await User.findByIdAndUpdate(user._id, {
+        'balances.main': totalMainValue,
+        'balances.matured': totalMaturedValue
+      });
+      
+      if (io) {
+        io.to(`user_${user._id}`).emit('wallet_realtime_update', {
+          main: totalMainValue,
+          matured: totalMaturedValue,
+          mainPnL: mainPnL,
+          mainPnLPercent: mainPnLPercentage,
+          maturedPnL: maturedPnL,
+          maturedPnLPercent: maturedPnLPercentage,
+          timestamp: Date.now()
+        });
+      }
+    }
+  } catch (err) {
+    console.error('Error in real-time wallet recalculation:', err);
+  } finally {
+    isRecalculating = false;
+  }
+};
+
+// =============================================
+// WRAPPER FUNCTION FOR COMPATIBILITY - THIS WAS MISSING AND CAUSING THE ERROR
+// =============================================
+
+// Keep compatibility with existing function - recalculates all user main balances
+const recalculateAllUserMainBalances = async (io) => {
+  const currentPrices = lastPrices;
+  await recalculateAllWalletValuesRealtime(io, currentPrices);
+};
+
+// =============================================
+// START SERVICES
 // =============================================
 
 startInvestorGrowthJob();
@@ -24847,7 +25003,7 @@ setInterval(async () => {
 }, 30000);
 
 // =============================================
-// GRACEFUL SHUTDOWN (PRESERVED AS IS)
+// GRACEFUL SHUTDOWN
 // =============================================
 
 const gracefulShutdown = () => {
@@ -24861,7 +25017,7 @@ process.on('SIGTERM', gracefulShutdown);
 process.on('SIGINT', gracefulShutdown);
 
 // =============================================
-// START SERVER (PRESERVED AS IS)
+// START SERVER
 // =============================================
 
 httpServer.listen(PORT, () => {
