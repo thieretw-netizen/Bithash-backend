@@ -23238,33 +23238,8 @@ async function calculateTotalBalance(userId) {
   return total;
 }
 
-// Helper functions for device detection
-function getDeviceType(req) {
-  const ua = req.headers['user-agent'] || '';
-  if (/mobile/i.test(ua)) return 'mobile';
-  if (/tablet/i.test(ua)) return 'tablet';
-  return 'desktop';
-}
 
-function getOSFromUserAgent(ua) {
-  if (!ua) return 'Unknown';
-  if (/windows/i.test(ua)) return 'Windows';
-  if (/mac/i.test(ua)) return 'macOS';
-  if (/linux/i.test(ua)) return 'Linux';
-  if (/android/i.test(ua)) return 'Android';
-  if (/ios|iphone|ipad/i.test(ua)) return 'iOS';
-  return 'Unknown';
-}
 
-function getBrowserFromUserAgent(ua) {
-  if (!ua) return 'Unknown';
-  if (/chrome/i.test(ua) && !/edg/i.test(ua)) return 'Chrome';
-  if (/safari/i.test(ua) && !/chrome/i.test(ua)) return 'Safari';
-  if (/firefox/i.test(ua)) return 'Firefox';
-  if (/edg/i.test(ua)) return 'Edge';
-  if (/opera|opr/i.test(ua)) return 'Opera';
-  return 'Unknown';
-}
 
 async function sendAutomatedEmail(user, type, data) {
   const templates = {
