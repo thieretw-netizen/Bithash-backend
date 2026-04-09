@@ -23251,7 +23251,7 @@ app.get('/api/stats/daily-progress', async (req, res) => {
       }
     });
   });
-};
+
 
 // =============================================
 // WEBSOCKET: /ws/ticker - Real-time price and 24h changes (ADDED - NOT ALTERING EXISTING)
