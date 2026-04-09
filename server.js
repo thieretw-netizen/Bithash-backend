@@ -23171,14 +23171,7 @@ app.get('/api/stats/daily-progress', async (req, res) => {
   }
 });
 
-// =============================================
-// WEBSOCKET: /ws/market - Real-time market data (ADDED - NOT ALTERING EXISTING)
-// =============================================
-const setupMarketWebSocket = (server) => {
-  const marketWss = new WebSocket.Server({ 
-    server, 
-    path: '/ws/market' 
-  });
+
 
   const clients = new Set();
   let marketInterval = null;
