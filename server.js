@@ -23644,16 +23644,7 @@ function getAssetTags(symbol) {
   return tags[symbol.toUpperCase()] || ['Layer 1', 'DeFi', 'Smart Contracts'];
 }
 
-
-
-
-
-
-
-
-
-
-// SNIPPET C - COMPLETE REWRITE
+        // SNIPPET C - COMPLETE REWRITE
 
 // Error handling middleware
 app.use((err, req, res, next) => {
