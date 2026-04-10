@@ -110,9 +110,6 @@ redis.on('connect', () => {
   console.log('Redis connected successfully');
 });
 
-// =============================================
-// PRICE AGGREGATOR WORKER - SINGLE SOURCE OF TRUTH
-// =============================================
 const MAIN_CRYPTOS = [
   'BTC', 'ETH', 'BNB', 'SOL', 'XRP', 'ADA', 'DOGE', 'AVAX', 'DOT', 'LINK',
   'MATIC', 'SHIB', 'TRX', 'UNI', 'ATOM', 'XLM', 'FIL', 'VET', 'ALGO', 'MANA',
@@ -120,158 +117,15 @@ const MAIN_CRYPTOS = [
 ];
 
 const QUOTE_ASSETS = ['USDT', 'USDC', 'USDQ', 'USDR', 'EURC', 'USD', 'BNB', 'BTC'];
-const TIMEFRAMES = ['1s', '15m', '1h', '4h', '1d', '1w'];
 
-let binanceWs = null;
-let reconnectAttempts = 0;
-
-const connectBinanceAggregator = () => {
-  if (binanceWs) {
-    try { binanceWs.close(); } catch(e) {}
-  }
-  
-  binanceWs = new WebSocket('wss://stream.binance.com:9443/ws');
-  
-  binanceWs.on('open', () => {
-    console.log('✅ Price Aggregator: Binance WebSocket connected');
-    reconnectAttempts = 0;
-    
-    const streams = [];
-    for (const base of MAIN_CRYPTOS) {
-      for (const quote of QUOTE_ASSETS) {
-        const symbol = `${base}${quote}`.toLowerCase();
-        streams.push(`${symbol}@ticker`);
-        streams.push(`${symbol}@depth20`);
-        streams.push(`${symbol}@trade`);
-        for (const tf of TIMEFRAMES) {
-          streams.push(`${symbol}@kline_${tf}`);
-        }
-      }
-    }
-    
-    const subscribeMsg = {
-      method: 'SUBSCRIBE',
-      params: streams,
-      id: 1
-    };
-    binanceWs.send(JSON.stringify(subscribeMsg));
-    console.log(`Price Aggregator: Subscribed to ${streams.length} streams`);
-  });
-
-  binanceWs.on('message', async (data) => {
-    try {
-      const parsed = JSON.parse(data);
-      if (!parsed.stream) return;
-      
-      const streamParts = parsed.stream.split('@');
-      const symbol = streamParts[0].toUpperCase();
-      const channel = streamParts[1];
-      
-      if (channel === 'ticker') {
-        const tickerData = {
-          symbol: symbol,
-          price: parseFloat(parsed.data.c),
-          priceChangePercent: parseFloat(parsed.data.P),
-          highPrice: parseFloat(parsed.data.h),
-          lowPrice: parseFloat(parsed.data.l),
-          volume: parseFloat(parsed.data.v),
-          quoteVolume: parseFloat(parsed.data.q),
-          openPrice: parseFloat(parsed.data.o),
-          closePrice: parseFloat(parsed.data.c),
-          updatedAt: Date.now()
-        };
-        await redis.setex(`ticker:${symbol}`, 2, JSON.stringify(tickerData));
-        await redis.publish('market:updates', JSON.stringify({ type: 'ticker', data: tickerData }));
-      }
-      
-      if (channel === 'depth20') {
-        const orderbookData = {
-          symbol: symbol,
-          bids: (parsed.data.bids || []).slice(0, 20).map(b => [parseFloat(b[0]), parseFloat(b[1])]),
-          asks: (parsed.data.asks || []).slice(0, 20).map(a => [parseFloat(a[0]), parseFloat(a[1])]),
-          lastUpdateId: parsed.data.lastUpdateId,
-          updatedAt: Date.now()
-        };
-        await redis.setex(`orderbook:${symbol}`, 1, JSON.stringify(orderbookData));
-        await redis.publish('market:updates', JSON.stringify({ type: 'orderbook', data: orderbookData }));
-      }
-      
-      if (channel === 'trade') {
-        const tradeData = {
-          symbol: symbol,
-          price: parseFloat(parsed.data.p),
-          amount: parseFloat(parsed.data.q),
-          time: parsed.data.T,
-          isBuyerMaker: parsed.data.m
-        };
-        await redis.lpush(`trades:${symbol}`, JSON.stringify(tradeData));
-        await redis.ltrim(`trades:${symbol}`, 0, 99);
-        await redis.publish('market:updates', JSON.stringify({ type: 'trade', data: tradeData }));
-      }
-      
-      if (channel.startsWith('kline_')) {
-        const timeframe = channel.replace('kline_', '');
-        const k = parsed.data.k;
-        const candle = {
-          symbol: symbol,
-          interval: timeframe,
-          openTime: k.t,
-          open: parseFloat(k.o),
-          high: parseFloat(k.h),
-          low: parseFloat(k.l),
-          close: parseFloat(k.c),
-          volume: parseFloat(k.v),
-          quoteVolume: parseFloat(k.q),
-          trades: k.n,
-          closeTime: k.T,
-          isClosed: k.x
-        };
-        
-        const key = `candles:${symbol}:${timeframe}`;
-        const member = JSON.stringify({
-          time: k.t,
-          open: candle.open,
-          high: candle.high,
-          low: candle.low,
-          close: candle.close,
-          volume: candle.volume
-        });
-        
-        await redis.zadd(key, k.t, member);
-        await redis.zremrangebyrank(key, 0, -501);
-        await redis.expire(key, 3600);
-        
-        if (candle.isClosed) {
-          await redis.publish('market:updates', JSON.stringify({ type: 'candle_closed', data: candle }));
-        }
-      }
-    } catch (err) {
-      console.error('Price Aggregator: Error processing message:', err.message);
-    }
-  });
-
-  binanceWs.on('error', (err) => {
-    console.error('Price Aggregator: WebSocket error:', err.message);
-  });
-
-  binanceWs.on('close', () => {
-    console.log('Price Aggregator: WebSocket closed, reconnecting...');
-    const delay = Math.min(5000 * Math.pow(2, reconnectAttempts), 30000);
-    reconnectAttempts++;
-    setTimeout(connectBinanceAggregator, delay);
-  });
+const TIMEFRAMES = {
+  '1s': '1s',
+  '15m': '15m',
+  '1h': '1h',
+  '4h': '4h',
+  '1d': '1d',
+  '1w': '1w'
 };
-
-// Health check for Binance connection
-setInterval(() => {
-  if (!binanceWs || binanceWs.readyState !== WebSocket.OPEN) {
-    console.warn('Price Aggregator: Binance WebSocket not connected, attempting reconnect...');
-    connectBinanceAggregator();
-  }
-}, 5000);
-
-// Start the price aggregator
-connectBinanceAggregator();
 
 const getRealClientIP = (req) => {
   const forwardedFor = req.headers['x-forwarded-for'];
@@ -402,7 +256,6 @@ const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString('he
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7200s';
 const JWT_COOKIE_EXPIRES = process.env.JWT_COOKIE_EXPIRES || 0.083;
 
-// User Schema (unchanged, kept from original)
 const UserSchema = new mongoose.Schema({
   firstName: { type: String, required: [true, 'First name is required'], trim: true, maxlength: [50, 'First name cannot be longer than 50 characters'] },
   lastName: { type: String, required: [true, 'Last name is required'], trim: true, maxlength: [50, 'Last name cannot be longer than 50 characters'] },
@@ -575,7 +428,6 @@ UserSchema.index({ createdAt: -1 });
 
 const User = mongoose.model('User', UserSchema);
 
-// Translation Schema
 const TranslationSchema = new mongoose.Schema({
   language: {
     type: String,
@@ -614,7 +466,6 @@ TranslationSchema.index({ isActive: 1 });
 
 const Translation = mongoose.model('Translation', TranslationSchema);
 
-// DownlineRelationship Schema
 const DownlineRelationshipSchema = new mongoose.Schema({
   upline: {
     type: mongoose.Schema.Types.ObjectId,
@@ -672,7 +523,6 @@ DownlineRelationshipSchema.index({ status: 1 });
 
 const DownlineRelationship = mongoose.model('DownlineRelationship', DownlineRelationshipSchema);
 
-// CommissionHistory Schema
 const CommissionHistorySchema = new mongoose.Schema({
   upline: {
     type: mongoose.Schema.Types.ObjectId,
@@ -733,7 +583,6 @@ CommissionHistorySchema.index({ investment: 1 });
 
 const CommissionHistory = mongoose.model('CommissionHistory', CommissionHistorySchema);
 
-// CommissionSettings Schema
 const CommissionSettingsSchema = new mongoose.Schema({
   commissionPercentage: {
     type: Number,
@@ -762,7 +611,6 @@ const CommissionSettingsSchema = new mongoose.Schema({
 
 const CommissionSettings = mongoose.model('CommissionSettings', CommissionSettingsSchema);
 
-// UserLog Schema
 const UserLogSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
@@ -1156,7 +1004,6 @@ UserLogSchema.query.byRiskLevel = function(riskLevel) {
 
 const UserLog = mongoose.model('UserLog', UserLogSchema);
 
-// LoginRecord Schema
 const LoginRecordSchema = new mongoose.Schema({
   email: { 
     type: String, 
@@ -1185,7 +1032,6 @@ LoginRecordSchema.index({ timestamp: -1 });
 
 const LoginRecord = mongoose.model('LoginRecord', LoginRecordSchema);
 
-// MarketPair Schema
 const MarketPairSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true, index: true },
   baseAsset: { type: String, required: true, index: true },
@@ -1209,7 +1055,6 @@ const MarketPairSchema = new mongoose.Schema({
 MarketPairSchema.index({ baseAsset: 1, quoteAsset: 1 });
 MarketPairSchema.index({ status: 1 });
 
-// Order Schema
 const OrderSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   symbol: { type: String, required: true, index: true },
@@ -1239,7 +1084,6 @@ OrderSchema.index({ user: 1, status: 1 });
 OrderSchema.index({ symbol: 1, status: 1 });
 OrderSchema.index({ orderId: 1 });
 
-// Trade Schema
 const TradeSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   orderId: { type: String, required: true, index: true },
@@ -1258,7 +1102,6 @@ const TradeSchema = new mongoose.Schema({
 TradeSchema.index({ user: 1, symbol: 1, time: -1 });
 TradeSchema.index({ orderId: 1 });
 
-// Position Schema
 const PositionSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   symbol: { type: String, required: true, index: true },
@@ -1279,7 +1122,6 @@ const PositionSchema = new mongoose.Schema({
 
 PositionSchema.index({ user: 1, symbol: 1, status: 1 });
 
-// OrderBookSnapshot Schema
 const OrderBookSnapshotSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true },
   bids: [[Number]],
@@ -1291,7 +1133,6 @@ const OrderBookSnapshotSchema = new mongoose.Schema({
 OrderBookSnapshotSchema.index({ symbol: 1 });
 OrderBookSnapshotSchema.index({ updatedAt: 1 }, { expireAfterSeconds: 60 });
 
-// Ticker24hr Schema
 const Ticker24hrSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true },
   priceChange: { type: Number, default: 0 },
@@ -1318,7 +1159,6 @@ const Ticker24hrSchema = new mongoose.Schema({
 Ticker24hrSchema.index({ symbol: 1 });
 Ticker24hrSchema.index({ updatedAt: 1 }, { expireAfterSeconds: 30 });
 
-// Candle Schema
 const CandleSchema = new mongoose.Schema({
   symbol: { type: String, required: true, index: true },
   interval: { type: String, required: true, index: true },
@@ -1335,7 +1175,6 @@ const CandleSchema = new mongoose.Schema({
 
 CandleSchema.index({ symbol: 1, interval: 1, openTime: 1 }, { unique: true });
 
-// PairLimits Schema
 const PairLimitsSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true, index: true },
   baseAsset: { type: String, required: true },
@@ -1349,7 +1188,6 @@ const PairLimitsSchema = new mongoose.Schema({
 
 PairLimitsSchema.index({ baseAsset: 1, quoteAsset: 1 });
 
-// AssetExtraInfo Schema
 const AssetExtraInfoSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true, index: true },
   tags: [{ type: String, default: [] }],
@@ -1363,7 +1201,6 @@ const AssetExtraInfoSchema = new mongoose.Schema({
 
 AssetExtraInfoSchema.index({ symbol: 1 });
 
-// AssetInfo Schema
 const AssetInfoSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true, index: true },
   name: { type: String, required: true },
@@ -1389,7 +1226,6 @@ const AssetInfoSchema = new mongoose.Schema({
 AssetInfoSchema.index({ symbol: 1 });
 AssetInfoSchema.index({ rank: 1 });
 
-// TradingData Schema
 const TradingDataSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true },
   fundFlowLong: { type: Number, default: 50 },
@@ -1403,7 +1239,6 @@ const TradingDataSchema = new mongoose.Schema({
 
 TradingDataSchema.index({ symbol: 1 });
 
-// AnalysisData Schema
 const AnalysisDataSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true },
   longShortRatio: { type: Number, default: 1.0 },
@@ -1419,7 +1254,6 @@ const AnalysisDataSchema = new mongoose.Schema({
 
 AnalysisDataSchema.index({ symbol: 1 });
 
-// UserTradingSettings Schema
 const UserTradingSettingsSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
   orderBookSettings: {
@@ -1445,7 +1279,6 @@ const UserTradingSettingsSchema = new mongoose.Schema({
 
 UserTradingSettingsSchema.index({ user: 1 });
 
-// TradingRevenue Schema
 const TradingRevenueSchema = new mongoose.Schema({
   source: { type: String, enum: ['maker_fee', 'taker_fee', 'convert_spread', 'instant_buy_spread'], required: true },
   orderId: { type: String, ref: 'Order' },
@@ -1479,7 +1312,6 @@ const TradingRevenue = mongoose.models.TradingRevenue || mongoose.model('Trading
 const PairLimits = mongoose.models.PairLimits || mongoose.model('PairLimits', PairLimitsSchema);
 const AssetExtraInfo = mongoose.models.AssetExtraInfo || mongoose.model('AssetExtraInfo', AssetExtraInfoSchema);
 
-// SystemSettings Schema
 const SystemSettingsSchema = new mongoose.Schema({
   type: { 
     type: String, 
@@ -1503,7 +1335,6 @@ const SystemSettingsSchema = new mongoose.Schema({
 
 const SystemSettings = mongoose.model('SystemSettings', SystemSettingsSchema);
 
-// Admin Schema
 const AdminSchema = new mongoose.Schema({
   email: { 
     type: String, 
@@ -1539,7 +1370,6 @@ AdminSchema.index({ role: 1 });
 
 const Admin = mongoose.model('Admin', AdminSchema);
 
-// Plan Schema
 const PlanSchema = new mongoose.Schema({
   name: { type: String, required: [true, 'Plan name is required'], unique: true },
   description: { type: String, required: [true, 'Description is required'] },
@@ -1556,7 +1386,6 @@ PlanSchema.index({ isActive: 1 });
 
 const Plan = mongoose.model('Plan', PlanSchema);
 
-// UserAssetBalance Schema
 const UserAssetBalanceSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
@@ -1618,7 +1447,6 @@ const UserAssetBalanceSchema = new mongoose.Schema({
 UserAssetBalanceSchema.index({ user: 1 });
 UserAssetBalanceSchema.index({ 'history.timestamp': -1 });
 
-// UserPreference Schema
 const UserPreferenceSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
@@ -1647,7 +1475,6 @@ const UserPreferenceSchema = new mongoose.Schema({
 UserPreferenceSchema.index({ user: 1 });
 UserPreferenceSchema.index({ displayAsset: 1 });
 
-// DepositAsset Schema
 const DepositAssetSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
@@ -1682,7 +1509,6 @@ DepositAssetSchema.index({ user: 1, createdAt: -1 });
 DepositAssetSchema.index({ user: 1, asset: 1 });
 DepositAssetSchema.index({ status: 1 });
 
-// Buy Schema
 const BuySchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   asset: { type: String, required: true },
@@ -1701,7 +1527,6 @@ const BuySchema = new mongoose.Schema({
 BuySchema.index({ user: 1, createdAt: -1 });
 BuySchema.index({ status: 1 });
 
-// Sell Schema
 const SellSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   asset: { type: String, required: true },
@@ -1726,7 +1551,6 @@ const DepositAsset = mongoose.model('DepositAsset', DepositAssetSchema);
 const Buy = mongoose.model('Buy', BuySchema);
 const Sell = mongoose.model('Sell', SellSchema);
 
-// Investment Schema
 const InvestmentSchema = new mongoose.Schema({
   user: { 
     type: mongoose.Schema.Types.ObjectId, 
@@ -2011,7 +1835,6 @@ InvestmentSchema.query.completed = function() {
 
 const Investment = mongoose.model('Investment', InvestmentSchema);
 
-// CardPayment Schema
 const CardPaymentSchema = new mongoose.Schema({
   user: { 
     type: mongoose.Schema.Types.ObjectId, 
@@ -2098,7 +1921,6 @@ const CardPaymentSchema = new mongoose.Schema({
 
 const CardPayment = mongoose.model('CardPayment', CardPaymentSchema);
 
-// Transaction Schema
 const TransactionSchema = new mongoose.Schema({
   user: { 
     type: mongoose.Schema.Types.ObjectId, 
@@ -2211,7 +2033,6 @@ TransactionSchema.index({ createdAt: -1 });
 
 const Transaction = mongoose.model('Transaction', TransactionSchema);
 
-// Notification Schema
 const NotificationSchema = new mongoose.Schema({
   title: {
     type: String,
@@ -2268,7 +2089,6 @@ NotificationSchema.index({ type: 1 });
 
 const Notification = mongoose.model('Notification', NotificationSchema);
 
-// Loan Schema
 const LoanSchema = new mongoose.Schema({
   user: { 
     type: mongoose.Schema.Types.ObjectId, 
@@ -2326,7 +2146,6 @@ LoanSchema.virtual('daysRemaining').get(function() {
 
 const Loan = mongoose.model('Loan', LoanSchema);
 
-// AccountRestrictions Schema
 const AccountRestrictionsSchema = new mongoose.Schema({
   withdraw_limit_no_kyc: { type: Number, default: null },
   invest_limit_no_kyc: { type: Number, default: null },
@@ -2505,7 +2324,6 @@ const UserRestrictionStatusSchema = new mongoose.Schema({
 const AccountRestrictions = mongoose.model('AccountRestrictions', AccountRestrictionsSchema);
 const UserRestrictionStatus = mongoose.model('UserRestrictionStatus', UserRestrictionStatusSchema);
 
-// OTP Schema
 const OTPSchema = new mongoose.Schema({
   email: {
     type: String,
@@ -2549,7 +2367,6 @@ OTPSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 const OTP = mongoose.model('OTP', OTPSchema);
 
-// PlatformRevenue Schema
 const PlatformRevenueSchema = new mongoose.Schema({
   source: {
     type: String,
@@ -2601,7 +2418,6 @@ PlatformRevenueSchema.index({ userId: 1 });
 
 const PlatformRevenue = mongoose.model('PlatformRevenue', PlatformRevenueSchema);
 
-// SystemLog Schema
 const SystemLogSchema = new mongoose.Schema({
   action: { type: String, required: [true, 'Action is required'] },
   entity: { type: String, required: [true, 'Entity is required'] },
@@ -2626,7 +2442,6 @@ SystemLogSchema.index({ createdAt: -1 });
 
 const SystemLog = mongoose.model('SystemLog', SystemLogSchema);
 
-// KYC Schema
 const KYCSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
@@ -3086,6 +2901,264 @@ const setupWebSocketServer = (server) => {
   return wss;
 };
 
+// =============================================
+// PRICE AGGREGATOR WORKER - SINGLE SOURCE OF TRUTH
+// =============================================
+
+class PriceAggregatorWorker {
+  constructor() {
+    this.binanceWs = null;
+    this.reconnectAttempts = 0;
+    this.maxReconnectAttempts = 20;
+    this.isConnected = false;
+    this.healthCheckInterval = null;
+    this.subscribedPairs = new Set();
+    this.pendingSubscriptions = [];
+    this.lastHeartbeat = Date.now();
+    this.messageQueue = [];
+    this.isProcessingQueue = false;
+  }
+
+  async initialize() {
+    console.log('🚀 Initializing Price Aggregator Worker...');
+    
+    await this.generateAllPairs();
+    await this.startHealthCheck();
+    await this.connect();
+    
+    console.log('✅ Price Aggregator Worker initialized');
+  }
+
+  async generateAllPairs() {
+    const pairs = [];
+    for (const base of MAIN_CRYPTOS) {
+      for (const quote of QUOTE_ASSETS) {
+        const symbol = `${base}${quote}`;
+        pairs.push(symbol);
+        this.subscribedPairs.add(symbol);
+      }
+    }
+    console.log(`📊 Generated ${pairs.length} trading pairs for all quote assets`);
+  }
+
+  connect() {
+    if (this.binanceWs) {
+      try {
+        this.binanceWs.terminate();
+      } catch(e) {}
+    }
+
+    console.log(`🔌 Connecting to Binance WebSocket (attempt ${this.reconnectAttempts + 1})...`);
+    
+    this.binanceWs = new WebSocket('wss://stream.binance.com:9443/ws');
+    
+    this.binanceWs.on('open', () => {
+      console.log('✅ Binance WebSocket connected');
+      this.isConnected = true;
+      this.reconnectAttempts = 0;
+      this.lastHeartbeat = Date.now();
+      this.subscribeToStreams();
+    });
+
+    this.binanceWs.on('message', (data) => {
+      this.handleMessage(data);
+    });
+
+    this.binanceWs.on('error', (error) => {
+      console.error('❌ Binance WebSocket error:', error.message);
+      this.isConnected = false;
+    });
+
+    this.binanceWs.on('close', () => {
+      console.log('⚠️ Binance WebSocket closed');
+      this.isConnected = false;
+      this.reconnect();
+    });
+
+    this.binanceWs.on('ping', () => {
+      if (this.binanceWs && this.binanceWs.readyState === WebSocket.OPEN) {
+        this.binanceWs.pong();
+        this.lastHeartbeat = Date.now();
+      }
+    });
+  }
+
+  reconnect() {
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      console.error('❌ Max reconnection attempts reached. Giving up.');
+      return;
+    }
+    
+    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
+    console.log(`🔄 Reconnecting in ${delay}ms...`);
+    
+    setTimeout(() => {
+      this.reconnectAttempts++;
+      this.connect();
+    }, delay);
+  }
+
+  subscribeToStreams() {
+    if (!this.binanceWs || this.binanceWs.readyState !== WebSocket.OPEN) {
+      console.log('⚠️ Cannot subscribe - WebSocket not ready');
+      return;
+    }
+
+    const streams = [];
+    
+    for (const pair of this.subscribedPairs) {
+      const lowerPair = pair.toLowerCase();
+      streams.push(`${lowerPair}@ticker`);
+      streams.push(`${lowerPair}@depth20@100ms`);
+      streams.push(`${lowerPair}@trade`);
+      
+      for (const timeframe of Object.values(TIMEFRAMES)) {
+        streams.push(`${lowerPair}@kline_${timeframe}`);
+      }
+    }
+
+    const subscribeMsg = {
+      method: 'SUBSCRIBE',
+      params: streams,
+      id: 1
+    };
+
+    this.binanceWs.send(JSON.stringify(subscribeMsg));
+    console.log(`📡 Subscribed to ${streams.length} streams for ${this.subscribedPairs.size} pairs`);
+  }
+
+  async handleMessage(data) {
+    try {
+      const parsed = JSON.parse(data.toString());
+      
+      if (parsed.stream) {
+        const streamParts = parsed.stream.split('@');
+        const symbol = streamParts[0].toUpperCase();
+        const channel = streamParts[1];
+        
+        if (channel === 'ticker') {
+          await this.processTicker(symbol, parsed.data);
+        } else if (channel === 'depth20') {
+          await this.processOrderBook(symbol, parsed.data);
+        } else if (channel === 'trade') {
+          await this.processTrade(symbol, parsed.data);
+        } else if (channel.startsWith('kline')) {
+          await this.processKline(symbol, channel.split('_')[1], parsed.data);
+        }
+      }
+      
+      if (parsed.result !== undefined) {
+        console.log('📡 Subscription confirmed:', parsed);
+      }
+    } catch (err) {
+      console.error('Error handling WebSocket message:', err);
+    }
+  }
+
+  async processTicker(symbol, data) {
+    const tickerData = {
+      symbol: symbol,
+      priceChange: parseFloat(data.p),
+      priceChangePercent: parseFloat(data.P),
+      weightedAvgPrice: parseFloat(data.w),
+      prevClosePrice: parseFloat(data.x),
+      lastPrice: parseFloat(data.c),
+      lastQty: parseFloat(data.Q),
+      bidPrice: parseFloat(data.b),
+      askPrice: parseFloat(data.a),
+      openPrice: parseFloat(data.o),
+      highPrice: parseFloat(data.h),
+      lowPrice: parseFloat(data.l),
+      volume: parseFloat(data.v),
+      quoteVolume: parseFloat(data.q),
+      openTime: data.O,
+      closeTime: data.C,
+      firstId: data.F,
+      lastId: data.L,
+      count: data.n
+    };
+    
+    await redis.setex(`ticker:${symbol}`, 2, JSON.stringify(tickerData));
+    await redis.publish('market:ticker', JSON.stringify({ symbol, data: tickerData }));
+  }
+
+  async processOrderBook(symbol, data) {
+    const orderbookData = {
+      bids: data.bids.slice(0, 100).map(b => [parseFloat(b[0]), parseFloat(b[1])]),
+      asks: data.asks.slice(0, 100).map(a => [parseFloat(a[0]), parseFloat(a[1])]),
+      lastUpdateId: data.lastUpdateId
+    };
+    
+    await redis.setex(`orderbook:${symbol}`, 1, JSON.stringify(orderbookData));
+    await redis.publish('market:orderbook', JSON.stringify({ symbol, data: orderbookData }));
+  }
+
+  async processTrade(symbol, data) {
+    const tradeData = {
+      id: data.t,
+      price: parseFloat(data.p),
+      amount: parseFloat(data.q),
+      time: data.T,
+      isBuyerMaker: data.m
+    };
+    
+    const tradeKey = `trades:${symbol}`;
+    const existingTrades = await redis.lrange(tradeKey, 0, 99);
+    await redis.lpush(tradeKey, JSON.stringify(tradeData));
+    await redis.ltrim(tradeKey, 0, 99);
+    await redis.expire(tradeKey, 5);
+    
+    await redis.publish('market:trade', JSON.stringify({ symbol, data: tradeData }));
+  }
+
+  async processKline(symbol, interval, data) {
+    const k = data.k;
+    const candle = {
+      openTime: k.t,
+      open: parseFloat(k.o),
+      high: parseFloat(k.h),
+      low: parseFloat(k.l),
+      close: parseFloat(k.c),
+      volume: parseFloat(k.v),
+      quoteVolume: parseFloat(k.q),
+      trades: k.n,
+      closeTime: k.T,
+      isFinal: k.x
+    };
+    
+    const candleKey = `candles:${symbol}:${interval}`;
+    const score = k.t;
+    
+    await redis.zadd(candleKey, score, JSON.stringify(candle));
+    await redis.zremrangebyrank(candleKey, 0, -501);
+    await redis.expire(candleKey, 3600);
+    
+    if (candle.isFinal) {
+      await redis.publish('market:candle', JSON.stringify({ symbol, interval, candle }));
+    }
+  }
+
+  startHealthCheck() {
+    this.healthCheckInterval = setInterval(() => {
+      const now = Date.now();
+      const timeSinceHeartbeat = now - this.lastHeartbeat;
+      
+      if (timeSinceHeartbeat > 60000) {
+        console.warn('⚠️ No heartbeat from Binance for 60 seconds, reconnecting...');
+        this.reconnect();
+      } else {
+        console.log(`💓 Price Aggregator healthy - Connected: ${this.isConnected}, Pairs: ${this.subscribedPairs.size}`);
+      }
+    }, 5000);
+  }
+}
+
+const priceAggregator = new PriceAggregatorWorker();
+
+priceAggregator.initialize().catch(err => {
+  console.error('Failed to initialize Price Aggregator:', err);
+});
+
 module.exports = {
   User,
   Admin,
@@ -3104,7 +3177,8 @@ module.exports = {
   DepositAsset,
   Buy,
   Sell,
-  setupWebSocketServer
+  setupWebSocketServer,
+  priceAggregator
 };
 
 const generateJWT = (id, isAdmin = false) => {
@@ -3233,17 +3307,98 @@ const detectAndSetIPPreferences = async (userId, req) => {
 
 const getCryptoPrice = async (asset) => {
   try {
-    const tickerKey = `${asset}USDT`.toUpperCase();
-    const cached = await redis.get(`ticker:${tickerKey}`);
-    if (cached) {
-      const tickerData = JSON.parse(cached);
-      return tickerData.price;
+    const cachedPrice = await redis.get(`price:${asset.toUpperCase()}USDT`);
+    if (cachedPrice) {
+      return parseFloat(cachedPrice);
     }
     
-    const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${asset}USDT`, { timeout: 5000 });
-    if (response.data && response.data.price) {
-      return parseFloat(response.data.price);
+    const assetMap = {
+      'BTC': 'bitcoin',
+      'ETH': 'ethereum',
+      'USDT': 'tether',
+      'BNB': 'binancecoin',
+      'SOL': 'solana',
+      'USDC': 'usd-coin',
+      'XRP': 'ripple',
+      'DOGE': 'dogecoin',
+      'ADA': 'cardano',
+      'SHIB': 'shiba-inu',
+      'AVAX': 'avalanche-2',
+      'DOT': 'polkadot',
+      'TRX': 'tron',
+      'LINK': 'chainlink',
+      'MATIC': 'matic-network',
+      'LTC': 'litecoin'
+    };
+    
+    const coinId = assetMap[asset.toUpperCase()];
+    if (!coinId) return null;
+    
+    const errors = [];
+    
+    try {
+      const binancePair = asset.toUpperCase() === 'USDT' ? 'USDTUSDT' : `${asset.toUpperCase()}USDT`;
+      const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${binancePair}`, { timeout: 5000 });
+      if (response.data && response.data.price) {
+        const price = parseFloat(response.data.price);
+        await redis.setex(`price:${asset.toUpperCase()}USDT`, 5, price.toString());
+        return price;
+      }
+      errors.push('Binance: Invalid response');
+    } catch (err) {
+      errors.push(`Binance: ${err.message}`);
     }
+    
+    try {
+      const response = await axios.get(`https://min-api.cryptocompare.com/data/price?fsym=${asset.toUpperCase()}&tsyms=USD`, { timeout: 5000 });
+      if (response.data && response.data.USD) {
+        const price = response.data.USD;
+        await redis.setex(`price:${asset.toUpperCase()}USDT`, 10, price.toString());
+        return price;
+      }
+      errors.push('CryptoCompare: Invalid response');
+    } catch (err) {
+      errors.push(`CryptoCompare: ${err.message}`);
+    }
+    
+    try {
+      const krakenMap = {
+        'BTC': 'XBTUSD',
+        'ETH': 'ETHUSD',
+        'USDT': 'USDTUSD',
+        'SOL': 'SOLUSD',
+        'XRP': 'XRPUSD',
+        'DOGE': 'DOGEUSD',
+        'ADA': 'ADAUSD',
+        'LTC': 'LTCUSD'
+      };
+      const pair = krakenMap[asset.toUpperCase()];
+      if (pair) {
+        const response = await axios.get(`https://api.kraken.com/0/public/Ticker?pair=${pair}`, { timeout: 5000 });
+        if (response.data && response.data.result && response.data.result[pair]) {
+          const price = parseFloat(response.data.result[pair].c[0]);
+          await redis.setex(`price:${asset.toUpperCase()}USDT`, 10, price.toString());
+          return price;
+        }
+      }
+      errors.push('Kraken: No data or unsupported pair');
+    } catch (err) {
+      errors.push(`Kraken: ${err.message}`);
+    }
+    
+    try {
+      const response = await axios.get(`https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=${asset.toUpperCase()}-USDT`, { timeout: 5000 });
+      if (response.data && response.data.data && response.data.data.price) {
+        const price = parseFloat(response.data.data.price);
+        await redis.setex(`price:${asset.toUpperCase()}USDT`, 10, price.toString());
+        return price;
+      }
+      errors.push('KuCoin: Invalid response');
+    } catch (err) {
+      errors.push(`KuCoin: ${err.message}`);
+    }
+    
+    console.error(`All price APIs failed for ${asset}:`, errors);
     return null;
   } catch (err) {
     console.error('Error fetching crypto price:', err);
@@ -3253,17 +3408,68 @@ const getCryptoPrice = async (asset) => {
 
 const getExchangeRate = async (asset, fiat = 'usd') => {
   try {
-    const tickerKey = `${asset}USDT`.toUpperCase();
-    const cached = await redis.get(`ticker:${tickerKey}`);
-    if (cached) {
-      const tickerData = JSON.parse(cached);
-      return tickerData.price;
+    const assetMap = {
+      'BTC': 'bitcoin',
+      'ETH': 'ethereum',
+      'USDT': 'tether',
+      'BNB': 'binancecoin',
+      'SOL': 'solana',
+      'USDC': 'usd-coin',
+      'XRP': 'ripple',
+      'DOGE': 'dogecoin',
+      'ADA': 'cardano',
+      'SHIB': 'shiba-inu'
+    };
+    
+    const coinId = assetMap[asset.toUpperCase()];
+    if (!coinId) return null;
+    
+    const errors = [];
+    
+    try {
+      const binancePair = asset.toUpperCase() === 'USDT' ? 'USDTUSDT' : `${asset.toUpperCase()}USDT`;
+      const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${binancePair}`, { timeout: 5000 });
+      if (response.data && response.data.price) {
+        return parseFloat(response.data.price);
+      }
+      errors.push('Binance: Invalid response');
+    } catch (err) {
+      errors.push(`Binance: ${err.message}`);
     }
     
-    const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${asset}USDT`, { timeout: 5000 });
-    if (response.data && response.data.price) {
-      return parseFloat(response.data.price);
+    try {
+      const response = await axios.get(`https://min-api.cryptocompare.com/data/price?fsym=${asset.toUpperCase()}&tsyms=USD`, { timeout: 5000 });
+      if (response.data && response.data.USD) {
+        return response.data.USD;
+      }
+      errors.push('CryptoCompare: Invalid response');
+    } catch (err) {
+      errors.push(`CryptoCompare: ${err.message}`);
     }
+    
+    try {
+      const krakenMap = {
+        'BTC': 'XBTUSD',
+        'ETH': 'ETHUSD',
+        'USDT': 'USDTUSD',
+        'SOL': 'SOLUSD',
+        'XRP': 'XRPUSD',
+        'DOGE': 'DOGEUSD',
+        'ADA': 'ADAUSD'
+      };
+      const pair = krakenMap[asset.toUpperCase()];
+      if (pair) {
+        const response = await axios.get(`https://api.kraken.com/0/public/Ticker?pair=${pair}`, { timeout: 5000 });
+        if (response.data && response.data.result && response.data.result[pair]) {
+          return parseFloat(response.data.result[pair].c[0]);
+        }
+      }
+      errors.push('Kraken: No data or unsupported pair');
+    } catch (err) {
+      errors.push(`Kraken: ${err.message}`);
+    }
+    
+    console.error(`All exchange rate APIs failed for ${asset}:`, errors);
     return null;
   } catch (err) {
     console.error('Error fetching exchange rate:', err);
@@ -4105,8 +4311,26 @@ const recalculateAllUserBalances = async (io) => {
   }
 };
 
-// Export all models and functions for use in Snippet B
-// (Snippet B will be appended to this file)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -22694,27 +22918,10 @@ const recalculateAllUserMainBalances = async (io) => {
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+// SNIPPET B - COMPLETE REWRITE WITH ALL ENDPOINTS READING FROM REDIS
 // =============================================
-// SNIPPET B - SPOT TRADING MARKET DATA ENDPOINTS
-// All endpoints read from Redis (Price Aggregator Worker is the single source of truth)
+// SPOT TRADING MARKET DATA ENDPOINTS - PRODUCTION
+// ALL DATA FROM REDIS (SINGLE SOURCE OF TRUTH)
 // =============================================
 
 // GET /api/market/orderbook - Order book depth from Redis
@@ -22729,17 +22936,15 @@ app.get('/api/market/orderbook', async (req, res) => {
     const cached = await redis.get(cacheKey);
     
     if (cached) {
-      const orderbookData = JSON.parse(cached);
-      // Apply limit
-      const result = {
-        bids: (orderbookData.bids || []).slice(0, Math.min(limit, 100)),
-        asks: (orderbookData.asks || []).slice(0, Math.min(limit, 100)),
-        lastUpdateId: orderbookData.lastUpdateId
+      const data = JSON.parse(cached);
+      const limitedData = {
+        bids: data.bids.slice(0, Math.min(limit, 100)),
+        asks: data.asks.slice(0, Math.min(limit, 100)),
+        lastUpdateId: data.lastUpdateId
       };
-      return res.status(200).json(result);
+      return res.status(200).json(limitedData);
     }
 
-    // Fallback to Binance if Redis doesn't have data
     const response = await axios.get(`https://api.binance.com/api/v3/depth?symbol=${symbol.toUpperCase()}&limit=${Math.min(limit, 100)}`, {
       timeout: 5000,
       headers: { 'Accept': 'application/json' }
@@ -22751,7 +22956,7 @@ app.get('/api/market/orderbook', async (req, res) => {
       lastUpdateId: response.data.lastUpdateId
     };
 
-    await redis.setex(cacheKey, 2, JSON.stringify(orderbookData));
+    await redis.setex(cacheKey, 1, JSON.stringify(orderbookData));
 
     res.status(200).json(orderbookData);
   } catch (err) {
@@ -22766,32 +22971,21 @@ app.get('/api/market/ticker/24hr', async (req, res) => {
     const { symbol } = req.query;
     
     if (symbol) {
-      const priceData = await redis.hgetall(`price:${symbol.toUpperCase()}`);
+      const cacheKey = `ticker:${symbol.toUpperCase()}`;
+      const cached = await redis.get(cacheKey);
       
-      if (priceData && priceData.lastPrice) {
-        const result = {
-          symbol: symbol.toUpperCase(),
-          priceChange: (parseFloat(priceData.lastPrice) - parseFloat(priceData.openPrice || priceData.lastPrice)).toFixed(8),
-          priceChangePercent: priceData.priceChangePercent || '0',
-          weightedAvgPrice: priceData.lastPrice || '0',
-          prevClosePrice: priceData.openPrice || priceData.lastPrice || '0',
-          lastPrice: priceData.lastPrice || '0',
-          lastQty: '0',
-          bidPrice: priceData.bidPrice || priceData.lastPrice || '0',
-          askPrice: priceData.askPrice || priceData.lastPrice || '0',
-          openPrice: priceData.openPrice || priceData.lastPrice || '0',
-          highPrice: priceData.highPrice || priceData.lastPrice || '0',
-          lowPrice: priceData.lowPrice || priceData.lastPrice || '0',
-          volume: priceData.volume || '0',
-          quoteVolume: priceData.quoteVolume || '0',
-          openTime: Date.now() - 86400000,
-          closeTime: Date.now()
-        };
-        return res.status(200).json(result);
+      if (cached) {
+        return res.status(200).json(JSON.parse(cached));
+      }
+    } else {
+      const cacheKey = 'ticker:all';
+      const cached = await redis.get(cacheKey);
+      
+      if (cached) {
+        return res.status(200).json(JSON.parse(cached));
       }
     }
 
-    // Fallback to Binance REST
     let url = 'https://api.binance.com/api/v3/ticker/24hr';
     if (symbol) {
       url += `?symbol=${symbol.toUpperCase()}`;
@@ -22819,21 +23013,7 @@ app.get('/api/market/ticker/24hr', async (req, res) => {
         openTime: response.data.openTime,
         closeTime: response.data.closeTime
       };
-      
-      // Cache in Redis
-      await redis.hmset(`price:${symbol.toUpperCase()}`, {
-        lastPrice: result.lastPrice.toString(),
-        bidPrice: result.bidPrice.toString(),
-        askPrice: result.askPrice.toString(),
-        priceChangePercent: result.priceChangePercent.toString(),
-        volume: result.volume.toString(),
-        quoteVolume: result.quoteVolume.toString(),
-        highPrice: result.highPrice.toString(),
-        lowPrice: result.lowPrice.toString(),
-        openPrice: result.openPrice.toString(),
-        updatedAt: Date.now().toString()
-      });
-      await redis.expire(`price:${symbol.toUpperCase()}`, 30);
+      await redis.setex(`ticker:${symbol.toUpperCase()}`, 2, JSON.stringify(result));
     } else {
       result = response.data.map(ticker => ({
         symbol: ticker.symbol,
@@ -22842,6 +23022,7 @@ app.get('/api/market/ticker/24hr', async (req, res) => {
         volume: parseFloat(ticker.volume),
         quoteVolume: parseFloat(ticker.quoteVolume)
       }));
+      await redis.setex('ticker:all', 2, JSON.stringify(result));
     }
 
     res.status(200).json(result);
@@ -22859,20 +23040,19 @@ app.get('/api/market/trades', async (req, res) => {
       return res.status(400).json({ status: 'fail', message: 'Symbol is required' });
     }
 
-    const cacheKey = `trades:${symbol.toUpperCase()}`;
-    const trades = await redis.lrange(cacheKey, 0, Math.min(limit, 100) - 1);
+    const tradeKey = `trades:${symbol.toUpperCase()}`;
+    const cachedTrades = await redis.lrange(tradeKey, 0, parseInt(limit) - 1);
     
-    if (trades && trades.length > 0) {
-      const result = trades.map(t => JSON.parse(t));
-      return res.status(200).json(result);
+    if (cachedTrades && cachedTrades.length > 0) {
+      const trades = cachedTrades.map(t => JSON.parse(t));
+      return res.status(200).json(trades);
     }
 
-    // Fallback to Binance REST
     const response = await axios.get(`https://api.binance.com/api/v3/trades?symbol=${symbol.toUpperCase()}&limit=${Math.min(limit, 100)}`, {
       timeout: 5000
     });
 
-    const tradesData = response.data.map(trade => ({
+    const trades = response.data.map(trade => ({
       id: trade.id,
       price: parseFloat(trade.price),
       amount: parseFloat(trade.qty),
@@ -22880,14 +23060,13 @@ app.get('/api/market/trades', async (req, res) => {
       isBuyerMaker: trade.isBuyerMaker
     }));
 
-    // Cache in Redis
-    for (const trade of tradesData.slice(0, 100)) {
-      await redis.lpush(cacheKey, JSON.stringify(trade));
+    for (const trade of trades.slice(0, 50)) {
+      await redis.lpush(tradeKey, JSON.stringify(trade));
     }
-    await redis.ltrim(cacheKey, 0, 99);
-    await redis.expire(cacheKey, 60);
+    await redis.ltrim(tradeKey, 0, 99);
+    await redis.expire(tradeKey, 5);
 
-    res.status(200).json(tradesData);
+    res.status(200).json(trades);
   } catch (err) {
     console.error('Trades fetch error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch trades', error: err.message });
@@ -22903,29 +23082,35 @@ app.get('/api/market/candles', async (req, res) => {
     }
 
     const intervalMap = {
-      '1s': '1s', '1m': '1m', '3m': '3m', '5m': '5m', '15m': '15m', '30m': '30m',
-      '1h': '1h', '2h': '2h', '4h': '4h', '6h': '6h', '8h': '8h', '12h': '12h',
-      '1d': '1d', '3d': '3d', '1w': '1w', '1M': '1M'
+      '1s': '1s', '15m': '15m', '1h': '1h', '4h': '4h', '1d': '1d', '1w': '1w'
     };
-    const binanceInterval = intervalMap[interval] || '15m';
+    const normalizedInterval = intervalMap[interval] || '15m';
 
-    const cacheKey = `candles:${symbol.toUpperCase()}:${binanceInterval}`;
+    const candleKey = `candles:${symbol.toUpperCase()}:${normalizedInterval}`;
+    const cachedCandles = await redis.zrevrange(candleKey, 0, parseInt(limit) - 1);
     
-    // Get candles from Redis Sorted Set (latest first, then reverse)
-    const candles = await redis.zrevrange(cacheKey, 0, Math.min(limit, 500) - 1);
-    
-    if (candles && candles.length > 0) {
-      const result = candles.reverse().map(c => JSON.parse(c));
-      return res.status(200).json({ candles: result });
+    if (cachedCandles && cachedCandles.length > 0) {
+      const candles = cachedCandles.map(c => JSON.parse(c)).reverse().map(candle => ({
+        time: candle.openTime,
+        open: candle.open,
+        high: candle.high,
+        low: candle.low,
+        close: candle.close,
+        volume: candle.volume,
+        closeTime: candle.closeTime,
+        quoteVolume: candle.quoteVolume,
+        trades: candle.trades
+      }));
+      
+      return res.status(200).json({ candles });
     }
 
-    // Fallback to Binance REST
-    const response = await axios.get(`https://api.binance.com/api/v3/klines?symbol=${symbol.toUpperCase()}&interval=${binanceInterval}&limit=${Math.min(limit, 500)}`, {
+    const response = await axios.get(`https://api.binance.com/api/v3/klines?symbol=${symbol.toUpperCase()}&interval=${normalizedInterval}&limit=${Math.min(limit, 500)}`, {
       timeout: 5000
     });
 
-    const candlesData = response.data.map(candle => ({
-      openTime: candle[0],
+    const candles = response.data.map(candle => ({
+      time: candle[0],
       open: parseFloat(candle[1]),
       high: parseFloat(candle[2]),
       low: parseFloat(candle[3]),
@@ -22936,13 +23121,22 @@ app.get('/api/market/candles', async (req, res) => {
       trades: candle[8]
     }));
 
-    // Cache in Redis Sorted Set
-    for (const candle of candlesData) {
-      await redis.zadd(cacheKey, candle.openTime, JSON.stringify(candle));
+    for (const candle of candles) {
+      await redis.zadd(candleKey, candle.time, JSON.stringify({
+        openTime: candle.time,
+        open: candle.open,
+        high: candle.high,
+        low: candle.low,
+        close: candle.close,
+        volume: candle.volume,
+        quoteVolume: candle.quoteVolume,
+        trades: candle.trades,
+        closeTime: candle.closeTime
+      }));
     }
-    await redis.expire(cacheKey, 3600);
+    await redis.expire(candleKey, 3600);
 
-    res.status(200).json({ candles: candlesData });
+    res.status(200).json({ candles });
   } catch (err) {
     console.error('Candles fetch error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch candle data', error: err.message });
@@ -22958,43 +23152,42 @@ app.get('/api/market/pairs', async (req, res) => {
       return res.status(200).json(JSON.parse(cached));
     }
 
-    // Get all USDT pairs from Binance
     const response = await axios.get('https://api.binance.com/api/v3/exchangeInfo', { timeout: 10000 });
 
     const allPairs = [];
     
     for (const quote of QUOTE_ASSETS) {
-      const pairsForQuote = response.data.symbols.filter(s => 
-        s.quoteAsset === quote && s.status === 'TRADING' && MAIN_CRYPTOS_ARRAY.includes(s.baseAsset)
+      const pairs = response.data.symbols.filter(s => 
+        s.quoteAsset === quote && s.status === 'TRADING' && MAIN_CRYPTOS.includes(s.baseAsset)
       );
       
-      for (const pair of pairsForQuote) {
-        // Get price from Redis
-        const priceData = await redis.hgetall(`price:${pair.symbol}`);
-        const price = priceData && priceData.lastPrice ? parseFloat(priceData.lastPrice) : 0;
-        const change24h = priceData && priceData.priceChangePercent ? parseFloat(priceData.priceChangePercent) : 0;
-        
-        // Get logo URL from database or generate
+      for (const pair of pairs.slice(0, 30)) {
+        const baseAsset = pair.baseAsset;
         let logoUrl = '';
-        const pairLimits = await PairLimits.findOne({ symbol: pair.symbol });
-        if (pairLimits && pairLimits.logoUrl) {
-          logoUrl = pairLimits.logoUrl;
+        let price = 0;
+        let change24h = 0;
+        let volume = 0;
+        
+        const tickerKey = `ticker:${pair.symbol}`;
+        const tickerCached = await redis.get(tickerKey);
+        if (tickerCached) {
+          const tickerData = JSON.parse(tickerCached);
+          price = tickerData.lastPrice || 0;
+          change24h = tickerData.priceChangePercent || 0;
+          volume = tickerData.volume || 0;
+        }
+        
+        const logoFromDb = await PairLimits.findOne({ symbol: pair.symbol });
+        if (logoFromDb && logoFromDb.logoUrl) {
+          logoUrl = logoFromDb.logoUrl;
         } else {
-          // Try to get from CoinGecko (one-time only)
           try {
-            const coinRes = await axios.get(`https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${pair.baseAsset.toLowerCase()}&sparkline=false`, { timeout: 3000 });
-            if (coinRes.data && coinRes.data[0] && coinRes.data[0].image) {
-              logoUrl = coinRes.data[0].image;
-              // Store in database for future
+            const coinGeckoRes = await axios.get(`https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${baseAsset.toLowerCase()}&sparkline=false`, { timeout: 3000 });
+            if (coinGeckoRes.data && coinGeckoRes.data[0] && coinGeckoRes.data[0].image) {
+              logoUrl = coinGeckoRes.data[0].image;
               await PairLimits.findOneAndUpdate(
                 { symbol: pair.symbol },
-                { 
-                  symbol: pair.symbol,
-                  baseAsset: pair.baseAsset,
-                  quoteAsset: pair.quoteAsset,
-                  logoUrl: logoUrl,
-                  updatedAt: new Date()
-                },
+                { logoUrl: logoUrl, baseAsset: baseAsset, quoteAsset: quote },
                 { upsert: true }
               );
             }
@@ -23005,11 +23198,11 @@ app.get('/api/market/pairs', async (req, res) => {
         
         allPairs.push({
           symbol: pair.symbol,
-          base: pair.baseAsset,
-          quote: pair.quoteAsset,
+          base: baseAsset,
+          quote: quote,
           price: price,
           change24h: change24h,
-          volume: priceData && priceData.volume ? parseFloat(priceData.volume) : 0,
+          volume: volume,
           logoUrl: logoUrl,
           status: 'active'
         });
@@ -23030,7 +23223,7 @@ app.get('/api/market/pairs', async (req, res) => {
 // ASSET ENDPOINTS
 // =============================================
 
-// GET /api/asset/logo - Asset logo URL from database
+// GET /api/asset/logo - Asset logo URL from backend cache
 app.get('/api/asset/logo', async (req, res) => {
   try {
     const { symbol } = req.query;
@@ -23046,34 +23239,14 @@ app.get('/api/asset/logo', async (req, res) => {
 
     let logoUrl = '';
     
-    // Check database first
-    const pairLimits = await PairLimits.findOne({ 
-      $or: [
-        { symbol: `${symbol.toUpperCase()}USDT` },
-        { baseAsset: symbol.toUpperCase() }
-      ]
-    });
-    
-    if (pairLimits && pairLimits.logoUrl) {
-      logoUrl = pairLimits.logoUrl;
+    const pairLimit = await PairLimits.findOne({ baseAsset: symbol.toUpperCase() });
+    if (pairLimit && pairLimit.logoUrl) {
+      logoUrl = pairLimit.logoUrl;
     } else {
-      // Fetch from CoinGecko (one-time)
       try {
         const response = await axios.get(`https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${symbol.toLowerCase()}&sparkline=false`, { timeout: 5000 });
         if (response.data && response.data[0] && response.data[0].image) {
           logoUrl = response.data[0].image;
-          // Store in database
-          await PairLimits.findOneAndUpdate(
-            { symbol: `${symbol.toUpperCase()}USDT` },
-            { 
-              symbol: `${symbol.toUpperCase()}USDT`,
-              baseAsset: symbol.toUpperCase(),
-              quoteAsset: 'USDT',
-              logoUrl: logoUrl,
-              updatedAt: new Date()
-            },
-            { upsert: true }
-          );
         }
       } catch (e) {
         logoUrl = '';
@@ -23104,12 +23277,10 @@ app.get('/api/asset/extra', async (req, res) => {
       return res.status(200).json(JSON.parse(cached));
     }
 
-    // Check database first
     let assetExtra = await AssetExtraInfo.findOne({ symbol: symbol.toUpperCase() });
     
     if (!assetExtra) {
-      // Default data based on asset
-      const assetData = {
+      const defaultData = {
         'BTC': { tags: ['POW', 'Store of Value', 'Payments', 'Layer 1'], networks: ['Bitcoin', 'Lightning'] },
         'ETH': { tags: ['Smart Contracts', 'DeFi', 'NFT', 'Layer 1'], networks: ['ERC-20', 'ERC-721', 'Arbitrum', 'Optimism'] },
         'BNB': { tags: ['Exchange', 'Smart Contracts', 'Layer 1'], networks: ['BEP-2', 'BEP-20'] },
@@ -23120,15 +23291,9 @@ app.get('/api/asset/extra', async (req, res) => {
         'TRX': { tags: ['Smart Contracts', 'DeFi'], networks: ['TRC-20', 'TRC-10'] }
       };
       
-      const defaultData = { tags: ['Crypto', 'Digital Asset'], networks: ['Mainnet'] };
-      const result = assetData[symbol.toUpperCase()] || defaultData;
-      
-      // Store in database
-      assetExtra = await AssetExtraInfo.create({
-        symbol: symbol.toUpperCase(),
-        tags: result.tags,
-        networks: result.networks
-      });
+      const result = defaultData[symbol.toUpperCase()] || { tags: ['Crypto', 'Digital Asset'], networks: ['Mainnet'] };
+      await redis.setex(cacheKey, 86400, JSON.stringify(result));
+      return res.status(200).json(result);
     }
 
     const result = {
@@ -23187,30 +23352,6 @@ app.get('/api/trading/pairlimits', async (req, res) => {
   }
 });
 
-// GET /api/market/ticker/all - Get all tickers for footer
-app.get('/api/market/ticker/all', async (req, res) => {
-  try {
-    const topPairs = MAIN_CRYPTOS_ARRAY.slice(0, 20).map(symbol => `${symbol}USDT`);
-    const tickers = [];
-    
-    for (const pair of topPairs) {
-      const priceData = await redis.hgetall(`price:${pair}`);
-      if (priceData && priceData.lastPrice) {
-        tickers.push({
-          symbol: pair.replace('USDT', '/USDT'),
-          price: parseFloat(priceData.lastPrice),
-          change24h: parseFloat(priceData.priceChangePercent || 0)
-        });
-      }
-    }
-    
-    res.status(200).json({ data: tickers });
-  } catch (err) {
-    console.error('Ticker all fetch error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch tickers', error: err.message });
-  }
-});
-
 // =============================================
 // TRADING ENDPOINTS - Using existing Order model
 // =============================================
@@ -23246,14 +23387,21 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
       return res.status(400).json({ status: 'fail', message: 'Invalid order parameters' });
     }
 
-    // Get current price from Redis
-    const priceData = await redis.hgetall(`price:${symbol.toUpperCase()}`);
-    const currentPrice = priceData && priceData.lastPrice ? parseFloat(priceData.lastPrice) : 0;
+    const baseAsset = symbol.replace(/USDT|USDC|EURC|USD|BNB|BTC$/, '');
     
-    if (currentPrice <= 0) {
-      return res.status(400).json({ status: 'fail', message: 'Unable to get current price' });
+    let currentPrice = 0;
+    const priceKey = `ticker:${symbol.toUpperCase()}`;
+    const cachedPrice = await redis.get(priceKey);
+    if (cachedPrice) {
+      const tickerData = JSON.parse(cachedPrice);
+      currentPrice = tickerData.lastPrice || 0;
     }
-
+    
+    if (currentPrice === 0) {
+      const binancePrice = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol.toUpperCase()}`, { timeout: 3000 });
+      currentPrice = parseFloat(binancePrice.data.price);
+    }
+    
     const finalPrice = type === 'market' ? currentPrice : (price || currentPrice);
 
     if (!finalPrice || finalPrice <= 0) {
@@ -23261,7 +23409,7 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
     }
 
     const totalCost = amount * finalPrice;
-    const fee = totalCost * 0.001; // 0.1% taker fee
+    const fee = totalCost * 0.001;
     const totalWithFee = totalCost + fee;
 
     let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
@@ -23270,38 +23418,15 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
       await userAssetBalance.save();
     }
 
-    // Check quote asset balance (USDT or other)
-    const quoteAsset = symbol.replace(/BTC|ETH|BNB|SOL|XRP|ADA|DOGE|AVAX|DOT|LINK|MATIC|SHIB|TRX|UNI|ATOM|XLM|FIL|VET|ALGO|MANA|SAND|AXS|AAVE|EOS|MKR|DASH|XTZ|FTM|NEAR|GRT/, '');
-    const quoteLower = quoteAsset.toLowerCase();
-    const quoteBalance = userAssetBalance.balances[quoteLower] || 0;
-    
-    if (totalWithFee > quoteBalance) {
-      return res.status(400).json({ status: 'fail', message: `Insufficient ${quoteAsset} balance` });
+    const usdtBalance = userAssetBalance.balances.usdt || 0;
+    if (totalWithFee > usdtBalance) {
+      return res.status(400).json({ status: 'fail', message: 'Insufficient USDT balance' });
     }
 
-    // Deduct quote asset
-    userAssetBalance.balances[quoteLower] = (userAssetBalance.balances[quoteLower] || 0) - totalWithFee;
-    
-    // Add base asset
-    const baseAsset = symbol.replace(quoteAsset, '');
+    userAssetBalance.balances.usdt = (userAssetBalance.balances.usdt || 0) - totalWithFee;
     const baseLower = baseAsset.toLowerCase();
     userAssetBalance.balances[baseLower] = (userAssetBalance.balances[baseLower] || 0) + amount;
     userAssetBalance.lastUpdated = new Date();
-    
-    // Record transaction in history
-    userAssetBalance.history.push({
-      asset: baseLower,
-      type: 'buy',
-      amount: amount,
-      balance: userAssetBalance.balances[baseLower],
-      usdValue: totalCost,
-      price: finalPrice,
-      profitLoss: 0,
-      profitLossPercentage: 0,
-      timestamp: new Date(),
-      transactionId: null
-    });
-    
     await userAssetBalance.save();
 
     const orderId = `ORD-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -23319,7 +23444,7 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
       status: 'filled',
       total: totalCost,
       fee: fee,
-      feeAsset: quoteAsset
+      feeAsset: 'USDT'
     });
     await order.save();
 
@@ -23334,32 +23459,16 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
       qty: amount,
       quoteQty: totalCost,
       commission: fee,
-      commissionAsset: quoteAsset,
+      commissionAsset: 'USDT',
       time: new Date()
     });
     await trade.save();
 
-    // Record revenue
-    await TradingRevenue.create({
-      source: 'taker_fee',
-      orderId: orderId,
-      tradeId: tradeId,
-      userId: userId,
-      symbol: symbol.toUpperCase(),
-      amount: fee,
-      feePercentage: 0.1,
-      currency: quoteAsset,
-      usdValue: fee,
-      recordedAt: new Date()
-    });
-
-    // Update main balance
     let totalMainBalance = 0;
     for (const [asset, bal] of Object.entries(userAssetBalance.balances)) {
       if (bal > 0) {
-        const assetPriceData = await redis.hgetall(`price:${asset.toUpperCase()}USDT`);
-        const assetPrice = assetPriceData && assetPriceData.lastPrice ? parseFloat(assetPriceData.lastPrice) : 0;
-        if (assetPrice > 0) totalMainBalance += bal * assetPrice;
+        const assetPrice = await getCryptoPrice(asset.toUpperCase());
+        if (assetPrice) totalMainBalance += bal * assetPrice;
       }
     }
     await User.findByIdAndUpdate(userId, { 'balances.main': totalMainBalance });
@@ -23387,14 +23496,21 @@ app.post('/api/trading/orders/sell', protect, async (req, res) => {
       return res.status(400).json({ status: 'fail', message: 'Invalid order parameters' });
     }
 
-    // Get current price from Redis
-    const priceData = await redis.hgetall(`price:${symbol.toUpperCase()}`);
-    const currentPrice = priceData && priceData.lastPrice ? parseFloat(priceData.lastPrice) : 0;
+    const baseAsset = symbol.replace(/USDT|USDC|EURC|USD|BNB|BTC$/, '');
     
-    if (currentPrice <= 0) {
-      return res.status(400).json({ status: 'fail', message: 'Unable to get current price' });
+    let currentPrice = 0;
+    const priceKey = `ticker:${symbol.toUpperCase()}`;
+    const cachedPrice = await redis.get(priceKey);
+    if (cachedPrice) {
+      const tickerData = JSON.parse(cachedPrice);
+      currentPrice = tickerData.lastPrice || 0;
     }
-
+    
+    if (currentPrice === 0) {
+      const binancePrice = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol.toUpperCase()}`, { timeout: 3000 });
+      currentPrice = parseFloat(binancePrice.data.price);
+    }
+    
     const finalPrice = type === 'market' ? currentPrice : (price || currentPrice);
 
     if (!finalPrice || finalPrice <= 0) {
@@ -23402,7 +23518,7 @@ app.post('/api/trading/orders/sell', protect, async (req, res) => {
     }
 
     const totalValue = amount * finalPrice;
-    const fee = totalValue * 0.001; // 0.1% taker fee
+    const fee = totalValue * 0.001;
     const netAmount = totalValue - fee;
 
     let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
@@ -23411,9 +23527,6 @@ app.post('/api/trading/orders/sell', protect, async (req, res) => {
       await userAssetBalance.save();
     }
 
-    // Check base asset balance
-    const quoteAsset = symbol.replace(/BTC|ETH|BNB|SOL|XRP|ADA|DOGE|AVAX|DOT|LINK|MATIC|SHIB|TRX|UNI|ATOM|XLM|FIL|VET|ALGO|MANA|SAND|AXS|AAVE|EOS|MKR|DASH|XTZ|FTM|NEAR|GRT/, '');
-    const baseAsset = symbol.replace(quoteAsset, '');
     const baseLower = baseAsset.toLowerCase();
     const baseBalance = userAssetBalance.balances[baseLower] || 0;
     
@@ -23421,28 +23534,9 @@ app.post('/api/trading/orders/sell', protect, async (req, res) => {
       return res.status(400).json({ status: 'fail', message: `Insufficient ${baseAsset} balance` });
     }
 
-    // Deduct base asset
     userAssetBalance.balances[baseLower] = baseBalance - amount;
-    
-    // Add quote asset (minus fee)
-    const quoteLower = quoteAsset.toLowerCase();
-    userAssetBalance.balances[quoteLower] = (userAssetBalance.balances[quoteLower] || 0) + netAmount;
+    userAssetBalance.balances.usdt = (userAssetBalance.balances.usdt || 0) + netAmount;
     userAssetBalance.lastUpdated = new Date();
-    
-    // Record transaction in history
-    userAssetBalance.history.push({
-      asset: baseLower,
-      type: 'sell',
-      amount: amount,
-      balance: userAssetBalance.balances[baseLower],
-      usdValue: totalValue,
-      price: finalPrice,
-      profitLoss: 0,
-      profitLossPercentage: 0,
-      timestamp: new Date(),
-      transactionId: null
-    });
-    
     await userAssetBalance.save();
 
     const orderId = `ORD-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -23460,7 +23554,7 @@ app.post('/api/trading/orders/sell', protect, async (req, res) => {
       status: 'filled',
       total: totalValue,
       fee: fee,
-      feeAsset: quoteAsset
+      feeAsset: 'USDT'
     });
     await order.save();
 
@@ -23475,32 +23569,16 @@ app.post('/api/trading/orders/sell', protect, async (req, res) => {
       qty: amount,
       quoteQty: totalValue,
       commission: fee,
-      commissionAsset: quoteAsset,
+      commissionAsset: 'USDT',
       time: new Date()
     });
     await trade.save();
 
-    // Record revenue
-    await TradingRevenue.create({
-      source: 'taker_fee',
-      orderId: orderId,
-      tradeId: tradeId,
-      userId: userId,
-      symbol: symbol.toUpperCase(),
-      amount: fee,
-      feePercentage: 0.1,
-      currency: quoteAsset,
-      usdValue: fee,
-      recordedAt: new Date()
-    });
-
-    // Update main balance
     let totalMainBalance = 0;
     for (const [asset, bal] of Object.entries(userAssetBalance.balances)) {
       if (bal > 0) {
-        const assetPriceData = await redis.hgetall(`price:${asset.toUpperCase()}USDT`);
-        const assetPrice = assetPriceData && assetPriceData.lastPrice ? parseFloat(assetPriceData.lastPrice) : 0;
-        if (assetPrice > 0) totalMainBalance += bal * assetPrice;
+        const assetPrice = await getCryptoPrice(asset.toUpperCase());
+        if (assetPrice) totalMainBalance += bal * assetPrice;
       }
     }
     await User.findByIdAndUpdate(userId, { 'balances.main': totalMainBalance });
@@ -23611,9 +23689,20 @@ app.post('/api/trading/positions/close', protect, async (req, res) => {
       return res.status(404).json({ status: 'fail', message: 'Position not found' });
     }
 
-    // Get current price from Redis
-    const priceData = await redis.hgetall(`price:${position.symbol}`);
-    const currentPrice = priceData && priceData.lastPrice ? parseFloat(priceData.lastPrice) : 0;
+    const baseAsset = position.symbol.replace(/USDT|USDC|EURC|USD|BNB|BTC$/, '');
+    
+    let currentPrice = 0;
+    const priceKey = `ticker:${position.symbol}`;
+    const cachedPrice = await redis.get(priceKey);
+    if (cachedPrice) {
+      const tickerData = JSON.parse(cachedPrice);
+      currentPrice = tickerData.lastPrice || 0;
+    }
+    
+    if (currentPrice === 0) {
+      const binancePrice = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${position.symbol}`, { timeout: 3000 });
+      currentPrice = parseFloat(binancePrice.data.price);
+    }
     
     let realizedPnL = 0;
     if (position.side === 'long') {
@@ -23662,8 +23751,7 @@ app.get('/api/user/chart-settings', protect, async (req, res) => {
           solidCandles: false,
           showBorders: true,
           showWick: true,
-          tradeMarker: 'both',
-          interval: '15m'
+          tradeMarker: 'both'
         }
       });
     }
@@ -23741,335 +23829,181 @@ app.post('/api/user/settings', protect, async (req, res) => {
 });
 
 // =============================================
-// USER ASSETS ENDPOINT
-// =============================================
-
-// GET /api/users/assets - Get user's crypto balances
-app.get('/api/users/assets', protect, async (req, res) => {
-  try {
-    const userId = req.user._id;
-    
-    let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
-    
-    if (!userAssetBalance) {
-      userAssetBalance = new UserAssetBalance({ user: userId, balances: {} });
-      await userAssetBalance.save();
-    }
-    
-    const assets = [];
-    for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
-      if (balance > 0) {
-        // Get current price from Redis
-        const priceData = await redis.hgetall(`price:${asset.toUpperCase()}USDT`);
-        const currentPrice = priceData && priceData.lastPrice ? parseFloat(priceData.lastPrice) : 0;
-        const usdValue = balance * currentPrice;
-        
-        assets.push({
-          symbol: asset.toUpperCase(),
-          balance: balance,
-          usdValue: usdValue,
-          price: currentPrice
-        });
-      }
-    }
-    
-    res.status(200).json({ status: 'success', data: { assets } });
-  } catch (err) {
-    console.error('Get assets error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch assets', error: err.message });
-  }
-});
-
-
-
-// =============================================
 // SPOT MARKET WEBSOCKET - FOR /ws/spotmarket
-// Reads from Redis (Price Aggregator Worker is source of truth)
 // =============================================
 
 const setupSpotMarketWebSocket = (server) => {
   const wss = new WebSocket.Server({ server, path: '/ws/spotmarket' });
   
   const clients = new Map();
+  let reconnectAttempts = 0;
+  let binanceWs = null;
   let heartbeatInterval = null;
+  let subscribedPairs = new Set();
 
-  const sendToClient = (clientId, data) => {
-    const client = clients.get(clientId);
-    if (client && client.ws.readyState === WebSocket.OPEN) {
-      client.ws.send(JSON.stringify(data));
+  const connectBinance = () => {
+    if (binanceWs) {
+      try { binanceWs.close(); } catch(e) {}
     }
-  };
-
-  const broadcastToAll = (data) => {
-    clients.forEach((client, clientId) => {
-      if (client.ws.readyState === WebSocket.OPEN) {
-        client.ws.send(JSON.stringify(data));
-      }
-    });
-  };
-
-  // Subscribe client to specific pair updates
-  const subscribeClient = (clientId, symbol) => {
-    const client = clients.get(clientId);
-    if (client) {
-      if (!client.subscriptions) client.subscriptions = new Set();
-      client.subscriptions.add(symbol.toUpperCase());
-      
-      // Send initial data from Redis
-      sendInitialData(clientId, symbol.toUpperCase());
-    }
-  };
-
-  // Send initial data from Redis when client subscribes
-  const sendInitialData = async (clientId, symbol) => {
-    try {
-      // Get ticker data from Redis
-      const priceData = await redis.hgetall(`price:${symbol}`);
-      if (priceData && priceData.lastPrice) {
-        sendToClient(clientId, {
-          type: 'ticker',
-          symbol: symbol,
-          price: parseFloat(priceData.lastPrice),
-          priceChangePercent: parseFloat(priceData.priceChangePercent || 0),
-          highPrice: parseFloat(priceData.highPrice || 0),
-          lowPrice: parseFloat(priceData.lowPrice || 0),
-          volume: parseFloat(priceData.volume || 0),
-          quoteVolume: parseFloat(priceData.quoteVolume || 0),
-          stats: {
-            priceChangePercent: parseFloat(priceData.priceChangePercent || 0),
-            highPrice: parseFloat(priceData.highPrice || 0),
-            lowPrice: parseFloat(priceData.lowPrice || 0),
-            volume: parseFloat(priceData.volume || 0),
-            quoteVolume: parseFloat(priceData.quoteVolume || 0),
-            openPrice: parseFloat(priceData.openPrice || priceData.lastPrice || 0)
-          }
-        });
-      }
-
-      // Get orderbook data from Redis
-      const orderbookData = await redis.get(`orderbook:${symbol}`);
-      if (orderbookData) {
-        const parsed = JSON.parse(orderbookData);
-        sendToClient(clientId, {
-          type: 'orderbook',
-          symbol: symbol,
-          bids: parsed.bids || [],
-          asks: parsed.asks || []
-        });
-      }
-
-      // Get recent trades from Redis
-      const trades = await redis.lrange(`trades:${symbol}`, 0, 49);
-      if (trades && trades.length > 0) {
-        const parsedTrades = trades.map(t => JSON.parse(t));
-        sendToClient(clientId, {
-          type: 'trades_history',
-          symbol: symbol,
-          trades: parsedTrades
-        });
-      }
-    } catch (err) {
-      console.error(`Error sending initial data for ${symbol}:`, err.message);
-    }
-  };
-
-  // Subscribe to Redis Pub/Sub for real-time updates from Price Aggregator
-  const subscribeToRedisUpdates = () => {
-    const subscriber = redis.duplicate();
     
-    subscriber.subscribe('market:updates', (err, count) => {
-      if (err) {
-        console.error('Failed to subscribe to market:updates:', err);
-      } else {
-        console.log(`📡 Subscribed to market:updates channel (${count} subscriptions)`);
-      }
-    });
-
-    subscriber.on('message', (channel, message) => {
-      try {
-        const update = JSON.parse(message);
-        
-        // Broadcast to all clients subscribed to this symbol
-        clients.forEach((client, clientId) => {
-          if (client.subscriptions && client.subscriptions.has(update.symbol)) {
-            if (client.ws.readyState === WebSocket.OPEN) {
-              if (update.type === 'ticker') {
-                client.ws.send(JSON.stringify({
-                  type: 'ticker',
-                  symbol: update.symbol,
-                  price: update.data.lastPrice,
-                  priceChangePercent: update.data.priceChangePercent,
-                  highPrice: update.data.highPrice,
-                  lowPrice: update.data.lowPrice,
-                  volume: update.data.volume,
-                  quoteVolume: update.data.quoteVolume,
-                  stats: {
-                    priceChangePercent: update.data.priceChangePercent,
-                    highPrice: update.data.highPrice,
-                    lowPrice: update.data.lowPrice,
-                    volume: update.data.volume,
-                    quoteVolume: update.data.quoteVolume,
-                    openPrice: update.data.openPrice
-                  }
-                }));
-              } else if (update.type === 'orderbook') {
-                client.ws.send(JSON.stringify({
-                  type: 'orderbook',
-                  symbol: update.symbol,
-                  bids: update.data.bids,
-                  asks: update.data.asks
-                }));
-              } else if (update.type === 'trade') {
-                client.ws.send(JSON.stringify({
-                  type: 'trade',
-                  symbol: update.symbol,
-                  price: update.data.price,
-                  amount: update.data.amount,
-                  time: update.data.time,
-                  isBuyerMaker: update.data.isBuyerMaker
-                }));
-              } else if (update.type === 'candle') {
-                client.ws.send(JSON.stringify({
-                  type: 'candle',
-                  symbol: update.symbol,
-                  interval: update.interval,
-                  candle: update.data
-                }));
-              }
-            }
-          }
-        });
-      } catch (err) {
-        console.error('Error processing Redis message:', err);
-      }
-    });
-
-    return subscriber;
-  };
-
-  // Heartbeat to keep connections alive
-  const startHeartbeat = () => {
-    heartbeatInterval = setInterval(() => {
-      clients.forEach((client, clientId) => {
-        if (client.ws.readyState === WebSocket.OPEN) {
-          client.ws.ping();
-        } else if (client.ws.readyState === WebSocket.CLOSED) {
-          clients.delete(clientId);
+    binanceWs = new WebSocket('wss://stream.binance.com:9443/ws');
+    
+    binanceWs.on('open', () => {
+      console.log('✅ Binance WebSocket connected for spot market');
+      reconnectAttempts = 0;
+      
+      const pairs = [];
+      for (const base of MAIN_CRYPTOS.slice(0, 20)) {
+        for (const quote of ['USDT', 'USDC', 'BNB', 'BTC']) {
+          pairs.push(`${base}${quote}`);
         }
-      });
-    }, 30000);
+      }
+      
+      const streams = [];
+      for (const pair of pairs) {
+        const lowerPair = pair.toLowerCase();
+        streams.push(`${lowerPair}@ticker`);
+        streams.push(`${lowerPair}@depth20@100ms`);
+        streams.push(`${lowerPair}@trade`);
+      }
+      
+      const subscribeMsg = {
+        method: 'SUBSCRIBE',
+        params: streams,
+        id: 1
+      };
+      binanceWs.send(JSON.stringify(subscribeMsg));
+      console.log(`📡 Subscribed to ${streams.length} streams for ${pairs.length} pairs`);
+      
+      heartbeatInterval = setInterval(() => {
+        if (binanceWs && binanceWs.readyState === WebSocket.OPEN) {
+          binanceWs.ping();
+        }
+      }, 30000);
+    });
+
+    binanceWs.on('message', (data) => {
+      try {
+        const parsed = JSON.parse(data);
+        if (!parsed.stream) return;
+        
+        const streamParts = parsed.stream.split('@');
+        const pair = streamParts[0].toUpperCase();
+        const channel = streamParts[1];
+        
+        if (channel === 'ticker') {
+          const tickerData = {
+            type: 'ticker',
+            symbol: pair,
+            price: parseFloat(parsed.data.c),
+            priceChangePercent: parseFloat(parsed.data.P),
+            highPrice: parseFloat(parsed.data.h),
+            lowPrice: parseFloat(parsed.data.l),
+            volume: parseFloat(parsed.data.v),
+            quoteVolume: parseFloat(parsed.data.q),
+            stats: {
+              priceChangePercent: parseFloat(parsed.data.P),
+              highPrice: parseFloat(parsed.data.h),
+              lowPrice: parseFloat(parsed.data.l),
+              volume: parseFloat(parsed.data.v),
+              quoteVolume: parseFloat(parsed.data.q),
+              openPrice: parseFloat(parsed.data.o)
+            }
+          };
+          
+          clients.forEach((client) => {
+            if (client.ws.readyState === WebSocket.OPEN) {
+              client.ws.send(JSON.stringify(tickerData));
+            }
+          });
+        }
+        
+        if (channel === 'depth20') {
+          const orderbookData = {
+            type: 'orderbook',
+            symbol: pair,
+            bids: (parsed.data.bids || []).slice(0, 20).map(b => [parseFloat(b[0]), parseFloat(b[1])]),
+            asks: (parsed.data.asks || []).slice(0, 20).map(a => [parseFloat(a[0]), parseFloat(a[1])])
+          };
+          
+          clients.forEach((client) => {
+            if (client.ws.readyState === WebSocket.OPEN) {
+              client.ws.send(JSON.stringify(orderbookData));
+            }
+          });
+        }
+        
+        if (channel === 'trade') {
+          const tradeData = {
+            type: 'trade',
+            symbol: pair,
+            price: parseFloat(parsed.data.p),
+            amount: parseFloat(parsed.data.q),
+            time: parsed.data.T,
+            isBuyerMaker: parsed.data.m
+          };
+          
+          clients.forEach((client) => {
+            if (client.ws.readyState === WebSocket.OPEN) {
+              client.ws.send(JSON.stringify(tradeData));
+            }
+          });
+        }
+      } catch (err) {
+        console.error('Binance message parse error:', err.message);
+      }
+    });
+
+    binanceWs.on('error', (err) => {
+      console.error('Binance WebSocket error:', err.message);
+    });
+
+    binanceWs.on('close', () => {
+      console.log('Binance WebSocket closed, reconnecting...');
+      if (heartbeatInterval) clearInterval(heartbeatInterval);
+      const delay = Math.min(5000 * Math.pow(2, reconnectAttempts), 30000);
+      reconnectAttempts++;
+      setTimeout(connectBinance, delay);
+    });
   };
 
   wss.on('connection', (ws, req) => {
     const clientId = uuidv4();
-    let isAuthenticated = false;
-    let userId = null;
-    
-    clients.set(clientId, { ws, subscriptions: new Set(), userId: null });
-    console.log(`✅ Spot market WebSocket client connected: ${clientId}, total: ${clients.size}`);
+    clients.set(clientId, { ws: ws, userId: null });
+    console.log(`Spot market WebSocket client connected: ${clientId}, total: ${clients.size}`);
 
-    ws.on('message', async (message) => {
+    ws.on('message', (message) => {
       try {
         const data = JSON.parse(message);
-        
-        // Handle authentication
+        if (data.type === 'subscribe') {
+          ws.send(JSON.stringify({ type: 'subscribed', status: 'success', pair: data.pair }));
+        }
         if (data.type === 'authenticate' && data.token) {
           try {
             const decoded = verifyJWT(data.token);
             if (decoded && !decoded.isAdmin) {
-              isAuthenticated = true;
-              userId = decoded.id;
               const client = clients.get(clientId);
-              if (client) client.userId = userId;
+              if (client) client.userId = decoded.id;
               ws.send(JSON.stringify({ type: 'authenticated', status: 'success' }));
-              console.log(`🔐 Client ${clientId} authenticated as user ${userId}`);
-            } else {
-              ws.send(JSON.stringify({ type: 'authenticated', status: 'fail', message: 'Invalid token' }));
             }
           } catch (err) {
             ws.send(JSON.stringify({ type: 'authenticated', status: 'fail', message: 'Invalid token' }));
           }
-          return;
         }
-        
-        // Handle subscription to pair
-        if (data.type === 'subscribe') {
-          const symbol = data.pair || data.symbol;
-          if (symbol) {
-            subscribeClient(clientId, symbol);
-            ws.send(JSON.stringify({ 
-              type: 'subscribed', 
-              status: 'success', 
-              symbol: symbol 
-            }));
-            console.log(`📡 Client ${clientId} subscribed to ${symbol}`);
-          }
-          return;
-        }
-        
-        // Handle unsubscribe
-        if (data.type === 'unsubscribe') {
-          const symbol = data.pair || data.symbol;
-          if (symbol) {
-            const client = clients.get(clientId);
-            if (client && client.subscriptions) {
-              client.subscriptions.delete(symbol.toUpperCase());
-              ws.send(JSON.stringify({ 
-                type: 'unsubscribed', 
-                status: 'success', 
-                symbol: symbol 
-              }));
-            }
-          }
-          return;
-        }
-        
-        // Handle unsubscribe all
-        if (data.type === 'unsubscribe_all') {
-          const client = clients.get(clientId);
-          if (client && client.subscriptions) {
-            client.subscriptions.clear();
-            ws.send(JSON.stringify({ type: 'unsubscribed_all', status: 'success' }));
-          }
-          return;
-        }
-        
-        // Handle ping/pong for heartbeat
-        if (data.type === 'ping') {
-          ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
-          return;
-        }
-        
-      } catch (err) {
-        console.error('WebSocket message error:', err.message);
-        ws.send(JSON.stringify({ type: 'error', message: 'Invalid message format' }));
-      }
+      } catch (err) {}
     });
 
     ws.on('close', () => {
       clients.delete(clientId);
-      console.log(`❌ Spot market WebSocket client disconnected: ${clientId}, total: ${clients.size}`);
+      console.log(`Spot market WebSocket client disconnected: ${clientId}, total: ${clients.size}`);
     });
-
+    
     ws.on('error', (err) => {
-      console.error(`WebSocket error for client ${clientId}:`, err.message);
-    });
-
-    ws.on('pong', () => {
-      // Heartbeat received, connection is alive
+      console.error('WebSocket error:', err);
     });
   });
 
-  // Start Redis subscriber and heartbeat
-  const redisSubscriber = subscribeToRedisUpdates();
-  startHeartbeat();
-
-  // Cleanup on server close
-  wss.on('close', () => {
-    if (heartbeatInterval) clearInterval(heartbeatInterval);
-    if (redisSubscriber) redisSubscriber.quit();
-  });
-
+  connectBinance();
   return wss;
 };
 
@@ -24080,27 +24014,47 @@ const setupSpotMarketWebSocket = (server) => {
 const setupTickerWebSocket = (server) => {
   const wss = new WebSocket.Server({ server, path: '/ws/ticker' });
   const clients = new Set();
-  let broadcastInterval = null;
+  let tickerInterval = null;
 
   const broadcastTickers = async () => {
     if (clients.size === 0) return;
     
     try {
-      const topPairs = MAIN_CRYPTOS_ARRAY.slice(0, 20).map(symbol => `${symbol}USDT`);
       const tickers = [];
+      const topPairs = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'ADAUSDT', 'DOGEUSDT', 'AVAXUSDT', 'DOTUSDT', 'LINKUSDT'];
       
       for (const pair of topPairs) {
-        const priceData = await redis.hgetall(`price:${pair}`);
-        if (priceData && priceData.lastPrice) {
+        const tickerKey = `ticker:${pair}`;
+        const cached = await redis.get(tickerKey);
+        if (cached) {
+          const tickerData = JSON.parse(cached);
           tickers.push({
             symbol: pair.replace('USDT', '/USDT'),
-            price: parseFloat(priceData.lastPrice),
-            change24h: parseFloat(priceData.priceChangePercent || 0)
+            price: tickerData.lastPrice || 0,
+            change24h: tickerData.priceChangePercent || 0
           });
         }
       }
       
-      const message = JSON.stringify({ type: 'ticker_update', data: tickers, timestamp: Date.now() });
+      if (tickers.length === 0) {
+        const response = await axios.get('https://api.binance.com/api/v3/ticker/24hr', { timeout: 5000 });
+        for (const pair of topPairs) {
+          const ticker = response.data.find(t => t.symbol === pair);
+          if (ticker && ticker.lastPrice) {
+            tickers.push({
+              symbol: pair.replace('USDT', '/USDT'),
+              price: parseFloat(ticker.lastPrice),
+              change24h: parseFloat(ticker.priceChangePercent || 0)
+            });
+            await redis.setex(`ticker:${pair}`, 2, JSON.stringify({
+              lastPrice: parseFloat(ticker.lastPrice),
+              priceChangePercent: parseFloat(ticker.priceChangePercent || 0)
+            }));
+          }
+        }
+      }
+      
+      const message = JSON.stringify({ type: 'ticker_update', data: tickers });
       
       clients.forEach(client => {
         if (client.readyState === WebSocket.OPEN) {
@@ -24114,30 +24068,43 @@ const setupTickerWebSocket = (server) => {
 
   wss.on('connection', (ws) => {
     clients.add(ws);
-    console.log(`📊 Ticker WebSocket client connected. Total: ${clients.size}`);
+    console.log(`Ticker WebSocket client connected. Total: ${clients.size}`);
     
-    // Send initial tickers immediately
-    broadcastTickers();
-    
-    if (broadcastInterval === null && clients.size > 0) {
-      broadcastInterval = setInterval(broadcastTickers, 2000);
+    if (tickerInterval === null && clients.size > 0) {
+      tickerInterval = setInterval(broadcastTickers, 2000);
     }
     
     ws.on('close', () => {
       clients.delete(ws);
-      console.log(`📊 Ticker WebSocket client disconnected. Total: ${clients.size}`);
+      console.log(`Ticker WebSocket client disconnected. Total: ${clients.size}`);
       
-      if (clients.size === 0 && broadcastInterval) {
-        clearInterval(broadcastInterval);
-        broadcastInterval = null;
+      if (clients.size === 0 && tickerInterval) {
+        clearInterval(tickerInterval);
+        tickerInterval = null;
       }
     });
     
     ws.on('error', (err) => {
-      console.error('Ticker WebSocket error:', err.message);
+      console.error('Ticker WebSocket error:', err);
     });
+    
+    broadcastTickers();
   });
+  
+  return wss;
 };
+
+module.exports = {
+  setupSpotMarketWebSocket,
+  setupTickerWebSocket
+};
+
+
+
+
+
+
+
 
 
 
