@@ -22,7 +22,7 @@ const { body, validationResult } = require('express-validator');
 const axios = require('axios');
 const speakeasy = require('speakeasy');
 const { v4: uuidv4 } = require('uuid');
-const WebSocket = require('ws');
+
 const OpenAI = require('openai');
 
 const app = express();
