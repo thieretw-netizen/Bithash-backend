@@ -110,6 +110,9 @@ redis.on('connect', () => {
   console.log('Redis connected successfully');
 });
 
+// =============================================
+// PRICE AGGREGATOR WORKER - SINGLE SOURCE OF TRUTH
+// =============================================
 const MAIN_CRYPTOS = [
   'BTC', 'ETH', 'BNB', 'SOL', 'XRP', 'ADA', 'DOGE', 'AVAX', 'DOT', 'LINK',
   'MATIC', 'SHIB', 'TRX', 'UNI', 'ATOM', 'XLM', 'FIL', 'VET', 'ALGO', 'MANA',
@@ -117,6 +120,158 @@ const MAIN_CRYPTOS = [
 ];
 
 const QUOTE_ASSETS = ['USDT', 'USDC', 'USDQ', 'USDR', 'EURC', 'USD', 'BNB', 'BTC'];
+const TIMEFRAMES = ['1s', '15m', '1h', '4h', '1d', '1w'];
+
+let binanceWs = null;
+let reconnectAttempts = 0;
+
+const connectBinanceAggregator = () => {
+  if (binanceWs) {
+    try { binanceWs.close(); } catch(e) {}
+  }
+  
+  binanceWs = new WebSocket('wss://stream.binance.com:9443/ws');
+  
+  binanceWs.on('open', () => {
+    console.log('✅ Price Aggregator: Binance WebSocket connected');
+    reconnectAttempts = 0;
+    
+    const streams = [];
+    for (const base of MAIN_CRYPTOS) {
+      for (const quote of QUOTE_ASSETS) {
+        const symbol = `${base}${quote}`.toLowerCase();
+        streams.push(`${symbol}@ticker`);
+        streams.push(`${symbol}@depth20`);
+        streams.push(`${symbol}@trade`);
+        for (const tf of TIMEFRAMES) {
+          streams.push(`${symbol}@kline_${tf}`);
+        }
+      }
+    }
+    
+    const subscribeMsg = {
+      method: 'SUBSCRIBE',
+      params: streams,
+      id: 1
+    };
+    binanceWs.send(JSON.stringify(subscribeMsg));
+    console.log(`Price Aggregator: Subscribed to ${streams.length} streams`);
+  });
+
+  binanceWs.on('message', async (data) => {
+    try {
+      const parsed = JSON.parse(data);
+      if (!parsed.stream) return;
+      
+      const streamParts = parsed.stream.split('@');
+      const symbol = streamParts[0].toUpperCase();
+      const channel = streamParts[1];
+      
+      if (channel === 'ticker') {
+        const tickerData = {
+          symbol: symbol,
+          price: parseFloat(parsed.data.c),
+          priceChangePercent: parseFloat(parsed.data.P),
+          highPrice: parseFloat(parsed.data.h),
+          lowPrice: parseFloat(parsed.data.l),
+          volume: parseFloat(parsed.data.v),
+          quoteVolume: parseFloat(parsed.data.q),
+          openPrice: parseFloat(parsed.data.o),
+          closePrice: parseFloat(parsed.data.c),
+          updatedAt: Date.now()
+        };
+        await redis.setex(`ticker:${symbol}`, 2, JSON.stringify(tickerData));
+        await redis.publish('market:updates', JSON.stringify({ type: 'ticker', data: tickerData }));
+      }
+      
+      if (channel === 'depth20') {
+        const orderbookData = {
+          symbol: symbol,
+          bids: (parsed.data.bids || []).slice(0, 20).map(b => [parseFloat(b[0]), parseFloat(b[1])]),
+          asks: (parsed.data.asks || []).slice(0, 20).map(a => [parseFloat(a[0]), parseFloat(a[1])]),
+          lastUpdateId: parsed.data.lastUpdateId,
+          updatedAt: Date.now()
+        };
+        await redis.setex(`orderbook:${symbol}`, 1, JSON.stringify(orderbookData));
+        await redis.publish('market:updates', JSON.stringify({ type: 'orderbook', data: orderbookData }));
+      }
+      
+      if (channel === 'trade') {
+        const tradeData = {
+          symbol: symbol,
+          price: parseFloat(parsed.data.p),
+          amount: parseFloat(parsed.data.q),
+          time: parsed.data.T,
+          isBuyerMaker: parsed.data.m
+        };
+        await redis.lpush(`trades:${symbol}`, JSON.stringify(tradeData));
+        await redis.ltrim(`trades:${symbol}`, 0, 99);
+        await redis.publish('market:updates', JSON.stringify({ type: 'trade', data: tradeData }));
+      }
+      
+      if (channel.startsWith('kline_')) {
+        const timeframe = channel.replace('kline_', '');
+        const k = parsed.data.k;
+        const candle = {
+          symbol: symbol,
+          interval: timeframe,
+          openTime: k.t,
+          open: parseFloat(k.o),
+          high: parseFloat(k.h),
+          low: parseFloat(k.l),
+          close: parseFloat(k.c),
+          volume: parseFloat(k.v),
+          quoteVolume: parseFloat(k.q),
+          trades: k.n,
+          closeTime: k.T,
+          isClosed: k.x
+        };
+        
+        const key = `candles:${symbol}:${timeframe}`;
+        const member = JSON.stringify({
+          time: k.t,
+          open: candle.open,
+          high: candle.high,
+          low: candle.low,
+          close: candle.close,
+          volume: candle.volume
+        });
+        
+        await redis.zadd(key, k.t, member);
+        await redis.zremrangebyrank(key, 0, -501);
+        await redis.expire(key, 3600);
+        
+        if (candle.isClosed) {
+          await redis.publish('market:updates', JSON.stringify({ type: 'candle_closed', data: candle }));
+        }
+      }
+    } catch (err) {
+      console.error('Price Aggregator: Error processing message:', err.message);
+    }
+  });
+
+  binanceWs.on('error', (err) => {
+    console.error('Price Aggregator: WebSocket error:', err.message);
+  });
+
+  binanceWs.on('close', () => {
+    console.log('Price Aggregator: WebSocket closed, reconnecting...');
+    const delay = Math.min(5000 * Math.pow(2, reconnectAttempts), 30000);
+    reconnectAttempts++;
+    setTimeout(connectBinanceAggregator, delay);
+  });
+};
+
+// Health check for Binance connection
+setInterval(() => {
+  if (!binanceWs || binanceWs.readyState !== WebSocket.OPEN) {
+    console.warn('Price Aggregator: Binance WebSocket not connected, attempting reconnect...');
+    connectBinanceAggregator();
+  }
+}, 5000);
+
+// Start the price aggregator
+connectBinanceAggregator();
 
 const getRealClientIP = (req) => {
   const forwardedFor = req.headers['x-forwarded-for'];
@@ -247,6 +402,7 @@ const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString('he
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7200s';
 const JWT_COOKIE_EXPIRES = process.env.JWT_COOKIE_EXPIRES || 0.083;
 
+// User Schema (unchanged, kept from original)
 const UserSchema = new mongoose.Schema({
   firstName: { type: String, required: [true, 'First name is required'], trim: true, maxlength: [50, 'First name cannot be longer than 50 characters'] },
   lastName: { type: String, required: [true, 'Last name is required'], trim: true, maxlength: [50, 'Last name cannot be longer than 50 characters'] },
@@ -419,6 +575,7 @@ UserSchema.index({ createdAt: -1 });
 
 const User = mongoose.model('User', UserSchema);
 
+// Translation Schema
 const TranslationSchema = new mongoose.Schema({
   language: {
     type: String,
@@ -457,6 +614,7 @@ TranslationSchema.index({ isActive: 1 });
 
 const Translation = mongoose.model('Translation', TranslationSchema);
 
+// DownlineRelationship Schema
 const DownlineRelationshipSchema = new mongoose.Schema({
   upline: {
     type: mongoose.Schema.Types.ObjectId,
@@ -514,6 +672,7 @@ DownlineRelationshipSchema.index({ status: 1 });
 
 const DownlineRelationship = mongoose.model('DownlineRelationship', DownlineRelationshipSchema);
 
+// CommissionHistory Schema
 const CommissionHistorySchema = new mongoose.Schema({
   upline: {
     type: mongoose.Schema.Types.ObjectId,
@@ -574,6 +733,7 @@ CommissionHistorySchema.index({ investment: 1 });
 
 const CommissionHistory = mongoose.model('CommissionHistory', CommissionHistorySchema);
 
+// CommissionSettings Schema
 const CommissionSettingsSchema = new mongoose.Schema({
   commissionPercentage: {
     type: Number,
@@ -602,6 +762,7 @@ const CommissionSettingsSchema = new mongoose.Schema({
 
 const CommissionSettings = mongoose.model('CommissionSettings', CommissionSettingsSchema);
 
+// UserLog Schema
 const UserLogSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
@@ -995,6 +1156,7 @@ UserLogSchema.query.byRiskLevel = function(riskLevel) {
 
 const UserLog = mongoose.model('UserLog', UserLogSchema);
 
+// LoginRecord Schema
 const LoginRecordSchema = new mongoose.Schema({
   email: { 
     type: String, 
@@ -1023,6 +1185,7 @@ LoginRecordSchema.index({ timestamp: -1 });
 
 const LoginRecord = mongoose.model('LoginRecord', LoginRecordSchema);
 
+// MarketPair Schema
 const MarketPairSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true, index: true },
   baseAsset: { type: String, required: true, index: true },
@@ -1046,6 +1209,7 @@ const MarketPairSchema = new mongoose.Schema({
 MarketPairSchema.index({ baseAsset: 1, quoteAsset: 1 });
 MarketPairSchema.index({ status: 1 });
 
+// Order Schema
 const OrderSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   symbol: { type: String, required: true, index: true },
@@ -1075,6 +1239,7 @@ OrderSchema.index({ user: 1, status: 1 });
 OrderSchema.index({ symbol: 1, status: 1 });
 OrderSchema.index({ orderId: 1 });
 
+// Trade Schema
 const TradeSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   orderId: { type: String, required: true, index: true },
@@ -1093,6 +1258,7 @@ const TradeSchema = new mongoose.Schema({
 TradeSchema.index({ user: 1, symbol: 1, time: -1 });
 TradeSchema.index({ orderId: 1 });
 
+// Position Schema
 const PositionSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   symbol: { type: String, required: true, index: true },
@@ -1113,6 +1279,7 @@ const PositionSchema = new mongoose.Schema({
 
 PositionSchema.index({ user: 1, symbol: 1, status: 1 });
 
+// OrderBookSnapshot Schema
 const OrderBookSnapshotSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true },
   bids: [[Number]],
@@ -1124,6 +1291,7 @@ const OrderBookSnapshotSchema = new mongoose.Schema({
 OrderBookSnapshotSchema.index({ symbol: 1 });
 OrderBookSnapshotSchema.index({ updatedAt: 1 }, { expireAfterSeconds: 60 });
 
+// Ticker24hr Schema
 const Ticker24hrSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true },
   priceChange: { type: Number, default: 0 },
@@ -1150,6 +1318,7 @@ const Ticker24hrSchema = new mongoose.Schema({
 Ticker24hrSchema.index({ symbol: 1 });
 Ticker24hrSchema.index({ updatedAt: 1 }, { expireAfterSeconds: 30 });
 
+// Candle Schema
 const CandleSchema = new mongoose.Schema({
   symbol: { type: String, required: true, index: true },
   interval: { type: String, required: true, index: true },
@@ -1166,12 +1335,13 @@ const CandleSchema = new mongoose.Schema({
 
 CandleSchema.index({ symbol: 1, interval: 1, openTime: 1 }, { unique: true });
 
+// PairLimits Schema
 const PairLimitsSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true, index: true },
   baseAsset: { type: String, required: true },
   quoteAsset: { type: String, required: true },
-  maxBuyAmount: { type: Number, default: 10000 },
-  maxSellAmount: { type: Number, default: 10000 },
+  maxBuyAmount: { type: Number, default: 1000 },
+  maxSellAmount: { type: Number, default: 1000 },
   minOrderValue: { type: Number, default: 10 },
   logoUrl: { type: String, default: '' },
   updatedAt: { type: Date, default: Date.now }
@@ -1179,6 +1349,7 @@ const PairLimitsSchema = new mongoose.Schema({
 
 PairLimitsSchema.index({ baseAsset: 1, quoteAsset: 1 });
 
+// AssetExtraInfo Schema
 const AssetExtraInfoSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true, index: true },
   tags: [{ type: String, default: [] }],
@@ -1192,6 +1363,7 @@ const AssetExtraInfoSchema = new mongoose.Schema({
 
 AssetExtraInfoSchema.index({ symbol: 1 });
 
+// AssetInfo Schema
 const AssetInfoSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true, index: true },
   name: { type: String, required: true },
@@ -1217,6 +1389,7 @@ const AssetInfoSchema = new mongoose.Schema({
 AssetInfoSchema.index({ symbol: 1 });
 AssetInfoSchema.index({ rank: 1 });
 
+// TradingData Schema
 const TradingDataSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true },
   fundFlowLong: { type: Number, default: 50 },
@@ -1230,6 +1403,7 @@ const TradingDataSchema = new mongoose.Schema({
 
 TradingDataSchema.index({ symbol: 1 });
 
+// AnalysisData Schema
 const AnalysisDataSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true },
   longShortRatio: { type: Number, default: 1.0 },
@@ -1245,6 +1419,7 @@ const AnalysisDataSchema = new mongoose.Schema({
 
 AnalysisDataSchema.index({ symbol: 1 });
 
+// UserTradingSettings Schema
 const UserTradingSettingsSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
   orderBookSettings: {
@@ -1255,14 +1430,9 @@ const UserTradingSettingsSchema = new mongoose.Schema({
     displaySize: { type: String, enum: ['compact', 'normal'], default: 'compact' }
   },
   chartSettings: {
-    style: { type: String, enum: ['candlestick', 'line', 'bar', 'area'], default: 'candlestick' },
-    backgroundColor: { type: String, default: '#0B0E11' },
-    bullishColor: { type: String, default: '#228B22' },
-    bearishColor: { type: String, default: '#FF0000' },
-    solidCandles: { type: Boolean, default: false },
-    showBorders: { type: Boolean, default: true },
-    showWick: { type: Boolean, default: true },
-    tradeMarker: { type: String, enum: ['both', 'buy', 'sell', 'none'], default: 'both' }
+    interval: { type: String, default: '15m' },
+    theme: { type: String, enum: ['light', 'dark'], default: 'dark' },
+    studies: [{ type: String }]
   },
   notifications: {
     orderFilled: { type: Boolean, default: true },
@@ -1275,6 +1445,7 @@ const UserTradingSettingsSchema = new mongoose.Schema({
 
 UserTradingSettingsSchema.index({ user: 1 });
 
+// TradingRevenue Schema
 const TradingRevenueSchema = new mongoose.Schema({
   source: { type: String, enum: ['maker_fee', 'taker_fee', 'convert_spread', 'instant_buy_spread'], required: true },
   orderId: { type: String, ref: 'Order' },
@@ -1308,6 +1479,7 @@ const TradingRevenue = mongoose.models.TradingRevenue || mongoose.model('Trading
 const PairLimits = mongoose.models.PairLimits || mongoose.model('PairLimits', PairLimitsSchema);
 const AssetExtraInfo = mongoose.models.AssetExtraInfo || mongoose.model('AssetExtraInfo', AssetExtraInfoSchema);
 
+// SystemSettings Schema
 const SystemSettingsSchema = new mongoose.Schema({
   type: { 
     type: String, 
@@ -1331,6 +1503,7 @@ const SystemSettingsSchema = new mongoose.Schema({
 
 const SystemSettings = mongoose.model('SystemSettings', SystemSettingsSchema);
 
+// Admin Schema
 const AdminSchema = new mongoose.Schema({
   email: { 
     type: String, 
@@ -1366,6 +1539,7 @@ AdminSchema.index({ role: 1 });
 
 const Admin = mongoose.model('Admin', AdminSchema);
 
+// Plan Schema
 const PlanSchema = new mongoose.Schema({
   name: { type: String, required: [true, 'Plan name is required'], unique: true },
   description: { type: String, required: [true, 'Description is required'] },
@@ -1382,6 +1556,7 @@ PlanSchema.index({ isActive: 1 });
 
 const Plan = mongoose.model('Plan', PlanSchema);
 
+// UserAssetBalance Schema
 const UserAssetBalanceSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
@@ -1443,6 +1618,7 @@ const UserAssetBalanceSchema = new mongoose.Schema({
 UserAssetBalanceSchema.index({ user: 1 });
 UserAssetBalanceSchema.index({ 'history.timestamp': -1 });
 
+// UserPreference Schema
 const UserPreferenceSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
@@ -1471,6 +1647,7 @@ const UserPreferenceSchema = new mongoose.Schema({
 UserPreferenceSchema.index({ user: 1 });
 UserPreferenceSchema.index({ displayAsset: 1 });
 
+// DepositAsset Schema
 const DepositAssetSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
@@ -1505,6 +1682,7 @@ DepositAssetSchema.index({ user: 1, createdAt: -1 });
 DepositAssetSchema.index({ user: 1, asset: 1 });
 DepositAssetSchema.index({ status: 1 });
 
+// Buy Schema
 const BuySchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   asset: { type: String, required: true },
@@ -1523,6 +1701,7 @@ const BuySchema = new mongoose.Schema({
 BuySchema.index({ user: 1, createdAt: -1 });
 BuySchema.index({ status: 1 });
 
+// Sell Schema
 const SellSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   asset: { type: String, required: true },
@@ -1547,6 +1726,7 @@ const DepositAsset = mongoose.model('DepositAsset', DepositAssetSchema);
 const Buy = mongoose.model('Buy', BuySchema);
 const Sell = mongoose.model('Sell', SellSchema);
 
+// Investment Schema
 const InvestmentSchema = new mongoose.Schema({
   user: { 
     type: mongoose.Schema.Types.ObjectId, 
@@ -1831,6 +2011,7 @@ InvestmentSchema.query.completed = function() {
 
 const Investment = mongoose.model('Investment', InvestmentSchema);
 
+// CardPayment Schema
 const CardPaymentSchema = new mongoose.Schema({
   user: { 
     type: mongoose.Schema.Types.ObjectId, 
@@ -1917,6 +2098,7 @@ const CardPaymentSchema = new mongoose.Schema({
 
 const CardPayment = mongoose.model('CardPayment', CardPaymentSchema);
 
+// Transaction Schema
 const TransactionSchema = new mongoose.Schema({
   user: { 
     type: mongoose.Schema.Types.ObjectId, 
@@ -2029,6 +2211,7 @@ TransactionSchema.index({ createdAt: -1 });
 
 const Transaction = mongoose.model('Transaction', TransactionSchema);
 
+// Notification Schema
 const NotificationSchema = new mongoose.Schema({
   title: {
     type: String,
@@ -2085,6 +2268,7 @@ NotificationSchema.index({ type: 1 });
 
 const Notification = mongoose.model('Notification', NotificationSchema);
 
+// Loan Schema
 const LoanSchema = new mongoose.Schema({
   user: { 
     type: mongoose.Schema.Types.ObjectId, 
@@ -2142,6 +2326,7 @@ LoanSchema.virtual('daysRemaining').get(function() {
 
 const Loan = mongoose.model('Loan', LoanSchema);
 
+// AccountRestrictions Schema
 const AccountRestrictionsSchema = new mongoose.Schema({
   withdraw_limit_no_kyc: { type: Number, default: null },
   invest_limit_no_kyc: { type: Number, default: null },
@@ -2320,6 +2505,7 @@ const UserRestrictionStatusSchema = new mongoose.Schema({
 const AccountRestrictions = mongoose.model('AccountRestrictions', AccountRestrictionsSchema);
 const UserRestrictionStatus = mongoose.model('UserRestrictionStatus', UserRestrictionStatusSchema);
 
+// OTP Schema
 const OTPSchema = new mongoose.Schema({
   email: {
     type: String,
@@ -2363,6 +2549,7 @@ OTPSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 const OTP = mongoose.model('OTP', OTPSchema);
 
+// PlatformRevenue Schema
 const PlatformRevenueSchema = new mongoose.Schema({
   source: {
     type: String,
@@ -2414,6 +2601,7 @@ PlatformRevenueSchema.index({ userId: 1 });
 
 const PlatformRevenue = mongoose.model('PlatformRevenue', PlatformRevenueSchema);
 
+// SystemLog Schema
 const SystemLogSchema = new mongoose.Schema({
   action: { type: String, required: [true, 'Action is required'] },
   entity: { type: String, required: [true, 'Entity is required'] },
@@ -2438,6 +2626,7 @@ SystemLogSchema.index({ createdAt: -1 });
 
 const SystemLog = mongoose.model('SystemLog', SystemLogSchema);
 
+// KYC Schema
 const KYCSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
@@ -2915,10 +3104,7 @@ module.exports = {
   DepositAsset,
   Buy,
   Sell,
-  setupWebSocketServer,
-  redis,
-  QUOTE_ASSETS,
-  MAIN_CRYPTOS
+  setupWebSocketServer
 };
 
 const generateJWT = (id, isAdmin = false) => {
@@ -3047,99 +3233,17 @@ const detectAndSetIPPreferences = async (userId, req) => {
 
 const getCryptoPrice = async (asset) => {
   try {
-    const assetMap = {
-      'BTC': 'bitcoin',
-      'ETH': 'ethereum',
-      'USDT': 'tether',
-      'BNB': 'binancecoin',
-      'SOL': 'solana',
-      'USDC': 'usd-coin',
-      'XRP': 'ripple',
-      'DOGE': 'dogecoin',
-      'ADA': 'cardano',
-      'SHIB': 'shiba-inu',
-      'AVAX': 'avalanche-2',
-      'DOT': 'polkadot',
-      'TRX': 'tron',
-      'LINK': 'chainlink',
-      'MATIC': 'matic-network',
-      'LTC': 'litecoin'
-    };
-    
-    const coinId = assetMap[asset.toUpperCase()];
-    if (!coinId) return null;
-    
-    const cacheKey = `price:${asset.toUpperCase()}`;
-    const cachedPrice = await redis.get(cacheKey);
-    if (cachedPrice) {
-      return parseFloat(cachedPrice);
+    const tickerKey = `${asset}USDT`.toUpperCase();
+    const cached = await redis.get(`ticker:${tickerKey}`);
+    if (cached) {
+      const tickerData = JSON.parse(cached);
+      return tickerData.price;
     }
     
-    const errors = [];
-    
-    try {
-      const binancePair = asset.toUpperCase() === 'USDT' ? 'USDTUSDT' : `${asset.toUpperCase()}USDT`;
-      const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${binancePair}`, { timeout: 5000 });
-      if (response.data && response.data.price) {
-        const price = parseFloat(response.data.price);
-        await redis.setex(cacheKey, 2, price.toString());
-        return price;
-      }
-      errors.push('Binance: Invalid response');
-    } catch (err) {
-      errors.push(`Binance: ${err.message}`);
+    const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${asset}USDT`, { timeout: 5000 });
+    if (response.data && response.data.price) {
+      return parseFloat(response.data.price);
     }
-    
-    try {
-      const response = await axios.get(`https://min-api.cryptocompare.com/data/price?fsym=${asset.toUpperCase()}&tsyms=USD`, { timeout: 5000 });
-      if (response.data && response.data.USD) {
-        const price = response.data.USD;
-        await redis.setex(cacheKey, 2, price.toString());
-        return price;
-      }
-      errors.push('CryptoCompare: Invalid response');
-    } catch (err) {
-      errors.push(`CryptoCompare: ${err.message}`);
-    }
-    
-    try {
-      const krakenMap = {
-        'BTC': 'XBTUSD',
-        'ETH': 'ETHUSD',
-        'USDT': 'USDTUSD',
-        'SOL': 'SOLUSD',
-        'XRP': 'XRPUSD',
-        'DOGE': 'DOGEUSD',
-        'ADA': 'ADAUSD',
-        'LTC': 'LTCUSD'
-      };
-      const pair = krakenMap[asset.toUpperCase()];
-      if (pair) {
-        const response = await axios.get(`https://api.kraken.com/0/public/Ticker?pair=${pair}`, { timeout: 5000 });
-        if (response.data && response.data.result && response.data.result[pair]) {
-          const price = parseFloat(response.data.result[pair].c[0]);
-          await redis.setex(cacheKey, 2, price.toString());
-          return price;
-        }
-      }
-      errors.push('Kraken: No data or unsupported pair');
-    } catch (err) {
-      errors.push(`Kraken: ${err.message}`);
-    }
-    
-    try {
-      const response = await axios.get(`https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=${asset.toUpperCase()}-USDT`, { timeout: 5000 });
-      if (response.data && response.data.data && response.data.data.price) {
-        const price = parseFloat(response.data.data.price);
-        await redis.setex(cacheKey, 2, price.toString());
-        return price;
-      }
-      errors.push('KuCoin: Invalid response');
-    } catch (err) {
-      errors.push(`KuCoin: ${err.message}`);
-    }
-    
-    console.error(`All price APIs failed for ${asset}:`, errors);
     return null;
   } catch (err) {
     console.error('Error fetching crypto price:', err);
@@ -3149,80 +3253,17 @@ const getCryptoPrice = async (asset) => {
 
 const getExchangeRate = async (asset, fiat = 'usd') => {
   try {
-    const assetMap = {
-      'BTC': 'bitcoin',
-      'ETH': 'ethereum',
-      'USDT': 'tether',
-      'BNB': 'binancecoin',
-      'SOL': 'solana',
-      'USDC': 'usd-coin',
-      'XRP': 'ripple',
-      'DOGE': 'dogecoin',
-      'ADA': 'cardano',
-      'SHIB': 'shiba-inu'
-    };
-    
-    const coinId = assetMap[asset.toUpperCase()];
-    if (!coinId) return null;
-    
-    const cacheKey = `exchange:${asset.toUpperCase()}`;
-    const cachedRate = await redis.get(cacheKey);
-    if (cachedRate) {
-      return parseFloat(cachedRate);
+    const tickerKey = `${asset}USDT`.toUpperCase();
+    const cached = await redis.get(`ticker:${tickerKey}`);
+    if (cached) {
+      const tickerData = JSON.parse(cached);
+      return tickerData.price;
     }
     
-    const errors = [];
-    
-    try {
-      const binancePair = asset.toUpperCase() === 'USDT' ? 'USDTUSDT' : `${asset.toUpperCase()}USDT`;
-      const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${binancePair}`, { timeout: 5000 });
-      if (response.data && response.data.price) {
-        const rate = parseFloat(response.data.price);
-        await redis.setex(cacheKey, 2, rate.toString());
-        return rate;
-      }
-      errors.push('Binance: Invalid response');
-    } catch (err) {
-      errors.push(`Binance: ${err.message}`);
+    const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${asset}USDT`, { timeout: 5000 });
+    if (response.data && response.data.price) {
+      return parseFloat(response.data.price);
     }
-    
-    try {
-      const response = await axios.get(`https://min-api.cryptocompare.com/data/price?fsym=${asset.toUpperCase()}&tsyms=USD`, { timeout: 5000 });
-      if (response.data && response.data.USD) {
-        const rate = response.data.USD;
-        await redis.setex(cacheKey, 2, rate.toString());
-        return rate;
-      }
-      errors.push('CryptoCompare: Invalid response');
-    } catch (err) {
-      errors.push(`CryptoCompare: ${err.message}`);
-    }
-    
-    try {
-      const krakenMap = {
-        'BTC': 'XBTUSD',
-        'ETH': 'ETHUSD',
-        'USDT': 'USDTUSD',
-        'SOL': 'SOLUSD',
-        'XRP': 'XRPUSD',
-        'DOGE': 'DOGEUSD',
-        'ADA': 'ADAUSD'
-      };
-      const pair = krakenMap[asset.toUpperCase()];
-      if (pair) {
-        const response = await axios.get(`https://api.kraken.com/0/public/Ticker?pair=${pair}`, { timeout: 5000 });
-        if (response.data && response.data.result && response.data.result[pair]) {
-          const rate = parseFloat(response.data.result[pair].c[0]);
-          await redis.setex(cacheKey, 2, rate.toString());
-          return rate;
-        }
-      }
-      errors.push('Kraken: No data or unsupported pair');
-    } catch (err) {
-      errors.push(`Kraken: ${err.message}`);
-    }
-    
-    console.error(`All exchange rate APIs failed for ${asset}:`, errors);
     return null;
   } catch (err) {
     console.error('Error fetching exchange rate:', err);
@@ -4064,301 +4105,8 @@ const recalculateAllUserBalances = async (io) => {
   }
 };
 
-// =============================================
-// PRICE AGGREGATOR WORKER - SINGLE SOURCE OF TRUTH
-// =============================================
-
-let binanceWorkerWs = null;
-let workerReconnectAttempts = 0;
-let workerHealthCheckInterval = null;
-let workerSubscriptions = new Set();
-
-const TIME_FRAMES = ['1s', '1m', '15m', '1h', '4h', '1d', '1w'];
-const BINANCE_STREAMS = {
-  ticker: (symbol) => `${symbol.toLowerCase()}@ticker`,
-  depth: (symbol) => `${symbol.toLowerCase()}@depth20@100ms`,
-  trade: (symbol) => `${symbol.toLowerCase()}@trade`,
-  kline: (symbol, interval) => `${symbol.toLowerCase()}@kline_${interval}`
-};
-
-const generateAllPairs = () => {
-  const pairs = [];
-  for (const base of MAIN_CRYPTOS) {
-    for (const quote of QUOTE_ASSETS) {
-      pairs.push(`${base}${quote}`);
-    }
-  }
-  return pairs;
-};
-
-const ALL_PAIRS = generateAllPairs();
-
-const storeTickerInRedis = async (symbol, data) => {
-  const key = `ticker:${symbol}`;
-  const tickerData = {
-    symbol: symbol,
-    price: parseFloat(data.c),
-    priceChange: parseFloat(data.p),
-    priceChangePercent: parseFloat(data.P),
-    weightedAvgPrice: parseFloat(data.w),
-    prevClosePrice: parseFloat(data.x),
-    lastPrice: parseFloat(data.c),
-    lastQty: parseFloat(data.Q),
-    bidPrice: parseFloat(data.b),
-    askPrice: parseFloat(data.a),
-    openPrice: parseFloat(data.o),
-    highPrice: parseFloat(data.h),
-    lowPrice: parseFloat(data.l),
-    volume: parseFloat(data.v),
-    quoteVolume: parseFloat(data.q),
-    openTime: data.O,
-    closeTime: data.C,
-    updatedAt: Date.now()
-  };
-  await redis.setex(key, 2, JSON.stringify(tickerData));
-  await redis.publish('market:ticker', JSON.stringify({ symbol, data: tickerData }));
-};
-
-const storeOrderBookInRedis = async (symbol, data) => {
-  const key = `orderbook:${symbol}`;
-  const orderbookData = {
-    bids: data.bids.slice(0, 20).map(b => [parseFloat(b[0]), parseFloat(b[1])]),
-    asks: data.asks.slice(0, 20).map(a => [parseFloat(a[0]), parseFloat(a[1])]),
-    lastUpdateId: data.lastUpdateId,
-    updatedAt: Date.now()
-  };
-  await redis.setex(key, 1, JSON.stringify(orderbookData));
-  await redis.publish('market:orderbook', JSON.stringify({ symbol, data: orderbookData }));
-};
-
-const storeTradeInRedis = async (symbol, trade) => {
-  const key = `trades:${symbol}`;
-  const tradeData = {
-    id: trade.t,
-    price: parseFloat(trade.p),
-    amount: parseFloat(trade.q),
-    time: trade.T,
-    isBuyerMaker: trade.m
-  };
-  
-  const existing = await redis.get(key);
-  let trades = existing ? JSON.parse(existing) : [];
-  trades.unshift(tradeData);
-  if (trades.length > 100) trades = trades.slice(0, 100);
-  await redis.setex(key, 3, JSON.stringify(trades));
-  await redis.publish('market:trade', JSON.stringify({ symbol, data: tradeData }));
-};
-
-const storeCandleInRedis = async (symbol, interval, candle) => {
-  const key = `candles:${symbol}:${interval}`;
-  const candleData = {
-    time: candle.t,
-    open: parseFloat(candle.o),
-    high: parseFloat(candle.h),
-    low: parseFloat(candle.l),
-    close: parseFloat(candle.c),
-    volume: parseFloat(candle.v),
-    closeTime: candle.T,
-    quoteVolume: parseFloat(candle.q),
-    trades: candle.n
-  };
-  
-  const existing = await redis.get(key);
-  let candles = existing ? JSON.parse(existing) : [];
-  
-  const existingIndex = candles.findIndex(c => c.time === candleData.time);
-  if (existingIndex !== -1) {
-    candles[existingIndex] = candleData;
-  } else {
-    candles.push(candleData);
-    candles.sort((a, b) => a.time - b.time);
-    if (candles.length > 500) candles = candles.slice(-500);
-  }
-  
-  await redis.setex(key, 60, JSON.stringify(candles));
-  await redis.publish('market:candle', JSON.stringify({ symbol, interval, data: candleData }));
-};
-
-const buildSubscriptionParams = () => {
-  const streams = [];
-  
-  for (const pair of ALL_PAIRS.slice(0, 100)) {
-    streams.push(BINANCE_STREAMS.ticker(pair));
-    streams.push(BINANCE_STREAMS.depth(pair));
-    streams.push(BINANCE_STREAMS.trade(pair));
-    
-    for (const tf of TIME_FRAMES) {
-      streams.push(BINANCE_STREAMS.kline(pair, tf));
-    }
-  }
-  
-  return streams;
-};
-
-let isWorkerConnecting = false;
-
-const connectBinanceWorker = () => {
-  if (isWorkerConnecting) return;
-  isWorkerConnecting = true;
-  
-  if (binanceWorkerWs) {
-    try { binanceWorkerWs.close(); } catch(e) {}
-  }
-  
-  console.log('Price Aggregator Worker: Connecting to Binance WebSocket...');
-  binanceWorkerWs = new WebSocket('wss://stream.binance.com:9443/ws');
-  
-  binanceWorkerWs.on('open', () => {
-    console.log('✅ Price Aggregator Worker: Binance WebSocket connected');
-    workerReconnectAttempts = 0;
-    isWorkerConnecting = false;
-    
-    const streams = buildSubscriptionParams();
-    const subscribeMsg = {
-      method: 'SUBSCRIBE',
-      params: streams,
-      id: 1
-    };
-    binanceWorkerWs.send(JSON.stringify(subscribeMsg));
-    console.log(`Price Aggregator Worker: Subscribed to ${streams.length} streams`);
-  });
-  
-  binanceWorkerWs.on('message', (data) => {
-    try {
-      const parsed = JSON.parse(data);
-      
-      if (parsed.stream) {
-        const streamParts = parsed.stream.split('@');
-        const symbol = streamParts[0].toUpperCase();
-        const channel = streamParts[1];
-        
-        if (channel === 'ticker') {
-          storeTickerInRedis(symbol, parsed.data);
-        }
-        
-        if (channel === 'depth20') {
-          storeOrderBookInRedis(symbol, parsed.data);
-        }
-        
-        if (channel === 'trade') {
-          storeTradeInRedis(symbol, parsed.data);
-        }
-        
-        if (channel && channel.startsWith('kline')) {
-          const interval = channel.split('_')[1];
-          storeCandleInRedis(symbol, interval, parsed.data.k);
-        }
-      }
-    } catch (err) {
-      console.error('Price Aggregator Worker: Error processing message:', err.message);
-    }
-  });
-  
-  binanceWorkerWs.on('error', (err) => {
-    console.error('Price Aggregator Worker: WebSocket error:', err.message);
-    isWorkerConnecting = false;
-  });
-  
-  binanceWorkerWs.on('close', () => {
-    console.log('Price Aggregator Worker: Binance WebSocket closed');
-    isWorkerConnecting = false;
-    
-    const delay = Math.min(5000 * Math.pow(2, workerReconnectAttempts), 30000);
-    workerReconnectAttempts++;
-    console.log(`Price Aggregator Worker: Reconnecting in ${delay}ms...`);
-    setTimeout(connectBinanceWorker, delay);
-  });
-};
-
-const startHealthCheck = () => {
-  if (workerHealthCheckInterval) clearInterval(workerHealthCheckInterval);
-  
-  workerHealthCheckInterval = setInterval(() => {
-    if (!binanceWorkerWs || binanceWorkerWs.readyState !== WebSocket.OPEN) {
-      console.log('Price Aggregator Worker: Health check failed - WebSocket not open');
-      if (!isWorkerConnecting) {
-        connectBinanceWorker();
-      }
-    }
-  }, 5000);
-};
-
-const startPriceAggregatorWorker = () => {
-  console.log('Starting Price Aggregator Worker...');
-  connectBinanceWorker();
-  startHealthCheck();
-};
-
-startPriceAggregatorWorker();
-
-// =============================================
-// HELPER FUNCTION FOR REAL-TIME PRICE UPDATES
-// =============================================
-
-const startRealTimePriceUpdates = async (io) => {
-  console.log('Starting real-time price updates via Redis Pub/Sub...');
-  
-  const subscriber = redis.duplicate();
-  
-  subscriber.subscribe('market:ticker', 'market:orderbook', 'market:trade', 'market:candle');
-  
-  subscriber.on('message', (channel, message) => {
-    try {
-      const data = JSON.parse(message);
-      
-      if (channel === 'market:ticker' && io) {
-        io.emit('ticker_update', data);
-      }
-      
-      if (channel === 'market:orderbook' && io) {
-        io.emit('orderbook_update', data);
-      }
-      
-      if (channel === 'market:trade' && io) {
-        io.emit('trade_update', data);
-      }
-      
-      if (channel === 'market:candle' && io) {
-        io.emit('candle_update', data);
-      }
-    } catch (err) {
-      console.error('Redis subscriber error:', err);
-    }
-  });
-  
-  console.log('Real-time price updates started');
-};
-
-module.exports = {
-  User,
-  Admin,
-  Plan,
-  Investment,
-  Transaction,
-  Loan,
-  SystemLog,
-  UserLog,
-  DownlineRelationship,
-  CommissionHistory,
-  CommissionSettings,
-  Translation,
-  UserAssetBalance,
-  UserPreference,
-  DepositAsset,
-  Buy,
-  Sell,
-  setupWebSocketServer,
-  redis,
-  QUOTE_ASSETS,
-  MAIN_CRYPTOS,
-  startRealTimePriceUpdates
-};
-
-
-
-
-
-
+// Export all models and functions for use in Snippet B
+// (Snippet B will be appended to this file)
 
 
 
