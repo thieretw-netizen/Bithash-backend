@@ -112,278 +112,251 @@ redis.on('connect', () => {
 
 
 
+
+
+
+
+
+
+
 // =============================================
-// PRICE AGGREGATOR WORKER - REAL DATA ONLY
-// Uses APIs that work from any region (CoinGecko, Kraken, KuCoin)
-// NO MOCK DATA - REAL PRICES FROM REAL EXCHANGES
+// PRICE AGGREGATOR WORKER - REPLACE THE ENTIRE OLD AGGREGATOR SECTION
+// Delete the old aggregator code and replace with this
 // =============================================
 
-const MAIN_CRYPTOS = [
+// Remove any existing declarations - use unique names
+const AGGREGATOR_MAIN_CRYPTOS = [
   'BTC', 'ETH', 'BNB', 'SOL', 'XRP', 'ADA', 'DOGE', 'AVAX', 'DOT', 'LINK',
-  'MATIC', 'SHIB', 'TRX', 'UNI', 'ATOM', 'XLM', 'FIL', 'VET', 'ALGO', 'MANA',
-  'SAND', 'AXS', 'AAVE', 'EOS', 'MKR', 'DASH', 'XTZ', 'FTM', 'NEAR', 'GRT'
+  'MATIC', 'SHIB', 'TRX', 'UNI', 'ATOM', 'XLM', 'FIL', 'VET', 'ALGO', 'MANA'
 ];
 
-const QUOTE_ASSETS = ['USDT', 'USDC'];
+const AGGREGATOR_QUOTE_ASSETS = ['USDT', 'USDC'];
+const AGGREGATOR_TIMEFRAMES = ['15m', '1h', '4h', '1d', '1w'];
 
-let isPriceAggregatorRunning = false;
-let priceUpdateInterval = null;
-let orderBookInterval = null;
+let aggregatorBinanceWs = null;
+let aggregatorReconnectAttempts = 0;
+let isAggregatorRunning = false;
 
-// =============================================
-// REAL API FETCHERS - NO MOCK DATA
-// =============================================
-
-const fetchRealPriceFromKraken = async (base, quote = 'USD') => {
-  try {
-    const pair = base === 'USDT' ? 'USD' : base;
-    const response = await axios.get(`https://api.kraken.com/0/public/Ticker?pair=${pair}${quote}`, {
-      timeout: 5000,
-      headers: { 'User-Agent': 'Mozilla/5.0' }
-    });
-    const pairKey = Object.keys(response.data.result)[0];
-    if (response.data.result && response.data.result[pairKey]) {
-      return {
-        price: parseFloat(response.data.result[pairKey].c[0]),
-        change24h: parseFloat(response.data.result[pairKey].p[1]),
-        volume: parseFloat(response.data.result[pairKey].v[1]),
-        high: parseFloat(response.data.result[pairKey].h[1]),
-        low: parseFloat(response.data.result[pairKey].l[1])
-      };
-    }
-  } catch (err) {
-    return null;
-  }
-  return null;
-};
-
-const fetchRealPriceFromKuCoin = async (base, quote = 'USDT') => {
-  try {
-    const response = await axios.get(`https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=${base}-${quote}`, {
-      timeout: 5000,
-      headers: { 'User-Agent': 'Mozilla/5.0' }
-    });
-    if (response.data && response.data.data) {
-      const changeResponse = await axios.get(`https://api.kucoin.com/api/v1/market/stats?symbol=${base}-${quote}`, {
-        timeout: 5000
-      });
-      return {
-        price: parseFloat(response.data.data.price),
-        change24h: changeResponse.data && changeResponse.data.data ? parseFloat(changeResponse.data.data.changeRate) * 100 : 0,
-        volume: changeResponse.data && changeResponse.data.data ? parseFloat(changeResponse.data.data.vol) : 0,
-        high: changeResponse.data && changeResponse.data.data ? parseFloat(changeResponse.data.data.high) : 0,
-        low: changeResponse.data && changeResponse.data.data ? parseFloat(changeResponse.data.data.low) : 0
-      };
-    }
-  } catch (err) {
-    return null;
-  }
-  return null;
-};
-
-const fetchRealPriceFromCoinGecko = async (base) => {
-  try {
-    const coinId = getCoinGeckoId(base);
-    if (!coinId) return null;
-    const response = await axios.get(`https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd&include_24hr_change=true&include_24hr_vol=true&include_market_cap=true`, {
-      timeout: 8000,
-      headers: { 'User-Agent': 'Mozilla/5.0' }
-    });
-    if (response.data && response.data[coinId]) {
-      return {
-        price: response.data[coinId].usd,
-        change24h: response.data[coinId].usd_24h_change || 0,
-        volume: response.data[coinId].usd_24h_vol || 0,
-        marketCap: response.data[coinId].usd_market_cap || 0
-      };
-    }
-  } catch (err) {
-    return null;
-  }
-  return null;
-};
-
-const getCoinGeckoId = (symbol) => {
+const getCoinGeckoIdMapping = (symbol) => {
   const mapping = {
     'BTC': 'bitcoin', 'ETH': 'ethereum', 'BNB': 'binancecoin', 'SOL': 'solana',
     'XRP': 'ripple', 'ADA': 'cardano', 'DOGE': 'dogecoin', 'AVAX': 'avalanche-2',
     'DOT': 'polkadot', 'LINK': 'chainlink', 'MATIC': 'matic-network', 'SHIB': 'shiba-inu',
     'TRX': 'tron', 'UNI': 'uniswap', 'ATOM': 'cosmos', 'XLM': 'stellar',
-    'FIL': 'filecoin', 'VET': 'vechain', 'ALGO': 'algorand', 'MANA': 'decentraland',
-    'SAND': 'the-sandbox', 'AXS': 'axie-infinity', 'AAVE': 'aave', 'EOS': 'eos',
-    'MKR': 'maker', 'DASH': 'dash', 'XTZ': 'tezos', 'FTM': 'fantom', 'NEAR': 'near', 'GRT': 'the-graph'
+    'FIL': 'filecoin', 'VET': 'vechain', 'ALGO': 'algorand', 'MANA': 'decentraland'
   };
   return mapping[symbol];
 };
 
-const fetchRealOrderBookFromKucoin = async (base, quote = 'USDT') => {
-  try {
-    const response = await axios.get(`https://api.kucoin.com/api/v1/market/orderbook/level2_100?symbol=${base}-${quote}`, {
-      timeout: 5000,
-      headers: { 'User-Agent': 'Mozilla/5.0' }
-    });
-    if (response.data && response.data.data) {
-      return {
-        bids: response.data.data.bids.slice(0, 50).map(b => [parseFloat(b[0]), parseFloat(b[1])]),
-        asks: response.data.data.asks.slice(0, 50).map(a => [parseFloat(a[0]), parseFloat(a[1])]),
-        lastUpdateId: Date.now()
-      };
-    }
-  } catch (err) {
-    return null;
-  }
-  return null;
-};
-
-const fetchRealTradesFromKucoin = async (base, quote = 'USDT', limit = 50) => {
-  try {
-    const response = await axios.get(`https://api.kucoin.com/api/v1/market/histories?symbol=${base}-${quote}&limit=${limit}`, {
-      timeout: 5000,
-      headers: { 'User-Agent': 'Mozilla/5.0' }
-    });
-    if (response.data && response.data.data) {
-      return response.data.data.map(trade => ({
-        id: trade.sequence,
-        price: parseFloat(trade.price),
-        amount: parseFloat(trade.size),
-        time: trade.time,
-        isBuyerMaker: trade.side === 'sell'
-      }));
-    }
-  } catch (err) {
-    return null;
-  }
-  return null;
-};
-
-const fetchRealCandlesFromKucoin = async (base, quote = 'USDT', interval = '15min', limit = 200) => {
-  try {
-    const intervalMap = { '15m': '15min', '1h': '1hour', '4h': '4hour', '1d': '1day', '1w': '1week' };
-    const kucoinInterval = intervalMap[interval] || '15min';
-    const response = await axios.get(`https://api.kucoin.com/api/v1/market/candles?type=${kucoinInterval}&symbol=${base}-${quote}&limit=${limit}`, {
-      timeout: 5000,
-      headers: { 'User-Agent': 'Mozilla/5.0' }
-    });
-    if (response.data && response.data.data) {
-      return response.data.data.map(candle => ({
-        time: candle[0],
-        open: parseFloat(candle[1]),
-        close: parseFloat(candle[2]),
-        high: parseFloat(candle[3]),
-        low: parseFloat(candle[4]),
-        volume: parseFloat(candle[5]),
-        quoteVolume: parseFloat(candle[6])
-      }));
-    }
-  } catch (err) {
-    return null;
-  }
-  return null;
-};
-
-// =============================================
-// AGGREGATOR MAIN LOOP - REAL DATA ONLY
-// =============================================
-
-const updateAllRealData = async () => {
-  console.log('🔄 Fetching real market data from KuCoin and Kraken...');
-  
-  for (const base of MAIN_CRYPTOS) {
-    for (const quote of QUOTE_ASSETS) {
-      const symbol = `${base}${quote}`;
-      
-      // Fetch real price from multiple sources
-      let priceData = await fetchRealPriceFromKuCoin(base, quote);
-      if (!priceData) priceData = await fetchRealPriceFromKraken(base, quote);
-      if (!priceData) priceData = await fetchRealPriceFromCoinGecko(base);
-      
-      if (priceData && priceData.price > 0) {
-        // Store real ticker data
-        const tickerData = {
-          symbol: symbol,
-          price: priceData.price,
-          priceChangePercent: priceData.change24h,
-          lastPrice: priceData.price,
-          highPrice: priceData.high || priceData.price * 1.02,
-          lowPrice: priceData.low || priceData.price * 0.98,
-          volume: priceData.volume || 0,
-          quoteVolume: (priceData.volume || 0) * priceData.price,
-          openPrice: priceData.price / (1 + (priceData.change24h / 100)),
-          openTime: Date.now() - 86400000,
-          closeTime: Date.now()
-        };
-        
-        await redis.setex(`ticker:${symbol}`, 5, JSON.stringify(tickerData));
-        await redis.publish('price_updates', JSON.stringify({ type: 'ticker', symbol, data: tickerData }));
-        
-        // Fetch real order book
-        const orderBook = await fetchRealOrderBookFromKucoin(base, quote);
-        if (orderBook) {
-          await redis.setex(`orderbook:${symbol}`, 2, JSON.stringify(orderBook));
-          await redis.publish('orderbook_updates', JSON.stringify({ type: 'orderbook', symbol, data: orderBook }));
-        }
-        
-        // Fetch real recent trades
-        const trades = await fetchRealTradesFromKucoin(base, quote, 50);
-        if (trades && trades.length > 0) {
-          const tradeKey = `trades:${symbol}`;
-          await redis.del(tradeKey);
-          for (const trade of trades) {
-            await redis.lpush(tradeKey, JSON.stringify(trade));
-          }
-          await redis.expire(tradeKey, 10);
-          await redis.publish('trade_updates', JSON.stringify({ type: 'trade', symbol, data: trades[0] }));
-        }
-        
-        // Fetch real candles for each timeframe
-        for (const interval of Object.keys(TIMEFRAMES)) {
-          const candles = await fetchRealCandlesFromKucoin(base, quote, interval, 200);
-          if (candles && candles.length > 0) {
-            const candleKey = `candles:${symbol}:${TIMEFRAMES[interval]}`;
-            await redis.del(candleKey);
-            for (const candle of candles) {
-              await redis.zadd(candleKey, candle.time, JSON.stringify(candle));
-            }
-            await redis.expire(candleKey, 86400);
-          }
-        }
-        
-        console.log(`✅ Updated real data for ${symbol}: $${priceData.price}`);
+const generateAggregatorStreams = () => {
+  const streams = [];
+  for (const base of AGGREGATOR_MAIN_CRYPTOS) {
+    for (const quote of AGGREGATOR_QUOTE_ASSETS) {
+      const symbol = `${base}${quote}`.toLowerCase();
+      streams.push(`${symbol}@ticker`);
+      streams.push(`${symbol}@depth20`);
+      streams.push(`${symbol}@trade`);
+      for (const interval of AGGREGATOR_TIMEFRAMES) {
+        streams.push(`${symbol}@kline_${interval}`);
       }
     }
   }
+  return streams;
 };
 
-const startPriceAggregator = () => {
-  if (isPriceAggregatorRunning) return;
+const connectBinanceAggregatorStream = () => {
+  if (aggregatorBinanceWs) {
+    try { aggregatorBinanceWs.close(); } catch(e) {}
+  }
   
-  isPriceAggregatorRunning = true;
-  console.log('🚀 Starting REAL-TIME Price Aggregator (KuCoin + Kraken + CoinGecko)');
-  console.log(`📊 Tracking ${MAIN_CRYPTOS.length} base assets × ${QUOTE_ASSETS.length} quote assets`);
+  console.log('🔌 Price Aggregator: Connecting to Binance WebSocket...');
   
-  // Initial update
-  updateAllRealData();
+  aggregatorBinanceWs = new WebSocket('wss://stream.binance.com:9443/ws');
   
-  // Update prices every 5 seconds (real-time)
-  priceUpdateInterval = setInterval(updateAllRealData, 5000);
+  aggregatorBinanceWs.on('open', () => {
+    console.log('✅ Binance WebSocket connected - Real data streaming active');
+    aggregatorReconnectAttempts = 0;
+    
+    const allStreams = generateAggregatorStreams();
+    const chunks = [];
+    for (let i = 0; i < allStreams.length; i += 200) {
+      chunks.push(allStreams.slice(i, i + 200));
+    }
+    
+    chunks.forEach((chunk, index) => {
+      setTimeout(() => {
+        if (aggregatorBinanceWs && aggregatorBinanceWs.readyState === WebSocket.OPEN) {
+          aggregatorBinanceWs.send(JSON.stringify({
+            method: 'SUBSCRIBE',
+            params: chunk,
+            id: index + 1
+          }));
+          console.log(`📡 Subscribed to ${chunk.length} streams (${index + 1}/${chunks.length})`);
+        }
+      }, index * 1000);
+    });
+  });
   
-  // Health check
+  aggregatorBinanceWs.on('message', async (data) => {
+    try {
+      const parsed = JSON.parse(data);
+      if (!parsed.stream) return;
+      
+      const streamParts = parsed.stream.split('@');
+      const symbol = streamParts[0].toUpperCase();
+      const channel = streamParts[1];
+      
+      if (channel === 'ticker') {
+        const tickerData = {
+          symbol: symbol,
+          price: parseFloat(parsed.data.c),
+          priceChangePercent: parseFloat(parsed.data.P),
+          highPrice: parseFloat(parsed.data.h),
+          lowPrice: parseFloat(parsed.data.l),
+          volume: parseFloat(parsed.data.v),
+          quoteVolume: parseFloat(parsed.data.q),
+          openPrice: parseFloat(parsed.data.o),
+          lastPrice: parseFloat(parsed.data.c),
+          bidPrice: parseFloat(parsed.data.b),
+          askPrice: parseFloat(parsed.data.a)
+        };
+        await redis.setex(`ticker:${symbol}`, 2, JSON.stringify(tickerData));
+        await redis.publish('price_updates', JSON.stringify({ type: 'ticker', symbol, data: tickerData }));
+      }
+      
+      if (channel === 'depth20') {
+        const orderbookData = {
+          bids: (parsed.data.bids || []).slice(0, 100).map(b => [parseFloat(b[0]), parseFloat(b[1])]),
+          asks: (parsed.data.asks || []).slice(0, 100).map(a => [parseFloat(a[0]), parseFloat(a[1])]),
+          lastUpdateId: parsed.data.lastUpdateId
+        };
+        await redis.setex(`orderbook:${symbol}`, 1, JSON.stringify(orderbookData));
+        await redis.publish('orderbook_updates', JSON.stringify({ type: 'orderbook', symbol, data: orderbookData }));
+      }
+      
+      if (channel === 'trade') {
+        const tradeData = {
+          id: parsed.data.t,
+          price: parseFloat(parsed.data.p),
+          amount: parseFloat(parsed.data.q),
+          time: parsed.data.T,
+          isBuyerMaker: parsed.data.m
+        };
+        const tradeKey = `trades:${symbol}`;
+        await redis.lpush(tradeKey, JSON.stringify(tradeData));
+        await redis.ltrim(tradeKey, 0, 99);
+        await redis.expire(tradeKey, 10);
+        await redis.publish('trade_updates', JSON.stringify({ type: 'trade', symbol, data: tradeData }));
+      }
+      
+      if (channel.startsWith('kline')) {
+        const interval = channel.split('_')[1];
+        const k = parsed.data.k;
+        const candleData = {
+          time: k.t,
+          open: parseFloat(k.o),
+          high: parseFloat(k.h),
+          low: parseFloat(k.l),
+          close: parseFloat(k.c),
+          volume: parseFloat(k.v),
+          closeTime: k.T,
+          quoteVolume: parseFloat(k.q),
+          trades: k.n,
+          isFinal: k.x
+        };
+        const candleKey = `candles:${symbol}:${interval}`;
+        await redis.zadd(candleKey, k.t, JSON.stringify(candleData));
+        await redis.zremrangebyrank(candleKey, 0, -501);
+        await redis.expire(candleKey, 86400);
+        if (candleData.isFinal) {
+          await redis.publish('candle_updates', JSON.stringify({ type: 'candle', symbol, interval, data: candleData }));
+        }
+      }
+      
+    } catch (err) {
+      console.error('Aggregator parse error:', err.message);
+    }
+  });
+  
+  aggregatorBinanceWs.on('error', (err) => {
+    console.error('❌ Binance WebSocket error:', err.message);
+  });
+  
+  aggregatorBinanceWs.on('close', () => {
+    console.log('⚠️ Binance WebSocket closed, reconnecting...');
+    const delay = Math.min(5000 * Math.pow(2, aggregatorReconnectAttempts), 30000);
+    aggregatorReconnectAttempts++;
+    setTimeout(connectBinanceAggregatorStream, delay);
+  });
+};
+
+// Fallback to KuCoin if Binance fails after 3 attempts
+let fallbackActive = false;
+let kuCoinUpdateInterval = null;
+
+const startKuCoinFallback = () => {
+  if (fallbackActive) return;
+  fallbackActive = true;
+  console.log('🔄 Switching to KuCoin fallback API...');
+  
+  const fetchKuCoinData = async () => {
+    for (const base of AGGREGATOR_MAIN_CRYPTOS.slice(0, 20)) {
+      try {
+        const response = await axios.get(`https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=${base}-USDT`, {
+          timeout: 5000,
+          headers: { 'User-Agent': 'Mozilla/5.0' }
+        });
+        if (response.data && response.data.data) {
+          const price = parseFloat(response.data.data.price);
+          const symbol = `${base}USDT`;
+          const tickerData = {
+            symbol: symbol,
+            price: price,
+            priceChangePercent: 0,
+            lastPrice: price,
+            highPrice: price * 1.02,
+            lowPrice: price * 0.98,
+            volume: 0,
+            quoteVolume: 0,
+            openPrice: price,
+            bidPrice: price * 0.999,
+            askPrice: price * 1.001
+          };
+          await redis.setex(`ticker:${symbol}`, 5, JSON.stringify(tickerData));
+        }
+      } catch (err) {
+        // Silent fail
+      }
+    }
+  };
+  
+  fetchKuCoinData();
+  kuCoinUpdateInterval = setInterval(fetchKuCoinData, 10000);
+};
+
+const startPriceAggregatorWorker = () => {
+  if (isAggregatorRunning) return;
+  isAggregatorRunning = true;
+  console.log('🚀 Starting Price Aggregator Worker...');
+  
+  connectBinanceAggregatorStream();
+  
+  // If Binance fails to connect after 30 seconds, start fallback
+  setTimeout(() => {
+    if (aggregatorReconnectAttempts >= 3 && !fallbackActive) {
+      startKuCoinFallback();
+    }
+  }, 30000);
+  
+  // Health check every minute
   setInterval(() => {
-    console.log('📊 Price Aggregator running - real data only');
+    const status = aggregatorBinanceWs ? (aggregatorBinanceWs.readyState === WebSocket.OPEN ? 'CONNECTED' : 'DISCONNECTED') : 'NOT_STARTED';
+    console.log(`📊 Aggregator health: ${status} | Reconnect attempts: ${aggregatorReconnectAttempts}`);
   }, 60000);
 };
 
-// Start the aggregator
-startPriceAggregator();
-
-
-
-
-
-
-
-
-
+// Start the worker
+startPriceAggregatorWorker();
 
 
 
