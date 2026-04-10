@@ -22608,10 +22608,11 @@ const recalculateAllUserMainBalances = async (io) => {
 
 
 // =============================================
-// SNIPPET B - COMPLETE MISSING ENDPOINTS AND WEBSOCKET CONNECTIONS
+// SNIPPET B - CORRECTED (NO DUPLICATE WEBSOCKET FUNCTIONS)
 // =============================================
 // Add this entire code block to your existing Snippet A
 // Place this BEFORE the module.exports section
+// DO NOT include the WebSocket setup functions - they already exist in Snippet C
 
 // =============================================
 // PRICE AGGREGATOR WORKER - REDIS SINGLE SOURCE OF TRUTH
@@ -22631,7 +22632,6 @@ const binance = new Binance().options({
 let binanceConnected = false;
 let lastBinancePing = Date.now();
 let priceWorkerRunning = false;
-let activeSubscriptions = new Set();
 
 const PRICE_AGGREGATOR_KEY = 'price_aggregator:status';
 const CURRENT_PRICES_KEY = 'market:prices';
@@ -22839,7 +22839,6 @@ const startPriceAggregatorWorker = async () => {
     };
 
     const key = `${CANDLES_KEY}${symbol}:${timeframe}`;
-    const candleKey = `${candle.openTime}`;
     
     await redis.zadd(key, candle.openTime, JSON.stringify(candle));
     await redis.zremrangebyrank(key, 0, -1001);
@@ -22939,274 +22938,6 @@ const startPriceAggregatorWorker = async () => {
   }, 30000);
 
   console.log('Price aggregator worker running and publishing to Redis Pub/Sub');
-};
-
-// =============================================
-// WEBSOCKET: /ws/market
-// =============================================
-
-const setupMarketWebSocket = (server) => {
-  const marketWss = new WebSocket.Server({ server, path: '/ws/market' });
-  const marketClients = new Map();
-
-  marketWss.on('connection', (ws, req) => {
-    const clientId = uuidv4();
-    let subscribedPairs = new Set();
-    let subscribedChannels = new Set();
-
-    marketClients.set(clientId, { ws, subscribedPairs, subscribedChannels });
-    console.log(`Market WebSocket client connected: ${clientId}, Total: ${marketClients.size}`);
-
-    const sendToClient = (data) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify(data));
-      }
-    };
-
-    const subscribeToPair = async (pair, channels) => {
-      if (!subscribedPairs.has(pair)) {
-        subscribedPairs.add(pair);
-      }
-
-      for (const channel of channels) {
-        subscribedChannels.add(channel);
-      }
-
-      const initialData = {};
-
-      if (channels.includes('ticker')) {
-        const ticker = await getTickerFromRedis(pair);
-        if (ticker) {
-          initialData.ticker = { type: 'ticker', symbol: pair, ...ticker };
-        }
-      }
-
-      if (channels.includes('orderbook')) {
-        const orderbook = await getOrderBookFromRedis(pair);
-        if (orderbook) {
-          initialData.orderbook = { type: 'orderbook', symbol: pair, ...orderbook };
-        }
-      }
-
-      if (channels.includes('trades')) {
-        const trades = await getRecentTradesFromRedis(pair, 50);
-        if (trades && trades.length) {
-          initialData.trades = trades.map(t => ({ type: 'trade', ...t }));
-        }
-      }
-
-      if (Object.keys(initialData).length) {
-        sendToClient(initialData);
-      }
-    };
-
-    const unsubscribeFromPair = (pair) => {
-      subscribedPairs.delete(pair);
-    };
-
-    ws.on('message', async (message) => {
-      try {
-        const data = JSON.parse(message);
-
-        if (data.type === 'subscribe') {
-          const pair = data.pair || currentPair?.symbol || 'BTCUSDT';
-          const channels = data.channels || ['ticker', 'orderbook', 'trades', 'candles', 'asset_info', 'trading_data', 'analysis'];
-          await subscribeToPair(pair, channels);
-          
-          sendToClient({ type: 'subscribed', pair, channels, status: 'success' });
-        } 
-        else if (data.type === 'unsubscribe') {
-          if (data.pair) {
-            unsubscribeFromPair(data.pair);
-          }
-          sendToClient({ type: 'unsubscribed', pair: data.pair, status: 'success' });
-        }
-        else if (data.type === 'unsubscribe_all') {
-          subscribedPairs.clear();
-          subscribedChannels.clear();
-          sendToClient({ type: 'unsubscribed_all', status: 'success' });
-        }
-        else if (data.type === 'ping') {
-          sendToClient({ type: 'pong', timestamp: Date.now() });
-        }
-      } catch (err) {
-        console.error('Market WebSocket message error:', err);
-        sendToClient({ type: 'error', message: 'Invalid message format' });
-      }
-    });
-
-    const subscribeToRedisChannels = async () => {
-      const redisSubscriber = new Redis({
-        host: process.env.REDIS_HOST || 'redis-14450.c276.us-east-1-2.ec2.redns.redis-cloud.com',
-        port: process.env.REDIS_PORT || 14450,
-        password: process.env.REDIS_PASSWORD || 'qjXgsg0YrsLaSumlEW9HkIZbvLjXEwXR'
-      });
-
-      await redisSubscriber.subscribe('price_updates', 'orderbook_updates', 'trade_updates', 'candle_updates');
-
-      redisSubscriber.on('message', async (channel, message) => {
-        if (ws.readyState !== WebSocket.OPEN) {
-          redisSubscriber.unsubscribe();
-          redisSubscriber.quit();
-          return;
-        }
-
-        try {
-          const update = JSON.parse(message);
-          
-          if (subscribedPairs.has(update.symbol) || subscribedPairs.size === 0) {
-            if (channel === 'price_updates' && subscribedChannels.has('ticker')) {
-              sendToClient(update);
-            } else if (channel === 'orderbook_updates' && subscribedChannels.has('orderbook')) {
-              sendToClient(update);
-            } else if (channel === 'trade_updates' && subscribedChannels.has('trades')) {
-              sendToClient(update);
-            } else if (channel === 'candle_updates' && subscribedChannels.has('candles')) {
-              sendToClient(update);
-            }
-          }
-        } catch (err) {
-          console.error('Redis message parse error:', err);
-        }
-      });
-    };
-
-    subscribeToRedisChannels();
-
-    const heartbeatInterval = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.ping();
-      } else {
-        clearInterval(heartbeatInterval);
-      }
-    }, 30000);
-
-    ws.on('close', () => {
-      clearInterval(heartbeatInterval);
-      marketClients.delete(clientId);
-      console.log(`Market WebSocket client disconnected: ${clientId}, Total: ${marketClients.size}`);
-    });
-
-    ws.on('error', (err) => {
-      console.error(`Market WebSocket error for client ${clientId}:`, err);
-    });
-  });
-
-  return marketWss;
-};
-
-// =============================================
-// WEBSOCKET: /ws/ticker
-// =============================================
-
-const setupTickerWebSocket = (server) => {
-  const tickerWss = new WebSocket.Server({ server, path: '/ws/ticker' });
-  const tickerClients = new Set();
-
-  const broadcastTickerUpdate = (update) => {
-    const message = JSON.stringify(update);
-    tickerClients.forEach(client => {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(message);
-      }
-    });
-  };
-
-  tickerWss.on('connection', (ws) => {
-    tickerClients.add(ws);
-    console.log(`Ticker WebSocket client connected, Total: ${tickerClients.size}`);
-
-    const sendTopTickers = async () => {
-      try {
-        const topPairs = MAIN_CRYPTOS.slice(0, 20);
-        const tickers = [];
-
-        for (const base of topPairs) {
-          for (const quote of QUOTE_ASSETS.slice(0, 1)) {
-            const symbol = `${base}${quote}`;
-            const tickerData = await getTickerFromRedis(symbol);
-            if (tickerData) {
-              tickers.push({
-                symbol: `${base}/${quote}`,
-                price: tickerData.price,
-                change24h: tickerData.priceChangePercent,
-                high24h: tickerData.highPrice,
-                low24h: tickerData.lowPrice,
-                volume24h: tickerData.volume
-              });
-            }
-          }
-        }
-
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'initial_tickers', tickers, timestamp: Date.now() }));
-        }
-      } catch (err) {
-        console.error('Error sending top tickers:', err);
-      }
-    };
-
-    sendTopTickers();
-
-    ws.on('message', async (message) => {
-      try {
-        const data = JSON.parse(message);
-        
-        if (data.type === 'subscribe') {
-          ws.send(JSON.stringify({ type: 'subscribed', status: 'success' }));
-        } else if (data.type === 'ping') {
-          ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
-        }
-      } catch (err) {
-        console.error('Ticker WebSocket message error:', err);
-      }
-    });
-
-    const heartbeatInterval = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.ping();
-      } else {
-        clearInterval(heartbeatInterval);
-      }
-    }, 30000);
-
-    ws.on('close', () => {
-      clearInterval(heartbeatInterval);
-      tickerClients.delete(ws);
-      console.log(`Ticker WebSocket client disconnected, Total: ${tickerClients.size}`);
-    });
-  });
-
-  const redisSubscriber = new Redis({
-    host: process.env.REDIS_HOST || 'redis-14450.c276.us-east-1-2.ec2.redns.redis-cloud.com',
-    port: process.env.REDIS_PORT || 14450,
-    password: process.env.REDIS_PASSWORD || 'qjXgsg0YrsLaSumlEW9HkIZbvLjXEwXR'
-  });
-
-  redisSubscriber.subscribe('price_updates');
-  
-  redisSubscriber.on('message', (channel, message) => {
-    if (channel === 'price_updates' && tickerClients.size > 0) {
-      try {
-        const update = JSON.parse(message);
-        const topPairs = MAIN_CRYPTOS.slice(0, 20).map(b => `${b}USDT`);
-        
-        if (topPairs.includes(update.symbol)) {
-          broadcastTickerUpdate({
-            type: 'ticker_update',
-            symbol: update.symbol.replace('USDT', '/USDT'),
-            price: update.price,
-            change24h: update.priceChangePercent,
-            timestamp: Date.now()
-          });
-        }
-      } catch (err) {
-        console.error('Redis message error:', err);
-      }
-    }
-  });
-
-  return tickerWss;
 };
 
 // =============================================
@@ -23350,8 +23081,8 @@ app.get('/api/market/orderbook', async (req, res) => {
       }
     }
 
-    const limitedBids = orderbook.bids.slice(0, parseInt(limit));
-    const limitedAsks = orderbook.asks.slice(0, parseInt(limit));
+    const limitedBids = (orderbook.bids || []).slice(0, parseInt(limit));
+    const limitedAsks = (orderbook.asks || []).slice(0, parseInt(limit));
 
     res.json({
       status: 'success',
@@ -24582,23 +24313,6 @@ app.post('/api/user/settings', protect, async (req, res) => {
 });
 
 // =============================================
-// INITIALIZE WEBSOCKETS AND PRICE AGGREGATOR
-// =============================================
-
-const initializeWebSockets = (httpServer) => {
-  setupMarketWebSocket(httpServer);
-  setupTickerWebSocket(httpServer);
-  console.log('WebSocket servers initialized on /ws/market and /ws/ticker');
-};
-
-// Start price aggregator worker when server starts
-startPriceAggregatorWorker().catch(console.error);
-
-
-
-
-
-// =============================================
 // RATE LIMITING MIDDLEWARE WITH RETRY-AFTER HEADER
 // =============================================
 
@@ -24651,10 +24365,10 @@ app.use('/api/trading/orders/cancel', orderLimiter);
 app.use('/api/trading/positions/close', tradingLimiter);
 
 // =============================================
-// HEALTH CHECK FOR WEBSOCKET AND PRICE AGGREGATOR
+// HEALTH CHECK FOR PRICE AGGREGATOR
 // =============================================
 
-app.get('/api/health/websocket', async (req, res) => {
+app.get('/api/health/aggregator', async (req, res) => {
   try {
     const aggregatorStatus = await redis.get(PRICE_AGGREGATOR_KEY);
     const binanceStatus = binanceConnected ? 'connected' : 'disconnected';
@@ -24676,31 +24390,6 @@ app.get('/api/health/websocket', async (req, res) => {
     });
   }
 });
-
-// =============================================
-// WEBSOCKET HEARTBEAT AND CONNECTION MANAGEMENT
-// =============================================
-
-const setupWebSocketHeartbeat = (wss) => {
-  const heartbeatInterval = setInterval(() => {
-    wss.clients.forEach((ws) => {
-      if (ws.isAlive === false) {
-        return ws.terminate();
-      }
-      ws.isAlive = false;
-      ws.ping();
-    });
-  }, 30000);
-
-  wss.on('connection', (ws) => {
-    ws.isAlive = true;
-    ws.on('pong', () => {
-      ws.isAlive = true;
-    });
-  });
-
-  return heartbeatInterval;
-};
 
 // =============================================
 // DATABASE INDEXING FOR PERFORMANCE (30,000+ USERS/MIN)
@@ -24741,66 +24430,6 @@ const ensureDatabaseIndexes = async () => {
 };
 
 // =============================================
-// REDIS PUB/SUB FOR SCALABLE WEBSOCKET BROADCASTING
-// =============================================
-
-const setupRedisPubSubForWebSockets = (io) => {
-  const redisSubscriber = new Redis({
-    host: process.env.REDIS_HOST || 'redis-14450.c276.us-east-1-2.ec2.redns.redis-cloud.com',
-    port: process.env.REDIS_PORT || 14450,
-    password: process.env.REDIS_PASSWORD || 'qjXgsg0YrsLaSumlEW9HkIZbvLjXEwXR'
-  });
-
-  redisSubscriber.subscribe('price_updates', 'orderbook_updates', 'trade_updates', 'candle_updates', 'user_balance_updates');
-
-  redisSubscriber.on('message', (channel, message) => {
-    try {
-      const data = JSON.parse(message);
-      
-      if (channel === 'user_balance_updates' && data.userId && io) {
-        io.to(`user_${data.userId}`).emit('balance_update', data.balance);
-      } else if (io) {
-        io.emit(channel, data);
-      }
-    } catch (err) {
-      console.error('Redis Pub/Sub error:', err);
-    }
-  });
-
-  return redisSubscriber;
-};
-
-// =============================================
-// MEMORY CACHE FOR FREQUENTLY ACCESSED DATA
-// =============================================
-
-const memoryCache = new Map();
-const CACHE_TTL = {
-  PAIRS: 30000,
-  TICKER: 2000,
-  ORDER_BOOK: 1000
-};
-
-const getCachedOrFetch = async (key, fetcher, ttl) => {
-  const cached = memoryCache.get(key);
-  if (cached && Date.now() - cached.timestamp < ttl) {
-    return cached.data;
-  }
-  
-  const data = await fetcher();
-  memoryCache.set(key, { data, timestamp: Date.now() });
-  return data;
-};
-
-const clearCache = (pattern) => {
-  for (const key of memoryCache.keys()) {
-    if (key.includes(pattern)) {
-      memoryCache.delete(key);
-    }
-  }
-};
-
-// =============================================
 // BATCH PROCESSING FOR HIGH THROUGHPUT
 // =============================================
 
@@ -24837,6 +24466,36 @@ const startBatchProcessing = () => {
 };
 
 // =============================================
+// MEMORY CACHE FOR FREQUENTLY ACCESSED DATA
+// =============================================
+
+const memoryCache = new Map();
+const CACHE_TTL = {
+  PAIRS: 30000,
+  TICKER: 2000,
+  ORDER_BOOK: 1000
+};
+
+const getCachedOrFetch = async (key, fetcher, ttl) => {
+  const cached = memoryCache.get(key);
+  if (cached && Date.now() - cached.timestamp < ttl) {
+    return cached.data;
+  }
+  
+  const data = await fetcher();
+  memoryCache.set(key, { data, timestamp: Date.now() });
+  return data;
+};
+
+const clearCache = (pattern) => {
+  for (const key of memoryCache.keys()) {
+    if (key.includes(pattern)) {
+      memoryCache.delete(key);
+    }
+  }
+};
+
+// =============================================
 // INITIALIZE ALL SERVICES
 // =============================================
 
@@ -24845,6 +24504,7 @@ const initializeServices = async () => {
   
   await ensureDatabaseIndexes();
   startBatchProcessing();
+  startPriceAggregatorWorker().catch(console.error);
   
   console.log('All services initialized successfully');
   console.log('Ready to handle 30,000+ users per minute');
@@ -24854,16 +24514,12 @@ const initializeServices = async () => {
 initializeServices().catch(console.error);
 
 // =============================================
-// EXPORT ADDITIONAL MODULES FOR USE IN SNIPPET A
+// EXPORT ADDITIONAL MODULES
 // =============================================
 
 module.exports = {
   ...module.exports,
   startPriceAggregatorWorker,
-  setupMarketWebSocket,
-  setupTickerWebSocket,
-  setupWebSocketHeartbeat,
-  setupRedisPubSubForWebSockets,
   getTickerFromRedis,
   getOrderBookFromRedis,
   getRecentTradesFromRedis,
@@ -24872,6 +24528,19 @@ module.exports = {
   PairLimits,
   AssetExtraInfo
 };
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
