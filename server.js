@@ -1162,6 +1162,33 @@ const CandleSchema = new mongoose.Schema({
 
 CandleSchema.index({ symbol: 1, interval: 1, openTime: 1 }, { unique: true });
 
+
+const PairLimitsSchema = new mongoose.Schema({
+  symbol: { type: String, required: true, unique: true, index: true },
+  baseAsset: { type: String, required: true },
+  quoteAsset: { type: String, required: true },
+  maxBuyAmount: { type: Number, default: 1000 },
+  maxSellAmount: { type: Number, default: 1000 },
+  minOrderValue: { type: Number, default: 10 },
+  logoUrl: { type: String, default: '' },
+  updatedAt: { type: Date, default: Date.now }
+});
+
+PairLimitsSchema.index({ baseAsset: 1, quoteAsset: 1 });
+
+const AssetExtraInfoSchema = new mongoose.Schema({
+  symbol: { type: String, required: true, unique: true, index: true },
+  tags: [{ type: String, default: [] }],
+  networks: [{ type: String, default: [] }],
+  website: { type: String, default: '' },
+  explorer: { type: String, default: '' },
+  twitter: { type: String, default: '' },
+  reddit: { type: String, default: '' },
+  updatedAt: { type: Date, default: Date.now }
+});
+
+AssetExtraInfoSchema.index({ symbol: 1 });
+
 const AssetInfoSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true, index: true },
   name: { type: String, required: true },
@@ -1191,7 +1218,7 @@ const TradingDataSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true },
   fundFlowLong: { type: Number, default: 50 },
   fundFlowShort: { type: Number, default: 50 },
-  netFlow: [{ type: Number }],
+  netFlow: [{ type: Number, default: [0, 0, 0, 0, 0, 0, 0] }],
   inflow24h: { type: Number, default: 0 },
   outflow24h: { type: Number, default: 0 },
   netFlow24h: { type: Number, default: 0 },
@@ -1270,6 +1297,8 @@ const TradingData = mongoose.models.TradingData || mongoose.model('TradingData',
 const AnalysisData = mongoose.models.AnalysisData || mongoose.model('AnalysisData', AnalysisDataSchema);
 const UserTradingSettings = mongoose.models.UserTradingSettings || mongoose.model('UserTradingSettings', UserTradingSettingsSchema);
 const TradingRevenue = mongoose.models.TradingRevenue || mongoose.model('TradingRevenue', TradingRevenueSchema);
+const PairLimits = mongoose.models.PairLimits || mongoose.model('PairLimits', PairLimitsSchema);
+const AssetExtraInfo = mongoose.models.AssetExtraInfo || mongoose.model('AssetExtraInfo', AssetExtraInfoSchema);
 
 const SystemSettingsSchema = new mongoose.Schema({
   type: { 
