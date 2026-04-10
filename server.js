@@ -2355,6 +2355,122 @@ OTPSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 const OTP = mongoose.model('OTP', OTPSchema);
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// =============================================
+// CHART SETTINGS MODEL - For storing user chart preferences
+// =============================================
+
+const ChartSettingsSchema = new mongoose.Schema({
+  user: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+    unique: true,
+    index: true
+  },
+  chartSettings: {
+    style: { type: String, enum: ['candlestick', 'line', 'bar', 'area'], default: 'candlestick' },
+    backgroundColor: { type: String, default: '#0B0E11' },
+    bullishColor: { type: String, default: '#228B22' },
+    bearishColor: { type: String, default: '#FF0000' },
+    solidCandles: { type: Boolean, default: false },
+    showBorders: { type: Boolean, default: true },
+    showWick: { type: Boolean, default: true },
+    tradeMarker: { type: String, enum: ['both', 'buy', 'sell', 'none'], default: 'both' }
+  },
+  timeframe: { type: String, default: '15m' },
+  studies: [{ type: String }],
+  updatedAt: { type: Date, default: Date.now }
+}, { timestamps: true });
+
+ChartSettingsSchema.index({ user: 1 });
+
+// =============================================
+// USER CHART SETTINGS MODEL (alias for ChartSettings)
+// =============================================
+
+const UserChartSettings = mongoose.models.UserChartSettings || mongoose.model('UserChartSettings', ChartSettingsSchema);
+
+// =============================================
+// ORDER BOOK SETTINGS MODEL - For storing order book preferences
+// =============================================
+
+const OrderBookSettingsSchema = new mongoose.Schema({
+  user: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+    unique: true,
+    index: true
+  },
+  precision: { type: Number, default: 0.01 },
+  depthSize: { type: Number, default: 20 },
+  showCumulativeTotal: { type: Boolean, default: false },
+  colorMode: { type: String, enum: ['default', 'reverse'], default: 'default' },
+  displaySize: { type: String, enum: ['compact', 'normal'], default: 'compact' },
+  updatedAt: { type: Date, default: Date.now }
+}, { timestamps: true });
+
+OrderBookSettingsSchema.index({ user: 1 });
+
+// =============================================
+// ASSET PRICE CACHE MODEL - For caching crypto prices
+// =============================================
+
+const AssetPriceCacheSchema = new mongoose.Schema({
+  symbol: { type: String, required: true, unique: true, index: true },
+  price: { type: Number, required: true },
+  priceChange24h: { type: Number, default: 0 },
+  volume24h: { type: Number, default: 0 },
+  high24h: { type: Number, default: 0 },
+  low24h: { type: Number, default: 0 },
+  lastUpdated: { type: Date, default: Date.now, expires: 60 }
+}, { timestamps: true });
+
+AssetPriceCacheSchema.index({ symbol: 1 });
+AssetPriceCacheSchema.index({ lastUpdated: 1 });
+
+// Export all models
+const ChartSettings = mongoose.models.ChartSettings || mongoose.model('ChartSettings', ChartSettingsSchema);
+const OrderBookSettings = mongoose.models.OrderBookSettings || mongoose.model('OrderBookSettings', OrderBookSettingsSchema);
+const AssetPriceCache = mongoose.models.AssetPriceCache || mongoose.model('AssetPriceCache', AssetPriceCacheSchema);
+
+// Add to module.exports if needed
+// module.exports.ChartSettings = ChartSettings;
+// module.exports.OrderBookSettings = OrderBookSettings;
+// module.exports.AssetPriceCache = AssetPriceCache;
+
+
+
+
+
+
+
+
+
+
+
 const PlatformRevenueSchema = new mongoose.Schema({
   source: {
     type: String,
