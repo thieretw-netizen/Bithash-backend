@@ -23585,8 +23585,6 @@ const setupSpotMarketWebSocket = (server) => {
   return marketWss;
 };
 
-// Initialize spot market WebSocket
-setupSpotMarketWebSocket(httpServer);
 
 
 
@@ -24359,3 +24357,5 @@ httpServer.listen(PORT, () => {
   console.log(`💰 Real-time crypto price updates started (every 10 seconds)`);
   console.log(`🔄 User main balances will recalculate every 5 minutes based on current prices`);
 });
+// Initialize spot market WebSocket
+setupSpotMarketWebSocket(httpServer);
