@@ -22600,7 +22600,6 @@ const recalculateAllUserMainBalances = async (io) => {
 
 
 
-
 // SNIPPET C - COMPLETE REWRITE
 
 // Error handling middleware
@@ -22639,7 +22638,7 @@ app.set('io', io);
 // =============================================
 
 const REDIS_INVESTOR_KEY = 'cloud_miner_count';
-const INITIAL_INVESTOR_COUNT = 4254200;
+const INITIAL_INVESTOR_COUNT = 5104329;
 const DAILY_GROWTH_LIMIT = 7999;
 
 const getStartOfDay = () => {
@@ -22650,21 +22649,6 @@ const getStartOfDay = () => {
 
 const getDailyGrowthKey = (date) => {
   return `daily_growth:${date}`;
-};
-
-const resetAllGrowthHistory = async () => {
-  try {
-    const keys = await redis.keys('daily_growth:*');
-    if (keys.length > 0) {
-      await redis.del(keys);
-      console.log(`🗑️ Deleted ${keys.length} daily growth history keys`);
-    }
-    await redis.del(REDIS_INVESTOR_KEY);
-    console.log(`🗑️ Deleted investor count key`);
-    console.log(`✅ All Redis stat growth history has been reset`);
-  } catch (err) {
-    console.error('Error resetting growth history:', err);
-  }
 };
 
 const initializeInvestorCount = async () => {
@@ -22785,7 +22769,6 @@ const getCurrentStats = async () => {
 let growthInterval = null;
 
 const startInvestorGrowthJob = async () => {
-  await resetAllGrowthHistory();
   await initializeInvestorCount();
   
   const scheduleNextGrowth = () => {
