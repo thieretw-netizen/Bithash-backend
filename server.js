@@ -24374,17 +24374,6 @@ const setupTickerWebSocket = (server) => {
   });
 };
 
-// =============================================
-// Initialize WebSocket servers after HTTP server is created
-// =============================================
-
-const setupAllWebSockets = (server) => {
-  setupSpotMarketWebSocket(server);
-  setupTickerWebSocket(server);
-  return setupSpotMarketWebSocket(server);
-};
-
-
 
 
 
