@@ -22628,8 +22628,6 @@ const TIMEFRAMES = {
 let wsConnection = null;
 let reconnectAttempts = 0;
 let isConnected = false;
-let subscribedStreams = new Set();
-let pendingKlines = new Map();
 
 function generateStreams() {
   const streams = [];
@@ -22893,8 +22891,6 @@ process.on('SIGINT', () => {
 });
 
 start().catch(console.error);
-
-
 
 
 
