@@ -24485,7 +24485,6 @@ const startPriceAggregator = () => {
 startPriceAggregator();
 
 // Initialize WebSocket server
-const marketWss = setupMarketWebSocket(httpServer);
 console.log('Market WebSocket server initialized on /ws/spotmarket');
 
 httpServer.listen(PORT, () => {
