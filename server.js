@@ -22499,7 +22499,7 @@ const startRealTimePriceUpdates = (io) => {
         
         // IMMEDIATELY recalculate ALL user wallet values based on new prices
         await recalculateAllWalletValuesRealtime(io, priceUpdates);
-      }
+      
     } catch (err) {
       console.error('Error in price update interval:', err);
     }
