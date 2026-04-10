@@ -22570,6 +22570,38 @@ const recalculateAllUserMainBalances = async (io) => {
 };
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // SNIPPET C - COMPLETE REWRITE
 
 // Error handling middleware
@@ -22608,7 +22640,7 @@ app.set('io', io);
 // =============================================
 
 const REDIS_INVESTOR_KEY = 'cloud_miner_count';
-const INITIAL_INVESTOR_COUNT = 4254200;
+const INITIAL_INVESTOR_COUNT = 5104329;
 const DAILY_GROWTH_LIMIT = 7999;
 
 const getStartOfDay = () => {
