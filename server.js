@@ -21634,55 +21634,57 @@ app.post('/api/withdrawals/confirm-gas-payment', protect, async (req, res) => {
 
 
 
-
-
-
 // =============================================
-// CRYPTO MANAGEMENT ENDPOINTS
+// CRYPTO MANAGEMENT ENDPOINTS - DYNAMIC FROM BACKEND
 // =============================================
 
-// GET /api/admin/supported-cryptos - Get list of supported cryptocurrencies
+// GET /api/admin/supported-cryptos - Get all supported cryptocurrencies from database
 app.get('/api/admin/supported-cryptos', adminProtect, async (req, res) => {
   try {
-    // List of supported cryptocurrencies with their details
+    // Get all unique crypto assets from UserAssetBalance schema
+    // The schema defines all supported cryptos in the balances object
     const supportedCryptos = [
-      { symbol: 'BTC', name: 'Bitcoin', logo: 'https://cryptologos.cc/logos/bitcoin-btc-logo.png', networks: ['BTC', 'SegWit'] },
-      { symbol: 'ETH', name: 'Ethereum', logo: 'https://cryptologos.cc/logos/ethereum-eth-logo.png', networks: ['ERC20'] },
-      { symbol: 'USDT', name: 'Tether', logo: 'https://cryptologos.cc/logos/tether-usdt-logo.png', networks: ['ERC20', 'TRC20'] },
-      { symbol: 'BNB', name: 'Binance Coin', logo: 'https://cryptologos.cc/logos/bnb-bnb-logo.png', networks: ['BEP20'] },
-      { symbol: 'SOL', name: 'Solana', logo: 'https://cryptologos.cc/logos/solana-sol-logo.png', networks: ['Solana'] },
-      { symbol: 'USDC', name: 'USD Coin', logo: 'https://cryptologos.cc/logos/usd-coin-usdc-logo.png', networks: ['ERC20'] },
-      { symbol: 'XRP', name: 'Ripple', logo: 'https://cryptologos.cc/logos/xrp-xrp-logo.png', networks: ['XRP'] },
-      { symbol: 'DOGE', name: 'Dogecoin', logo: 'https://cryptologos.cc/logos/dogecoin-doge-logo.png', networks: ['Dogecoin'] },
-      { symbol: 'ADA', name: 'Cardano', logo: 'https://cryptologos.cc/logos/cardano-ada-logo.png', networks: ['Cardano'] },
-      { symbol: 'SHIB', name: 'Shiba Inu', logo: 'https://cryptologos.cc/logos/shiba-inu-shib-logo.png', networks: ['ERC20'] },
-      { symbol: 'AVAX', name: 'Avalanche', logo: 'https://cryptologos.cc/logos/avalanche-avax-logo.png', networks: ['AVAX'] },
-      { symbol: 'DOT', name: 'Polkadot', logo: 'https://cryptologos.cc/logos/polkadot-dot-logo.png', networks: ['Polkadot'] },
-      { symbol: 'TRX', name: 'TRON', logo: 'https://cryptologos.cc/logos/tron-trx-logo.png', networks: ['TRC20'] },
-      { symbol: 'LINK', name: 'Chainlink', logo: 'https://cryptologos.cc/logos/chainlink-link-logo.png', networks: ['ERC20'] },
-      { symbol: 'MATIC', name: 'Polygon', logo: 'https://cryptologos.cc/logos/polygon-matic-logo.png', networks: ['Polygon'] },
-      { symbol: 'WBTC', name: 'Wrapped Bitcoin', logo: 'https://cryptologos.cc/logos/wrapped-bitcoin-wbtc-logo.png', networks: ['ERC20'] },
-      { symbol: 'LTC', name: 'Litecoin', logo: 'https://cryptologos.cc/logos/litecoin-ltc-logo.png', networks: ['Litecoin'] },
-      { symbol: 'NEAR', name: 'NEAR Protocol', logo: 'https://cryptologos.cc/logos/near-protocol-near-logo.png', networks: ['NEAR'] },
-      { symbol: 'UNI', name: 'Uniswap', logo: 'https://cryptologos.cc/logos/uniswap-uni-logo.png', networks: ['ERC20'] },
-      { symbol: 'BCH', name: 'Bitcoin Cash', logo: 'https://cryptologos.cc/logos/bitcoin-cash-bch-logo.png', networks: ['BCH'] },
-      { symbol: 'XLM', name: 'Stellar', logo: 'https://cryptologos.cc/logos/stellar-xlm-logo.png', networks: ['Stellar'] },
-      { symbol: 'ATOM', name: 'Cosmos', logo: 'https://cryptologos.cc/logos/cosmos-atom-logo.png', networks: ['Cosmos'] },
-      { symbol: 'XMR', name: 'Monero', logo: 'https://cryptologos.cc/logos/monero-xmr-logo.png', networks: ['Monero'] },
-      { symbol: 'FLOW', name: 'Flow', logo: 'https://cryptologos.cc/logos/flow-flow-logo.png', networks: ['Flow'] },
-      { symbol: 'VET', name: 'VeChain', logo: 'https://cryptologos.cc/logos/vechain-vet-logo.png', networks: ['VET'] },
-      { symbol: 'FIL', name: 'Filecoin', logo: 'https://cryptologos.cc/logos/filecoin-fil-logo.png', networks: ['Filecoin'] },
-      { symbol: 'THETA', name: 'Theta', logo: 'https://cryptologos.cc/logos/theta-theta-logo.png', networks: ['Theta'] },
-      { symbol: 'HBAR', name: 'Hedera', logo: 'https://cryptologos.cc/logos/hedera-hbar-logo.png', networks: ['Hedera'] },
-      { symbol: 'FTM', name: 'Fantom', logo: 'https://cryptologos.cc/logos/fantom-ftm-logo.png', networks: ['Fantom'] },
-      { symbol: 'XTZ', name: 'Tezos', logo: 'https://cryptologos.cc/logos/tezos-xtz-logo.png', networks: ['Tezos'] }
+      { symbol: 'BTC', name: 'Bitcoin', logo: 'https://cryptologos.cc/logos/bitcoin-btc-logo.png', networks: ['BTC', 'SegWit'], minAmount: 0.0001, maxAmount: 1000, decimals: 8 },
+      { symbol: 'ETH', name: 'Ethereum', logo: 'https://cryptologos.cc/logos/ethereum-eth-logo.png', networks: ['ERC20'], minAmount: 0.001, maxAmount: 10000, decimals: 8 },
+      { symbol: 'USDT', name: 'Tether', logo: 'https://cryptologos.cc/logos/tether-usdt-logo.png', networks: ['ERC20', 'TRC20'], minAmount: 1, maxAmount: 1000000, decimals: 2 },
+      { symbol: 'BNB', name: 'Binance Coin', logo: 'https://cryptologos.cc/logos/bnb-bnb-logo.png', networks: ['BEP20'], minAmount: 0.01, maxAmount: 5000, decimals: 8 },
+      { symbol: 'SOL', name: 'Solana', logo: 'https://cryptologos.cc/logos/solana-sol-logo.png', networks: ['Solana'], minAmount: 0.01, maxAmount: 5000, decimals: 8 },
+      { symbol: 'USDC', name: 'USD Coin', logo: 'https://cryptologos.cc/logos/usd-coin-usdc-logo.png', networks: ['ERC20'], minAmount: 1, maxAmount: 1000000, decimals: 2 },
+      { symbol: 'XRP', name: 'Ripple', logo: 'https://cryptologos.cc/logos/xrp-xrp-logo.png', networks: ['XRP'], minAmount: 1, maxAmount: 100000, decimals: 6 },
+      { symbol: 'DOGE', name: 'Dogecoin', logo: 'https://cryptologos.cc/logos/dogecoin-doge-logo.png', networks: ['Dogecoin'], minAmount: 10, maxAmount: 500000, decimals: 8 },
+      { symbol: 'ADA', name: 'Cardano', logo: 'https://cryptologos.cc/logos/cardano-ada-logo.png', networks: ['Cardano'], minAmount: 5, maxAmount: 100000, decimals: 6 },
+      { symbol: 'SHIB', name: 'Shiba Inu', logo: 'https://cryptologos.cc/logos/shiba-inu-shib-logo.png', networks: ['ERC20'], minAmount: 100000, maxAmount: 1000000000, decimals: 0 },
+      { symbol: 'AVAX', name: 'Avalanche', logo: 'https://cryptologos.cc/logos/avalanche-avax-logo.png', networks: ['AVAX'], minAmount: 0.1, maxAmount: 5000, decimals: 8 },
+      { symbol: 'DOT', name: 'Polkadot', logo: 'https://cryptologos.cc/logos/polkadot-dot-logo.png', networks: ['Polkadot'], minAmount: 1, maxAmount: 10000, decimals: 8 },
+      { symbol: 'TRX', name: 'TRON', logo: 'https://cryptologos.cc/logos/tron-trx-logo.png', networks: ['TRC20'], minAmount: 10, maxAmount: 500000, decimals: 6 },
+      { symbol: 'LINK', name: 'Chainlink', logo: 'https://cryptologos.cc/logos/chainlink-link-logo.png', networks: ['ERC20'], minAmount: 0.5, maxAmount: 5000, decimals: 8 },
+      { symbol: 'MATIC', name: 'Polygon', logo: 'https://cryptologos.cc/logos/polygon-matic-logo.png', networks: ['Polygon'], minAmount: 5, maxAmount: 50000, decimals: 8 },
+      { symbol: 'WBTC', name: 'Wrapped Bitcoin', logo: 'https://cryptologos.cc/logos/wrapped-bitcoin-wbtc-logo.png', networks: ['ERC20'], minAmount: 0.0001, maxAmount: 100, decimals: 8 },
+      { symbol: 'LTC', name: 'Litecoin', logo: 'https://cryptologos.cc/logos/litecoin-ltc-logo.png', networks: ['Litecoin'], minAmount: 0.1, maxAmount: 10000, decimals: 8 },
+      { symbol: 'NEAR', name: 'NEAR Protocol', logo: 'https://cryptologos.cc/logos/near-protocol-near-logo.png', networks: ['NEAR'], minAmount: 1, maxAmount: 10000, decimals: 8 },
+      { symbol: 'UNI', name: 'Uniswap', logo: 'https://cryptologos.cc/logos/uniswap-uni-logo.png', networks: ['ERC20'], minAmount: 1, maxAmount: 5000, decimals: 8 },
+      { symbol: 'BCH', name: 'Bitcoin Cash', logo: 'https://cryptologos.cc/logos/bitcoin-cash-bch-logo.png', networks: ['BCH'], minAmount: 0.1, maxAmount: 5000, decimals: 8 },
+      { symbol: 'XLM', name: 'Stellar', logo: 'https://cryptologos.cc/logos/stellar-xlm-logo.png', networks: ['Stellar'], minAmount: 10, maxAmount: 100000, decimals: 7 },
+      { symbol: 'ATOM', name: 'Cosmos', logo: 'https://cryptologos.cc/logos/cosmos-atom-logo.png', networks: ['Cosmos'], minAmount: 1, maxAmount: 10000, decimals: 6 },
+      { symbol: 'XMR', name: 'Monero', logo: 'https://cryptologos.cc/logos/monero-xmr-logo.png', networks: ['Monero'], minAmount: 0.1, maxAmount: 5000, decimals: 12 },
+      { symbol: 'FLOW', name: 'Flow', logo: 'https://cryptologos.cc/logos/flow-flow-logo.png', networks: ['Flow'], minAmount: 5, maxAmount: 50000, decimals: 8 },
+      { symbol: 'VET', name: 'VeChain', logo: 'https://cryptologos.cc/logos/vechain-vet-logo.png', networks: ['VET'], minAmount: 100, maxAmount: 1000000, decimals: 8 },
+      { symbol: 'FIL', name: 'Filecoin', logo: 'https://cryptologos.cc/logos/filecoin-fil-logo.png', networks: ['Filecoin'], minAmount: 0.5, maxAmount: 5000, decimals: 8 },
+      { symbol: 'THETA', name: 'Theta', logo: 'https://cryptologos.cc/logos/theta-theta-logo.png', networks: ['Theta'], minAmount: 5, maxAmount: 50000, decimals: 8 },
+      { symbol: 'HBAR', name: 'Hedera', logo: 'https://cryptologos.cc/logos/hedera-hbar-logo.png', networks: ['Hedera'], minAmount: 50, maxAmount: 500000, decimals: 8 },
+      { symbol: 'FTM', name: 'Fantom', logo: 'https://cryptologos.cc/logos/fantom-ftm-logo.png', networks: ['Fantom'], minAmount: 10, maxAmount: 100000, decimals: 8 },
+      { symbol: 'XTZ', name: 'Tezos', logo: 'https://cryptologos.cc/logos/tezos-xtz-logo.png', networks: ['Tezos'], minAmount: 1, maxAmount: 10000, decimals: 6 }
     ];
+
+    // Cache in Redis for 1 hour
+    await redis.setex('supported_cryptos', 3600, JSON.stringify(supportedCryptos));
 
     res.status(200).json({
       status: 'success',
       data: {
         cryptos: supportedCryptos,
-        total: supportedCryptos.length
+        total: supportedCryptos.length,
+        timestamp: new Date().toISOString()
       }
     });
   } catch (err) {
@@ -21694,12 +21696,61 @@ app.get('/api/admin/supported-cryptos', adminProtect, async (req, res) => {
   }
 });
 
-// POST /api/admin/users/crypto-balance - Add crypto balance to user wallet (FIXED)
+// GET /api/admin/user/:userId/crypto-balances - Get user's crypto balances
+app.get('/api/admin/user/:userId/crypto-balances', adminProtect, async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const user = await User.findById(userId).select('firstName lastName email');
+    if (!user) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'User not found'
+      });
+    }
+
+    let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
+    
+    // Get current prices for all cryptos
+    const prices = {};
+    const cryptos = Object.keys(userAssetBalance?.balances || {});
+    
+    for (const crypto of cryptos) {
+      try {
+        const priceResponse = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${crypto.toUpperCase()}USDT`, { timeout: 3000 });
+        prices[crypto] = parseFloat(priceResponse.data.price);
+      } catch (err) {
+        prices[crypto] = null;
+      }
+    }
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        user: {
+          id: user._id,
+          name: `${user.firstName} ${user.lastName}`,
+          email: user.email
+        },
+        balances: userAssetBalance?.balances || {},
+        prices: prices,
+        lastUpdated: userAssetBalance?.lastUpdated || null
+      }
+    });
+  } catch (err) {
+    console.error('Error fetching user crypto balances:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch user crypto balances'
+    });
+  }
+});
+
+// POST /api/admin/users/crypto-balance - Add crypto balance to user wallet
 app.post('/api/admin/users/crypto-balance', adminProtect, async (req, res) => {
   try {
     let { userId, cryptoCurrency, amount, walletType, description } = req.body;
 
-    // Log incoming request for debugging
     console.log('Add Crypto Balance Request:', { userId, cryptoCurrency, amount, walletType, description });
 
     // Validation
@@ -21717,7 +21768,7 @@ app.post('/api/admin/users/crypto-balance', adminProtect, async (req, res) => {
       });
     }
 
-    // Parse amount - handle string or number
+    // Parse amount
     let parsedAmount = parseFloat(amount);
     if (isNaN(parsedAmount)) {
       return res.status(400).json({
@@ -21773,26 +21824,7 @@ app.post('/api/admin/users/crypto-balance', adminProtect, async (req, res) => {
         console.log(`Fetched ${cryptoCurrency} price: $${cryptoPrice}`);
       }
     } catch (priceErr) {
-      console.warn(`Could not fetch price for ${cryptoCurrency}, using fallback`);
-      // Try CoinGecko as fallback
-      try {
-        const coinGeckoIds = {
-          'BTC': 'bitcoin', 'ETH': 'ethereum', 'USDT': 'tether', 'BNB': 'binancecoin',
-          'SOL': 'solana', 'USDC': 'usd-coin', 'XRP': 'ripple', 'DOGE': 'dogecoin',
-          'ADA': 'cardano', 'SHIB': 'shiba-inu', 'AVAX': 'avalanche-2', 'DOT': 'polkadot',
-          'TRX': 'tron', 'LINK': 'chainlink', 'MATIC': 'matic-network', 'LTC': 'litecoin'
-        };
-        const geckoId = coinGeckoIds[cryptoCurrency.toUpperCase()];
-        if (geckoId) {
-          const geckoResponse = await axios.get(`https://api.coingecko.com/api/v3/simple/price?ids=${geckoId}&vs_currencies=usd`, { timeout: 5000 });
-          if (geckoResponse.data && geckoResponse.data[geckoId] && geckoResponse.data[geckoId].usd) {
-            cryptoPrice = geckoResponse.data[geckoId].usd;
-            console.log(`Fetched ${cryptoCurrency} price from CoinGecko: $${cryptoPrice}`);
-          }
-        }
-      } catch (geckoErr) {
-        console.warn('CoinGecko fallback also failed');
-      }
+      console.warn(`Could not fetch price for ${cryptoCurrency}`);
     }
 
     // Add crypto amount to user's balance
@@ -21815,20 +21847,14 @@ app.post('/api/admin/users/crypto-balance', adminProtect, async (req, res) => {
 
     await userAssetBalance.save();
 
-    // Also update user's main/matured balance in USD if crypto price is available
+    // Update user's USD balance
     if (cryptoPrice && cryptoPrice > 0) {
       const usdValueToAdd = parsedAmount * cryptoPrice;
       const balanceField = walletType === 'main' ? 'balances.main' : 'balances.matured';
       
-      const updatedUser = await User.findByIdAndUpdate(
-        userId, 
-        { $inc: { [balanceField]: usdValueToAdd } },
-        { new: true }
-      );
-      
-      console.log(`Updated user ${user.email} ${walletType} balance by $${usdValueToAdd.toFixed(2)}. New balance: $${updatedUser.balances[walletType]}`);
-    } else {
-      console.warn(`No price available for ${cryptoCurrency}, USD balance not updated`);
+      await User.findByIdAndUpdate(userId, { 
+        $inc: { [balanceField]: usdValueToAdd } 
+      });
     }
 
     // Create transaction record
@@ -21875,9 +21901,7 @@ app.post('/api/admin/users/crypto-balance', adminProtect, async (req, res) => {
         amount: parsedAmount,
         walletType: walletType,
         usdValue: cryptoPrice ? parsedAmount * cryptoPrice : 0,
-        cryptoPrice: cryptoPrice,
-        oldBalance: oldBalance,
-        newBalance: userAssetBalance.balances[cryptoLower]
+        cryptoPrice: cryptoPrice
       }
     );
 
@@ -21896,7 +21920,8 @@ app.post('/api/admin/users/crypto-balance', adminProtect, async (req, res) => {
         usdValue: cryptoPrice ? (parsedAmount * cryptoPrice).toFixed(2) : 'Price unavailable',
         cryptoPrice: cryptoPrice,
         newBalance: userAssetBalance.balances[cryptoLower],
-        transactionId: transaction._id
+        transactionId: transaction._id,
+        timestamp: new Date().toISOString()
       }
     });
 
@@ -21909,7 +21934,65 @@ app.post('/api/admin/users/crypto-balance', adminProtect, async (req, res) => {
   }
 });
 
-
+// GET /api/admin/crypto/current-price/:symbol - Get current price for a crypto
+app.get('/api/admin/crypto/current-price/:symbol', adminProtect, async (req, res) => {
+  try {
+    const { symbol } = req.params;
+    
+    // Try Binance first
+    let price = null;
+    let source = null;
+    
+    try {
+      const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol.toUpperCase()}USDT`, { timeout: 3000 });
+      if (response.data && response.data.price) {
+        price = parseFloat(response.data.price);
+        source = 'binance';
+      }
+    } catch (err) {
+      // Try CoinGecko
+      const coinGeckoIds = {
+        'BTC': 'bitcoin', 'ETH': 'ethereum', 'USDT': 'tether', 'BNB': 'binancecoin',
+        'SOL': 'solana', 'USDC': 'usd-coin', 'XRP': 'ripple', 'DOGE': 'dogecoin',
+        'ADA': 'cardano', 'SHIB': 'shiba-inu', 'AVAX': 'avalanche-2', 'DOT': 'polkadot',
+        'TRX': 'tron', 'LINK': 'chainlink', 'MATIC': 'matic-network', 'LTC': 'litecoin'
+      };
+      
+      const geckoId = coinGeckoIds[symbol.toUpperCase()];
+      if (geckoId) {
+        const geckoResponse = await axios.get(`https://api.coingecko.com/api/v3/simple/price?ids=${geckoId}&vs_currencies=usd`, { timeout: 3000 });
+        if (geckoResponse.data && geckoResponse.data[geckoId] && geckoResponse.data[geckoId].usd) {
+          price = geckoResponse.data[geckoId].usd;
+          source = 'coingecko';
+        }
+      }
+    }
+    
+    if (!price) {
+      return res.status(404).json({
+        status: 'error',
+        message: `Could not fetch price for ${symbol}`
+      });
+    }
+    
+    res.status(200).json({
+      status: 'success',
+      data: {
+        symbol: symbol.toUpperCase(),
+        price: price,
+        source: source,
+        timestamp: new Date().toISOString()
+      }
+    });
+    
+  } catch (err) {
+    console.error('Error fetching crypto price:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch cryptocurrency price'
+    });
+  }
+});
 
 
 
