@@ -23404,3 +23404,4 @@ httpServer.listen(PORT, () => {
   console.log(`💰 Real-time crypto price updates started (every 1 second)`);
   console.log(`🔌 WebSocket endpoints: /ws/spotmarket, /ws/ticker, /ws/market`);
 });
+
