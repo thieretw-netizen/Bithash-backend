@@ -1,4 +1,3 @@
-
 // SNIPPET A - COMPLETE REWRITE
 require('dotenv').config()
 const express = require('express');
@@ -96,17 +95,12 @@ const redis = new Redis({
     const delay = Math.min(times * 50, 2000);
     return delay;
   },
-
-
-  
   maxRetriesPerRequest: 3,
   enableReadyCheck: true,
   lazyConnect: false,
   keepAlive: 10000,
   connectTimeout: 10000
 });
-
-
 
 redis.on('error', (err) => {
   console.error('Redis error:', err);
@@ -115,13 +109,6 @@ redis.on('error', (err) => {
 redis.on('connect', () => {
   console.log('Redis connected successfully');
 });
-
-
-const MAIN_CRYPTOS = [
-  'BTC', 'ETH', 'BNB', 'SOL', 'XRP', 'ADA', 'DOGE', 'AVAX', 'DOT', 'LINK',
-  'MATIC', 'SHIB', 'TRX', 'UNI', 'ATOM', 'XLM', 'FIL', 'VET', 'ALGO', 'MANA',
-  'SAND', 'AXS', 'AAVE', 'EOS', 'MKR', 'DASH', 'XTZ', 'FTM', 'NEAR', 'GRT'
-];
 
 const getRealClientIP = (req) => {
   const forwardedFor = req.headers['x-forwarded-for'];
@@ -4044,6 +4031,15 @@ const recalculateAllUserBalances = async (io) => {
     console.error('Error recalculating user balances:', err);
   }
 };
+
+
+
+
+
+
+
+
+
 
 
 
@@ -22448,11 +22444,6 @@ let isRecalculating = false;
 
 const startRealTimePriceUpdates = (io) => {
   if (priceUpdateInterval) clearInterval(priceUpdateInterval);
-
-
-
-
-  
   
   // UPDATE PRICES EVERY 1 SECOND FOR TRUE REAL-TIME
   priceUpdateInterval = setInterval(async () => {
@@ -22477,21 +22468,10 @@ const startRealTimePriceUpdates = (io) => {
         // Broadcast price updates to all clients
         io.emit('price_update', priceUpdates);
         lastPrices = priceUpdates;
-
-  // ADD THIS LINE - Broadcast to WebSocket clients as well
-  const marketWss = req?.app?.get('marketWss');
-  if (marketWss) {
-    marketWss.clients.forEach(client => {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(JSON.stringify({ type: 'price_update', data: priceUpdates }));
-      }
-    });
-  }
-}
         
         // IMMEDIATELY recalculate ALL user wallet values based on new prices
         await recalculateAllWalletValuesRealtime(io, priceUpdates);
-      
+      }
     } catch (err) {
       console.error('Error in price update interval:', err);
     }
@@ -22616,11 +22596,6 @@ const recalculateAllUserMainBalances = async (io) => {
   const currentPrices = lastPrices;
   await recalculateAllWalletValuesRealtime(io, currentPrices);
 };
-
-
-
-
-
 
 
 
@@ -23199,16 +23174,6 @@ const gracefulShutdown = () => {
   process.exit(0);
 };
 
-
-// Initialize WebSocket servers after HTTP server is created
-const setupAllWebSockets = (server) => {
-  setupSpotMarketWebSocket(server);
-  setupTickerWebSocket(server);
-  return setupMarketWebSocket(server);
-};
-
-
-
 process.on('SIGTERM', gracefulShutdown);
 process.on('SIGINT', gracefulShutdown);
 
@@ -23216,7 +23181,6 @@ httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`📊 Real-time stats initialized with Redis as single source of truth`);
   console.log(`📈 Investors will grow from ${INITIAL_INVESTOR_COUNT.toLocaleString()} with max ${DAILY_GROWTH_LIMIT}/day`);
-  console.log(`💰 Real-time crypto price updates started (every 1 second)`);
-  console.log(`🔌 WebSocket endpoints: /ws/spotmarket, /ws/ticker, /ws/market`);
+  console.log(`💰 Real-time crypto price updates started (every 10 seconds)`);
+  console.log(`🔄 User main balances will recalculate every 5 minutes based on current prices`);
 });
-
