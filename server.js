@@ -21694,10 +21694,13 @@ app.get('/api/admin/supported-cryptos', adminProtect, async (req, res) => {
   }
 });
 
-// POST /api/admin/users/crypto-balance - Add crypto balance to user wallet
+// POST /api/admin/users/crypto-balance - Add crypto balance to user wallet (FIXED)
 app.post('/api/admin/users/crypto-balance', adminProtect, async (req, res) => {
   try {
-    const { userId, cryptoCurrency, amount, walletType, description } = req.body;
+    let { userId, cryptoCurrency, amount, walletType, description } = req.body;
+
+    // Log incoming request for debugging
+    console.log('Add Crypto Balance Request:', { userId, cryptoCurrency, amount, walletType, description });
 
     // Validation
     if (!userId) {
@@ -21714,7 +21717,16 @@ app.post('/api/admin/users/crypto-balance', adminProtect, async (req, res) => {
       });
     }
 
-    if (!amount || amount <= 0) {
+    // Parse amount - handle string or number
+    let parsedAmount = parseFloat(amount);
+    if (isNaN(parsedAmount)) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Amount must be a valid number'
+      });
+    }
+
+    if (parsedAmount <= 0) {
       return res.status(400).json({
         status: 'error',
         message: 'Amount must be greater than 0'
@@ -21748,7 +21760,7 @@ app.post('/api/admin/users/crypto-balance', adminProtect, async (req, res) => {
 
     // Initialize balance for this crypto if not exists
     const cryptoLower = cryptoCurrency.toLowerCase();
-    if (!userAssetBalance.balances[cryptoLower]) {
+    if (userAssetBalance.balances[cryptoLower] === undefined) {
       userAssetBalance.balances[cryptoLower] = 0;
     }
 
@@ -21758,22 +21770,42 @@ app.post('/api/admin/users/crypto-balance', adminProtect, async (req, res) => {
       const priceResponse = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${cryptoCurrency.toUpperCase()}USDT`, { timeout: 5000 });
       if (priceResponse.data && priceResponse.data.price) {
         cryptoPrice = parseFloat(priceResponse.data.price);
+        console.log(`Fetched ${cryptoCurrency} price: $${cryptoPrice}`);
       }
     } catch (priceErr) {
       console.warn(`Could not fetch price for ${cryptoCurrency}, using fallback`);
-      cryptoPrice = null;
+      // Try CoinGecko as fallback
+      try {
+        const coinGeckoIds = {
+          'BTC': 'bitcoin', 'ETH': 'ethereum', 'USDT': 'tether', 'BNB': 'binancecoin',
+          'SOL': 'solana', 'USDC': 'usd-coin', 'XRP': 'ripple', 'DOGE': 'dogecoin',
+          'ADA': 'cardano', 'SHIB': 'shiba-inu', 'AVAX': 'avalanche-2', 'DOT': 'polkadot',
+          'TRX': 'tron', 'LINK': 'chainlink', 'MATIC': 'matic-network', 'LTC': 'litecoin'
+        };
+        const geckoId = coinGeckoIds[cryptoCurrency.toUpperCase()];
+        if (geckoId) {
+          const geckoResponse = await axios.get(`https://api.coingecko.com/api/v3/simple/price?ids=${geckoId}&vs_currencies=usd`, { timeout: 5000 });
+          if (geckoResponse.data && geckoResponse.data[geckoId] && geckoResponse.data[geckoId].usd) {
+            cryptoPrice = geckoResponse.data[geckoId].usd;
+            console.log(`Fetched ${cryptoCurrency} price from CoinGecko: $${cryptoPrice}`);
+          }
+        }
+      } catch (geckoErr) {
+        console.warn('CoinGecko fallback also failed');
+      }
     }
 
     // Add crypto amount to user's balance
-    userAssetBalance.balances[cryptoLower] += amount;
+    const oldBalance = userAssetBalance.balances[cryptoLower];
+    userAssetBalance.balances[cryptoLower] = parseFloat((oldBalance + parsedAmount).toFixed(8));
     userAssetBalance.lastUpdated = new Date();
 
     // Add to history
-    const usdValue = cryptoPrice ? amount * cryptoPrice : 0;
+    const usdValue = cryptoPrice ? parsedAmount * cryptoPrice : 0;
     userAssetBalance.history.push({
       asset: cryptoCurrency,
       type: 'deposit',
-      amount: amount,
+      amount: parsedAmount,
       balance: userAssetBalance.balances[cryptoLower],
       usdValue: usdValue,
       price: cryptoPrice || 0,
@@ -21783,22 +21815,29 @@ app.post('/api/admin/users/crypto-balance', adminProtect, async (req, res) => {
 
     await userAssetBalance.save();
 
-    // Also update user's main balance in USD if needed
-    if (cryptoPrice) {
-      const usdValueToAdd = amount * cryptoPrice;
+    // Also update user's main/matured balance in USD if crypto price is available
+    if (cryptoPrice && cryptoPrice > 0) {
+      const usdValueToAdd = parsedAmount * cryptoPrice;
       const balanceField = walletType === 'main' ? 'balances.main' : 'balances.matured';
-      await User.findByIdAndUpdate(userId, {
-        $inc: { [balanceField]: usdValueToAdd }
-      });
+      
+      const updatedUser = await User.findByIdAndUpdate(
+        userId, 
+        { $inc: { [balanceField]: usdValueToAdd } },
+        { new: true }
+      );
+      
+      console.log(`Updated user ${user.email} ${walletType} balance by $${usdValueToAdd.toFixed(2)}. New balance: $${updatedUser.balances[walletType]}`);
+    } else {
+      console.warn(`No price available for ${cryptoCurrency}, USD balance not updated`);
     }
 
     // Create transaction record
     const transaction = new Transaction({
       user: userId,
       type: 'deposit',
-      amount: amount,
+      amount: parsedAmount,
       asset: cryptoCurrency.toUpperCase(),
-      assetAmount: amount,
+      assetAmount: parsedAmount,
       currency: 'USD',
       status: 'completed',
       method: cryptoCurrency.toUpperCase(),
@@ -21807,11 +21846,14 @@ app.post('/api/admin/users/crypto-balance', adminProtect, async (req, res) => {
         cryptoCurrency: cryptoCurrency,
         walletType: walletType,
         addedBy: req.admin.name || req.admin.email,
-        description: description || `Crypto balance added by admin`,
-        priceAtAddition: cryptoPrice
+        adminId: req.admin._id,
+        description: description || `Crypto balance added by admin ${req.admin.name || req.admin.email}`,
+        priceAtAddition: cryptoPrice,
+        oldBalance: oldBalance,
+        newBalance: userAssetBalance.balances[cryptoLower]
       },
       fee: 0,
-      netAmount: cryptoPrice ? amount * cryptoPrice : 0,
+      netAmount: cryptoPrice ? parsedAmount * cryptoPrice : 0,
       exchangeRateAtTime: cryptoPrice,
       network: cryptoCurrency.toUpperCase(),
       processedBy: req.admin._id,
@@ -21830,16 +21872,18 @@ app.post('/api/admin/users/crypto-balance', adminProtect, async (req, res) => {
       req,
       {
         cryptoCurrency: cryptoCurrency,
-        amount: amount,
+        amount: parsedAmount,
         walletType: walletType,
-        usdValue: cryptoPrice ? amount * cryptoPrice : 0,
-        cryptoPrice: cryptoPrice
+        usdValue: cryptoPrice ? parsedAmount * cryptoPrice : 0,
+        cryptoPrice: cryptoPrice,
+        oldBalance: oldBalance,
+        newBalance: userAssetBalance.balances[cryptoLower]
       }
     );
 
     res.status(200).json({
       status: 'success',
-      message: `Successfully added ${amount} ${cryptoCurrency.toUpperCase()} to user's ${walletType} wallet`,
+      message: `Successfully added ${parsedAmount} ${cryptoCurrency.toUpperCase()} to ${user.firstName} ${user.lastName}'s ${walletType} wallet`,
       data: {
         user: {
           id: user._id,
@@ -21847,9 +21891,10 @@ app.post('/api/admin/users/crypto-balance', adminProtect, async (req, res) => {
           email: user.email
         },
         cryptoCurrency: cryptoCurrency,
-        amount: amount,
+        amount: parsedAmount,
         walletType: walletType,
-        usdValue: cryptoPrice ? amount * cryptoPrice : 0,
+        usdValue: cryptoPrice ? (parsedAmount * cryptoPrice).toFixed(2) : 'Price unavailable',
+        cryptoPrice: cryptoPrice,
         newBalance: userAssetBalance.balances[cryptoLower],
         transactionId: transaction._id
       }
