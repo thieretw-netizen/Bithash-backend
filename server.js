@@ -128,7 +128,6 @@ class PriceAggregatorWorker {
     this.timeframes = ['1s', '15m', '1h', '4h', '1d', '1w'];
     this.healthCheckInterval = null;
     this.lastUpdateTimestamps = new Map();
-    this.MAX_STALENESS_MS = 500;
   }
 
   generateAllPairs() {
@@ -141,19 +140,42 @@ class PriceAggregatorWorker {
     return pairs;
   }
 
-  getBinanceStreamName(pair, streamType) {
-    return `${pair.toLowerCase()}@${streamType}`;
-  }
-
   async start() {
     if (this.isRunning) return;
     this.isRunning = true;
     console.log('🚀 Price Aggregator Worker starting...');
     
     await this.initializeRedisKeys();
+    await this.initializeDynamicPairs();
     this.connectBinanceWebSocket();
     this.startHealthCheck();
-    this.startStalenessMonitor();
+  }
+
+  async initializeDynamicPairs() {
+    try {
+      const response = await axios.get('https://api.binance.com/api/v3/exchangeInfo', { timeout: 10000 });
+      const tradingPairs = response.data.symbols.filter(s => s.status === 'TRADING');
+      
+      const uniqueBases = new Set();
+      const uniqueQuotes = new Set();
+      
+      for (const pair of tradingPairs) {
+        uniqueBases.add(pair.baseAsset);
+        uniqueQuotes.add(pair.quoteAsset);
+      }
+      
+      if (uniqueBases.size > 0) {
+        this.baseAssets = Array.from(uniqueBases).slice(0, 100);
+      }
+      if (uniqueQuotes.size > 0) {
+        this.quoteAssets = Array.from(uniqueQuotes).filter(q => ['USDT', 'USDC', 'BTC', 'ETH', 'BNB', 'EURC'].includes(q));
+        if (this.quoteAssets.length === 0) this.quoteAssets = ['USDT', 'USDC', 'BTC', 'ETH', 'BNB'];
+      }
+      
+      console.log(`Dynamic pairs initialized: ${this.baseAssets.length} base assets, ${this.quoteAssets.length} quote assets`);
+    } catch (err) {
+      console.error('Failed to fetch dynamic pairs, using defaults:', err.message);
+    }
   }
 
   async initializeRedisKeys() {
@@ -165,32 +187,10 @@ class PriceAggregatorWorker {
       await redis.hsetnx(`price:${pair}`, 'lowPrice', '0');
       await redis.hsetnx(`price:${pair}`, 'volume', '0');
       await redis.hsetnx(`price:${pair}`, 'quoteVolume', '0');
+      await redis.hsetnx(`price:${pair}`, 'openPrice', '0');
       await redis.hsetnx(`price:${pair}`, 'updatedAt', Date.now().toString());
-      
-      for (const timeframe of this.timeframes) {
-        await redis.del(`candles:${pair}:${timeframe}`);
-      }
     }
     console.log(`Initialized Redis keys for ${allPairs.length} pairs`);
-  }
-
-  startStalenessMonitor() {
-    setInterval(async () => {
-      const allPairs = this.generateAllPairs();
-      const now = Date.now();
-      
-      for (const pair of allPairs) {
-        const lastUpdate = this.lastUpdateTimestamps.get(pair) || 0;
-        if (now - lastUpdate > this.MAX_STALENESS_MS && lastUpdate > 0) {
-          console.warn(`⚠️ Stale data for ${pair}: ${now - lastUpdate}ms old`);
-          await redis.publish('market:alerts', JSON.stringify({
-            type: 'stale_data',
-            symbol: pair,
-            stalenessMs: now - lastUpdate
-          }));
-        }
-      }
-    }, 1000);
   }
 
   connectBinanceWebSocket() {
@@ -208,7 +208,7 @@ class PriceAggregatorWorker {
     }
     
     for (const timeframe of this.timeframes) {
-      for (const pair of allPairs.slice(0, 80)) {
+      for (const pair of allPairs.slice(0, 50)) {
         streams.push(`${pair.toLowerCase()}@kline_${timeframe}`);
       }
     }
@@ -231,7 +231,8 @@ class PriceAggregatorWorker {
         const pair = streamParts[0].toUpperCase();
         const channel = streamParts[1];
         
-        this.lastUpdateTimestamps.set(pair, Date.now());
+        const now = Date.now();
+        this.lastUpdateTimestamps.set(`${pair}:${channel}`, now);
         
         if (channel === 'ticker') {
           await this.handleTickerUpdate(pair, parsed.data);
@@ -267,6 +268,7 @@ class PriceAggregatorWorker {
     const volume = parseFloat(data.v);
     const quoteVolume = parseFloat(data.q);
     const openPrice = parseFloat(data.o);
+    const updatedAt = Date.now();
 
     await redis.hset(`price:${pair}`, {
       lastPrice: lastPrice.toString(),
@@ -276,7 +278,7 @@ class PriceAggregatorWorker {
       volume: volume.toString(),
       quoteVolume: quoteVolume.toString(),
       openPrice: openPrice.toString(),
-      updatedAt: Date.now().toString()
+      updatedAt: updatedAt.toString()
     });
 
     await redis.publish('market:updates', JSON.stringify({
@@ -288,6 +290,7 @@ class PriceAggregatorWorker {
       lowPrice: lowPrice,
       volume: volume,
       quoteVolume: quoteVolume,
+      openPrice: openPrice,
       stats: {
         priceChangePercent: priceChangePercent,
         highPrice: highPrice,
@@ -303,7 +306,7 @@ class PriceAggregatorWorker {
     const bids = (data.bids || []).slice(0, 100).map(b => [parseFloat(b[0]), parseFloat(b[1])]);
     const asks = (data.asks || []).slice(0, 100).map(a => [parseFloat(a[0]), parseFloat(a[1])]);
     
-    await redis.setex(`orderbook:${pair}`, 1, JSON.stringify({
+    await redis.setex(`orderbook:${pair}`, 2, JSON.stringify({
       bids: bids,
       asks: asks,
       lastUpdateId: data.lastUpdateId,
@@ -320,6 +323,7 @@ class PriceAggregatorWorker {
 
   async handleTradeUpdate(pair, data) {
     const trade = {
+      id: data.t,
       price: parseFloat(data.p),
       amount: parseFloat(data.q),
       time: data.T,
@@ -328,11 +332,15 @@ class PriceAggregatorWorker {
 
     await redis.lpush(`trades:${pair}`, JSON.stringify(trade));
     await redis.ltrim(`trades:${pair}`, 0, 99);
+    await redis.expire(`trades:${pair}`, 60);
 
     await redis.publish('market:updates', JSON.stringify({
       type: 'trade',
       symbol: pair,
-      ...trade
+      price: trade.price,
+      amount: trade.amount,
+      time: trade.time,
+      isBuyerMaker: trade.isBuyerMaker
     }));
   }
 
@@ -354,6 +362,7 @@ class PriceAggregatorWorker {
     const key = `candles:${pair}:${timeframe}`;
     await redis.zadd(key, candle.openTime, JSON.stringify(candle));
     await redis.zremrangebyrank(key, 0, -501);
+    await redis.expire(key, 3600);
 
     await redis.publish('market:updates', JSON.stringify({
       type: 'candles',
@@ -361,6 +370,51 @@ class PriceAggregatorWorker {
       interval: timeframe,
       candle: candle
     }));
+  }
+
+  async getFreshPrice(pair, maxAgeMs = 500) {
+    const data = await redis.hgetall(`price:${pair}`);
+    if (!data || !data.updatedAt) return null;
+    
+    const age = Date.now() - parseInt(data.updatedAt);
+    if (age > maxAgeMs) return null;
+    
+    return {
+      lastPrice: parseFloat(data.lastPrice),
+      priceChangePercent: parseFloat(data.priceChangePercent),
+      highPrice: parseFloat(data.highPrice),
+      lowPrice: parseFloat(data.lowPrice),
+      volume: parseFloat(data.volume),
+      quoteVolume: parseFloat(data.quoteVolume),
+      openPrice: parseFloat(data.openPrice),
+      updatedAt: parseInt(data.updatedAt),
+      age: age
+    };
+  }
+
+  async getFreshOrderBook(pair, maxAgeMs = 500) {
+    const data = await redis.get(`orderbook:${pair}`);
+    if (!data) return null;
+    
+    const orderbook = JSON.parse(data);
+    if (orderbook.updatedAt && Date.now() - orderbook.updatedAt > maxAgeMs) return null;
+    
+    return orderbook;
+  }
+
+  async getFreshTrades(pair, maxAgeMs = 500) {
+    const trades = await redis.lrange(`trades:${pair}`, 0, 49);
+    if (!trades || trades.length === 0) return null;
+    
+    return trades.map(t => JSON.parse(t));
+  }
+
+  async getFreshCandles(pair, interval, limit = 200, maxAgeMs = 500) {
+    const key = `candles:${pair}:${interval}`;
+    const candles = await redis.zrange(key, -limit, -1);
+    if (!candles || candles.length === 0) return null;
+    
+    return candles.map(c => JSON.parse(c));
   }
 
   startHealthCheck() {
@@ -1319,8 +1373,6 @@ const MarketPairSchema = new mongoose.Schema({
 MarketPairSchema.index({ baseAsset: 1, quoteAsset: 1 });
 MarketPairSchema.index({ status: 1 });
 
-const MarketPair = mongoose.models.MarketPair || mongoose.model('MarketPair', MarketPairSchema);
-
 const OrderSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   symbol: { type: String, required: true, index: true },
@@ -1350,8 +1402,6 @@ OrderSchema.index({ user: 1, status: 1 });
 OrderSchema.index({ symbol: 1, status: 1 });
 OrderSchema.index({ orderId: 1 });
 
-const Order = mongoose.models.Order || mongoose.model('Order', OrderSchema);
-
 const TradeSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   orderId: { type: String, required: true, index: true },
@@ -1369,8 +1419,6 @@ const TradeSchema = new mongoose.Schema({
 
 TradeSchema.index({ user: 1, symbol: 1, time: -1 });
 TradeSchema.index({ orderId: 1 });
-
-const Trade = mongoose.models.Trade || mongoose.model('Trade', TradeSchema);
 
 const PositionSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
@@ -1391,8 +1439,6 @@ const PositionSchema = new mongoose.Schema({
 });
 
 PositionSchema.index({ user: 1, symbol: 1, status: 1 });
-
-const Position = mongoose.models.Position || mongoose.model('Position', PositionSchema);
 
 const OrderBookSnapshotSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true },
@@ -1447,8 +1493,6 @@ const CandleSchema = new mongoose.Schema({
 
 CandleSchema.index({ symbol: 1, interval: 1, openTime: 1 }, { unique: true });
 
-const Candle = mongoose.models.Candle || mongoose.model('Candle', CandleSchema);
-
 const PairLimitsSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true, index: true },
   baseAsset: { type: String, required: true },
@@ -1462,8 +1506,6 @@ const PairLimitsSchema = new mongoose.Schema({
 
 PairLimitsSchema.index({ baseAsset: 1, quoteAsset: 1 });
 
-const PairLimits = mongoose.models.PairLimits || mongoose.model('PairLimits', PairLimitsSchema);
-
 const AssetExtraInfoSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true, index: true },
   tags: [{ type: String, default: [] }],
@@ -1476,8 +1518,6 @@ const AssetExtraInfoSchema = new mongoose.Schema({
 });
 
 AssetExtraInfoSchema.index({ symbol: 1 });
-
-const AssetExtraInfo = mongoose.models.AssetExtraInfo || mongoose.model('AssetExtraInfo', AssetExtraInfoSchema);
 
 const AssetInfoSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true, index: true },
@@ -1504,8 +1544,6 @@ const AssetInfoSchema = new mongoose.Schema({
 AssetInfoSchema.index({ symbol: 1 });
 AssetInfoSchema.index({ rank: 1 });
 
-const AssetInfo = mongoose.models.AssetInfo || mongoose.model('AssetInfo', AssetInfoSchema);
-
 const TradingDataSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true },
   fundFlowLong: { type: Number, default: 50 },
@@ -1518,8 +1556,6 @@ const TradingDataSchema = new mongoose.Schema({
 });
 
 TradingDataSchema.index({ symbol: 1 });
-
-const TradingData = mongoose.models.TradingData || mongoose.model('TradingData', TradingDataSchema);
 
 const AnalysisDataSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true },
@@ -1535,8 +1571,6 @@ const AnalysisDataSchema = new mongoose.Schema({
 });
 
 AnalysisDataSchema.index({ symbol: 1 });
-
-const AnalysisData = mongoose.models.AnalysisData || mongoose.model('AnalysisData', AnalysisDataSchema);
 
 const UserTradingSettingsSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
@@ -1568,8 +1602,6 @@ const UserTradingSettingsSchema = new mongoose.Schema({
 
 UserTradingSettingsSchema.index({ user: 1 });
 
-const UserTradingSettings = mongoose.models.UserTradingSettings || mongoose.model('UserTradingSettings', UserTradingSettingsSchema);
-
 const TradingRevenueSchema = new mongoose.Schema({
   source: { type: String, enum: ['maker_fee', 'taker_fee', 'convert_spread', 'instant_buy_spread'], required: true },
   orderId: { type: String, ref: 'Order' },
@@ -1588,7 +1620,20 @@ TradingRevenueSchema.index({ source: 1 });
 TradingRevenueSchema.index({ recordedAt: -1 });
 TradingRevenueSchema.index({ userId: 1 });
 
+const MarketPair = mongoose.models.MarketPair || mongoose.model('MarketPair', MarketPairSchema);
+const Order = mongoose.models.Order || mongoose.model('Order', OrderSchema);
+const Trade = mongoose.models.Trade || mongoose.model('Trade', TradeSchema);
+const Position = mongoose.models.Position || mongoose.model('Position', PositionSchema);
+const OrderBookSnapshot = mongoose.models.OrderBookSnapshot || mongoose.model('OrderBookSnapshot', OrderBookSnapshotSchema);
+const Ticker24hr = mongoose.models.Ticker24hr || mongoose.model('Ticker24hr', Ticker24hrSchema);
+const Candle = mongoose.models.Candle || mongoose.model('Candle', CandleSchema);
+const AssetInfo = mongoose.models.AssetInfo || mongoose.model('AssetInfo', AssetInfoSchema);
+const TradingData = mongoose.models.TradingData || mongoose.model('TradingData', TradingDataSchema);
+const AnalysisData = mongoose.models.AnalysisData || mongoose.model('AnalysisData', AnalysisDataSchema);
+const UserTradingSettings = mongoose.models.UserTradingSettings || mongoose.model('UserTradingSettings', UserTradingSettingsSchema);
 const TradingRevenue = mongoose.models.TradingRevenue || mongoose.model('TradingRevenue', TradingRevenueSchema);
+const PairLimits = mongoose.models.PairLimits || mongoose.model('PairLimits', PairLimitsSchema);
+const AssetExtraInfo = mongoose.models.AssetExtraInfo || mongoose.model('AssetExtraInfo', AssetExtraInfoSchema);
 
 const SystemSettingsSchema = new mongoose.Schema({
   type: { 
@@ -1725,8 +1770,6 @@ const UserAssetBalanceSchema = new mongoose.Schema({
 UserAssetBalanceSchema.index({ user: 1 });
 UserAssetBalanceSchema.index({ 'history.timestamp': -1 });
 
-const UserAssetBalance = mongoose.model('UserAssetBalance', UserAssetBalanceSchema);
-
 const UserPreferenceSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
@@ -1754,8 +1797,6 @@ const UserPreferenceSchema = new mongoose.Schema({
 
 UserPreferenceSchema.index({ user: 1 });
 UserPreferenceSchema.index({ displayAsset: 1 });
-
-const UserPreference = mongoose.model('UserPreference', UserPreferenceSchema);
 
 const DepositAssetSchema = new mongoose.Schema({
   user: {
@@ -1791,8 +1832,6 @@ DepositAssetSchema.index({ user: 1, createdAt: -1 });
 DepositAssetSchema.index({ user: 1, asset: 1 });
 DepositAssetSchema.index({ status: 1 });
 
-const DepositAsset = mongoose.model('DepositAsset', DepositAssetSchema);
-
 const BuySchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   asset: { type: String, required: true },
@@ -1810,8 +1849,6 @@ const BuySchema = new mongoose.Schema({
 
 BuySchema.index({ user: 1, createdAt: -1 });
 BuySchema.index({ status: 1 });
-
-const Buy = mongoose.model('Buy', BuySchema);
 
 const SellSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
@@ -1831,6 +1868,10 @@ const SellSchema = new mongoose.Schema({
 SellSchema.index({ user: 1, createdAt: -1 });
 SellSchema.index({ status: 1 });
 
+const UserAssetBalance = mongoose.model('UserAssetBalance', UserAssetBalanceSchema);
+const UserPreference = mongoose.model('UserPreference', UserPreferenceSchema);
+const DepositAsset = mongoose.model('DepositAsset', DepositAssetSchema);
+const Buy = mongoose.model('Buy', BuySchema);
 const Sell = mongoose.model('Sell', SellSchema);
 
 const InvestmentSchema = new mongoose.Schema({
@@ -3203,28 +3244,7 @@ module.exports = {
   Sell,
   setupWebSocketServer,
   priceAggregator,
-  redis,
-  MarketPair,
-  Order,
-  Trade,
-  Position,
-  OrderBookSnapshot,
-  Ticker24hr,
-  Candle,
-  AssetInfo,
-  TradingData,
-  AnalysisData,
-  UserTradingSettings,
-  TradingRevenue,
-  PairLimits,
-  AssetExtraInfo,
-  SystemSettings,
-  AccountRestrictions,
-  UserRestrictionStatus,
-  OTP,
-  PlatformRevenue,
-  KYC,
-  upload
+  redis
 };
 
 const generateJWT = (id, isAdmin = false) => {
@@ -3353,9 +3373,9 @@ const detectAndSetIPPreferences = async (userId, req) => {
 
 const getCryptoPrice = async (asset) => {
   try {
-    const cachedPrice = await redis.hget(`price:${asset}USDT`, 'lastPrice');
-    if (cachedPrice && parseFloat(cachedPrice) > 0) {
-      return parseFloat(cachedPrice);
+    const cachedPrice = await priceAggregator.getFreshPrice(`${asset}USDT`, 1000);
+    if (cachedPrice && cachedPrice.lastPrice > 0) {
+      return cachedPrice.lastPrice;
     }
     
     const assetMap = {
@@ -3380,32 +3400,23 @@ const getCryptoPrice = async (asset) => {
     const coinId = assetMap[asset.toUpperCase()];
     if (!coinId) return null;
     
-    const errors = [];
-    
     try {
       const binancePair = asset.toUpperCase() === 'USDT' ? 'USDTUSDT' : `${asset.toUpperCase()}USDT`;
       const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${binancePair}`, { timeout: 5000 });
       if (response.data && response.data.price) {
-        console.log(`Fetched ${asset} price from Binance: $${response.data.price}`);
         return parseFloat(response.data.price);
       }
-      errors.push('Binance: Invalid response');
     } catch (err) {
-      errors.push(`Binance: ${err.message}`);
     }
     
     try {
       const response = await axios.get(`https://min-api.cryptocompare.com/data/price?fsym=${asset.toUpperCase()}&tsyms=USD`, { timeout: 5000 });
       if (response.data && response.data.USD) {
-        console.log(`Fetched ${asset} price from CryptoCompare: $${response.data.USD}`);
         return response.data.USD;
       }
-      errors.push('CryptoCompare: Invalid response');
     } catch (err) {
-      errors.push(`CryptoCompare: ${err.message}`);
     }
     
-    console.error(`All price APIs failed for ${asset}:`, errors);
     return null;
   } catch (err) {
     console.error('Error fetching crypto price:', err);
@@ -3415,9 +3426,9 @@ const getCryptoPrice = async (asset) => {
 
 const getExchangeRate = async (asset, fiat = 'usd') => {
   try {
-    const cachedPrice = await redis.hget(`price:${asset}USDT`, 'lastPrice');
-    if (cachedPrice && parseFloat(cachedPrice) > 0) {
-      return parseFloat(cachedPrice);
+    const cachedPrice = await priceAggregator.getFreshPrice(`${asset}USDT`, 1000);
+    if (cachedPrice && cachedPrice.lastPrice > 0) {
+      return cachedPrice.lastPrice;
     }
     
     const assetMap = {
@@ -3436,17 +3447,13 @@ const getExchangeRate = async (asset, fiat = 'usd') => {
     const coinId = assetMap[asset.toUpperCase()];
     if (!coinId) return null;
     
-    const errors = [];
-    
     try {
       const binancePair = asset.toUpperCase() === 'USDT' ? 'USDTUSDT' : `${asset.toUpperCase()}USDT`;
       const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${binancePair}`, { timeout: 5000 });
       if (response.data && response.data.price) {
         return parseFloat(response.data.price);
       }
-      errors.push('Binance: Invalid response');
     } catch (err) {
-      errors.push(`Binance: ${err.message}`);
     }
     
     try {
@@ -3454,12 +3461,9 @@ const getExchangeRate = async (asset, fiat = 'usd') => {
       if (response.data && response.data.USD) {
         return response.data.USD;
       }
-      errors.push('CryptoCompare: Invalid response');
     } catch (err) {
-      errors.push(`CryptoCompare: ${err.message}`);
     }
     
-    console.error(`All exchange rate APIs failed for ${asset}:`, errors);
     return null;
   } catch (err) {
     console.error('Error fetching exchange rate:', err);
@@ -3472,34 +3476,27 @@ const getFiatExchangeRates = async () => {
     try {
       const response = await axios.get('https://api.exchangerate-api.com/v4/latest/USD', { timeout: 5000 });
       if (response.data && response.data.rates) {
-        console.log('Fetched fiat exchange rates from exchangerate-api.com');
         return response.data.rates;
       }
     } catch (err) {
-      console.warn('exchangerate-api.com failed:', err.message);
     }
     
     try {
       const response = await axios.get('https://api.frankfurter.app/latest?from=USD', { timeout: 5000 });
       if (response.data && response.data.rates) {
-        console.log('Fetched fiat exchange rates from frankfurter.app');
         return response.data.rates;
       }
     } catch (err) {
-      console.warn('frankfurter.app failed:', err.message);
     }
     
     try {
       const response = await axios.get('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json', { timeout: 5000 });
       if (response.data && response.data.usd) {
-        console.log('Fetched fiat exchange rates from currency-api');
         return response.data.usd;
       }
     } catch (err) {
-      console.warn('currency-api failed:', err.message);
     }
     
-    console.error('All fiat exchange rate APIs failed');
     return null;
   } catch (err) {
     console.error('Error fetching fiat exchange rates:', err);
@@ -3529,8 +3526,8 @@ const getAllWorldCurrencies = async () => {
     { code: 'HKD', name: 'Hong Kong Dollar', symbol: 'HK$', flag: 'https://flagcdn.com/w40/hk.png' },
     { code: 'NZD', name: 'New Zealand Dollar', symbol: 'NZ$', flag: 'https://flagcdn.com/w40/nz.png' },
     { code: 'SEK', name: 'Swedish Krona', symbol: 'kr', flag: 'https://flagcdn.com/w40/se.png' },
-    { code: 'NOK', name: 'Norwegian Krona', symbol: 'kr', flag: 'https://flagcdn.com/w40/no.png' },
-    { code: 'DKK', name: 'Danish Krona', symbol: 'kr', flag: 'https://flagcdn.com/w40/dk.png' },
+    { code: 'NOK', name: 'Norwegian Krone', symbol: 'kr', flag: 'https://flagcdn.com/w40/no.png' },
+    { code: 'DKK', name: 'Danish Krone', symbol: 'kr', flag: 'https://flagcdn.com/w40/dk.png' },
     { code: 'PLN', name: 'Polish Zloty', symbol: 'zł', flag: 'https://flagcdn.com/w40/pl.png' },
     { code: 'TRY', name: 'Turkish Lira', symbol: '₺', flag: 'https://flagcdn.com/w40/tr.png' },
     { code: 'RUB', name: 'Russian Ruble', symbol: '₽', flag: 'https://flagcdn.com/w40/ru.png' },
@@ -3630,8 +3627,6 @@ const getUserDeviceInfo = async (req) => {
 
     if (isPublicIP && ip && ip !== 'Unknown' && ip !== '0.0.0.0') {
       try {
-        console.log(`Looking up exact location for IP: ${ip}`);
-        
         const ipinfoToken = process.env.IPINFO_TOKEN || 'b56ce6e91d732d';
         
         try {
@@ -3663,12 +3658,8 @@ const getUserDeviceInfo = async (req) => {
             };
             
             location = `${city || 'Unknown'}, ${region || 'Unknown'}, ${country || 'Unknown'}`;
-            
-            console.log(`Exact location from ipinfo.io: ${location} (lat: ${latitude}, lng: ${longitude})`);
           }
         } catch (ipinfoError) {
-          console.log('ipinfo.io failed for exact location, trying fallback services...');
-          
           try {
             const response = await axios.get(`https://ipapi.co/${ip}/json/`, {
               timeout: 5000
@@ -3693,7 +3684,6 @@ const getUserDeviceInfo = async (req) => {
               };
               
               location = `${city || 'Unknown'}, ${region || 'Unknown'}, ${country_name || country_code || 'Unknown'}`;
-              console.log(`Exact location from ipapi.co: ${location}`);
             }
           } catch (ipapiError) {
             try {
@@ -3720,7 +3710,6 @@ const getUserDeviceInfo = async (req) => {
                 };
                 
                 location = `${cityName || 'Unknown'}, ${regionName || 'Unknown'}, ${countryName || 'Unknown'}`;
-                console.log(`Exact location from freeipapi.com: ${location}`);
               }
             } catch (freeipapiError) {
               try {
@@ -3747,11 +3736,9 @@ const getUserDeviceInfo = async (req) => {
                   };
                   
                   location = `${city || 'Unknown'}, ${regionName || 'Unknown'}, ${country || 'Unknown'}`;
-                  console.log(`Exact location from ip-api.com: ${location}`);
                 }
               } catch (ipapiComError) {
                 location = 'Location Unavailable';
-                console.log('All location services failed for exact location');
               }
             }
           }
@@ -3761,7 +3748,6 @@ const getUserDeviceInfo = async (req) => {
         location = 'Location Unavailable';
       }
     } else if (!isPublicIP) {
-      console.log(`Private IP detected: ${ip}, using local network location`);
     }
 
     return {
@@ -3821,15 +3807,6 @@ const logActivity = async (action, entity, entityId, performedBy, performedByMod
         ...changes,
         locationData: locationData
       }
-    });
-    
-    console.log(`Activity Logged: ${action}`, {
-      entity,
-      entityId,
-      location: locationData.location,
-      exactLocation: locationData.exactLocation,
-      ip: locationData.ip,
-      isPublicIP: locationData.isPublicIP
     });
   } catch (err) {
     console.error('Error logging activity:', err);
@@ -4294,15 +4271,33 @@ const recalculateAllUserBalances = async (io) => {
       }
     }
     
-    console.log(`Recalculated balances for ${updatedCount} users (Main: fluctuates, Active: fluctuates, Matured: fluctuates)`);
+    console.log(`Recalculated balances for ${updatedCount} users`);
     
   } catch (err) {
     console.error('Error recalculating user balances:', err);
   }
 };
 
-// Start the Price Aggregator Worker
+// Start Price Aggregator Worker on server start
 priceAggregator.start().catch(console.error);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
