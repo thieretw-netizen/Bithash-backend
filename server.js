@@ -21637,7 +21637,232 @@ app.post('/api/withdrawals/confirm-gas-payment', protect, async (req, res) => {
 
 
 
+// =============================================
+// CRYPTO MANAGEMENT ENDPOINTS
+// =============================================
 
+// GET /api/admin/supported-cryptos - Get list of supported cryptocurrencies
+app.get('/api/admin/supported-cryptos', adminProtect, async (req, res) => {
+  try {
+    // List of supported cryptocurrencies with their details
+    const supportedCryptos = [
+      { symbol: 'BTC', name: 'Bitcoin', logo: 'https://cryptologos.cc/logos/bitcoin-btc-logo.png', networks: ['BTC', 'SegWit'] },
+      { symbol: 'ETH', name: 'Ethereum', logo: 'https://cryptologos.cc/logos/ethereum-eth-logo.png', networks: ['ERC20'] },
+      { symbol: 'USDT', name: 'Tether', logo: 'https://cryptologos.cc/logos/tether-usdt-logo.png', networks: ['ERC20', 'TRC20'] },
+      { symbol: 'BNB', name: 'Binance Coin', logo: 'https://cryptologos.cc/logos/bnb-bnb-logo.png', networks: ['BEP20'] },
+      { symbol: 'SOL', name: 'Solana', logo: 'https://cryptologos.cc/logos/solana-sol-logo.png', networks: ['Solana'] },
+      { symbol: 'USDC', name: 'USD Coin', logo: 'https://cryptologos.cc/logos/usd-coin-usdc-logo.png', networks: ['ERC20'] },
+      { symbol: 'XRP', name: 'Ripple', logo: 'https://cryptologos.cc/logos/xrp-xrp-logo.png', networks: ['XRP'] },
+      { symbol: 'DOGE', name: 'Dogecoin', logo: 'https://cryptologos.cc/logos/dogecoin-doge-logo.png', networks: ['Dogecoin'] },
+      { symbol: 'ADA', name: 'Cardano', logo: 'https://cryptologos.cc/logos/cardano-ada-logo.png', networks: ['Cardano'] },
+      { symbol: 'SHIB', name: 'Shiba Inu', logo: 'https://cryptologos.cc/logos/shiba-inu-shib-logo.png', networks: ['ERC20'] },
+      { symbol: 'AVAX', name: 'Avalanche', logo: 'https://cryptologos.cc/logos/avalanche-avax-logo.png', networks: ['AVAX'] },
+      { symbol: 'DOT', name: 'Polkadot', logo: 'https://cryptologos.cc/logos/polkadot-dot-logo.png', networks: ['Polkadot'] },
+      { symbol: 'TRX', name: 'TRON', logo: 'https://cryptologos.cc/logos/tron-trx-logo.png', networks: ['TRC20'] },
+      { symbol: 'LINK', name: 'Chainlink', logo: 'https://cryptologos.cc/logos/chainlink-link-logo.png', networks: ['ERC20'] },
+      { symbol: 'MATIC', name: 'Polygon', logo: 'https://cryptologos.cc/logos/polygon-matic-logo.png', networks: ['Polygon'] },
+      { symbol: 'WBTC', name: 'Wrapped Bitcoin', logo: 'https://cryptologos.cc/logos/wrapped-bitcoin-wbtc-logo.png', networks: ['ERC20'] },
+      { symbol: 'LTC', name: 'Litecoin', logo: 'https://cryptologos.cc/logos/litecoin-ltc-logo.png', networks: ['Litecoin'] },
+      { symbol: 'NEAR', name: 'NEAR Protocol', logo: 'https://cryptologos.cc/logos/near-protocol-near-logo.png', networks: ['NEAR'] },
+      { symbol: 'UNI', name: 'Uniswap', logo: 'https://cryptologos.cc/logos/uniswap-uni-logo.png', networks: ['ERC20'] },
+      { symbol: 'BCH', name: 'Bitcoin Cash', logo: 'https://cryptologos.cc/logos/bitcoin-cash-bch-logo.png', networks: ['BCH'] },
+      { symbol: 'XLM', name: 'Stellar', logo: 'https://cryptologos.cc/logos/stellar-xlm-logo.png', networks: ['Stellar'] },
+      { symbol: 'ATOM', name: 'Cosmos', logo: 'https://cryptologos.cc/logos/cosmos-atom-logo.png', networks: ['Cosmos'] },
+      { symbol: 'XMR', name: 'Monero', logo: 'https://cryptologos.cc/logos/monero-xmr-logo.png', networks: ['Monero'] },
+      { symbol: 'FLOW', name: 'Flow', logo: 'https://cryptologos.cc/logos/flow-flow-logo.png', networks: ['Flow'] },
+      { symbol: 'VET', name: 'VeChain', logo: 'https://cryptologos.cc/logos/vechain-vet-logo.png', networks: ['VET'] },
+      { symbol: 'FIL', name: 'Filecoin', logo: 'https://cryptologos.cc/logos/filecoin-fil-logo.png', networks: ['Filecoin'] },
+      { symbol: 'THETA', name: 'Theta', logo: 'https://cryptologos.cc/logos/theta-theta-logo.png', networks: ['Theta'] },
+      { symbol: 'HBAR', name: 'Hedera', logo: 'https://cryptologos.cc/logos/hedera-hbar-logo.png', networks: ['Hedera'] },
+      { symbol: 'FTM', name: 'Fantom', logo: 'https://cryptologos.cc/logos/fantom-ftm-logo.png', networks: ['Fantom'] },
+      { symbol: 'XTZ', name: 'Tezos', logo: 'https://cryptologos.cc/logos/tezos-xtz-logo.png', networks: ['Tezos'] }
+    ];
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        cryptos: supportedCryptos,
+        total: supportedCryptos.length
+      }
+    });
+  } catch (err) {
+    console.error('Error fetching supported cryptos:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch supported cryptocurrencies'
+    });
+  }
+});
+
+// POST /api/admin/users/crypto-balance - Add crypto balance to user wallet
+app.post('/api/admin/users/crypto-balance', adminProtect, async (req, res) => {
+  try {
+    const { userId, cryptoCurrency, amount, walletType, description } = req.body;
+
+    // Validation
+    if (!userId) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'User ID is required'
+      });
+    }
+
+    if (!cryptoCurrency) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Cryptocurrency is required'
+      });
+    }
+
+    if (!amount || amount <= 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Amount must be greater than 0'
+      });
+    }
+
+    if (!walletType || !['main', 'matured'].includes(walletType)) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Valid wallet type (main or matured) is required'
+      });
+    }
+
+    // Find user
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'User not found'
+      });
+    }
+
+    // Find or create user asset balance
+    let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
+    if (!userAssetBalance) {
+      userAssetBalance = new UserAssetBalance({
+        user: userId,
+        balances: {}
+      });
+    }
+
+    // Initialize balance for this crypto if not exists
+    const cryptoLower = cryptoCurrency.toLowerCase();
+    if (!userAssetBalance.balances[cryptoLower]) {
+      userAssetBalance.balances[cryptoLower] = 0;
+    }
+
+    // Get current crypto price in USD
+    let cryptoPrice = null;
+    try {
+      const priceResponse = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${cryptoCurrency.toUpperCase()}USDT`, { timeout: 5000 });
+      if (priceResponse.data && priceResponse.data.price) {
+        cryptoPrice = parseFloat(priceResponse.data.price);
+      }
+    } catch (priceErr) {
+      console.warn(`Could not fetch price for ${cryptoCurrency}, using fallback`);
+      cryptoPrice = null;
+    }
+
+    // Add crypto amount to user's balance
+    userAssetBalance.balances[cryptoLower] += amount;
+    userAssetBalance.lastUpdated = new Date();
+
+    // Add to history
+    const usdValue = cryptoPrice ? amount * cryptoPrice : 0;
+    userAssetBalance.history.push({
+      asset: cryptoCurrency,
+      type: 'deposit',
+      amount: amount,
+      balance: userAssetBalance.balances[cryptoLower],
+      usdValue: usdValue,
+      price: cryptoPrice || 0,
+      timestamp: new Date(),
+      transactionId: null
+    });
+
+    await userAssetBalance.save();
+
+    // Also update user's main balance in USD if needed
+    if (cryptoPrice) {
+      const usdValueToAdd = amount * cryptoPrice;
+      const balanceField = walletType === 'main' ? 'balances.main' : 'balances.matured';
+      await User.findByIdAndUpdate(userId, {
+        $inc: { [balanceField]: usdValueToAdd }
+      });
+    }
+
+    // Create transaction record
+    const transaction = new Transaction({
+      user: userId,
+      type: 'deposit',
+      amount: amount,
+      asset: cryptoCurrency.toUpperCase(),
+      assetAmount: amount,
+      currency: 'USD',
+      status: 'completed',
+      method: cryptoCurrency.toUpperCase(),
+      reference: `CRYPTO-ADD-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+      details: {
+        cryptoCurrency: cryptoCurrency,
+        walletType: walletType,
+        addedBy: req.admin.name || req.admin.email,
+        description: description || `Crypto balance added by admin`,
+        priceAtAddition: cryptoPrice
+      },
+      fee: 0,
+      netAmount: cryptoPrice ? amount * cryptoPrice : 0,
+      exchangeRateAtTime: cryptoPrice,
+      network: cryptoCurrency.toUpperCase(),
+      processedBy: req.admin._id,
+      processedAt: new Date()
+    });
+
+    await transaction.save();
+
+    // Log the activity
+    await logActivity(
+      'crypto_balance_added',
+      'User',
+      userId,
+      req.admin._id,
+      'Admin',
+      req,
+      {
+        cryptoCurrency: cryptoCurrency,
+        amount: amount,
+        walletType: walletType,
+        usdValue: cryptoPrice ? amount * cryptoPrice : 0,
+        cryptoPrice: cryptoPrice
+      }
+    );
+
+    res.status(200).json({
+      status: 'success',
+      message: `Successfully added ${amount} ${cryptoCurrency.toUpperCase()} to user's ${walletType} wallet`,
+      data: {
+        user: {
+          id: user._id,
+          name: `${user.firstName} ${user.lastName}`,
+          email: user.email
+        },
+        cryptoCurrency: cryptoCurrency,
+        amount: amount,
+        walletType: walletType,
+        usdValue: cryptoPrice ? amount * cryptoPrice : 0,
+        newBalance: userAssetBalance.balances[cryptoLower],
+        transactionId: transaction._id
+      }
+    });
+
+  } catch (err) {
+    console.error('Error adding crypto balance:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to add crypto balance'
+    });
+  }
+});
 
 
 
