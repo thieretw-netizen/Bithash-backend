@@ -1,3 +1,4 @@
+
 // SNIPPET A - COMPLETE REWRITE
 require('dotenv').config()
 const express = require('express');
@@ -95,12 +96,17 @@ const redis = new Redis({
     const delay = Math.min(times * 50, 2000);
     return delay;
   },
+
+
+  
   maxRetriesPerRequest: 3,
   enableReadyCheck: true,
   lazyConnect: false,
   keepAlive: 10000,
   connectTimeout: 10000
 });
+
+
 
 redis.on('error', (err) => {
   console.error('Redis error:', err);
@@ -110,243 +116,6 @@ redis.on('connect', () => {
   console.log('Redis connected successfully');
 });
 
-// =============================================
-// PRICE AGGREGATOR WORKER - SINGLE SOURCE OF TRUTH
-// =============================================
-class PriceAggregatorWorker {
-  constructor() {
-    this.binanceWs = null;
-    this.reconnectAttempts = 0;
-    this.isRunning = false;
-    this.subscribedPairs = new Set();
-    this.quoteAssets = ['USDT', 'USDC', 'USDQ', 'USDR', 'EURC', 'USD', 'BNB', 'BTC'];
-    this.baseAssets = [
-      'BTC', 'ETH', 'BNB', 'SOL', 'XRP', 'ADA', 'DOGE', 'AVAX', 'DOT', 'LINK',
-      'MATIC', 'SHIB', 'TRX', 'UNI', 'ATOM', 'XLM', 'FIL', 'VET', 'ALGO', 'MANA',
-      'SAND', 'AXS', 'AAVE', 'EOS', 'MKR', 'DASH', 'XTZ', 'FTM', 'NEAR', 'GRT'
-    ];
-    this.timeframes = ['1s', '15m', '1h', '4h', '1d', '1w'];
-    this.healthCheckInterval = null;
-  }
-
-  generateAllPairs() {
-    const pairs = [];
-    for (const base of this.baseAssets) {
-      for (const quote of this.quoteAssets) {
-        pairs.push(`${base}${quote}`);
-      }
-    }
-    return pairs;
-  }
-
-  getBinanceStreamName(pair, streamType) {
-    return `${pair.toLowerCase()}@${streamType}`;
-  }
-
-  async start() {
-    if (this.isRunning) return;
-    this.isRunning = true;
-    console.log('🚀 Price Aggregator Worker starting...');
-    
-    await this.initializeRedisKeys();
-    this.connectBinanceWebSocket();
-    this.startHealthCheck();
-  }
-
-  async initializeRedisKeys() {
-    const allPairs = this.generateAllPairs();
-    for (const pair of allPairs) {
-      await redis.hsetnx(`price:${pair}`, 'lastPrice', '0');
-      await redis.hsetnx(`price:${pair}`, 'priceChangePercent', '0');
-      await redis.hsetnx(`price:${pair}`, 'highPrice', '0');
-      await redis.hsetnx(`price:${pair}`, 'lowPrice', '0');
-      await redis.hsetnx(`price:${pair}`, 'volume', '0');
-      await redis.hsetnx(`price:${pair}`, 'quoteVolume', '0');
-      await redis.hsetnx(`price:${pair}`, 'updatedAt', Date.now().toString());
-    }
-    console.log(`Initialized Redis keys for ${allPairs.length} pairs`);
-  }
-
-  connectBinanceWebSocket() {
-    if (this.binanceWs) {
-      try { this.binanceWs.close(); } catch(e) {}
-    }
-
-    const streams = [];
-    const allPairs = this.generateAllPairs();
-    
-    for (const pair of allPairs.slice(0, 100)) {
-      streams.push(`${pair.toLowerCase()}@ticker`);
-      streams.push(`${pair.toLowerCase()}@depth20`);
-      streams.push(`${pair.toLowerCase()}@trade`);
-    }
-    
-    for (const timeframe of this.timeframes) {
-      for (const pair of allPairs.slice(0, 50)) {
-        streams.push(`${pair.toLowerCase()}@kline_${timeframe}`);
-      }
-    }
-
-    const streamUrl = `wss://stream.binance.com:9443/stream?streams=${streams.join('/')}`;
-    
-    this.binanceWs = new WebSocket(streamUrl);
-
-    this.binanceWs.on('open', () => {
-      console.log('✅ Price Aggregator connected to Binance WebSocket');
-      this.reconnectAttempts = 0;
-    });
-
-    this.binanceWs.on('message', async (data) => {
-      try {
-        const parsed = JSON.parse(data);
-        if (!parsed.stream) return;
-        
-        const streamParts = parsed.stream.split('@');
-        const pair = streamParts[0].toUpperCase();
-        const channel = streamParts[1];
-        
-        if (channel === 'ticker') {
-          await this.handleTickerUpdate(pair, parsed.data);
-        } else if (channel === 'depth20') {
-          await this.handleDepthUpdate(pair, parsed.data);
-        } else if (channel === 'trade') {
-          await this.handleTradeUpdate(pair, parsed.data);
-        } else if (channel.startsWith('kline')) {
-          await this.handleKlineUpdate(pair, parsed.data);
-        }
-      } catch (err) {
-        console.error('Binance message parse error:', err.message);
-      }
-    });
-
-    this.binanceWs.on('error', (err) => {
-      console.error('Binance WebSocket error:', err.message);
-    });
-
-    this.binanceWs.on('close', () => {
-      console.log('Binance WebSocket closed, reconnecting...');
-      const delay = Math.min(5000 * Math.pow(2, this.reconnectAttempts), 30000);
-      this.reconnectAttempts++;
-      setTimeout(() => this.connectBinanceWebSocket(), delay);
-    });
-  }
-
-  async handleTickerUpdate(pair, data) {
-    const lastPrice = parseFloat(data.c);
-    const priceChangePercent = parseFloat(data.P);
-    const highPrice = parseFloat(data.h);
-    const lowPrice = parseFloat(data.l);
-    const volume = parseFloat(data.v);
-    const quoteVolume = parseFloat(data.q);
-    const openPrice = parseFloat(data.o);
-
-    await redis.hset(`price:${pair}`, {
-      lastPrice: lastPrice.toString(),
-      priceChangePercent: priceChangePercent.toString(),
-      highPrice: highPrice.toString(),
-      lowPrice: lowPrice.toString(),
-      volume: volume.toString(),
-      quoteVolume: quoteVolume.toString(),
-      openPrice: openPrice.toString(),
-      updatedAt: Date.now().toString()
-    });
-
-    await redis.publish('market:updates', JSON.stringify({
-      type: 'ticker',
-      symbol: pair,
-      price: lastPrice,
-      priceChangePercent: priceChangePercent,
-      highPrice: highPrice,
-      lowPrice: lowPrice,
-      volume: volume,
-      quoteVolume: quoteVolume
-    }));
-  }
-
-  async handleDepthUpdate(pair, data) {
-    const bids = (data.bids || []).slice(0, 100).map(b => [parseFloat(b[0]), parseFloat(b[1])]);
-    const asks = (data.asks || []).slice(0, 100).map(a => [parseFloat(a[0]), parseFloat(a[1])]);
-    
-    await redis.setex(`orderbook:${pair}`, 1, JSON.stringify({
-      bids: bids,
-      asks: asks,
-      lastUpdateId: data.lastUpdateId
-    }));
-
-    await redis.publish('market:updates', JSON.stringify({
-      type: 'orderbook',
-      symbol: pair,
-      bids: bids.slice(0, 20),
-      asks: asks.slice(0, 20)
-    }));
-  }
-
-  async handleTradeUpdate(pair, data) {
-    const trade = {
-      price: parseFloat(data.p),
-      amount: parseFloat(data.q),
-      time: data.T,
-      isBuyerMaker: data.m
-    };
-
-    await redis.lpush(`trades:${pair}`, JSON.stringify(trade));
-    await redis.ltrim(`trades:${pair}`, 0, 99);
-
-    await redis.publish('market:updates', JSON.stringify({
-      type: 'trade',
-      symbol: pair,
-      ...trade
-    }));
-  }
-
-  async handleKlineUpdate(pair, data) {
-    const kline = data.k;
-    const timeframe = kline.i;
-    const candle = {
-      openTime: kline.t,
-      open: parseFloat(kline.o),
-      high: parseFloat(kline.h),
-      low: parseFloat(kline.l),
-      close: parseFloat(kline.c),
-      volume: parseFloat(kline.v),
-      quoteVolume: parseFloat(kline.q),
-      trades: kline.n,
-      closeTime: kline.T
-    };
-
-    const key = `candles:${pair}:${timeframe}`;
-    await redis.zadd(key, candle.openTime, JSON.stringify(candle));
-    await redis.zremrangebyrank(key, 0, -501);
-
-    await redis.publish('market:updates', JSON.stringify({
-      type: 'candles',
-      symbol: pair,
-      interval: timeframe,
-      candle: candle
-    }));
-  }
-
-  startHealthCheck() {
-    this.healthCheckInterval = setInterval(async () => {
-      const isConnected = this.binanceWs && this.binanceWs.readyState === WebSocket.OPEN;
-      await redis.set('aggregator:health', isConnected ? 'healthy' : 'unhealthy');
-      await redis.set('aggregator:lastHeartbeat', Date.now().toString());
-      
-      if (!isConnected) {
-        console.error('⚠️ Price Aggregator health check failed - Binance disconnected');
-      }
-    }, 5000);
-  }
-
-  async stop() {
-    this.isRunning = false;
-    if (this.healthCheckInterval) clearInterval(this.healthCheckInterval);
-    if (this.binanceWs) this.binanceWs.close();
-    console.log('Price Aggregator Worker stopped');
-  }
-}
-
-const priceAggregator = new PriceAggregatorWorker();
 
 const MAIN_CRYPTOS = [
   'BTC', 'ETH', 'BNB', 'SOL', 'XRP', 'ADA', 'DOGE', 'AVAX', 'DOT', 'LINK',
@@ -747,6 +516,10 @@ const DownlineRelationshipSchema = new mongoose.Schema({
 DownlineRelationshipSchema.index({ downline: 1 }, { unique: true });
 DownlineRelationshipSchema.index({ upline: 1, downline: 1 }, { unique: true });
 DownlineRelationshipSchema.index({ status: 1 });
+
+DownlineRelationshipSchema.virtual('relationshipDescription').get(function() {
+  return `${this.downline} is downline of ${this.upline} with ${this.commissionPercentage}% commission`;
+});
 
 const DownlineRelationship = mongoose.model('DownlineRelationship', DownlineRelationshipSchema);
 
@@ -1402,6 +1175,7 @@ const CandleSchema = new mongoose.Schema({
 
 CandleSchema.index({ symbol: 1, interval: 1, openTime: 1 }, { unique: true });
 
+
 const PairLimitsSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true, index: true },
   baseAsset: { type: String, required: true },
@@ -1491,14 +1265,9 @@ const UserTradingSettingsSchema = new mongoose.Schema({
     displaySize: { type: String, enum: ['compact', 'normal'], default: 'compact' }
   },
   chartSettings: {
-    style: { type: String, default: 'candlestick' },
-    backgroundColor: { type: String, default: '#0B0E11' },
-    bullishColor: { type: String, default: '#228B22' },
-    bearishColor: { type: String, default: '#FF0000' },
-    solidCandles: { type: Boolean, default: false },
-    showBorders: { type: Boolean, default: true },
-    showWick: { type: Boolean, default: true },
-    tradeMarker: { type: String, default: 'both' }
+    interval: { type: String, default: '15m' },
+    theme: { type: String, enum: ['light', 'dark'], default: 'dark' },
+    studies: [{ type: String }]
   },
   notifications: {
     orderFilled: { type: Boolean, default: true },
@@ -3151,9 +2920,7 @@ module.exports = {
   DepositAsset,
   Buy,
   Sell,
-  setupWebSocketServer,
-  priceAggregator,
-  redis
+  setupWebSocketServer
 };
 
 const generateJWT = (id, isAdmin = false) => {
@@ -3282,11 +3049,6 @@ const detectAndSetIPPreferences = async (userId, req) => {
 
 const getCryptoPrice = async (asset) => {
   try {
-    const cachedPrice = await redis.hget(`price:${asset}USDT`, 'lastPrice');
-    if (cachedPrice && parseFloat(cachedPrice) > 0) {
-      return parseFloat(cachedPrice);
-    }
-    
     const assetMap = {
       'BTC': 'bitcoin',
       'ETH': 'ethereum',
@@ -3334,6 +3096,42 @@ const getCryptoPrice = async (asset) => {
       errors.push(`CryptoCompare: ${err.message}`);
     }
     
+    try {
+      const krakenMap = {
+        'BTC': 'XBTUSD',
+        'ETH': 'ETHUSD',
+        'USDT': 'USDTUSD',
+        'SOL': 'SOLUSD',
+        'XRP': 'XRPUSD',
+        'DOGE': 'DOGEUSD',
+        'ADA': 'ADAUSD',
+        'LTC': 'LTCUSD'
+      };
+      const pair = krakenMap[asset.toUpperCase()];
+      if (pair) {
+        const response = await axios.get(`https://api.kraken.com/0/public/Ticker?pair=${pair}`, { timeout: 5000 });
+        if (response.data && response.data.result && response.data.result[pair]) {
+          const price = parseFloat(response.data.result[pair].c[0]);
+          console.log(`Fetched ${asset} price from Kraken: $${price}`);
+          return price;
+        }
+      }
+      errors.push('Kraken: No data or unsupported pair');
+    } catch (err) {
+      errors.push(`Kraken: ${err.message}`);
+    }
+    
+    try {
+      const response = await axios.get(`https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=${asset.toUpperCase()}-USDT`, { timeout: 5000 });
+      if (response.data && response.data.data && response.data.data.price) {
+        console.log(`Fetched ${asset} price from KuCoin: $${response.data.data.price}`);
+        return parseFloat(response.data.data.price);
+      }
+      errors.push('KuCoin: Invalid response');
+    } catch (err) {
+      errors.push(`KuCoin: ${err.message}`);
+    }
+    
     console.error(`All price APIs failed for ${asset}:`, errors);
     return null;
   } catch (err) {
@@ -3344,11 +3142,6 @@ const getCryptoPrice = async (asset) => {
 
 const getExchangeRate = async (asset, fiat = 'usd') => {
   try {
-    const cachedPrice = await redis.hget(`price:${asset}USDT`, 'lastPrice');
-    if (cachedPrice && parseFloat(cachedPrice) > 0) {
-      return parseFloat(cachedPrice);
-    }
-    
     const assetMap = {
       'BTC': 'bitcoin',
       'ETH': 'ethereum',
@@ -3386,6 +3179,28 @@ const getExchangeRate = async (asset, fiat = 'usd') => {
       errors.push('CryptoCompare: Invalid response');
     } catch (err) {
       errors.push(`CryptoCompare: ${err.message}`);
+    }
+    
+    try {
+      const krakenMap = {
+        'BTC': 'XBTUSD',
+        'ETH': 'ETHUSD',
+        'USDT': 'USDTUSD',
+        'SOL': 'SOLUSD',
+        'XRP': 'XRPUSD',
+        'DOGE': 'DOGEUSD',
+        'ADA': 'ADAUSD'
+      };
+      const pair = krakenMap[asset.toUpperCase()];
+      if (pair) {
+        const response = await axios.get(`https://api.kraken.com/0/public/Ticker?pair=${pair}`, { timeout: 5000 });
+        if (response.data && response.data.result && response.data.result[pair]) {
+          return parseFloat(response.data.result[pair].c[0]);
+        }
+      }
+      errors.push('Kraken: No data or unsupported pair');
+    } catch (err) {
+      errors.push(`Kraken: ${err.message}`);
     }
     
     console.error(`All exchange rate APIs failed for ${asset}:`, errors);
