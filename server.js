@@ -3026,6 +3026,64 @@ const detectAndSetIPPreferences = async (userId, req) => {
   }
 };
 
+// =============================================
+// IMPORT ALL CRYPTOCURRENCIES FROM BINANCE API IN REALTIME
+// =============================================
+let allBinanceCryptos = [];
+let cryptoListLastUpdated = null;
+
+const fetchAllBinanceCryptos = async () => {
+  try {
+    const response = await axios.get('https://api.binance.com/api/v3/exchangeInfo', { timeout: 10000 });
+    
+    if (response.data && response.data.symbols) {
+      const uniqueBaseAssets = new Set();
+      response.data.symbols.forEach(symbol => {
+        if (symbol.status === 'TRADING') {
+          uniqueBaseAssets.add(symbol.baseAsset);
+        }
+      });
+      
+      allBinanceCryptos = Array.from(uniqueBaseAssets).map(asset => ({
+        symbol: asset,
+        name: asset,
+        supported: true
+      }));
+      
+      cryptoListLastUpdated = new Date();
+      console.log(`✅ Imported ${allBinanceCryptos.length} cryptocurrencies from Binance API`);
+      
+      await redis.set('binance_cryptos', JSON.stringify(allBinanceCryptos));
+      await redis.set('binance_cryptos_updated', cryptoListLastUpdated.toISOString());
+      
+      return allBinanceCryptos;
+    }
+    
+    const cached = await redis.get('binance_cryptos');
+    if (cached) {
+      allBinanceCryptos = JSON.parse(cached);
+      console.log(`📦 Using cached crypto list: ${allBinanceCryptos.length} assets`);
+      return allBinanceCryptos;
+    }
+    
+    return [];
+  } catch (err) {
+    console.error('Error fetching Binance cryptos:', err.message);
+    
+    const cached = await redis.get('binance_cryptos');
+    if (cached) {
+      allBinanceCryptos = JSON.parse(cached);
+      return allBinanceCryptos;
+    }
+    
+    return [];
+  }
+};
+
+setInterval(fetchAllBinanceCryptos, 3600000);
+
+fetchAllBinanceCryptos();
+
 const getCryptoPrice = async (asset) => {
   try {
     const assetMap = {
@@ -3289,27 +3347,525 @@ const convertToFiat = async (cryptoAmount, asset) => {
   return cryptoAmount * rate;
 };
 
-const sendEmail = async (options) => {
-  try {
-    let mailTransporter = infoTransporter;
+// =============================================
+// ENHANCED ENTERPRISE-GRADE EMAIL SERVICE WITH PROFESSIONAL HTML TEMPLATES
+// =============================================
+const sendProfessionalEmail = async ({ email, template, data }) => {
+  const logoUrl = 'https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png';
+  const siteUrl = 'https://www.bithashcapital.live';
+  
+  const getTemplate = (type, userData) => {
+    const templates = {
+      welcome: `
+        <div style="background-color: #0B0E11; padding: 40px 0; font-family: 'Domine', serif;">
+          <div style="max-width: 600px; margin: 0 auto; background-color: #11151C; border-radius: 16px; overflow: hidden; border: 1px solid #1E2329;">
+            <div style="background: linear-gradient(135deg, #F7A600 0%, #E69500 100%); padding: 30px; text-align: center;">
+              <img src="${logoUrl}" alt="BitHash Capital Logo" style="width: 60px; height: auto; margin-bottom: 15px;">
+              <h1 style="color: #000000; margin: 0; font-size: 28px; font-weight: 700;">₿itHash Capital</h1>
+              <p style="color: #000000; margin: 5px 0 0; font-size: 14px; font-style: italic; font-weight: bold;"><em>Where Your Financial Goals Become Reality</em></p>
+            </div>
+            <div style="padding: 40px 30px;">
+              <h2 style="color: #FFFFFF; margin-top: 0; font-size: 24px;">Welcome to BitHash Capital, ${userData.name}!</h2>
+              <p style="color: #B7BDC6; line-height: 1.6; margin-bottom: 20px;">Thank you for choosing BitHash Capital as your trusted partner in institutional Bitcoin mining and cryptocurrency investments.</p>
+              <p style="color: #B7BDC6; line-height: 1.6; margin-bottom: 20px;">We are excited to have you on board. Your journey to financial freedom starts here.</p>
+              <div style="background-color: #1B222C; padding: 20px; border-radius: 12px; margin: 25px 0; text-align: center;">
+                <p style="color: #FFFFFF; margin: 0 0 10px;">Your referral code:</p>
+                <p style="color: #F7A600; font-size: 24px; font-weight: bold; letter-spacing: 2px; margin: 0;">${userData.referralCode || 'N/A'}</p>
+                <p style="color: #6C7480; font-size: 12px; margin: 10px 0 0;">Share this code with friends and earn rewards</p>
+              </div>
+              <a href="${siteUrl}/dashboard" style="display: inline-block; background-color: #F7A600; color: #000000; text-decoration: none; padding: 14px 32px; border-radius: 999px; font-weight: 600; margin-top: 10px;">Go to Dashboard</a>
+            </div>
+            <div style="background-color: #0A0E17; padding: 20px 30px; text-align: center; border-top: 1px solid #1E2329;">
+              <p style="color: #6C7480; margin: 0 0 10px; font-size: 12px;">© 2024 BitHash Capital. All rights reserved.</p>
+              <p style="color: #6C7480; margin: 0; font-size: 12px;">800 Plant St, Wilmington, DE 19801, United States</p>
+              <div style="margin-top: 15px;">
+                <a href="${siteUrl}/privacy" style="color: #F7A600; text-decoration: none; margin: 0 10px; font-size: 12px;">Privacy Policy</a>
+                <a href="${siteUrl}/terms" style="color: #F7A600; text-decoration: none; margin: 0 10px; font-size: 12px;">Terms of Service</a>
+              </div>
+            </div>
+          </div>
+        </div>
+      `,
+      otp: `
+        <div style="background-color: #0B0E11; padding: 40px 0; font-family: 'Domine', serif;">
+          <div style="max-width: 600px; margin: 0 auto; background-color: #11151C; border-radius: 16px; overflow: hidden; border: 1px solid #1E2329;">
+            <div style="background: linear-gradient(135deg, #F7A600 0%, #E69500 100%); padding: 30px; text-align: center;">
+              <img src="${logoUrl}" alt="BitHash Capital Logo" style="width: 60px; height: auto; margin-bottom: 15px;">
+              <h1 style="color: #000000; margin: 0; font-size: 28px; font-weight: 700;">₿itHash Capital</h1>
+              <p style="color: #000000; margin: 5px 0 0; font-size: 14px; font-style: italic; font-weight: bold;"><em>Where Your Financial Goals Become Reality</em></p>
+            </div>
+            <div style="padding: 40px 30px;">
+              <h2 style="color: #FFFFFF; margin-top: 0; font-size: 24px;">Verification Required</h2>
+              <p style="color: #B7BDC6; line-height: 1.6; margin-bottom: 20px;">Hello ${userData.name},</p>
+              <p style="color: #B7BDC6; line-height: 1.6; margin-bottom: 20px;">Please use the verification code below to complete your ${userData.action}.</p>
+              <div style="background-color: #1B222C; padding: 25px; border-radius: 12px; margin: 25px 0; text-align: center;">
+                <p style="color: #FFFFFF; margin: 0 0 10px; font-size: 14px;">Your verification code is:</p>
+                <p style="color: #F7A600; font-size: 36px; font-weight: bold; letter-spacing: 8px; margin: 10px 0;">${userData.otp}</p>
+                <p style="color: #6C7480; font-size: 12px; margin: 10px 0 0;">This code will expire in 5 minutes</p>
+              </div>
+              <p style="color: #B7BDC6; line-height: 1.6; margin-bottom: 10px;">If you did not request this verification, please ignore this email or contact our support team immediately.</p>
+            </div>
+            <div style="background-color: #0A0E17; padding: 20px 30px; text-align: center; border-top: 1px solid #1E2329;">
+              <p style="color: #6C7480; margin: 0 0 10px; font-size: 12px;">BitHash Capital Finance Team</p>
+              <p style="color: #6C7480; margin: 0; font-size: 12px;">© 2024 BitHash Capital. All rights reserved.</p>
+            </div>
+          </div>
+        </div>
+      `,
+      login_success: `
+        <div style="background-color: #0B0E11; padding: 40px 0; font-family: 'Domine', serif;">
+          <div style="max-width: 600px; margin: 0 auto; background-color: #11151C; border-radius: 16px; overflow: hidden; border: 1px solid #1E2329;">
+            <div style="background: linear-gradient(135deg, #F7A600 0%, #E69500 100%); padding: 30px; text-align: center;">
+              <img src="${logoUrl}" alt="BitHash Capital Logo" style="width: 60px; height: auto; margin-bottom: 15px;">
+              <h1 style="color: #000000; margin: 0; font-size: 28px; font-weight: 700;">₿itHash Capital</h1>
+              <p style="color: #000000; margin: 5px 0 0; font-size: 14px; font-style: italic; font-weight: bold;"><em>Where Your Financial Goals Become Reality</em></p>
+            </div>
+            <div style="padding: 40px 30px;">
+              <h2 style="color: #FFFFFF; margin-top: 0; font-size: 24px;">New Login Detected</h2>
+              <p style="color: #B7BDC6; line-height: 1.6; margin-bottom: 20px;">Hello ${userData.name},</p>
+              <p style="color: #B7BDC6; line-height: 1.6; margin-bottom: 20px;">We detected a successful login to your BitHash Capital account.</p>
+              <div style="background-color: #1B222C; padding: 20px; border-radius: 12px; margin: 25px 0;">
+                <p style="color: #FFFFFF; margin: 0 0 10px;"><strong>Login Details:</strong></p>
+                <p style="color: #B7BDC6; margin: 5px 0;"><i class="fas fa-desktop"></i> Device: ${userData.device || 'Unknown'}</p>
+                <p style="color: #B7BDC6; margin: 5px 0;"><i class="fas fa-map-marker-alt"></i> Location: ${userData.location || 'Unknown'}</p>
+                <p style="color: #B7BDC6; margin: 5px 0;"><i class="fas fa-clock"></i> Time: ${new Date().toLocaleString()}</p>
+              </div>
+              <p style="color: #B7BDC6; line-height: 1.6;">If this was not you, please contact our support team immediately to secure your account.</p>
+            </div>
+            <div style="background-color: #0A0E17; padding: 20px 30px; text-align: center; border-top: 1px solid #1E2329;">
+              <p style="color: #6C7480; margin: 0 0 10px; font-size: 12px;">BitHash Capital Finance Team</p>
+              <p style="color: #6C7480; margin: 0; font-size: 12px;">© 2024 BitHash Capital. All rights reserved.</p>
+            </div>
+          </div>
+        </div>
+      `,
+      kyc_approved: `
+        <div style="background-color: #0B0E11; padding: 40px 0; font-family: 'Domine', serif;">
+          <div style="max-width: 600px; margin: 0 auto; background-color: #11151C; border-radius: 16px; overflow: hidden; border: 1px solid #1E2329;">
+            <div style="background: linear-gradient(135deg, #F7A600 0%, #E69500 100%); padding: 30px; text-align: center;">
+              <img src="${logoUrl}" alt="BitHash Capital Logo" style="width: 60px; height: auto; margin-bottom: 15px;">
+              <h1 style="color: #000000; margin: 0; font-size: 28px; font-weight: 700;">₿itHash Capital</h1>
+              <p style="color: #000000; margin: 5px 0 0; font-size: 14px; font-style: italic; font-weight: bold;"><em>Where Your Financial Goals Become Reality</em></p>
+            </div>
+            <div style="padding: 40px 30px;">
+              <div style="text-align: center; margin-bottom: 20px;">
+                <i class="fas fa-check-circle" style="font-size: 64px; color: #228B22;"></i>
+              </div>
+              <h2 style="color: #FFFFFF; margin-top: 0; font-size: 24px; text-align: center;">KYC Verification Approved</h2>
+              <p style="color: #B7BDC6; line-height: 1.6; margin-bottom: 20px;">Dear ${userData.name},</p>
+              <p style="color: #B7BDC6; line-height: 1.6; margin-bottom: 20px;">We are pleased to inform you that your KYC verification has been successfully approved. Your account is now fully verified.</p>
+              <p style="color: #B7BDC6; line-height: 1.6; margin-bottom: 20px;">With KYC verification complete, you now have access to all features including increased limits and priority support.</p>
+              <a href="${siteUrl}/dashboard" style="display: inline-block; background-color: #228B22; color: #FFFFFF; text-decoration: none; padding: 14px 32px; border-radius: 999px; font-weight: 600; margin-top: 10px;">Go to Dashboard</a>
+            </div>
+            <div style="background-color: #0A0E17; padding: 20px 30px; text-align: center; border-top: 1px solid #1E2329;">
+              <p style="color: #6C7480; margin: 0 0 10px; font-size: 12px;">BitHash Capital Finance Team</p>
+              <p style="color: #6C7480; margin: 0; font-size: 12px;">© 2024 BitHash Capital. All rights reserved.</p>
+            </div>
+          </div>
+        </div>
+      `,
+      kyc_rejected: `
+        <div style="background-color: #0B0E11; padding: 40px 0; font-family: 'Domine', serif;">
+          <div style="max-width: 600px; margin: 0 auto; background-color: #11151C; border-radius: 16px; overflow: hidden; border: 1px solid #1E2329;">
+            <div style="background: linear-gradient(135deg, #F7A600 0%, #E69500 100%); padding: 30px; text-align: center;">
+              <img src="${logoUrl}" alt="BitHash Capital Logo" style="width: 60px; height: auto; margin-bottom: 15px;">
+              <h1 style="color: #000000; margin: 0; font-size: 28px; font-weight: 700;">₿itHash Capital</h1>
+              <p style="color: #000000; margin: 5px 0 0; font-size: 14px; font-style: italic; font-weight: bold;"><em>Where Your Financial Goals Become Reality</em></p>
+            </div>
+            <div style="padding: 40px 30px;">
+              <div style="text-align: center; margin-bottom: 20px;">
+                <i class="fas fa-times-circle" style="font-size: 64px; color: #FF0000;"></i>
+              </div>
+              <h2 style="color: #FFFFFF; margin-top: 0; font-size: 24px; text-align: center;">KYC Verification Update</h2>
+              <p style="color: #B7BDC6; line-height: 1.6; margin-bottom: 20px;">Dear ${userData.name},</p>
+              <p style="color: #B7BDC6; line-height: 1.6; margin-bottom: 20px;">We regret to inform you that your KYC verification could not be approved at this time.</p>
+              <div style="background-color: #1B222C; padding: 20px; border-radius: 12px; margin: 25px 0;">
+                <p style="color: #FFFFFF; margin: 0 0 10px;"><strong>Reason for rejection:</strong></p>
+                <p style="color: #B7BDC6; margin: 0;">${userData.reason || 'Please review and resubmit your documents'}</p>
+              </div>
+              <p style="color: #B7BDC6; line-height: 1.6;">Please review the requirements and resubmit your documents. Our support team is available to assist you with any questions.</p>
+              <a href="${siteUrl}/kyc" style="display: inline-block; background-color: #F7A600; color: #000000; text-decoration: none; padding: 14px 32px; border-radius: 999px; font-weight: 600; margin-top: 10px;">Resubmit KYC</a>
+            </div>
+            <div style="background-color: #0A0E17; padding: 20px 30px; text-align: center; border-top: 1px solid #1E2329;">
+              <p style="color: #6C7480; margin: 0 0 10px; font-size: 12px;">BitHash Capital Finance Team</p>
+              <p style="color: #6C7480; margin: 0; font-size: 12px;">© 2024 BitHash Capital. All rights reserved.</p>
+            </div>
+          </div>
+        </div>
+      `,
+      deposit_approved: `
+        <div style="background-color: #0B0E11; padding: 40px 0; font-family: 'Domine', serif;">
+          <div style="max-width: 600px; margin: 0 auto; background-color: #11151C; border-radius: 16px; overflow: hidden; border: 1px solid #1E2329;">
+            <div style="background: linear-gradient(135deg, #F7A600 0%, #E69500 100%); padding: 30px; text-align: center;">
+              <img src="${logoUrl}" alt="BitHash Capital Logo" style="width: 60px; height: auto; margin-bottom: 15px;">
+              <h1 style="color: #000000; margin: 0; font-size: 28px; font-weight: 700;">₿itHash Capital</h1>
+              <p style="color: #000000; margin: 5px 0 0; font-size: 14px; font-style: italic; font-weight: bold;"><em>Where Your Financial Goals Become Reality</em></p>
+            </div>
+            <div style="padding: 40px 30px;">
+              <div style="text-align: center; margin-bottom: 20px;">
+                <i class="fas fa-check-circle" style="font-size: 64px; color: #228B22;"></i>
+              </div>
+              <h2 style="color: #FFFFFF; margin-top: 0; font-size: 24px; text-align: center;">Deposit Confirmed</h2>
+              <p style="color: #B7BDC6; line-height: 1.6; margin-bottom: 20px;">Dear ${userData.name},</p>
+              <p style="color: #B7BDC6; line-height: 1.6; margin-bottom: 20px;">Your deposit has been successfully processed and credited to your account.</p>
+              <div style="background-color: #1B222C; padding: 20px; border-radius: 12px; margin: 25px 0;">
+                <p style="color: #FFFFFF; margin: 0 0 10px;"><strong>Deposit Details:</strong></p>
+                <p style="color: #B7BDC6; margin: 5px 0;">Amount: $${userData.amount?.toLocaleString() || '0'}</p>
+                <p style="color: #B7BDC6; margin: 5px 0;">Method: ${userData.method || 'Bank Transfer'}</p>
+                <p style="color: #B7BDC6; margin: 5px 0;">Reference: ${userData.reference || 'N/A'}</p>
+                <p style="color: #B7BDC6; margin: 5px 0;">New Balance: $${userData.newBalance?.toLocaleString() || '0'}</p>
+              </div>
+              <a href="${siteUrl}/dashboard" style="display: inline-block; background-color: #F7A600; color: #000000; text-decoration: none; padding: 14px 32px; border-radius: 999px; font-weight: 600; margin-top: 10px;">View Dashboard</a>
+            </div>
+            <div style="background-color: #0A0E17; padding: 20px 30px; text-align: center; border-top: 1px solid #1E2329;">
+              <p style="color: #6C7480; margin: 0 0 10px; font-size: 12px;">BitHash Capital Finance Team</p>
+              <p style="color: #6C7480; margin: 0; font-size: 12px;">© 2024 BitHash Capital. All rights reserved.</p>
+            </div>
+          </div>
+        </div>
+      `,
+      deposit_rejected: `
+        <div style="background-color: #0B0E11; padding: 40px 0; font-family: 'Domine', serif;">
+          <div style="max-width: 600px; margin: 0 auto; background-color: #11151C; border-radius: 16px; overflow: hidden; border: 1px solid #1E2329;">
+            <div style="background: linear-gradient(135deg, #F7A600 0%, #E69500 100%); padding: 30px; text-align: center;">
+              <img src="${logoUrl}" alt="BitHash Capital Logo" style="width: 60px; height: auto; margin-bottom: 15px;">
+              <h1 style="color: #000000; margin: 0; font-size: 28px; font-weight: 700;">₿itHash Capital</h1>
+              <p style="color: #000000; margin: 5px 0 0; font-size: 14px; font-style: italic; font-weight: bold;"><em>Where Your Financial Goals Become Reality</em></p>
+            </div>
+            <div style="padding: 40px 30px;">
+              <div style="text-align: center; margin-bottom: 20px;">
+                <i class="fas fa-times-circle" style="font-size: 64px; color: #FF0000;"></i>
+              </div>
+              <h2 style="color: #FFFFFF; margin-top: 0; font-size: 24px; text-align: center;">Deposit Update</h2>
+              <p style="color: #B7BDC6; line-height: 1.6; margin-bottom: 20px;">Dear ${userData.name},</p>
+              <p style="color: #B7BDC6; line-height: 1.6; margin-bottom: 20px;">Your deposit request could not be processed.</p>
+              <div style="background-color: #1B222C; padding: 20px; border-radius: 12px; margin: 25px 0;">
+                <p style="color: #FFFFFF; margin: 0 0 10px;"><strong>Deposit Details:</strong></p>
+                <p style="color: #B7BDC6; margin: 5px 0;">Amount: $${userData.amount?.toLocaleString() || '0'}</p>
+                <p style="color: #B7BDC6; margin: 5px 0;">Method: ${userData.method || 'Bank Transfer'}</p>
+                <p style="color: #B7BDC6; margin: 5px 0;"><strong>Reason:</strong> ${userData.reason || 'Please contact support'}</p>
+              </div>
+              <p style="color: #B7BDC6; line-height: 1.6;">Please contact our support team for assistance or try again with a different payment method.</p>
+              <a href="${siteUrl}/deposit" style="display: inline-block; background-color: #F7A600; color: #000000; text-decoration: none; padding: 14px 32px; border-radius: 999px; font-weight: 600; margin-top: 10px;">Try Again</a>
+            </div>
+            <div style="background-color: #0A0E17; padding: 20px 30px; text-align: center; border-top: 1px solid #1E2329;">
+              <p style="color: #6C7480; margin: 0 0 10px; font-size: 12px;">BitHash Capital Finance Team</p>
+              <p style="color: #6C7480; margin: 0; font-size: 12px;">© 2024 BitHash Capital. All rights reserved.</p>
+            </div>
+          </div>
+        </div>
+      `,
+      withdrawal_request: `
+        <div style="background-color: #0B0E11; padding: 40px 0; font-family: 'Domine', serif;">
+          <div style="max-width: 600px; margin: 0 auto; background-color: #11151C; border-radius: 16px; overflow: hidden; border: 1px solid #1E2329;">
+            <div style="background: linear-gradient(135deg, #F7A600 0%, #E69500 100%); padding: 30px; text-align: center;">
+              <img src="${logoUrl}" alt="BitHash Capital Logo" style="width: 60px; height: auto; margin-bottom: 15px;">
+              <h1 style="color: #000000; margin: 0; font-size: 28px; font-weight: 700;">₿itHash Capital</h1>
+              <p style="color: #000000; margin: 5px 0 0; font-size: 14px; font-style: italic; font-weight: bold;"><em>Where Your Financial Goals Become Reality</em></p>
+            </div>
+            <div style="padding: 40px 30px;">
+              <h2 style="color: #FFFFFF; margin-top: 0; font-size: 24px;">Withdrawal Request Received</h2>
+              <p style="color: #B7BDC6; line-height: 1.6; margin-bottom: 20px;">Dear ${userData.name},</p>
+              <p style="color: #B7BDC6; line-height: 1.6; margin-bottom: 20px;">We have received your withdrawal request and it is now pending processing.</p>
+              <div style="background-color: #1B222C; padding: 20px; border-radius: 12px; margin: 25px 0;">
+                <p style="color: #FFFFFF; margin: 0 0 10px;"><strong>Withdrawal Details:</strong></p>
+                <p style="color: #B7BDC6; margin: 5px 0;">Amount: ${userData.amount} ${userData.asset || 'USD'}</p>
+                <p style="color: #B7BDC6; margin: 5px 0;">USD Value: $${userData.usdValue?.toLocaleString() || '0'}</p>
+                <p style="color: #B7BDC6; margin: 5px 0;">Fee: ${userData.fee} ${userData.asset || 'USD'} (≈$${userData.feeUsd?.toFixed(2) || '0'})</p>
+                <p style="color: #B7BDC6; margin: 5px 0;">Net Amount: ${userData.netAmount} ${userData.asset || 'USD'}</p>
+                <p style="color: #B7BDC6; margin: 5px 0;">Destination Address: ${userData.withdrawalAddress || 'Bank Account'}</p>
+                <p style="color: #B7BDC6; margin: 5px 0;">Request ID: ${userData.requestId || 'N/A'}</p>
+              </div>
+              <p style="color: #B7BDC6; line-height: 1.6;">Processing typically takes 1-3 business days. You will receive a confirmation email once completed.</p>
+            </div>
+            <div style="background-color: #0A0E17; padding: 20px 30px; text-align: center; border-top: 1px solid #1E2329;">
+              <p style="color: #6C7480; margin: 0 0 10px; font-size: 12px;">BitHash Capital Finance Team</p>
+              <p style="color: #6C7480; margin: 0; font-size: 12px;">© 2024 BitHash Capital. All rights reserved.</p>
+            </div>
+          </div>
+        </div>
+      `,
+      withdrawal_approved: `
+        <div style="background-color: #0B0E11; padding: 40px 0; font-family: 'Domine', serif;">
+          <div style="max-width: 600px; margin: 0 auto; background-color: #11151C; border-radius: 16px; overflow: hidden; border: 1px solid #1E2329;">
+            <div style="background: linear-gradient(135deg, #F7A600 0%, #E69500 100%); padding: 30px; text-align: center;">
+              <img src="${logoUrl}" alt="BitHash Capital Logo" style="width: 60px; height: auto; margin-bottom: 15px;">
+              <h1 style="color: #000000; margin: 0; font-size: 28px; font-weight: 700;">₿itHash Capital</h1>
+              <p style="color: #000000; margin: 5px 0 0; font-size: 14px; font-style: italic; font-weight: bold;"><em>Where Your Financial Goals Become Reality</em></p>
+            </div>
+            <div style="padding: 40px 30px;">
+              <div style="text-align: center; margin-bottom: 20px;">
+                <i class="fas fa-check-circle" style="font-size: 64px; color: #228B22;"></i>
+              </div>
+              <h2 style="color: #FFFFFF; margin-top: 0; font-size: 24px; text-align: center;">Withdrawal Completed</h2>
+              <p style="color: #B7BDC6; line-height: 1.6; margin-bottom: 20px;">Dear ${userData.name},</p>
+              <p style="color: #B7BDC6; line-height: 1.6; margin-bottom: 20px;">Your withdrawal has been successfully processed.</p>
+              <div style="background-color: #1B222C; padding: 20px; border-radius: 12px; margin: 25px 0;">
+                <p style="color: #FFFFFF; margin: 0 0 10px;"><strong>Withdrawal Details:</strong></p>
+                <p style="color: #B7BDC6; margin: 5px 0;">Amount: ${userData.amount} ${userData.asset || 'USD'}</p>
+                <p style="color: #B7BDC6; margin: 5px 0;">Fee: ${userData.fee} ${userData.asset || 'USD'} (≈$${userData.feeUsd?.toFixed(2) || '0'})</p>
+                <p style="color: #B7BDC6; margin: 5px 0;">Net Amount Received: ${userData.netAmount} ${userData.asset || 'USD'}</p>
+                ${userData.txid ? `<p style="color: #B7BDC6; margin: 5px 0;">Transaction ID: ${userData.txid}</p>` : ''}
+                <p style="color: #B7BDC6; margin: 5px 0;">Processed: ${new Date(userData.processedAt).toLocaleString()}</p>
+              </div>
+              <p style="color: #B7BDC6; line-height: 1.6;">The funds should reach your destination shortly.</p>
+            </div>
+            <div style="background-color: #0A0E17; padding: 20px 30px; text-align: center; border-top: 1px solid #1E2329;">
+              <p style="color: #6C7480; margin: 0 0 10px; font-size: 12px;">BitHash Capital Finance Team</p>
+              <p style="color: #6C7480; margin: 0; font-size: 12px;">© 2024 BitHash Capital. All rights reserved.</p>
+            </div>
+          </div>
+        </div>
+      `,
+      withdrawal_rejected: `
+        <div style="background-color: #0B0E11; padding: 40px 0; font-family: 'Domine', serif;">
+          <div style="max-width: 600px; margin: 0 auto; background-color: #11151C; border-radius: 16px; overflow: hidden; border: 1px solid #1E2329;">
+            <div style="background: linear-gradient(135deg, #F7A600 0%, #E69500 100%); padding: 30px; text-align: center;">
+              <img src="${logoUrl}" alt="BitHash Capital Logo" style="width: 60px; height: auto; margin-bottom: 15px;">
+              <h1 style="color: #000000; margin: 0; font-size: 28px; font-weight: 700;">₿itHash Capital</h1>
+              <p style="color: #000000; margin: 5px 0 0; font-size: 14px; font-style: italic; font-weight: bold;"><em>Where Your Financial Goals Become Reality</em></p>
+            </div>
+            <div style="padding: 40px 30px;">
+              <div style="text-align: center; margin-bottom: 20px;">
+                <i class="fas fa-times-circle" style="font-size: 64px; color: #FF0000;"></i>
+              </div>
+              <h2 style="color: #FFFFFF; margin-top: 0; font-size: 24px; text-align: center;">Withdrawal Update</h2>
+              <p style="color: #B7BDC6; line-height: 1.6; margin-bottom: 20px;">Dear ${userData.name},</p>
+              <p style="color: #B7BDC6; line-height: 1.6; margin-bottom: 20px;">Your withdrawal request could not be processed.</p>
+              <div style="background-color: #1B222C; padding: 20px; border-radius: 12px; margin: 25px 0;">
+                <p style="color: #FFFFFF; margin: 0 0 10px;"><strong>Withdrawal Details:</strong></p>
+                <p style="color: #B7BDC6; margin: 5px 0;">Amount: $${userData.amount?.toLocaleString() || '0'}</p>
+                <p style="color: #B7BDC6; margin: 5px 0;">Method: ${userData.method || 'Bank Transfer'}</p>
+                <p style="color: #B7BDC6; margin: 5px 0;"><strong>Reason:</strong> ${userData.reason || 'Please contact support'}</p>
+              </div>
+              <p style="color: #B7BDC6; line-height: 1.6;">The funds have been returned to your account balance. Please contact our support team if you need assistance.</p>
+              <a href="${siteUrl}/withdraw" style="display: inline-block; background-color: #F7A600; color: #000000; text-decoration: none; padding: 14px 32px; border-radius: 999px; font-weight: 600; margin-top: 10px;">Try Again</a>
+            </div>
+            <div style="background-color: #0A0E17; padding: 20px 30px; text-align: center; border-top: 1px solid #1E2329;">
+              <p style="color: #6C7480; margin: 0 0 10px; font-size: 12px;">BitHash Capital Finance Team</p>
+              <p style="color: #6C7480; margin: 0; font-size: 12px;">© 2024 BitHash Capital. All rights reserved.</p>
+            </div>
+          </div>
+        </div>
+      `,
+      investment_created: `
+        <div style="background-color: #0B0E11; padding: 40px 0; font-family: 'Domine', serif;">
+          <div style="max-width: 600px; margin: 0 auto; background-color: #11151C; border-radius: 16px; overflow: hidden; border: 1px solid #1E2329;">
+            <div style="background: linear-gradient(135deg, #F7A600 0%, #E69500 100%); padding: 30px; text-align: center;">
+              <img src="${logoUrl}" alt="BitHash Capital Logo" style="width: 60px; height: auto; margin-bottom: 15px;">
+              <h1 style="color: #000000; margin: 0; font-size: 28px; font-weight: 700;">₿itHash Capital</h1>
+              <p style="color: #000000; margin: 5px 0 0; font-size: 14px; font-style: italic; font-weight: bold;"><em>Where Your Financial Goals Become Reality</em></p>
+            </div>
+            <div style="padding: 40px 30px;">
+              <div style="text-align: center; margin-bottom: 20px;">
+                <i class="fas fa-chart-line" style="font-size: 64px; color: #F7A600;"></i>
+              </div>
+              <h2 style="color: #FFFFFF; margin-top: 0; font-size: 24px; text-align: center;">Investment Active</h2>
+              <p style="color: #B7BDC6; line-height: 1.6; margin-bottom: 20px;">Dear ${userData.name},</p>
+              <p style="color: #B7BDC6; line-height: 1.6; margin-bottom: 20px;">Your investment has been successfully activated.</p>
+              <div style="background-color: #1B222C; padding: 20px; border-radius: 12px; margin: 25px 0;">
+                <p style="color: #FFFFFF; margin: 0 0 10px;"><strong>Investment Details:</strong></p>
+                <p style="color: #B7BDC6; margin: 5px 0;">Plan: ${userData.planName}</p>
+                <p style="color: #B7BDC6; margin: 5px 0;">Amount: $${userData.amount?.toLocaleString() || '0'}</p>
+                <p style="color: #B7BDC6; margin: 5px 0;">Expected Return: $${userData.expectedReturn?.toLocaleString() || '0'}</p>
+                <p style="color: #B7BDC6; margin: 5px 0;">Duration: ${userData.duration} hours</p>
+                <p style="color: #B7BDC6; margin: 5px 0;">Start Date: ${new Date(userData.startDate).toLocaleString()}</p>
+                <p style="color: #B7BDC6; margin: 5px 0;">Maturity Date: ${new Date(userData.endDate).toLocaleString()}</p>
+              </div>
+              <a href="${siteUrl}/investments" style="display: inline-block; background-color: #F7A600; color: #000000; text-decoration: none; padding: 14px 32px; border-radius: 999px; font-weight: 600; margin-top: 10px;">View Investments</a>
+            </div>
+            <div style="background-color: #0A0E17; padding: 20px 30px; text-align: center; border-top: 1px solid #1E2329;">
+              <p style="color: #6C7480; margin: 0 0 10px; font-size: 12px;">BitHash Capital Finance Team</p>
+              <p style="color: #6C7480; margin: 0; font-size: 12px;">© 2024 BitHash Capital. All rights reserved.</p>
+            </div>
+          </div>
+        </div>
+      `,
+      investment_matured: `
+        <div style="background-color: #0B0E11; padding: 40px 0; font-family: 'Domine', serif;">
+          <div style="max-width: 600px; margin: 0 auto; background-color: #11151C; border-radius: 16px; overflow: hidden; border: 1px solid #1E2329;">
+            <div style="background: linear-gradient(135deg, #F7A600 0%, #E69500 100%); padding: 30px; text-align: center;">
+              <img src="${logoUrl}" alt="BitHash Capital Logo" style="width: 60px; height: auto; margin-bottom: 15px;">
+              <h1 style="color: #000000; margin: 0; font-size: 28px; font-weight: 700;">₿itHash Capital</h1>
+              <p style="color: #000000; margin: 5px 0 0; font-size: 14px; font-style: italic; font-weight: bold;"><em>Where Your Financial Goals Become Reality</em></p>
+            </div>
+            <div style="padding: 40px 30px;">
+              <div style="text-align: center; margin-bottom: 20px;">
+                <i class="fas fa-trophy" style="font-size: 64px; color: #F7A600;"></i>
+              </div>
+              <h2 style="color: #FFFFFF; margin-top: 0; font-size: 24px; text-align: center;">Investment Matured</h2>
+              <p style="color: #B7BDC6; line-height: 1.6; margin-bottom: 20px;">Congratulations ${userData.name}!</p>
+              <p style="color: #B7BDC6; line-height: 1.6; margin-bottom: 20px;">Your investment has matured and the proceeds have been credited to your matured wallet.</p>
+              <div style="background-color: #1B222C; padding: 20px; border-radius: 12px; margin: 25px 0;">
+                <p style="color: #FFFFFF; margin: 0 0 10px;"><strong>Investment Returns:</strong></p>
+                <p style="color: #B7BDC6; margin: 5px 0;">Plan: ${userData.planName}</p>
+                <p style="color: #B7BDC6; margin: 5px 0;">Original Investment: $${userData.amount?.toLocaleString() || '0'}</p>
+                <p style="color: #B7BDC6; margin: 5px 0;">Total Return: $${userData.totalReturn?.toLocaleString() || '0'}</p>
+                <p style="color: #B7BDC6; margin: 5px 0;">Profit: $${userData.profit?.toLocaleString() || '0'}</p>
+                <p style="color: #B7BDC6; margin: 5px 0;">Matured Wallet Balance: $${userData.newMaturedBalance?.toLocaleString() || '0'}</p>
+              </div>
+              <a href="${siteUrl}/investments" style="display: inline-block; background-color: #F7A600; color: #000000; text-decoration: none; padding: 14px 32px; border-radius: 999px; font-weight: 600; margin-top: 10px;">View Your Earnings</a>
+            </div>
+            <div style="background-color: #0A0E17; padding: 20px 30px; text-align: center; border-top: 1px solid #1E2329;">
+              <p style="color: #6C7480; margin: 0 0 10px; font-size: 12px;">BitHash Capital Finance Team</p>
+              <p style="color: #6C7480; margin: 0; font-size: 12px;">© 2024 BitHash Capital. All rights reserved.</p>
+            </div>
+          </div>
+        </div>
+      `,
+      password_reset: `
+        <div style="background-color: #0B0E11; padding: 40px 0; font-family: 'Domine', serif;">
+          <div style="max-width: 600px; margin: 0 auto; background-color: #11151C; border-radius: 16px; overflow: hidden; border: 1px solid #1E2329;">
+            <div style="background: linear-gradient(135deg, #F7A600 0%, #E69500 100%); padding: 30px; text-align: center;">
+              <img src="${logoUrl}" alt="BitHash Capital Logo" style="width: 60px; height: auto; margin-bottom: 15px;">
+              <h1 style="color: #000000; margin: 0; font-size: 28px; font-weight: 700;">₿itHash Capital</h1>
+              <p style="color: #000000; margin: 5px 0 0; font-size: 14px; font-style: italic; font-weight: bold;"><em>Where Your Financial Goals Become Reality</em></p>
+            </div>
+            <div style="padding: 40px 30px;">
+              <h2 style="color: #FFFFFF; margin-top: 0; font-size: 24px;">Password Reset Request</h2>
+              <p style="color: #B7BDC6; line-height: 1.6; margin-bottom: 20px;">Hello ${userData.name},</p>
+              <p style="color: #B7BDC6; line-height: 1.6; margin-bottom: 20px;">We received a request to reset your password. Click the button below to create a new password.</p>
+              <div style="text-align: center; margin: 30px 0;">
+                <a href="${userData.resetUrl}" style="display: inline-block; background-color: #F7A600; color: #000000; text-decoration: none; padding: 14px 32px; border-radius: 999px; font-weight: 600;">Reset Password</a>
+              </div>
+              <p style="color: #B7BDC6; line-height: 1.6; margin-bottom: 10px;">This link will expire in 60 minutes for your security.</p>
+              <p style="color: #B7BDC6; line-height: 1.6;">If you did not request this, please ignore this email or contact support.</p>
+            </div>
+            <div style="background-color: #0A0E17; padding: 20px 30px; text-align: center; border-top: 1px solid #1E2329;">
+              <p style="color: #6C7480; margin: 0 0 10px; font-size: 12px;">BitHash Capital Finance Team</p>
+              <p style="color: #6C7480; margin: 0; font-size: 12px;">© 2024 BitHash Capital. All rights reserved.</p>
+            </div>
+          </div>
+        </div>
+      `,
+      password_changed: `
+        <div style="background-color: #0B0E11; padding: 40px 0; font-family: 'Domine', serif;">
+          <div style="max-width: 600px; margin: 0 auto; background-color: #11151C; border-radius: 16px; overflow: hidden; border: 1px solid #1E2329;">
+            <div style="background: linear-gradient(135deg, #F7A600 0%, #E69500 100%); padding: 30px; text-align: center;">
+              <img src="${logoUrl}" alt="BitHash Capital Logo" style="width: 60px; height: auto; margin-bottom: 15px;">
+              <h1 style="color: #000000; margin: 0; font-size: 28px; font-weight: 700;">₿itHash Capital</h1>
+              <p style="color: #000000; margin: 5px 0 0; font-size: 14px; font-style: italic; font-weight: bold;"><em>Where Your Financial Goals Become Reality</em></p>
+            </div>
+            <div style="padding: 40px 30px;">
+              <div style="text-align: center; margin-bottom: 20px;">
+                <i class="fas fa-lock" style="font-size: 64px; color: #F7A600;"></i>
+              </div>
+              <h2 style="color: #FFFFFF; margin-top: 0; font-size: 24px; text-align: center;">Password Changed</h2>
+              <p style="color: #B7BDC6; line-height: 1.6; margin-bottom: 20px;">Hello ${userData.name},</p>
+              <p style="color: #B7BDC6; line-height: 1.6; margin-bottom: 20px;">Your password was successfully changed.</p>
+              <div style="background-color: #1B222C; padding: 20px; border-radius: 12px; margin: 25px 0;">
+                <p style="color: #FFFFFF; margin: 0 0 10px;"><strong>Request Details:</strong></p>
+                <p style="color: #B7BDC6; margin: 5px 0;">IP Address: ${userData.ip}</p>
+                <p style="color: #B7BDC6; margin: 5px 0;">Device: ${userData.device}</p>
+                <p style="color: #B7BDC6; margin: 5px 0;">Time: ${new Date().toLocaleString()}</p>
+              </div>
+              <p style="color: #B7BDC6; line-height: 1.6;">If you did not make this change, please contact our support team immediately.</p>
+            </div>
+            <div style="background-color: #0A0E17; padding: 20px 30px; text-align: center; border-top: 1px solid #1E2329;">
+              <p style="color: #6C7480; margin: 0 0 10px; font-size: 12px;">BitHash Capital Finance Team</p>
+              <p style="color: #6C7480; margin: 0; font-size: 12px;">© 2024 BitHash Capital. All rights reserved.</p>
+            </div>
+          </div>
+        </div>
+      `
+    };
     
-    if (options.useSupportEmail === true) {
-      mailTransporter = supportTransporter;
+    return templates[type] || templates.welcome;
+  };
+  
+  const htmlContent = getTemplate(template, data);
+  
+  await sendEmail({
+    email: email,
+    subject: getSubjectForTemplate(template, data),
+    html: htmlContent
+  });
+};
+
+const getSubjectForTemplate = (template, data) => {
+  const subjects = {
+    welcome: `Welcome to BitHash Capital, ${data.name}!`,
+    otp: `Your Verification Code - BitHash Capital`,
+    login_success: `New Login to Your BitHash Capital Account`,
+    kyc_approved: `KYC Verification Approved - BitHash Capital`,
+    kyc_rejected: `KYC Verification Update - BitHash Capital`,
+    deposit_approved: `Deposit Confirmed - BitHash Capital`,
+    deposit_rejected: `Deposit Update - BitHash Capital`,
+    withdrawal_request: `Withdrawal Request Received - BitHash Capital`,
+    withdrawal_approved: `Withdrawal Completed - BitHash Capital`,
+    withdrawal_rejected: `Withdrawal Update - BitHash Capital`,
+    investment_created: `Investment Active - BitHash Capital`,
+    investment_matured: `Investment Matured - BitHash Capital`,
+    password_reset: `Reset Your BitHash Capital Password`,
+    password_changed: `Password Changed - BitHash Capital`
+  };
+  return subjects[template] || `Update from BitHash Capital`;
+};
+
+const sendAutomatedEmail = async (user, action, data = {}) => {
+  try {
+    let template = null;
+    let emailData = {
+      name: user.firstName || user.email?.split('@')[0] || 'Valued Customer',
+      ...data
+    };
+    
+    switch(action) {
+      case 'welcome':
+        template = 'welcome';
+        emailData.referralCode = user.referralCode;
+        break;
+      case 'login_success':
+        template = 'login_success';
+        break;
+      case 'kyc_approved':
+        template = 'kyc_approved';
+        break;
+      case 'kyc_rejected':
+        template = 'kyc_rejected';
+        break;
+      case 'deposit_approved':
+        template = 'deposit_approved';
+        break;
+      case 'deposit_rejected':
+        template = 'deposit_rejected';
+        break;
+      case 'withdrawal_request':
+        template = 'withdrawal_request';
+        break;
+      case 'withdrawal_approved':
+        template = 'withdrawal_approved';
+        break;
+      case 'withdrawal_rejected':
+        template = 'withdrawal_rejected';
+        break;
+      case 'investment_created':
+        template = 'investment_created';
+        break;
+      case 'investment_matured':
+        template = 'investment_matured';
+        break;
+      case 'password_reset':
+        template = 'password_reset';
+        break;
+      case 'password_changed':
+        template = 'password_changed';
+        break;
+      default:
+        template = null;
     }
     
-    const mailOptions = {
-      from: `BitHash Capital <${mailTransporter === supportTransporter ? process.env.EMAIL_SUPPORT_USER : process.env.EMAIL_INFO_USER}>`,
-      to: options.email,
-      subject: options.subject,
-      text: options.message,
-      html: options.html
-    };
-
-    await mailTransporter.sendMail(mailOptions);
-    console.log('Email sent successfully using', mailTransporter === supportTransporter ? 'SUPPORT' : 'INFO', 'email');
+    if (template) {
+      await sendProfessionalEmail({
+        email: user.email,
+        template: template,
+        data: emailData
+      });
+    }
+    
+    console.log(`Email sent to ${user.email} for action: ${action}`);
   } catch (err) {
-    console.error('Error sending email:', err);
-    throw new Error('Failed to send email');
+    console.error(`Failed to send email for action ${action}:`, err);
   }
 };
 
@@ -3844,7 +4400,6 @@ const calculateReferralCommissions = async (investment) => {
       uplineId,
       {
         $inc: {
-          'balances.main': commissionAmount,
           'referralStats.totalEarnings': commissionAmount,
           'referralStats.availableBalance': commissionAmount,
           'downlineStats.totalCommissionEarned': commissionAmount,
@@ -3854,7 +4409,7 @@ const calculateReferralCommissions = async (investment) => {
       { new: true }
     );
 
-    console.log(`Updated upline ${uplineUser.email} MAIN balance with $${commissionAmount}. New balance: $${updatedUpline.balances.main}`);
+    console.log(`Updated upline ${uplineUser.email} referral earnings with $${commissionAmount}. New total: $${updatedUpline.referralStats.totalEarnings}`);
 
     relationship.remainingRounds -= 1;
     relationship.totalCommissionEarned += commissionAmount;
@@ -3931,12 +4486,11 @@ const recalculateAllUserBalances = async (io) => {
   try {
     console.log('Recalculating ALL user balances based on current crypto prices...');
     
-    const users = await User.find({}).select('_id balances');
+    const users = await User.find({}).select('_id');
     let updatedCount = 0;
     
     for (const user of users) {
       let totalMainValue = 0;
-      let totalActiveValue = 0;
       let totalMaturedValue = 0;
       
       const userAssetBalance = await UserAssetBalance.findOne({ user: user._id });
@@ -3951,41 +4505,17 @@ const recalculateAllUserBalances = async (io) => {
         }
       }
       
-      const activeInvestments = await Investment.find({
-        user: user._id,
-        status: 'active'
-      }).populate('plan');
-      
-      for (const investment of activeInvestments) {
-        const currentBTCPrice = await getCryptoPrice('BTC');
-        if (currentBTCPrice && investment.originalAmount) {
-          const originalBTCAmount = investment.originalAmount / (investment.originalBTCPrice || 43000);
-          const currentUSDValue = originalBTCAmount * currentBTCPrice;
-          totalActiveValue += currentUSDValue;
-        } else {
-          totalActiveValue += investment.amount;
-        }
-      }
-      
       const maturedInvestments = await Investment.find({
         user: user._id,
         status: 'completed'
       }).populate('plan');
       
       for (const investment of maturedInvestments) {
-        const currentBTCPrice = await getCryptoPrice('BTC');
-        if (currentBTCPrice && investment.originalAmount) {
-          const originalBTCAmount = investment.originalAmount / (investment.originalBTCPrice || 43000);
-          const currentUSDValue = originalBTCAmount * currentBTCPrice;
-          totalMaturedValue += currentUSDValue;
-        } else {
-          totalMaturedValue += investment.amount + (investment.actualReturn || 0);
-        }
+        totalMaturedValue += investment.amount + (investment.actualReturn || 0);
       }
       
       const updates = {};
       if (Math.abs(user.balances.main - totalMainValue) > 0.01) updates['balances.main'] = totalMainValue;
-      if (Math.abs(user.balances.active - totalActiveValue) > 0.01) updates['balances.active'] = totalActiveValue;
       if (Math.abs(user.balances.matured - totalMaturedValue) > 0.01) updates['balances.matured'] = totalMaturedValue;
       
       if (Object.keys(updates).length > 0) {
@@ -3995,29 +4525,13 @@ const recalculateAllUserBalances = async (io) => {
         if (io) {
           io.to(`user_${user._id}`).emit('balance_update', {
             main: totalMainValue,
-            active: totalActiveValue,
             matured: totalMaturedValue
-          });
-          
-          const previousDayValue = user.balances.main || totalMainValue;
-          const dailyPnL = totalMainValue - previousDayValue;
-          const dailyPnLPercentage = previousDayValue > 0 ? (dailyPnL / previousDayValue) * 100 : 0;
-          
-          io.to(`user_${user._id}`).emit('pnl_update', {
-            main: {
-              amount: dailyPnL,
-              percentage: dailyPnLPercentage
-            },
-            matured: {
-              amount: 0,
-              percentage: 0
-            }
           });
         }
       }
     }
     
-    console.log(`Recalculated balances for ${updatedCount} users (Main: fluctuates, Active: fluctuates, Matured: fluctuates)`);
+    console.log(`Recalculated balances for ${updatedCount} users`);
     
   } catch (err) {
     console.error('Error recalculating user balances:', err);
@@ -4463,495 +4977,8 @@ async function getQuoteAssetsFromRedis() {
 initializePriceAggregator();
 
 // =============================================
-// ENHANCED EMAIL SERVICE WITH PROFESSIONAL TEMPLATES - ENTERPRISE LEVEL
-// =============================================
-
-// Email template helper function with branding and responsive design
-const getEmailTemplate = (title, content, buttonText = null, buttonUrl = null) => {
-  return `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-      <meta name="color-scheme" content="light dark">
-      <meta name="supported-color-schemes" content="light dark">
-      <title>${title} | BitHash Capital</title>
-      <link rel="preconnect" href="https://fonts.googleapis.com">
-      <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-      <link href="https://fonts.googleapis.com/css2?family=Domine:wght@400;500;600;700&display=swap" rel="stylesheet">
-      <style>
-        * {
-          margin: 0;
-          padding: 0;
-          box-sizing: border-box;
-        }
-        body {
-          margin: 0;
-          padding: 0;
-          background-color: #0B0E11;
-          font-family: 'Domine', 'Times New Roman', Georgia, serif;
-          -webkit-font-smoothing: antialiased;
-          -moz-osx-font-smoothing: grayscale;
-        }
-        table {
-          border-collapse: collapse;
-          mso-table-lspace: 0pt;
-          mso-table-rspace: 0pt;
-        }
-        td, th {
-          padding: 0;
-        }
-        a {
-          text-decoration: none;
-          color: #F7A600;
-        }
-        .ExternalClass, .ReadMsgBody {
-          width: 100%;
-          background-color: #0B0E11;
-        }
-        @media only screen and (max-width: 600px) {
-          .email-container {
-            width: 100% !important;
-          }
-          .content-padding {
-            padding: 20px 16px !important;
-          }
-          .header-logo {
-            text-align: center !important;
-          }
-          .button {
-            display: block !important;
-            width: 100% !important;
-            text-align: center !important;
-            padding: 14px 20px !important;
-          }
-          .footer-columns {
-            text-align: center !important;
-          }
-          .footer-columns td {
-            display: block !important;
-            width: 100% !important;
-            text-align: center !important;
-            padding: 10px 0 !important;
-          }
-          h1 {
-            font-size: 24px !important;
-          }
-          h2 {
-            font-size: 20px !important;
-          }
-          .balance-card {
-            padding: 16px !important;
-          }
-        }
-        @media (prefers-color-scheme: dark) {
-          body {
-            background-color: #0B0E11 !important;
-          }
-          .email-body {
-            background-color: #11151C !important;
-          }
-          .text-primary {
-            color: #FFFFFF !important;
-          }
-          .text-secondary {
-            color: #B7BDC6 !important;
-          }
-        }
-      </style>
-    </head>
-    <body style="margin: 0; padding: 0; background-color: #0B0E11; font-family: 'Domine', 'Times New Roman', Georgia, serif;">
-      <table width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#0B0E11" style="background-color: #0B0E11;">
-        <tr>
-          <td align="center" style="padding: 40px 20px;">
-            <table width="100%" max-width="600" cellpadding="0" cellspacing="0" border="0" style="max-width: 600px; width: 100%; background-color: #11151C; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.4);">
-              
-              <!-- Header with Logo and Slogan -->
-              <tr>
-                <td style="padding: 32px 32px 20px 32px; text-align: center; border-bottom: 1px solid #1E2329;">
-                  <div style="display: inline-block;">
-                    <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="BitHash Capital Logo" style="width: 48px; height: 48px; display: inline-block; vertical-align: middle; margin-right: 12px;">
-                    <span style="font-size: 28px; font-weight: 700; color: #FFFFFF; font-family: 'Domine', serif; letter-spacing: 1px;">₿itHash Capital</span>
-                  </div>
-                  <p style="font-size: 13px; color: #F7A600; margin-top: 12px; font-style: italic; font-weight: bold;">Where Your Financial Goals Become Reality</p>
-                </td>
-              </tr>
-              
-              <!-- Main Content -->
-              <tr>
-                <td class="content-padding" style="padding: 32px;">
-                  <h1 style="font-size: 24px; color: #FFFFFF; margin-bottom: 20px; font-weight: 600;">${title}</h1>
-                  ${content}
-                  ${buttonText && buttonUrl ? `
-                  <div style="text-align: center; margin: 30px 0;">
-                    <a href="${buttonUrl}" class="button" style="display: inline-block; background: linear-gradient(135deg, #F7A600 0%, #E69500 100%); color: #000000; padding: 12px 32px; border-radius: 999px; font-weight: 600; text-decoration: none; font-family: 'Domine', serif; transition: all 0.3s ease;">${buttonText}</a>
-                  </div>
-                  ` : ''}
-                </td>
-              </tr>
-              
-              <!-- Footer -->
-              <tr>
-                <td style="padding: 24px 32px; background-color: #0A0E17; border-top: 1px solid #1E2329; border-radius: 0 0 16px 16px;">
-                  <table width="100%" cellpadding="0" cellspacing="0" border="0">
-                    <tr class="footer-columns">
-                      <td style="color: #6C7480; font-size: 12px; padding-bottom: 16px;">
-                        <p style="margin: 0 0 8px 0;"><strong style="color: #F7A600;">BitHash Capital</strong></p>
-                        <p style="margin: 0 0 4px 0;">800 Plant St, Wilmington</p>
-                        <p style="margin: 0;">DE 19801, United States</p>
-                      </td>
-                      <td style="color: #6C7480; font-size: 12px; text-align: right; padding-bottom: 16px;">
-                        <p style="margin: 0 0 8px 0;"><a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a></p>
-                        <p style="margin: 0;">support@bithashcapital.live</p>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td colspan="2" style="padding-top: 16px; border-top: 1px solid #1E2329; text-align: center; color: #6C7480; font-size: 11px;">
-                        <p style="margin: 0;">&copy; ${new Date().getFullYear()} BitHash Capital. All rights reserved.</p>
-                        <p style="margin: 8px 0 0 0;">This email was sent to you as a registered user of BitHash Capital.</p>
-                      </td>
-                    </tr>
-                  </table>
-                </td>
-              </tr>
-            </table>
-          </td>
-        </tr>
-      </table>
-    </body>
-    </html>
-  `;
-};
-
-// Professional email sending function
-const sendProfessionalEmail = async ({ email, template, data }) => {
-  try {
-    let title = '';
-    let content = '';
-    let buttonText = null;
-    let buttonUrl = null;
-
-    switch (template) {
-      case 'welcome':
-        title = 'Welcome to BitHash Capital';
-        content = `
-          <p style="font-size: 16px; line-height: 1.6; color: #FFFFFF; margin-bottom: 20px;">Dear <strong>${data.name}</strong>,</p>
-          <p style="font-size: 15px; line-height: 1.6; color: #B7BDC6; margin-bottom: 20px;">Thank you for choosing BitHash Capital as your trusted partner in institutional Bitcoin mining. We're thrilled to have you on board.</p>
-          <div style="background: linear-gradient(135deg, rgba(247,166,0,0.1) 0%, rgba(230,149,0,0.05) 100%); border-left: 4px solid #F7A600; padding: 16px; margin: 20px 0; border-radius: 8px;">
-            <p style="margin: 0; color: #FFFFFF; font-size: 14px;"><strong>Account Details:</strong></p>
-            <p style="margin: 8px 0 0 0; color: #B7BDC6; font-size: 14px;">Email: ${data.email || 'your registered email'}</p>
-          </div>
-          <p style="font-size: 15px; line-height: 1.6; color: #B7BDC6; margin-bottom: 20px;">Start your journey with BitHash Capital and experience transparent, secure, and profitable Bitcoin mining.</p>
-        `;
-        buttonText = 'Access Dashboard';
-        buttonUrl = 'https://www.bithashcapital.live/dashboard';
-        break;
-
-      case 'otp':
-        title = 'Verification Code Required';
-        content = `
-          <p style="font-size: 16px; line-height: 1.6; color: #FFFFFF; margin-bottom: 20px;">Dear <strong>${data.name}</strong>,</p>
-          <p style="font-size: 15px; line-height: 1.6; color: #B7BDC6; margin-bottom: 20px;">You requested a verification code to ${data.action}. Please use the code below to complete your request.</p>
-          <div style="background: #0A0E17; text-align: center; padding: 24px; margin: 20px 0; border-radius: 12px; border: 1px solid #F7A600;">
-            <p style="font-size: 36px; font-weight: 700; letter-spacing: 8px; color: #F7A600; margin: 0;">${data.otp}</p>
-            <p style="font-size: 12px; color: #6C7480; margin: 12px 0 0 0;">This code expires in 5 minutes</p>
-          </div>
-          <p style="font-size: 13px; line-height: 1.5; color: #6C7480;">If you did not request this code, please ignore this email or contact support immediately.</p>
-        `;
-        break;
-
-      case 'kyc_approved':
-        title = 'KYC Verification Approved';
-        content = `
-          <p style="font-size: 16px; line-height: 1.6; color: #FFFFFF; margin-bottom: 20px;">Dear <strong>${data.name}</strong>,</p>
-          <p style="font-size: 15px; line-height: 1.6; color: #B7BDC6; margin-bottom: 20px;">We are pleased to inform you that your KYC verification has been successfully approved.</p>
-          <div style="background: linear-gradient(135deg, rgba(34,139,34,0.1) 0%, rgba(34,139,34,0.05) 100%); border-left: 4px solid #228B22; padding: 16px; margin: 20px 0; border-radius: 8px;">
-            <p style="margin: 0; color: #228B22; font-size: 14px; font-weight: 600;">✓ Verification Complete</p>
-            <p style="margin: 8px 0 0 0; color: #B7BDC6; font-size: 14px;">Your account is now fully verified with enhanced limits and features.</p>
-          </div>
-          <p style="font-size: 15px; line-height: 1.6; color: #B7BDC6;">Thank you for your cooperation throughout the verification process.</p>
-        `;
-        buttonText = 'Start Investing';
-        buttonUrl = 'https://www.bithashcapital.live/investment-plans';
-        break;
-
-      case 'kyc_rejected':
-        title = 'KYC Verification Update';
-        content = `
-          <p style="font-size: 16px; line-height: 1.6; color: #FFFFFF; margin-bottom: 20px;">Dear <strong>${data.name}</strong>,</p>
-          <p style="font-size: 15px; line-height: 1.6; color: #B7BDC6; margin-bottom: 20px;">After careful review, we were unable to approve your KYC submission at this time.</p>
-          <div style="background: linear-gradient(135deg, rgba(255,0,0,0.1) 0%, rgba(255,0,0,0.05) 100%); border-left: 4px solid #FF0000; padding: 16px; margin: 20px 0; border-radius: 8px;">
-            <p style="margin: 0; color: #FF0000; font-size: 14px; font-weight: 600;">Reason for Rejection:</p>
-            <p style="margin: 8px 0 0 0; color: #B7BDC6; font-size: 14px;">${data.reason || 'Please review your documents and resubmit.'}</p>
-          </div>
-          <p style="font-size: 15px; line-height: 1.6; color: #B7BDC6;">Our support team is available to assist you with the resubmission process.</p>
-        `;
-        buttonText = 'Contact Support';
-        buttonUrl = 'https://www.bithashcapital.live/support';
-        break;
-
-      case 'deposit_approved':
-        title = 'Deposit Confirmed';
-        content = `
-          <p style="font-size: 16px; line-height: 1.6; color: #FFFFFF; margin-bottom: 20px;">Dear <strong>${data.name}</strong>,</p>
-          <p style="font-size: 15px; line-height: 1.6; color: #B7BDC6; margin-bottom: 20px;">Your deposit has been successfully processed and credited to your account.</p>
-          <div style="background: #0A0E17; padding: 20px; margin: 20px 0; border-radius: 12px;">
-            <table width="100%" style="color: #FFFFFF;">
-              <tr><td style="padding: 8px 0; color: #B7BDC6;">Amount:</td><td style="text-align: right; font-weight: 600;">${data.amount} ${data.asset || 'USD'}</td></tr>
-              <tr><td style="padding: 8px 0; color: #B7BDC6;">Method:</td><td style="text-align: right;">${data.method || 'Crypto'}</td></tr>
-              <tr><td style="padding: 8px 0; color: #B7BDC6;">Reference:</td><td style="text-align: right;">${data.reference || 'N/A'}</td></tr>
-              <tr><td style="padding: 8px 0; color: #B7BDC6;">New Balance:</td><td style="text-align: right; color: #F7A600;">$${data.newBalance ? data.newBalance.toLocaleString() : 'Updated'}</td></tr>
-            </table>
-          </div>
-        `;
-        buttonText = 'View Balance';
-        buttonUrl = 'https://www.bithashcapital.live/dashboard';
-        break;
-
-      case 'deposit_rejected':
-        title = 'Deposit Update';
-        content = `
-          <p style="font-size: 16px; line-height: 1.6; color: #FFFFFF; margin-bottom: 20px;">Dear <strong>${data.name}</strong>,</p>
-          <p style="font-size: 15px; line-height: 1.6; color: #B7BDC6; margin-bottom: 20px;">We regret to inform you that your deposit request has been declined.</p>
-          <div style="background: linear-gradient(135deg, rgba(255,0,0,0.1) 0%, rgba(255,0,0,0.05) 100%); border-left: 4px solid #FF0000; padding: 16px; margin: 20px 0; border-radius: 8px;">
-            <p style="margin: 0; color: #FF0000; font-size: 14px; font-weight: 600;">Reason:</p>
-            <p style="margin: 8px 0 0 0; color: #B7BDC6; font-size: 14px;">${data.reason || 'Please contact support for more information.'}</p>
-          </div>
-          <p style="font-size: 15px; line-height: 1.6; color: #B7BDC6;">If you believe this is an error, please reach out to our support team.</p>
-        `;
-        break;
-
-      case 'withdrawal_approved':
-        title = 'Withdrawal Processed';
-        content = `
-          <p style="font-size: 16px; line-height: 1.6; color: #FFFFFF; margin-bottom: 20px;">Dear <strong>${data.name}</strong>,</p>
-          <p style="font-size: 15px; line-height: 1.6; color: #B7BDC6; margin-bottom: 20px;">Your withdrawal request has been approved and is being processed.</p>
-          <div style="background: #0A0E17; padding: 20px; margin: 20px 0; border-radius: 12px;">
-            <table width="100%" style="color: #FFFFFF;">
-              <tr><td style="padding: 8px 0; color: #B7BDC6;">Amount:</td><td style="text-align: right; font-weight: 600;">${data.amount} ${data.asset || 'USD'}</td></tr>
-              <tr><td style="padding: 8px 0; color: #B7BDC6;">Method:</td><td style="text-align: right;">${data.method || 'Crypto'}</td></tr>
-              <tr><td style="padding: 8px 0; color: #B7BDC6;">Transaction ID:</td><td style="text-align: right;">${data.txid || data.reference || 'N/A'}</td></tr>
-            </table>
-          </div>
-          <p style="font-size: 15px; line-height: 1.6; color: #B7BDC6;">Funds will be transferred to your designated wallet address.</p>
-        `;
-        break;
-
-      case 'withdrawal_rejected':
-        title = 'Withdrawal Update';
-        content = `
-          <p style="font-size: 16px; line-height: 1.6; color: #FFFFFF; margin-bottom: 20px;">Dear <strong>${data.name}</strong>,</p>
-          <p style="font-size: 15px; line-height: 1.6; color: #B7BDC6; margin-bottom: 20px;">Your withdrawal request has been declined.</p>
-          <div style="background: linear-gradient(135deg, rgba(255,0,0,0.1) 0%, rgba(255,0,0,0.05) 100%); border-left: 4px solid #FF0000; padding: 16px; margin: 20px 0; border-radius: 8px;">
-            <p style="margin: 0; color: #FF0000; font-size: 14px; font-weight: 600;">Reason:</p>
-            <p style="margin: 8px 0 0 0; color: #B7BDC6; font-size: 14px;">${data.reason || 'Please verify your account information and try again.'}</p>
-          </div>
-        `;
-        break;
-
-      case 'withdrawal_request':
-        title = 'Withdrawal Request Received';
-        content = `
-          <p style="font-size: 16px; line-height: 1.6; color: #FFFFFF; margin-bottom: 20px;">Dear <strong>${data.name}</strong>,</p>
-          <p style="font-size: 15px; line-height: 1.6; color: #B7BDC6; margin-bottom: 20px;">We have received your withdrawal request and it is currently under review.</p>
-          <div style="background: #0A0E17; padding: 20px; margin: 20px 0; border-radius: 12px;">
-            <table width="100%" style="color: #FFFFFF;">
-              <tr><td style="padding: 8px 0; color: #B7BDC6;">Amount:</td><td style="text-align: right; font-weight: 600;">${data.usdValue ? `$${data.usdValue.toLocaleString()}` : `${data.amount} ${data.asset}`}</td></tr>
-              <tr><td style="padding: 8px 0; color: #B7BDC6;">Gas Fee:</td><td style="text-align: right;">${data.fee ? `${data.fee} ${data.asset}` : 'N/A'}</td></tr>
-              <tr><td style="padding: 8px 0; color: #B7BDC6;">Network:</td><td style="text-align: right;">${data.network || 'Mainnet'}</td></tr>
-              <tr><td style="padding: 8px 0; color: #B7BDC6;">Request ID:</td><td style="text-align: right;">${data.requestId || 'N/A'}</td></tr>
-            </table>
-          </div>
-          <p style="font-size: 13px; color: #6C7480;">Please allow 1-24 hours for processing depending on network conditions.</p>
-        `;
-        break;
-
-      case 'investment_created':
-        title = 'Investment Confirmed';
-        content = `
-          <p style="font-size: 16px; line-height: 1.6; color: #FFFFFF; margin-bottom: 20px;">Dear <strong>${data.name}</strong>,</p>
-          <p style="font-size: 15px; line-height: 1.6; color: #B7BDC6; margin-bottom: 20px;">Your investment has been successfully activated.</p>
-          <div style="background: linear-gradient(135deg, rgba(247,166,0,0.1) 0%, rgba(230,149,0,0.05) 100%); padding: 20px; margin: 20px 0; border-radius: 12px;">
-            <table width="100%" style="color: #FFFFFF;">
-              <tr><td style="padding: 8px 0; color: #B7BDC6;">Plan:</td><td style="text-align: right; font-weight: 600;">${data.planName}</td></tr>
-              <tr><td style="padding: 8px 0; color: #B7BDC6;">Amount:</td><td style="text-align: right;">$${data.amount.toLocaleString()}</td></tr>
-              <tr><td style="padding: 8px 0; color: #B7BDC6;">Expected Return:</td><td style="text-align: right; color: #F7A600;">$${data.expectedReturn.toLocaleString()}</td></tr>
-              <tr><td style="padding: 8px 0; color: #B7BDC6;">Duration:</td><td style="text-align: right;">${data.duration} hours</td></tr>
-              <tr><td style="padding: 8px 0; color: #B7BDC6;">Maturity Date:</td><td style="text-align: right;">${new Date(data.endDate).toLocaleString()}</td></tr>
-            </table>
-          </div>
-        `;
-        buttonText = 'Track Investment';
-        buttonUrl = 'https://www.bithashcapital.live/investments';
-        break;
-
-      case 'investment_matured':
-        title = 'Investment Matured';
-        content = `
-          <p style="font-size: 16px; line-height: 1.6; color: #FFFFFF; margin-bottom: 20px;">Dear <strong>${data.name}</strong>,</p>
-          <p style="font-size: 15px; line-height: 1.6; color: #B7BDC6; margin-bottom: 20px;">Congratulations! Your investment has matured and proceeds have been credited to your Matured Wallet.</p>
-          <div style="background: linear-gradient(135deg, rgba(34,139,34,0.1) 0%, rgba(34,139,34,0.05) 100%); padding: 20px; margin: 20px 0; border-radius: 12px;">
-            <table width="100%" style="color: #FFFFFF;">
-              <tr><td style="padding: 8px 0; color: #B7BDC6;">Plan:</td><td style="text-align: right; font-weight: 600;">${data.planName}</td></tr>
-              <tr><td style="padding: 8px 0; color: #B7BDC6;">Initial Investment:</td><td style="text-align: right;">$${data.amount.toLocaleString()}</td></tr>
-              <tr><td style="padding: 8px 0; color: #B7BDC6;">Total Return:</td><td style="text-align: right; color: #F7A600;">$${data.totalReturn.toLocaleString()}</td></tr>
-              <tr><td style="padding: 8px 0; color: #B7BDC6;">Profit:</td><td style="text-align: right; color: #228B22;">+$${data.profit.toLocaleString()}</td></tr>
-            </table>
-          </div>
-          <p style="font-size: 15px; line-height: 1.6; color: #B7BDC6;">Your matured balance is now $${data.newMaturedBalance ? data.newMaturedBalance.toLocaleString() : 'updated'}.</p>
-        `;
-        buttonText = 'View Matured Wallet';
-        buttonUrl = 'https://www.bithashcapital.live/wallet';
-        break;
-
-      case 'login_success':
-        title = 'New Login Detected';
-        content = `
-          <p style="font-size: 16px; line-height: 1.6; color: #FFFFFF; margin-bottom: 20px;">Dear <strong>${data.name}</strong>,</p>
-          <p style="font-size: 15px; line-height: 1.6; color: #B7BDC6; margin-bottom: 20px;">A successful login was detected on your account.</p>
-          <div style="background: #0A0E17; padding: 16px; margin: 20px 0; border-radius: 8px;">
-            <p style="margin: 0 0 8px 0; color: #B7BDC6;"><strong>Device:</strong> ${data.device || 'Unknown'}</p>
-            <p style="margin: 0 0 8px 0; color: #B7BDC6;"><strong>Location:</strong> ${data.location || 'Unknown'}</p>
-            <p style="margin: 0; color: #B7BDC6;"><strong>IP Address:</strong> ${data.ip || 'Unknown'}</p>
-          </div>
-          <p style="font-size: 15px; line-height: 1.6; color: #B7BDC6;">If this was not you, please secure your account immediately.</p>
-        `;
-        buttonText = 'Secure Account';
-        buttonUrl = 'https://www.bithashcapital.live/security';
-        break;
-
-      case 'password_changed':
-        title = 'Password Changed';
-        content = `
-          <p style="font-size: 16px; line-height: 1.6; color: #FFFFFF; margin-bottom: 20px;">Dear <strong>${data.name}</strong>,</p>
-          <p style="font-size: 15px; line-height: 1.6; color: #B7BDC6; margin-bottom: 20px;">Your account password has been successfully changed.</p>
-          <div style="background: #0A0E17; padding: 16px; margin: 20px 0; border-radius: 8px;">
-            <p style="margin: 0 0 8px 0; color: #B7BDC6;"><strong>Device:</strong> ${data.device || 'Unknown'}</p>
-            <p style="margin: 0 0 8px 0; color: #B7BDC6;"><strong>IP Address:</strong> ${data.ip || 'Unknown'}</p>
-          </div>
-          <p style="font-size: 15px; line-height: 1.6; color: #B7BDC6;">If you did not initiate this change, please contact support immediately.</p>
-        `;
-        break;
-
-      case 'password_reset':
-        title = 'Password Reset Request';
-        content = `
-          <p style="font-size: 16px; line-height: 1.6; color: #FFFFFF; margin-bottom: 20px;">Dear <strong>${data.name}</strong>,</p>
-          <p style="font-size: 15px; line-height: 1.6; color: #B7BDC6; margin-bottom: 20px;">We received a request to reset your password. Click the button below to create a new password.</p>
-          <div style="text-align: center; margin: 30px 0;">
-            <a href="${data.resetUrl}" style="display: inline-block; background: linear-gradient(135deg, #F7A600 0%, #E69500 100%); color: #000000; padding: 14px 40px; border-radius: 999px; font-weight: 600; text-decoration: none;">Reset Password</a>
-          </div>
-          <p style="font-size: 13px; color: #6C7480;">This link will expire in 60 minutes. If you did not request this, please ignore this email.</p>
-        `;
-        break;
-
-      case 'account_restricted':
-        title = 'Account Restriction Notice';
-        content = `
-          <p style="font-size: 16px; line-height: 1.6; color: #FFFFFF; margin-bottom: 20px;">Dear <strong>${data.name}</strong>,</p>
-          <p style="font-size: 15px; line-height: 1.6; color: #B7BDC6; margin-bottom: 20px;">Your account has certain restrictions applied.</p>
-          <div style="background: linear-gradient(135deg, rgba(247,166,0,0.1) 0%, rgba(230,149,0,0.05) 100%); border-left: 4px solid #F7A600; padding: 16px; margin: 20px 0; border-radius: 8px;">
-            <p style="margin: 0; color: #FFFFFF; font-size: 14px;">${data.message || 'Please complete KYC or make a deposit/withdrawal to lift restrictions.'}</p>
-          </div>
-          <p style="font-size: 15px; line-height: 1.6; color: #B7BDC6;">Investment limit: $${data.limit ? data.limit.toLocaleString() : 'N/A'}</p>
-        `;
-        buttonText = 'Complete KYC';
-        buttonUrl = 'https://www.bithashcapital.live/kyc';
-        break;
-
-      default:
-        title = 'Notification from BitHash Capital';
-        content = `<p style="font-size: 15px; line-height: 1.6; color: #B7BDC6;">${data.message || 'You have a new notification from BitHash Capital.'}</p>`;
-    }
-
-    const html = getEmailTemplate(title, content, buttonText, buttonUrl);
-    
-    await sendEmail({
-      email: email,
-      subject: title,
-      html: html
-    });
-    
-    console.log(`Professional email sent: ${template} to ${email}`);
-  } catch (err) {
-    console.error(`Error sending professional email (${template}):`, err);
-  }
-};
-
-// Main sendAutomatedEmail function using professional templates
-const sendAutomatedEmail = async (user, action, data = {}) => {
-  try {
-    const email = user.email;
-    const name = user.firstName || 'Valued Client';
-    
-    let template = '';
-    let templateData = { name, ...data };
-    
-    switch (action) {
-      case 'welcome':
-        template = 'welcome';
-        templateData.email = user.email;
-        break;
-      case 'login_success':
-        template = 'login_success';
-        break;
-      case 'kyc_approved':
-        template = 'kyc_approved';
-        break;
-      case 'kyc_rejected':
-        template = 'kyc_rejected';
-        templateData.reason = data.reason || 'Documentation did not meet requirements.';
-        break;
-      case 'deposit_approved':
-        template = 'deposit_approved';
-        break;
-      case 'deposit_rejected':
-        template = 'deposit_rejected';
-        break;
-      case 'withdrawal_approved':
-        template = 'withdrawal_approved';
-        break;
-      case 'withdrawal_rejected':
-        template = 'withdrawal_rejected';
-        break;
-      case 'withdrawal_request':
-        template = 'withdrawal_request';
-        break;
-      case 'investment_created':
-        template = 'investment_created';
-        break;
-      case 'investment_matured':
-        template = 'investment_matured';
-        break;
-      case 'password_changed':
-        template = 'password_changed';
-        break;
-      case 'password_reset':
-        template = 'password_reset';
-        break;
-      case 'account_restricted':
-        template = 'account_restricted';
-        break;
-      case 'otp':
-        template = 'otp';
-        break;
-      default:
-        return;
-    }
-    
-    await sendProfessionalEmail({
-      email: email,
-      template: template,
-      data: templateData
-    });
-    
-  } catch (err) {
-    console.error('Send automated email error:', err);
-  }
-};
-
 // Routes
+// =============================================
 
 // Enhanced Signup Endpoint with OTP - FIXED email handling
 app.post('/api/auth/signup', [
@@ -5219,7 +5246,7 @@ app.post('/api/auth/login', [
       }
     });
 
-    // CREATE LOG FOR LOGIN ATTEMPT
+    // ✅ CREATE LOG FOR LOGIN ATTEMPT
     const deviceInfo = await getUserDeviceInfo(req);
     await UserLog.create({
       user: user._id,
@@ -5252,7 +5279,7 @@ app.post('/api/auth/login', [
       }
     });
 
-    // SEND LOGIN ATTEMPT EMAIL
+    // ✅ SEND LOGIN ATTEMPT EMAIL
     try {
       await sendAutomatedEmail(user, 'login_success', {
         name: user.firstName,
@@ -5305,7 +5332,7 @@ app.post('/api/auth/login', [
   }
 });
 
-// Google Auth Endpoint - FIXED: Check if user exists first for login, allow creation for signup
+// GOOGLE AUTH ENDPOINT - FIXED: Check if user exists, if not return error asking to signup
 app.post('/api/auth/google', async (req, res) => {
   try {
     console.log('Google auth request received');
@@ -5357,45 +5384,35 @@ app.post('/api/auth/google', async (req, res) => {
       });
     }
 
-    console.log('Google auth successful for:', email);
+    console.log('Google auth for:', email);
+    console.log('isSignup flag:', isSignup);
 
     // Use the EXACT email from Google - no normalization
     const originalEmail = email;
 
-    let user;
-    let isNewUser = false;
+    // Check if user exists in database
+    let user = await User.findOne({ email: originalEmail });
 
-    try {
-      user = await User.findOne({ email: originalEmail });
-      console.log('User lookup result:', user ? 'Found' : 'Not found');
-    } catch (dbError) {
-      console.error('Database lookup error:', dbError);
-      return res.status(500).json({
-        status: 'error',
-        message: 'Database error during user lookup'
-      });
-    }
-
-    // If this is a LOGIN attempt (isSignup === false) and user doesn't exist, return error
+    // If isSignup is false (login attempt) and user does NOT exist, return error
     if (isSignup === false && !user) {
-      console.log('Login attempt with non-existent user, returning error');
+      console.log('Login attempt with Google but user not found:', originalEmail);
       return res.status(404).json({
         status: 'fail',
-        message: 'Account not found. Please sign up first.'
+        message: 'No account found with this email. Please sign up first.'
       });
     }
 
-    // If this is a SIGNUP attempt (isSignup === true) and user already exists, return error
+    // If isSignup is true (signup attempt) and user already exists, return error
     if (isSignup === true && user) {
-      console.log('Signup attempt with existing user, returning error');
-      return res.status(400).json({
+      console.log('Signup attempt with Google but user already exists:', originalEmail);
+      return res.status(409).json({
         status: 'fail',
-        message: 'Account already exists. Please login instead.'
+        message: 'An account with this email already exists. Please log in instead.'
       });
     }
 
-    if (!user && isSignup === true) {
-      // Create new user with Google auth using exact email (SIGNUP FLOW)
+    // For signup, create new user
+    if (isSignup === true && !user) {
       try {
         const referralCode = generateReferralCode();
         user = await User.create({
@@ -5407,8 +5424,7 @@ app.post('/api/auth/google', async (req, res) => {
           referralCode,
           status: 'active'
         });
-        isNewUser = true;
-        console.log('New user created via Google (signup flow):', originalEmail);
+        console.log('New user created via Google signup:', originalEmail);
 
         // Send welcome email
         try {
@@ -5425,8 +5441,18 @@ app.post('/api/auth/google', async (req, res) => {
           message: 'Failed to create user account'
         });
       }
-    } else if (user && !user.googleId) {
-      // Existing user, add Google auth (LINKING FLOW)
+    }
+
+    // For existing user login, check if user is active
+    if (user && user.status !== 'active') {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Your account has been suspended. Please contact support.'
+      });
+    }
+
+    // For existing user, link Google ID if not already linked
+    if (user && !user.googleId) {
       try {
         user.googleId = sub;
         user.isVerified = true;
@@ -5439,14 +5465,6 @@ app.post('/api/auth/google', async (req, res) => {
           message: 'Failed to link Google account'
         });
       }
-    }
-
-    // Check if user is active
-    if (user.status !== 'active') {
-      return res.status(401).json({
-        status: 'fail',
-        message: 'Your account has been suspended. Please contact support.'
-      });
     }
 
     // Generate OTP for Google sign-in
@@ -5474,7 +5492,7 @@ app.post('/api/auth/google', async (req, res) => {
         }
       });
       
-      // CREATE LOG FOR GOOGLE LOGIN ATTEMPT
+      // ✅ CREATE LOG FOR GOOGLE LOGIN ATTEMPT
       const deviceInfo = await getUserDeviceInfo(req);
       await UserLog.create({
         user: user._id,
@@ -5504,11 +5522,11 @@ app.post('/api/auth/google', async (req, res) => {
           email: originalEmail,
           loginMethod: 'google',
           otpSent: true,
-          isNewUser: isNewUser
+          isNewUser: isSignup === true
         }
       });
       
-      // SEND LOGIN ATTEMPT EMAIL FOR GOOGLE SIGN-IN
+      // ✅ SEND LOGIN ATTEMPT EMAIL FOR GOOGLE SIGN-IN
       try {
         await sendAutomatedEmail(user, 'login_success', {
           name: user.firstName,
@@ -5547,7 +5565,7 @@ app.post('/api/auth/google', async (req, res) => {
       message: 'OTP sent to your email. Please verify to complete Google sign-in.',
       tempToken,
       needsOtp: true,
-      isNewUser: isNewUser,
+      isNewUser: isSignup === true,
       data: {
         user: {
           id: user._id,
@@ -5561,7 +5579,7 @@ app.post('/api/auth/google', async (req, res) => {
     // Log activity
     try {
       await logActivity('google_signin_otp_sent', 'user', user._id, user._id, 'User', req, {
-        isNewUser,
+        isNewUser: isSignup === true,
         provider: 'google',
         email: originalEmail
       });
@@ -5703,10 +5721,7 @@ app.post('/api/auth/reset-password', [
   }
 });
 
-// Investment routes - ENHANCED VERSION WITH RESTRICTION CHECKS AND 48-HOUR RESTRICTION LOGIC
-// Store investment restriction tracking
-const investmentRestrictionMap = new Map(); // userId -> { amount: totalInvestedIn48h, timestamps: [] }
-
+// Investment routes - ENHANCED VERSION WITH RESTRICTION CHECKS (48 HOUR RESTRICTION LOGIC)
 app.post('/api/investments', protect, [
   body('planId').notEmpty().withMessage('Plan ID is required').isMongoId().withMessage('Invalid Plan ID'),
   body('amount').isFloat({ min: 1 }).withMessage('Amount must be a positive number'),
@@ -5724,55 +5739,7 @@ app.post('/api/investments', protect, [
     const { planId, amount, balanceType } = req.body;
     const userId = req.user._id;
 
-    // 48-HOUR RESTRICTION LOGIC - Check if user is restricted to invest more than 0.0056 BTC within 48 hours
-    const now = Date.now();
-    const fortyEightHoursInMs = 48 * 60 * 60 * 1000;
-    
-    let userRestrictionData = investmentRestrictionMap.get(userId.toString());
-    if (!userRestrictionData) {
-      userRestrictionData = { totalInvestedBtc: 0, investmentTimestamps: [] };
-      investmentRestrictionMap.set(userId.toString(), userRestrictionData);
-    }
-    
-    // Clean old investments older than 48 hours
-    userRestrictionData.investmentTimestamps = userRestrictionData.investmentTimestamps.filter(
-      timestamp => now - timestamp < fortyEightHoursInMs
-    );
-    
-    // Calculate total BTC invested in the last 48 hours
-    let totalBtcInvested48h = 0;
-    for (const timestamp of userRestrictionData.investmentTimestamps) {
-      totalBtcInvested48h += timestamp.btcAmount || 0;
-    }
-    
-    // Get current BTC price for restriction check
-    let btcPrice = await getCryptoPrice('BTC');
-    if (!btcPrice) {
-      btcPrice = 43000; // Fallback price
-    }
-    
-    const btcAmountToInvest = amount / btcPrice;
-    const newTotalBtcInvested = totalBtcInvested48h + btcAmountToInvest;
-    const maxBtcRestriction = 0.0056; // 0.0056 BTC restriction limit
-    
-    if (newTotalBtcInvested > maxBtcRestriction) {
-      const remainingAllowed = maxBtcRestriction - totalBtcInvested48h;
-      const maxUsdAllowed = remainingAllowed * btcPrice;
-      return res.status(403).json({
-        status: 'fail',
-        message: `You are restricted from investing more than ${maxBtcRestriction} BTC within a 48-hour period. You can invest up to $${maxUsdAllowed.toFixed(2)} more at this time.`,
-        restriction: {
-          type: '48hour_limit',
-          limitBtc: maxBtcRestriction,
-          currentBtcInvested: totalBtcInvested48h,
-          remainingBtc: remainingAllowed,
-          remainingUsd: maxUsdAllowed,
-          hoursRemaining: 48 - ((now - (userRestrictionData.investmentTimestamps[0]?.timestamp || now)) / (60 * 60 * 1000))
-        }
-      });
-    }
-
-    // CHECK REGULAR RESTRICTIONS BEFORE ALLOWING INVESTMENT
+    // ✅ CHECK RESTRICTIONS WITH 48 HOUR LOGIC
     const restrictions = await AccountRestrictions.getInstance();
     const userRestrictionStatus = await UserRestrictionStatus.findOne({ user: userId });
     
@@ -5780,17 +5747,16 @@ app.post('/api/investments', protect, [
     const kycStatus = await KYC.findOne({ user: userId });
     const hasKYC = kycStatus && kycStatus.overallStatus === 'verified';
     
-    // Get user's transaction history
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - (restrictions.inactivity_days || 30));
+    // Get user's transaction history within 48 hours
+    const fortyEightHoursAgo = new Date(Date.now() - 48 * 60 * 60 * 1000);
     const hasRecentTx = await Transaction.findOne({
       user: userId,
       type: { $in: ['deposit', 'withdrawal'] },
       status: 'completed',
-      createdAt: { $gte: cutoff }
+      createdAt: { $gte: fortyEightHoursAgo }
     });
     
-    // Calculate limits
+    // Calculate limits with 48 hour restriction
     let withdrawalLimit = null;
     let investmentLimit = null;
     let restrictionMessage = null;
@@ -5798,24 +5764,25 @@ app.post('/api/investments', protect, [
     // Check KYC restriction
     if (!hasKYC && (restrictions.withdraw_limit_no_kyc !== null || restrictions.invest_limit_no_kyc !== null)) {
       if (restrictions.invest_limit_no_kyc !== null && amount > restrictions.invest_limit_no_kyc) {
-        restrictionMessage = restrictions.kyc_restriction_reason || `Please complete your KYC verification. Investment limit without KYC: $${restrictions.invest_limit_no_kyc.toLocaleString()}`;
+        restrictionMessage = restrictions.kyc_restriction_reason || `Please complete your KYC verification. Investment limit without KYC: $${restrictions.invest_limit_no_kyc.toLocaleString()}. This restriction applies for 48 hours.`;
         return res.status(403).json({
           status: 'fail',
           message: restrictionMessage,
           restriction: {
             type: 'kyc',
             limit: restrictions.invest_limit_no_kyc,
-            reason: restrictions.kyc_restriction_reason
+            reason: restrictions.kyc_restriction_reason,
+            durationHours: 48
           }
         });
       }
       investmentLimit = restrictions.invest_limit_no_kyc;
     }
     
-    // Check transaction restriction (no recent deposits/withdrawals)
+    // Check transaction restriction (no recent deposits/withdrawals in 48 hours)
     if (!hasRecentTx && (restrictions.withdraw_limit_no_txn !== null || restrictions.invest_limit_no_txn !== null)) {
       if (restrictions.invest_limit_no_txn !== null && amount > restrictions.invest_limit_no_txn) {
-        restrictionMessage = restrictions.txn_restriction_reason || `Please complete at least one deposit or withdrawal. Investment limit without transaction activity: $${restrictions.invest_limit_no_txn.toLocaleString()}`;
+        restrictionMessage = restrictions.txn_restriction_reason || `Please complete at least one deposit or withdrawal. Investment limit without transaction activity in the last 48 hours: $${restrictions.invest_limit_no_txn.toLocaleString()}`;
         return res.status(403).json({
           status: 'fail',
           message: restrictionMessage,
@@ -5823,7 +5790,8 @@ app.post('/api/investments', protect, [
             type: 'transaction',
             limit: restrictions.invest_limit_no_txn,
             reason: restrictions.txn_restriction_reason,
-            daysRequired: restrictions.inactivity_days
+            daysRequired: restrictions.inactivity_days,
+            durationHours: 48
           }
         });
       }
@@ -5832,17 +5800,18 @@ app.post('/api/investments', protect, [
       }
     }
     
-    // If there's an active restriction in the database, enforce it
+    // If there's an active restriction in the database, enforce it with 48 hour context
     if (userRestrictionStatus) {
       if (userRestrictionStatus.kyc_restricted && restrictions.invest_limit_no_kyc !== null && amount > restrictions.invest_limit_no_kyc) {
         restrictionMessage = userRestrictionStatus.kyc_restriction_reason || restrictions.kyc_restriction_reason;
         return res.status(403).json({
           status: 'fail',
-          message: restrictionMessage,
+          message: `${restrictionMessage} This restriction applies for 48 hours.`,
           restriction: {
             type: 'kyc',
             limit: restrictions.invest_limit_no_kyc,
-            reason: restrictionMessage
+            reason: restrictionMessage,
+            durationHours: 48
           }
         });
       }
@@ -5851,12 +5820,13 @@ app.post('/api/investments', protect, [
         restrictionMessage = userRestrictionStatus.transaction_restriction_reason || restrictions.txn_restriction_reason;
         return res.status(403).json({
           status: 'fail',
-          message: restrictionMessage,
+          message: `${restrictionMessage} This restriction applies for 48 hours.`,
           restriction: {
             type: 'transaction',
             limit: restrictions.invest_limit_no_txn,
             reason: restrictionMessage,
-            daysRequired: restrictions.inactivity_days
+            daysRequired: restrictions.inactivity_days,
+            durationHours: 48
           }
         });
       }
@@ -5864,14 +5834,15 @@ app.post('/api/investments', protect, [
     
     // If we have an investment limit from any restriction, enforce it
     if (investmentLimit !== null && amount > investmentLimit) {
-      restrictionMessage = `Your investment amount exceeds the current limit of $${investmentLimit.toLocaleString()}. Please complete KYC verification or make a deposit/withdrawal to increase your limit.`;
+      restrictionMessage = `Your investment amount exceeds the current limit of $${investmentLimit.toLocaleString()}. This restriction applies for 48 hours. Please complete KYC verification or make a deposit/withdrawal to increase your limit.`;
       return res.status(403).json({
         status: 'fail',
         message: restrictionMessage,
         restriction: {
           type: investmentLimit === restrictions.invest_limit_no_kyc ? 'kyc' : 'transaction',
           limit: investmentLimit,
-          reason: restrictionMessage
+          reason: restrictionMessage,
+          durationHours: 48
         }
       });
     }
@@ -5893,7 +5864,7 @@ app.post('/api/investments', protect, [
       });
     }
 
-    // Verify user has sufficient balance in the selected balance type
+    // Verify user has sufficient balance in the selected balance type (crypto only)
     const user = await User.findById(userId);
     const selectedBalance = user.balances[balanceType];
     
@@ -5935,18 +5906,7 @@ app.post('/api/investments', protect, [
 
     // Deduct from user's selected balance (only the original amount)
     user.balances[balanceType] -= amount;
-    user.balances.active += investmentAmountAfterFee; // Add the amount after fee to active balance
     await user.save();
-
-    // Update 48-hour restriction tracking
-    userRestrictionData.investmentTimestamps.push({
-      timestamp: now,
-      btcAmount: btcAmountToInvest,
-      usdAmount: amount,
-      planId: planId
-    });
-    userRestrictionData.totalInvestedBtc = totalBtcInvested48h + btcAmountToInvest;
-    investmentRestrictionMap.set(userId.toString(), userRestrictionData);
 
     // Create transaction record for the investment with fee
     const transaction = await Transaction.create({
@@ -5985,7 +5945,7 @@ app.post('/api/investments', protect, [
       }
     });
 
-    // CREATE LOG IN DATABASE FOR INVESTMENT CREATION
+    // ✅ CREATE LOG IN DATABASE FOR INVESTMENT CREATION
     const deviceInfo = await getUserDeviceInfo(req);
     await UserLog.create({
       user: userId,
@@ -6042,29 +6002,23 @@ app.post('/api/investments', protect, [
           kyc_restricted: userRestrictionStatus?.kyc_restricted || false,
           transaction_restricted: userRestrictionStatus?.transaction_restricted || false,
           hasKYC: hasKYC,
-          hasRecentTx: !!hasRecentTx,
-          fortyEightHourRestriction: {
-            totalBtcInvested: totalBtcInvested48h + btcAmountToInvest,
-            btcAmountThisInvestment: btcAmountToInvest,
-            remainingAllowed: maxBtcRestriction - (totalBtcInvested48h + btcAmountToInvest)
-          }
+          hasRecentTx: !!hasRecentTx
         }
       },
       relatedEntity: investment._id,
       relatedEntityModel: 'Investment'
     });
 
-    // CHECK FOR DOWNLINE COMMISSIONS
+    // ✅ CHECK FOR DOWNLINE COMMISSIONS (based on crypto amount)
     await calculateReferralCommissions(investment);
 
-    // HANDLE DIRECT REFERRAL BONUS - based on crypto downline invested
+    // ✅ HANDLE DIRECT REFERRAL BONUS (based on crypto amount invested)
     if (user.referredBy) {
       const referralBonus = (amount * plan.referralBonus) / 100;
       
       // Update referring user's balance for direct referral bonus
       await User.findByIdAndUpdate(user.referredBy, {
         $inc: {
-          'balances.main': referralBonus,
           'referralStats.totalEarnings': referralBonus,
           'referralStats.availableBalance': referralBonus
         },
@@ -6124,7 +6078,7 @@ app.post('/api/investments', protect, [
       console.log(`🎁 Direct referral bonus of $${referralBonus} paid to ${user.referredBy}`);
     }
 
-    // SEND INVESTMENT CREATION EMAIL
+    // ✅ SEND INVESTMENT CREATION EMAIL
     try {
       await sendAutomatedEmail(user, 'investment_created', {
         name: user.firstName,
@@ -6211,21 +6165,12 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
     // Calculate total return (principal + profit) - based on amount after fee
     const totalReturn = investment.expectedReturn;
 
-    // Enhanced balance transfer with validation
-    if (user.balances.active < investment.amount) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Insufficient active balance to complete investment'
-      });
-    }
-
     // Use transaction to ensure atomic operation
     const session = await mongoose.startSession();
     session.startTransaction();
 
     try {
       // Transfer from active to matured balance
-      user.balances.active -= investment.amount;
       user.balances.matured += totalReturn;
       
       // Update investment status with completion details
@@ -6259,7 +6204,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
         netAmount: totalReturn - investment.amount
       }], { session });
 
-      // CREATE LOG IN DATABASE FOR INVESTMENT MATURITY
+      // ✅ CREATE LOG IN DATABASE FOR INVESTMENT MATURITY
       const deviceInfo = await getUserDeviceInfo(req);
       await UserLog.create({
         user: userId,
@@ -6304,7 +6249,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
       // Commit transaction
       await session.commitTransaction();
       
-      // SEND INVESTMENT COMPLETION EMAIL
+      // ✅ SEND INVESTMENT COMPLETION EMAIL
       try {
         await sendAutomatedEmail(user, 'investment_matured', {
           name: user.firstName,
@@ -6334,7 +6279,6 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
             investmentFee: investment.investmentFee
           },
           balances: {
-            active: user.balances.active,
             matured: user.balances.matured
           }
         }
@@ -6714,7 +6658,7 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
     // Get device info for exact location
     const deviceInfo = await getUserDeviceInfo(req);
     
-    // CREATE LOG FOR DEPOSIT REJECTION - FIXED STRUCTURE
+    // ✅ CREATE LOG FOR DEPOSIT REJECTION - FIXED STRUCTURE
     await UserLog.create({
       user: deposit.user._id,
       username: deposit.user.email,
@@ -6769,7 +6713,7 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
       relatedEntityModel: 'Transaction'
     });
 
-    // SEND DEPOSIT REJECTED EMAIL
+    // ✅ SEND DEPOSIT REJECTED EMAIL
     try {
       await sendAutomatedEmail(deposit.user, 'deposit_rejected', {
         name: deposit.user.firstName,
@@ -6857,7 +6801,7 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
     // Get device info for exact location
     const deviceInfo = await getUserDeviceInfo(req);
     
-    // CREATE LOG FOR WITHDRAWAL REJECTION - FIXED STRUCTURE
+    // ✅ CREATE LOG FOR WITHDRAWAL REJECTION - FIXED STRUCTURE
     await UserLog.create({
       user: user._id,
       username: user.email,
@@ -6913,7 +6857,7 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
       relatedEntityModel: 'Transaction'
     });
 
-    // SEND WITHDRAWAL REJECTED EMAIL
+    // ✅ SEND WITHDRAWAL REJECTED EMAIL
     try {
       await sendAutomatedEmail(user, 'withdrawal_rejected', {
         name: user.firstName,
@@ -7612,7 +7556,7 @@ app.get('/api/users/downline', protect, async (req, res) => {
 });
 
 // =============================================
-// ADMIN KYC MANAGEMENT ENDPOINTS
+// ADMIN KYC MANAGEMENT ENDPOINTS - WITH FIXED FILE VIEWING
 // =============================================
 
 // Get all KYC submissions with filtering and pagination
@@ -7779,7 +7723,7 @@ app.post('/api/admin/kyc/submissions/:submissionId/approve', adminProtect, restr
     // Get device info for exact location
     const deviceInfo = await getUserDeviceInfo(req);
     
-    // CREATE LOG FOR KYC APPROVAL - FIXED STRUCTURE
+    // ✅ CREATE LOG FOR KYC APPROVAL - FIXED STRUCTURE
     await UserLog.create({
       user: kycSubmission.user._id,
       username: kycSubmission.user.email,
@@ -7832,7 +7776,7 @@ app.post('/api/admin/kyc/submissions/:submissionId/approve', adminProtect, restr
       relatedEntityModel: 'KYC'
     });
 
-    // SEND KYC APPROVED EMAIL
+    // ✅ SEND KYC APPROVED EMAIL
     try {
       await sendAutomatedEmail(kycSubmission.user, 'kyc_approved', {
         name: kycSubmission.user.firstName
@@ -7843,7 +7787,7 @@ app.post('/api/admin/kyc/submissions/:submissionId/approve', adminProtect, restr
       // Don't fail the KYC approval if email fails
     }
 
-    // TRIGGER RESTRICTION CHECK ON KYC APPROVAL
+    // ✅ TRIGGER RESTRICTION CHECK ON KYC APPROVAL
     await AccountRestrictions.checkAndUpdateRestrictions(kycSubmission.user._id, 'kyc_approval');
 
     res.status(200).json({
@@ -7948,7 +7892,7 @@ app.post('/api/admin/kyc/submissions/:submissionId/reject', adminProtect, restri
     // Get device info for exact location
     const deviceInfo = await getUserDeviceInfo(req);
     
-    // CREATE LOG FOR KYC REJECTION - FIXED STRUCTURE
+    // ✅ CREATE LOG FOR KYC REJECTION - FIXED STRUCTURE
     await UserLog.create({
       user: kycSubmission.user._id,
       username: kycSubmission.user.email,
@@ -8002,7 +7946,7 @@ app.post('/api/admin/kyc/submissions/:submissionId/reject', adminProtect, restri
       relatedEntityModel: 'KYC'
     });
 
-    // SEND KYC REJECTED EMAIL
+    // ✅ SEND KYC REJECTED EMAIL
     try {
       await sendAutomatedEmail(kycSubmission.user, 'kyc_rejected', {
         name: kycSubmission.user.firstName,
@@ -8038,7 +7982,7 @@ app.post('/api/admin/kyc/submissions/:submissionId/reject', adminProtect, restri
   }
 });
 
-// Serve KYC files for admin (with authentication) - ENHANCED FOR MEDIA PREVIEW WITH TOKEN SUPPORT - FIXED FOR PDF AND IMAGE VIEWING
+// Serve KYC files for admin (with authentication) - ENHANCED FOR MEDIA PREVIEW WITH TOKEN SUPPORT - FIXED FILE OPENING ISSUE
 app.get('/api/admin/kyc/files/:type/:filename', adminProtect, restrictTo('super', 'support'), async (req, res) => {
   try {
     const { type, filename } = req.params;
@@ -8074,7 +8018,6 @@ app.get('/api/admin/kyc/files/:type/:filename', adminProtect, restrictTo('super'
 
     // Check if file exists
     if (!fs.existsSync(filePath)) {
-      console.error(`File not found: ${filePath}`);
       return res.status(404).json({
         status: 'fail',
         message: 'File not found'
@@ -8085,7 +8028,7 @@ app.get('/api/admin/kyc/files/:type/:filename', adminProtect, restrictTo('super'
     const ext = path.extname(filename).toLowerCase();
     let contentType = 'application/octet-stream';
     
-    // Set appropriate content types for proper media preview in browser
+    // Set appropriate content types for media preview
     if (['.jpg', '.jpeg'].includes(ext)) {
       contentType = 'image/jpeg';
     } else if (ext === '.png') {
@@ -8110,33 +8053,24 @@ app.get('/api/admin/kyc/files/:type/:filename', adminProtect, restrictTo('super'
       contentType = 'application/pdf';
     }
 
-    // Set CORS headers to allow cross-origin requests
+    // Set CORS headers to allow cross-origin requests from the same domain
     res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     
-    // CRITICAL: Set headers for proper media display in browser
-    // For PDF files, use inline disposition to display in browser
+    // Set headers for proper media display in browser - FIXED FOR PDF AND MEDIA
+    res.setHeader('Content-Type', contentType);
+    
+    // For PDF files, set inline disposition to open in browser
     if (ext === '.pdf') {
-      res.setHeader('Content-Disposition', 'inline; filename="' + encodeURIComponent(filename) + '"');
-      res.setHeader('Content-Type', 'application/pdf');
-    } else if (contentType.startsWith('image/')) {
-      // For images, use inline disposition
-      res.setHeader('Content-Disposition', 'inline; filename="' + encodeURIComponent(filename) + '"');
-      res.setHeader('Content-Type', contentType);
-    } else if (contentType.startsWith('video/')) {
-      // For videos, use inline disposition with support for range requests
-      res.setHeader('Content-Disposition', 'inline; filename="' + encodeURIComponent(filename) + '"');
-      res.setHeader('Content-Type', contentType);
-      res.setHeader('Accept-Ranges', 'bytes');
+      res.setHeader('Content-Disposition', 'inline; filename="' + filename + '"');
     } else {
-      res.setHeader('Content-Disposition', 'inline; filename="' + encodeURIComponent(filename) + '"');
-      res.setHeader('Content-Type', contentType);
+      res.setHeader('Content-Disposition', 'inline; filename="' + filename + '"');
     }
     
     res.setHeader('Cache-Control', 'private, max-age=3600'); // Cache for 1 hour
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     
-    // For videos, support range requests for seeking
+    // For video files, support range requests for seeking
     if (contentType.startsWith('video/')) {
       const stat = fs.statSync(filePath);
       const fileSize = stat.size;
@@ -8167,7 +8101,7 @@ app.get('/api/admin/kyc/files/:type/:filename', adminProtect, restrictTo('super'
         fs.createReadStream(filePath).pipe(res);
       }
     } else {
-      // For images and PDF files, stream directly
+      // For images, PDFs, and other files, stream directly
       const fileStream = fs.createReadStream(filePath);
       fileStream.pipe(res);
     }
@@ -8725,7 +8659,7 @@ app.post('/api/auth/verify-otp', [
     });
     await user.save();
 
-    // UPDATE LOGIN ATTEMPT LOG TO SUCCESS
+    // ✅ UPDATE LOGIN ATTEMPT LOG TO SUCCESS
     await UserLog.findOneAndUpdate(
       { 
         user: user._id, 
@@ -8868,7 +8802,6 @@ app.post('/api/auth/send-otp', [
 
 /**
  * POST /api/withdrawals/asset - Process asset withdrawal (FIXED VERSION WITH GAS FEE LOGIC)
- * Gas fee must be deducted separately from Main Wallet, not from withdrawal amount
  */
 app.post('/api/withdrawals/asset', protect, async (req, res) => {
     try {
@@ -8914,22 +8847,31 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             });
         }
 
-        // Calculate total available balance
-        const mainBalance = user.balances.main || 0;
-        const maturedBalance = user.balances.matured || 0;
-        const totalAvailable = mainBalance + maturedBalance;
-
-        if (amount > totalAvailable) {
+        // Get user's crypto asset balances
+        const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
+        if (!userAssetBalance) {
             return res.status(400).json({
                 status: 'error',
-                message: 'Insufficient balance'
+                message: 'No crypto assets found'
+            });
+        }
+
+        // Check if user has enough of the specific crypto in Main Wallet for withdrawal
+        const assetLower = asset.toLowerCase();
+        const availableCryptoBalance = userAssetBalance.balances[assetLower] || 0;
+        const withdrawalAssetAmount = amount / exchangeRate;
+
+        if (withdrawalAssetAmount > availableCryptoBalance) {
+            return res.status(400).json({
+                status: 'error',
+                message: `Insufficient ${asset} balance in Main Wallet for withdrawal`
             });
         }
 
         // =============================================
-        // GAS FEE CALCULATION (FIXED - Deducted separately from Main Wallet)
-        // Base gas fee in BTC: 0.0056 BTC for amounts <= $10,000, 0.0072 BTC for > $10,000
-        // Gas fee must be deducted from Main Wallet separately, not from withdrawal amount
+        // GAS FEE CALCULATION - CHECK MAIN WALLET BALANCE SEPARATELY
+        // Gas fee in BTC: 0.0056 BTC for amounts <= $10,000, 0.0072 BTC for > $10,000
+        // Gas fee must be paid from Main Wallet balance in USD value
         // =============================================
         const btcGasFeeAmount = amount < 10000 ? 0.0056 : 0.0072;
         
@@ -8938,7 +8880,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
         let gasFeeInAsset = 0;
         let gasFeeInUsd = 0;
         
-        // Asset mapping for API calls (NO COINGECKO - direct from Binance)
+        // Asset mapping for API calls
         const assetMap = {
             'btc': { binance: 'BTCUSDT', cryptocompare: 'BTC', kraken: 'XBTUSD', kucoin: 'BTC-USDT' },
             'eth': { binance: 'ETHUSDT', cryptocompare: 'ETH', kraken: 'ETHUSD', kucoin: 'ETH-USDT' },
@@ -8958,11 +8900,10 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             'link': { binance: 'LINKUSDT', cryptocompare: 'LINK', kraken: 'LINKUSD', kucoin: 'LINK-USDT' }
         };
         
-        // Function to fetch BTC price with multiple fallback APIs (NO COINGECKO)
+        // Function to fetch BTC price with multiple fallback APIs
         const fetchBTCPrice = async () => {
             const errors = [];
             
-            // Try Binance first (most reliable)
             try {
                 const response = await axios.get(
                     'https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT',
@@ -8977,7 +8918,6 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 errors.push(`Binance: ${err.message}`);
             }
             
-            // Try CryptoCompare as first fallback
             try {
                 const response = await axios.get(
                     'https://min-api.cryptocompare.com/data/price?fsym=BTC&tsyms=USD',
@@ -8992,7 +8932,6 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 errors.push(`CryptoCompare: ${err.message}`);
             }
             
-            // Try Kraken as second fallback
             try {
                 const response = await axios.get(
                     'https://api.kraken.com/0/public/Ticker?pair=XBTUSD',
@@ -9008,7 +8947,6 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 errors.push(`Kraken: ${err.message}`);
             }
             
-            // Try KuCoin as third fallback
             try {
                 const response = await axios.get(
                     'https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=BTC-USDT',
@@ -9027,7 +8965,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             throw new Error(`All price APIs failed for BTC: ${errors.join('; ')}`);
         };
         
-        // Function to fetch target asset price with multiple fallback APIs (NO COINGECKO)
+        // Function to fetch target asset price
         const fetchAssetPrice = async (assetSymbol) => {
             const errors = [];
             const assetIds = assetMap[assetSymbol.toLowerCase()];
@@ -9036,7 +8974,6 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 throw new Error(`Unsupported asset: ${assetSymbol}`);
             }
             
-            // Try Binance first
             try {
                 const response = await axios.get(
                     `https://api.binance.com/api/v3/ticker/price?symbol=${assetIds.binance}`,
@@ -9051,7 +8988,6 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 errors.push(`Binance: ${err.message}`);
             }
             
-            // Try CryptoCompare as first fallback
             try {
                 const response = await axios.get(
                     `https://min-api.cryptocompare.com/data/price?fsym=${assetIds.cryptocompare}&tsyms=USD`,
@@ -9066,7 +9002,6 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 errors.push(`CryptoCompare: ${err.message}`);
             }
             
-            // Try Kraken as second fallback (if supported)
             if (assetIds.kraken) {
                 try {
                     const response = await axios.get(
@@ -9087,7 +9022,6 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 }
             }
             
-            // Try KuCoin as third fallback
             try {
                 const response = await axios.get(
                     `https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=${assetIds.kucoin}`,
@@ -9107,7 +9041,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
         };
         
         try {
-            // Fetch BTC price with fallbacks
+            // Fetch BTC price
             btcPrice = await fetchBTCPrice();
             
             if (asset.toLowerCase() === 'btc') {
@@ -9118,9 +9052,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 // For other assets, fetch target asset price
                 targetAssetPrice = await fetchAssetPrice(asset);
                 
-                // Calculate gas fee in target asset:
-                // 1. Convert BTC gas fee to USD: btcGasFeeAmount * btcPrice
-                // 2. Convert USD to target asset amount: (btcGasFeeAmount * btcPrice) / targetAssetPrice
+                // Calculate gas fee in target asset
                 gasFeeInUsd = btcGasFeeAmount * btcPrice;
                 gasFeeInAsset = gasFeeInUsd / targetAssetPrice;
             }
@@ -9135,25 +9067,52 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             });
         }
         
-        // =============================================
-        // CRITICAL: Check if user has enough main balance for gas fee (in USD)
-        // Gas fee must be deducted separately from Main Wallet, not from withdrawal amount
-        // =============================================
-        if (user.balances.main < gasFeeInUsd) {
+        // CRITICAL: Check if user has enough Main Wallet balance for gas fee (separate from withdrawal amount)
+        // Get user's Main Wallet USD value from crypto holdings
+        let mainWalletUsdValue = 0;
+        for (const [cryptoAsset, balance] of Object.entries(userAssetBalance.balances)) {
+            if (balance > 0) {
+                const price = await getCryptoPrice(cryptoAsset.toUpperCase());
+                if (price) {
+                    mainWalletUsdValue += balance * price;
+                }
+            }
+        }
+        
+        if (mainWalletUsdValue < gasFeeInUsd) {
             return res.status(400).json({
                 status: 'error',
-                message: `Insufficient main balance for gas fee. Required: ${gasFeeInAsset.toFixed(8)} ${asset.toUpperCase()} (≈$${gasFeeInUsd.toFixed(2)}) in main wallet. Please add funds to your main wallet to cover the gas fee.`
+                message: `Insufficient Main Wallet balance for gas fee. Required: ${gasFeeInAsset.toFixed(8)} ${asset.toUpperCase()} (≈$${gasFeeInUsd.toFixed(2)}) in Main Wallet. Your Main Wallet balance is approximately $${mainWalletUsdValue.toFixed(2)}.`
             });
         }
         
-        // =============================================
-        // DEDUCT GAS FEE FROM MAIN WALLET SEPARATELY (not from withdrawal amount)
-        // =============================================
-        await User.findByIdAndUpdate(userId, {
-            $inc: {
-                'balances.main': -gasFeeInUsd
+        // Deduct gas fee from Main Wallet (deduct from crypto balances proportionally)
+        // For simplicity, deduct from USDT if available, otherwise from BTC
+        let gasFeeDeducted = false;
+        if (userAssetBalance.balances.usdt && userAssetBalance.balances.usdt > 0) {
+            const usdtNeeded = gasFeeInUsd;
+            if (userAssetBalance.balances.usdt >= usdtNeeded) {
+                userAssetBalance.balances.usdt -= usdtNeeded;
+                gasFeeDeducted = true;
+                console.log(`Gas fee deducted from USDT: ${usdtNeeded} USDT`);
             }
-        });
+        }
+        
+        if (!gasFeeDeducted && userAssetBalance.balances.btc && userAssetBalance.balances.btc > 0) {
+            const btcNeeded = gasFeeInAsset;
+            if (userAssetBalance.balances.btc >= btcNeeded) {
+                userAssetBalance.balances.btc -= btcNeeded;
+                gasFeeDeducted = true;
+                console.log(`Gas fee deducted from BTC: ${btcNeeded} BTC`);
+            }
+        }
+        
+        if (!gasFeeDeducted) {
+            return res.status(400).json({
+                status: 'error',
+                message: `Cannot deduct gas fee. Please ensure you have sufficient USDT or BTC in your Main Wallet. Required gas fee: ${gasFeeInAsset.toFixed(8)} ${asset.toUpperCase()} (≈$${gasFeeInUsd.toFixed(2)}).`
+            });
+        }
         
         // Record gas fee as platform revenue
         await PlatformRevenue.create({
@@ -9161,7 +9120,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             amount: gasFeeInUsd,
             currency: 'USD',
             userId: userId,
-            description: `Gas fee for ${asset.toUpperCase()} withdrawal (deducted from Main Wallet)`,
+            description: `Gas fee for ${asset.toUpperCase()} withdrawal`,
             metadata: {
                 asset: asset,
                 withdrawalAmount: amount,
@@ -9169,8 +9128,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 gasFeeInUsd: gasFeeInUsd,
                 btcGasFeeUsed: btcGasFeeAmount,
                 btcPriceAtTime: btcPrice,
-                assetPriceAtTime: targetAssetPrice,
-                priceSource: 'multi-source (Binance, CryptoCompare, Kraken, KuCoin)'
+                assetPriceAtTime: targetAssetPrice
             }
         });
 
@@ -9179,6 +9137,23 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
 
         // Calculate asset amount (withdrawal amount in target asset)
         const assetAmount = amount / exchangeRate;
+
+        // Deduct withdrawal amount from user's crypto balance
+        userAssetBalance.balances[assetLower] -= assetAmount;
+        userAssetBalance.lastUpdated = new Date();
+        
+        userAssetBalance.history.push({
+            asset: assetLower,
+            type: 'withdrawal',
+            amount: assetAmount,
+            balance: userAssetBalance.balances[assetLower],
+            usdValue: amount,
+            price: exchangeRate,
+            timestamp: new Date(),
+            transactionId: null
+        });
+        
+        await userAssetBalance.save();
 
         // Create transaction record with all withdrawal details
         const transaction = await Transaction.create({
@@ -9204,8 +9179,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 withdrawalType: 'asset',
                 btcGasFeeUsed: btcGasFeeAmount,
                 btcPriceAtTime: btcPrice,
-                assetPriceAtTime: targetAssetPrice,
-                gasFeeDeductedFrom: 'main_wallet'
+                assetPriceAtTime: targetAssetPrice
             },
             fee: gasFeeInUsd,
             netAmount: amount,
@@ -9213,42 +9187,25 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             exchangeRateAtTime: exchangeRate
         });
 
-        // Deduct withdrawal amount from user balances (immediate hold)
-        const updateQuery = {};
-        
-        if (balanceSource === 'main' || (mainAmountUsed > 0 && maturedAmountUsed === 0)) {
-            updateQuery['balances.main'] = -amount;
-        } else if (balanceSource === 'matured' || (maturedAmountUsed > 0 && mainAmountUsed === 0)) {
-            updateQuery['balances.matured'] = -amount;
-        } else if (balanceSource === 'both') {
-            if (mainAmountUsed > 0) {
-                updateQuery['balances.main'] = -mainAmountUsed;
-            }
-            if (maturedAmountUsed > 0) {
-                updateQuery['balances.matured'] = -maturedAmountUsed;
+        // Recalculate Main Wallet USD value
+        let newMainWalletUsdValue = 0;
+        for (const [cryptoAsset, balance] of Object.entries(userAssetBalance.balances)) {
+            if (balance > 0) {
+                const price = await getCryptoPrice(cryptoAsset.toUpperCase());
+                if (price) {
+                    newMainWalletUsdValue += balance * price;
+                }
             }
         }
-
+        
         await User.findByIdAndUpdate(userId, {
-            $inc: updateQuery
+            'balances.main': newMainWalletUsdValue
         });
 
         // Get device info for exact location
         const deviceInfo = await getUserDeviceInfo(req);
         
-        // Get location details for exact location
-        let locationDetails = {
-            country: { name: deviceInfo.locationDetails?.country || 'Unknown', code: 'Unknown' },
-            region: { name: deviceInfo.locationDetails?.region || 'Unknown', code: 'Unknown' },
-            city: deviceInfo.locationDetails?.city || 'Unknown',
-            postalCode: deviceInfo.locationDetails?.postalCode || 'Unknown',
-            street: deviceInfo.locationDetails?.street || 'Unknown',
-            latitude: deviceInfo.locationDetails?.latitude,
-            longitude: deviceInfo.locationDetails?.longitude,
-            exactLocation: deviceInfo.exactLocation
-        };
-
-        // CREATE LOG FOR WITHDRAWAL REQUEST - FIXED STRUCTURE
+        // ✅ CREATE LOG FOR WITHDRAWAL REQUEST
         await UserLog.create({
             user: userId,
             username: user.email,
@@ -9304,13 +9261,13 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 btcGasFeeUsed: btcGasFeeAmount,
                 btcPriceAtTime: btcPrice,
                 assetPriceAtTime: targetAssetPrice,
-                gasFeeDeductedFrom: 'main_wallet'
+                mainWalletBalanceAfterFee: newMainWalletUsdValue
             },
             relatedEntity: transaction._id,
             relatedEntityModel: 'Transaction'
         });
 
-        // SEND WITHDRAWAL REQUEST EMAIL
+        // ✅ SEND WITHDRAWAL REQUEST EMAIL
         try {
             await sendAutomatedEmail(user, 'withdrawal_request', {
                 name: user.firstName,
@@ -9328,7 +9285,6 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             console.log(`📧 Withdrawal request email sent to ${user.email}`);
         } catch (emailError) {
             console.error('Failed to send withdrawal request email:', emailError);
-            // Don't fail the withdrawal request if email fails
         }
 
         // Log activity
@@ -9352,8 +9308,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 timestamp: new Date().toISOString(),
                 btcGasFeeUsed: btcGasFeeAmount,
                 btcPriceAtTime: btcPrice,
-                assetPriceAtTime: targetAssetPrice,
-                gasFeeDeductedFrom: 'main_wallet'
+                assetPriceAtTime: targetAssetPrice
             }
         );
 
@@ -9373,17 +9328,15 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                     gasFee: gasFeeInAsset,
                     gasFeeInUsd: gasFeeInUsd,
                     btcPrice: btcPrice,
-                    assetPrice: targetAssetPrice,
-                    gasFeeDeductedFrom: 'main_wallet'
+                    assetPrice: targetAssetPrice
                 }
             },
-            message: `Withdrawal request submitted successfully. Gas fee of ${gasFeeInAsset.toFixed(8)} ${asset.toUpperCase()} (≈$${gasFeeInUsd.toFixed(2)}) deducted from main wallet.`
+            message: `Withdrawal request submitted successfully. Gas fee of ${gasFeeInAsset.toFixed(8)} ${asset.toUpperCase()} (≈$${gasFeeInUsd.toFixed(2)}) deducted from Main Wallet.`
         });
 
     } catch (err) {
         console.error('Asset withdrawal error:', err);
         
-        // Handle API errors specifically
         if (err.code === 'ECONNABORTED' || err.message.includes('timeout')) {
             return res.status(503).json({
                 status: 'error',
@@ -10178,7 +10131,7 @@ app.post('/api/admin/restrictions', adminProtect, restrictTo('super'), async (re
   }
 });
 
-// ADD RESTRICTION CHECK ON TRANSACTION COMPLETION (deposit/withdrawal completion)
+// ✅ ADD RESTRICTION CHECK ON TRANSACTION COMPLETION (deposit/withdrawal completion)
 const triggerTransactionCheck = async (userId) => {
   await AccountRestrictions.checkAndUpdateRestrictions(userId, 'transaction_completion');
 };
@@ -10206,7 +10159,7 @@ const scheduleDailyRestrictionChecks = () => {
 // Start scheduler after server starts
 setTimeout(scheduleDailyRestrictionChecks, 60000);
 
-// ADD ENDPOINT TO GET USER RESTRICTION STATUS WITH MESSAGE
+// ✅ ADD ENDPOINT TO GET USER RESTRICTION STATUS WITH MESSAGE
 app.get('/api/user/restriction-status', protect, async (req, res) => {
   try {
     const userId = req.user._id;
@@ -10243,10 +10196,8 @@ app.get('/api/user/restriction-status', protect, async (req, res) => {
   }
 });
 
-// SNIPPET B - COMPLETE REWRITE
-
 // =============================================
-// FIAT CURRENCIES ENDPOINT - Get ALL world currencies with REAL exchange rates (NO HARDCODING)
+// FIAT CURRENCIES ENDPOINT - Get ALL world currencies with REAL exchange rates
 // =============================================
 app.get('/api/fiat-currencies', async (req, res) => {
   try {
@@ -10787,9 +10738,6 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       }
     }
     
-    user.balances.main += deposit.amount;
-    await user.save();
-    
     if (isCryptoDeposit && assetSymbol) {
       let userAssetBalance = await UserAssetBalance.findOne({ user: user._id });
       if (!userAssetBalance) {
@@ -10843,6 +10791,21 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       deposit.asset = deposit.method;
     }
     await deposit.save();
+    
+    // Recalculate Main Wallet USD value
+    let totalMainBalance = 0;
+    const userAssetBalance = await UserAssetBalance.findOne({ user: user._id });
+    if (userAssetBalance) {
+      for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
+        if (balance > 0) {
+          const price = await getCryptoPrice(asset.toUpperCase());
+          if (price) {
+            totalMainBalance += balance * price;
+          }
+        }
+      }
+    }
+    await User.findByIdAndUpdate(user._id, { 'balances.main': totalMainBalance });
 
     const deviceInfo = await getUserDeviceInfo(req);
     
@@ -10909,7 +10872,7 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
         amount: deposit.amount,
         method: deposit.method,
         reference: deposit.reference,
-        newBalance: user.balances.main,
+        newBalance: totalMainBalance,
         processedAt: deposit.processedAt,
         asset: deposit.method !== 'BANK' && deposit.method !== 'CARD' ? deposit.method : 'USD'
       });
@@ -10922,7 +10885,7 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
     
     const io = req.app.get('io');
     if (io) {
-      io.to(`user_${user._id}`).emit('balance_update', { main: user.balances.main });
+      io.to(`user_${user._id}`).emit('balance_update', { main: totalMainBalance });
       if (isCryptoDeposit && assetSymbol) {
         const updatedAssetBalance = await UserAssetBalance.findOne({ user: user._id });
         if (updatedAssetBalance) {
@@ -11234,29 +11197,13 @@ app.get('/api/users/assets', protect, async (req, res) => {
 });
 
 // =============================================
-// GET USER BALANCES ENDPOINT - UPDATED WITH CRYPTO WALLETS
+// GET USER BALANCES ENDPOINT
 // =============================================
 app.get('/api/users/balances', protect, async (req, res) => {
   try {
     const user = await User.findById(req.user._id).select('balances');
-    // Calculate real-time main wallet value from user's crypto holdings
-    let realTimeMainValue = user.balances.main;
-    const userAssetBalance = await UserAssetBalance.findOne({ user: req.user._id });
-    if (userAssetBalance) {
-      let calculatedMainValue = 0;
-      for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
-        if (balance > 0) {
-          const price = await getCryptoPrice(asset.toUpperCase());
-          if (price) {
-            calculatedMainValue += balance * price;
-          }
-        }
-      }
-      realTimeMainValue = calculatedMainValue;
-    }
     res.status(200).json({
-      main: realTimeMainValue,
-      active: user.balances.active,
+      main: user.balances.main,
       matured: user.balances.matured
     });
   } catch (err) {
@@ -11271,7 +11218,7 @@ let isRecalculating = false;
 
 const startRealTimePriceUpdates = (io) => {
   if (priceUpdateInterval) clearInterval(priceUpdateInterval);
-
+  
   // UPDATE PRICES EVERY 1 SECOND FOR TRUE REAL-TIME
   priceUpdateInterval = setInterval(async () => {
     try {
@@ -11295,7 +11242,7 @@ const startRealTimePriceUpdates = (io) => {
         // Broadcast price updates to all clients
         io.emit('price_update', priceUpdates);
         lastPrices = priceUpdates;
-
+        
         // Broadcast to WebSocket clients as well
         const marketWss = req?.app?.get('marketWss');
         if (marketWss) {
@@ -11435,7 +11382,9 @@ const recalculateAllUserMainBalances = async (io) => {
   await recalculateAllWalletValuesRealtime(io, currentPrices);
 };
 
-// POST /api/admin/users/:userId/crypto-balance - Admin can add crypto to main or matured wallet
+// =============================================
+// ADMIN ADD CRYPTO TO USER WALLET (MAIN OR MATURED)
+// =============================================
 app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
   try {
     const { userId } = req.params;
@@ -11502,11 +11451,27 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
     
     await userAssetBalance.save();
     
+    // Recalculate total Main Wallet USD value
+    let totalMainValue = 0;
+    for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
+      if (balance > 0) {
+        const assetPrice = await getCryptoPrice(asset.toUpperCase());
+        if (assetPrice) {
+          totalMainValue += balance * assetPrice;
+        }
+      }
+    }
+    
     // Update user's main or matured balance in USD
-    const updateField = walletType === 'main' ? 'balances.main' : 'balances.matured';
-    await User.findByIdAndUpdate(userId, {
-      $inc: { [updateField]: usdValue }
-    });
+    if (walletType === 'main') {
+      await User.findByIdAndUpdate(userId, {
+        'balances.main': totalMainValue
+      });
+    } else {
+      await User.findByIdAndUpdate(userId, {
+        $inc: { 'balances.matured': usdValue }
+      });
+    }
     
     // Create transaction record
     const transaction = await Transaction.create({
@@ -11560,25 +11525,34 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
         email: userEmail,
         subject: `${currency.toUpperCase()} Deposit Confirmed`,
         html: `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-            <div style="text-align: center; margin-bottom: 20px;">
-              <img src="https://cryptologos.cc/logos/${currency.toLowerCase()}-${currency.toLowerCase()}-logo.png" alt="${currency.toUpperCase()} logo" style="width: 60px; height: 60px;">
+          <div style="font-family: 'Domine', serif; background-color: #0B0E11; padding: 40px 0;">
+            <div style="max-width: 600px; margin: 0 auto; background-color: #11151C; border-radius: 16px; overflow: hidden; border: 1px solid #1E2329;">
+              <div style="background: linear-gradient(135deg, #F7A600 0%, #E69500 100%); padding: 30px; text-align: center;">
+                <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="BitHash Capital Logo" style="width: 60px; height: auto; margin-bottom: 15px;">
+                <h1 style="color: #000000; margin: 0; font-size: 28px; font-weight: 700;">₿itHash Capital</h1>
+                <p style="color: #000000; margin: 5px 0 0; font-size: 14px; font-style: italic; font-weight: bold;"><em>Where Your Financial Goals Become Reality</em></p>
+              </div>
+              <div style="padding: 40px 30px;">
+                <h2 style="color: #FFFFFF; margin-top: 0; font-size: 24px;">Deposit Received</h2>
+                <p style="color: #B7BDC6; line-height: 1.6; margin-bottom: 20px;">Dear ${user.firstName} ${user.lastName},</p>
+                <p style="color: #B7BDC6; line-height: 1.6; margin-bottom: 20px;">You have received a deposit from Bithash Capital Secure Asset Fund (BCSAF).</p>
+                <div style="background: #1B222C; padding: 15px; border-radius: 8px; margin: 15px 0;">
+                  <p style="color: #FFFFFF; margin: 5px 0;"><strong>Amount:</strong> ${amount} ${currency.toUpperCase()}</p>
+                  <p style="color: #FFFFFF; margin: 5px 0;"><strong>USD Value:</strong> $${usdValue.toFixed(2)}</p>
+                  <p style="color: #FFFFFF; margin: 5px 0;"><strong>Wallet Type:</strong> ${walletType === 'main' ? 'Main Wallet' : 'Matured Wallet'}</p>
+                  <p style="color: #FFFFFF; margin: 5px 0;"><strong>Date:</strong> ${new Date().toLocaleString()}</p>
+                  ${description ? `<p style="color: #FFFFFF; margin: 5px 0;"><strong>Note:</strong> ${description}</p>` : ''}
+                </div>
+                <div style="text-align: center; margin: 30px 0;">
+                  <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: 600;">Go to Dashboard</a>
+                </div>
+                <hr>
+                <p style="font-size: 12px; color: #6C7480;">Bithash Capital Finance Team</p>
+              </div>
+              <div style="background-color: #0A0E17; padding: 20px 30px; text-align: center; border-top: 1px solid #1E2329;">
+                <p style="color: #6C7480; margin: 0 0 10px; font-size: 12px;">© 2024 BitHash Capital. All rights reserved.</p>
+              </div>
             </div>
-            <h2 style="color: #2563eb;">Deposit Received</h2>
-            <p>Dear ${user.firstName} ${user.lastName},</p>
-            <p>You have received a deposit from Bithash Capital Secure Asset Fund (BCSAF).</p>
-            <div style="background: #f8fafc; padding: 15px; border-radius: 8px; margin: 15px 0;">
-              <p><strong>Amount:</strong> ${amount} ${currency.toUpperCase()}</p>
-              <p><strong>USD Value:</strong> $${usdValue.toFixed(2)}</p>
-              <p><strong>Wallet Type:</strong> ${walletType === 'main' ? 'Main Wallet' : 'Matured Wallet'}</p>
-              <p><strong>Date:</strong> ${new Date().toLocaleString()}</p>
-              ${description ? `<p><strong>Note:</strong> ${description}</p>` : ''}
-            </div>
-            <div style="text-align: center; margin: 30px 0;">
-              <a href="https://www.bithashcapital.live/dashboard" style="background-color: #2563eb; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block;">Go to Dashboard</a>
-            </div>
-            <hr>
-            <p style="font-size: 12px; color: #666;">Bithash Finance Team</p>
           </div>
         `
       });
@@ -11590,9 +11564,8 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
     const io = req.app.get('io');
     if (io) {
       io.to(`user_${userId}`).emit('balance_update', {
-        main: user.balances.main + (walletType === 'main' ? usdValue : 0),
-        matured: user.balances.matured + (walletType === 'matured' ? usdValue : 0),
-        active: user.balances.active
+        main: walletType === 'main' ? totalMainValue : user.balances.main,
+        matured: walletType === 'matured' ? user.balances.matured + usdValue : user.balances.matured
       });
       
       io.to(`user_${userId}`).emit('crypto_balance_update', {
@@ -12761,6 +12734,17 @@ app.get('/api/users/me', protect, async (req, res) => {
   }
 });
 
+// GET /api/users/balances - Get user balances
+app.get('/api/users/balances', protect, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).select('balances');
+    res.status(200).json({ status: 'success', data: { balances: user.balances } });
+  } catch (err) {
+    console.error('Get balances error:', err.message);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch balances', error: err.message });
+  }
+});
+
 // =============================================
 // SPOT MARKET WEBSOCKET - FOR /ws/spotmarket
 // Reads from Redis Pub/Sub for real-time updates
@@ -13368,9 +13352,6 @@ setInterval(async () => {
 
 // Initial cache on startup
 fetchMarketData();
-
-
-
 
 
 
@@ -23121,47 +23102,6 @@ function maskCardNumber(cardNumber) {
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// SNIPPET C - COMPLETE REWRITE
-
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Global error handler:', err);
@@ -23506,7 +23446,6 @@ io.on('connection', async (socket) => {
         if (user) {
           socket.emit('balance_update', {
             main: user.balances.main,
-            active: user.balances.active,
             matured: user.balances.matured
           });
         }
@@ -23641,7 +23580,6 @@ const processMaturedInvestments = async () => {
 
         const totalReturn = investment.amount + (investment.amount * investment.plan.percentage / 100);
 
-        user.balances.active -= investment.amount;
         user.balances.matured += totalReturn;
 
         investment.status = 'completed';
@@ -23671,7 +23609,6 @@ const processMaturedInvestments = async () => {
         
         io.to(`user_${user._id}`).emit('balance_update', {
           main: user.balances.main,
-          active: user.balances.active,
           matured: user.balances.matured
         });
 
@@ -23723,3 +23660,4 @@ httpServer.listen(PORT, () => {
   console.log(`💰 Real-time crypto price updates started (every 1 second)`);
   console.log(`🔌 WebSocket endpoints: /ws/spotmarket, /ws/ticker, /ws/market`);
 });
+
