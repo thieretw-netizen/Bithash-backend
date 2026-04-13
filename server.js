@@ -45,10 +45,23 @@ app.use(helmet({
   crossOriginOpenerPolicy: { policy: "unsafe-none" }
 }));
 
-app.use(cors({
-  origin: [
-    'https://www.bithashcapital.live', 
-  ],
+const corsOptions = {
+  origin: function(origin, callback) {
+    const allowedOrigins = [
+      'https://www.bithashcapital.live',
+      'https://bithashcapital.live',
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'https://bithhash.vercel.app'
+    ];
+    
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.log('CORS blocked origin:', origin);
+      callback(null, true);
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: [
@@ -59,14 +72,24 @@ app.use(cors({
     'X-Requested-With',
     'Accept',
     'Origin',
-    'X-2FA-Verified'
+    'X-2FA-Verified',
+    'admin_jwt',
+    'x-admin-token'
   ],
   exposedHeaders: [
     'X-Rate-Limit-Limit',
     'X-Rate-Limit-Remaining',
-    'X-Rate-Limit-Reset'
-  ]
-}));
+    'X-Rate-Limit-Reset',
+    'Authorization'
+  ],
+  preflightContinue: false,
+  optionsSuccessStatus: 204
+};
+
+app.use(cors(corsOptions));
+
+// Handle preflight requests explicitly for all routes
+app.options('*', cors(corsOptions));
 
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -87,9 +110,9 @@ app.use(xss());
 app.use(hpp());
 
 const redis = new Redis({
-  host: process.env.REDIS_HOST,
-  port: process.env.REDIS_PORT,
-  password: process.env.REDIS_PASSWORD,
+  host: process.env.REDIS_HOST || 'redis-14450.c276.us-east-1-2.ec2.redns.redis-cloud.com',
+  port: process.env.REDIS_PORT || 14450,
+  password: process.env.REDIS_PASSWORD || 'qjXgsg0YrsLaSumlEW9HkIZbvLjXEwXR',
   retryStrategy: (times) => {
     const delay = Math.min(times * 50, 2000);
     return delay;
@@ -102,11 +125,11 @@ const redis = new Redis({
 });
 
 redis.on('error', (err) => {
-  if (process.env.NODE_ENV !== 'production') console.error('Redis error:', err);
+  console.error('Redis error:', err);
 });
 
 redis.on('connect', () => {
-  if (process.env.NODE_ENV !== 'production') console.log('Redis connected successfully');
+  console.log('Redis connected successfully');
 });
 
 const getRealClientIP = (req) => {
@@ -181,7 +204,7 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-mongoose.connect(process.env.MONGODB_URI, {
+mongoose.connect(process.env.MONGODB_URI || 'mongodb+srv://mekitariansalincoria8_db_user:PTd4blzgRclmyuV8@cluster0.fvvirw2.mongodb.net/?appName=Cluster0', {
   autoIndex: true,
   connectTimeoutMS: 30000,
   socketTimeoutMS: 30000,
@@ -192,9 +215,7 @@ mongoose.connect(process.env.MONGODB_URI, {
   retryWrites: true,
   retryReads: true
 })
-.then(() => {
-  if (process.env.NODE_ENV !== 'production') console.log('MongoDB connected successfully');
-})
+.then(() => console.log('MongoDB connected successfully'))
 .catch(err => {
   console.error('MongoDB connection error:', err);
   process.exit(1);
@@ -231,7 +252,7 @@ const supportTransporter = createTransporter(
 const transporter = infoTransporter;
 
 const googleClient = new OAuth2Client({
-  clientId: process.env.GOOGLE_CLIENT_ID,
+  clientId: process.env.GOOGLE_CLIENT_ID || '634814462335-9o4t8q95c4orcsd9sijjl52374g6vm85.apps.googleusercontent.com',
   clientSecret: process.env.GOOGLE_CLIENT_SECRET,
   redirectUri: process.env.GOOGLE_REDIRECT_URI
 });
@@ -1554,8 +1575,8 @@ const InvestmentSchema = new mongoose.Schema({
   },
   currency: {
     type: String,
-    enum: ['BTC'],
-    default: 'BTC',
+    enum: ['USD', 'BTC', 'ETH', 'USDT'],
+    default: 'USD',
     index: true
   },
   originalAmount: {
@@ -1935,7 +1956,7 @@ const TransactionSchema = new mongoose.Schema({
     type: Number,
     min: [0, 'Asset amount cannot be negative']
   },
-  currency: { type: String, default: 'BTC' },
+  currency: { type: String, default: 'USD' },
   status: { 
     type: String, 
     enum: ['pending', 'completed', 'failed', 'cancelled'], 
@@ -2362,7 +2383,7 @@ const PlatformRevenueSchema = new mongoose.Schema({
   },
   currency: {
     type: String,
-    default: 'BTC'
+    default: 'USD'
   },
   transactionId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -2542,10 +2563,10 @@ const fs = require('fs');
 
 const ensureUploadDirectories = () => {
   const dirs = [
-    process.env.KYC_UPLOAD_PATH || 'uploads/kyc/identity',
-    process.env.KYC_ADDRESS_PATH || 'uploads/kyc/address',
-    process.env.KYC_FACIAL_PATH || 'uploads/kyc/facial',
-    process.env.TEMP_UPLOAD_PATH || 'uploads/temp'
+    'uploads/kyc/identity',
+    'uploads/kyc/address',
+    'uploads/kyc/facial',
+    'uploads/temp'
   ];
   
   dirs.forEach(dir => {
@@ -2559,14 +2580,14 @@ ensureUploadDirectories();
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    let uploadPath = process.env.TEMP_UPLOAD_PATH || 'uploads/temp';
+    let uploadPath = 'uploads/temp';
     
     if (file.fieldname.includes('identity')) {
-      uploadPath = process.env.KYC_IDENTITY_PATH || 'uploads/kyc/identity';
+      uploadPath = 'uploads/kyc/identity';
     } else if (file.fieldname.includes('address')) {
-      uploadPath = process.env.KYC_ADDRESS_PATH || 'uploads/kyc/address';
+      uploadPath = 'uploads/kyc/address';
     } else if (file.fieldname.includes('facial')) {
-      uploadPath = process.env.KYC_FACIAL_PATH || 'uploads/kyc/facial';
+      uploadPath = 'uploads/kyc/facial';
     }
     
     cb(null, uploadPath);
@@ -2579,7 +2600,15 @@ const storage = multer.diskStorage({
 });
 
 const fileFilter = (req, file, cb) => {
-  const allowedMimes = JSON.parse(process.env.KYC_ALLOWED_MIME_TYPES || '{"image/jpeg": true, "image/jpg": true, "image/png": true, "image/gif": true, "application/pdf": true, "video/mp4": true, "video/webm": true}');
+  const allowedMimes = {
+    'image/jpeg': true,
+    'image/jpg': true,
+    'image/png': true,
+    'image/gif': true,
+    'application/pdf': true,
+    'video/mp4': true,
+    'video/webm': true
+  };
   
   if (allowedMimes[file.mimetype]) {
     cb(null, true);
@@ -2592,8 +2621,8 @@ const upload = multer({
   storage: storage,
   fileFilter: fileFilter,
   limits: {
-    fileSize: parseInt(process.env.KYC_MAX_FILE_SIZE) || 10 * 1024 * 1024,
-    files: parseInt(process.env.KYC_MAX_FILES) || 5
+    fileSize: 10 * 1024 * 1024,
+    files: 5
   }
 });
 
@@ -2690,7 +2719,7 @@ const setupWebSocketServer = (server) => {
           }
         }
       } catch (err) {
-        if (process.env.NODE_ENV !== 'production') console.error('Authentication error:', err);
+        console.error('Authentication error:', err);
         return false;
       }
       return false;
@@ -2837,7 +2866,7 @@ const setupWebSocketServer = (server) => {
           }
         }
       } catch (err) {
-        if (process.env.NODE_ENV !== 'production') console.error('WebSocket message error:', err);
+        console.error('WebSocket message error:', err);
         sendToClient(clientId, {
           type: 'error',
           message: 'Internal server error'
@@ -2864,7 +2893,7 @@ const setupWebSocketServer = (server) => {
     });
 
     ws.on('error', (err) => {
-      if (process.env.NODE_ENV !== 'production') console.error('WebSocket error:', err);
+      console.error('WebSocket error:', err);
       ws.close();
     });
 
@@ -2907,7 +2936,7 @@ const verifyJWT = (token) => {
   try {
     return jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('JWT verification error:', err);
+    console.error('JWT verification error:', err);
     throw new Error('Invalid or expired token');
   }
 };
@@ -2969,7 +2998,7 @@ const detectAndSetIPPreferences = async (userId, req) => {
         detectedLanguage = languageMap[countryCode] || 'en';
       }
     } catch (geoError) {
-      if (process.env.NODE_ENV !== 'production') console.warn('IP geolocation failed, using defaults:', geoError.message);
+      console.warn('IP geolocation failed, using defaults:', geoError.message);
       try {
         const ipinfoToken = process.env.IPINFO_TOKEN || 'b56ce6e91d732d';
         const ipinfoResponse = await axios.get(`https://ipinfo.io/${ip}?token=${ipinfoToken}`, { timeout: 3000 });
@@ -2984,7 +3013,7 @@ const detectAndSetIPPreferences = async (userId, req) => {
           detectedLanguage = languageMap[countryCode] || 'en';
         }
       } catch (fallbackError) {
-        if (process.env.NODE_ENV !== 'production') console.warn('Fallback IP geolocation also failed');
+        console.warn('Fallback IP geolocation also failed');
       }
     }
     
@@ -3011,11 +3040,11 @@ const detectAndSetIPPreferences = async (userId, req) => {
       { upsert: true, new: true }
     );
     
-    if (process.env.NODE_ENV !== 'production') console.log(`IP-based preferences set for user ${userId}: language=${detectedLanguage}, currency=${detectedCurrency}, country=${detectedCountry}`);
+    console.log(`IP-based preferences set for user ${userId}: language=${detectedLanguage}, currency=${detectedCurrency}, country=${detectedCountry}`);
     
     return { language: detectedLanguage, currency: detectedCurrency, country: detectedCountry };
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error detecting IP preferences:', err);
+    console.error('Error detecting IP preferences:', err);
     return null;
   }
 };
@@ -3050,7 +3079,7 @@ const getCryptoPrice = async (asset) => {
       const binancePair = asset.toUpperCase() === 'USDT' ? 'USDTUSDT' : `${asset.toUpperCase()}USDT`;
       const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${binancePair}`, { timeout: 5000 });
       if (response.data && response.data.price) {
-        if (process.env.NODE_ENV !== 'production') console.log(`Fetched ${asset} price from Binance: $${response.data.price}`);
+        console.log(`Fetched ${asset} price from Binance: $${response.data.price}`);
         return parseFloat(response.data.price);
       }
       errors.push('Binance: Invalid response');
@@ -3061,7 +3090,7 @@ const getCryptoPrice = async (asset) => {
     try {
       const response = await axios.get(`https://min-api.cryptocompare.com/data/price?fsym=${asset.toUpperCase()}&tsyms=USD`, { timeout: 5000 });
       if (response.data && response.data.USD) {
-        if (process.env.NODE_ENV !== 'production') console.log(`Fetched ${asset} price from CryptoCompare: $${response.data.USD}`);
+        console.log(`Fetched ${asset} price from CryptoCompare: $${response.data.USD}`);
         return response.data.USD;
       }
       errors.push('CryptoCompare: Invalid response');
@@ -3085,7 +3114,7 @@ const getCryptoPrice = async (asset) => {
         const response = await axios.get(`https://api.kraken.com/0/public/Ticker?pair=${pair}`, { timeout: 5000 });
         if (response.data && response.data.result && response.data.result[pair]) {
           const price = parseFloat(response.data.result[pair].c[0]);
-          if (process.env.NODE_ENV !== 'production') console.log(`Fetched ${asset} price from Kraken: $${price}`);
+          console.log(`Fetched ${asset} price from Kraken: $${price}`);
           return price;
         }
       }
@@ -3097,7 +3126,7 @@ const getCryptoPrice = async (asset) => {
     try {
       const response = await axios.get(`https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=${asset.toUpperCase()}-USDT`, { timeout: 5000 });
       if (response.data && response.data.data && response.data.data.price) {
-        if (process.env.NODE_ENV !== 'production') console.log(`Fetched ${asset} price from KuCoin: $${response.data.data.price}`);
+        console.log(`Fetched ${asset} price from KuCoin: $${response.data.data.price}`);
         return parseFloat(response.data.data.price);
       }
       errors.push('KuCoin: Invalid response');
@@ -3105,10 +3134,10 @@ const getCryptoPrice = async (asset) => {
       errors.push(`KuCoin: ${err.message}`);
     }
     
-    if (process.env.NODE_ENV !== 'production') console.error(`All price APIs failed for ${asset}:`, errors);
+    console.error(`All price APIs failed for ${asset}:`, errors);
     return null;
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error fetching crypto price:', err);
+    console.error('Error fetching crypto price:', err);
     return null;
   }
 };
@@ -3176,10 +3205,10 @@ const getExchangeRate = async (asset, fiat = 'usd') => {
       errors.push(`Kraken: ${err.message}`);
     }
     
-    if (process.env.NODE_ENV !== 'production') console.error(`All exchange rate APIs failed for ${asset}:`, errors);
+    console.error(`All exchange rate APIs failed for ${asset}:`, errors);
     return null;
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error fetching exchange rate:', err);
+    console.error('Error fetching exchange rate:', err);
     return null;
   }
 };
@@ -3189,37 +3218,37 @@ const getFiatExchangeRates = async () => {
     try {
       const response = await axios.get('https://api.exchangerate-api.com/v4/latest/USD', { timeout: 5000 });
       if (response.data && response.data.rates) {
-        if (process.env.NODE_ENV !== 'production') console.log('Fetched fiat exchange rates from exchangerate-api.com');
+        console.log('Fetched fiat exchange rates from exchangerate-api.com');
         return response.data.rates;
       }
     } catch (err) {
-      if (process.env.NODE_ENV !== 'production') console.warn('exchangerate-api.com failed:', err.message);
+      console.warn('exchangerate-api.com failed:', err.message);
     }
     
     try {
       const response = await axios.get('https://api.frankfurter.app/latest?from=USD', { timeout: 5000 });
       if (response.data && response.data.rates) {
-        if (process.env.NODE_ENV !== 'production') console.log('Fetched fiat exchange rates from frankfurter.app');
+        console.log('Fetched fiat exchange rates from frankfurter.app');
         return response.data.rates;
       }
     } catch (err) {
-      if (process.env.NODE_ENV !== 'production') console.warn('frankfurter.app failed:', err.message);
+      console.warn('frankfurter.app failed:', err.message);
     }
     
     try {
       const response = await axios.get('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json', { timeout: 5000 });
       if (response.data && response.data.usd) {
-        if (process.env.NODE_ENV !== 'production') console.log('Fetched fiat exchange rates from currency-api');
+        console.log('Fetched fiat exchange rates from currency-api');
         return response.data.usd;
       }
     } catch (err) {
-      if (process.env.NODE_ENV !== 'production') console.warn('currency-api failed:', err.message);
+      console.warn('currency-api failed:', err.message);
     }
     
-    if (process.env.NODE_ENV !== 'production') console.error('All fiat exchange rate APIs failed');
+    console.error('All fiat exchange rate APIs failed');
     return null;
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error fetching fiat exchange rates:', err);
+    console.error('Error fetching fiat exchange rates:', err);
     return null;
   }
 };
@@ -3300,9 +3329,9 @@ const sendEmail = async (options) => {
     };
 
     await mailTransporter.sendMail(mailOptions);
-    if (process.env.NODE_ENV !== 'production') console.log('Email sent successfully using', mailTransporter === supportTransporter ? 'SUPPORT' : 'INFO', 'email');
+    console.log('Email sent successfully using', mailTransporter === supportTransporter ? 'SUPPORT' : 'INFO', 'email');
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error sending email:', err);
+    console.error('Error sending email:', err);
     throw new Error('Failed to send email');
   }
 };
@@ -3347,7 +3376,7 @@ const getUserDeviceInfo = async (req) => {
 
     if (isPublicIP && ip && ip !== 'Unknown' && ip !== '0.0.0.0') {
       try {
-        if (process.env.NODE_ENV !== 'production') console.log(`Looking up exact location for IP: ${ip}`);
+        console.log(`Looking up exact location for IP: ${ip}`);
         
         const ipinfoToken = process.env.IPINFO_TOKEN || 'b56ce6e91d732d';
         
@@ -3381,10 +3410,10 @@ const getUserDeviceInfo = async (req) => {
             
             location = `${city || 'Unknown'}, ${region || 'Unknown'}, ${country || 'Unknown'}`;
             
-            if (process.env.NODE_ENV !== 'production') console.log(`Exact location from ipinfo.io: ${location} (lat: ${latitude}, lng: ${longitude})`);
+            console.log(`Exact location from ipinfo.io: ${location} (lat: ${latitude}, lng: ${longitude})`);
           }
         } catch (ipinfoError) {
-          if (process.env.NODE_ENV !== 'production') console.log('ipinfo.io failed for exact location, trying fallback services...');
+          console.log('ipinfo.io failed for exact location, trying fallback services...');
           
           try {
             const response = await axios.get(`https://ipapi.co/${ip}/json/`, {
@@ -3410,7 +3439,7 @@ const getUserDeviceInfo = async (req) => {
               };
               
               location = `${city || 'Unknown'}, ${region || 'Unknown'}, ${country_name || country_code || 'Unknown'}`;
-              if (process.env.NODE_ENV !== 'production') console.log(`Exact location from ipapi.co: ${location}`);
+              console.log(`Exact location from ipapi.co: ${location}`);
             }
           } catch (ipapiError) {
             try {
@@ -3437,7 +3466,7 @@ const getUserDeviceInfo = async (req) => {
                 };
                 
                 location = `${cityName || 'Unknown'}, ${regionName || 'Unknown'}, ${countryName || 'Unknown'}`;
-                if (process.env.NODE_ENV !== 'production') console.log(`Exact location from freeipapi.com: ${location}`);
+                console.log(`Exact location from freeipapi.com: ${location}`);
               }
             } catch (freeipapiError) {
               try {
@@ -3464,21 +3493,21 @@ const getUserDeviceInfo = async (req) => {
                   };
                   
                   location = `${city || 'Unknown'}, ${regionName || 'Unknown'}, ${country || 'Unknown'}`;
-                  if (process.env.NODE_ENV !== 'production') console.log(`Exact location from ip-api.com: ${location}`);
+                  console.log(`Exact location from ip-api.com: ${location}`);
                 }
               } catch (ipapiComError) {
                 location = 'Location Unavailable';
-                if (process.env.NODE_ENV !== 'production') console.log('All location services failed for exact location');
+                console.log('All location services failed for exact location');
               }
             }
           }
         }
       } catch (err) {
-        if (process.env.NODE_ENV !== 'production') console.error('All exact location lookup services failed:', err.message);
+        console.error('All exact location lookup services failed:', err.message);
         location = 'Location Unavailable';
       }
     } else if (!isPublicIP) {
-      if (process.env.NODE_ENV !== 'production') console.log(`Private IP detected: ${ip}, using local network location`);
+      console.log(`Private IP detected: ${ip}, using local network location`);
     }
 
     return {
@@ -3490,7 +3519,7 @@ const getUserDeviceInfo = async (req) => {
       locationDetails: locationDetails
     };
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error getting device info:', err);
+    console.error('Error getting device info:', err);
     return {
       ip: req.ip || 'Unknown',
       device: req.headers['user-agent'] || 'Unknown',
@@ -3540,7 +3569,7 @@ const logActivity = async (action, entity, entityId, performedBy, performedByMod
       }
     });
     
-    if (process.env.NODE_ENV !== 'production') console.log(`Activity Logged: ${action}`, {
+    console.log(`Activity Logged: ${action}`, {
       entity,
       entityId,
       location: locationData.location,
@@ -3549,7 +3578,7 @@ const logActivity = async (action, entity, entityId, performedBy, performedByMod
       isPublicIP: locationData.isPublicIP
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error logging activity:', err);
+    console.error('Error logging activity:', err);
   }
 };
 
@@ -3572,21 +3601,21 @@ const verifyTOTP = (token, secret) => {
 
 const initializeAdmin = async () => {
   try {
-    const adminExists = await Admin.findOne({ email: process.env.ADMIN_EMAIL || 'admin@bithash.com' });
+    const adminExists = await Admin.findOne({ email: 'admin@bithash.com' });
     if (!adminExists) {
-      const hashedPassword = process.env.ADMIN_PASSWORD_HASH || await bcrypt.hash('SecureAdminPassword123!', 12);
+      const hashedPassword = await bcrypt.hash(process.env.DEFAULT_ADMIN_PASSWORD || 'SecureAdminPassword123!', 12);
       await Admin.create({
-        email: process.env.ADMIN_EMAIL || 'admin@bithash.com',
+        email: 'admin@bithash.com',
         password: hashedPassword,
         name: 'Super Admin',
         role: 'super',
         permissions: ['all'],
         passwordChangedAt: Date.now()
       });
-      if (process.env.NODE_ENV !== 'production') console.log('Default admin created');
+      console.log('Default admin created');
     }
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error initializing admin:', err);
+    console.error('Error initializing admin:', err);
   }
 };
 
@@ -3647,7 +3676,7 @@ const initializePlans = async () => {
       }
     }
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error initializing plans:', err);
+    console.error('Error initializing plans:', err);
   }
 };
 
@@ -3794,7 +3823,7 @@ const calculateReferralCommissions = async (investment) => {
       .populate('plan');
 
     if (!populatedInvestment) {
-      if (process.env.NODE_ENV !== 'production') console.log(`Investment not found: ${investment._id}`);
+      console.log(`Investment not found: ${investment._id}`);
       return;
     }
 
@@ -3802,7 +3831,7 @@ const calculateReferralCommissions = async (investment) => {
     const investorId = populatedInvestment.user._id;
     const investmentAmount = populatedInvestment.amount;
 
-    if (process.env.NODE_ENV !== 'production') console.log(`Checking downline commissions for investment: ${investmentId}, user: ${investorId}, amount: $${investmentAmount}`);
+    console.log(`Checking downline commissions for investment: ${investmentId}, user: ${investorId}, amount: $${investmentAmount}`);
 
     const relationship = await DownlineRelationship.findOne({
       downline: investorId,
@@ -3811,7 +3840,7 @@ const calculateReferralCommissions = async (investment) => {
     }).populate('upline', 'firstName lastName email balances referralStats downlineStats');
 
     if (!relationship) {
-      if (process.env.NODE_ENV !== 'production') console.log(`No active downline relationship found for user: ${investorId}`);
+      console.log(`No active downline relationship found for user: ${investorId}`);
       return;
     }
 
@@ -3820,7 +3849,7 @@ const calculateReferralCommissions = async (investment) => {
     const commissionPercentage = relationship.commissionPercentage;
     const commissionAmount = (investmentAmount * commissionPercentage) / 100;
 
-    if (process.env.NODE_ENV !== 'production') console.log(`Downline commission: $${investmentAmount} * ${commissionPercentage}% = $${commissionAmount} for upline: ${uplineUser.email}`);
+    console.log(`Downline commission: $${investmentAmount} * ${commissionPercentage}% = $${commissionAmount} for upline: ${uplineUser.email}`);
 
     const commissionHistory = await CommissionHistory.create({
       upline: uplineId,
@@ -3848,14 +3877,14 @@ const calculateReferralCommissions = async (investment) => {
       { new: true }
     );
 
-    if (process.env.NODE_ENV !== 'production') console.log(`Updated upline ${uplineUser.email} MAIN balance with $${commissionAmount}. New balance: $${updatedUpline.balances.main}`);
+    console.log(`Updated upline ${uplineUser.email} MAIN balance with $${commissionAmount}. New balance: $${updatedUpline.balances.main}`);
 
     relationship.remainingRounds -= 1;
     relationship.totalCommissionEarned += commissionAmount;
     
     if (relationship.remainingRounds === 0) {
       relationship.status = 'completed';
-      if (process.env.NODE_ENV !== 'production') console.log(`Commission rounds completed for relationship: ${relationship._id}`);
+      console.log(`Commission rounds completed for relationship: ${relationship._id}`);
     }
 
     await relationship.save();
@@ -3864,7 +3893,7 @@ const calculateReferralCommissions = async (investment) => {
       user: uplineId,
       type: 'referral',
       amount: commissionAmount,
-      currency: 'BTC',
+      currency: 'USD',
       status: 'completed',
       method: 'INTERNAL',
       reference: `DOWNLINE-COMM-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
@@ -3905,7 +3934,7 @@ const calculateReferralCommissions = async (investment) => {
       'downlineStats.activeDownlines': activeDownlinesCount
     });
 
-    if (process.env.NODE_ENV !== 'production') console.log(`Downline commission of $${commissionAmount} paid to upline ${uplineUser.email} for investment ${investmentId} (Round ${relationship.commissionRounds - relationship.remainingRounds + 1}/${relationship.commissionRounds})`);
+    console.log(`Downline commission of $${commissionAmount} paid to upline ${uplineUser.email} for investment ${investmentId} (Round ${relationship.commissionRounds - relationship.remainingRounds + 1}/${relationship.commissionRounds})`);
 
     await logActivity('downline_commission_paid', 'commission', commissionHistory._id, uplineId, 'User', null, {
       amount: commissionAmount,
@@ -3917,13 +3946,13 @@ const calculateReferralCommissions = async (investment) => {
     });
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Downline commission calculation error:', err);
+    console.error('Downline commission calculation error:', err);
   }
 };
 
 const recalculateAllUserBalances = async (io) => {
   try {
-    if (process.env.NODE_ENV !== 'production') console.log('Recalculating ALL user balances based on current crypto prices...');
+    console.log('Recalculating ALL user balances based on current crypto prices...');
     
     const users = await User.find({}).select('_id balances');
     let updatedCount = 0;
@@ -4011,10 +4040,10 @@ const recalculateAllUserBalances = async (io) => {
       }
     }
     
-    if (process.env.NODE_ENV !== 'production') console.log(`Recalculated balances for ${updatedCount} users (Main: fluctuates, Active: fluctuates, Matured: fluctuates)`);
+    console.log(`Recalculated balances for ${updatedCount} users (Main: fluctuates, Active: fluctuates, Matured: fluctuates)`);
     
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error recalculating user balances:', err);
+    console.error('Error recalculating user balances:', err);
   }
 };
 
@@ -4107,11 +4136,11 @@ async function fetchAllTradingPairs() {
     await redis.set(REDIS_KEYS.ALL_PAIRS, JSON.stringify(allPairs));
     await redis.set(REDIS_KEYS.QUOTE_ASSETS, JSON.stringify(Array.from(quoteAssetsSet)));
     
-    if (process.env.NODE_ENV !== 'production') console.log(`Loaded ${allPairs.length} total trading pairs across quotes: ${Array.from(quoteAssetsSet).join(', ')}`);
+    console.log(`Loaded ${allPairs.length} total trading pairs across quotes: ${Array.from(quoteAssetsSet).join(', ')}`);
     
     return { pairs: allPairs, quoteAssets: Array.from(quoteAssetsSet) };
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Failed to fetch trading pairs:', err);
+    console.error('Failed to fetch trading pairs:', err);
     const cached = await redis.get(REDIS_KEYS.ALL_PAIRS);
     if (cached) {
       const pairs = JSON.parse(cached);
@@ -4148,15 +4177,15 @@ async function subscribeToSymbol(symbol) {
   
   binanceWs.send(JSON.stringify(subscribeMsg));
   subscribedSymbols.add(symbol);
-  if (process.env.NODE_ENV !== 'production') console.log(`Subscribed to ${symbol} with ${streams.length} streams`);
+  console.log(`Subscribed to ${symbol} with ${streams.length} streams`);
 }
 
 async function initializePriceAggregator() {
-  if (process.env.NODE_ENV !== 'production') console.log('🚀 Starting Price Aggregator Worker...');
+  console.log('🚀 Starting Price Aggregator Worker...');
   
   const { pairs, quoteAssets } = await fetchAllTradingPairs();
   
-  if (process.env.NODE_ENV !== 'production') console.log(`📊 Will subscribe to ${pairs.length} trading pairs`);
+  console.log(`📊 Will subscribe to ${pairs.length} trading pairs`);
   
   for (const pair of pairs) {
     const symbol = pair.symbol;
@@ -4172,10 +4201,10 @@ async function initializePriceAggregator() {
           await redis.set(REDIS_KEYS.TICKER(symbol), JSON.stringify({
             symbol, lastPrice: price, priceChangePercent: 0, volume: 0, quoteVolume: 0
           }));
-          if (process.env.NODE_ENV !== 'production') console.log(`Preloaded initial price for ${symbol}: $${price}`);
+          console.log(`Preloaded initial price for ${symbol}: $${price}`);
         }
       } catch (err) {
-        if (process.env.NODE_ENV !== 'production') console.log(`Could not preload ${symbol}, will wait for WebSocket`);
+        console.log(`Could not preload ${symbol}, will wait for WebSocket`);
       }
     }
   }
@@ -4188,11 +4217,11 @@ function connectBinanceWebSocket() {
     try { binanceWs.close(); } catch(e) {}
   }
   
-  if (process.env.NODE_ENV !== 'production') console.log('🔌 Connecting to Binance WebSocket...');
+  console.log('🔌 Connecting to Binance WebSocket...');
   binanceWs = new WebSocket('wss://stream.binance.com:9443/ws');
   
   binanceWs.on('open', async () => {
-    if (process.env.NODE_ENV !== 'production') console.log('✅ Binance WebSocket connected');
+    console.log('✅ Binance WebSocket connected');
     wsReconnectAttempts = 0;
     
     const { pairs } = await fetchAllTradingPairs();
@@ -4208,7 +4237,7 @@ function connectBinanceWebSocket() {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     
-    if (process.env.NODE_ENV !== 'production') console.log(`Subscribed to ${subscribedSymbols.size} symbols`);
+    console.log(`Subscribed to ${subscribedSymbols.size} symbols`);
   });
   
   binanceWs.on('message', async (data) => {
@@ -4223,16 +4252,16 @@ function connectBinanceWebSocket() {
         await processStreamMessage(parsed);
       }
     } catch (err) {
-      if (process.env.NODE_ENV !== 'production') console.error('Error processing WebSocket message:', err);
+      console.error('Error processing WebSocket message:', err);
     }
   });
   
   binanceWs.on('error', (err) => {
-    if (process.env.NODE_ENV !== 'production') console.error('Binance WebSocket error:', err);
+    console.error('Binance WebSocket error:', err);
   });
   
   binanceWs.on('close', () => {
-    if (process.env.NODE_ENV !== 'production') console.log('Binance WebSocket closed, reconnecting...');
+    console.log('Binance WebSocket closed, reconnecting...');
     const delay = Math.min(5000 * Math.pow(2, wsReconnectAttempts), 60000);
     wsReconnectAttempts++;
     setTimeout(connectBinanceWebSocket, delay);
@@ -4260,7 +4289,7 @@ async function processStreamMessage(message) {
   const latency = now - eventTime;
   
   if (latency > MAX_STALENESS_MS) {
-    if (process.env.NODE_ENV !== 'production') console.warn(`Stale update for ${symbol}@${channel}: ${latency}ms > ${MAX_STALENESS_MS}ms, rejecting`);
+    console.warn(`Stale update for ${symbol}@${channel}: ${latency}ms > ${MAX_STALENESS_MS}ms, rejecting`);
     return;
   }
   
@@ -4474,13 +4503,34 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
         const response = await axios.get(`https://api.coingecko.com/api/v3/simple/price?ids=${assetId}&vs_currencies=${fiat}`);
         return response.data[assetId]?.[fiat] || 0;
       } catch (error) {
-        if (process.env.NODE_ENV !== 'production') console.error('Error fetching exchange rate:', error);
+        console.error('Error fetching exchange rate:', error);
         return 0;
       }
     };
 
 
-
+// Additional CORS headers middleware - add this right after app.use(cors(...))
+app.use((req, res, next) => {
+  const allowedOrigins = [
+    'https://www.bithashcapital.live',
+    'https://bithashcapital.live',
+    'http://localhost:3000',
+    'https://bithhash.vercel.app'
+  ];
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+  }
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CSRF-Token, X-Requested-With, Accept, Origin, X-2FA-Verified, admin_jwt, x-admin-token');
+  res.header('Access-Control-Expose-Headers', 'X-Rate-Limit-Limit, X-Rate-Limit-Remaining, X-Rate-Limit-Reset, Authorization');
+  
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+  next();
+});
 
 
 
@@ -4532,7 +4582,7 @@ app.post('/api/auth/signup', [
 
     // Handle referral code from URL parameter
     if (referralCode) {
-      if (process.env.NODE_ENV !== 'production') console.log('Processing referral code:', referralCode);
+      console.log('Processing referral code:', referralCode);
       
       let actualReferralCode = referralCode;
       // Extract the last part of the referral code (format: BH-timestamp-random-checksum)
@@ -4550,7 +4600,7 @@ app.post('/api/auth/signup', [
       
       if (referredByUser) {
         referralSource = 'referral_link';
-        if (process.env.NODE_ENV !== 'production') console.log(`Referral found: ${referredByUser.firstName} ${referredByUser.lastName} (${referredByUser.email})`);
+        console.log(`Referral found: ${referredByUser.firstName} ${referredByUser.lastName} (${referredByUser.email})`);
       }
     }
 
@@ -4617,7 +4667,7 @@ app.post('/api/auth/signup', [
     await logActivity('signup_initiated', 'user', newUser._id, newUser._id, 'User', req);
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Signup error:', err);
+    console.error('Signup error:', err);
     res.status(500).json({
       status: 'error',
       message: 'An error occurred during signup'
@@ -4680,7 +4730,7 @@ app.get('/api/referrals/validate/:code', async (req, res) => {
         });
 
     } catch (err) {
-        if (process.env.NODE_ENV !== 'production') console.error('Referral validation error:', err);
+        console.error('Referral validation error:', err);
         res.status(500).json({
             status: 'error',
             message: 'Failed to validate referral code'
@@ -4808,9 +4858,9 @@ app.post('/api/auth/login', [
         ip: deviceInfo.ip,
         timestamp: new Date()
       });
-      if (process.env.NODE_ENV !== 'production') console.log(`📧 Login attempt email sent to ${user.email}`);
+      console.log(`📧 Login attempt email sent to ${user.email}`);
     } catch (emailError) {
-      if (process.env.NODE_ENV !== 'production') console.error('Failed to send login attempt email:', emailError);
+      console.error('Failed to send login attempt email:', emailError);
       // Don't fail the login if email fails
     }
 
@@ -4838,7 +4888,7 @@ app.post('/api/auth/login', [
     }, user);
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Login error:', err);
+    console.error('Login error:', err);
     
     await logUserActivity(req, 'login_error', 'failed', {
       error: err.message,
@@ -4856,31 +4906,31 @@ app.post('/api/auth/login', [
 
 app.post('/api/auth/google', async (req, res) => {
   try {
-    if (process.env.NODE_ENV !== 'production') console.log('Google auth request received');
+    console.log('Google auth request received');
     
     const { credential, isSignup } = req.body;
     
     if (!credential) {
-      if (process.env.NODE_ENV !== 'production') console.error('No credential provided');
+      console.error('No credential provided');
       return res.status(400).json({
         status: 'fail',
         message: 'Google credential is required'
       });
     }
 
-    if (process.env.NODE_ENV !== 'production') console.log('Verifying Google token...');
+    console.log('Verifying Google token...');
 
     // Verify the Google token
     let payload;
     try {
       const ticket = await googleClient.verifyIdToken({
         idToken: credential,
-        audience: process.env.GOOGLE_CLIENT_ID
+        audience: process.env.GOOGLE_CLIENT_ID || '634814462335-9o4t8q95c4orcsd9sijjl52374g6vm85.apps.googleusercontent.com'
       });
       payload = ticket.getPayload();
-      if (process.env.NODE_ENV !== 'production') console.log('Google token verified successfully');
+      console.log('Google token verified successfully');
     } catch (verifyError) {
-      if (process.env.NODE_ENV !== 'production') console.error('Google token verification failed:', verifyError);
+      console.error('Google token verification failed:', verifyError);
       return res.status(400).json({
         status: 'fail',
         message: 'Invalid Google token. Please try again.'
@@ -4888,7 +4938,7 @@ app.post('/api/auth/google', async (req, res) => {
     }
 
     if (!payload) {
-      if (process.env.NODE_ENV !== 'production') console.error('No payload from Google token');
+      console.error('No payload from Google token');
       return res.status(400).json({
         status: 'fail',
         message: 'Invalid token payload'
@@ -4898,45 +4948,58 @@ app.post('/api/auth/google', async (req, res) => {
     const { email, given_name, family_name, sub } = payload;
 
     if (!email) {
-      if (process.env.NODE_ENV !== 'production') console.error('No email in Google payload');
+      console.error('No email in Google payload');
       return res.status(400).json({
         status: 'fail',
         message: 'No email found in Google account'
       });
     }
 
-    if (process.env.NODE_ENV !== 'production') console.log('Google auth successful for:', email);
+    console.log('Google auth successful for:', email);
 
     // Use the EXACT email from Google - no normalization
     const originalEmail = email;
 
-    // Check if user exists in database
-    const user = await User.findOne({ email: originalEmail });
-    
-    // If this is a login attempt (isSignup === false) and user doesn't exist, return error
-    if (isSignup === false && !user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'No account found with this email. Please sign up first.'
-      });
-    }
-    
-    // If this is a signup attempt (isSignup === true) and user already exists, return error
-    if (isSignup === true && user) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'An account with this email already exists. Please login instead.'
-      });
-    }
-
-    let currentUser = user;
+    let user;
     let isNewUser = false;
 
-    if (!currentUser) {
-      // Create new user with Google auth using exact email (only for signup)
+    // Check if user exists in the database
+    const existingUser = await User.findOne({ email: originalEmail });
+
+    // If isSignup is false (from login page), user must exist
+    if (isSignup === false && !existingUser) {
+      console.log('Login attempt with Google but user not found:', originalEmail);
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Account not found. Please sign up first.'
+      });
+    }
+
+    // If isSignup is true (from signup page), user must NOT exist
+    if (isSignup === true && existingUser) {
+      console.log('Signup attempt with Google but user already exists:', originalEmail);
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Account already exists. Please login instead.'
+      });
+    }
+
+    try {
+      user = await User.findOne({ email: originalEmail });
+      console.log('User lookup result:', user ? 'Found' : 'Not found');
+    } catch (dbError) {
+      console.error('Database lookup error:', dbError);
+      return res.status(500).json({
+        status: 'error',
+        message: 'Database error during user lookup'
+      });
+    }
+
+    if (!user) {
+      // Create new user with Google auth using exact email
       try {
         const referralCode = generateReferralCode();
-        currentUser = await User.create({
+        user = await User.create({
           firstName: given_name || 'Google',
           lastName: family_name || 'User',
           email: originalEmail,
@@ -4946,33 +5009,33 @@ app.post('/api/auth/google', async (req, res) => {
           status: 'active'
         });
         isNewUser = true;
-        if (process.env.NODE_ENV !== 'production') console.log('New user created via Google:', originalEmail);
+        console.log('New user created via Google:', originalEmail);
 
         // Send welcome email
         try {
-          await sendAutomatedEmail(currentUser, 'welcome', {
+          await sendAutomatedEmail(user, 'welcome', {
             firstName: given_name || 'Google User'
           });
         } catch (emailError) {
-          if (process.env.NODE_ENV !== 'production') console.error('Welcome email failed:', emailError);
+          console.error('Welcome email failed:', emailError);
           // Don't fail the request if email fails
         }
       } catch (createError) {
-        if (process.env.NODE_ENV !== 'production') console.error('User creation error:', createError);
+        console.error('User creation error:', createError);
         return res.status(500).json({
           status: 'error',
           message: 'Failed to create user account'
         });
       }
-    } else if (!currentUser.googleId) {
+    } else if (!user.googleId) {
       // Existing user, add Google auth
       try {
-        currentUser.googleId = sub;
-        currentUser.isVerified = true;
-        await currentUser.save();
-        if (process.env.NODE_ENV !== 'production') console.log('Existing user linked with Google:', originalEmail);
+        user.googleId = sub;
+        user.isVerified = true;
+        await user.save();
+        console.log('Existing user linked with Google:', originalEmail);
       } catch (updateError) {
-        if (process.env.NODE_ENV !== 'production') console.error('User update error:', updateError);
+        console.error('User update error:', updateError);
         return res.status(500).json({
           status: 'error',
           message: 'Failed to link Google account'
@@ -4981,7 +5044,7 @@ app.post('/api/auth/google', async (req, res) => {
     }
 
     // Check if user is active
-    if (currentUser.status !== 'active') {
+    if (user.status !== 'active') {
       return res.status(401).json({
         status: 'fail',
         message: 'Your account has been suspended. Please contact support.'
@@ -5007,7 +5070,7 @@ app.post('/api/auth/google', async (req, res) => {
         email: originalEmail,
         template: 'otp',
         data: {
-          name: currentUser.firstName,
+          name: user.firstName,
           otp: otp,
           action: 'Google sign-in verification'
         }
@@ -5016,10 +5079,10 @@ app.post('/api/auth/google', async (req, res) => {
       // ✅ CREATE LOG FOR GOOGLE LOGIN ATTEMPT
       const deviceInfo = await getUserDeviceInfo(req);
       await UserLog.create({
-        user: currentUser._id,
-        username: currentUser.email,
-        email: currentUser.email,
-        userFullName: `${currentUser.firstName} ${currentUser.lastName}`,
+        user: user._id,
+        username: user.email,
+        email: user.email,
+        userFullName: `${user.firstName} ${user.lastName}`,
         action: 'login_attempt',
         actionCategory: 'authentication',
         ipAddress: deviceInfo.ip,
@@ -5049,34 +5112,34 @@ app.post('/api/auth/google', async (req, res) => {
       
       // ✅ SEND LOGIN ATTEMPT EMAIL FOR GOOGLE SIGN-IN
       try {
-        await sendAutomatedEmail(currentUser, 'login_success', {
-          name: currentUser.firstName,
+        await sendAutomatedEmail(user, 'login_success', {
+          name: user.firstName,
           device: deviceInfo.device,
           location: deviceInfo.location,
           ip: deviceInfo.ip,
           timestamp: new Date()
         });
-        if (process.env.NODE_ENV !== 'production') console.log(`📧 Google login attempt email sent to ${currentUser.email}`);
+        console.log(`📧 Google login attempt email sent to ${user.email}`);
       } catch (emailError) {
-        if (process.env.NODE_ENV !== 'production') console.error('Failed to send Google login attempt email:', emailError);
+        console.error('Failed to send Google login attempt email:', emailError);
       }
       
     } catch (otpError) {
-      if (process.env.NODE_ENV !== 'production') console.error('OTP creation error:', otpError);
+      console.error('OTP creation error:', otpError);
       // Continue even if OTP fails for now
     }
 
     // Generate temporary token
-    const tempToken = generateJWT(currentUser._id);
+    const tempToken = generateJWT(user._id);
 
     // Update last login
     try {
-      currentUser.lastLogin = new Date();
+      user.lastLogin = new Date();
       const deviceInfo = await getUserDeviceInfo(req);
-      currentUser.loginHistory.push(deviceInfo);
-      await currentUser.save();
+      user.loginHistory.push(deviceInfo);
+      await user.save();
     } catch (updateError) {
-      if (process.env.NODE_ENV !== 'production') console.error('User update error:', updateError);
+      console.error('User update error:', updateError);
       // Continue even if update fails
     }
 
@@ -5089,28 +5152,28 @@ app.post('/api/auth/google', async (req, res) => {
       isNewUser: isNewUser,
       data: {
         user: {
-          id: currentUser._id,
-          firstName: currentUser.firstName,
-          lastName: currentUser.lastName,
-          email: currentUser.email
+          id: user._id,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          email: user.email
         }
       }
     });
 
     // Log activity (don't let this break the response)
     try {
-      await logActivity('google_signin_otp_sent', 'user', currentUser._id, currentUser._id, 'User', req, {
+      await logActivity('google_signin_otp_sent', 'user', user._id, user._id, 'User', req, {
         isNewUser,
         provider: 'google',
         email: originalEmail
       });
     } catch (logError) {
-      if (process.env.NODE_ENV !== 'production') console.error('Activity logging error:', logError);
+      console.error('Activity logging error:', logError);
     }
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Google auth UNEXPECTED error:', err);
-    if (process.env.NODE_ENV !== 'production') console.error('Error stack:', err.stack);
+    console.error('Google auth UNEXPECTED error:', err);
+    console.error('Error stack:', err.stack);
     
     res.status(500).json({
       status: 'error',
@@ -5164,7 +5227,7 @@ app.post('/api/auth/forgot-password', [
 
     await logActivity('forgot-password', 'user', user._id, user._id, 'User', req);
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Forgot password error:', err);
+    console.error('Forgot password error:', err);
     res.status(500).json({
       status: 'error',
       message: 'An error occurred while sending the password reset email'
@@ -5236,7 +5299,7 @@ app.post('/api/auth/reset-password', [
 
     await logActivity('reset-password', 'user', user._id, user._id, 'User', req);
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Reset password error:', err);
+    console.error('Reset password error:', err);
     res.status(500).json({
       status: 'error',
       message: 'An error occurred while resetting the password'
@@ -5413,8 +5476,8 @@ app.post('/api/investments', protect, [
       plan: planId,
       amount: investmentAmountAfterFee, // Store the amount after fee
       originalAmount: amount, // Store original amount before fee
-      originalCurrency: 'BTC',
-      currency: 'BTC',
+      originalCurrency: 'USD',
+      currency: 'USD',
       expectedReturn,
       returnPercentage: plan.percentage,
       endDate,
@@ -5438,7 +5501,7 @@ app.post('/api/investments', protect, [
       user: userId,
       type: 'investment',
       amount: -amount,
-      currency: 'BTC',
+      currency: 'USD',
       status: 'completed',
       method: 'INTERNAL',
       reference: `INV-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
@@ -5457,7 +5520,7 @@ app.post('/api/investments', protect, [
     await PlatformRevenue.create({
       source: 'investment_fee',
       amount: investmentFee,
-      currency: 'BTC',
+      currency: 'USD',
       transactionId: transaction._id,
       investmentId: investment._id,
       userId: userId,
@@ -5578,7 +5641,7 @@ app.post('/api/investments', protect, [
         user: user.referredBy,
         type: 'referral',
         amount: referralBonus,
-        currency: 'BTC',
+        currency: 'USD',
         status: 'completed',
         method: 'INTERNAL',
         reference: `REF-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
@@ -5601,7 +5664,7 @@ app.post('/api/investments', protect, [
       };
       await investment.save();
 
-      if (process.env.NODE_ENV !== 'production') console.log(`🎁 Direct referral bonus of $${referralBonus} paid to ${user.referredBy}`);
+      console.log(`🎁 Direct referral bonus of $${referralBonus} paid to ${user.referredBy}`);
     }
 
     // ✅ SEND INVESTMENT CREATION EMAIL
@@ -5615,9 +5678,9 @@ app.post('/api/investments', protect, [
         startDate: investment.startDate,
         endDate: investment.endDate
       });
-      if (process.env.NODE_ENV !== 'production') console.log(`📧 Investment creation email sent to ${user.email}`);
+      console.log(`📧 Investment creation email sent to ${user.email}`);
     } catch (emailError) {
-      if (process.env.NODE_ENV !== 'production') console.error('Failed to send investment creation email:', emailError);
+      console.error('Failed to send investment creation email:', emailError);
       // Don't fail the investment if email fails
     }
 
@@ -5641,7 +5704,7 @@ app.post('/api/investments', protect, [
       }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Investment creation error:', err);
+    console.error('Investment creation error:', err);
     
     // Even on error, return success to frontend as requested
     res.status(200).json({
@@ -5728,7 +5791,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
         user: userId,
         type: 'interest',
         amount: totalReturn - investment.amount,
-        currency: 'BTC',
+        currency: 'USD',
         status: 'completed',
         method: 'INTERNAL',
         reference: `RET-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
@@ -5800,9 +5863,9 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
           completionDate: investment.completionDate,
           newMaturedBalance: user.balances.matured
         });
-        if (process.env.NODE_ENV !== 'production') console.log(`📧 Investment completion email sent to ${user.email}`);
+        console.log(`📧 Investment completion email sent to ${user.email}`);
       } catch (emailError) {
-        if (process.env.NODE_ENV !== 'production') console.error('Failed to send investment completion email:', emailError);
+        console.error('Failed to send investment completion email:', emailError);
         // Don't fail the investment completion if email fails
       }
 
@@ -5836,7 +5899,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
     }
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Complete investment error:', err);
+    console.error('Complete investment error:', err);
     res.status(500).json({
       status: 'error',
       message: 'An error occurred while completing the investment'
@@ -5884,7 +5947,7 @@ app.get('/api/admin/deposits/pending', adminProtect, async (req, res) => {
       }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin pending deposits error:', err);
+    console.error('Admin pending deposits error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch pending deposits'
@@ -5928,7 +5991,7 @@ app.get('/api/admin/deposits/approved', adminProtect, async (req, res) => {
       }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin approved deposits error:', err);
+    console.error('Admin approved deposits error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch approved deposits'
@@ -5971,7 +6034,7 @@ app.get('/api/admin/deposits/rejected', adminProtect, async (req, res) => {
       }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin rejected deposits error:', err);
+    console.error('Admin rejected deposits error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch rejected deposits'
@@ -6014,7 +6077,7 @@ app.get('/api/admin/withdrawals/pending', adminProtect, async (req, res) => {
       }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin pending withdrawals error:', err);
+    console.error('Admin pending withdrawals error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch pending withdrawals'
@@ -6058,7 +6121,7 @@ app.get('/api/admin/withdrawals/approved', adminProtect, async (req, res) => {
       }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin approved withdrawals error:', err);
+    console.error('Admin approved withdrawals error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch approved withdrawals'
@@ -6101,7 +6164,7 @@ app.get('/api/admin/withdrawals/rejected', adminProtect, async (req, res) => {
       }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin rejected withdrawals error:', err);
+    console.error('Admin rejected withdrawals error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch rejected withdrawals'
@@ -6133,7 +6196,7 @@ app.get('/api/admin/deposits/:id', adminProtect, async (req, res) => {
       data: { deposit }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin get deposit error:', err);
+    console.error('Admin get deposit error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch deposit details'
@@ -6165,7 +6228,7 @@ app.get('/api/admin/withdrawals/:id', adminProtect, async (req, res) => {
       data: { withdrawal }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin get withdrawal error:', err);
+    console.error('Admin get withdrawal error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch withdrawal details'
@@ -6280,9 +6343,9 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
         method: deposit.method,
         reason: reason
       });
-      if (process.env.NODE_ENV !== 'production') console.log(`📧 Deposit rejection email sent to ${deposit.user.email}`);
+      console.log(`📧 Deposit rejection email sent to ${deposit.user.email}`);
     } catch (emailError) {
-      if (process.env.NODE_ENV !== 'production') console.error('Failed to send deposit rejection email:', emailError);
+      console.error('Failed to send deposit rejection email:', emailError);
       // Don't fail the deposit rejection if email fails
     }
     
@@ -6297,7 +6360,7 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
       userId: deposit.user._id
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin reject deposit error:', err);
+    console.error('Admin reject deposit error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to reject deposit',
@@ -6423,11 +6486,11 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
         amount: withdrawal.amount,
         reason: reason,
         method: withdrawal.method,
-        asset: withdrawal.asset || 'BTC'
+        asset: withdrawal.asset || 'USD'
       });
-      if (process.env.NODE_ENV !== 'production') console.log(`📧 Withdrawal rejection email sent to ${user.email}`);
+      console.log(`📧 Withdrawal rejection email sent to ${user.email}`);
     } catch (emailError) {
-      if (process.env.NODE_ENV !== 'production') console.error('Failed to send withdrawal rejection email:', emailError);
+      console.error('Failed to send withdrawal rejection email:', emailError);
       // Don't fail the withdrawal rejection if email fails
     }
     
@@ -6442,7 +6505,7 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
       userId: user._id
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin reject withdrawal error:', err);
+    console.error('Admin reject withdrawal error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to reject withdrawal',
@@ -6493,91 +6556,91 @@ app.delete('/api/admin/users/:userId', adminProtect, async (req, res) => {
       status: userToDelete.status
     };
     
-    if (process.env.NODE_ENV !== 'production') console.log(`Admin ${req.admin.email} is deleting user: ${userInfo.email}`);
+    console.log(`Admin ${req.admin.email} is deleting user: ${userInfo.email}`);
     
     // Delete all related data in the correct order to avoid foreign key constraints
     
     // 1. Delete all user logs
     const userLogsDeleted = await UserLog.deleteMany({ user: userId });
-    if (process.env.NODE_ENV !== 'production') console.log(`Deleted ${userLogsDeleted.deletedCount} user logs`);
+    console.log(`Deleted ${userLogsDeleted.deletedCount} user logs`);
     
     // 2. Delete all investments
     const investmentsDeleted = await Investment.deleteMany({ user: userId });
-    if (process.env.NODE_ENV !== 'production') console.log(`Deleted ${investmentsDeleted.deletedCount} investments`);
+    console.log(`Deleted ${investmentsDeleted.deletedCount} investments`);
     
     // 3. Delete all transactions
     const transactionsDeleted = await Transaction.deleteMany({ user: userId });
-    if (process.env.NODE_ENV !== 'production') console.log(`Deleted ${transactionsDeleted.deletedCount} transactions`);
+    console.log(`Deleted ${transactionsDeleted.deletedCount} transactions`);
     
     // 4. Delete all deposit assets
     const depositAssetsDeleted = await DepositAsset.deleteMany({ user: userId });
-    if (process.env.NODE_ENV !== 'production') console.log(`Deleted ${depositAssetsDeleted.deletedCount} deposit assets`);
+    console.log(`Deleted ${depositAssetsDeleted.deletedCount} deposit assets`);
     
     // 5. Delete all buy records
     const buysDeleted = await Buy.deleteMany({ user: userId });
-    if (process.env.NODE_ENV !== 'production') console.log(`Deleted ${buysDeleted.deletedCount} buy records`);
+    console.log(`Deleted ${buysDeleted.deletedCount} buy records`);
     
     // 6. Delete all sell records
     const sellsDeleted = await Sell.deleteMany({ user: userId });
-    if (process.env.NODE_ENV !== 'production') console.log(`Deleted ${sellsDeleted.deletedCount} sell records`);
+    console.log(`Deleted ${sellsDeleted.deletedCount} sell records`);
     
     // 7. Delete user asset balances
     const userAssetBalanceDeleted = await UserAssetBalance.deleteOne({ user: userId });
-    if (process.env.NODE_ENV !== 'production') console.log(`Deleted user asset balance: ${userAssetBalanceDeleted.deletedCount > 0 ? 'Yes' : 'No'}`);
+    console.log(`Deleted user asset balance: ${userAssetBalanceDeleted.deletedCount > 0 ? 'Yes' : 'No'}`);
     
     // 8. Delete user preferences
     const userPreferenceDeleted = await UserPreference.deleteOne({ user: userId });
-    if (process.env.NODE_ENV !== 'production') console.log(`Deleted user preferences: ${userPreferenceDeleted.deletedCount > 0 ? 'Yes' : 'No'}`);
+    console.log(`Deleted user preferences: ${userPreferenceDeleted.deletedCount > 0 ? 'Yes' : 'No'}`);
     
     // 9. Delete KYC records
     const kycDeleted = await KYC.deleteOne({ user: userId });
-    if (process.env.NODE_ENV !== 'production') console.log(`Deleted KYC record: ${kycDeleted.deletedCount > 0 ? 'Yes' : 'No'}`);
+    console.log(`Deleted KYC record: ${kycDeleted.deletedCount > 0 ? 'Yes' : 'No'}`);
     
     // 10. Delete card payments
     const cardsDeleted = await CardPayment.deleteMany({ user: userId });
-    if (process.env.NODE_ENV !== 'production') console.log(`Deleted ${cardsDeleted.deletedCount} saved cards`);
+    console.log(`Deleted ${cardsDeleted.deletedCount} saved cards`);
     
     // 11. Delete loans
     const loansDeleted = await Loan.deleteMany({ user: userId });
-    if (process.env.NODE_ENV !== 'production') console.log(`Deleted ${loansDeleted.deletedCount} loans`);
+    console.log(`Deleted ${loansDeleted.deletedCount} loans`);
     
     // 12. Delete OTP records
     const otpsDeleted = await OTP.deleteMany({ email: userToDelete.email });
-    if (process.env.NODE_ENV !== 'production') console.log(`Deleted ${otpsDeleted.deletedCount} OTP records`);
+    console.log(`Deleted ${otpsDeleted.deletedCount} OTP records`);
     
     // 13. Delete downline relationships where user is downline
     const downlineRelationshipsDeleted = await DownlineRelationship.deleteMany({ downline: userId });
-    if (process.env.NODE_ENV !== 'production') console.log(`Deleted ${downlineRelationshipsDeleted.deletedCount} downline relationships (as downline)`);
+    console.log(`Deleted ${downlineRelationshipsDeleted.deletedCount} downline relationships (as downline)`);
     
     // 14. Delete downline relationships where user is upline
     const uplineRelationshipsDeleted = await DownlineRelationship.deleteMany({ upline: userId });
-    if (process.env.NODE_ENV !== 'production') console.log(`Deleted ${uplineRelationshipsDeleted.deletedCount} downline relationships (as upline)`);
+    console.log(`Deleted ${uplineRelationshipsDeleted.deletedCount} downline relationships (as upline)`);
     
     // 15. Delete commission history where user is upline
     const commissionHistoryDeleted = await CommissionHistory.deleteMany({ upline: userId });
-    if (process.env.NODE_ENV !== 'production') console.log(`Deleted ${commissionHistoryDeleted.deletedCount} commission history records (as upline)`);
+    console.log(`Deleted ${commissionHistoryDeleted.deletedCount} commission history records (as upline)`);
     
     // 16. Delete commission history where user is downline
     const downlineCommissionDeleted = await CommissionHistory.deleteMany({ downline: userId });
-    if (process.env.NODE_ENV !== 'production') console.log(`Deleted ${downlineCommissionDeleted.deletedCount} commission history records (as downline)`);
+    console.log(`Deleted ${downlineCommissionDeleted.deletedCount} commission history records (as downline)`);
     
     // 17. Update referral history in other users (remove references)
     await User.updateMany(
       { 'referralHistory.referredUser': userId },
       { $pull: { referralHistory: { referredUser: userId } } }
     );
-    if (process.env.NODE_ENV !== 'production') console.log('Removed referral history references');
+    console.log('Removed referral history references');
     
     // 18. Update referredBy references in other users
     await User.updateMany(
       { referredBy: userId },
       { $unset: { referredBy: '' } }
     );
-    if (process.env.NODE_ENV !== 'production') console.log('Removed referredBy references');
+    console.log('Removed referredBy references');
     
     // 19. Update notifications (remove user references)
     await Notification.deleteMany({ specificUserId: userId });
-    if (process.env.NODE_ENV !== 'production') console.log('Deleted user-specific notifications');
+    console.log('Deleted user-specific notifications');
     
     // 20. Finally delete the user
     const deletedUser = await User.findByIdAndDelete(userId);
@@ -6614,7 +6677,7 @@ app.delete('/api/admin/users/:userId', adminProtect, async (req, res) => {
       }
     );
     
-    if (process.env.NODE_ENV !== 'production') console.log(`User ${userInfo.email} successfully deleted by admin ${req.admin.email}`);
+    console.log(`User ${userInfo.email} successfully deleted by admin ${req.admin.email}`);
     
     res.status(200).json({
       status: 'success',
@@ -6641,7 +6704,7 @@ app.delete('/api/admin/users/:userId', adminProtect, async (req, res) => {
     });
     
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin delete user error:', err);
+    console.error('Admin delete user error:', err);
     res.status(500).json({
       status: 'error',
       message: 'An error occurred while deleting the user',
@@ -6714,7 +6777,7 @@ app.put('/api/admin/users/:userId/suspend', adminProtect, async (req, res) => {
     });
     
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin suspend user error:', err);
+    console.error('Admin suspend user error:', err);
     res.status(500).json({
       status: 'error',
       message: 'An error occurred while suspending the user'
@@ -6776,7 +6839,7 @@ app.put('/api/admin/users/:userId/reactivate', adminProtect, async (req, res) =>
     });
     
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin reactivate user error:', err);
+    console.error('Admin reactivate user error:', err);
     res.status(500).json({
       status: 'error',
       message: 'An error occurred while reactivating the user'
@@ -6832,7 +6895,7 @@ app.get('/api/admin/downline', adminProtect, restrictTo('super', 'support'), asy
       }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get downline relationships error:', err);
+    console.error('Get downline relationships error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch downline relationships'
@@ -6928,7 +6991,7 @@ app.post('/api/admin/downline/assign', adminProtect, restrictTo('super', 'suppor
     });
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Assign downline error:', err);
+    console.error('Assign downline error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to assign downline relationship'
@@ -6961,7 +7024,7 @@ app.delete('/api/admin/downline/:relationshipId', adminProtect, restrictTo('supe
     });
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Remove downline error:', err);
+    console.error('Remove downline error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to remove downline relationship'
@@ -6990,7 +7053,7 @@ app.get('/api/admin/commission-settings', adminProtect, restrictTo('super', 'sup
       }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get commission settings error:', err);
+    console.error('Get commission settings error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch commission settings'
@@ -7050,7 +7113,7 @@ app.post('/api/admin/commission-settings', adminProtect, restrictTo('super'), [
     });
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Update commission settings error:', err);
+    console.error('Update commission settings error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to update commission settings'
@@ -7089,7 +7152,7 @@ app.get('/api/admin/commission-history', adminProtect, restrictTo('super', 'supp
       }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get commission history error:', err);
+    console.error('Get commission history error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch commission history'
@@ -7124,7 +7187,7 @@ app.get('/api/users/downline', protect, async (req, res) => {
     });
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get user downline error:', err);
+    console.error('Get user downline error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch downline information'
@@ -7146,7 +7209,7 @@ app.get('/api/admin/kyc/submissions', adminProtect, restrictTo('super', 'support
     const status = req.query.status || 'all';
     const skip = (page - 1) * limit;
 
-    if (process.env.NODE_ENV !== 'production') console.log('Fetching KYC submissions with params:', { page, limit, status });
+    console.log('Fetching KYC submissions with params:', { page, limit, status });
 
     // Build query based on status filter
     let query = {};
@@ -7194,7 +7257,7 @@ app.get('/api/admin/kyc/submissions', adminProtect, restrictTo('super', 'support
       adminNotes: submission.adminNotes
     }));
 
-    if (process.env.NODE_ENV !== 'production') console.log(`Found ${formattedSubmissions.length} KYC submissions`);
+    console.log(`Found ${formattedSubmissions.length} KYC submissions`);
 
     res.status(200).json({
       status: 'success',
@@ -7212,7 +7275,7 @@ app.get('/api/admin/kyc/submissions', adminProtect, restrictTo('super', 'support
     });
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get KYC submissions error:', err);
+    console.error('Get KYC submissions error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch KYC submissions'
@@ -7247,7 +7310,7 @@ app.get('/api/admin/kyc/submissions/:submissionId', adminProtect, restrictTo('su
     });
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get KYC submission details error:', err);
+    console.error('Get KYC submission details error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch KYC submission details'
@@ -7360,9 +7423,9 @@ app.post('/api/admin/kyc/submissions/:submissionId/approve', adminProtect, restr
       await sendAutomatedEmail(kycSubmission.user, 'kyc_approved', {
         name: kycSubmission.user.firstName
       });
-      if (process.env.NODE_ENV !== 'production') console.log(`📧 KYC approval email sent to ${kycSubmission.user.email}`);
+      console.log(`📧 KYC approval email sent to ${kycSubmission.user.email}`);
     } catch (emailError) {
-      if (process.env.NODE_ENV !== 'production') console.error('Failed to send KYC approval email:', emailError);
+      console.error('Failed to send KYC approval email:', emailError);
       // Don't fail the KYC approval if email fails
     }
 
@@ -7383,7 +7446,7 @@ app.post('/api/admin/kyc/submissions/:submissionId/approve', adminProtect, restr
     });
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Approve KYC error:', err);
+    console.error('Approve KYC error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to approve KYC application',
@@ -7531,9 +7594,9 @@ app.post('/api/admin/kyc/submissions/:submissionId/reject', adminProtect, restri
         name: kycSubmission.user.firstName,
         reason: reason
       });
-      if (process.env.NODE_ENV !== 'production') console.log(`📧 KYC rejection email sent to ${kycSubmission.user.email}`);
+      console.log(`📧 KYC rejection email sent to ${kycSubmission.user.email}`);
     } catch (emailError) {
-      if (process.env.NODE_ENV !== 'production') console.error('Failed to send KYC rejection email:', emailError);
+      console.error('Failed to send KYC rejection email:', emailError);
       // Don't fail the KYC rejection if email fails
     }
 
@@ -7552,7 +7615,7 @@ app.post('/api/admin/kyc/submissions/:submissionId/reject', adminProtect, restri
     });
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Reject KYC error:', err);
+    console.error('Reject KYC error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to reject KYC application',
@@ -7569,23 +7632,23 @@ app.get('/api/admin/kyc/files/:type/:filename', adminProtect, restrictTo('super'
     let filePath;
     switch (type) {
       case 'identity-front':
-        filePath = path.join(process.env.KYC_IDENTITY_PATH || 'uploads/kyc/identity', filename);
+        filePath = path.join(__dirname, 'uploads/kyc/identity', filename);
         break;
       
       case 'identity-back':
-        filePath = path.join(process.env.KYC_IDENTITY_PATH || 'uploads/kyc/identity', filename);
+        filePath = path.join(__dirname, 'uploads/kyc/identity', filename);
         break;
       
       case 'address':
-        filePath = path.join(process.env.KYC_ADDRESS_PATH || 'uploads/kyc/address', filename);
+        filePath = path.join(__dirname, 'uploads/kyc/address', filename);
         break;
       
       case 'facial-video':
-        filePath = path.join(process.env.KYC_FACIAL_PATH || 'uploads/kyc/facial', filename);
+        filePath = path.join(__dirname, 'uploads/kyc/facial', filename);
         break;
       
       case 'facial-photo':
-        filePath = path.join(process.env.KYC_FACIAL_PATH || 'uploads/kyc/facial', filename);
+        filePath = path.join(__dirname, 'uploads/kyc/facial', filename);
         break;
       
       default:
@@ -7679,7 +7742,7 @@ app.get('/api/admin/kyc/files/:type/:filename', adminProtect, restrictTo('super'
     }
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Serve KYC file error:', err);
+    console.error('Serve KYC file error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to serve file'
@@ -7713,7 +7776,7 @@ app.get('/api/admin/kyc/files/secure/:type/:filename', adminProtect, restrictTo(
     });
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Generate secure URL error:', err);
+    console.error('Generate secure URL error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to generate secure URL'
@@ -7924,7 +7987,7 @@ app.get('/api/referrals', protect, async (req, res) => {
         await logActivity('view_referrals', 'referral', userId, userId, 'User', req);
 
     } catch (error) {
-        if (process.env.NODE_ENV !== 'production') console.error('Error loading referral data:', error);
+        console.error('Error loading referral data:', error);
         res.status(500).json({
             status: 'error',
             message: 'Failed to load referral data'
@@ -7992,7 +8055,7 @@ app.post('/api/admin/users', adminProtect, [
     
     await logActivity('create-user', 'user', user._id, req.admin._id, 'Admin', req);
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin add user error:', err);
+    console.error('Admin add user error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to create user'
@@ -8061,7 +8124,7 @@ const logUserActivity = async (req, action, status = 'success', metadata = {}, r
     });
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error logging user activity:', err);
+    console.error('Error logging user activity:', err);
     // Fail silently to not disrupt user experience
   }
 };
@@ -8123,7 +8186,7 @@ const trackUserActivity = (action, options = {}) => {
             relatedEntity = res.locals.transaction || req.body;
             metadata = {
               amount: req.body.amount,
-              currency: req.body.currency || 'BTC',
+              currency: req.body.currency || 'USD',
               method: req.body.method
             };
             break;
@@ -8152,7 +8215,7 @@ const trackUserActivity = (action, options = {}) => {
         await logUserActivity(req, action, 'success', metadata, relatedEntity);
       }
     } catch (err) {
-      if (process.env.NODE_ENV !== 'production') console.error('Activity tracking middleware error:', err);
+      console.error('Activity tracking middleware error:', err);
       // Don't interrupt the request flow if tracking fails
     }
   };
@@ -8171,7 +8234,7 @@ const trackFailedLogin = async (req, res, next) => {
       });
     }
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Failed login tracking error:', err);
+    console.error('Failed login tracking error:', err);
   }
 };
 
@@ -8295,7 +8358,7 @@ app.post('/api/auth/verify-otp', [
     }, user);
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('OTP verification error:', err);
+    console.error('OTP verification error:', err);
     res.status(500).json({
       status: 'error',
       message: 'An error occurred during verification'
@@ -8369,7 +8432,7 @@ app.post('/api/auth/send-otp', [
     });
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Send OTP error:', err);
+    console.error('Send OTP error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to send OTP'
@@ -8481,7 +8544,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                     { timeout: 8000 }
                 );
                 if (response.data && response.data.price) {
-                    if (process.env.NODE_ENV !== 'production') console.log(`Fetched BTC price from Binance: $${response.data.price}`);
+                    console.log(`Fetched BTC price from Binance: $${response.data.price}`);
                     return parseFloat(response.data.price);
                 }
                 errors.push('Binance: Invalid response');
@@ -8496,7 +8559,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                     { timeout: 8000 }
                 );
                 if (response.data && response.data.USD) {
-                    if (process.env.NODE_ENV !== 'production') console.log(`Fetched BTC price from CryptoCompare: $${response.data.USD}`);
+                    console.log(`Fetched BTC price from CryptoCompare: $${response.data.USD}`);
                     return response.data.USD;
                 }
                 errors.push('CryptoCompare: Invalid response');
@@ -8512,7 +8575,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 );
                 if (response.data && response.data.result && response.data.result.XXBTZUSD) {
                     const price = parseFloat(response.data.result.XXBTZUSD.c[0]);
-                    if (process.env.NODE_ENV !== 'production') console.log(`Fetched BTC price from Kraken: $${price}`);
+                    console.log(`Fetched BTC price from Kraken: $${price}`);
                     return price;
                 }
                 errors.push('Kraken: Invalid response');
@@ -8528,7 +8591,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 );
                 if (response.data && response.data.data && response.data.data.price) {
                     const price = parseFloat(response.data.data.price);
-                    if (process.env.NODE_ENV !== 'production') console.log(`Fetched BTC price from KuCoin: $${price}`);
+                    console.log(`Fetched BTC price from KuCoin: $${price}`);
                     return price;
                 }
                 errors.push('KuCoin: Invalid response');
@@ -8555,7 +8618,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                     { timeout: 8000 }
                 );
                 if (response.data && response.data.price) {
-                    if (process.env.NODE_ENV !== 'production') console.log(`Fetched ${assetSymbol} price from Binance: $${response.data.price}`);
+                    console.log(`Fetched ${assetSymbol} price from Binance: $${response.data.price}`);
                     return parseFloat(response.data.price);
                 }
                 errors.push('Binance: Invalid response');
@@ -8570,7 +8633,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                     { timeout: 8000 }
                 );
                 if (response.data && response.data.USD) {
-                    if (process.env.NODE_ENV !== 'production') console.log(`Fetched ${assetSymbol} price from CryptoCompare: $${response.data.USD}`);
+                    console.log(`Fetched ${assetSymbol} price from CryptoCompare: $${response.data.USD}`);
                     return response.data.USD;
                 }
                 errors.push('CryptoCompare: Invalid response');
@@ -8589,7 +8652,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                         const pairKey = Object.keys(response.data.result)[0];
                         if (pairKey && response.data.result[pairKey]) {
                             const price = parseFloat(response.data.result[pairKey].c[0]);
-                            if (process.env.NODE_ENV !== 'production') console.log(`Fetched ${assetSymbol} price from Kraken: $${price}`);
+                            console.log(`Fetched ${assetSymbol} price from Kraken: $${price}`);
                             return price;
                         }
                     }
@@ -8607,7 +8670,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 );
                 if (response.data && response.data.data && response.data.data.price) {
                     const price = parseFloat(response.data.data.price);
-                    if (process.env.NODE_ENV !== 'production') console.log(`Fetched ${assetSymbol} price from KuCoin: $${price}`);
+                    console.log(`Fetched ${assetSymbol} price from KuCoin: $${price}`);
                     return price;
                 }
                 errors.push('KuCoin: Invalid response');
@@ -8637,10 +8700,10 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 gasFeeInAsset = gasFeeInUsd / targetAssetPrice;
             }
             
-            if (process.env.NODE_ENV !== 'production') console.log(`Gas fee calculation: BTC fee: ${btcGasFeeAmount} BTC, BTC price: $${btcPrice}, Gas fee in USD: $${gasFeeInUsd.toFixed(2)}, Gas fee in ${asset.toUpperCase()}: ${gasFeeInAsset.toFixed(8)}`);
+            console.log(`Gas fee calculation: BTC fee: ${btcGasFeeAmount} BTC, BTC price: $${btcPrice}, Gas fee in USD: $${gasFeeInUsd.toFixed(2)}, Gas fee in ${asset.toUpperCase()}: ${gasFeeInAsset.toFixed(8)}`);
             
         } catch (error) {
-            if (process.env.NODE_ENV !== 'production') console.error('Price fetch error:', error);
+            console.error('Price fetch error:', error);
             return res.status(503).json({
                 status: 'error',
                 message: error.message || 'Unable to fetch current cryptocurrency prices. Please try again.'
@@ -8666,7 +8729,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
         await PlatformRevenue.create({
             source: 'withdrawal_fee',
             amount: gasFeeInUsd,
-            currency: 'BTC',
+            currency: 'USD',
             userId: userId,
             description: `Gas fee for ${asset.toUpperCase()} withdrawal`,
             metadata: {
@@ -8694,7 +8757,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             amount: amount,
             asset: asset,
             assetAmount: assetAmount,
-            currency: 'BTC',
+            currency: 'USD',
             status: 'pending',
             method: asset,
             reference: reference,
@@ -8830,9 +8893,9 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 timestamp: new Date(),
                 network: asset === 'USDT' ? 'ERC-20' : asset === 'BTC' ? 'Bitcoin' : 'Mainnet'
             });
-            if (process.env.NODE_ENV !== 'production') console.log(`📧 Withdrawal request email sent to ${user.email}`);
+            console.log(`📧 Withdrawal request email sent to ${user.email}`);
         } catch (emailError) {
-            if (process.env.NODE_ENV !== 'production') console.error('Failed to send withdrawal request email:', emailError);
+            console.error('Failed to send withdrawal request email:', emailError);
             // Don't fail the withdrawal request if email fails
         }
 
@@ -8884,7 +8947,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
         });
 
     } catch (err) {
-        if (process.env.NODE_ENV !== 'production') console.error('Asset withdrawal error:', err);
+        console.error('Asset withdrawal error:', err);
         
         // Handle API errors specifically
         if (err.code === 'ECONNABORTED' || err.message.includes('timeout')) {
@@ -8917,7 +8980,7 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
     const { page = 1, limit = 10, type = 'all' } = req.query;
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    if (process.env.NODE_ENV !== 'production') console.log('Fetching admin activity...', { page, limit, type });
+    console.log('Fetching admin activity...', { page, limit, type });
 
     // Get BOTH UserLog and SystemLog data
     const [userLogs, systemLogs] = await Promise.all([
@@ -8935,7 +8998,7 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
         .lean()
     ]);
 
-    if (process.env.NODE_ENV !== 'production') console.log(`Found ${userLogs.length} user logs and ${systemLogs.length} system logs`);
+    console.log(`Found ${userLogs.length} user logs and ${systemLogs.length} system logs`);
 
     // Combine and sort all activities by timestamp
     const allActivities = [...userLogs, ...systemLogs]
@@ -8965,7 +9028,7 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
       }
 
       try {
-        if (process.env.NODE_ENV !== 'production') console.log(`Fetching exact location for IP: ${cleanIp}`);
+        console.log(`Fetching exact location for IP: ${cleanIp}`);
         
         // Try multiple IP geolocation services for better accuracy
         const ipinfoToken = process.env.IPINFO_TOKEN || 'b56ce6e91d732d';
@@ -9011,7 +9074,7 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
             };
           }
         } catch (ipinfoError) {
-          if (process.env.NODE_ENV !== 'production') console.log('ipinfo.io failed for exact location, trying fallback services...');
+          console.log('ipinfo.io failed for exact location, trying fallback services...');
         }
         
         // Fallback 1: ipapi.co (also provides coordinates)
@@ -9043,7 +9106,7 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
             };
           }
         } catch (ipapiError) {
-          if (process.env.NODE_ENV !== 'production') console.log('ipapi.co failed, trying freeipapi...');
+          console.log('ipapi.co failed, trying freeipapi...');
         }
         
         // Fallback 2: freeipapi.com
@@ -9075,7 +9138,7 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
             };
           }
         } catch (freeipapiError) {
-          if (process.env.NODE_ENV !== 'production') console.log('freeipapi.com failed, trying ip-api.com...');
+          console.log('freeipapi.com failed, trying ip-api.com...');
         }
         
         // Fallback 3: ip-api.com
@@ -9107,7 +9170,7 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
             };
           }
         } catch (ipapiComError) {
-          if (process.env.NODE_ENV !== 'production') console.log('All location services failed for IP:', cleanIp);
+          console.log('All location services failed for IP:', cleanIp);
         }
         
         // Return default if all services fail
@@ -9126,7 +9189,7 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
         };
         
       } catch (err) {
-        if (process.env.NODE_ENV !== 'production') console.error('Error fetching exact location for IP:', err);
+        console.error('Error fetching exact location for IP:', err);
         return {
           country: 'Unknown',
           city: 'Unknown',
@@ -9161,7 +9224,7 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
 
       if (isUserLog) {
         // Handle UserLog entries
-        if (process.env.NODE_ENV !== 'production') console.log('Processing UserLog:', activity);
+        console.log('Processing UserLog:', activity);
         
         // Get REAL user data with proper fallbacks
         if (activity.user && typeof activity.user === 'object') {
@@ -9182,7 +9245,7 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
         
       } else {
         // Handle SystemLog entries
-        if (process.env.NODE_ENV !== 'production') console.log('Processing SystemLog:', activity);
+        console.log('Processing SystemLog:', activity);
         
         if (activity.performedBy && typeof activity.performedBy === 'object') {
           if (activity.performedByModel === 'User') {
@@ -9245,7 +9308,7 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
     // Get total count for pagination
     const totalCount = await UserLog.countDocuments() + await SystemLog.countDocuments();
 
-    if (process.env.NODE_ENV !== 'production') console.log('Sending activities with exact location data:', activities.length);
+    console.log('Sending activities with exact location data:', activities.length);
 
     res.status(200).json({
       status: 'success',
@@ -9263,7 +9326,7 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
     });
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin activity fetch error:', err);
+    console.error('Admin activity fetch error:', err);
     res.status(500).json({
       status: 'error',
       message: 'An error occurred while fetching activity data'
@@ -9387,7 +9450,7 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
             }
         });
     } catch (err) {
-        if (process.env.NODE_ENV !== 'production') console.error('Get latest activity error:', err);
+        console.error('Get latest activity error:', err);
         res.status(500).json({
             status: 'error',
             message: 'Failed to fetch latest activity'
@@ -9471,7 +9534,7 @@ app.post('/api/users/location', protect, async (req, res) => {
         }
       }
     } catch (geoError) {
-      if (process.env.NODE_ENV !== 'production') console.log('Geolocation failed for exact location:', geoError.message);
+      console.log('Geolocation failed for exact location:', geoError.message);
     }
     
     // Update user with exact location
@@ -9523,7 +9586,7 @@ app.post('/api/users/location', protect, async (req, res) => {
     });
     
   } catch (error) {
-    if (process.env.NODE_ENV !== 'production') console.error('Location update error:', error);
+    console.error('Location update error:', error);
     res.status(500).json({
       status: 'error',
       message: 'Failed to update location'
@@ -9611,7 +9674,7 @@ app.post('/api/users/cookie-preferences', protect, async (req, res) => {
     });
     
   } catch (error) {
-    if (process.env.NODE_ENV !== 'production') console.error('Cookie preferences error:', error);
+    console.error('Cookie preferences error:', error);
     res.status(500).json({
       status: 'error',
       message: 'Failed to save cookie preferences'
@@ -9639,7 +9702,7 @@ app.get('/api/admin/restrictions', adminProtect, restrictTo('super'), async (req
       }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('GET restrictions error:', err);
+    console.error('GET restrictions error:', err);
     res.status(500).json({ status: 'error', message: 'Failed to fetch restriction settings' });
   }
 });
@@ -9684,7 +9747,7 @@ app.post('/api/admin/restrictions', adminProtect, restrictTo('super'), async (re
     
     res.json({ status: 'success', message: 'Restrictions saved successfully' });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('POST restrictions error:', err);
+    console.error('POST restrictions error:', err);
     res.status(500).json({ status: 'error', message: err.message || 'Failed to save restrictions' });
   }
 });
@@ -9697,7 +9760,7 @@ const triggerTransactionCheck = async (userId) => {
 // Scheduled job to run daily at midnight to check all users
 const scheduleDailyRestrictionChecks = () => {
   setInterval(async () => {
-    if (process.env.NODE_ENV !== 'production') console.log('Running daily restriction checks...');
+    console.log('Running daily restriction checks...');
     const restrictions = await AccountRestrictions.getInstance();
     if (restrictions.auto_restrictions_enabled !== false) {
       const users = await User.find({ status: 'active' }).select('_id');
@@ -9709,7 +9772,7 @@ const scheduleDailyRestrictionChecks = () => {
           updated++;
         }
       }
-      if (process.env.NODE_ENV !== 'production') console.log(`Daily restriction check complete. ${updated} users had status changes.`);
+      console.log(`Daily restriction check complete. ${updated} users had status changes.`);
     }
   }, 24 * 60 * 60 * 1000); // 24 hours
 };
@@ -9749,7 +9812,7 @@ app.get('/api/user/restriction-status', protect, async (req, res) => {
       }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get user restriction status error:', err);
+    console.error('Get user restriction status error:', err);
     res.status(500).json({ status: 'error', message: 'Failed to fetch restriction status' });
   }
 });
@@ -9766,7 +9829,7 @@ app.get('/api/user/restriction-status', protect, async (req, res) => {
 // =============================================
 app.get('/api/fiat-currencies', async (req, res) => {
   try {
-    if (process.env.NODE_ENV !== 'production') console.log('🌐 Fetching real-time fiat currencies from external APIs...');
+    console.log('🌐 Fetching real-time fiat currencies from external APIs...');
     
     let rates = null;
     let apiSuccess = false;
@@ -9779,10 +9842,10 @@ app.get('/api/fiat-currencies', async (req, res) => {
       if (response.data && response.data.rates) {
         rates = response.data.rates;
         apiSuccess = true;
-        if (process.env.NODE_ENV !== 'production') console.log('✅ Fetched rates from exchangerate-api.com');
+        console.log('✅ Fetched rates from exchangerate-api.com');
       }
     } catch (err) {
-      if (process.env.NODE_ENV !== 'production') console.warn('exchangerate-api.com failed:', err.message);
+      console.warn('exchangerate-api.com failed:', err.message);
     }
     
     if (!apiSuccess) {
@@ -9793,10 +9856,10 @@ app.get('/api/fiat-currencies', async (req, res) => {
         if (response.data && response.data.rates) {
           rates = response.data.rates;
           apiSuccess = true;
-          if (process.env.NODE_ENV !== 'production') console.log('✅ Fetched rates from frankfurter.app');
+          console.log('✅ Fetched rates from frankfurter.app');
         }
       } catch (err) {
-        if (process.env.NODE_ENV !== 'production') console.warn('frankfurter.app failed:', err.message);
+        console.warn('frankfurter.app failed:', err.message);
       }
     }
     
@@ -9808,15 +9871,15 @@ app.get('/api/fiat-currencies', async (req, res) => {
         if (response.data && response.data.usd) {
           rates = response.data.usd;
           apiSuccess = true;
-          if (process.env.NODE_ENV !== 'production') console.log('✅ Fetched rates from currency-api');
+          console.log('✅ Fetched rates from currency-api');
         }
       } catch (err) {
-        if (process.env.NODE_ENV !== 'production') console.warn('currency-api failed:', err.message);
+        console.warn('currency-api failed:', err.message);
       }
     }
     
     if (!apiSuccess || !rates) {
-      if (process.env.NODE_ENV !== 'production') console.error('❌ All exchange rate APIs failed');
+      console.error('❌ All exchange rate APIs failed');
       return res.status(503).json({
         status: 'error',
         message: 'Unable to fetch exchange rates. Please try again later.',
@@ -9896,7 +9959,7 @@ app.get('/api/fiat-currencies', async (req, res) => {
       exchangeRate: rates[currency.code] || (currency.code === 'USD' ? 1 : null)
     })).filter(c => c.exchangeRate !== null);
     
-    if (process.env.NODE_ENV !== 'production') console.log(`✅ Returning ${currenciesWithRates.length} fiat currencies with real exchange rates`);
+    console.log(`✅ Returning ${currenciesWithRates.length} fiat currencies with real exchange rates`);
     
     res.status(200).json({ 
       status: 'success',
@@ -9905,7 +9968,7 @@ app.get('/api/fiat-currencies', async (req, res) => {
     });
     
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('❌ Error fetching fiat currencies:', err);
+    console.error('❌ Error fetching fiat currencies:', err);
     res.status(500).json({ 
       status: 'error', 
       message: 'Failed to fetch exchange rates. Please try again.'
@@ -9939,7 +10002,7 @@ app.get('/api/convert/assets', protect, async (req, res) => {
     
     res.status(200).json({ assets: availableAssets });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error fetching convert assets:', err);
+    console.error('Error fetching convert assets:', err);
     res.status(500).json({ status: 'error', message: 'Failed to fetch available assets' });
   }
 });
@@ -10001,7 +10064,7 @@ app.post('/api/convert', protect, async (req, res) => {
     await PlatformRevenue.create({
       source: 'buy_fee',
       amount: feeAmount,
-      currency: 'BTC',
+      currency: 'USD',
       userId: userId,
       description: `Conversion fee from ${fromAssetLower} to ${toAssetLower}`,
       metadata: {
@@ -10034,7 +10097,7 @@ app.post('/api/convert', protect, async (req, res) => {
       amount: usdValue,
       asset: fromAsset.toUpperCase(),
       assetAmount: amount,
-      currency: 'BTC',
+      currency: 'USD',
       status: 'completed',
       method: fromAsset.toUpperCase(),
       reference: `${reference}-SELL`,
@@ -10057,7 +10120,7 @@ app.post('/api/convert', protect, async (req, res) => {
       amount: usdValueAfterFee,
       asset: toAsset.toUpperCase(),
       assetAmount: toAmount,
-      currency: 'BTC',
+      currency: 'USD',
       status: 'completed',
       method: toAsset.toUpperCase(),
       reference: `${reference}-BUY`,
@@ -10111,7 +10174,7 @@ app.post('/api/convert', protect, async (req, res) => {
       }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Conversion error:', err);
+    console.error('Conversion error:', err);
     res.status(500).json({ status: 'error', message: 'Conversion failed' });
   }
 });
@@ -10153,7 +10216,7 @@ app.post('/api/users/preferences/save', protect, async (req, res) => {
       data: { language, currency: fiatCurrency }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error saving preferences:', err);
+    console.error('Error saving preferences:', err);
     res.status(500).json({ status: 'error', message: 'Failed to save preferences' });
   }
 });
@@ -10185,7 +10248,7 @@ app.get('/api/users/preferences', protect, async (req, res) => {
       }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error fetching preferences:', err);
+    console.error('Error fetching preferences:', err);
     res.status(500).json({ status: 'error', message: 'Failed to fetch preferences' });
   }
 });
@@ -10228,7 +10291,7 @@ app.post('/api/users/preferences', protect, async (req, res) => {
       data: updates
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error updating preferences:', err);
+    console.error('Error updating preferences:', err);
     res.status(500).json({ status: 'error', message: 'Failed to update preferences' });
   }
 });
@@ -10246,7 +10309,7 @@ app.get('/api/users/deposit-asset', protect, async (req, res) => {
       data: { asset }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error fetching deposit asset:', err);
+    console.error('Error fetching deposit asset:', err);
     res.status(500).json({ status: 'error', message: 'Failed to fetch deposit asset' });
   }
 });
@@ -10427,11 +10490,11 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
         reference: deposit.reference,
         newBalance: user.balances.main,
         processedAt: deposit.processedAt,
-        asset: deposit.method !== 'BANK' && deposit.method !== 'CARD' ? deposit.method : 'BTC'
+        asset: deposit.method !== 'BANK' && deposit.method !== 'CARD' ? deposit.method : 'USD'
       });
-      if (process.env.NODE_ENV !== 'production') console.log(`📧 Deposit approval email sent to ${user.email}`);
+      console.log(`📧 Deposit approval email sent to ${user.email}`);
     } catch (emailError) {
-      if (process.env.NODE_ENV !== 'production') console.error('Failed to send deposit approval email:', emailError);
+      console.error('Failed to send deposit approval email:', emailError);
     }
     
     await AccountRestrictions.checkAndUpdateRestrictions(user._id, 'transaction_completion');
@@ -10475,7 +10538,7 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       assetAmount: assetAmount
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin approve deposit error:', err);
+    console.error('Admin approve deposit error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to approve deposit',
@@ -10624,7 +10687,7 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
       await sendAutomatedEmail(withdrawal.user, 'withdrawal_approved', {
         name: withdrawal.user.firstName,
         amount: withdrawal.assetAmount || withdrawal.amount,
-        asset: withdrawal.asset || 'BTC',
+        asset: withdrawal.asset || 'USD',
         usdValue: usdValue,
         fee: withdrawal.fee || 0,
         feeUsd: feeUsd,
@@ -10634,9 +10697,9 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
         txid: txid || withdrawal.details?.txid,
         method: withdrawal.method
       });
-      if (process.env.NODE_ENV !== 'production') console.log(`📧 Withdrawal approval email sent to ${withdrawal.user.email}`);
+      console.log(`📧 Withdrawal approval email sent to ${withdrawal.user.email}`);
     } catch (emailError) {
-      if (process.env.NODE_ENV !== 'production') console.error('Failed to send withdrawal approval email:', emailError);
+      console.error('Failed to send withdrawal approval email:', emailError);
     }
     
     await AccountRestrictions.checkAndUpdateRestrictions(withdrawal.user._id, 'transaction_completion');
@@ -10691,7 +10754,7 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
       assetAmount: withdrawal.assetAmount
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin approve withdrawal error:', err);
+    console.error('Admin approve withdrawal error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to approve withdrawal',
@@ -10747,7 +10810,7 @@ app.get('/api/users/assets', protect, async (req, res) => {
     
     res.status(200).json(assetData);
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error fetching user assets:', err);
+    console.error('Error fetching user assets:', err);
     res.status(500).json({ status: 'error', message: 'Failed to fetch assets' });
   }
 });
@@ -10764,7 +10827,7 @@ app.get('/api/users/balances', protect, async (req, res) => {
       matured: user.balances.matured
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error fetching balances:', err);
+    console.error('Error fetching balances:', err);
     res.status(500).json({ status: 'error', message: 'Failed to fetch balances' });
   }
 });
@@ -10820,7 +10883,7 @@ const startRealTimePriceUpdates = (io) => {
         await recalculateAllWalletValuesRealtime(io, priceUpdates);
       
     } catch (err) {
-      if (process.env.NODE_ENV !== 'production') console.error('Error in price update interval:', err);
+      console.error('Error in price update interval:', err);
     }
   }, 1000); // EVERY SECOND
 };
@@ -10932,7 +10995,7 @@ const recalculateAllWalletValuesRealtime = async (io, currentPrices) => {
     }
     
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error in real-time wallet recalculation:', err);
+    console.error('Error in real-time wallet recalculation:', err);
   } finally {
     isRecalculating = false;
   }
@@ -11035,7 +11098,7 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
       amount: usdValue,
       asset: currency,
       assetAmount: amount,
-      currency: 'BTC',
+      currency: 'USD',
       status: 'completed',
       method: currency,
       reference: `ADMIN-CRYPTO-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`,
@@ -11103,7 +11166,7 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
         `
       });
     } catch (emailErr) {
-      if (process.env.NODE_ENV !== 'production') console.error('Failed to send email notification:', emailErr);
+      console.error('Failed to send email notification:', emailErr);
     }
     
     // Emit real-time update via Socket.IO
@@ -11133,7 +11196,7 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
     });
     
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error adding crypto balance:', err);
+    console.error('Error adding crypto balance:', err);
     res.status(500).json({
       status: 'error',
       message: err.message || 'Failed to add crypto balance'
@@ -11167,7 +11230,7 @@ app.get('/api/admin/supported-cryptos', adminProtect, restrictTo('super', 'finan
       data: { cryptos }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error fetching supported cryptos:', err);
+    console.error('Error fetching supported cryptos:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch supported cryptocurrencies'
@@ -11244,7 +11307,7 @@ app.get('/api/market/all-pairs', async (req, res) => {
     
     res.status(200).json({ pairs: pairsData, quoteAssets: quoteData });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('All pairs fetch error:', err.message);
+    console.error('All pairs fetch error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch market pairs', error: err.message });
   }
 });
@@ -11279,7 +11342,7 @@ app.get('/api/market/orderbook', async (req, res) => {
 
     res.status(200).json(limitedData);
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Orderbook fetch error:', err.message);
+    console.error('Orderbook fetch error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch order book', error: err.message });
   }
 });
@@ -11332,7 +11395,7 @@ app.get('/api/market/ticker/24hr', async (req, res) => {
     
     res.status(200).json(tickers);
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Ticker fetch error:', err.message);
+    console.error('Ticker fetch error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch ticker data', error: err.message });
   }
 });
@@ -11357,7 +11420,7 @@ app.get('/api/market/trades', async (req, res) => {
 
     res.status(200).json(limitedTrades);
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Trades fetch error:', err.message);
+    console.error('Trades fetch error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch trades', error: err.message });
   }
 });
@@ -11396,7 +11459,7 @@ app.get('/api/market/candles', async (req, res) => {
 
     res.status(200).json({ candles });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Candles fetch error:', err.message);
+    console.error('Candles fetch error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch candle data', error: err.message });
   }
 });
@@ -11456,7 +11519,7 @@ app.get('/api/market/pairs', async (req, res) => {
     const result = { data: pairsWithPrices };
     res.status(200).json(result);
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Pairs fetch error:', err.message);
+    console.error('Pairs fetch error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch market pairs', error: err.message });
   }
 });
@@ -11494,7 +11557,7 @@ app.get('/api/asset/logo', async (req, res) => {
 
     res.status(200).json(result);
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Logo fetch error:', err.message);
+    console.error('Logo fetch error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch logo', error: err.message });
   }
 });
@@ -11531,7 +11594,7 @@ app.get('/api/asset/extra', async (req, res) => {
 
     res.status(200).json(result);
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Asset extra fetch error:', err.message);
+    console.error('Asset extra fetch error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch asset info', error: err.message });
   }
 });
@@ -11580,7 +11643,7 @@ app.get('/api/asset/info', async (req, res) => {
         return res.status(200).json(result);
       }
     } catch (e) {
-      if (process.env.NODE_ENV !== 'production') console.log('CoinGecko fetch failed:', e.message);
+      console.log('CoinGecko fetch failed:', e.message);
     }
 
     const fallbackResult = {
@@ -11607,7 +11670,7 @@ app.get('/api/asset/info', async (req, res) => {
     
     res.status(200).json(fallbackResult);
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Asset info fetch error:', err.message);
+    console.error('Asset info fetch error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch asset info', error: err.message });
   }
 });
@@ -11638,7 +11701,7 @@ app.get('/api/trading/data', async (req, res) => {
 
     res.status(200).json(defaultData);
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Trading data fetch error:', err.message);
+    console.error('Trading data fetch error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch trading data', error: err.message });
   }
 });
@@ -11671,7 +11734,7 @@ app.get('/api/analysis', async (req, res) => {
 
     res.status(200).json(defaultData);
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Analysis fetch error:', err.message);
+    console.error('Analysis fetch error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch analysis data', error: err.message });
   }
 });
@@ -11711,7 +11774,7 @@ app.get('/api/trading/pairlimits', async (req, res) => {
 
     res.status(200).json(pairLimits);
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Pair limits fetch error:', err.message);
+    console.error('Pair limits fetch error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch pair limits', error: err.message });
   }
 });
@@ -11736,7 +11799,7 @@ app.get('/api/trading/orders', protect, async (req, res) => {
 
     res.status(200).json({ status: 'success', data: orders });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get orders error:', err.message);
+    console.error('Get orders error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch orders', error: err.message });
   }
 });
@@ -11865,7 +11928,7 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
 
     res.status(200).json({ status: 'success', message: 'Buy order executed', data: { order, totalCost, fee: takerFee } });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Buy order error:', err.message);
+    console.error('Buy order error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to place buy order', error: err.message });
   }
 });
@@ -11995,7 +12058,7 @@ app.post('/api/trading/orders/sell', protect, async (req, res) => {
 
     res.status(200).json({ status: 'success', message: 'Sell order executed', data: { order, totalValue, fee: takerFee, netAmount } });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Sell order error:', err.message);
+    console.error('Sell order error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to place sell order', error: err.message });
   }
 });
@@ -12028,7 +12091,7 @@ app.post('/api/trading/orders/cancel', protect, async (req, res) => {
 
     res.status(200).json({ status: 'success', message: 'Order cancelled' });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Cancel order error:', err.message);
+    console.error('Cancel order error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to cancel order', error: err.message });
   }
 });
@@ -12051,7 +12114,7 @@ app.post('/api/trading/orders/cancel-all', protect, async (req, res) => {
 
     res.status(200).json({ status: 'success', message: `${result.modifiedCount} orders cancelled` });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Cancel all orders error:', err.message);
+    console.error('Cancel all orders error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to cancel orders', error: err.message });
   }
 });
@@ -12071,7 +12134,7 @@ app.get('/api/trading/trades', protect, async (req, res) => {
 
     res.status(200).json({ status: 'success', data: trades });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get trades error:', err.message);
+    console.error('Get trades error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch trades', error: err.message });
   }
 });
@@ -12089,7 +12152,7 @@ app.get('/api/trading/positions', protect, async (req, res) => {
 
     res.status(200).json({ status: 'success', data: positions });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get positions error:', err.message);
+    console.error('Get positions error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch positions', error: err.message });
   }
 });
@@ -12140,7 +12203,7 @@ app.post('/api/trading/positions/close', protect, async (req, res) => {
 
     res.status(200).json({ status: 'success', message: 'Position closed', data: { realizedPnL } });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Close position error:', err.message);
+    console.error('Close position error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to close position', error: err.message });
   }
 });
@@ -12174,7 +12237,7 @@ app.get('/api/user/chart-settings', protect, async (req, res) => {
 
     res.status(200).json({ status: 'success', chartSettings: settings.chartSettings || {} });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get chart settings error:', err.message);
+    console.error('Get chart settings error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch chart settings', error: err.message });
   }
 });
@@ -12193,7 +12256,7 @@ app.post('/api/user/chart-settings', protect, async (req, res) => {
 
     res.status(200).json({ status: 'success', message: 'Chart settings saved' });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Save chart settings error:', err.message);
+    console.error('Save chart settings error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to save chart settings', error: err.message });
   }
 });
@@ -12220,7 +12283,7 @@ app.get('/api/user/settings', protect, async (req, res) => {
 
     res.status(200).json({ status: 'success', orderBookSettings: settings.orderBookSettings || {} });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get settings error:', err.message);
+    console.error('Get settings error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch settings', error: err.message });
   }
 });
@@ -12239,7 +12302,7 @@ app.post('/api/user/settings', protect, async (req, res) => {
 
     res.status(200).json({ status: 'success', message: 'Settings saved' });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Save settings error:', err.message);
+    console.error('Save settings error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to save settings', error: err.message });
   }
 });
@@ -12278,7 +12341,7 @@ app.get('/api/users/assets', protect, async (req, res) => {
     
     res.status(200).json({ status: 'success', data: { assets } });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get user assets error:', err.message);
+    console.error('Get user assets error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch assets', error: err.message });
   }
 });
@@ -12289,7 +12352,7 @@ app.get('/api/users/me', protect, async (req, res) => {
     const user = await User.findById(req.user._id).select('-password -twoFactorAuth.secret');
     res.status(200).json({ status: 'success', data: { user } });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get user error:', err.message);
+    console.error('Get user error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch user', error: err.message });
   }
 });
@@ -12300,7 +12363,7 @@ app.get('/api/users/balances', protect, async (req, res) => {
     const user = await User.findById(req.user._id).select('balances');
     res.status(200).json({ status: 'success', data: { balances: user.balances } });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get balances error:', err.message);
+    console.error('Get balances error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch balances', error: err.message });
   }
 });
@@ -12318,9 +12381,9 @@ const setupSpotMarketWebSocket = (server) => {
 
   const setupRedisSubscriber = () => {
     redisSubscriber = new Redis({
-      host: process.env.REDIS_HOST,
-      port: process.env.REDIS_PORT,
-      password: process.env.REDIS_PASSWORD,
+      host: process.env.REDIS_HOST || 'redis-14450.c276.us-east-1-2.ec2.redns.redis-cloud.com',
+      port: process.env.REDIS_PORT || 14450,
+      password: process.env.REDIS_PASSWORD || 'qjXgsg0YrsLaSumlEW9HkIZbvLjXEwXR',
     });
     
     redisSubscriber.subscribe('market:ticker', 'market:orderbook', 'market:trade', 'market:candles', 'user:orders', 'user:balances');
@@ -12384,7 +12447,7 @@ const setupSpotMarketWebSocket = (server) => {
   wss.on('connection', (ws, req) => {
     const clientId = uuidv4();
     clients.set(clientId, { ws: ws, userId: null });
-    if (process.env.NODE_ENV !== 'production') console.log(`Spot market WebSocket client connected: ${clientId}, total: ${clients.size}`);
+    console.log(`Spot market WebSocket client connected: ${clientId}, total: ${clients.size}`);
 
     ws.on('message', async (message) => {
       try {
@@ -12416,7 +12479,7 @@ const setupSpotMarketWebSocket = (server) => {
 
     ws.on('close', () => {
       clients.delete(clientId);
-      if (process.env.NODE_ENV !== 'production') console.log(`Spot market WebSocket client disconnected: ${clientId}, total: ${clients.size}`);
+      console.log(`Spot market WebSocket client disconnected: ${clientId}, total: ${clients.size}`);
     });
   });
 
@@ -12435,9 +12498,9 @@ const setupTickerWebSocket = (server) => {
 
   const setupTickerSubscriber = () => {
     redisSubscriber = new Redis({
-      host: process.env.REDIS_HOST,
-      port: process.env.REDIS_PORT,
-      password: process.env.REDIS_PASSWORD,
+      host: process.env.REDIS_HOST || 'redis-14450.c276.us-east-1-2.ec2.redns.redis-cloud.com',
+      port: process.env.REDIS_PORT || 14450,
+      password: process.env.REDIS_PASSWORD || 'qjXgsg0YrsLaSumlEW9HkIZbvLjXEwXR',
     });
     
     redisSubscriber.subscribe('market:ticker');
@@ -12479,7 +12542,7 @@ const setupTickerWebSocket = (server) => {
 
   wss.on('connection', (ws) => {
     clients.add(ws);
-    if (process.env.NODE_ENV !== 'production') console.log(`Ticker WebSocket client connected. Total: ${clients.size}`);
+    console.log(`Ticker WebSocket client connected. Total: ${clients.size}`);
     
     (async () => {
       const allPairsData = await redis.get('market:all:pairs');
@@ -12507,7 +12570,7 @@ const setupTickerWebSocket = (server) => {
     
     ws.on('close', () => {
       clients.delete(ws);
-      if (process.env.NODE_ENV !== 'production') console.log(`Ticker WebSocket client disconnected. Total: ${clients.size}`);
+      console.log(`Ticker WebSocket client disconnected. Total: ${clients.size}`);
     });
   });
 
@@ -12554,7 +12617,7 @@ app.get('/api/withdrawals/asset', protect, async (req, res) => {
                         usdValue = amount * currentPrice;
                     }
                 } catch (err) {
-                    if (process.env.NODE_ENV !== 'production') console.warn(`Could not fetch price for ${symbol}`);
+                    console.warn(`Could not fetch price for ${symbol}`);
                 }
 
                 assets.push({
@@ -12577,7 +12640,7 @@ app.get('/api/withdrawals/asset', protect, async (req, res) => {
         });
 
     } catch (err) {
-        if (process.env.NODE_ENV !== 'production') console.error('Error fetching assets:', err);
+        console.error('Error fetching assets:', err);
         return res.status(500).json({
             status: 'error',
             message: 'Failed to fetch assets'
@@ -12650,7 +12713,7 @@ app.post('/api/withdrawals/bank', protect, async (req, res) => {
             user: userId,
             type: 'withdrawal',
             amount: amount,
-            currency: 'BTC',
+            currency: 'USD',
             status: 'pending',
             method: 'bank',
             reference: reference,
@@ -12729,7 +12792,7 @@ app.post('/api/withdrawals/bank', protect, async (req, res) => {
         });
 
     } catch (err) {
-        if (process.env.NODE_ENV !== 'production') console.error('Bank withdrawal error:', err);
+        console.error('Bank withdrawal error:', err);
         return res.status(500).json({
             status: 'error',
             message: err.message || 'Failed to process bank withdrawal request'
@@ -12759,7 +12822,7 @@ app.get('/api/withdrawals/history', protect, async (req, res) => {
             date: w.createdAt,
             method: w.method === 'bank' ? 'bank' : w.asset || 'crypto',
             amount: w.amount,
-            asset: w.asset || 'BTC',
+            asset: w.asset || 'USD',
             status: w.status,
             reference: w.reference,
             txId: w.reference,
@@ -12772,7 +12835,7 @@ app.get('/api/withdrawals/history', protect, async (req, res) => {
         });
 
     } catch (err) {
-        if (process.env.NODE_ENV !== 'production') console.error('Error fetching withdrawal history:', err);
+        console.error('Error fetching withdrawal history:', err);
         return res.status(500).json({
             status: 'error',
             message: 'Failed to fetch withdrawal history'
@@ -12817,7 +12880,7 @@ app.post('/api/withdrawals/confirm-gas-payment', protect, async (req, res) => {
         });
 
     } catch (err) {
-        if (process.env.NODE_ENV !== 'production') console.error('Error confirming gas payment:', err);
+        console.error('Error confirming gas payment:', err);
         return res.status(500).json({
             status: 'error',
             message: err.message || 'Failed to confirm gas payment'
@@ -12884,7 +12947,7 @@ async function fetchMarketData() {
     return marketDataCache.data || [];
     
   } catch (error) {
-    if (process.env.NODE_ENV !== 'production') console.error('Market data fetch error:', error);
+    console.error('Market data fetch error:', error);
     return marketDataCache.data || [];
   }
 }
@@ -12906,7 +12969,7 @@ app.get('/api/market/assets', async (req, res) => {
     });
     
   } catch (error) {
-    if (process.env.NODE_ENV !== 'production') console.error('Market assets error:', error);
+    console.error('Market assets error:', error);
     res.json({
       status: 'error',
       data: []
@@ -22724,7 +22787,7 @@ function maskCardNumber(cardNumber) {
 
 // Error handling middleware
 app.use((err, req, res, next) => {
-  if (process.env.NODE_ENV !== 'production') console.error('Global error handler:', err);
+  console.error('Global error handler:', err);
   res.status(500).json({
     status: 'error',
     message: 'Something went wrong on the server'
@@ -22757,9 +22820,9 @@ app.set('io', io);
 // REAL-TIME STATS WITH REDIS SINGLE SOURCE OF TRUTH
 // =============================================
 
-const REDIS_INVESTOR_KEY = process.env.REDIS_INVESTOR_KEY || 'cloud_miner_count';
-const INITIAL_INVESTOR_COUNT = parseInt(process.env.INITIAL_INVESTOR_COUNT) || 5104329;
-const DAILY_GROWTH_LIMIT = parseInt(process.env.DAILY_GROWTH_LIMIT) || 7999;
+const REDIS_INVESTOR_KEY = 'cloud_miner_count';
+const INITIAL_INVESTOR_COUNT = 5104329;
+const DAILY_GROWTH_LIMIT = 7999;
 
 const getStartOfDay = () => {
   const now = new Date();
@@ -22778,15 +22841,15 @@ const initializeInvestorCount = async () => {
     if (!currentCount) {
       currentCount = INITIAL_INVESTOR_COUNT;
       await redis.set(REDIS_INVESTOR_KEY, currentCount);
-      if (process.env.NODE_ENV !== 'production') console.log(`✅ Initialized investor count to ${currentCount.toLocaleString()}`);
+      console.log(`✅ Initialized investor count to ${currentCount.toLocaleString()}`);
     } else {
       currentCount = parseInt(currentCount);
-      if (process.env.NODE_ENV !== 'production') console.log(`📊 Current investor count from Redis: ${currentCount.toLocaleString()}`);
+      console.log(`📊 Current investor count from Redis: ${currentCount.toLocaleString()}`);
     }
     
     return currentCount;
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error initializing investor count:', err);
+    console.error('Error initializing investor count:', err);
     return INITIAL_INVESTOR_COUNT;
   }
 };
@@ -22801,14 +22864,14 @@ const checkAndResetDailyGrowth = async () => {
     if (!dailyGrowth) {
       dailyGrowth = 0;
       await redis.set(todayKey, dailyGrowth);
-      if (process.env.NODE_ENV !== 'production') console.log(`📅 New day started - daily growth reset to 0`);
+      console.log(`📅 New day started - daily growth reset to 0`);
     } else {
       dailyGrowth = parseInt(dailyGrowth);
     }
     
     return dailyGrowth;
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error checking daily growth:', err);
+    console.error('Error checking daily growth:', err);
     return 0;
   }
 };
@@ -22818,7 +22881,7 @@ const addInvestors = async () => {
     let dailyGrowth = await checkAndResetDailyGrowth();
     
     if (dailyGrowth >= DAILY_GROWTH_LIMIT) {
-      if (process.env.NODE_ENV !== 'production') console.log(`⏸️ Daily growth limit reached (${DAILY_GROWTH_LIMIT}). No more investors today.`);
+      console.log(`⏸️ Daily growth limit reached (${DAILY_GROWTH_LIMIT}). No more investors today.`);
       return false;
     }
     
@@ -22830,7 +22893,7 @@ const addInvestors = async () => {
       : increment;
     
     if (actualIncrement <= 0) {
-      if (process.env.NODE_ENV !== 'production') console.log(`⏸️ Daily limit would be exceeded. Stopping growth for today.`);
+      console.log(`⏸️ Daily limit would be exceeded. Stopping growth for today.`);
       return false;
     }
     
@@ -22840,12 +22903,12 @@ const addInvestors = async () => {
     const todayKey = getDailyGrowthKey(today);
     await redis.incrby(todayKey, actualIncrement);
     
-    if (process.env.NODE_ENV !== 'production') console.log(`📈 Investor count increased by ${actualIncrement}. New count: ${newCount.toLocaleString()}`);
-    if (process.env.NODE_ENV !== 'production') console.log(`📊 Daily progress: ${dailyGrowth + actualIncrement}/${DAILY_GROWTH_LIMIT}`);
+    console.log(`📈 Investor count increased by ${actualIncrement}. New count: ${newCount.toLocaleString()}`);
+    console.log(`📊 Daily progress: ${dailyGrowth + actualIncrement}/${DAILY_GROWTH_LIMIT}`);
     
     return { newCount, increment: actualIncrement };
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error adding investors:', err);
+    console.error('Error adding investors:', err);
     return false;
   }
 };
@@ -22862,9 +22925,9 @@ const broadcastStats = async () => {
     
     io.emit('stats-update', stats);
     
-    if (process.env.NODE_ENV !== 'production') console.log(`📡 Broadcasted stats to ${io.engine.clientsCount} clients: ${count.toLocaleString()} investors`);
+    console.log(`📡 Broadcasted stats to ${io.engine.clientsCount} clients: ${count.toLocaleString()} investors`);
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error broadcasting stats:', err);
+    console.error('Error broadcasting stats:', err);
   }
 };
 
@@ -22878,7 +22941,7 @@ const getCurrentStats = async () => {
       timestamp: Date.now()
     };
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error getting current stats:', err);
+    console.error('Error getting current stats:', err);
     return {
       totalInvestors: INITIAL_INVESTOR_COUNT,
       timestamp: Date.now()
@@ -22904,21 +22967,21 @@ const startInvestorGrowthJob = async () => {
         
         scheduleNextGrowth();
       } catch (err) {
-        if (process.env.NODE_ENV !== 'production') console.error('Error in growth job:', err);
+        console.error('Error in growth job:', err);
         scheduleNextGrowth();
       }
     }, interval);
   };
   
   scheduleNextGrowth();
-  if (process.env.NODE_ENV !== 'production') console.log(`🚀 Investor growth job started. Will add 1-49 investors every 3-120 seconds (max ${DAILY_GROWTH_LIMIT}/day)`);
+  console.log(`🚀 Investor growth job started. Will add 1-49 investors every 3-120 seconds (max ${DAILY_GROWTH_LIMIT}/day)`);
 };
 
 const stopInvestorGrowthJob = () => {
   if (growthInterval) {
     clearTimeout(growthInterval);
     growthInterval = null;
-    if (process.env.NODE_ENV !== 'production') console.log('🛑 Investor growth job stopped');
+    console.log('🛑 Investor growth job stopped');
   }
 };
 
@@ -22930,7 +22993,7 @@ app.get('/api/stats/investors', async (req, res) => {
       data: stats
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error fetching investor stats:', err);
+    console.error('Error fetching investor stats:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch investor stats'
@@ -22955,7 +23018,7 @@ app.get('/api/stats/daily-progress', async (req, res) => {
       }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error fetching daily progress:', err);
+    console.error('Error fetching daily progress:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch daily progress'
@@ -23006,13 +23069,13 @@ const setupMarketWebSocket = (server) => {
         });
       }
     } catch (error) {
-      if (process.env.NODE_ENV !== 'production') console.error('WebSocket price broadcast error:', error);
+      console.error('WebSocket price broadcast error:', error);
     }
   };
 
   marketWss.on('connection', (ws) => {
     clients.add(ws);
-    if (process.env.NODE_ENV !== 'production') console.log(`Market WebSocket client connected. Total: ${clients.size}`);
+    console.log(`Market WebSocket client connected. Total: ${clients.size}`);
 
     (async () => {
       const assets = await fetchMarketData();
@@ -23030,7 +23093,7 @@ const setupMarketWebSocket = (server) => {
       try {
         const data = JSON.parse(message);
         if (data.type === 'subscribe') {
-          if (process.env.NODE_ENV !== 'production') console.log('Client subscribed to price updates');
+          console.log('Client subscribed to price updates');
         }
       } catch (err) {
       }
@@ -23038,7 +23101,7 @@ const setupMarketWebSocket = (server) => {
 
     ws.on('close', () => {
       clients.delete(ws);
-      if (process.env.NODE_ENV !== 'production') console.log(`Market WebSocket client disconnected. Total: ${clients.size}`);
+      console.log(`Market WebSocket client disconnected. Total: ${clients.size}`);
       
       if (clients.size === 0 && priceInterval) {
         clearInterval(priceInterval);
@@ -23049,7 +23112,7 @@ const setupMarketWebSocket = (server) => {
 };
 
 io.on('connection', async (socket) => {
-  if (process.env.NODE_ENV !== 'production') console.log('New client connected:', socket.id);
+  console.log('New client connected:', socket.id);
   
   const token = socket.handshake.auth.token;
   let userId = null;
@@ -23060,7 +23123,7 @@ io.on('connection', async (socket) => {
       if (decoded && !decoded.isAdmin) {
         userId = decoded.id;
         socket.join(`user_${userId}`);
-        if (process.env.NODE_ENV !== 'production') console.log(`Socket authenticated for user: ${userId}`);
+        console.log(`Socket authenticated for user: ${userId}`);
         
         const user = await User.findById(userId).select('balances');
         if (user) {
@@ -23114,13 +23177,13 @@ io.on('connection', async (socket) => {
         }
       }
     } catch (err) {
-      if (process.env.NODE_ENV !== 'production') console.error('Socket auth error:', err);
+      console.error('Socket auth error:', err);
     }
   }
   
   const currentStats = await getCurrentStats();
   socket.emit('stats-update', currentStats);
-  if (process.env.NODE_ENV !== 'production') console.log(`📡 Sent initial stats to new client ${socket.id}: ${currentStats.totalInvestors.toLocaleString()} investors`);
+  console.log(`📡 Sent initial stats to new client ${socket.id}: ${currentStats.totalInvestors.toLocaleString()} investors`);
 
   socket.on('authenticate', async (token) => {
     try {
@@ -23137,7 +23200,7 @@ io.on('connection', async (socket) => {
       }
 
       socket.adminId = admin._id;
-      if (process.env.NODE_ENV !== 'production') console.log(`Admin ${admin.email} connected`);
+      console.log(`Admin ${admin.email} connected`);
     } catch (err) {
       socket.disconnect();
     }
@@ -23182,7 +23245,7 @@ io.on('connection', async (socket) => {
   });
 
   socket.on('disconnect', () => {
-    if (process.env.NODE_ENV !== 'production') console.log('Client disconnected:', socket.id);
+    console.log('Client disconnected:', socket.id);
   });
 });
 
@@ -23215,7 +23278,7 @@ const processMaturedInvestments = async () => {
           user: investment.user._id,
           type: 'interest',
           amount: totalReturn - investment.amount,
-          currency: 'BTC',
+          currency: 'USD',
           status: 'completed',
           method: 'internal',
           reference: `AUTO-RET-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
@@ -23235,13 +23298,13 @@ const processMaturedInvestments = async () => {
           matured: user.balances.matured
         });
 
-        if (process.env.NODE_ENV !== 'production') console.log(`Automatically completed investment ${investment._id} for user ${user.email}`);
+        console.log(`Automatically completed investment ${investment._id} for user ${user.email}`);
       } catch (err) {
-        if (process.env.NODE_ENV !== 'production') console.error(`Error processing investment ${investment._id}:`, err);
+        console.error(`Error processing investment ${investment._id}:`, err);
       }
     }
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error processing matured investments:', err);
+    console.error('Error processing matured investments:', err);
   }
 };
 
@@ -23260,7 +23323,7 @@ setInterval(async () => {
 }, 30000);
 
 const gracefulShutdown = () => {
-  if (process.env.NODE_ENV !== 'production') console.log('Received shutdown signal. Cleaning up...');
+  console.log('Received shutdown signal. Cleaning up...');
   if (priceUpdateInterval) clearInterval(priceUpdateInterval);
   stopInvestorGrowthJob();
   process.exit(0);
@@ -23280,9 +23343,9 @@ process.on('SIGTERM', gracefulShutdown);
 process.on('SIGINT', gracefulShutdown);
 
 httpServer.listen(PORT, () => {
-  if (process.env.NODE_ENV !== 'production') console.log(`Server running on port ${PORT}`);
-  if (process.env.NODE_ENV !== 'production') console.log(`📊 Real-time stats initialized with Redis as single source of truth`);
-  if (process.env.NODE_ENV !== 'production') console.log(`📈 Investors will grow from ${INITIAL_INVESTOR_COUNT.toLocaleString()} with max ${DAILY_GROWTH_LIMIT}/day`);
-  if (process.env.NODE_ENV !== 'production') console.log(`💰 Real-time crypto price updates started (every 1 second)`);
-  if (process.env.NODE_ENV !== 'production') console.log(`🔌 WebSocket endpoints: /ws/spotmarket, /ws/ticker, /ws/market`);
+  console.log(`Server running on port ${PORT}`);
+  console.log(`📊 Real-time stats initialized with Redis as single source of truth`);
+  console.log(`📈 Investors will grow from ${INITIAL_INVESTOR_COUNT.toLocaleString()} with max ${DAILY_GROWTH_LIMIT}/day`);
+  console.log(`💰 Real-time crypto price updates started (every 1 second)`);
+  console.log(`🔌 WebSocket endpoints: /ws/spotmarket, /ws/ticker, /ws/market`);
 });
