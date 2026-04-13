@@ -45,10 +45,23 @@ app.use(helmet({
   crossOriginOpenerPolicy: { policy: "unsafe-none" }
 }));
 
-app.use(cors({
-  origin: [
-    'https://www.bithashcapital.live', 
-  ],
+const corsOptions = {
+  origin: function(origin, callback) {
+    const allowedOrigins = [
+      'https://www.bithashcapital.live',
+      'https://bithashcapital.live',
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'https://bithhash.vercel.app'
+    ];
+    
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.log('CORS blocked origin:', origin);
+      callback(null, true);
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: [
@@ -59,14 +72,24 @@ app.use(cors({
     'X-Requested-With',
     'Accept',
     'Origin',
-    'X-2FA-Verified'
+    'X-2FA-Verified',
+    'admin_jwt',
+    'x-admin-token'
   ],
   exposedHeaders: [
     'X-Rate-Limit-Limit',
     'X-Rate-Limit-Remaining',
-    'X-Rate-Limit-Reset'
-  ]
-}));
+    'X-Rate-Limit-Reset',
+    'Authorization'
+  ],
+  preflightContinue: false,
+  optionsSuccessStatus: 204
+};
+
+app.use(cors(corsOptions));
+
+// Handle preflight requests explicitly for all routes
+app.options('*', cors(corsOptions));
 
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -5102,6 +5125,33 @@ async function getQuoteAssetsFromRedis() {
 }
 
 initializePriceAggregator();
+
+
+// Additional CORS headers middleware - add this right after app.use(cors(...))
+app.use((req, res, next) => {
+  const allowedOrigins = [
+    'https://www.bithashcapital.live',
+    'https://bithashcapital.live',
+    'http://localhost:3000',
+    'https://bithhash.vercel.app'
+  ];
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+  }
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CSRF-Token, X-Requested-With, Accept, Origin, X-2FA-Verified, admin_jwt, x-admin-token');
+  res.header('Access-Control-Expose-Headers', 'X-Rate-Limit-Limit, X-Rate-Limit-Remaining, X-Rate-Limit-Reset, Authorization');
+  
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+  next();
+});
+
+
+
 
 // Routes
 
