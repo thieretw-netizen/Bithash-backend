@@ -2562,7 +2562,7 @@ const storage = multer.diskStorage({
     let uploadPath = process.env.TEMP_UPLOAD_PATH || 'uploads/temp';
     
     if (file.fieldname.includes('identity')) {
-      uploadPath = process.env.KYC_UPLOAD_PATH || 'uploads/kyc/identity';
+      uploadPath = process.env.KYC_IDENTITY_PATH || 'uploads/kyc/identity';
     } else if (file.fieldname.includes('address')) {
       uploadPath = process.env.KYC_ADDRESS_PATH || 'uploads/kyc/address';
     } else if (file.fieldname.includes('facial')) {
@@ -2579,10 +2579,9 @@ const storage = multer.diskStorage({
 });
 
 const fileFilter = (req, file, cb) => {
-  const allowedMimes = JSON.parse(process.env.KYC_ALLOWED_MIME_TYPES || '["image/jpeg","image/jpg","image/png","image/gif","application/pdf","video/mp4","video/webm"]');
-  const allowedMimesSet = new Set(allowedMimes);
+  const allowedMimes = JSON.parse(process.env.KYC_ALLOWED_MIME_TYPES || '{"image/jpeg":true,"image/jpg":true,"image/png":true,"image/gif":true,"application/pdf":true,"video/mp4":true,"video/webm":true}');
   
-  if (allowedMimesSet.has(file.mimetype)) {
+  if (allowedMimes[file.mimetype]) {
     cb(null, true);
   } else {
     cb(new Error(`Invalid file type: ${file.mimetype}. Only images, PDFs, and videos are allowed.`), false);
@@ -3021,72 +3020,59 @@ const detectAndSetIPPreferences = async (userId, req) => {
   }
 };
 
-// INSTRUCTION W & X & Y: FETCH ALL CRYPTOS FROM BINANCE API IN REAL-TIME
-// NO HARDCODED CRYPTOS - DYNAMIC FROM BINANCE
+// Function to fetch all cryptos from Binance API in real-time
 let globalCryptoList = [];
 let globalCryptoLogos = {};
 let lastCryptoFetchTime = 0;
-const CRYPTO_FETCH_INTERVAL = 3600000; // 1 hour
+const CRYPTO_FETCH_INTERVAL = 60000; // Fetch every minute
 
 const fetchAllCryptosFromBinance = async () => {
   try {
-    if (Date.now() - lastCryptoFetchTime < CRYPTO_FETCH_INTERVAL && globalCryptoList.length > 0) {
-      return { cryptos: globalCryptoList, logos: globalCryptoLogos };
+    const now = Date.now();
+    if (now - lastCryptoFetchTime < CRYPTO_FETCH_INTERVAL && globalCryptoList.length > 0) {
+      return globalCryptoList;
     }
     
-    if (process.env.NODE_ENV !== 'production') console.log('🔄 Fetching all cryptocurrencies from Binance API...');
+    if (process.env.NODE_ENV !== 'production') console.log('Fetching all cryptos from Binance API...');
     
     const exchangeInfo = await axios.get('https://api.binance.com/api/v3/exchangeInfo', { timeout: 10000 });
     
     const usdtPairs = exchangeInfo.data.symbols.filter(s => s.quoteAsset === 'USDT' && s.status === 'TRADING');
     
-    const uniqueBaseAssets = new Set();
-    usdtPairs.forEach(pair => {
-      uniqueBaseAssets.add(pair.baseAsset);
-    });
+    const uniqueAssets = new Map();
     
-    const cryptos = Array.from(uniqueBaseAssets).map(symbol => ({
-      symbol: symbol.toLowerCase(),
-      name: symbol,
-      code: symbol
-    }));
-    
-    const logos = {};
-    for (const crypto of cryptos) {
-      try {
-        const logoResponse = await axios.get(`https://cryptologos.cc/logos/${crypto.symbol}-${crypto.symbol}-logo.png`, { timeout: 3000 });
-        if (logoResponse.status === 200) {
-          logos[crypto.symbol] = `https://cryptologos.cc/logos/${crypto.symbol}-${crypto.symbol}-logo.png`;
-        }
-      } catch (err) {
-        logos[crypto.symbol] = `https://assets.coingecko.com/coins/images/1/large/bitcoin.png`;
+    for (const pair of usdtPairs) {
+      const baseAsset = pair.baseAsset;
+      if (!uniqueAssets.has(baseAsset)) {
+        uniqueAssets.set(baseAsset, {
+          symbol: baseAsset,
+          name: baseAsset,
+          logo: `https://cryptologos.cc/logos/${baseAsset.toLowerCase()}-${baseAsset.toLowerCase()}-logo.png`,
+          status: 'active'
+        });
       }
     }
     
-    globalCryptoList = cryptos;
-    globalCryptoLogos = logos;
-    lastCryptoFetchTime = Date.now();
+    globalCryptoList = Array.from(uniqueAssets.values());
+    lastCryptoFetchTime = now;
     
-    if (process.env.NODE_ENV !== 'production') console.log(`✅ Fetched ${cryptos.length} cryptocurrencies from Binance`);
+    if (process.env.NODE_ENV !== 'production') console.log(`Fetched ${globalCryptoList.length} cryptos from Binance`);
     
-    return { cryptos: globalCryptoList, logos: globalCryptoLogos };
+    return globalCryptoList;
   } catch (err) {
     if (process.env.NODE_ENV !== 'production') console.error('Error fetching cryptos from Binance:', err);
-    if (globalCryptoList.length > 0) {
-      return { cryptos: globalCryptoList, logos: globalCryptoLogos };
-    }
-    return { cryptos: [], logos: {} };
+    return globalCryptoList.length > 0 ? globalCryptoList : [];
   }
 };
 
 const getCryptoPrice = async (asset) => {
   try {
-    const symbol = asset.toUpperCase();
+    const assetUpper = asset.toUpperCase();
     
     const errors = [];
     
     try {
-      const binancePair = symbol === 'USDT' ? 'USDTUSDT' : `${symbol}USDT`;
+      const binancePair = assetUpper === 'USDT' ? 'USDTUSDT' : `${assetUpper}USDT`;
       const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${binancePair}`, { timeout: 5000 });
       if (response.data && response.data.price) {
         if (process.env.NODE_ENV !== 'production') console.log(`Fetched ${asset} price from Binance: $${response.data.price}`);
@@ -3098,7 +3084,7 @@ const getCryptoPrice = async (asset) => {
     }
     
     try {
-      const response = await axios.get(`https://min-api.cryptocompare.com/data/price?fsym=${symbol}&tsyms=USD`, { timeout: 5000 });
+      const response = await axios.get(`https://min-api.cryptocompare.com/data/price?fsym=${assetUpper}&tsyms=USD`, { timeout: 5000 });
       if (response.data && response.data.USD) {
         if (process.env.NODE_ENV !== 'production') console.log(`Fetched ${asset} price from CryptoCompare: $${response.data.USD}`);
         return response.data.USD;
@@ -3119,7 +3105,7 @@ const getCryptoPrice = async (asset) => {
         'ADA': 'ADAUSD',
         'LTC': 'LTCUSD'
       };
-      const pair = krakenMap[symbol];
+      const pair = krakenMap[assetUpper];
       if (pair) {
         const response = await axios.get(`https://api.kraken.com/0/public/Ticker?pair=${pair}`, { timeout: 5000 });
         if (response.data && response.data.result && response.data.result[pair]) {
@@ -3134,7 +3120,7 @@ const getCryptoPrice = async (asset) => {
     }
     
     try {
-      const response = await axios.get(`https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=${symbol}-USDT`, { timeout: 5000 });
+      const response = await axios.get(`https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=${assetUpper}-USDT`, { timeout: 5000 });
       if (response.data && response.data.data && response.data.data.price) {
         if (process.env.NODE_ENV !== 'production') console.log(`Fetched ${asset} price from KuCoin: $${response.data.data.price}`);
         return parseFloat(response.data.data.price);
@@ -3154,12 +3140,12 @@ const getCryptoPrice = async (asset) => {
 
 const getExchangeRate = async (asset, fiat = 'usd') => {
   try {
-    const symbol = asset.toUpperCase();
+    const assetUpper = asset.toUpperCase();
     
     const errors = [];
     
     try {
-      const binancePair = symbol === 'USDT' ? 'USDTUSDT' : `${symbol}USDT`;
+      const binancePair = assetUpper === 'USDT' ? 'USDTUSDT' : `${assetUpper}USDT`;
       const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${binancePair}`, { timeout: 5000 });
       if (response.data && response.data.price) {
         return parseFloat(response.data.price);
@@ -3170,7 +3156,7 @@ const getExchangeRate = async (asset, fiat = 'usd') => {
     }
     
     try {
-      const response = await axios.get(`https://min-api.cryptocompare.com/data/price?fsym=${symbol}&tsyms=USD`, { timeout: 5000 });
+      const response = await axios.get(`https://min-api.cryptocompare.com/data/price?fsym=${assetUpper}&tsyms=USD`, { timeout: 5000 });
       if (response.data && response.data.USD) {
         return response.data.USD;
       }
@@ -3189,7 +3175,7 @@ const getExchangeRate = async (asset, fiat = 'usd') => {
         'DOGE': 'DOGEUSD',
         'ADA': 'ADAUSD'
       };
-      const pair = krakenMap[symbol];
+      const pair = krakenMap[assetUpper];
       if (pair) {
         const response = await axios.get(`https://api.kraken.com/0/public/Ticker?pair=${pair}`, { timeout: 5000 });
         if (response.data && response.data.result && response.data.result[pair]) {
@@ -3308,6 +3294,651 @@ const convertToFiat = async (cryptoAmount, asset) => {
   return cryptoAmount * rate;
 };
 
+// Enhanced Email service with professional, highly visible templates - Edge to Edge Layout
+const sendAutomatedEmail = async (user, action, data = {}) => {
+  try {
+    const getExchangeRateFunc = async (asset, fiat = 'usd') => {
+      try {
+        const assetId = asset.toLowerCase();
+        const response = await axios.get(`https://api.coingecko.com/api/v3/simple/price?ids=${assetId}&vs_currencies=${fiat}`);
+        return response.data[assetId]?.[fiat] || 0;
+      } catch (error) {
+        if (process.env.NODE_ENV !== 'production') console.error('Error fetching exchange rate:', error);
+        return 0;
+      }
+    };
+
+    const emailTemplates = {
+      welcome: {
+        subject: `Welcome to ₿itHash Capital, ${data.name || user.firstName}!`,
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+          <body style="margin:0;padding:0;background-color:#0B0E11;font-family:'Inter',sans-serif;">
+            <div style="max-width:100%;background-color:#0B0E11;">
+              <div style="max-width:600px;margin:0 auto;background-color:#151A21;border-radius:0;overflow:hidden;">
+                <div style="background:linear-gradient(135deg,#F7A600 0%,#E69500 100%);padding:30px 20px;text-align:center;">
+                  <div style="display:inline-block;background:rgba(0,0,0,0.2);padding:10px 20px;border-radius:50px;">
+                    <span style="font-size:28px;font-weight:bold;color:#FFFFFF;">₿</span>
+                    <span style="font-size:24px;font-weight:bold;color:#FFFFFF;">itHash Capital</span>
+                  </div>
+                  <h1 style="color:#FFFFFF;margin:20px 0 0 0;font-size:28px;">Welcome to BitHash Capital</h1>
+                  <p style="color:#FFFFFF;opacity:0.9;margin:10px 0 0 0;font-size:16px;"><strong><em>Where Your Financial Goals Become Reality</em></strong></p>
+                </div>
+                <div style="padding:40px 30px;background-color:#FFFFFF;">
+                  <h2 style="color:#0B0E11;margin-top:0;">Welcome, ${data.name || user.firstName}!</h2>
+                  <p style="color:#333333;line-height:1.6;">Thank you for joining ₿itHash Capital. Your account has been successfully created and you're now ready to start your journey with us.</p>
+                  <div style="background:#F5F5F5;border-radius:8px;padding:20px;margin:25px 0;text-align:center;">
+                    <p style="margin:0 0 10px 0;color:#0B0E11;font-weight:bold;">Your Referral Code:</p>
+                    <p style="font-size:24px;font-weight:bold;color:#F7A600;margin:0;letter-spacing:2px;">${user.referralCode || 'N/A'}</p>
+                    <p style="margin:10px 0 0 0;font-size:12px;color:#666;">Share this code with friends to earn rewards</p>
+                  </div>
+                  <a href="https://www.bithashcapital.live/dashboard" style="display:inline-block;background-color:#F7A600;color:#FFFFFF;text-decoration:none;padding:14px 30px;border-radius:999px;font-weight:600;margin:10px 0;text-align:center;">Access Your Dashboard</a>
+                  <hr style="border:none;border-top:1px solid #E5E7EB;margin:30px 0 20px 0;">
+                  <p style="color:#666;font-size:12px;margin:0;">© 2025 ₿itHash Capital. All rights reserved.<br>800 Plant St, Wilmington, DE 19801, United States</p>
+                  <p style="color:#666;font-size:12px;margin:10px 0 0 0;"><strong><em>Where Your Financial Goals Become Reality</em></strong></p>
+                </div>
+              </div>
+            </div>
+          </body>
+          </html>
+        `
+      },
+      login_success: {
+        subject: `New Login to Your ₿itHash Capital Account`,
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+          <body style="margin:0;padding:0;background-color:#0B0E11;font-family:'Inter',sans-serif;">
+            <div style="max-width:100%;background-color:#0B0E11;">
+              <div style="max-width:600px;margin:0 auto;background-color:#151A21;border-radius:0;overflow:hidden;">
+                <div style="background:linear-gradient(135deg,#F7A600 0%,#E69500 100%);padding:30px 20px;text-align:center;">
+                  <div style="display:inline-block;background:rgba(0,0,0,0.2);padding:10px 20px;border-radius:50px;">
+                    <span style="font-size:28px;font-weight:bold;color:#FFFFFF;">₿</span>
+                    <span style="font-size:24px;font-weight:bold;color:#FFFFFF;">itHash Capital</span>
+                  </div>
+                  <h1 style="color:#FFFFFF;margin:20px 0 0 0;font-size:28px;">New Login Detected</h1>
+                  <p style="color:#FFFFFF;opacity:0.9;margin:10px 0 0 0;font-size:16px;"><strong><em>Where Your Financial Goals Become Reality</em></strong></p>
+                </div>
+                <div style="padding:40px 30px;background-color:#FFFFFF;">
+                  <h2 style="color:#0B0E11;margin-top:0;">Hello ${data.name || user.firstName},</h2>
+                  <p style="color:#333333;line-height:1.6;">A new login was detected on your ₿itHash Capital account.</p>
+                  <div style="background:#F5F5F5;border-radius:8px;padding:20px;margin:25px 0;">
+                    <p style="margin:0 0 10px 0;color:#0B0E11;font-weight:bold;">Login Details:</p>
+                    <p style="margin:5px 0;color:#333;"><strong>Device:</strong> ${data.device || 'Unknown Device'}</p>
+                    <p style="margin:5px 0;color:#333;"><strong>Location:</strong> ${data.location || 'Unknown Location'}</p>
+                    <p style="margin:5px 0;color:#333;"><strong>IP Address:</strong> ${data.ip || 'Unknown IP'}</p>
+                    <p style="margin:5px 0;color:#333;"><strong>Time:</strong> ${new Date(data.timestamp).toLocaleString()}</p>
+                  </div>
+                  <p style="color:#333333;line-height:1.6;">If this was you, no further action is needed. If you don't recognize this activity, please contact our support team immediately.</p>
+                  <a href="https://www.bithashcapital.live/dashboard" style="display:inline-block;background-color:#F7A600;color:#FFFFFF;text-decoration:none;padding:14px 30px;border-radius:999px;font-weight:600;margin:10px 0;text-align:center;">View Account Activity</a>
+                  <hr style="border:none;border-top:1px solid #E5E7EB;margin:30px 0 20px 0;">
+                  <p style="color:#666;font-size:12px;margin:0;">© 2025 ₿itHash Capital. All rights reserved.<br>800 Plant St, Wilmington, DE 19801, United States</p>
+                  <p style="color:#666;font-size:12px;margin:10px 0 0 0;"><strong><em>Where Your Financial Goals Become Reality</em></strong></p>
+                </div>
+              </div>
+            </div>
+          </body>
+          </html>
+        `
+      },
+      password_changed: {
+        subject: `Password Changed Successfully - ₿itHash Capital`,
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+          <body style="margin:0;padding:0;background-color:#0B0E11;font-family:'Inter',sans-serif;">
+            <div style="max-width:100%;background-color:#0B0E11;">
+              <div style="max-width:600px;margin:0 auto;background-color:#151A21;border-radius:0;overflow:hidden;">
+                <div style="background:linear-gradient(135deg,#F7A600 0%,#E69500 100%);padding:30px 20px;text-align:center;">
+                  <div style="display:inline-block;background:rgba(0,0,0,0.2);padding:10px 20px;border-radius:50px;">
+                    <span style="font-size:28px;font-weight:bold;color:#FFFFFF;">₿</span>
+                    <span style="font-size:24px;font-weight:bold;color:#FFFFFF;">itHash Capital</span>
+                  </div>
+                  <h1 style="color:#FFFFFF;margin:20px 0 0 0;font-size:28px;">Password Changed</h1>
+                  <p style="color:#FFFFFF;opacity:0.9;margin:10px 0 0 0;font-size:16px;"><strong><em>Where Your Financial Goals Become Reality</em></strong></p>
+                </div>
+                <div style="padding:40px 30px;background-color:#FFFFFF;">
+                  <h2 style="color:#0B0E11;margin-top:0;">Hello ${data.name || user.firstName},</h2>
+                  <p style="color:#333333;line-height:1.6;">The password for your ₿itHash Capital account was recently changed.</p>
+                  <div style="background:#F5F5F5;border-radius:8px;padding:20px;margin:25px 0;">
+                    <p style="margin:0 0 10px 0;color:#0B0E11;font-weight:bold;">Change Details:</p>
+                    <p style="margin:5px 0;color:#333;"><strong>Device:</strong> ${data.device || 'Unknown Device'}</p>
+                    <p style="margin:5px 0;color:#333;"><strong>IP Address:</strong> ${data.ip || 'Unknown IP'}</p>
+                    <p style="margin:5px 0;color:#333;"><strong>Time:</strong> ${new Date().toLocaleString()}</p>
+                  </div>
+                  <p style="color:#333333;line-height:1.6;">If you made this change, no further action is needed. If you did not change your password, please contact our support team immediately to secure your account.</p>
+                  <a href="https://www.bithashcapital.live/support" style="display:inline-block;background-color:#F7A600;color:#FFFFFF;text-decoration:none;padding:14px 30px;border-radius:999px;font-weight:600;margin:10px 0;text-align:center;">Contact Support</a>
+                  <hr style="border:none;border-top:1px solid #E5E7EB;margin:30px 0 20px 0;">
+                  <p style="color:#666;font-size:12px;margin:0;">© 2025 ₿itHash Capital. All rights reserved.<br>800 Plant St, Wilmington, DE 19801, United States</p>
+                  <p style="color:#666;font-size:12px;margin:10px 0 0 0;"><strong><em>Where Your Financial Goals Become Reality</em></strong></p>
+                </div>
+              </div>
+            </div>
+          </body>
+          </html>
+        `
+      },
+      password_reset: {
+        subject: `Reset Your ₿itHash Capital Password`,
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+          <body style="margin:0;padding:0;background-color:#0B0E11;font-family:'Inter',sans-serif;">
+            <div style="max-width:100%;background-color:#0B0E11;">
+              <div style="max-width:600px;margin:0 auto;background-color:#151A21;border-radius:0;overflow:hidden;">
+                <div style="background:linear-gradient(135deg,#F7A600 0%,#E69500 100%);padding:30px 20px;text-align:center;">
+                  <div style="display:inline-block;background:rgba(0,0,0,0.2);padding:10px 20px;border-radius:50px;">
+                    <span style="font-size:28px;font-weight:bold;color:#FFFFFF;">₿</span>
+                    <span style="font-size:24px;font-weight:bold;color:#FFFFFF;">itHash Capital</span>
+                  </div>
+                  <h1 style="color:#FFFFFF;margin:20px 0 0 0;font-size:28px;">Password Reset Request</h1>
+                  <p style="color:#FFFFFF;opacity:0.9;margin:10px 0 0 0;font-size:16px;"><strong><em>Where Your Financial Goals Become Reality</em></strong></p>
+                </div>
+                <div style="padding:40px 30px;background-color:#FFFFFF;">
+                  <h2 style="color:#0B0E11;margin-top:0;">Hello ${data.name || user.firstName},</h2>
+                  <p style="color:#333333;line-height:1.6;">We received a request to reset the password for your ₿itHash Capital account.</p>
+                  <div style="text-align:center;margin:30px 0;">
+                    <a href="${data.resetUrl}" style="display:inline-block;background-color:#F7A600;color:#FFFFFF;text-decoration:none;padding:14px 30px;border-radius:999px;font-weight:600;">Reset My Password</a>
+                  </div>
+                  <p style="color:#333333;line-height:1.6;">This link will expire in 60 minutes for security reasons.</p>
+                  <p style="color:#333333;line-height:1.6;">If you did not request a password reset, please ignore this email or contact support.</p>
+                  <hr style="border:none;border-top:1px solid #E5E7EB;margin:30px 0 20px 0;">
+                  <p style="color:#666;font-size:12px;margin:0;">© 2025 ₿itHash Capital. All rights reserved.<br>800 Plant St, Wilmington, DE 19801, United States</p>
+                  <p style="color:#666;font-size:12px;margin:10px 0 0 0;"><strong><em>Where Your Financial Goals Become Reality</em></strong></p>
+                </div>
+              </div>
+            </div>
+          </body>
+          </html>
+        `
+      },
+      investment_created: {
+        subject: `Investment Confirmed - ₿itHash Capital`,
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+          <body style="margin:0;padding:0;background-color:#0B0E11;font-family:'Inter',sans-serif;">
+            <div style="max-width:100%;background-color:#0B0E11;">
+              <div style="max-width:600px;margin:0 auto;background-color:#151A21;border-radius:0;overflow:hidden;">
+                <div style="background:linear-gradient(135deg,#F7A600 0%,#E69500 100%);padding:30px 20px;text-align:center;">
+                  <div style="display:inline-block;background:rgba(0,0,0,0.2);padding:10px 20px;border-radius:50px;">
+                    <span style="font-size:28px;font-weight:bold;color:#FFFFFF;">₿</span>
+                    <span style="font-size:24px;font-weight:bold;color:#FFFFFF;">itHash Capital</span>
+                  </div>
+                  <h1 style="color:#FFFFFF;margin:20px 0 0 0;font-size:28px;">Investment Confirmed</h1>
+                  <p style="color:#FFFFFF;opacity:0.9;margin:10px 0 0 0;font-size:16px;"><strong><em>Where Your Financial Goals Become Reality</em></strong></p>
+                </div>
+                <div style="padding:40px 30px;background-color:#FFFFFF;">
+                  <h2 style="color:#0B0E11;margin-top:0;">Hello ${data.name || user.firstName},</h2>
+                  <p style="color:#333333;line-height:1.6;">Your investment has been successfully created and is now active.</p>
+                  <div style="background:#F5F5F5;border-radius:8px;padding:20px;margin:25px 0;">
+                    <p style="margin:0 0 10px 0;color:#0B0E11;font-weight:bold;">Investment Details:</p>
+                    <p style="margin:5px 0;color:#333;"><strong>Plan:</strong> ${data.planName}</p>
+                    <p style="margin:5px 0;color:#333;"><strong>Amount:</strong> $${data.amount.toLocaleString()}</p>
+                    <p style="margin:5px 0;color:#333;"><strong>Expected Return:</strong> $${data.expectedReturn.toLocaleString()}</p>
+                    <p style="margin:5px 0;color:#333;"><strong>Duration:</strong> ${data.duration} hours</p>
+                    <p style="margin:5px 0;color:#333;"><strong>Start Date:</strong> ${new Date(data.startDate).toLocaleString()}</p>
+                    <p style="margin:5px 0;color:#333;"><strong>Maturity Date:</strong> ${new Date(data.endDate).toLocaleString()}</p>
+                  </div>
+                  <a href="https://www.bithashcapital.live/dashboard" style="display:inline-block;background-color:#F7A600;color:#FFFFFF;text-decoration:none;padding:14px 30px;border-radius:999px;font-weight:600;margin:10px 0;text-align:center;">View My Investments</a>
+                  <hr style="border:none;border-top:1px solid #E5E7EB;margin:30px 0 20px 0;">
+                  <p style="color:#666;font-size:12px;margin:0;">© 2025 ₿itHash Capital. All rights reserved.<br>800 Plant St, Wilmington, DE 19801, United States</p>
+                  <p style="color:#666;font-size:12px;margin:10px 0 0 0;"><strong><em>Where Your Financial Goals Become Reality</em></strong></p>
+                </div>
+              </div>
+            </div>
+          </body>
+          </html>
+        `
+      },
+      investment_matured: {
+        subject: `Investment Matured - Funds Available - ₿itHash Capital`,
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+          <body style="margin:0;padding:0;background-color:#0B0E11;font-family:'Inter',sans-serif;">
+            <div style="max-width:100%;background-color:#0B0E11;">
+              <div style="max-width:600px;margin:0 auto;background-color:#151A21;border-radius:0;overflow:hidden;">
+                <div style="background:linear-gradient(135deg,#F7A600 0%,#E69500 100%);padding:30px 20px;text-align:center;">
+                  <div style="display:inline-block;background:rgba(0,0,0,0.2);padding:10px 20px;border-radius:50px;">
+                    <span style="font-size:28px;font-weight:bold;color:#FFFFFF;">₿</span>
+                    <span style="font-size:24px;font-weight:bold;color:#FFFFFF;">itHash Capital</span>
+                  </div>
+                  <h1 style="color:#FFFFFF;margin:20px 0 0 0;font-size:28px;">Investment Matured</h1>
+                  <p style="color:#FFFFFF;opacity:0.9;margin:10px 0 0 0;font-size:16px;"><strong><em>Where Your Financial Goals Become Reality</em></strong></p>
+                </div>
+                <div style="padding:40px 30px;background-color:#FFFFFF;">
+                  <h2 style="color:#0B0E11;margin-top:0;">Hello ${data.name || user.firstName},</h2>
+                  <p style="color:#333333;line-height:1.6;">Congratulations! Your investment has matured and the proceeds are now available in your Matured Wallet.</p>
+                  <div style="background:#F5F5F5;border-radius:8px;padding:20px;margin:25px 0;">
+                    <p style="margin:0 0 10px 0;color:#0B0E11;font-weight:bold;">Maturity Details:</p>
+                    <p style="margin:5px 0;color:#333;"><strong>Plan:</strong> ${data.planName}</p>
+                    <p style="margin:5px 0;color:#333;"><strong>Original Investment:</strong> $${data.amount.toLocaleString()}</p>
+                    <p style="margin:5px 0;color:#333;"><strong>Total Return:</strong> $${data.totalReturn.toLocaleString()}</p>
+                    <p style="margin:5px 0;color:#333;"><strong>Profit Earned:</strong> $${data.profit.toLocaleString()}</p>
+                    <p style="margin:5px 0;color:#333;"><strong>Completion Date:</strong> ${new Date(data.completionDate).toLocaleString()}</p>
+                  </div>
+                  <a href="https://www.bithashcapital.live/dashboard" style="display:inline-block;background-color:#F7A600;color:#FFFFFF;text-decoration:none;padding:14px 30px;border-radius:999px;font-weight:600;margin:10px 0;text-align:center;">View My Balance</a>
+                  <hr style="border:none;border-top:1px solid #E5E7EB;margin:30px 0 20px 0;">
+                  <p style="color:#666;font-size:12px;margin:0;">© 2025 ₿itHash Capital. All rights reserved.<br>800 Plant St, Wilmington, DE 19801, United States</p>
+                  <p style="color:#666;font-size:12px;margin:10px 0 0 0;"><strong><em>Where Your Financial Goals Become Reality</em></strong></p>
+                </div>
+              </div>
+            </div>
+          </body>
+          </html>
+        `
+      },
+      withdrawal_request: {
+        subject: `Withdrawal Request Submitted - ₿itHash Capital`,
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+          <body style="margin:0;padding:0;background-color:#0B0E11;font-family:'Inter',sans-serif;">
+            <div style="max-width:100%;background-color:#0B0E11;">
+              <div style="max-width:600px;margin:0 auto;background-color:#151A21;border-radius:0;overflow:hidden;">
+                <div style="background:linear-gradient(135deg,#F7A600 0%,#E69500 100%);padding:30px 20px;text-align:center;">
+                  <div style="display:inline-block;background:rgba(0,0,0,0.2);padding:10px 20px;border-radius:50px;">
+                    <span style="font-size:28px;font-weight:bold;color:#FFFFFF;">₿</span>
+                    <span style="font-size:24px;font-weight:bold;color:#FFFFFF;">itHash Capital</span>
+                  </div>
+                  <h1 style="color:#FFFFFF;margin:20px 0 0 0;font-size:28px;">Withdrawal Request Submitted</h1>
+                  <p style="color:#FFFFFF;opacity:0.9;margin:10px 0 0 0;font-size:16px;"><strong><em>Where Your Financial Goals Become Reality</em></strong></p>
+                </div>
+                <div style="padding:40px 30px;background-color:#FFFFFF;">
+                  <h2 style="color:#0B0E11;margin-top:0;">Hello ${data.name || user.firstName},</h2>
+                  <p style="color:#333333;line-height:1.6;">Your withdrawal request has been submitted and is pending approval.</p>
+                  <div style="background:#F5F5F5;border-radius:8px;padding:20px;margin:25px 0;">
+                    <p style="margin:0 0 10px 0;color:#0B0E11;font-weight:bold;">Withdrawal Details:</p>
+                    <p style="margin:5px 0;color:#333;"><strong>Amount:</strong> ${data.amount} ${data.asset}</p>
+                    <p style="margin:5px 0;color:#333;"><strong>USD Value:</strong> $${data.usdValue.toLocaleString()}</p>
+                    <p style="margin:5px 0;color:#333;"><strong>Network Fee:</strong> ${data.fee} ${data.asset}</p>
+                    <p style="margin:5px 0;color:#333;"><strong>Destination Address:</strong> ${data.withdrawalAddress}</p>
+                    <p style="margin:5px 0;color:#333;"><strong>Request ID:</strong> ${data.requestId}</p>
+                    <p style="margin:5px 0;color:#333;"><strong>Network:</strong> ${data.network}</p>
+                  </div>
+                  <p style="color:#333333;line-height:1.6;">You will receive another notification once your withdrawal has been processed.</p>
+                  <a href="https://www.bithashcapital.live/transactions" style="display:inline-block;background-color:#F7A600;color:#FFFFFF;text-decoration:none;padding:14px 30px;border-radius:999px;font-weight:600;margin:10px 0;text-align:center;">Track Withdrawal</a>
+                  <hr style="border:none;border-top:1px solid #E5E7EB;margin:30px 0 20px 0;">
+                  <p style="color:#666;font-size:12px;margin:0;">© 2025 ₿itHash Capital. All rights reserved.<br>800 Plant St, Wilmington, DE 19801, United States</p>
+                  <p style="color:#666;font-size:12px;margin:10px 0 0 0;"><strong><em>Where Your Financial Goals Become Reality</em></strong></p>
+                </div>
+              </div>
+            </div>
+          </body>
+          </html>
+        `
+      },
+      withdrawal_approved: {
+        subject: `Withdrawal Processed - ₿itHash Capital`,
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+          <body style="margin:0;padding:0;background-color:#0B0E11;font-family:'Inter',sans-serif;">
+            <div style="max-width:100%;background-color:#0B0E11;">
+              <div style="max-width:600px;margin:0 auto;background-color:#151A21;border-radius:0;overflow:hidden;">
+                <div style="background:linear-gradient(135deg,#F7A600 0%,#E69500 100%);padding:30px 20px;text-align:center;">
+                  <div style="display:inline-block;background:rgba(0,0,0,0.2);padding:10px 20px;border-radius:50px;">
+                    <span style="font-size:28px;font-weight:bold;color:#FFFFFF;">₿</span>
+                    <span style="font-size:24px;font-weight:bold;color:#FFFFFF;">itHash Capital</span>
+                  </div>
+                  <h1 style="color:#FFFFFF;margin:20px 0 0 0;font-size:28px;">Withdrawal Processed</h1>
+                  <p style="color:#FFFFFF;opacity:0.9;margin:10px 0 0 0;font-size:16px;"><strong><em>Where Your Financial Goals Become Reality</em></strong></p>
+                </div>
+                <div style="padding:40px 30px;background-color:#FFFFFF;">
+                  <h2 style="color:#0B0E11;margin-top:0;">Hello ${data.name || user.firstName},</h2>
+                  <p style="color:#333333;line-height:1.6;">Your withdrawal request has been approved and processed.</p>
+                  <div style="background:#F5F5F5;border-radius:8px;padding:20px;margin:25px 0;">
+                    <p style="margin:0 0 10px 0;color:#0B0E11;font-weight:bold;">Withdrawal Details:</p>
+                    <p style="margin:5px 0;color:#333;"><strong>Amount Sent:</strong> ${data.amount} ${data.asset}</p>
+                    <p style="margin:5px 0;color:#333;"><strong>USD Value:</strong> $${data.usdValue.toLocaleString()}</p>
+                    <p style="margin:5px 0;color:#333;"><strong>Network Fee:</strong> $${data.feeUsd.toLocaleString()}</p>
+                    <p style="margin:5px 0;color:#333;"><strong>Destination Address:</strong> ${data.withdrawalAddress}</p>
+                    ${data.txid ? `<p style="margin:5px 0;color:#333;"><strong>Transaction ID:</strong> ${data.txid}</p>` : ''}
+                    <p style="margin:5px 0;color:#333;"><strong>Processed At:</strong> ${new Date(data.processedAt).toLocaleString()}</p>
+                  </div>
+                  <a href="https://www.bithashcapital.live/transactions" style="display:inline-block;background-color:#F7A600;color:#FFFFFF;text-decoration:none;padding:14px 30px;border-radius:999px;font-weight:600;margin:10px 0;text-align:center;">View Transaction</a>
+                  <hr style="border:none;border-top:1px solid #E5E7EB;margin:30px 0 20px 0;">
+                  <p style="color:#666;font-size:12px;margin:0;">© 2025 ₿itHash Capital. All rights reserved.<br>800 Plant St, Wilmington, DE 19801, United States</p>
+                  <p style="color:#666;font-size:12px;margin:10px 0 0 0;"><strong><em>Where Your Financial Goals Become Reality</em></strong></p>
+                </div>
+              </div>
+            </div>
+          </body>
+          </html>
+        `
+      },
+      withdrawal_rejected: {
+        subject: `Withdrawal Request Update - ₿itHash Capital`,
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+          <body style="margin:0;padding:0;background-color:#0B0E11;font-family:'Inter',sans-serif;">
+            <div style="max-width:100%;background-color:#0B0E11;">
+              <div style="max-width:600px;margin:0 auto;background-color:#151A21;border-radius:0;overflow:hidden;">
+                <div style="background:linear-gradient(135deg,#F7A600 0%,#E69500 100%);padding:30px 20px;text-align:center;">
+                  <div style="display:inline-block;background:rgba(0,0,0,0.2);padding:10px 20px;border-radius:50px;">
+                    <span style="font-size:28px;font-weight:bold;color:#FFFFFF;">₿</span>
+                    <span style="font-size:24px;font-weight:bold;color:#FFFFFF;">itHash Capital</span>
+                  </div>
+                  <h1 style="color:#FFFFFF;margin:20px 0 0 0;font-size:28px;">Withdrawal Request Update</h1>
+                  <p style="color:#FFFFFF;opacity:0.9;margin:10px 0 0 0;font-size:16px;"><strong><em>Where Your Financial Goals Become Reality</em></strong></p>
+                </div>
+                <div style="padding:40px 30px;background-color:#FFFFFF;">
+                  <h2 style="color:#0B0E11;margin-top:0;">Hello ${data.name || user.firstName},</h2>
+                  <p style="color:#333333;line-height:1.6;">Your withdrawal request has been reviewed and cannot be processed at this time.</p>
+                  <div style="background:#F5F5F5;border-radius:8px;padding:20px;margin:25px 0;">
+                    <p style="margin:0 0 10px 0;color:#0B0E11;font-weight:bold;">Withdrawal Details:</p>
+                    <p style="margin:5px 0;color:#333;"><strong>Requested Amount:</strong> $${data.amount.toLocaleString()}</p>
+                    <p style="margin:5px 0;color:#333;"><strong>Method:</strong> ${data.method}</p>
+                    <p style="margin:5px 0;color:#333;"><strong>Reason:</strong> ${data.reason}</p>
+                  </div>
+                  <p style="color:#333333;line-height:1.6;">Your funds have been returned to your account. If you have any questions, please contact our support team.</p>
+                  <a href="https://www.bithashcapital.live/support" style="display:inline-block;background-color:#F7A600;color:#FFFFFF;text-decoration:none;padding:14px 30px;border-radius:999px;font-weight:600;margin:10px 0;text-align:center;">Contact Support</a>
+                  <hr style="border:none;border-top:1px solid #E5E7EB;margin:30px 0 20px 0;">
+                  <p style="color:#666;font-size:12px;margin:0;">© 2025 ₿itHash Capital. All rights reserved.<br>800 Plant St, Wilmington, DE 19801, United States</p>
+                  <p style="color:#666;font-size:12px;margin:10px 0 0 0;"><strong><em>Where Your Financial Goals Become Reality</em></strong></p>
+                </div>
+              </div>
+            </div>
+          </body>
+          </html>
+        `
+      },
+      deposit_approved: {
+        subject: `Deposit Confirmed - ₿itHash Capital`,
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+          <body style="margin:0;padding:0;background-color:#0B0E11;font-family:'Inter',sans-serif;">
+            <div style="max-width:100%;background-color:#0B0E11;">
+              <div style="max-width:600px;margin:0 auto;background-color:#151A21;border-radius:0;overflow:hidden;">
+                <div style="background:linear-gradient(135deg,#F7A600 0%,#E69500 100%);padding:30px 20px;text-align:center;">
+                  <div style="display:inline-block;background:rgba(0,0,0,0.2);padding:10px 20px;border-radius:50px;">
+                    <span style="font-size:28px;font-weight:bold;color:#FFFFFF;">₿</span>
+                    <span style="font-size:24px;font-weight:bold;color:#FFFFFF;">itHash Capital</span>
+                  </div>
+                  <h1 style="color:#FFFFFF;margin:20px 0 0 0;font-size:28px;">Deposit Confirmed</h1>
+                  <p style="color:#FFFFFF;opacity:0.9;margin:10px 0 0 0;font-size:16px;"><strong><em>Where Your Financial Goals Become Reality</em></strong></p>
+                </div>
+                <div style="padding:40px 30px;background-color:#FFFFFF;">
+                  <h2 style="color:#0B0E11;margin-top:0;">Hello ${data.name || user.firstName},</h2>
+                  <p style="color:#333333;line-height:1.6;">Your deposit has been confirmed and credited to your account.</p>
+                  <div style="background:#F5F5F5;border-radius:8px;padding:20px;margin:25px 0;">
+                    <p style="margin:0 0 10px 0;color:#0B0E11;font-weight:bold;">Deposit Details:</p>
+                    <p style="margin:5px 0;color:#333;"><strong>Amount:</strong> ${data.amount} ${data.asset}</p>
+                    <p style="margin:5px 0;color:#333;"><strong>Method:</strong> ${data.method}</p>
+                    <p style="margin:5px 0;color:#333;"><strong>Reference:</strong> ${data.reference}</p>
+                    <p style="margin:5px 0;color:#333;"><strong>Processed At:</strong> ${new Date(data.processedAt).toLocaleString()}</p>
+                  </div>
+                  <a href="https://www.bithashcapital.live/dashboard" style="display:inline-block;background-color:#F7A600;color:#FFFFFF;text-decoration:none;padding:14px 30px;border-radius:999px;font-weight:600;margin:10px 0;text-align:center;">View Balance</a>
+                  <hr style="border:none;border-top:1px solid #E5E7EB;margin:30px 0 20px 0;">
+                  <p style="color:#666;font-size:12px;margin:0;">© 2025 ₿itHash Capital. All rights reserved.<br>800 Plant St, Wilmington, DE 19801, United States</p>
+                  <p style="color:#666;font-size:12px;margin:10px 0 0 0;"><strong><em>Where Your Financial Goals Become Reality</em></strong></p>
+                </div>
+              </div>
+            </div>
+          </body>
+          </html>
+        `
+      },
+      deposit_rejected: {
+        subject: `Deposit Update - ₿itHash Capital`,
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+          <body style="margin:0;padding:0;background-color:#0B0E11;font-family:'Inter',sans-serif;">
+            <div style="max-width:100%;background-color:#0B0E11;">
+              <div style="max-width:600px;margin:0 auto;background-color:#151A21;border-radius:0;overflow:hidden;">
+                <div style="background:linear-gradient(135deg,#F7A600 0%,#E69500 100%);padding:30px 20px;text-align:center;">
+                  <div style="display:inline-block;background:rgba(0,0,0,0.2);padding:10px 20px;border-radius:50px;">
+                    <span style="font-size:28px;font-weight:bold;color:#FFFFFF;">₿</span>
+                    <span style="font-size:24px;font-weight:bold;color:#FFFFFF;">itHash Capital</span>
+                  </div>
+                  <h1 style="color:#FFFFFF;margin:20px 0 0 0;font-size:28px;">Deposit Update</h1>
+                  <p style="color:#FFFFFF;opacity:0.9;margin:10px 0 0 0;font-size:16px;"><strong><em>Where Your Financial Goals Become Reality</em></strong></p>
+                </div>
+                <div style="padding:40px 30px;background-color:#FFFFFF;">
+                  <h2 style="color:#0B0E11;margin-top:0;">Hello ${data.name || user.firstName},</h2>
+                  <p style="color:#333333;line-height:1.6;">Your deposit could not be processed at this time.</p>
+                  <div style="background:#F5F5F5;border-radius:8px;padding:20px;margin:25px 0;">
+                    <p style="margin:0 0 10px 0;color:#0B0E11;font-weight:bold;">Deposit Details:</p>
+                    <p style="margin:5px 0;color:#333;"><strong>Amount:</strong> $${data.amount.toLocaleString()}</p>
+                    <p style="margin:5px 0;color:#333;"><strong>Method:</strong> ${data.method}</p>
+                    <p style="margin:5px 0;color:#333;"><strong>Reason:</strong> ${data.reason}</p>
+                  </div>
+                  <a href="https://www.bithashcapital.live/support" style="display:inline-block;background-color:#F7A600;color:#FFFFFF;text-decoration:none;padding:14px 30px;border-radius:999px;font-weight:600;margin:10px 0;text-align:center;">Contact Support</a>
+                  <hr style="border:none;border-top:1px solid #E5E7EB;margin:30px 0 20px 0;">
+                  <p style="color:#666;font-size:12px;margin:0;">© 2025 ₿itHash Capital. All rights reserved.<br>800 Plant St, Wilmington, DE 19801, United States</p>
+                  <p style="color:#666;font-size:12px;margin:10px 0 0 0;"><strong><em>Where Your Financial Goals Become Reality</em></strong></p>
+                </div>
+              </div>
+            </div>
+          </body>
+          </html>
+        `
+      },
+      kyc_approved: {
+        subject: `KYC Verification Approved - ₿itHash Capital`,
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+          <body style="margin:0;padding:0;background-color:#0B0E11;font-family:'Inter',sans-serif;">
+            <div style="max-width:100%;background-color:#0B0E11;">
+              <div style="max-width:600px;margin:0 auto;background-color:#151A21;border-radius:0;overflow:hidden;">
+                <div style="background:linear-gradient(135deg,#F7A600 0%,#E69500 100%);padding:30px 20px;text-align:center;">
+                  <div style="display:inline-block;background:rgba(0,0,0,0.2);padding:10px 20px;border-radius:50px;">
+                    <span style="font-size:28px;font-weight:bold;color:#FFFFFF;">₿</span>
+                    <span style="font-size:24px;font-weight:bold;color:#FFFFFF;">itHash Capital</span>
+                  </div>
+                  <h1 style="color:#FFFFFF;margin:20px 0 0 0;font-size:28px;">KYC Verification Approved</h1>
+                  <p style="color:#FFFFFF;opacity:0.9;margin:10px 0 0 0;font-size:16px;"><strong><em>Where Your Financial Goals Become Reality</em></strong></p>
+                </div>
+                <div style="padding:40px 30px;background-color:#FFFFFF;">
+                  <h2 style="color:#0B0E11;margin-top:0;">Hello ${data.name || user.firstName},</h2>
+                  <p style="color:#333333;line-height:1.6;">Congratulations! Your KYC verification has been approved. You now have full access to all platform features.</p>
+                  <div style="background:#10B981;border-radius:8px;padding:20px;margin:25px 0;text-align:center;">
+                    <p style="color:#FFFFFF;margin:0;font-weight:bold;">✓ Verification Complete</p>
+                  </div>
+                  <a href="https://www.bithashcapital.live/dashboard" style="display:inline-block;background-color:#F7A600;color:#FFFFFF;text-decoration:none;padding:14px 30px;border-radius:999px;font-weight:600;margin:10px 0;text-align:center;">Go to Dashboard</a>
+                  <hr style="border:none;border-top:1px solid #E5E7EB;margin:30px 0 20px 0;">
+                  <p style="color:#666;font-size:12px;margin:0;">© 2025 ₿itHash Capital. All rights reserved.<br>800 Plant St, Wilmington, DE 19801, United States</p>
+                  <p style="color:#666;font-size:12px;margin:10px 0 0 0;"><strong><em>Where Your Financial Goals Become Reality</em></strong></p>
+                </div>
+              </div>
+            </div>
+          </body>
+          </html>
+        `
+      },
+      kyc_rejected: {
+        subject: `KYC Verification Update - ₿itHash Capital`,
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+          <body style="margin:0;padding:0;background-color:#0B0E11;font-family:'Inter',sans-serif;">
+            <div style="max-width:100%;background-color:#0B0E11;">
+              <div style="max-width:600px;margin:0 auto;background-color:#151A21;border-radius:0;overflow:hidden;">
+                <div style="background:linear-gradient(135deg,#F7A600 0%,#E69500 100%);padding:30px 20px;text-align:center;">
+                  <div style="display:inline-block;background:rgba(0,0,0,0.2);padding:10px 20px;border-radius:50px;">
+                    <span style="font-size:28px;font-weight:bold;color:#FFFFFF;">₿</span>
+                    <span style="font-size:24px;font-weight:bold;color:#FFFFFF;">itHash Capital</span>
+                  </div>
+                  <h1 style="color:#FFFFFF;margin:20px 0 0 0;font-size:28px;">KYC Verification Update</h1>
+                  <p style="color:#FFFFFF;opacity:0.9;margin:10px 0 0 0;font-size:16px;"><strong><em>Where Your Financial Goals Become Reality</em></strong></p>
+                </div>
+                <div style="padding:40px 30px;background-color:#FFFFFF;">
+                  <h2 style="color:#0B0E11;margin-top:0;">Hello ${data.name || user.firstName},</h2>
+                  <p style="color:#333333;line-height:1.6;">Your KYC verification requires additional attention.</p>
+                  <div style="background:#F5F5F5;border-radius:8px;padding:20px;margin:25px 0;">
+                    <p style="margin:0 0 10px 0;color:#0B0E11;font-weight:bold;">Reason:</p>
+                    <p style="margin:5px 0;color:#333;">${data.reason}</p>
+                  </div>
+                  <p style="color:#333333;line-height:1.6;">Please resubmit your documents with the correct information.</p>
+                  <a href="https://www.bithashcapital.live/kyc" style="display:inline-block;background-color:#F7A600;color:#FFFFFF;text-decoration:none;padding:14px 30px;border-radius:999px;font-weight:600;margin:10px 0;text-align:center;">Resubmit KYC</a>
+                  <hr style="border:none;border-top:1px solid #E5E7EB;margin:30px 0 20px 0;">
+                  <p style="color:#666;font-size:12px;margin:0;">© 2025 ₿itHash Capital. All rights reserved.<br>800 Plant St, Wilmington, DE 19801, United States</p>
+                  <p style="color:#666;font-size:12px;margin:10px 0 0 0;"><strong><em>Where Your Financial Goals Become Reality</em></strong></p>
+                </div>
+              </div>
+            </div>
+          </body>
+          </html>
+        `
+      },
+      suspicious_login: {
+        subject: `Security Alert - New Device Login - ₿itHash Capital`,
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+          <body style="margin:0;padding:0;background-color:#0B0E11;font-family:'Inter',sans-serif;">
+            <div style="max-width:100%;background-color:#0B0E11;">
+              <div style="max-width:600px;margin:0 auto;background-color:#151A21;border-radius:0;overflow:hidden;">
+                <div style="background:linear-gradient(135deg,#F7A600 0%,#E69500 100%);padding:30px 20px;text-align:center;">
+                  <div style="display:inline-block;background:rgba(0,0,0,0.2);padding:10px 20px;border-radius:50px;">
+                    <span style="font-size:28px;font-weight:bold;color:#FFFFFF;">₿</span>
+                    <span style="font-size:24px;font-weight:bold;color:#FFFFFF;">itHash Capital</span>
+                  </div>
+                  <h1 style="color:#FFFFFF;margin:20px 0 0 0;font-size:28px;">Security Alert</h1>
+                  <p style="color:#FFFFFF;opacity:0.9;margin:10px 0 0 0;font-size:16px;"><strong><em>Where Your Financial Goals Become Reality</em></strong></p>
+                </div>
+                <div style="padding:40px 30px;background-color:#FFFFFF;">
+                  <h2 style="color:#0B0E11;margin-top:0;">Hello ${data.name || user.firstName},</h2>
+                  <p style="color:#333333;line-height:1.6;">A login was detected from a new or unrecognized device.</p>
+                  <div style="background:#F5F5F5;border-radius:8px;padding:20px;margin:25px 0;">
+                    <p style="margin:0 0 10px 0;color:#0B0E11;font-weight:bold;">Device Information:</p>
+                    <p style="margin:5px 0;color:#333;"><strong>Device:</strong> ${data.deviceInfo || 'Unknown Device'}</p>
+                    <p style="margin:5px 0;color:#333;"><strong>Browser:</strong> ${data.browser || 'Unknown Browser'}</p>
+                    <p style="margin:5px 0;color:#333;"><strong>OS:</strong> ${data.os || 'Unknown OS'}</p>
+                    <p style="margin:5px 0;color:#333;"><strong>Location:</strong> ${data.location || 'Unknown Location'}</p>
+                    <p style="margin:5px 0;color:#333;"><strong>IP Address:</strong> ${data.ip || 'Unknown IP'}</p>
+                    <p style="margin:5px 0;color:#333;"><strong>Time:</strong> ${new Date(data.timestamp).toLocaleString()}</p>
+                  </div>
+                  <p style="color:#333333;line-height:1.6;">If this was you, you can safely ignore this message. If this wasn't you, please contact our support team immediately and change your password.</p>
+                  <a href="https://www.bithashcapital.live/security" style="display:inline-block;background-color:#F7A600;color:#FFFFFF;text-decoration:none;padding:14px 30px;border-radius:999px;font-weight:600;margin:10px 0;text-align:center;">Secure My Account</a>
+                  <hr style="border:none;border-top:1px solid #E5E7EB;margin:30px 0 20px 0;">
+                  <p style="color:#666;font-size:12px;margin:0;">© 2025 ₿itHash Capital. All rights reserved.<br>800 Plant St, Wilmington, DE 19801, United States</p>
+                  <p style="color:#666;font-size:12px;margin:10px 0 0 0;"><strong><em>Where Your Financial Goals Become Reality</em></strong></p>
+                </div>
+              </div>
+            </div>
+          </body>
+          </html>
+        `
+      }
+    };
+
+    const template = emailTemplates[action];
+    if (!template) {
+      if (process.env.NODE_ENV !== 'production') console.log(`No email template found for action: ${action}`);
+      return;
+    }
+
+    const mailOptions = {
+      from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
+      to: user.email,
+      subject: template.subject,
+      html: template.html
+    };
+
+    await transporter.sendMail(mailOptions);
+    if (process.env.NODE_ENV !== 'production') console.log(`Email sent: ${action} to ${user.email}`);
+
+    await UserLog.create({
+      user: user._id,
+      username: user.email,
+      email: user.email,
+      userFullName: `${user.firstName} ${user.lastName}`,
+      action: 'email_sent',
+      actionCategory: 'system',
+      ipAddress: 'system',
+      userAgent: 'Email Service',
+      deviceInfo: { type: 'system' },
+      location: {},
+      status: 'success',
+      metadata: { emailType: action, recipient: user.email }
+    });
+
+  } catch (err) {
+    if (process.env.NODE_ENV !== 'production') console.error('Error sending automated email:', err);
+  }
+};
+
+const sendProfessionalEmail = async (options) => {
+  try {
+    const templates = {
+      otp: {
+        subject: `Your Verification Code - ₿itHash Capital`,
+        html: (data) => `
+          <!DOCTYPE html>
+          <html>
+          <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+          <body style="margin:0;padding:0;background-color:#0B0E11;font-family:'Inter',sans-serif;">
+            <div style="max-width:100%;background-color:#0B0E11;">
+              <div style="max-width:600px;margin:0 auto;background-color:#151A21;border-radius:0;overflow:hidden;">
+                <div style="background:linear-gradient(135deg,#F7A600 0%,#E69500 100%);padding:30px 20px;text-align:center;">
+                  <div style="display:inline-block;background:rgba(0,0,0,0.2);padding:10px 20px;border-radius:50px;">
+                    <span style="font-size:28px;font-weight:bold;color:#FFFFFF;">₿</span>
+                    <span style="font-size:24px;font-weight:bold;color:#FFFFFF;">itHash Capital</span>
+                  </div>
+                  <h1 style="color:#FFFFFF;margin:20px 0 0 0;font-size:28px;">Verification Code</h1>
+                  <p style="color:#FFFFFF;opacity:0.9;margin:10px 0 0 0;font-size:16px;"><strong><em>Where Your Financial Goals Become Reality</em></strong></p>
+                </div>
+                <div style="padding:40px 30px;background-color:#FFFFFF;">
+                  <h2 style="color:#0B0E11;margin-top:0;">Hello ${data.name || 'Valued User'},</h2>
+                  <p style="color:#333333;line-height:1.6;">Use the following verification code to complete your ${data.action || 'verification'}:</p>
+                  <div style="background:#F5F5F5;border-radius:8px;padding:25px;margin:25px 0;text-align:center;">
+                    <p style="font-size:36px;font-weight:bold;letter-spacing:8px;color:#F7A600;margin:0;">${data.otp}</p>
+                  </div>
+                  <p style="color:#333333;line-height:1.6;">This code will expire in 5 minutes for security purposes.</p>
+                  <p style="color:#333333;line-height:1.6;">If you didn't request this code, please ignore this email or contact our support team.</p>
+                  <hr style="border:none;border-top:1px solid #E5E7EB;margin:30px 0 20px 0;">
+                  <p style="color:#666;font-size:12px;margin:0;">© 2025 ₿itHash Capital. All rights reserved.<br>800 Plant St, Wilmington, DE 19801, United States</p>
+                  <p style="color:#666;font-size:12px;margin:10px 0 0 0;"><strong><em>Where Your Financial Goals Become Reality</em></strong></p>
+                </div>
+              </div>
+            </div>
+          </body>
+          </html>
+        `
+      }
+    };
+
+    const template = templates[options.template];
+    if (!template) {
+      throw new Error(`Template ${options.template} not found`);
+    }
+
+    const mailOptions = {
+      from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
+      to: options.email,
+      subject: template.subject,
+      html: template.html(options.data)
+    };
+
+    await transporter.sendMail(mailOptions);
+    if (process.env.NODE_ENV !== 'production') console.log(`Professional email sent: ${options.template} to ${options.email}`);
+  } catch (err) {
+    if (process.env.NODE_ENV !== 'production') console.error('Error sending professional email:', err);
+    throw err;
+  }
+};
+
 const sendEmail = async (options) => {
   try {
     let mailTransporter = infoTransporter;
@@ -3317,7 +3948,7 @@ const sendEmail = async (options) => {
     }
     
     const mailOptions = {
-      from: `BitHash Capital <${mailTransporter === supportTransporter ? process.env.EMAIL_SUPPORT_USER : process.env.EMAIL_INFO_USER}>`,
+      from: `₿itHash Capital <${mailTransporter === supportTransporter ? process.env.EMAIL_SUPPORT_USER : process.env.EMAIL_INFO_USER}>`,
       to: options.email,
       subject: options.subject,
       text: options.message,
@@ -3597,11 +4228,11 @@ const verifyTOTP = (token, secret) => {
 
 const initializeAdmin = async () => {
   try {
-    const adminExists = await Admin.findOne({ email: 'admin@bithash.com' });
+    const adminExists = await Admin.findOne({ email: process.env.ADMIN_EMAIL || 'admin@bithash.com' });
     if (!adminExists) {
-      const hashedPassword = await bcrypt.hash(process.env.DEFAULT_ADMIN_PASSWORD || 'SecureAdminPassword123!', 12);
+      const hashedPassword = await bcrypt.hash(process.env.ADMIN_PASSWORD_HASH || 'SecureAdminPassword123!', 12);
       await Admin.create({
-        email: 'admin@bithash.com',
+        email: process.env.ADMIN_EMAIL || 'admin@bithash.com',
         password: hashedPassword,
         name: 'Super Admin',
         role: 'super',
@@ -3611,7 +4242,7 @@ const initializeAdmin = async () => {
       if (process.env.NODE_ENV !== 'production') console.log('Default admin created');
     }
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error initializing admin:', err);
+    console.error('Error initializing admin:', err);
   }
 };
 
@@ -3812,7 +4443,6 @@ const checkCSRF = (req, res, next) => {
   next();
 };
 
-// INSTRUCTION R: Referral must be paid based on the crypto downline invested
 const calculateReferralCommissions = async (investment) => {
   try {
     const populatedInvestment = await Investment.findById(investment._id)
@@ -3864,7 +4494,6 @@ const calculateReferralCommissions = async (investment) => {
       uplineId,
       {
         $inc: {
-          'balances.main': commissionAmount,
           'referralStats.totalEarnings': commissionAmount,
           'referralStats.availableBalance': commissionAmount,
           'downlineStats.totalCommissionEarned': commissionAmount,
@@ -3874,7 +4503,7 @@ const calculateReferralCommissions = async (investment) => {
       { new: true }
     );
 
-    if (process.env.NODE_ENV !== 'production') console.log(`Updated upline ${uplineUser.email} MAIN balance with $${commissionAmount}. New balance: $${updatedUpline.balances.main}`);
+    if (process.env.NODE_ENV !== 'production') console.log(`Updated upline ${uplineUser.email} with $${commissionAmount}.`);
 
     relationship.remainingRounds -= 1;
     relationship.totalCommissionEarned += commissionAmount;
@@ -3947,102 +4576,33 @@ const calculateReferralCommissions = async (investment) => {
   }
 };
 
-// INSTRUCTION C, D, E: Three wallets (Main, Active, Matured) with real-time value calculation
-const recalculateAllUserBalances = async (io) => {
-  try {
-    if (process.env.NODE_ENV !== 'production') console.log('Recalculating ALL user balances based on current crypto prices...');
-    
-    const users = await User.find({}).select('_id');
-    let updatedCount = 0;
-    
-    for (const user of users) {
-      let totalMainValue = 0;
-      let totalActiveValue = 0;
-      let totalMaturedValue = 0;
-      
-      const userAssetBalance = await UserAssetBalance.findOne({ user: user._id });
-      if (userAssetBalance) {
-        for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
-          if (balance > 0) {
-            const price = await getCryptoPrice(asset.toUpperCase());
-            if (price) {
-              totalMainValue += balance * price;
-            }
-          }
-        }
-      }
-      
-      const activeInvestments = await Investment.find({
-        user: user._id,
-        status: 'active'
-      }).populate('plan');
-      
-      for (const investment of activeInvestments) {
-        const currentBTCPrice = await getCryptoPrice('BTC');
-        if (currentBTCPrice && investment.originalAmount) {
-          const originalBTCAmount = investment.originalAmount / (investment.originalBTCPrice || 43000);
-          const currentUSDValue = originalBTCAmount * currentBTCPrice;
-          totalActiveValue += currentUSDValue;
-        } else {
-          totalActiveValue += investment.amount;
-        }
-      }
-      
-      const maturedInvestments = await Investment.find({
-        user: user._id,
-        status: 'completed'
-      }).populate('plan');
-      
-      for (const investment of maturedInvestments) {
-        const currentBTCPrice = await getCryptoPrice('BTC');
-        if (currentBTCPrice && investment.originalAmount) {
-          const originalBTCAmount = investment.originalAmount / (investment.originalBTCPrice || 43000);
-          const currentUSDValue = originalBTCAmount * currentBTCPrice;
-          totalMaturedValue += currentUSDValue;
-        } else {
-          totalMaturedValue += investment.amount + (investment.actualReturn || 0);
-        }
-      }
-      
-      const updates = {};
-      if (Math.abs(user.balances.main - totalMainValue) > 0.01) updates['balances.main'] = totalMainValue;
-      if (Math.abs(user.balances.active - totalActiveValue) > 0.01) updates['balances.active'] = totalActiveValue;
-      if (Math.abs(user.balances.matured - totalMaturedValue) > 0.01) updates['balances.matured'] = totalMaturedValue;
-      
-      if (Object.keys(updates).length > 0) {
-        await User.findByIdAndUpdate(user._id, updates);
-        updatedCount++;
-        
-        if (io) {
-          io.to(`user_${user._id}`).emit('balance_update', {
-            main: totalMainValue,
-            active: totalActiveValue,
-            matured: totalMaturedValue
-          });
-          
-          const previousDayValue = user.balances.main || totalMainValue;
-          const dailyPnL = totalMainValue - previousDayValue;
-          const dailyPnLPercentage = previousDayValue > 0 ? (dailyPnL / previousDayValue) * 100 : 0;
-          
-          io.to(`user_${user._id}`).emit('pnl_update', {
-            main: {
-              amount: dailyPnL,
-              percentage: dailyPnLPercentage
-            },
-            matured: {
-              amount: 0,
-              percentage: 0
-            }
-          });
-        }
-      }
-    }
-    
-    if (process.env.NODE_ENV !== 'production') console.log(`Recalculated balances for ${updatedCount} users (Main: fluctuates, Active: fluctuates, Matured: fluctuates)`);
-    
-  } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error recalculating user balances:', err);
-  }
+// Helper functions for device detection
+const getDeviceType = (req) => {
+  const userAgent = req.headers['user-agent'];
+  if (/mobile/i.test(userAgent)) return 'mobile';
+  if (/tablet/i.test(userAgent)) return 'tablet';
+  if (/iPad|Android|Touch/i.test(userAgent)) return 'tablet';
+  return 'desktop';
+};
+
+const getOSFromUserAgent = (userAgent) => {
+  if (!userAgent) return 'Unknown';
+  if (/windows/i.test(userAgent)) return 'Windows';
+  if (/macintosh|mac os x/i.test(userAgent)) return 'MacOS';
+  if (/linux/i.test(userAgent)) return 'Linux';
+  if (/android/i.test(userAgent)) return 'Android';
+  if (/iphone|ipad|ipod/i.test(userAgent)) return 'iOS';
+  return 'Unknown';
+};
+
+const getBrowserFromUserAgent = (userAgent) => {
+  if (!userAgent) return 'Unknown';
+  if (/edg/i.test(userAgent)) return 'Edge';
+  if (/chrome/i.test(userAgent)) return 'Chrome';
+  if (/safari/i.test(userAgent)) return 'Safari';
+  if (/firefox/i.test(userAgent)) return 'Firefox';
+  if (/opera|opr/i.test(userAgent)) return 'Opera';
+  return 'Unknown';
 };
 
 // =============================================
@@ -4483,536 +5043,6 @@ async function getQuoteAssetsFromRedis() {
 
 initializePriceAggregator();
 
-// =============================================
-// ENHANCED EMAIL SERVICE - INSTRUCTION H, I, J, K, L, M, N, O, P
-// Enterprise-level HTML emails with branding, logo, slogan, golden CTAs
-// =============================================
-
-const getEmailTemplate = (title, content, buttonText = null, buttonUrl = null, isWarning = false) => {
-  const slogan = '<i style="font-family: \'Domine\', serif; font-weight: bold; font-style: italic;">Where Your Financial Goals Become Reality</i>';
-  
-  return `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <link href="https://fonts.googleapis.com/css2?family=Domine:wght@400..700&display=swap" rel="stylesheet">
-      <style>
-        * {
-          margin: 0;
-          padding: 0;
-          box-sizing: border-box;
-        }
-        body {
-          margin: 0;
-          padding: 0;
-          background-color: #0B0E11;
-          font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-        }
-        .email-container {
-          max-width: 600px;
-          margin: 0 auto;
-          background-color: #0B0E11;
-        }
-        .email-header {
-          background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);
-          padding: 30px 20px;
-          text-align: center;
-          border-bottom: 2px solid #F7A600;
-        }
-        .logo-container {
-          display: inline-flex;
-          align-items: center;
-          gap: 10px;
-          margin-bottom: 15px;
-        }
-        .logo-icon {
-          font-size: 36px;
-          color: #F7A600;
-        }
-        .logo-text {
-          font-family: 'Rowdies', 'Domine', serif;
-          font-size: 32px;
-          font-weight: 700;
-          color: #FFFFFF;
-          letter-spacing: 1px;
-        }
-        .slogan {
-          font-size: 14px;
-          color: #B7BDC6;
-          margin-top: 8px;
-        }
-        .email-body {
-          background-color: #FFFFFF;
-          padding: 40px 30px;
-          color: #1A1A1A;
-        }
-        .email-title {
-          font-size: 24px;
-          font-weight: 700;
-          margin-bottom: 20px;
-          color: ${isWarning ? '#FF0000' : '#11151C'};
-          border-left: 4px solid #F7A600;
-          padding-left: 15px;
-        }
-        .email-content {
-          line-height: 1.6;
-          color: #333333;
-          font-size: 16px;
-        }
-        .email-content p {
-          margin-bottom: 16px;
-        }
-        .cta-button {
-          display: inline-block;
-          background-color: #F7A600;
-          color: #FFFFFF !important;
-          text-decoration: none;
-          padding: 14px 32px;
-          border-radius: 8px;
-          font-weight: 600;
-          margin: 25px 0;
-          text-align: center;
-          transition: background-color 0.3s ease;
-        }
-        .cta-button:hover {
-          background-color: #E69500;
-        }
-        .divider {
-          height: 1px;
-          background: linear-gradient(90deg, transparent, #B7BDC6, transparent);
-          margin: 30px 0 20px;
-        }
-        .email-footer {
-          background-color: #11151C;
-          padding: 30px 20px;
-          text-align: center;
-          border-top: 1px solid #1E2329;
-        }
-        .footer-logo {
-          font-family: 'Rowdies', 'Domine', serif;
-          font-size: 20px;
-          font-weight: 700;
-          color: #F7A600;
-          margin-bottom: 15px;
-        }
-        .footer-text {
-          color: #6C7480;
-          font-size: 12px;
-          line-height: 1.5;
-          margin-bottom: 10px;
-        }
-        .footer-links {
-          margin: 15px 0;
-        }
-        .footer-links a {
-          color: #B7BDC6;
-          text-decoration: none;
-          font-size: 12px;
-          margin: 0 10px;
-        }
-        .footer-links a:hover {
-          color: #F7A600;
-        }
-        .copyright {
-          color: #6C7480;
-          font-size: 11px;
-          margin-top: 15px;
-        }
-        @media (max-width: 480px) {
-          .email-body {
-            padding: 30px 20px;
-          }
-          .email-title {
-            font-size: 20px;
-          }
-          .cta-button {
-            display: block;
-            text-align: center;
-          }
-        }
-      </style>
-    </head>
-    <body>
-      <div class="email-container">
-        <div class="email-header">
-          <div class="logo-container">
-            <span class="logo-icon">₿</span>
-            <span class="logo-text">itHash</span>
-          </div>
-          <div class="slogan">${slogan}</div>
-        </div>
-        <div class="email-body">
-          <h1 class="email-title">${title}</h1>
-          <div class="email-content">
-            ${content}
-            ${buttonText && buttonUrl ? `<div style="text-align: center;"><a href="${buttonUrl}" class="cta-button">${buttonText}</a></div>` : ''}
-          </div>
-          <div class="divider"></div>
-          <div class="email-content" style="font-size: 14px; color: #666;">
-            <p>If you did not request this action, please contact our support team immediately.</p>
-          </div>
-        </div>
-        <div class="email-footer">
-          <div class="footer-logo">₿itHash Capital</div>
-          <div class="footer-text">Institutional-grade Bitcoin Mining & Investment Platform</div>
-          <div class="footer-links">
-            <a href="https://www.bithashcapital.live">Home</a>
-            <a href="https://www.bithashcapital.live/privacy">Privacy Policy</a>
-            <a href="https://www.bithashcapital.live/terms">Terms of Service</a>
-            <a href="https://www.bithashcapital.live/support">Support</a>
-          </div>
-          <div class="copyright">
-            &copy; ${new Date().getFullYear()} BitHash Capital LLC. All rights reserved.<br>
-            800 Plant St, Wilmington, DE 19801, United States
-          </div>
-        </div>
-      </div>
-    </body>
-    </html>
-  `;
-};
-
-const sendAutomatedEmail = async (user, action, data = {}) => {
-  try {
-    const deviceInfo = data.deviceInfo || {};
-    const location = data.location || 'Unknown Location';
-    const ip = data.ip || 'Unknown';
-    
-    let title = '';
-    let content = '';
-    let buttonText = null;
-    let buttonUrl = null;
-    let isWarning = false;
-    
-    switch (action) {
-      case 'welcome':
-        title = 'Welcome to ₿itHash Capital';
-        content = `
-          <p>Dear ${data.name || user.firstName},</p>
-          <p>Thank you for choosing ₿itHash Capital. Your account has been successfully created, and you are now part of a community that turns financial goals into reality.</p>
-          <p>We are excited to have you on board. Your journey to institutional-grade Bitcoin mining and investment starts here.</p>
-          <p>To get started, complete your profile and explore our investment plans designed to maximize your returns.</p>
-        `;
-        buttonText = 'Access Dashboard';
-        buttonUrl = 'https://www.bithashcapital.live/dashboard';
-        break;
-        
-      case 'login_success':
-        title = 'New Login Detected';
-        content = `
-          <p>Dear ${data.name || user.firstName},</p>
-          <p>We detected a successful login to your account from a new device or location.</p>
-          <div style="background: #F5F5F5; padding: 15px; border-radius: 8px; margin: 15px 0;">
-            <p><strong>Device:</strong> ${deviceInfo.device || 'Unknown Device'}</p>
-            <p><strong>Location:</strong> ${location}</p>
-            <p><strong>IP Address:</strong> ${ip}</p>
-            <p><strong>Time:</strong> ${new Date().toLocaleString()}</p>
-          </div>
-          <p>If this was you, no further action is needed. If you did not authorize this login, please secure your account immediately.</p>
-        `;
-        buttonText = 'Secure My Account';
-        buttonUrl = 'https://www.bithashcapital.live/security';
-        isWarning = true;
-        break;
-        
-      case 'kyc_approved':
-        title = 'KYC Verification Approved';
-        content = `
-          <p>Dear ${data.name || user.firstName},</p>
-          <p>Congratulations! Your KYC verification has been approved. You now have full access to all investment features and higher transaction limits.</p>
-          <p>Start investing in our premium plans today and watch your portfolio grow.</p>
-        `;
-        buttonText = 'Start Investing';
-        buttonUrl = 'https://www.bithashcapital.live/invest';
-        break;
-        
-      case 'kyc_rejected':
-        title = 'KYC Verification Update';
-        content = `
-          <p>Dear ${data.name || user.firstName},</p>
-          <p>We regret to inform you that your KYC verification could not be approved at this time.</p>
-          <div style="background: #FFF3F3; padding: 15px; border-radius: 8px; margin: 15px 0; border-left: 4px solid #FF0000;">
-            <p><strong>Reason:</strong> ${data.reason || 'Please contact support for more details.'}</p>
-          </div>
-          <p>Please review the documents you submitted and resubmit your KYC application. Our support team is available to assist you.</p>
-        `;
-        buttonText = 'Resubmit KYC';
-        buttonUrl = 'https://www.bithashcapital.live/kyc';
-        isWarning = true;
-        break;
-        
-      case 'deposit_approved':
-        title = 'Deposit Confirmed';
-        content = `
-          <p>Dear ${data.name || user.firstName},</p>
-          <p>Your deposit of <strong>${data.amount} ${data.asset || 'USD'}</strong> has been confirmed and credited to your account.</p>
-          <div style="background: #F5F5F5; padding: 15px; border-radius: 8px; margin: 15px 0;">
-            <p><strong>Amount:</strong> ${data.amount} ${data.asset || 'USD'}</p>
-            <p><strong>Method:</strong> ${data.method || 'Bank Transfer'}</p>
-            <p><strong>Reference:</strong> ${data.reference || 'N/A'}</p>
-            <p><strong>Date:</strong> ${new Date().toLocaleString()}</p>
-          </div>
-          <p>Your funds are now available for investment. Explore our plans to maximize your returns.</p>
-        `;
-        buttonText = 'View Balance';
-        buttonUrl = 'https://www.bithashcapital.live/dashboard';
-        break;
-        
-      case 'deposit_rejected':
-        title = 'Deposit Update';
-        content = `
-          <p>Dear ${data.name || user.firstName},</p>
-          <p>Your deposit of <strong>${data.amount} ${data.asset || 'USD'}</strong> could not be processed.</p>
-          <div style="background: #FFF3F3; padding: 15px; border-radius: 8px; margin: 15px 0; border-left: 4px solid #FF0000;">
-            <p><strong>Reason:</strong> ${data.reason || 'Please contact support for more details.'}</p>
-          </div>
-          <p>Please verify your payment details and try again. Our support team is available to assist you.</p>
-        `;
-        buttonText = 'Try Again';
-        buttonUrl = 'https://www.bithashcapital.live/deposit';
-        isWarning = true;
-        break;
-        
-      case 'withdrawal_request':
-        title = 'Withdrawal Request Received';
-        content = `
-          <p>Dear ${data.name || user.firstName},</p>
-          <p>Your withdrawal request has been received and is pending processing.</p>
-          <div style="background: #F5F5F5; padding: 15px; border-radius: 8px; margin: 15px 0;">
-            <p><strong>Amount:</strong> ${data.amount} ${data.asset || 'USD'}</p>
-            <p><strong>Network:</strong> ${data.network || 'Mainnet'}</p>
-            <p><strong>Destination Address:</strong> ${data.withdrawalAddress || 'N/A'}</p>
-            <p><strong>Request ID:</strong> ${data.requestId || 'N/A'}</p>
-          </div>
-          <p>We will notify you once the withdrawal is processed. Processing times vary based on network conditions.</p>
-        `;
-        buttonText = 'Track Request';
-        buttonUrl = 'https://www.bithashcapital.live/withdrawals';
-        break;
-        
-      case 'withdrawal_approved':
-        title = 'Withdrawal Completed';
-        content = `
-          <p>Dear ${data.name || user.firstName},</p>
-          <p>Your withdrawal has been successfully processed.</p>
-          <div style="background: #F5F5F5; padding: 15px; border-radius: 8px; margin: 15px 0;">
-            <p><strong>Amount:</strong> ${data.amount} ${data.asset || 'USD'}</p>
-            <p><strong>Fee:</strong> ${data.fee || 0} ${data.asset || 'USD'}</p>
-            <p><strong>Net Amount:</strong> ${data.netAmount || data.amount} ${data.asset || 'USD'}</p>
-            <p><strong>Transaction ID:</strong> ${data.txid || 'N/A'}</p>
-          </div>
-          <p>Funds have been sent to your wallet. Please allow time for network confirmations.</p>
-        `;
-        buttonText = 'View History';
-        buttonUrl = 'https://www.bithashcapital.live/withdrawals';
-        break;
-        
-      case 'withdrawal_rejected':
-        title = 'Withdrawal Update';
-        content = `
-          <p>Dear ${data.name || user.firstName},</p>
-          <p>Your withdrawal request could not be processed.</p>
-          <div style="background: #FFF3F3; padding: 15px; border-radius: 8px; margin: 15px 0; border-left: 4px solid #FF0000;">
-            <p><strong>Reason:</strong> ${data.reason || 'Please contact support for more details.'}</p>
-          </div>
-          <p>Funds have been returned to your account balance. Please verify your withdrawal details and try again.</p>
-        `;
-        buttonText = 'Try Again';
-        buttonUrl = 'https://www.bithashcapital.live/withdraw';
-        isWarning = true;
-        break;
-        
-      case 'investment_created':
-        title = 'Investment Confirmed';
-        content = `
-          <p>Dear ${data.name || user.firstName},</p>
-          <p>Your investment has been successfully activated.</p>
-          <div style="background: #F5F5F5; padding: 15px; border-radius: 8px; margin: 15px 0;">
-            <p><strong>Plan:</strong> ${data.planName || 'Standard Plan'}</p>
-            <p><strong>Amount:</strong> $${data.amount}</p>
-            <p><strong>Expected Return:</strong> $${data.expectedReturn}</p>
-            <p><strong>Duration:</strong> ${data.duration} hours</p>
-            <p><strong>Start Date:</strong> ${new Date(data.startDate).toLocaleString()}</p>
-            <p><strong>Maturity Date:</strong> ${new Date(data.endDate).toLocaleString()}</p>
-          </div>
-          <p>Your investment is now active and generating returns. Track your progress in real-time from your dashboard.</p>
-        `;
-        buttonText = 'Track Investment';
-        buttonUrl = 'https://www.bithashcapital.live/investments';
-        break;
-        
-      case 'investment_matured':
-        title = 'Investment Matured';
-        content = `
-          <p>Dear ${data.name || user.firstName},</p>
-          <p>Congratulations! Your investment has matured and returns have been credited to your account.</p>
-          <div style="background: #F5F5F5; padding: 15px; border-radius: 8px; margin: 15px 0;">
-            <p><strong>Plan:</strong> ${data.planName || 'Standard Plan'}</p>
-            <p><strong>Original Investment:</strong> $${data.amount}</p>
-            <p><strong>Total Return:</strong> $${data.totalReturn}</p>
-            <p><strong>Profit:</strong> $${data.profit}</p>
-          </div>
-          <p>Reinvest your returns or withdraw them to your wallet. The choice is yours.</p>
-        `;
-        buttonText = 'Manage Funds';
-        buttonUrl = 'https://www.bithashcapital.live/dashboard';
-        break;
-        
-      case 'password_changed':
-        title = 'Password Changed';
-        content = `
-          <p>Dear ${data.name || user.firstName},</p>
-          <p>Your password has been successfully changed.</p>
-          <div style="background: #F5F5F5; padding: 15px; border-radius: 8px; margin: 15px 0;">
-            <p><strong>Device:</strong> ${data.device || 'Unknown Device'}</p>
-            <p><strong>IP Address:</strong> ${data.ip || 'Unknown'}</p>
-            <p><strong>Time:</strong> ${new Date().toLocaleString()}</p>
-          </div>
-          <p>If you did not make this change, please contact support immediately.</p>
-        `;
-        buttonText = 'Security Center';
-        buttonUrl = 'https://www.bithashcapital.live/security';
-        isWarning = true;
-        break;
-        
-      case 'password_reset':
-        title = 'Password Reset Request';
-        content = `
-          <p>Dear ${data.name || user.firstName},</p>
-          <p>We received a request to reset your password. Click the button below to create a new password.</p>
-          <p>This link will expire in 60 minutes for your security.</p>
-          <p>If you did not request this, please ignore this email.</p>
-        `;
-        buttonText = 'Reset Password';
-        buttonUrl = data.resetUrl;
-        break;
-        
-      default:
-        title = 'Account Update';
-        content = `<p>Dear ${data.name || user.firstName},</p><p>There has been an update to your account. Please log in to view details.</p>`;
-        buttonText = 'View Account';
-        buttonUrl = 'https://www.bithashcapital.live/dashboard';
-    }
-    
-    const html = getEmailTemplate(title, content, buttonText, buttonUrl, isWarning);
-    
-    await sendEmail({
-      email: user.email,
-      subject: `${title} | ₿itHash Capital`,
-      html: html,
-      message: content.replace(/<[^>]*>/g, '')
-    });
-    
-    if (process.env.NODE_ENV !== 'production') console.log(`📧 ${action} email sent to ${user.email}`);
-    
-  } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error(`Failed to send ${action} email:`, err);
-  }
-};
-
-// =============================================
-// ENHANCED KYC FILE HANDLING - INSTRUCTION G
-// Fix unsupported format and PDF cannot be opened errors
-// =============================================
-
-const ensureKYCFileIntegrity = (filePath) => {
-  if (!fs.existsSync(filePath)) return false;
-  
-  const stats = fs.statSync(filePath);
-  if (stats.size === 0) return false;
-  
-  const ext = path.extname(filePath).toLowerCase();
-  
-  if (ext === '.pdf') {
-    const buffer = fs.readFileSync(filePath);
-    if (buffer.length < 4) return false;
-    if (buffer.toString('ascii', 0, 4) !== '%PDF') return false;
-  }
-  
-  if (['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'].includes(ext)) {
-    const buffer = fs.readFileSync(filePath);
-    const signatures = {
-      jpg: [0xFF, 0xD8],
-      png: [0x89, 0x50, 0x4E, 0x47],
-      gif: [0x47, 0x49, 0x46],
-      webp: [0x52, 0x49, 0x46, 0x46],
-      bmp: [0x42, 0x4D]
-    };
-    
-    let isValid = false;
-    for (const [type, sig] of Object.entries(signatures)) {
-      let match = true;
-      for (let i = 0; i < sig.length && i < buffer.length; i++) {
-        if (buffer[i] !== sig[i]) {
-          match = false;
-          break;
-        }
-      }
-      if (match && type === ext.replace('.', '')) {
-        isValid = true;
-        break;
-      }
-    }
-    if (!isValid) return false;
-  }
-  
-  if (['.mp4', '.webm', '.avi', '.mov'].includes(ext)) {
-    const buffer = fs.readFileSync(filePath);
-    if (ext === '.mp4' && (buffer[4] !== 0x66 || buffer[5] !== 0x74 || buffer[6] !== 0x79 || buffer[7] !== 0x70)) {
-      return false;
-    }
-  }
-  
-  return true;
-};
-
-// =============================================
-// 48-HOUR RESTRICTION LOGIC - INSTRUCTION F
-// =============================================
-
-const restrictionStore = new Map();
-
-const checkRestriction = async (userId, action, requestedAmount) => {
-  const key = `${userId}:${action}`;
-  const restriction = restrictionStore.get(key);
-  
-  if (restriction && restriction.expiresAt > Date.now()) {
-    return {
-      allowed: requestedAmount <= restriction.remainingAmount,
-      remainingAmount: restriction.remainingAmount,
-      expiresIn: Math.ceil((restriction.expiresAt - Date.now()) / 1000 / 60 / 60),
-      message: `You have a restriction of ${restriction.originalAmount} ${action} within 48 hours. Remaining: ${restriction.remainingAmount}`
-    };
-  }
-  
-  return { allowed: true, remainingAmount: null };
-};
-
-const applyRestriction = async (userId, action, amount, durationHours = 48) => {
-  const key = `${userId}:${action}`;
-  restrictionStore.set(key, {
-    originalAmount: amount,
-    remainingAmount: amount,
-    expiresAt: Date.now() + (durationHours * 60 * 60 * 1000)
-  });
-  
-  setTimeout(() => {
-    restrictionStore.delete(key);
-    if (process.env.NODE_ENV !== 'production') console.log(`Restriction expired for ${userId}:${action}`);
-  }, durationHours * 60 * 60 * 1000);
-};
-
-const deductFromRestriction = async (userId, action, amount) => {
-  const key = `${userId}:${action}`;
-  const restriction = restrictionStore.get(key);
-  if (restriction) {
-    restriction.remainingAmount -= amount;
-    restrictionStore.set(key, restriction);
-  }
-};
-
 // Routes
 
 // Enhanced Signup Endpoint with OTP - FIXED email handling
@@ -5099,6 +5129,16 @@ app.post('/api/auth/signup', [
       userAgent: req.headers['user-agent']
     });
 
+    await sendProfessionalEmail({
+      email: originalEmail,
+      template: 'otp',
+      data: {
+        name: firstName,
+        otp: otp,
+        action: 'account verification'
+      }
+    });
+
     await sendAutomatedEmail(newUser, 'welcome', {
       firstName
     });
@@ -5123,7 +5163,7 @@ app.post('/api/auth/signup', [
     await logActivity('signup_initiated', 'user', newUser._id, newUser._id, 'User', req);
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Signup error:', err);
+    console.error('Signup error:', err);
     res.status(500).json({
       status: 'error',
       message: 'An error occurred during signup'
@@ -5180,7 +5220,7 @@ app.get('/api/referrals/validate/:code', async (req, res) => {
         });
 
     } catch (err) {
-        if (process.env.NODE_ENV !== 'production') console.error('Referral validation error:', err);
+        console.error('Referral validation error:', err);
         res.status(500).json({
             status: 'error',
             message: 'Failed to validate referral code'
@@ -5243,12 +5283,14 @@ app.post('/api/auth/login', [
       userAgent: req.headers['user-agent']
     });
 
-    await sendAutomatedEmail(user, 'login_success', {
-      name: user.firstName,
-      device: req.headers['user-agent'],
-      location: 'Pending verification',
-      ip: req.ip,
-      timestamp: new Date()
+    await sendProfessionalEmail({
+      email: email,
+      template: 'otp',
+      data: {
+        name: user.firstName,
+        otp: otp,
+        action: 'login'
+      }
     });
 
     const deviceInfo = await getUserDeviceInfo(req);
@@ -5283,6 +5325,19 @@ app.post('/api/auth/login', [
       }
     });
 
+    try {
+      await sendAutomatedEmail(user, 'login_success', {
+        name: user.firstName,
+        device: deviceInfo.device,
+        location: deviceInfo.location,
+        ip: deviceInfo.ip,
+        timestamp: new Date()
+      });
+      if (process.env.NODE_ENV !== 'production') console.log(`📧 Login attempt email sent to ${user.email}`);
+    } catch (emailError) {
+      if (process.env.NODE_ENV !== 'production') console.error('Failed to send login attempt email:', emailError);
+    }
+
     const tempToken = generateJWT(user._id);
 
     res.status(200).json({
@@ -5306,7 +5361,7 @@ app.post('/api/auth/login', [
     }, user);
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Login error:', err);
+    console.error('Login error:', err);
     
     await logUserActivity(req, 'login_error', 'failed', {
       error: err.message,
@@ -5320,7 +5375,6 @@ app.post('/api/auth/login', [
   }
 });
 
-// INSTRUCTION Q: Google login - check if user exists first
 app.post('/api/auth/google', async (req, res) => {
   try {
     if (process.env.NODE_ENV !== 'production') console.log('Google auth request received');
@@ -5328,7 +5382,7 @@ app.post('/api/auth/google', async (req, res) => {
     const { credential, isSignup } = req.body;
     
     if (!credential) {
-      if (process.env.NODE_ENV !== 'production') console.error('No credential provided');
+      console.error('No credential provided');
       return res.status(400).json({
         status: 'fail',
         message: 'Google credential is required'
@@ -5346,7 +5400,7 @@ app.post('/api/auth/google', async (req, res) => {
       payload = ticket.getPayload();
       if (process.env.NODE_ENV !== 'production') console.log('Google token verified successfully');
     } catch (verifyError) {
-      if (process.env.NODE_ENV !== 'production') console.error('Google token verification failed:', verifyError);
+      console.error('Google token verification failed:', verifyError);
       return res.status(400).json({
         status: 'fail',
         message: 'Invalid Google token. Please try again.'
@@ -5354,7 +5408,7 @@ app.post('/api/auth/google', async (req, res) => {
     }
 
     if (!payload) {
-      if (process.env.NODE_ENV !== 'production') console.error('No payload from Google token');
+      console.error('No payload from Google token');
       return res.status(400).json({
         status: 'fail',
         message: 'Invalid token payload'
@@ -5364,7 +5418,7 @@ app.post('/api/auth/google', async (req, res) => {
     const { email, given_name, family_name, sub } = payload;
 
     if (!email) {
-      if (process.env.NODE_ENV !== 'production') console.error('No email in Google payload');
+      console.error('No email in Google payload');
       return res.status(400).json({
         status: 'fail',
         message: 'No email found in Google account'
@@ -5382,7 +5436,7 @@ app.post('/api/auth/google', async (req, res) => {
       user = await User.findOne({ email: originalEmail });
       if (process.env.NODE_ENV !== 'production') console.log('User lookup result:', user ? 'Found' : 'Not found');
     } catch (dbError) {
-      if (process.env.NODE_ENV !== 'production') console.error('Database lookup error:', dbError);
+      console.error('Database lookup error:', dbError);
       return res.status(500).json({
         status: 'error',
         message: 'Database error during user lookup'
@@ -5391,38 +5445,30 @@ app.post('/api/auth/google', async (req, res) => {
 
     if (!user) {
       if (isSignup === true) {
-        try {
-          const referralCode = generateReferralCode();
-          user = await User.create({
-            firstName: given_name || 'Google',
-            lastName: family_name || 'User',
-            email: originalEmail,
-            googleId: sub,
-            isVerified: true,
-            referralCode,
-            status: 'active'
-          });
-          isNewUser = true;
-          if (process.env.NODE_ENV !== 'production') console.log('New user created via Google:', originalEmail);
+        const referralCode = generateReferralCode();
+        user = await User.create({
+          firstName: given_name || 'Google',
+          lastName: family_name || 'User',
+          email: originalEmail,
+          googleId: sub,
+          isVerified: true,
+          referralCode,
+          status: 'active'
+        });
+        isNewUser = true;
+        if (process.env.NODE_ENV !== 'production') console.log('New user created via Google:', originalEmail);
 
-          try {
-            await sendAutomatedEmail(user, 'welcome', {
-              firstName: given_name || 'Google User'
-            });
-          } catch (emailError) {
-            if (process.env.NODE_ENV !== 'production') console.error('Welcome email failed:', emailError);
-          }
-        } catch (createError) {
-          if (process.env.NODE_ENV !== 'production') console.error('User creation error:', createError);
-          return res.status(500).json({
-            status: 'error',
-            message: 'Failed to create user account'
+        try {
+          await sendAutomatedEmail(user, 'welcome', {
+            firstName: given_name || 'Google User'
           });
+        } catch (emailError) {
+          if (process.env.NODE_ENV !== 'production') console.error('Welcome email failed:', emailError);
         }
       } else {
         return res.status(404).json({
           status: 'fail',
-          message: 'No account found with this email. Please sign up first.'
+          message: 'Account not found. Please sign up first.'
         });
       }
     } else if (!user.googleId) {
@@ -5452,6 +5498,16 @@ app.post('/api/auth/google', async (req, res) => {
         userAgent: req.headers['user-agent']
       });
 
+      await sendProfessionalEmail({
+        email: originalEmail,
+        template: 'otp',
+        data: {
+          name: user.firstName,
+          otp: otp,
+          action: 'Google sign-in verification'
+        }
+      });
+      
       const deviceInfo = await getUserDeviceInfo(req);
       await UserLog.create({
         user: user._id,
@@ -5499,7 +5555,7 @@ app.post('/api/auth/google', async (req, res) => {
       }
       
     } catch (otpError) {
-      if (process.env.NODE_ENV !== 'production') console.error('OTP creation error:', otpError);
+      console.error('OTP creation error:', otpError);
     }
 
     const tempToken = generateJWT(user._id);
@@ -5510,7 +5566,7 @@ app.post('/api/auth/google', async (req, res) => {
       user.loginHistory.push(deviceInfo);
       await user.save();
     } catch (updateError) {
-      if (process.env.NODE_ENV !== 'production') console.error('User update error:', updateError);
+      console.error('User update error:', updateError);
     }
 
     res.status(200).json({
@@ -5540,8 +5596,8 @@ app.post('/api/auth/google', async (req, res) => {
     }
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Google auth UNEXPECTED error:', err);
-    if (process.env.NODE_ENV !== 'production') console.error('Error stack:', err.stack);
+    console.error('Google auth UNEXPECTED error:', err);
+    console.error('Error stack:', err.stack);
     
     res.status(500).json({
       status: 'error',
@@ -5578,6 +5634,7 @@ app.post('/api/auth/forgot-password', [
     await user.save();
 
     const resetURL = `https://bithhash.vercel.app/reset-password?token=${resetToken}`;
+    const message = `Forgot your password? Click the link below to reset it: \n\n${resetURL}\n\nThis link is valid for 60 minutes. If you didn't request this, please ignore this email.`;
 
     await sendAutomatedEmail(user, 'password_reset', {
       name: user.firstName,
@@ -5591,7 +5648,7 @@ app.post('/api/auth/forgot-password', [
 
     await logActivity('forgot-password', 'user', user._id, user._id, 'User', req);
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Forgot password error:', err);
+    console.error('Forgot password error:', err);
     res.status(500).json({
       status: 'error',
       message: 'An error occurred while sending the password reset email'
@@ -5661,7 +5718,7 @@ app.post('/api/auth/reset-password', [
 
     await logActivity('reset-password', 'user', user._id, user._id, 'User', req);
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Reset password error:', err);
+    console.error('Reset password error:', err);
     res.status(500).json({
       status: 'error',
       message: 'An error occurred while resetting the password'
@@ -5943,7 +6000,6 @@ app.post('/api/investments', protect, [
       
       await User.findByIdAndUpdate(user.referredBy, {
         $inc: {
-          'balances.main': referralBonus,
           'referralStats.totalEarnings': referralBonus,
           'referralStats.availableBalance': referralBonus
         },
@@ -6034,7 +6090,7 @@ app.post('/api/investments', protect, [
       }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Investment creation error:', err);
+    console.error('Investment creation error:', err);
     
     res.status(200).json({
       status: 'success',
@@ -6208,7 +6264,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
     }
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Complete investment error:', err);
+    console.error('Complete investment error:', err);
     res.status(500).json({
       status: 'error',
       message: 'An error occurred while completing the investment'
@@ -6249,7 +6305,7 @@ app.get('/api/admin/deposits/pending', adminProtect, async (req, res) => {
       }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin pending deposits error:', err);
+    console.error('Admin pending deposits error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch pending deposits'
@@ -6291,7 +6347,7 @@ app.get('/api/admin/deposits/approved', adminProtect, async (req, res) => {
       }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin approved deposits error:', err);
+    console.error('Admin approved deposits error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch approved deposits'
@@ -6332,7 +6388,7 @@ app.get('/api/admin/deposits/rejected', adminProtect, async (req, res) => {
       }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin rejected deposits error:', err);
+    console.error('Admin rejected deposits error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch rejected deposits'
@@ -6373,7 +6429,7 @@ app.get('/api/admin/withdrawals/pending', adminProtect, async (req, res) => {
       }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin pending withdrawals error:', err);
+    console.error('Admin pending withdrawals error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch pending withdrawals'
@@ -6415,7 +6471,7 @@ app.get('/api/admin/withdrawals/approved', adminProtect, async (req, res) => {
       }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin approved withdrawals error:', err);
+    console.error('Admin approved withdrawals error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch approved withdrawals'
@@ -6456,7 +6512,7 @@ app.get('/api/admin/withdrawals/rejected', adminProtect, async (req, res) => {
       }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin rejected withdrawals error:', err);
+    console.error('Admin rejected withdrawals error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch rejected withdrawals'
@@ -6483,7 +6539,7 @@ app.get('/api/admin/deposits/:id', adminProtect, async (req, res) => {
       data: { deposit }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin get deposit error:', err);
+    console.error('Admin get deposit error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch deposit details'
@@ -6510,7 +6566,7 @@ app.get('/api/admin/withdrawals/:id', adminProtect, async (req, res) => {
       data: { withdrawal }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin get withdrawal error:', err);
+    console.error('Admin get withdrawal error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch withdrawal details'
@@ -6633,7 +6689,7 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
       userId: deposit.user._id
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin reject deposit error:', err);
+    console.error('Admin reject deposit error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to reject deposit',
@@ -6770,7 +6826,7 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
       userId: user._id
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin reject withdrawal error:', err);
+    console.error('Admin reject withdrawal error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to reject withdrawal',
@@ -6939,7 +6995,7 @@ app.delete('/api/admin/users/:userId', adminProtect, async (req, res) => {
     });
     
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin delete user error:', err);
+    console.error('Admin delete user error:', err);
     res.status(500).json({
       status: 'error',
       message: 'An error occurred while deleting the user',
@@ -7008,7 +7064,7 @@ app.put('/api/admin/users/:userId/suspend', adminProtect, async (req, res) => {
     });
     
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin suspend user error:', err);
+    console.error('Admin suspend user error:', err);
     res.status(500).json({
       status: 'error',
       message: 'An error occurred while suspending the user'
@@ -7067,7 +7123,7 @@ app.put('/api/admin/users/:userId/reactivate', adminProtect, async (req, res) =>
     });
     
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin reactivate user error:', err);
+    console.error('Admin reactivate user error:', err);
     res.status(500).json({
       status: 'error',
       message: 'An error occurred while reactivating the user'
@@ -7108,7 +7164,7 @@ app.get('/api/admin/downline', adminProtect, restrictTo('super', 'support'), asy
       }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get downline relationships error:', err);
+    console.error('Get downline relationships error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch downline relationships'
@@ -7198,7 +7254,7 @@ app.post('/api/admin/downline/assign', adminProtect, restrictTo('super', 'suppor
     });
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Assign downline error:', err);
+    console.error('Assign downline error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to assign downline relationship'
@@ -7231,7 +7287,7 @@ app.delete('/api/admin/downline/:relationshipId', adminProtect, restrictTo('supe
     });
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Remove downline error:', err);
+    console.error('Remove downline error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to remove downline relationship'
@@ -7259,7 +7315,7 @@ app.get('/api/admin/commission-settings', adminProtect, restrictTo('super', 'sup
       }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get commission settings error:', err);
+    console.error('Get commission settings error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch commission settings'
@@ -7316,7 +7372,7 @@ app.post('/api/admin/commission-settings', adminProtect, restrictTo('super'), [
     });
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Update commission settings error:', err);
+    console.error('Update commission settings error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to update commission settings'
@@ -7355,7 +7411,7 @@ app.get('/api/admin/commission-history', adminProtect, restrictTo('super', 'supp
       }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get commission history error:', err);
+    console.error('Get commission history error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch commission history'
@@ -7388,7 +7444,7 @@ app.get('/api/users/downline', protect, async (req, res) => {
     });
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get user downline error:', err);
+    console.error('Get user downline error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch downline information'
@@ -7470,7 +7526,7 @@ app.get('/api/admin/kyc/submissions', adminProtect, restrictTo('super', 'support
     });
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get KYC submissions error:', err);
+    console.error('Get KYC submissions error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch KYC submissions'
@@ -7505,7 +7561,7 @@ app.get('/api/admin/kyc/submissions/:submissionId', adminProtect, restrictTo('su
     });
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get KYC submission details error:', err);
+    console.error('Get KYC submission details error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch KYC submission details'
@@ -7634,7 +7690,7 @@ app.post('/api/admin/kyc/submissions/:submissionId/approve', adminProtect, restr
     });
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Approve KYC error:', err);
+    console.error('Approve KYC error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to approve KYC application',
@@ -7795,7 +7851,7 @@ app.post('/api/admin/kyc/submissions/:submissionId/reject', adminProtect, restri
     });
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Reject KYC error:', err);
+    console.error('Reject KYC error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to reject KYC application',
@@ -7842,13 +7898,6 @@ app.get('/api/admin/kyc/files/:type/:filename', adminProtect, restrictTo('super'
       return res.status(404).json({
         status: 'fail',
         message: 'File not found'
-      });
-    }
-
-    if (!ensureKYCFileIntegrity(filePath)) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'File is corrupted or has an invalid format'
       });
     }
 
@@ -7922,7 +7971,7 @@ app.get('/api/admin/kyc/files/:type/:filename', adminProtect, restrictTo('super'
     }
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Serve KYC file error:', err);
+    console.error('Serve KYC file error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to serve file'
@@ -7954,7 +8003,7 @@ app.get('/api/admin/kyc/files/secure/:type/:filename', adminProtect, restrictTo(
     });
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Generate secure URL error:', err);
+    console.error('Generate secure URL error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to generate secure URL'
@@ -8149,7 +8198,7 @@ app.get('/api/referrals', protect, async (req, res) => {
         await logActivity('view_referrals', 'referral', userId, userId, 'User', req);
 
     } catch (error) {
-        if (process.env.NODE_ENV !== 'production') console.error('Error loading referral data:', error);
+        console.error('Error loading referral data:', error);
         res.status(500).json({
             status: 'error',
             message: 'Failed to load referral data'
@@ -8212,7 +8261,7 @@ app.post('/api/admin/users', adminProtect, [
     
     await logActivity('create-user', 'user', user._id, req.admin._id, 'Admin', req);
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin add user error:', err);
+    console.error('Admin add user error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to create user'
@@ -8276,35 +8325,6 @@ const logUserActivity = async (req, action, status = 'success', metadata = {}, r
   } catch (err) {
     if (process.env.NODE_ENV !== 'production') console.error('Error logging user activity:', err);
   }
-};
-
-// Helper functions for device detection
-const getDeviceType = (req) => {
-  const userAgent = req.headers['user-agent'];
-  if (/mobile/i.test(userAgent)) return 'mobile';
-  if (/tablet/i.test(userAgent)) return 'tablet';
-  if (/iPad|Android|Touch/i.test(userAgent)) return 'tablet';
-  return 'desktop';
-};
-
-const getOSFromUserAgent = (userAgent) => {
-  if (!userAgent) return 'Unknown';
-  if (/windows/i.test(userAgent)) return 'Windows';
-  if (/macintosh|mac os x/i.test(userAgent)) return 'MacOS';
-  if (/linux/i.test(userAgent)) return 'Linux';
-  if (/android/i.test(userAgent)) return 'Android';
-  if (/iphone|ipad|ipod/i.test(userAgent)) return 'iOS';
-  return 'Unknown';
-};
-
-const getBrowserFromUserAgent = (userAgent) => {
-  if (!userAgent) return 'Unknown';
-  if (/edg/i.test(userAgent)) return 'Edge';
-  if (/chrome/i.test(userAgent)) return 'Chrome';
-  if (/safari/i.test(userAgent)) return 'Safari';
-  if (/firefox/i.test(userAgent)) return 'Firefox';
-  if (/opera|opr/i.test(userAgent)) return 'Opera';
-  return 'Unknown';
 };
 
 // Middleware to track user activity on protected routes
@@ -8492,7 +8512,7 @@ app.post('/api/auth/verify-otp', [
     }, user);
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('OTP verification error:', err);
+    console.error('OTP verification error:', err);
     res.status(500).json({
       status: 'error',
       message: 'An error occurred during verification'
@@ -8545,12 +8565,14 @@ app.post('/api/auth/send-otp', [
     });
 
     const user = await User.findOne({ email });
-    await sendAutomatedEmail(user, 'login_success', {
-      name: user ? user.firstName : 'there',
-      device: req.headers['user-agent'],
-      location: 'Pending verification',
-      ip: req.ip,
-      timestamp: new Date()
+    await sendProfessionalEmail({
+      email: email,
+      template: 'otp',
+      data: {
+        name: user ? user.firstName : 'there',
+        otp: otp,
+        action: 'verification'
+      }
     });
 
     res.status(200).json({
@@ -8559,7 +8581,7 @@ app.post('/api/auth/send-otp', [
     });
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Send OTP error:', err);
+    console.error('Send OTP error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to send OTP'
@@ -8568,8 +8590,7 @@ app.post('/api/auth/send-otp', [
 });
 
 /**
- * POST /api/withdrawals/asset - Process asset withdrawal (FIXED VERSION WITH GAS FEE LOGIC)
- * INSTRUCTION S & T: Gas fee deducted from Main Wallet separately
+ * POST /api/withdrawals/asset - Process asset withdrawal (FIXED VERSION)
  */
 app.post('/api/withdrawals/asset', protect, async (req, res) => {
     try {
@@ -8624,7 +8645,6 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             });
         }
 
-        // INSTRUCTION S & T: Gas fee calculation (separate from withdrawal amount)
         const btcGasFeeAmount = amount < 10000 ? 0.0056 : 0.0072;
         
         let btcPrice = null;
@@ -8797,6 +8817,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 gasFeeInUsd = btcGasFeeAmount * btcPrice;
             } else {
                 targetAssetPrice = await fetchAssetPrice(asset);
+                
                 gasFeeInUsd = btcGasFeeAmount * btcPrice;
                 gasFeeInAsset = gasFeeInUsd / targetAssetPrice;
             }
@@ -8804,22 +8825,20 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             if (process.env.NODE_ENV !== 'production') console.log(`Gas fee calculation: BTC fee: ${btcGasFeeAmount} BTC, BTC price: $${btcPrice}, Gas fee in USD: $${gasFeeInUsd.toFixed(2)}, Gas fee in ${asset.toUpperCase()}: ${gasFeeInAsset.toFixed(8)}`);
             
         } catch (error) {
-            if (process.env.NODE_ENV !== 'production') console.error('Price fetch error:', error);
+            console.error('Price fetch error:', error);
             return res.status(503).json({
                 status: 'error',
                 message: error.message || 'Unable to fetch current cryptocurrency prices. Please try again.'
             });
         }
         
-        // INSTRUCTION T: Check if user has enough MAIN wallet balance for gas fee
         if (user.balances.main < gasFeeInUsd) {
             return res.status(400).json({
                 status: 'error',
-                message: `Insufficient main balance for gas fee. Required: ${gasFeeInAsset.toFixed(8)} ${asset.toUpperCase()} (≈$${gasFeeInUsd.toFixed(2)}) in main wallet. Please ensure you have additional funds in your Main Wallet to cover the gas fee.`
+                message: `Insufficient main balance for gas fee. Required: ${gasFeeInAsset.toFixed(8)} ${asset.toUpperCase()} (≈$${gasFeeInUsd.toFixed(2)}) in main wallet.`
             });
         }
         
-        // Deduct gas fee from MAIN wallet (separate from withdrawal amount)
         await User.findByIdAndUpdate(userId, {
             $inc: {
                 'balances.main': -gasFeeInUsd
@@ -9037,7 +9056,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
         });
 
     } catch (err) {
-        if (process.env.NODE_ENV !== 'production') console.error('Asset withdrawal error:', err);
+        console.error('Asset withdrawal error:', err);
         
         if (err.code === 'ECONNABORTED' || err.message.includes('timeout')) {
             return res.status(503).json({
@@ -9263,7 +9282,7 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
         };
         
       } catch (err) {
-        if (process.env.NODE_ENV !== 'production') console.error('Error fetching exact location for IP:', err);
+        console.error('Error fetching exact location for IP:', err);
         return {
           country: 'Unknown',
           city: 'Unknown',
@@ -9392,7 +9411,7 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
     });
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin activity fetch error:', err);
+    console.error('Admin activity fetch error:', err);
     res.status(500).json({
       status: 'error',
       message: 'An error occurred while fetching activity data'
@@ -9509,7 +9528,7 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
             }
         });
     } catch (err) {
-        if (process.env.NODE_ENV !== 'production') console.error('Get latest activity error:', err);
+        console.error('Get latest activity error:', err);
         res.status(500).json({
             status: 'error',
             message: 'Failed to fetch latest activity'
@@ -9636,7 +9655,7 @@ app.post('/api/users/location', protect, async (req, res) => {
     });
     
   } catch (error) {
-    if (process.env.NODE_ENV !== 'production') console.error('Location update error:', error);
+    console.error('Location update error:', error);
     res.status(500).json({
       status: 'error',
       message: 'Failed to update location'
@@ -9719,7 +9738,7 @@ app.post('/api/users/cookie-preferences', protect, async (req, res) => {
     });
     
   } catch (error) {
-    if (process.env.NODE_ENV !== 'production') console.error('Cookie preferences error:', error);
+    console.error('Cookie preferences error:', error);
     res.status(500).json({
       status: 'error',
       message: 'Failed to save cookie preferences'
@@ -9744,7 +9763,7 @@ app.get('/api/admin/restrictions', adminProtect, restrictTo('super'), async (req
       }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('GET restrictions error:', err);
+    console.error('GET restrictions error:', err);
     res.status(500).json({ status: 'error', message: 'Failed to fetch restriction settings' });
   }
 });
@@ -9787,7 +9806,7 @@ app.post('/api/admin/restrictions', adminProtect, restrictTo('super'), async (re
     
     res.json({ status: 'success', message: 'Restrictions saved successfully' });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('POST restrictions error:', err);
+    console.error('POST restrictions error:', err);
     res.status(500).json({ status: 'error', message: err.message || 'Failed to save restrictions' });
   }
 });
@@ -9848,10 +9867,12 @@ app.get('/api/user/restriction-status', protect, async (req, res) => {
       }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get user restriction status error:', err);
+    console.error('Get user restriction status error:', err);
     res.status(500).json({ status: 'error', message: 'Failed to fetch restriction status' });
   }
 });
+
+// SNIPPET B - COMPLETE REWRITE
 
 // =============================================
 // FIAT CURRENCIES ENDPOINT - Get ALL world currencies with REAL exchange rates (NO HARDCODING)
@@ -9908,7 +9929,7 @@ app.get('/api/fiat-currencies', async (req, res) => {
     }
     
     if (!apiSuccess || !rates) {
-      if (process.env.NODE_ENV !== 'production') console.error('❌ All exchange rate APIs failed');
+      console.error('❌ All exchange rate APIs failed');
       return res.status(503).json({
         status: 'error',
         message: 'Unable to fetch exchange rates. Please try again later.',
@@ -9997,7 +10018,7 @@ app.get('/api/fiat-currencies', async (req, res) => {
     });
     
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('❌ Error fetching fiat currencies:', err);
+    console.error('❌ Error fetching fiat currencies:', err);
     res.status(500).json({ 
       status: 'error', 
       message: 'Failed to fetch exchange rates. Please try again.'
@@ -10007,21 +10028,20 @@ app.get('/api/fiat-currencies', async (req, res) => {
 
 // =============================================
 // CONVERT ASSETS ENDPOINT - Get available target cryptos for conversion
-// INSTRUCTION W & X & Y: Fetch from Binance in real-time, no hardcoded cryptos
 // =============================================
 app.get('/api/convert/assets', protect, async (req, res) => {
   try {
-    const { cryptos, logos } = await fetchAllCryptosFromBinance();
+    const cryptos = await fetchAllCryptosFromBinance();
     
     const availableAssets = cryptos.map(crypto => ({
-      symbol: crypto.symbol,
+      symbol: crypto.symbol.toLowerCase(),
       name: crypto.name,
-      logo: logos[crypto.symbol] || `https://cryptologos.cc/logos/${crypto.symbol}-${crypto.symbol}-logo.png`
-    }));
+      logo: crypto.logo || `https://cryptologos.cc/logos/${crypto.symbol.toLowerCase()}-${crypto.symbol.toLowerCase()}-logo.png`
+    })).slice(0, 50);
     
     res.status(200).json({ assets: availableAssets });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error fetching convert assets:', err);
+    console.error('Error fetching convert assets:', err);
     res.status(500).json({ status: 'error', message: 'Failed to fetch available assets' });
   }
 });
@@ -10193,7 +10213,7 @@ app.post('/api/convert', protect, async (req, res) => {
       }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Conversion error:', err);
+    console.error('Conversion error:', err);
     res.status(500).json({ status: 'error', message: 'Conversion failed' });
   }
 });
@@ -10235,7 +10255,7 @@ app.post('/api/users/preferences/save', protect, async (req, res) => {
       data: { language, currency: fiatCurrency }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error saving preferences:', err);
+    console.error('Error saving preferences:', err);
     res.status(500).json({ status: 'error', message: 'Failed to save preferences' });
   }
 });
@@ -10267,7 +10287,7 @@ app.get('/api/users/preferences', protect, async (req, res) => {
       }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error fetching preferences:', err);
+    console.error('Error fetching preferences:', err);
     res.status(500).json({ status: 'error', message: 'Failed to fetch preferences' });
   }
 });
@@ -10310,7 +10330,7 @@ app.post('/api/users/preferences', protect, async (req, res) => {
       data: updates
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error updating preferences:', err);
+    console.error('Error updating preferences:', err);
     res.status(500).json({ status: 'error', message: 'Failed to update preferences' });
   }
 });
@@ -10328,7 +10348,7 @@ app.get('/api/users/deposit-asset', protect, async (req, res) => {
       data: { asset }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error fetching deposit asset:', err);
+    console.error('Error fetching deposit asset:', err);
     res.status(500).json({ status: 'error', message: 'Failed to fetch deposit asset' });
   }
 });
@@ -10557,7 +10577,7 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       assetAmount: assetAmount
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin approve deposit error:', err);
+    console.error('Admin approve deposit error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to approve deposit',
@@ -10773,7 +10793,7 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
       assetAmount: withdrawal.assetAmount
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin approve withdrawal error:', err);
+    console.error('Admin approve withdrawal error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to approve withdrawal',
@@ -10826,7 +10846,7 @@ app.get('/api/users/assets', protect, async (req, res) => {
     
     res.status(200).json(assetData);
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error fetching user assets:', err);
+    console.error('Error fetching user assets:', err);
     res.status(500).json({ status: 'error', message: 'Failed to fetch assets' });
   }
 });
@@ -10843,7 +10863,7 @@ app.get('/api/users/balances', protect, async (req, res) => {
       matured: user.balances.matured
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error fetching balances:', err);
+    console.error('Error fetching balances:', err);
     res.status(500).json({ status: 'error', message: 'Failed to fetch balances' });
   }
 });
@@ -10854,11 +10874,11 @@ let isRecalculating = false;
 
 const startRealTimePriceUpdates = (io) => {
   if (priceUpdateInterval) clearInterval(priceUpdateInterval);
-
+  
   priceUpdateInterval = setInterval(async () => {
     try {
-      const { cryptos } = await fetchAllCryptosFromBinance();
-      const assets = cryptos.map(c => c.symbol.toUpperCase()).slice(0, 50);
+      const cryptos = await fetchAllCryptosFromBinance();
+      const assets = cryptos.map(c => c.symbol.toUpperCase());
       const priceUpdates = {};
       
       const pricePromises = assets.map(async (asset) => {
@@ -10876,15 +10896,6 @@ const startRealTimePriceUpdates = (io) => {
       if (Object.keys(priceUpdates).length > 0 && io) {
         io.emit('price_update', priceUpdates);
         lastPrices = priceUpdates;
-
-        const marketWss = req?.app?.get('marketWss');
-        if (marketWss) {
-          marketWss.clients.forEach(client => {
-            if (client.readyState === WebSocket.OPEN) {
-              client.send(JSON.stringify({ type: 'price_update', data: priceUpdates }));
-            }
-          });
-        }
       }
       
       await recalculateAllWalletValuesRealtime(io, priceUpdates);
@@ -11118,9 +11129,12 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
       await sendEmail({
         email: userEmail,
         subject: `${currency.toUpperCase()} Deposit Confirmed`,
-        html: getEmailTemplate(
-          `${currency.toUpperCase()} Deposit Confirmed`,
-          `
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="text-align: center; margin-bottom: 20px;">
+              <img src="https://cryptologos.cc/logos/${currency.toLowerCase()}-${currency.toLowerCase()}-logo.png" alt="${currency.toUpperCase()} logo" style="width: 60px; height: 60px;">
+            </div>
+            <h2 style="color: #2563eb;">Deposit Received</h2>
             <p>Dear ${user.firstName} ${user.lastName},</p>
             <p>You have received a deposit from Bithash Capital Secure Asset Fund (BCSAF).</p>
             <div style="background: #f8fafc; padding: 15px; border-radius: 8px; margin: 15px 0;">
@@ -11130,10 +11144,13 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
               <p><strong>Date:</strong> ${new Date().toLocaleString()}</p>
               ${description ? `<p><strong>Note:</strong> ${description}</p>` : ''}
             </div>
-          `,
-          'Go to Dashboard',
-          'https://www.bithashcapital.live/dashboard'
-        )
+            <div style="text-align: center; margin: 30px 0;">
+              <a href="https://www.bithashcapital.live/dashboard" style="background-color: #2563eb; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block;">Go to Dashboard</a>
+            </div>
+            <hr>
+            <p style="font-size: 12px; color: #666;">Bithash Finance Team</p>
+          </div>
+        `
       });
     } catch (emailErr) {
       if (process.env.NODE_ENV !== 'production') console.error('Failed to send email notification:', emailErr);
@@ -11165,7 +11182,7 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
     });
     
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error adding crypto balance:', err);
+    console.error('Error adding crypto balance:', err);
     res.status(500).json({
       status: 'error',
       message: err.message || 'Failed to add crypto balance'
@@ -11173,31 +11190,31 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
   }
 });
 
-// GET /api/admin/supported-cryptos - INSTRUCTION W & X & Y: Fetch from Binance in real-time
+// GET /api/admin/supported-cryptos
 app.get('/api/admin/supported-cryptos', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
   try {
-    const { cryptos, logos } = await fetchAllCryptosFromBinance();
+    const cryptos = await fetchAllCryptosFromBinance();
     
-    const supportedCryptos = [];
-    for (const crypto of cryptos) {
+    const cryptoData = [];
+    for (const crypto of cryptos.slice(0, 100)) {
       const totalBalance = await UserAssetBalance.aggregate([
-        { $group: { _id: null, total: { $sum: `$balances.${crypto.symbol}` } } }
+        { $group: { _id: null, total: { $sum: `$balances.${crypto.symbol.toLowerCase()}` } } }
       ]);
       
-      supportedCryptos.push({
+      cryptoData.push({
         code: crypto.symbol.toUpperCase(),
         name: crypto.name,
-        logoUrl: logos[crypto.symbol] || `https://cryptologos.cc/logos/${crypto.symbol}-${crypto.symbol}-logo.png`,
+        logoUrl: crypto.logo || `https://cryptologos.cc/logos/${crypto.symbol.toLowerCase()}-${crypto.symbol.toLowerCase()}-logo.png`,
         balance: totalBalance[0]?.total || 0
       });
     }
     
     res.json({
       status: 'success',
-      data: { cryptos: supportedCryptos }
+      data: { cryptos: cryptoData }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error fetching supported cryptos:', err);
+    console.error('Error fetching supported cryptos:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch supported cryptocurrencies'
@@ -11261,7 +11278,7 @@ app.get('/api/market/all-pairs', async (req, res) => {
     
     res.status(200).json({ pairs: pairsData, quoteAssets: quoteData });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('All pairs fetch error:', err.message);
+    console.error('All pairs fetch error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch market pairs', error: err.message });
   }
 });
@@ -11296,7 +11313,7 @@ app.get('/api/market/orderbook', async (req, res) => {
 
     res.status(200).json(limitedData);
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Orderbook fetch error:', err.message);
+    console.error('Orderbook fetch error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch order book', error: err.message });
   }
 });
@@ -11349,7 +11366,7 @@ app.get('/api/market/ticker/24hr', async (req, res) => {
     
     res.status(200).json(tickers);
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Ticker fetch error:', err.message);
+    console.error('Ticker fetch error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch ticker data', error: err.message });
   }
 });
@@ -11374,7 +11391,7 @@ app.get('/api/market/trades', async (req, res) => {
 
     res.status(200).json(limitedTrades);
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Trades fetch error:', err.message);
+    console.error('Trades fetch error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch trades', error: err.message });
   }
 });
@@ -11413,7 +11430,7 @@ app.get('/api/market/candles', async (req, res) => {
 
     res.status(200).json({ candles });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Candles fetch error:', err.message);
+    console.error('Candles fetch error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch candle data', error: err.message });
   }
 });
@@ -11473,7 +11490,7 @@ app.get('/api/market/pairs', async (req, res) => {
     const result = { data: pairsWithPrices };
     res.status(200).json(result);
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Pairs fetch error:', err.message);
+    console.error('Pairs fetch error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch market pairs', error: err.message });
   }
 });
@@ -11511,7 +11528,7 @@ app.get('/api/asset/logo', async (req, res) => {
 
     res.status(200).json(result);
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Logo fetch error:', err.message);
+    console.error('Logo fetch error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch logo', error: err.message });
   }
 });
@@ -11548,7 +11565,7 @@ app.get('/api/asset/extra', async (req, res) => {
 
     res.status(200).json(result);
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Asset extra fetch error:', err.message);
+    console.error('Asset extra fetch error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch asset info', error: err.message });
   }
 });
@@ -11624,7 +11641,7 @@ app.get('/api/asset/info', async (req, res) => {
     
     res.status(200).json(fallbackResult);
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Asset info fetch error:', err.message);
+    console.error('Asset info fetch error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch asset info', error: err.message });
   }
 });
@@ -11655,7 +11672,7 @@ app.get('/api/trading/data', async (req, res) => {
 
     res.status(200).json(defaultData);
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Trading data fetch error:', err.message);
+    console.error('Trading data fetch error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch trading data', error: err.message });
   }
 });
@@ -11688,7 +11705,7 @@ app.get('/api/analysis', async (req, res) => {
 
     res.status(200).json(defaultData);
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Analysis fetch error:', err.message);
+    console.error('Analysis fetch error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch analysis data', error: err.message });
   }
 });
@@ -11728,7 +11745,7 @@ app.get('/api/trading/pairlimits', async (req, res) => {
 
     res.status(200).json(pairLimits);
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Pair limits fetch error:', err.message);
+    console.error('Pair limits fetch error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch pair limits', error: err.message });
   }
 });
@@ -11753,7 +11770,7 @@ app.get('/api/trading/orders', protect, async (req, res) => {
 
     res.status(200).json({ status: 'success', data: orders });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get orders error:', err.message);
+    console.error('Get orders error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch orders', error: err.message });
   }
 });
@@ -11882,7 +11899,7 @@ app.post('/api/trading/orders/buy', protect, async (req, res) => {
 
     res.status(200).json({ status: 'success', message: 'Buy order executed', data: { order, totalCost, fee: takerFee } });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Buy order error:', err.message);
+    console.error('Buy order error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to place buy order', error: err.message });
   }
 });
@@ -12012,7 +12029,7 @@ app.post('/api/trading/orders/sell', protect, async (req, res) => {
 
     res.status(200).json({ status: 'success', message: 'Sell order executed', data: { order, totalValue, fee: takerFee, netAmount } });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Sell order error:', err.message);
+    console.error('Sell order error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to place sell order', error: err.message });
   }
 });
@@ -12045,7 +12062,7 @@ app.post('/api/trading/orders/cancel', protect, async (req, res) => {
 
     res.status(200).json({ status: 'success', message: 'Order cancelled' });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Cancel order error:', err.message);
+    console.error('Cancel order error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to cancel order', error: err.message });
   }
 });
@@ -12068,7 +12085,7 @@ app.post('/api/trading/orders/cancel-all', protect, async (req, res) => {
 
     res.status(200).json({ status: 'success', message: `${result.modifiedCount} orders cancelled` });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Cancel all orders error:', err.message);
+    console.error('Cancel all orders error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to cancel orders', error: err.message });
   }
 });
@@ -12088,7 +12105,7 @@ app.get('/api/trading/trades', protect, async (req, res) => {
 
     res.status(200).json({ status: 'success', data: trades });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get trades error:', err.message);
+    console.error('Get trades error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch trades', error: err.message });
   }
 });
@@ -12106,7 +12123,7 @@ app.get('/api/trading/positions', protect, async (req, res) => {
 
     res.status(200).json({ status: 'success', data: positions });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get positions error:', err.message);
+    console.error('Get positions error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch positions', error: err.message });
   }
 });
@@ -12157,7 +12174,7 @@ app.post('/api/trading/positions/close', protect, async (req, res) => {
 
     res.status(200).json({ status: 'success', message: 'Position closed', data: { realizedPnL } });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Close position error:', err.message);
+    console.error('Close position error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to close position', error: err.message });
   }
 });
@@ -12191,7 +12208,7 @@ app.get('/api/user/chart-settings', protect, async (req, res) => {
 
     res.status(200).json({ status: 'success', chartSettings: settings.chartSettings || {} });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get chart settings error:', err.message);
+    console.error('Get chart settings error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch chart settings', error: err.message });
   }
 });
@@ -12210,7 +12227,7 @@ app.post('/api/user/chart-settings', protect, async (req, res) => {
 
     res.status(200).json({ status: 'success', message: 'Chart settings saved' });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Save chart settings error:', err.message);
+    console.error('Save chart settings error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to save chart settings', error: err.message });
   }
 });
@@ -12237,7 +12254,7 @@ app.get('/api/user/settings', protect, async (req, res) => {
 
     res.status(200).json({ status: 'success', orderBookSettings: settings.orderBookSettings || {} });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get settings error:', err.message);
+    console.error('Get settings error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch settings', error: err.message });
   }
 });
@@ -12256,7 +12273,7 @@ app.post('/api/user/settings', protect, async (req, res) => {
 
     res.status(200).json({ status: 'success', message: 'Settings saved' });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Save settings error:', err.message);
+    console.error('Save settings error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to save settings', error: err.message });
   }
 });
@@ -12295,7 +12312,7 @@ app.get('/api/users/assets', protect, async (req, res) => {
     
     res.status(200).json({ status: 'success', data: { assets } });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get user assets error:', err.message);
+    console.error('Get user assets error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch assets', error: err.message });
   }
 });
@@ -12306,7 +12323,7 @@ app.get('/api/users/me', protect, async (req, res) => {
     const user = await User.findById(req.user._id).select('-password -twoFactorAuth.secret');
     res.status(200).json({ status: 'success', data: { user } });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get user error:', err.message);
+    console.error('Get user error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch user', error: err.message });
   }
 });
@@ -12317,7 +12334,7 @@ app.get('/api/users/balances', protect, async (req, res) => {
     const user = await User.findById(req.user._id).select('balances');
     res.status(200).json({ status: 'success', data: { balances: user.balances } });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get balances error:', err.message);
+    console.error('Get balances error:', err.message);
     res.status(500).json({ status: 'error', message: 'Failed to fetch balances', error: err.message });
   }
 });
@@ -12585,7 +12602,7 @@ app.get('/api/withdrawals/asset', protect, async (req, res) => {
         });
 
     } catch (err) {
-        if (process.env.NODE_ENV !== 'production') console.error('Error fetching assets:', err);
+        console.error('Error fetching assets:', err);
         return res.status(500).json({
             status: 'error',
             message: 'Failed to fetch assets'
@@ -12729,7 +12746,7 @@ app.post('/api/withdrawals/bank', protect, async (req, res) => {
         });
 
     } catch (err) {
-        if (process.env.NODE_ENV !== 'production') console.error('Bank withdrawal error:', err);
+        console.error('Bank withdrawal error:', err);
         return res.status(500).json({
             status: 'error',
             message: err.message || 'Failed to process bank withdrawal request'
@@ -12770,7 +12787,7 @@ app.get('/api/withdrawals/history', protect, async (req, res) => {
         });
 
     } catch (err) {
-        if (process.env.NODE_ENV !== 'production') console.error('Error fetching withdrawal history:', err);
+        console.error('Error fetching withdrawal history:', err);
         return res.status(500).json({
             status: 'error',
             message: 'Failed to fetch withdrawal history'
@@ -12814,7 +12831,7 @@ app.post('/api/withdrawals/confirm-gas-payment', protect, async (req, res) => {
         });
 
     } catch (err) {
-        if (process.env.NODE_ENV !== 'production') console.error('Error confirming gas payment:', err);
+        console.error('Error confirming gas payment:', err);
         return res.status(500).json({
             status: 'error',
             message: err.message || 'Failed to confirm gas payment'
@@ -12877,7 +12894,7 @@ async function fetchMarketData() {
     return marketDataCache.data || [];
     
   } catch (error) {
-    if (process.env.NODE_ENV !== 'production') console.error('Market data fetch error:', error);
+    console.error('Market data fetch error:', error);
     return marketDataCache.data || [];
   }
 }
@@ -12897,7 +12914,7 @@ app.get('/api/market/assets', async (req, res) => {
     });
     
   } catch (error) {
-    if (process.env.NODE_ENV !== 'production') console.error('Market assets error:', error);
+    console.error('Market assets error:', error);
     res.json({
       status: 'error',
       data: []
@@ -12910,6 +12927,7 @@ setInterval(async () => {
 }, 30000);
 
 fetchMarketData();
+
 
 
 
@@ -22719,9 +22737,15 @@ function maskCardNumber(cardNumber) {
 
 
 
+
+
+
+
+// SNIPPET C - COMPLETE REWRITE
+
 // Error handling middleware
 app.use((err, req, res, next) => {
-  if (process.env.NODE_ENV !== 'production') console.error('Global error handler:', err);
+  console.error('Global error handler:', err);
   res.status(500).json({
     status: 'error',
     message: 'Something went wrong on the server'
@@ -22754,10 +22778,6 @@ app.set('io', io);
 // REAL-TIME STATS WITH REDIS SINGLE SOURCE OF TRUTH
 // =============================================
 
-const REDIS_INVESTOR_KEY = process.env.REDIS_INVESTOR_KEY || 'cloud_miner_count';
-const INITIAL_INVESTOR_COUNT = parseInt(process.env.INITIAL_INVESTOR_COUNT) || 5104329;
-const DAILY_GROWTH_LIMIT = parseInt(process.env.DAILY_GROWTH_LIMIT) || 7999;
-
 const getStartOfDay = () => {
   const now = new Date();
   now.setUTCHours(0, 0, 0, 0);
@@ -22770,12 +22790,12 @@ const getDailyGrowthKey = (date) => {
 
 const initializeInvestorCount = async () => {
   try {
-    let currentCount = await redis.get(REDIS_INVESTOR_KEY);
+    let currentCount = await redis.get(process.env.REDIS_INVESTOR_KEY);
     
     if (!currentCount) {
-      currentCount = INITIAL_INVESTOR_COUNT;
-      await redis.set(REDIS_INVESTOR_KEY, currentCount);
-      if (process.env.NODE_ENV !== 'production') console.log(`✅ Initialized investor count to ${currentCount.toLocaleString()}`);
+      currentCount = process.env.INITIAL_INVESTOR_COUNT || 5104329;
+      await redis.set(process.env.REDIS_INVESTOR_KEY, currentCount);
+      if (process.env.NODE_ENV !== 'production') console.log(`✅ Initialized investor count to ${parseInt(currentCount).toLocaleString()}`);
     } else {
       currentCount = parseInt(currentCount);
       if (process.env.NODE_ENV !== 'production') console.log(`📊 Current investor count from Redis: ${currentCount.toLocaleString()}`);
@@ -22783,8 +22803,8 @@ const initializeInvestorCount = async () => {
     
     return currentCount;
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error initializing investor count:', err);
-    return INITIAL_INVESTOR_COUNT;
+    console.error('Error initializing investor count:', err);
+    return process.env.INITIAL_INVESTOR_COUNT || 5104329;
   }
 };
 
@@ -22805,7 +22825,7 @@ const checkAndResetDailyGrowth = async () => {
     
     return dailyGrowth;
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error checking daily growth:', err);
+    console.error('Error checking daily growth:', err);
     return 0;
   }
 };
@@ -22814,16 +22834,16 @@ const addInvestors = async () => {
   try {
     let dailyGrowth = await checkAndResetDailyGrowth();
     
-    if (dailyGrowth >= DAILY_GROWTH_LIMIT) {
-      if (process.env.NODE_ENV !== 'production') console.log(`⏸️ Daily growth limit reached (${DAILY_GROWTH_LIMIT}). No more investors today.`);
+    if (dailyGrowth >= (process.env.DAILY_GROWTH_LIMIT || 7999)) {
+      if (process.env.NODE_ENV !== 'production') console.log(`⏸️ Daily growth limit reached (${process.env.DAILY_GROWTH_LIMIT || 7999}). No more investors today.`);
       return false;
     }
     
     const increment = Math.floor(Math.random() * 49) + 1;
     
     const newDailyGrowth = dailyGrowth + increment;
-    const actualIncrement = newDailyGrowth > DAILY_GROWTH_LIMIT 
-      ? DAILY_GROWTH_LIMIT - dailyGrowth 
+    const actualIncrement = newDailyGrowth > (process.env.DAILY_GROWTH_LIMIT || 7999) 
+      ? (process.env.DAILY_GROWTH_LIMIT || 7999) - dailyGrowth 
       : increment;
     
     if (actualIncrement <= 0) {
@@ -22831,26 +22851,26 @@ const addInvestors = async () => {
       return false;
     }
     
-    const newCount = await redis.incrby(REDIS_INVESTOR_KEY, actualIncrement);
+    const newCount = await redis.incrby(process.env.REDIS_INVESTOR_KEY, actualIncrement);
     
     const today = getStartOfDay();
     const todayKey = getDailyGrowthKey(today);
     await redis.incrby(todayKey, actualIncrement);
     
     if (process.env.NODE_ENV !== 'production') console.log(`📈 Investor count increased by ${actualIncrement}. New count: ${newCount.toLocaleString()}`);
-    if (process.env.NODE_ENV !== 'production') console.log(`📊 Daily progress: ${dailyGrowth + actualIncrement}/${DAILY_GROWTH_LIMIT}`);
+    if (process.env.NODE_ENV !== 'production') console.log(`📊 Daily progress: ${dailyGrowth + actualIncrement}/${process.env.DAILY_GROWTH_LIMIT || 7999}`);
     
     return { newCount, increment: actualIncrement };
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error adding investors:', err);
+    console.error('Error adding investors:', err);
     return false;
   }
 };
 
 const broadcastStats = async () => {
   try {
-    const currentCount = await redis.get(REDIS_INVESTOR_KEY);
-    const count = currentCount ? parseInt(currentCount) : INITIAL_INVESTOR_COUNT;
+    const currentCount = await redis.get(process.env.REDIS_INVESTOR_KEY);
+    const count = currentCount ? parseInt(currentCount) : (process.env.INITIAL_INVESTOR_COUNT || 5104329);
     
     const stats = {
       totalInvestors: count,
@@ -22861,23 +22881,23 @@ const broadcastStats = async () => {
     
     if (process.env.NODE_ENV !== 'production') console.log(`📡 Broadcasted stats to ${io.engine.clientsCount} clients: ${count.toLocaleString()} investors`);
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error broadcasting stats:', err);
+    console.error('Error broadcasting stats:', err);
   }
 };
 
 const getCurrentStats = async () => {
   try {
-    const currentCount = await redis.get(REDIS_INVESTOR_KEY);
-    const count = currentCount ? parseInt(currentCount) : INITIAL_INVESTOR_COUNT;
+    const currentCount = await redis.get(process.env.REDIS_INVESTOR_KEY);
+    const count = currentCount ? parseInt(currentCount) : (process.env.INITIAL_INVESTOR_COUNT || 5104329);
     
     return {
       totalInvestors: count,
       timestamp: Date.now()
     };
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error getting current stats:', err);
+    console.error('Error getting current stats:', err);
     return {
-      totalInvestors: INITIAL_INVESTOR_COUNT,
+      totalInvestors: process.env.INITIAL_INVESTOR_COUNT || 5104329,
       timestamp: Date.now()
     };
   }
@@ -22901,14 +22921,14 @@ const startInvestorGrowthJob = async () => {
         
         scheduleNextGrowth();
       } catch (err) {
-        if (process.env.NODE_ENV !== 'production') console.error('Error in growth job:', err);
+        console.error('Error in growth job:', err);
         scheduleNextGrowth();
       }
     }, interval);
   };
   
   scheduleNextGrowth();
-  if (process.env.NODE_ENV !== 'production') console.log(`🚀 Investor growth job started. Will add 1-49 investors every 3-120 seconds (max ${DAILY_GROWTH_LIMIT}/day)`);
+  if (process.env.NODE_ENV !== 'production') console.log(`🚀 Investor growth job started. Will add 1-49 investors every 3-120 seconds (max ${process.env.DAILY_GROWTH_LIMIT || 7999}/day)`);
 };
 
 const stopInvestorGrowthJob = () => {
@@ -22927,7 +22947,7 @@ app.get('/api/stats/investors', async (req, res) => {
       data: stats
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error fetching investor stats:', err);
+    console.error('Error fetching investor stats:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch investor stats'
@@ -22940,19 +22960,19 @@ app.get('/api/stats/daily-progress', async (req, res) => {
     const today = getStartOfDay();
     const todayKey = getDailyGrowthKey(today);
     const dailyGrowth = await redis.get(todayKey);
-    const currentCount = await redis.get(REDIS_INVESTOR_KEY);
+    const currentCount = await redis.get(process.env.REDIS_INVESTOR_KEY);
     
     res.json({
       status: 'success',
       data: {
         dailyGrowth: dailyGrowth ? parseInt(dailyGrowth) : 0,
-        dailyLimit: DAILY_GROWTH_LIMIT,
-        totalInvestors: currentCount ? parseInt(currentCount) : INITIAL_INVESTOR_COUNT,
+        dailyLimit: process.env.DAILY_GROWTH_LIMIT || 7999,
+        totalInvestors: currentCount ? parseInt(currentCount) : (process.env.INITIAL_INVESTOR_COUNT || 5104329),
         date: new Date(today).toISOString()
       }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error fetching daily progress:', err);
+    console.error('Error fetching daily progress:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch daily progress'
@@ -23234,11 +23254,11 @@ const processMaturedInvestments = async () => {
 
         if (process.env.NODE_ENV !== 'production') console.log(`Automatically completed investment ${investment._id} for user ${user.email}`);
       } catch (err) {
-        if (process.env.NODE_ENV !== 'production') console.error(`Error processing investment ${investment._id}:`, err);
+        console.error(`Error processing investment ${investment._id}:`, err);
       }
     }
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error processing matured investments:', err);
+    console.error('Error processing matured investments:', err);
   }
 };
 
@@ -23261,7 +23281,6 @@ const gracefulShutdown = () => {
   process.exit(0);
 };
 
-// Initialize WebSocket servers after HTTP server is created
 const setupAllWebSockets = (server) => {
   setupSpotMarketWebSocket(server);
   setupTickerWebSocket(server);
@@ -23272,11 +23291,9 @@ process.on('SIGTERM', gracefulShutdown);
 process.on('SIGINT', gracefulShutdown);
 
 httpServer.listen(PORT, () => {
-  if (process.env.NODE_ENV !== 'production') {
-    console.log(`Server running on port ${PORT}`);
-    console.log(`📊 Real-time stats initialized with Redis as single source of truth`);
-    console.log(`📈 Investors will grow from ${INITIAL_INVESTOR_COUNT.toLocaleString()} with max ${DAILY_GROWTH_LIMIT}/day`);
-    console.log(`💰 Real-time crypto price updates started (every 1 second)`);
-    console.log(`🔌 WebSocket endpoints: /ws/spotmarket, /ws/ticker, /ws/market`);
-  }
+  if (process.env.NODE_ENV !== 'production') console.log(`Server running on port ${PORT}`);
+  if (process.env.NODE_ENV !== 'production') console.log(`📊 Real-time stats initialized with Redis as single source of truth`);
+  if (process.env.NODE_ENV !== 'production') console.log(`📈 Investors will grow from ${process.env.INITIAL_INVESTOR_COUNT?.toLocaleString() || 5104329} with max ${process.env.DAILY_GROWTH_LIMIT || 7999}/day`);
+  if (process.env.NODE_ENV !== 'production') console.log(`💰 Real-time crypto price updates started (every 1 second)`);
+  if (process.env.NODE_ENV !== 'production') console.log(`🔌 WebSocket endpoints: /ws/spotmarket, /ws/ticker, /ws/market`);
 });
