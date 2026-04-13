@@ -259,7 +259,7 @@ const googleClient = new OAuth2Client({
   redirectUri: process.env.GOOGLE_REDIRECT_URI
 });
 
-const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString('hex');
+const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7200s';
 const JWT_COOKIE_EXPIRES = process.env.JWT_COOKIE_EXPIRES || 0.083;
 
@@ -2565,9 +2565,9 @@ const fs = require('fs');
 
 const ensureUploadDirectories = () => {
   const dirs = [
-    process.env.KYC_UPLOAD_PATH || 'uploads/kyc/identity',
-    process.env.KYC_UPLOAD_PATH || 'uploads/kyc/address',
-    process.env.KYC_UPLOAD_PATH || 'uploads/kyc/facial',
+    process.env.KYC_IDENTITY_PATH || 'uploads/kyc/identity',
+    process.env.KYC_ADDRESS_PATH || 'uploads/kyc/address',
+    process.env.KYC_FACIAL_PATH || 'uploads/kyc/facial',
     process.env.TEMP_UPLOAD_PATH || 'uploads/temp'
   ];
   
@@ -2602,10 +2602,18 @@ const storage = multer.diskStorage({
 });
 
 const fileFilter = (req, file, cb) => {
-  const allowedMimes = JSON.parse(process.env.KYC_ALLOWED_MIME_TYPES || '["image/jpeg","image/jpg","image/png","image/gif","application/pdf","video/mp4","video/webm"]');
-  const allowedMimesSet = new Set(allowedMimes);
+  const allowedMimes = process.env.KYC_ALLOWED_MIME_TYPES ? 
+    JSON.parse(process.env.KYC_ALLOWED_MIME_TYPES) : {
+      'image/jpeg': true,
+      'image/jpg': true,
+      'image/png': true,
+      'image/gif': true,
+      'application/pdf': true,
+      'video/mp4': true,
+      'video/webm': true
+    };
   
-  if (allowedMimesSet.has(file.mimetype)) {
+  if (allowedMimes[file.mimetype]) {
     cb(null, true);
   } else {
     cb(new Error(`Invalid file type: ${file.mimetype}. Only images, PDFs, and videos are allowed.`), false);
@@ -3217,7 +3225,7 @@ const getFiatExchangeRates = async () => {
         return response.data.rates;
       }
     } catch (err) {
-      if (process.env.NODE_ENV !== 'production') console.warn('exchangerate-api.com failed:', err.message);
+      console.warn('exchangerate-api.com failed:', err.message);
     }
     
     try {
@@ -3227,7 +3235,7 @@ const getFiatExchangeRates = async () => {
         return response.data.rates;
       }
     } catch (err) {
-      if (process.env.NODE_ENV !== 'production') console.warn('frankfurter.app failed:', err.message);
+      console.warn('frankfurter.app failed:', err.message);
     }
     
     try {
@@ -3237,7 +3245,7 @@ const getFiatExchangeRates = async () => {
         return response.data.usd;
       }
     } catch (err) {
-      if (process.env.NODE_ENV !== 'production') console.warn('currency-api failed:', err.message);
+      console.warn('currency-api failed:', err.message);
     }
     
     console.error('All fiat exchange rate APIs failed');
@@ -3279,8 +3287,10 @@ const getAllWorldCurrencies = async () => {
     { code: 'SAR', name: 'Saudi Riyal', symbol: '﷼', flag: 'https://flagcdn.com/w40/sa.png' },
     { code: 'ILS', name: 'Israeli Shekel', symbol: '₪', flag: 'https://flagcdn.com/w40/il.png' },
     { code: 'RON', name: 'Romanian Leu', symbol: 'lei', flag: 'https://flagcdn.com/w40/ro.png' },
-    { code: 'KES', name: 'Kenyan Shilling', symbol: 'KSh', flag: 'https://flagcdn.com/w40/ke.png' },
-    { code: 'NGN', name: 'Nigerian Naira', symbol: '₦', flag: 'https://flagcdn.com/w40/ng.png' },
+    { code: 'CZK', name: 'Czech Koruna', symbol: 'Kč', flag: 'https://flagcdn.com/w40/cz.png' },
+    { code: 'HUF', name: 'Hungarian Forint', symbol: 'Ft', flag: 'https://flagcdn.com/w40/hu.png' },
+    { code: 'BGN', name: 'Bulgarian Lev', symbol: 'лв', flag: 'https://flagcdn.com/w40/bg.png' },
+    { code: 'HRK', name: 'Croatian Kuna', symbol: 'kn', flag: 'https://flagcdn.com/w40/hr.png' },
     { code: 'THB', name: 'Thai Baht', symbol: '฿', flag: 'https://flagcdn.com/w40/th.png' },
     { code: 'VND', name: 'Vietnamese Dong', symbol: '₫', flag: 'https://flagcdn.com/w40/vn.png' },
     { code: 'IDR', name: 'Indonesian Rupiah', symbol: 'Rp', flag: 'https://flagcdn.com/w40/id.png' },
@@ -3288,12 +3298,33 @@ const getAllWorldCurrencies = async () => {
     { code: 'PHP', name: 'Philippine Peso', symbol: '₱', flag: 'https://flagcdn.com/w40/ph.png' },
     { code: 'PKR', name: 'Pakistani Rupee', symbol: '₨', flag: 'https://flagcdn.com/w40/pk.png' },
     { code: 'BDT', name: 'Bangladeshi Taka', symbol: '৳', flag: 'https://flagcdn.com/w40/bd.png' },
+    { code: 'LKR', name: 'Sri Lankan Rupee', symbol: 'Rs', flag: 'https://flagcdn.com/w40/lk.png' },
+    { code: 'NPR', name: 'Nepalese Rupee', symbol: 'Rs', flag: 'https://flagcdn.com/w40/np.png' },
     { code: 'EGP', name: 'Egyptian Pound', symbol: 'E£', flag: 'https://flagcdn.com/w40/eg.png' },
-    { code: 'UAH', name: 'Ukrainian Hryvnia', symbol: '₴', flag: 'https://flagcdn.com/w40/ua.png' },
-    { code: 'KZT', name: 'Kazakhstani Tenge', symbol: '₸', flag: 'https://flagcdn.com/w40/kz.png' },
+    { code: 'QAR', name: 'Qatari Riyal', symbol: '﷼', flag: 'https://flagcdn.com/w40/qa.png' },
+    { code: 'KWD', name: 'Kuwaiti Dinar', symbol: 'KD', flag: 'https://flagcdn.com/w40/kw.png' },
+    { code: 'BHD', name: 'Bahraini Dinar', symbol: '.د.ب', flag: 'https://flagcdn.com/w40/bh.png' },
+    { code: 'OMR', name: 'Omani Rial', symbol: '﷼', flag: 'https://flagcdn.com/w40/om.png' },
+    { code: 'JOD', name: 'Jordanian Dinar', symbol: 'JD', flag: 'https://flagcdn.com/w40/jo.png' },
+    { code: 'KES', name: 'Kenyan Shilling', symbol: 'KSh', flag: 'https://flagcdn.com/w40/ke.png' },
+    { code: 'NGN', name: 'Nigerian Naira', symbol: '₦', flag: 'https://flagcdn.com/w40/ng.png' },
+    { code: 'GHS', name: 'Ghanaian Cedi', symbol: '₵', flag: 'https://flagcdn.com/w40/gh.png' },
+    { code: 'MAD', name: 'Moroccan Dirham', symbol: 'DH', flag: 'https://flagcdn.com/w40/ma.png' },
+    { code: 'TZS', name: 'Tanzanian Shilling', symbol: 'TSh', flag: 'https://flagcdn.com/w40/tz.png' },
+    { code: 'UGX', name: 'Ugandan Shilling', symbol: 'USh', flag: 'https://flagcdn.com/w40/ug.png' },
+    { code: 'ARS', name: 'Argentine Peso', symbol: '$', flag: 'https://flagcdn.com/w40/ar.png' },
     { code: 'CLP', name: 'Chilean Peso', symbol: '$', flag: 'https://flagcdn.com/w40/cl.png' },
     { code: 'COP', name: 'Colombian Peso', symbol: '$', flag: 'https://flagcdn.com/w40/co.png' },
-    { code: 'PEN', name: 'Peruvian Sol', symbol: 'S/', flag: 'https://flagcdn.com/w40/pe.png' }
+    { code: 'PEN', name: 'Peruvian Sol', symbol: 'S/', flag: 'https://flagcdn.com/w40/pe.png' },
+    { code: 'UYU', name: 'Uruguayan Peso', symbol: '$', flag: 'https://flagcdn.com/w40/uy.png' },
+    { code: 'PYG', name: 'Paraguayan Guarani', symbol: '₲', flag: 'https://flagcdn.com/w40/py.png' },
+    { code: 'BOB', name: 'Bolivian Boliviano', symbol: 'Bs', flag: 'https://flagcdn.com/w40/bo.png' },
+    { code: 'CRC', name: 'Costa Rican Colón', symbol: '₡', flag: 'https://flagcdn.com/w40/cr.png' },
+    { code: 'TWD', name: 'New Taiwan Dollar', symbol: 'NT$', flag: 'https://flagcdn.com/w40/tw.png' },
+    { code: 'MNT', name: 'Mongolian Tugrik', symbol: '₮', flag: 'https://flagcdn.com/w40/mn.png' },
+    { code: 'KHR', name: 'Cambodian Riel', symbol: '៛', flag: 'https://flagcdn.com/w40/kh.png' },
+    { code: 'LAK', name: 'Lao Kip', symbol: '₭', flag: 'https://flagcdn.com/w40/la.png' },
+    { code: 'MMK', name: 'Myanmar Kyat', symbol: 'Ks', flag: 'https://flagcdn.com/w40/mm.png' }
   ];
   
   return allCurrencies.map(currency => ({
@@ -3306,6 +3337,1187 @@ const convertToFiat = async (cryptoAmount, asset) => {
   const rate = await getExchangeRate(asset);
   return cryptoAmount * rate;
 };
+
+const sendEmail = async (options) => {
+  try {
+    let mailTransporter = infoTransporter;
+    
+    if (options.useSupportEmail === true) {
+      mailTransporter = supportTransporter;
+    }
+    
+    const mailOptions = {
+      from: `BitHash Capital <${mailTransporter === supportTransporter ? process.env.EMAIL_SUPPORT_USER : process.env.EMAIL_INFO_USER}>`,
+      to: options.email,
+      subject: options.subject,
+      text: options.message,
+      html: options.html
+    };
+
+    await mailTransporter.sendMail(mailOptions);
+    if (process.env.NODE_ENV !== 'production') console.log('Email sent successfully using', mailTransporter === supportTransporter ? 'SUPPORT' : 'INFO', 'email');
+  } catch (err) {
+    console.error('Error sending email:', err);
+    throw new Error('Failed to send email');
+  }
+};
+
+const getUserDeviceInfo = async (req) => {
+  try {
+    let ip = getRealClientIP(req);
+
+    let location = 'Unknown Location';
+    let exactLocation = false;
+    let isPublicIP = true;
+    let locationDetails = {
+      country: 'Unknown',
+      city: 'Unknown',
+      region: 'Unknown',
+      street: 'Unknown',
+      postalCode: 'Unknown',
+      timezone: 'Unknown',
+      latitude: null,
+      longitude: null
+    };
+
+    const privateIPRanges = [
+      /^10\./,
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\./,
+      /^192\.168\./,
+      /^127\./,
+      /^169\.254\./,
+      /^::1$/,
+      /^fc00::/,
+      /^fd00::/,
+      /^fe80::/
+    ];
+
+    for (const range of privateIPRanges) {
+      if (range.test(ip)) {
+        isPublicIP = false;
+        location = 'Local Network';
+        break;
+      }
+    }
+
+    if (isPublicIP && ip && ip !== 'Unknown' && ip !== '0.0.0.0') {
+      try {
+        if (process.env.NODE_ENV !== 'production') console.log(`Looking up exact location for IP: ${ip}`);
+        
+        const ipinfoToken = process.env.IPINFO_TOKEN || 'b56ce6e91d732d';
+        
+        try {
+          const response = await axios.get(`https://ipinfo.io/${ip}?token=${ipinfoToken}`, {
+            timeout: 5000
+          });
+          
+          if (response.data) {
+            const { city, region, country, loc, org, timezone, postal } = response.data;
+            
+            let latitude = null;
+            let longitude = null;
+            if (loc && loc.includes(',')) {
+              const coords = loc.split(',');
+              latitude = parseFloat(coords[0]);
+              longitude = parseFloat(coords[1]);
+              exactLocation = true;
+            }
+            
+            locationDetails = {
+              country: country || 'Unknown',
+              city: city || 'Unknown',
+              region: region || 'Unknown',
+              street: response.data.street || 'Unknown',
+              postalCode: postal || 'Unknown',
+              timezone: timezone || 'Unknown',
+              latitude: latitude,
+              longitude: longitude
+            };
+            
+            location = `${city || 'Unknown'}, ${region || 'Unknown'}, ${country || 'Unknown'}`;
+            
+            if (process.env.NODE_ENV !== 'production') console.log(`Exact location from ipinfo.io: ${location} (lat: ${latitude}, lng: ${longitude})`);
+          }
+        } catch (ipinfoError) {
+          if (process.env.NODE_ENV !== 'production') console.log('ipinfo.io failed for exact location, trying fallback services...');
+          
+          try {
+            const response = await axios.get(`https://ipapi.co/${ip}/json/`, {
+              timeout: 5000
+            });
+            
+            if (response.data && !response.data.error) {
+              const { city, region, country_name, country_code, latitude, longitude, timezone, postal } = response.data;
+              
+              if (latitude && longitude) {
+                exactLocation = true;
+              }
+              
+              locationDetails = {
+                country: country_name || country_code || 'Unknown',
+                city: city || 'Unknown',
+                region: region || 'Unknown',
+                street: 'Unknown',
+                postalCode: postal || 'Unknown',
+                timezone: timezone || 'Unknown',
+                latitude: latitude || null,
+                longitude: longitude || null
+              };
+              
+              location = `${city || 'Unknown'}, ${region || 'Unknown'}, ${country_name || country_code || 'Unknown'}`;
+              if (process.env.NODE_ENV !== 'production') console.log(`Exact location from ipapi.co: ${location}`);
+            }
+          } catch (ipapiError) {
+            try {
+              const response = await axios.get(`https://freeipapi.com/api/json/${ip}`, {
+                timeout: 5000
+              });
+              
+              if (response.data) {
+                const { cityName, regionName, countryName, latitude, longitude, timeZone } = response.data;
+                
+                if (latitude && longitude) {
+                  exactLocation = true;
+                }
+                
+                locationDetails = {
+                  country: countryName || 'Unknown',
+                  city: cityName || 'Unknown',
+                  region: regionName || 'Unknown',
+                  street: 'Unknown',
+                  postalCode: 'Unknown',
+                  timezone: timeZone || 'Unknown',
+                  latitude: latitude || null,
+                  longitude: longitude || null
+                };
+                
+                location = `${cityName || 'Unknown'}, ${regionName || 'Unknown'}, ${countryName || 'Unknown'}`;
+                if (process.env.NODE_ENV !== 'production') console.log(`Exact location from freeipapi.com: ${location}`);
+              }
+            } catch (freeipapiError) {
+              try {
+                const response = await axios.get(`http://ip-api.com/json/${ip}`, {
+                  timeout: 5000
+                });
+                
+                if (response.data && response.data.status === 'success') {
+                  const { city, regionName, country, lat, lon, timezone, zip } = response.data;
+                  
+                  if (lat && lon) {
+                    exactLocation = true;
+                  }
+                  
+                  locationDetails = {
+                    country: country || 'Unknown',
+                    city: city || 'Unknown',
+                    region: regionName || 'Unknown',
+                    street: 'Unknown',
+                    postalCode: zip || 'Unknown',
+                    timezone: timezone || 'Unknown',
+                    latitude: lat || null,
+                    longitude: lon || null
+                  };
+                  
+                  location = `${city || 'Unknown'}, ${regionName || 'Unknown'}, ${country || 'Unknown'}`;
+                  if (process.env.NODE_ENV !== 'production') console.log(`Exact location from ip-api.com: ${location}`);
+                }
+              } catch (ipapiComError) {
+                location = 'Location Unavailable';
+                if (process.env.NODE_ENV !== 'production') console.log('All location services failed for exact location');
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error('All exact location lookup services failed:', err.message);
+        location = 'Location Unavailable';
+      }
+    } else if (!isPublicIP) {
+      if (process.env.NODE_ENV !== 'production') console.log(`Private IP detected: ${ip}, using local network location`);
+    }
+
+    return {
+      ip: ip || 'Unknown',
+      device: req.headers['user-agent'] || 'Unknown',
+      location: location,
+      isPublicIP: isPublicIP,
+      exactLocation: exactLocation,
+      locationDetails: locationDetails
+    };
+  } catch (err) {
+    console.error('Error getting device info:', err);
+    return {
+      ip: req.ip || 'Unknown',
+      device: req.headers['user-agent'] || 'Unknown',
+      location: 'Unknown',
+      isPublicIP: false,
+      exactLocation: false,
+      locationDetails: {
+        country: 'Unknown',
+        city: 'Unknown',
+        region: 'Unknown',
+        street: 'Unknown',
+        postalCode: 'Unknown',
+        timezone: 'Unknown',
+        latitude: null,
+        longitude: null
+      }
+    };
+  }
+};
+
+const logActivity = async (action, entity, entityId, performedBy, performedByModel, req, changes = {}) => {
+  try {
+    const deviceInfo = await getUserDeviceInfo(req);
+    
+    const locationData = {
+      ip: deviceInfo.ip,
+      location: deviceInfo.location,
+      isPublicIP: deviceInfo.isPublicIP,
+      exactLocation: deviceInfo.exactLocation,
+      locationDetails: deviceInfo.locationDetails,
+      userAgent: deviceInfo.device,
+      detectedAt: new Date()
+    };
+    
+    await SystemLog.create({
+      action,
+      entity,
+      entityId,
+      performedBy,
+      performedByModel,
+      ip: locationData.ip,
+      device: locationData.userAgent,
+      location: locationData.location,
+      changes: {
+        ...changes,
+        locationData: locationData
+      }
+    });
+    
+    if (process.env.NODE_ENV !== 'production') console.log(`Activity Logged: ${action}`, {
+      entity,
+      entityId,
+      location: locationData.location,
+      exactLocation: locationData.exactLocation,
+      ip: locationData.ip,
+      isPublicIP: locationData.isPublicIP
+    });
+  } catch (err) {
+    console.error('Error logging activity:', err);
+  }
+};
+
+const generateTOTPSecret = () => {
+  return speakeasy.generateSecret({
+    length: 20,
+    name: 'BitHash',
+    issuer: 'BitHash LLC'
+  });
+};
+
+const verifyTOTP = (token, secret) => {
+  return speakeasy.totp.verify({
+    secret,
+    encoding: 'base32',
+    token,
+    window: 2
+  });
+};
+
+const initializeAdmin = async () => {
+  try {
+    const adminExists = await Admin.findOne({ email: process.env.ADMIN_EMAIL });
+    if (!adminExists) {
+      const hashedPassword = await bcrypt.hash(process.env.ADMIN_PASSWORD_HASH, 12);
+      await Admin.create({
+        email: process.env.ADMIN_EMAIL,
+        password: hashedPassword,
+        name: 'Super Admin',
+        role: 'super',
+        permissions: ['all'],
+        passwordChangedAt: Date.now()
+      });
+      if (process.env.NODE_ENV !== 'production') console.log('Default admin created');
+    }
+  } catch (err) {
+    console.error('Error initializing admin:', err);
+  }
+};
+
+const initializePlans = async () => {
+  try {
+    const plans = [
+      {
+        name: 'Starter Plan',
+        description: '12% After 10 hours',
+        percentage: 12,
+        duration: 10,
+        minAmount: 50,
+        maxAmount: 499,
+        referralBonus: 5
+      },
+      {
+        name: 'Gold Plan',
+        description: '20% After 24 hours',
+        percentage: 20,
+        duration: 24,
+        minAmount: 500,
+        maxAmount: 1999,
+        referralBonus: 5
+      },
+      {
+        name: 'Advance Plan',
+        description: '35% After 48 hours',
+        percentage: 35,
+        duration: 48,
+        minAmount: 2000,
+        maxAmount: 9999,
+        referralBonus: 5
+      },
+      {
+        name: 'Exclusive Plan',
+        description: '40% After 72 hours',
+        percentage: 40,
+        duration: 72,
+        minAmount: 10000,
+        maxAmount: 49999,
+        referralBonus: 5
+      },
+      {
+        name: 'Expert Plan',
+        description: '50% After 96 hours',
+        percentage: 50,
+        duration: 96,
+        minAmount: 50000,
+        maxAmount: 1000000,
+        referralBonus: 5
+      }
+    ];
+
+    for (const plan of plans) {
+      const existingPlan = await Plan.findOne({ name: plan.name });
+      if (!existingPlan) {
+        await Plan.create(plan);
+      }
+    }
+  } catch (err) {
+    console.error('Error initializing plans:', err);
+  }
+};
+
+initializeAdmin();
+initializePlans();
+
+const protect = async (req, res, next) => {
+  try {
+    let token;
+    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+      token = req.headers.authorization.split(' ')[1];
+    } else if (req.cookies.jwt) {
+      token = req.cookies.jwt;
+    }
+
+    if (!token) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'You are not logged in! Please log in to get access.'
+      });
+    }
+
+    const decoded = verifyJWT(token);
+    const currentUser = await User.findById(decoded.id).select('+passwordChangedAt +twoFactorAuth.secret');
+
+    if (!currentUser) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'The user belonging to this token no longer exists.'
+      });
+    }
+
+    if (currentUser.passwordChangedAt && decoded.iat < currentUser.passwordChangedAt.getTime() / 1000) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'User recently changed password! Please log in again.'
+      });
+    }
+
+    if (currentUser.status !== 'active') {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Your account has been suspended. Please contact support.'
+      });
+    }
+
+    if (currentUser.twoFactorAuth.enabled && !req.headers['x-2fa-verified']) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Two-factor authentication required'
+      });
+    }
+
+    req.user = currentUser;
+    next();
+  } catch (err) {
+    return res.status(401).json({
+      status: 'fail',
+      message: err.message || 'Invalid token. Please log in again.'
+    });
+  }
+};
+
+const adminProtect = async (req, res, next) => {
+  try {
+    let token;
+    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+      token = req.headers.authorization.split(' ')[1];
+    } else if (req.cookies.admin_jwt) {
+      token = req.cookies.admin_jwt;
+    }
+
+    if (!token) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'You are not logged in! Please log in to get access.'
+      });
+    }
+
+    const decoded = verifyJWT(token);
+    if (!decoded.isAdmin) {
+      return res.status(403).json({
+        status: 'fail',
+        message: 'You do not have permission to access this resource'
+      });
+    }
+
+    const currentAdmin = await Admin.findById(decoded.id).select('+passwordChangedAt +twoFactorAuth.secret');
+    if (!currentAdmin) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'The admin belonging to this token no longer exists.'
+      });
+    }
+
+    if (currentAdmin.twoFactorAuth.enabled && !req.headers['x-2fa-verified']) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Two-factor authentication required'
+      });
+    }
+
+    req.admin = currentAdmin;
+    next();
+  } catch (err) {
+    return res.status(401).json({
+      status: 'fail',
+      message: err.message || 'Invalid token. Please log in again.'
+    });
+  }
+};
+
+const restrictTo = (...roles) => {
+  return (req, res, next) => {
+    if (!roles.includes(req.admin.role)) {
+      return res.status(403).json({
+        status: 'fail',
+        message: 'You do not have permission to perform this action'
+      });
+    }
+    next();
+  };
+};
+
+const checkCSRF = (req, res, next) => {
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') {
+    return next();
+  }
+
+  const csrfToken = req.headers['x-csrf-token'] || req.body._csrf;
+  if (!csrfToken || !req.session.csrfToken || csrfToken !== req.session.csrfToken) {
+    return res.status(403).json({
+      status: 'fail',
+      message: 'Invalid CSRF token'
+    });
+  }
+  next();
+};
+
+const calculateReferralCommissions = async (investment) => {
+  try {
+    const populatedInvestment = await Investment.findById(investment._id)
+      .populate('user', 'firstName lastName email')
+      .populate('plan');
+
+    if (!populatedInvestment) {
+      if (process.env.NODE_ENV !== 'production') console.log(`Investment not found: ${investment._id}`);
+      return;
+    }
+
+    const investmentId = populatedInvestment._id;
+    const investorId = populatedInvestment.user._id;
+    const investmentAmount = populatedInvestment.amount;
+
+    if (process.env.NODE_ENV !== 'production') console.log(`Checking downline commissions for investment: ${investmentId}, user: ${investorId}, amount: $${investmentAmount}`);
+
+    const relationship = await DownlineRelationship.findOne({
+      downline: investorId,
+      status: 'active',
+      remainingRounds: { $gt: 0 }
+    }).populate('upline', 'firstName lastName email balances referralStats downlineStats');
+
+    if (!relationship) {
+      if (process.env.NODE_ENV !== 'production') console.log(`No active downline relationship found for user: ${investorId}`);
+      return;
+    }
+
+    const uplineId = relationship.upline._id;
+    const uplineUser = relationship.upline;
+    const commissionPercentage = relationship.commissionPercentage;
+    const commissionAmount = (investmentAmount * commissionPercentage) / 100;
+
+    if (process.env.NODE_ENV !== 'production') console.log(`Downline commission: $${investmentAmount} * ${commissionPercentage}% = $${commissionAmount} for upline: ${uplineUser.email}`);
+
+    const commissionHistory = await CommissionHistory.create({
+      upline: uplineId,
+      downline: investorId,
+      investment: investmentId,
+      investmentAmount: investmentAmount,
+      commissionPercentage: commissionPercentage,
+      commissionAmount: commissionAmount,
+      roundNumber: relationship.commissionRounds - relationship.remainingRounds + 1,
+      status: 'paid',
+      paidAt: new Date()
+    });
+
+    const updatedUpline = await User.findByIdAndUpdate(
+      uplineId,
+      {
+        $inc: {
+          'balances.main': commissionAmount,
+          'referralStats.totalEarnings': commissionAmount,
+          'referralStats.availableBalance': commissionAmount,
+          'downlineStats.totalCommissionEarned': commissionAmount,
+          'downlineStats.thisMonthCommission': commissionAmount
+        }
+      },
+      { new: true }
+    );
+
+    if (process.env.NODE_ENV !== 'production') console.log(`Updated upline ${uplineUser.email} MAIN balance with $${commissionAmount}. New balance: $${updatedUpline.balances.main}`);
+
+    relationship.remainingRounds -= 1;
+    relationship.totalCommissionEarned += commissionAmount;
+    
+    if (relationship.remainingRounds === 0) {
+      relationship.status = 'completed';
+      if (process.env.NODE_ENV !== 'production') console.log(`Commission rounds completed for relationship: ${relationship._id}`);
+    }
+
+    await relationship.save();
+
+    await Transaction.create({
+      user: uplineId,
+      type: 'referral',
+      amount: commissionAmount,
+      currency: 'USD',
+      status: 'completed',
+      method: 'INTERNAL',
+      reference: `DOWNLINE-COMM-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      details: {
+        commissionFrom: investorId,
+        investmentId: investmentId,
+        round: relationship.commissionRounds - relationship.remainingRounds + 1,
+        totalRounds: relationship.commissionRounds,
+        commissionType: 'downline',
+        downlineName: `${populatedInvestment.user.firstName} ${populatedInvestment.user.lastName}`,
+        percentage: commissionPercentage
+      },
+      fee: 0,
+      netAmount: commissionAmount
+    });
+
+    await User.findByIdAndUpdate(uplineId, {
+      $push: {
+        referralHistory: {
+          referredUser: investorId,
+          amount: commissionAmount,
+          percentage: commissionPercentage,
+          level: 1,
+          date: new Date(),
+          status: 'available',
+          type: 'downline_commission'
+        }
+      }
+    });
+
+    const activeDownlinesCount = await DownlineRelationship.countDocuments({ 
+      upline: uplineId, 
+      status: 'active',
+      remainingRounds: { $gt: 0 }
+    });
+
+    await User.findByIdAndUpdate(uplineId, {
+      'downlineStats.activeDownlines': activeDownlinesCount
+    });
+
+    if (process.env.NODE_ENV !== 'production') console.log(`Downline commission of $${commissionAmount} paid to upline ${uplineUser.email} for investment ${investmentId} (Round ${relationship.commissionRounds - relationship.remainingRounds + 1}/${relationship.commissionRounds})`);
+
+    await logActivity('downline_commission_paid', 'commission', commissionHistory._id, uplineId, 'User', null, {
+      amount: commissionAmount,
+      downline: investorId,
+      investment: investmentId,
+      round: relationship.commissionRounds - relationship.remainingRounds + 1,
+      totalRounds: relationship.commissionRounds,
+      percentage: commissionPercentage
+    });
+
+  } catch (err) {
+    console.error('Downline commission calculation error:', err);
+  }
+};
+
+const recalculateAllUserBalances = async (io) => {
+  try {
+    if (process.env.NODE_ENV !== 'production') console.log('Recalculating ALL user balances based on current crypto prices...');
+    
+    const users = await User.find({}).select('_id balances');
+    let updatedCount = 0;
+    
+    for (const user of users) {
+      let totalMainValue = 0;
+      let totalActiveValue = 0;
+      let totalMaturedValue = 0;
+      
+      const userAssetBalance = await UserAssetBalance.findOne({ user: user._id });
+      if (userAssetBalance) {
+        for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
+          if (balance > 0) {
+            const price = await getCryptoPrice(asset.toUpperCase());
+            if (price) {
+              totalMainValue += balance * price;
+            }
+          }
+        }
+      }
+      
+      const activeInvestments = await Investment.find({
+        user: user._id,
+        status: 'active'
+      }).populate('plan');
+      
+      for (const investment of activeInvestments) {
+        const currentBTCPrice = await getCryptoPrice('BTC');
+        if (currentBTCPrice && investment.originalAmount) {
+          const originalBTCAmount = investment.originalAmount / (investment.originalBTCPrice || 43000);
+          const currentUSDValue = originalBTCAmount * currentBTCPrice;
+          totalActiveValue += currentUSDValue;
+        } else {
+          totalActiveValue += investment.amount;
+        }
+      }
+      
+      const maturedInvestments = await Investment.find({
+        user: user._id,
+        status: 'completed'
+      }).populate('plan');
+      
+      for (const investment of maturedInvestments) {
+        const currentBTCPrice = await getCryptoPrice('BTC');
+        if (currentBTCPrice && investment.originalAmount) {
+          const originalBTCAmount = investment.originalAmount / (investment.originalBTCPrice || 43000);
+          const currentUSDValue = originalBTCAmount * currentBTCPrice;
+          totalMaturedValue += currentUSDValue;
+        } else {
+          totalMaturedValue += investment.amount + (investment.actualReturn || 0);
+        }
+      }
+      
+      const updates = {};
+      if (Math.abs(user.balances.main - totalMainValue) > 0.01) updates['balances.main'] = totalMainValue;
+      if (Math.abs(user.balances.active - totalActiveValue) > 0.01) updates['balances.active'] = totalActiveValue;
+      if (Math.abs(user.balances.matured - totalMaturedValue) > 0.01) updates['balances.matured'] = totalMaturedValue;
+      
+      if (Object.keys(updates).length > 0) {
+        await User.findByIdAndUpdate(user._id, updates);
+        updatedCount++;
+        
+        if (io) {
+          io.to(`user_${user._id}`).emit('balance_update', {
+            main: totalMainValue,
+            active: totalActiveValue,
+            matured: totalMaturedValue
+          });
+          
+          const previousDayValue = user.balances.main || totalMainValue;
+          const dailyPnL = totalMainValue - previousDayValue;
+          const dailyPnLPercentage = previousDayValue > 0 ? (dailyPnL / previousDayValue) * 100 : 0;
+          
+          io.to(`user_${user._id}`).emit('pnl_update', {
+            main: {
+              amount: dailyPnL,
+              percentage: dailyPnLPercentage
+            },
+            matured: {
+              amount: 0,
+              percentage: 0
+            }
+          });
+        }
+      }
+    }
+    
+    if (process.env.NODE_ENV !== 'production') console.log(`Recalculated balances for ${updatedCount} users (Main: fluctuates, Active: fluctuates, Matured: fluctuates)`);
+    
+  } catch (err) {
+    console.error('Error recalculating user balances:', err);
+  }
+};
+
+// =============================================
+// PRICE AGGREGATOR WORKER - SINGLE SOURCE OF TRUTH
+// =============================================
+
+let binanceWs = null;
+let wsReconnectAttempts = 0;
+let subscribedSymbols = new Set();
+let updateSequenceMap = new Map();
+let lastUpdateTimeMap = new Map();
+const MAX_STALENESS_MS = 500;
+let activeSubscriptions = new Map();
+
+const REDIS_KEYS = {
+  TICKER: (symbol) => `ticker:${symbol}`,
+  ORDERBOOK: (symbol) => `orderbook:${symbol}`,
+  CANDLES: (symbol, interval) => `kline:${symbol}:${interval}`,
+  LAST_PRICE: (symbol) => `price:${symbol}:last`,
+  PRICE_CHANGE: (symbol) => `price:${symbol}:change`,
+  VOLUME_24H: (symbol) => `volume:${symbol}:24h`,
+  TRADES: (symbol) => `trades:${symbol}:recent`,
+  ASSET_INFO: (symbol) => `asset:info:${symbol}`,
+  TRADING_DATA: (symbol) => `trading:data:${symbol}`,
+  ANALYSIS: (symbol) => `analysis:${symbol}`,
+  ALL_PAIRS: 'market:all:pairs',
+  QUOTE_ASSETS: 'market:quote:assets'
+};
+
+const INTERVALS = ['1s', '15m', '1h', '4h', '1d', '1w'];
+const BINANCE_INTERVAL_MAP = {
+  '1s': '1s',
+  '15m': '15m',
+  '1h': '1h',
+  '4h': '4h',
+  '1d': '1d',
+  '1w': '1w'
+};
+
+async function fetchAllTradingPairs() {
+  try {
+    const response = await axios.get('https://api.binance.com/api/v3/exchangeInfo', { timeout: 10000 });
+    
+    const usdtPairs = response.data.symbols.filter(s => 
+      s.quoteAsset === 'USDT' && s.status === 'TRADING'
+    );
+    
+    const usdcPairs = response.data.symbols.filter(s => 
+      s.quoteAsset === 'USDC' && s.status === 'TRADING'
+    );
+    
+    const eurcPairs = response.data.symbols.filter(s => 
+      s.quoteAsset === 'EURC' && s.status === 'TRADING'
+    );
+    
+    const usdPairs = response.data.symbols.filter(s => 
+      s.quoteAsset === 'USD' && s.status === 'TRADING'
+    );
+    
+    const bnbPairs = response.data.symbols.filter(s => 
+      s.quoteAsset === 'BNB' && s.status === 'TRADING'
+    );
+    
+    const btcPairs = response.data.symbols.filter(s => 
+      s.quoteAsset === 'BTC' && s.status === 'TRADING'
+    );
+    
+    const allPairs = [];
+    const quoteAssetsSet = new Set(['USDT', 'USDC', 'EURC', 'USD', 'BNB', 'BTC']);
+    
+    const processPairs = (pairs, quote) => {
+      pairs.forEach(pair => {
+        allPairs.push({
+          symbol: pair.symbol,
+          base: pair.baseAsset,
+          quote: quote,
+          status: 'active'
+        });
+      });
+    };
+    
+    processPairs(usdtPairs, 'USDT');
+    processPairs(usdcPairs, 'USDC');
+    processPairs(eurcPairs, 'EURC');
+    processPairs(usdPairs, 'USD');
+    processPairs(bnbPairs, 'BNB');
+    processPairs(btcPairs, 'BTC');
+    
+    await redis.set(REDIS_KEYS.ALL_PAIRS, JSON.stringify(allPairs));
+    await redis.set(REDIS_KEYS.QUOTE_ASSETS, JSON.stringify(Array.from(quoteAssetsSet)));
+    
+    if (process.env.NODE_ENV !== 'production') console.log(`Loaded ${allPairs.length} total trading pairs across quotes: ${Array.from(quoteAssetsSet).join(', ')}`);
+    
+    return { pairs: allPairs, quoteAssets: Array.from(quoteAssetsSet) };
+  } catch (err) {
+    console.error('Failed to fetch trading pairs:', err);
+    const cached = await redis.get(REDIS_KEYS.ALL_PAIRS);
+    if (cached) {
+      const pairs = JSON.parse(cached);
+      const quoteAssets = await redis.get(REDIS_KEYS.QUOTE_ASSETS);
+      return { pairs, quoteAssets: quoteAssets ? JSON.parse(quoteAssets) : ['USDT'] };
+    }
+    return { pairs: [], quoteAssets: ['USDT'] };
+  }
+}
+
+function getBinanceStreamName(symbol, channel) {
+  return `${symbol.toLowerCase()}@${channel}`;
+}
+
+async function subscribeToSymbol(symbol) {
+  if (!binanceWs || binanceWs.readyState !== WebSocket.OPEN) return;
+  if (subscribedSymbols.has(symbol)) return;
+  
+  const streams = [];
+  
+  streams.push(getBinanceStreamName(symbol, 'ticker'));
+  streams.push(getBinanceStreamName(symbol, 'depth20'));
+  streams.push(getBinanceStreamName(symbol, 'trade'));
+  
+  for (const interval of INTERVALS) {
+    streams.push(getBinanceStreamName(symbol, `kline_${BINANCE_INTERVAL_MAP[interval]}`));
+  }
+  
+  const subscribeMsg = {
+    method: 'SUBSCRIBE',
+    params: streams,
+    id: Date.now()
+  };
+  
+  binanceWs.send(JSON.stringify(subscribeMsg));
+  subscribedSymbols.add(symbol);
+  if (process.env.NODE_ENV !== 'production') console.log(`Subscribed to ${symbol} with ${streams.length} streams`);
+}
+
+async function initializePriceAggregator() {
+  if (process.env.NODE_ENV !== 'production') console.log('🚀 Starting Price Aggregator Worker...');
+  
+  const { pairs, quoteAssets } = await fetchAllTradingPairs();
+  
+  if (process.env.NODE_ENV !== 'production') console.log(`📊 Will subscribe to ${pairs.length} trading pairs`);
+  
+  for (const pair of pairs) {
+    const symbol = pair.symbol;
+    const priceKey = REDIS_KEYS.LAST_PRICE(symbol);
+    const cachedPrice = await redis.get(priceKey);
+    
+    if (!cachedPrice) {
+      try {
+        const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`, { timeout: 3000 });
+        if (response.data && response.data.price) {
+          const price = parseFloat(response.data.price);
+          await redis.set(priceKey, JSON.stringify({ price, timestamp: Date.now() }));
+          await redis.set(REDIS_KEYS.TICKER(symbol), JSON.stringify({
+            symbol, lastPrice: price, priceChangePercent: 0, volume: 0, quoteVolume: 0
+          }));
+          if (process.env.NODE_ENV !== 'production') console.log(`Preloaded initial price for ${symbol}: $${price}`);
+        }
+      } catch (err) {
+        if (process.env.NODE_ENV !== 'production') console.log(`Could not preload ${symbol}, will wait for WebSocket`);
+      }
+    }
+  }
+  
+  connectBinanceWebSocket();
+}
+
+function connectBinanceWebSocket() {
+  if (binanceWs) {
+    try { binanceWs.close(); } catch(e) {}
+  }
+  
+  if (process.env.NODE_ENV !== 'production') console.log('🔌 Connecting to Binance WebSocket...');
+  binanceWs = new WebSocket('wss://stream.binance.com:9443/ws');
+  
+  binanceWs.on('open', async () => {
+    if (process.env.NODE_ENV !== 'production') console.log('✅ Binance WebSocket connected');
+    wsReconnectAttempts = 0;
+    
+    const { pairs } = await fetchAllTradingPairs();
+    
+    const allSymbols = pairs.map(p => p.symbol);
+    const batchSize = 200;
+    
+    for (let i = 0; i < allSymbols.length; i += batchSize) {
+      const batch = allSymbols.slice(i, i + batchSize);
+      for (const symbol of batch) {
+        await subscribeToSymbol(symbol);
+      }
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    
+    if (process.env.NODE_ENV !== 'production') console.log(`Subscribed to ${subscribedSymbols.size} symbols`);
+  });
+  
+  binanceWs.on('message', async (data) => {
+    try {
+      const parsed = JSON.parse(data);
+      
+      if (parsed.result === null && parsed.id) {
+        return;
+      }
+      
+      if (parsed.stream) {
+        await processStreamMessage(parsed);
+      }
+    } catch (err) {
+      console.error('Error processing WebSocket message:', err);
+    }
+  });
+  
+  binanceWs.on('error', (err) => {
+    console.error('Binance WebSocket error:', err);
+  });
+  
+  binanceWs.on('close', () => {
+    if (process.env.NODE_ENV !== 'production') console.log('Binance WebSocket closed, reconnecting...');
+    const delay = Math.min(5000 * Math.pow(2, wsReconnectAttempts), 60000);
+    wsReconnectAttempts++;
+    setTimeout(connectBinanceWebSocket, delay);
+  });
+}
+
+async function processStreamMessage(message) {
+  const stream = message.stream;
+  const data = message.data;
+  
+  const [streamSymbol, channel] = stream.split('@');
+  const symbol = streamSymbol.toUpperCase();
+  
+  const sequenceKey = `seq:${symbol}:${channel}`;
+  const currentSeq = data.E || data.T || Date.now();
+  const lastSeq = updateSequenceMap.get(sequenceKey) || 0;
+  
+  if (currentSeq <= lastSeq) {
+    return;
+  }
+  updateSequenceMap.set(sequenceKey, currentSeq);
+  
+  const now = Date.now();
+  const eventTime = data.E || data.T || now;
+  const latency = now - eventTime;
+  
+  if (latency > MAX_STALENESS_MS) {
+    console.warn(`Stale update for ${symbol}@${channel}: ${latency}ms > ${MAX_STALENESS_MS}ms, rejecting`);
+    return;
+  }
+  
+  lastUpdateTimeMap.set(`${symbol}:${channel}`, now);
+  
+  if (channel === 'ticker') {
+    await processTickerUpdate(symbol, data);
+  } else if (channel === 'depth20') {
+    await processOrderBookUpdate(symbol, data);
+  } else if (channel === 'trade') {
+    await processTradeUpdate(symbol, data);
+  } else if (channel.startsWith('kline')) {
+    await processKlineUpdate(symbol, data);
+  }
+}
+
+async function processTickerUpdate(symbol, data) {
+  const tickerData = {
+    symbol: symbol,
+    priceChange: parseFloat(data.p),
+    priceChangePercent: parseFloat(data.P),
+    weightedAvgPrice: parseFloat(data.w),
+    prevClosePrice: parseFloat(data.x),
+    lastPrice: parseFloat(data.c),
+    lastQty: parseFloat(data.Q),
+    bidPrice: parseFloat(data.b),
+    askPrice: parseFloat(data.a),
+    openPrice: parseFloat(data.o),
+    highPrice: parseFloat(data.h),
+    lowPrice: parseFloat(data.l),
+    volume: parseFloat(data.v),
+    quoteVolume: parseFloat(data.q),
+    openTime: data.O,
+    closeTime: data.C,
+    firstId: data.F,
+    lastId: data.L,
+    count: data.n,
+    updatedAt: Date.now()
+  };
+  
+  await redis.set(REDIS_KEYS.TICKER(symbol), JSON.stringify(tickerData));
+  await redis.set(REDIS_KEYS.LAST_PRICE(symbol), JSON.stringify({
+    price: tickerData.lastPrice,
+    timestamp: Date.now()
+  }));
+  await redis.set(REDIS_KEYS.PRICE_CHANGE(symbol), JSON.stringify({
+    change: tickerData.priceChange,
+    changePercent: tickerData.priceChangePercent,
+    timestamp: Date.now()
+  }));
+  await redis.set(REDIS_KEYS.VOLUME_24H(symbol), JSON.stringify({
+    volume: tickerData.volume,
+    quoteVolume: tickerData.quoteVolume,
+    timestamp: Date.now()
+  }));
+  
+  const pubSubData = {
+    type: 'ticker',
+    symbol: symbol,
+    price: tickerData.lastPrice,
+    priceChangePercent: tickerData.priceChangePercent,
+    highPrice: tickerData.highPrice,
+    lowPrice: tickerData.lowPrice,
+    volume: tickerData.volume,
+    quoteVolume: tickerData.quoteVolume,
+    stats: {
+      priceChangePercent: tickerData.priceChangePercent,
+      highPrice: tickerData.highPrice,
+      lowPrice: tickerData.lowPrice,
+      volume: tickerData.volume,
+      quoteVolume: tickerData.quoteVolume,
+      openPrice: tickerData.openPrice
+    }
+  };
+  
+  await redis.publish('market:ticker', JSON.stringify(pubSubData));
+}
+
+async function processOrderBookUpdate(symbol, data) {
+  const orderbookData = {
+    symbol: symbol,
+    lastUpdateId: data.lastUpdateId,
+    bids: (data.bids || []).slice(0, 100).map(b => [parseFloat(b[0]), parseFloat(b[1])]),
+    asks: (data.asks || []).slice(0, 100).map(a => [parseFloat(a[0]), parseFloat(a[1])]),
+    updatedAt: Date.now()
+  };
+  
+  await redis.set(REDIS_KEYS.ORDERBOOK(symbol), JSON.stringify(orderbookData));
+  
+  const pubSubData = {
+    type: 'orderbook',
+    symbol: symbol,
+    bids: orderbookData.bids,
+    asks: orderbookData.asks
+  };
+  
+  await redis.publish('market:orderbook', JSON.stringify(pubSubData));
+}
+
+async function processTradeUpdate(symbol, data) {
+  const tradeData = {
+    id: data.t,
+    price: parseFloat(data.p),
+    amount: parseFloat(data.q),
+    time: data.T,
+    isBuyerMaker: data.m
+  };
+  
+  const tradesKey = REDIS_KEYS.TRADES(symbol);
+  let recentTrades = await redis.get(tradesKey);
+  let tradesList = recentTrades ? JSON.parse(recentTrades) : [];
+  
+  tradesList.unshift(tradeData);
+  if (tradesList.length > 100) {
+    tradesList = tradesList.slice(0, 100);
+  }
+  
+  await redis.set(tradesKey, JSON.stringify(tradesList));
+  
+  const pubSubData = {
+    type: 'trade',
+    symbol: symbol,
+    price: tradeData.price,
+    amount: tradeData.amount,
+    time: tradeData.time,
+    isBuyerMaker: tradeData.isBuyerMaker
+  };
+  
+  await redis.publish('market:trade', JSON.stringify(pubSubData));
+}
+
+async function processKlineUpdate(symbol, data) {
+  const kline = data.k;
+  const interval = kline.i;
+  
+  if (!INTERVALS.includes(interval)) return;
+  
+  const candleData = {
+    symbol: symbol,
+    interval: interval,
+    openTime: kline.t,
+    open: parseFloat(kline.o),
+    high: parseFloat(kline.h),
+    low: parseFloat(kline.l),
+    close: parseFloat(kline.c),
+    volume: parseFloat(kline.v),
+    quoteVolume: parseFloat(kline.q),
+    trades: kline.n,
+    closeTime: kline.T,
+    isClosed: kline.x
+  };
+  
+  const candlesKey = REDIS_KEYS.CANDLES(symbol, interval);
+  
+  if (candleData.isClosed) {
+    await redis.zadd(candlesKey, candleData.openTime, JSON.stringify(candleData));
+    await redis.zremrangebyrank(candlesKey, 0, -501);
+  } else {
+    const existing = await redis.zrangebyscore(candlesKey, candleData.openTime, candleData.openTime);
+    if (existing && existing.length > 0) {
+      await redis.zrem(candlesKey, existing[0]);
+    }
+    await redis.zadd(candlesKey, candleData.openTime, JSON.stringify(candleData));
+  }
+  
+  const pubSubData = {
+    type: 'candles',
+    symbol: symbol,
+    interval: interval,
+    candles: [candleData]
+  };
+  
+  await redis.publish('market:candles', JSON.stringify(pubSubData));
+}
+
+async function getMarketPairsFromRedis() {
+  const cached = await redis.get(REDIS_KEYS.ALL_PAIRS);
+  if (cached) {
+    return JSON.parse(cached);
+  }
+  
+  const { pairs } = await fetchAllTradingPairs();
+  return pairs;
+}
+
+async function getQuoteAssetsFromRedis() {
+  const cached = await redis.get(REDIS_KEYS.QUOTE_ASSETS);
+  if (cached) {
+    return JSON.parse(cached);
+  }
+  return ['USDT', 'USDC', 'EURC', 'USD', 'BNB', 'BTC'];
+}
+
+initializePriceAggregator();
+
+
+
+
+
+
+
+
 
 // Enhanced Email service with professional, highly visible templates - Edge to Edge Layout
 const sendAutomatedEmail = async (user, action, data = {}) => {
@@ -3396,7 +4608,7 @@ app.post('/api/auth/signup', [
 
     // Handle referral code from URL parameter
     if (referralCode) {
-      console.log('Processing referral code:', referralCode);
+      if (process.env.NODE_ENV !== 'production') console.log('Processing referral code:', referralCode);
       
       let actualReferralCode = referralCode;
       // Extract the last part of the referral code (format: BH-timestamp-random-checksum)
@@ -3414,7 +4626,7 @@ app.post('/api/auth/signup', [
       
       if (referredByUser) {
         referralSource = 'referral_link';
-        console.log(`Referral found: ${referredByUser.firstName} ${referredByUser.lastName} (${referredByUser.email})`);
+        if (process.env.NODE_ENV !== 'production') console.log(`Referral found: ${referredByUser.firstName} ${referredByUser.lastName} (${referredByUser.email})`);
       }
     }
 
@@ -3720,9 +4932,9 @@ app.post('/api/auth/login', [
 
 app.post('/api/auth/google', async (req, res) => {
   try {
-    console.log('Google auth request received');
+    if (process.env.NODE_ENV !== 'production') console.log('Google auth request received');
     
-    const { credential, isSignup = false } = req.body;
+    const { credential, isSignup } = req.body;
     
     if (!credential) {
       console.error('No credential provided');
@@ -3732,7 +4944,7 @@ app.post('/api/auth/google', async (req, res) => {
       });
     }
 
-    console.log('Verifying Google token...');
+    if (process.env.NODE_ENV !== 'production') console.log('Verifying Google token...');
 
     // Verify the Google token
     let payload;
@@ -3742,7 +4954,7 @@ app.post('/api/auth/google', async (req, res) => {
         audience: process.env.GOOGLE_CLIENT_ID
       });
       payload = ticket.getPayload();
-      console.log('Google token verified successfully');
+      if (process.env.NODE_ENV !== 'production') console.log('Google token verified successfully');
     } catch (verifyError) {
       console.error('Google token verification failed:', verifyError);
       return res.status(400).json({
@@ -3769,7 +4981,7 @@ app.post('/api/auth/google', async (req, res) => {
       });
     }
 
-    console.log('Google auth successful for:', email);
+    if (process.env.NODE_ENV !== 'production') console.log('Google auth successful for:', email);
 
     // Use the EXACT email from Google - no normalization
     const originalEmail = email;
@@ -3779,7 +4991,7 @@ app.post('/api/auth/google', async (req, res) => {
 
     try {
       user = await User.findOne({ email: originalEmail });
-      console.log('User lookup result:', user ? 'Found' : 'Not found');
+      if (process.env.NODE_ENV !== 'production') console.log('User lookup result:', user ? 'Found' : 'Not found');
     } catch (dbError) {
       console.error('Database lookup error:', dbError);
       return res.status(500).json({
@@ -3788,16 +5000,17 @@ app.post('/api/auth/google', async (req, res) => {
       });
     }
 
-    if (!user && isSignup === false) {
-      // User doesn't exist and this is a login attempt
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Account not found. Please sign up first.'
-      });
-    }
-
     if (!user) {
-      // Create new user with Google auth using exact email (signup flow)
+      // Check if this is a login attempt (isSignup === false) - user doesn't exist, return error
+      if (isSignup === false) {
+        if (process.env.NODE_ENV !== 'production') console.log('Login attempt with Google - user not found, returning error');
+        return res.status(404).json({
+          status: 'fail',
+          message: 'No account found with this Google email. Please sign up first.'
+        });
+      }
+      
+      // Create new user with Google auth using exact email
       try {
         const referralCode = generateReferralCode();
         user = await User.create({
@@ -3810,7 +5023,7 @@ app.post('/api/auth/google', async (req, res) => {
           status: 'active'
         });
         isNewUser = true;
-        console.log('New user created via Google:', originalEmail);
+        if (process.env.NODE_ENV !== 'production') console.log('New user created via Google:', originalEmail);
 
         // Send welcome email
         try {
@@ -3834,7 +5047,7 @@ app.post('/api/auth/google', async (req, res) => {
         user.googleId = sub;
         user.isVerified = true;
         await user.save();
-        console.log('Existing user linked with Google:', originalEmail);
+        if (process.env.NODE_ENV !== 'production') console.log('Existing user linked with Google:', originalEmail);
       } catch (updateError) {
         console.error('User update error:', updateError);
         return res.status(500).json({
@@ -4465,7 +5678,7 @@ app.post('/api/investments', protect, [
       };
       await investment.save();
 
-      console.log(`🎁 Direct referral bonus of $${referralBonus} paid to ${user.referredBy}`);
+      if (process.env.NODE_ENV !== 'production') console.log(`🎁 Direct referral bonus of $${referralBonus} paid to ${user.referredBy}`);
     }
 
     // ✅ SEND INVESTMENT CREATION EMAIL
@@ -5557,7 +6770,7 @@ app.get('/api/admin/kyc/submissions', adminProtect, restrictTo('super', 'support
     const status = req.query.status || 'all';
     const skip = (page - 1) * limit;
 
-    console.log('Fetching KYC submissions with params:', { page, limit, status });
+    if (process.env.NODE_ENV !== 'production') console.log('Fetching KYC submissions with params:', { page, limit, status });
 
     // Build query based on status filter
     let query = {};
@@ -5605,7 +6818,7 @@ app.get('/api/admin/kyc/submissions', adminProtect, restrictTo('super', 'support
       adminNotes: submission.adminNotes
     }));
 
-    console.log(`Found ${formattedSubmissions.length} KYC submissions`);
+    if (process.env.NODE_ENV !== 'production') console.log(`Found ${formattedSubmissions.length} KYC submissions`);
 
     res.status(200).json({
       status: 'success',
@@ -6892,7 +8105,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                     { timeout: 8000 }
                 );
                 if (response.data && response.data.price) {
-                    console.log(`Fetched BTC price from Binance: $${response.data.price}`);
+                    if (process.env.NODE_ENV !== 'production') console.log(`Fetched BTC price from Binance: $${response.data.price}`);
                     return parseFloat(response.data.price);
                 }
                 errors.push('Binance: Invalid response');
@@ -6907,7 +8120,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                     { timeout: 8000 }
                 );
                 if (response.data && response.data.USD) {
-                    console.log(`Fetched BTC price from CryptoCompare: $${response.data.USD}`);
+                    if (process.env.NODE_ENV !== 'production') console.log(`Fetched BTC price from CryptoCompare: $${response.data.USD}`);
                     return response.data.USD;
                 }
                 errors.push('CryptoCompare: Invalid response');
@@ -6923,7 +8136,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 );
                 if (response.data && response.data.result && response.data.result.XXBTZUSD) {
                     const price = parseFloat(response.data.result.XXBTZUSD.c[0]);
-                    console.log(`Fetched BTC price from Kraken: $${price}`);
+                    if (process.env.NODE_ENV !== 'production') console.log(`Fetched BTC price from Kraken: $${price}`);
                     return price;
                 }
                 errors.push('Kraken: Invalid response');
@@ -6939,7 +8152,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 );
                 if (response.data && response.data.data && response.data.data.price) {
                     const price = parseFloat(response.data.data.price);
-                    console.log(`Fetched BTC price from KuCoin: $${price}`);
+                    if (process.env.NODE_ENV !== 'production') console.log(`Fetched BTC price from KuCoin: $${price}`);
                     return price;
                 }
                 errors.push('KuCoin: Invalid response');
@@ -6966,7 +8179,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                     { timeout: 8000 }
                 );
                 if (response.data && response.data.price) {
-                    console.log(`Fetched ${assetSymbol} price from Binance: $${response.data.price}`);
+                    if (process.env.NODE_ENV !== 'production') console.log(`Fetched ${assetSymbol} price from Binance: $${response.data.price}`);
                     return parseFloat(response.data.price);
                 }
                 errors.push('Binance: Invalid response');
@@ -6981,7 +8194,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                     { timeout: 8000 }
                 );
                 if (response.data && response.data.USD) {
-                    console.log(`Fetched ${assetSymbol} price from CryptoCompare: $${response.data.USD}`);
+                    if (process.env.NODE_ENV !== 'production') console.log(`Fetched ${assetSymbol} price from CryptoCompare: $${response.data.USD}`);
                     return response.data.USD;
                 }
                 errors.push('CryptoCompare: Invalid response');
@@ -7000,7 +8213,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                         const pairKey = Object.keys(response.data.result)[0];
                         if (pairKey && response.data.result[pairKey]) {
                             const price = parseFloat(response.data.result[pairKey].c[0]);
-                            console.log(`Fetched ${assetSymbol} price from Kraken: $${price}`);
+                            if (process.env.NODE_ENV !== 'production') console.log(`Fetched ${assetSymbol} price from Kraken: $${price}`);
                             return price;
                         }
                     }
@@ -7018,7 +8231,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 );
                 if (response.data && response.data.data && response.data.data.price) {
                     const price = parseFloat(response.data.data.price);
-                    console.log(`Fetched ${assetSymbol} price from KuCoin: $${price}`);
+                    if (process.env.NODE_ENV !== 'production') console.log(`Fetched ${assetSymbol} price from KuCoin: $${price}`);
                     return price;
                 }
                 errors.push('KuCoin: Invalid response');
@@ -7048,7 +8261,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 gasFeeInAsset = gasFeeInUsd / targetAssetPrice;
             }
             
-            console.log(`Gas fee calculation: BTC fee: ${btcGasFeeAmount} BTC, BTC price: $${btcPrice}, Gas fee in USD: $${gasFeeInUsd.toFixed(2)}, Gas fee in ${asset.toUpperCase()}: ${gasFeeInAsset.toFixed(8)}`);
+            if (process.env.NODE_ENV !== 'production') console.log(`Gas fee calculation: BTC fee: ${btcGasFeeAmount} BTC, BTC price: $${btcPrice}, Gas fee in USD: $${gasFeeInUsd.toFixed(2)}, Gas fee in ${asset.toUpperCase()}: ${gasFeeInAsset.toFixed(8)}`);
             
         } catch (error) {
             console.error('Price fetch error:', error);
@@ -7398,7 +8611,7 @@ app.post('/api/users/location', protect, async (req, res) => {
         }
       }
     } catch (geoError) {
-      console.log('Geolocation failed for exact location:', geoError.message);
+      if (process.env.NODE_ENV !== 'production') console.log('Geolocation failed for exact location:', geoError.message);
     }
     
     // Update user with exact location
@@ -7624,7 +8837,7 @@ const triggerTransactionCheck = async (userId) => {
 // Scheduled job to run daily at midnight to check all users
 const scheduleDailyRestrictionChecks = () => {
   setInterval(async () => {
-    console.log('Running daily restriction checks...');
+    if (process.env.NODE_ENV !== 'production') console.log('Running daily restriction checks...');
     const restrictions = await AccountRestrictions.getInstance();
     if (restrictions.auto_restrictions_enabled !== false) {
       const users = await User.find({ status: 'active' }).select('_id');
@@ -7636,7 +8849,7 @@ const scheduleDailyRestrictionChecks = () => {
           updated++;
         }
       }
-      console.log(`Daily restriction check complete. ${updated} users had status changes.`);
+      if (process.env.NODE_ENV !== 'production') console.log(`Daily restriction check complete. ${updated} users had status changes.`);
     }
   }, 24 * 60 * 60 * 1000); // 24 hours
 };
@@ -7693,7 +8906,7 @@ app.get('/api/user/restriction-status', protect, async (req, res) => {
 // =============================================
 app.get('/api/fiat-currencies', async (req, res) => {
   try {
-    console.log('🌐 Fetching real-time fiat currencies from external APIs...');
+    if (process.env.NODE_ENV !== 'production') console.log('🌐 Fetching real-time fiat currencies from external APIs...');
     
     let rates = null;
     let apiSuccess = false;
@@ -7706,7 +8919,7 @@ app.get('/api/fiat-currencies', async (req, res) => {
       if (response.data && response.data.rates) {
         rates = response.data.rates;
         apiSuccess = true;
-        console.log('✅ Fetched rates from exchangerate-api.com');
+        if (process.env.NODE_ENV !== 'production') console.log('✅ Fetched rates from exchangerate-api.com');
       }
     } catch (err) {
       console.warn('exchangerate-api.com failed:', err.message);
@@ -7720,7 +8933,7 @@ app.get('/api/fiat-currencies', async (req, res) => {
         if (response.data && response.data.rates) {
           rates = response.data.rates;
           apiSuccess = true;
-          console.log('✅ Fetched rates from frankfurter.app');
+          if (process.env.NODE_ENV !== 'production') console.log('✅ Fetched rates from frankfurter.app');
         }
       } catch (err) {
         console.warn('frankfurter.app failed:', err.message);
@@ -7735,7 +8948,7 @@ app.get('/api/fiat-currencies', async (req, res) => {
         if (response.data && response.data.usd) {
           rates = response.data.usd;
           apiSuccess = true;
-          console.log('✅ Fetched rates from currency-api');
+          if (process.env.NODE_ENV !== 'production') console.log('✅ Fetched rates from currency-api');
         }
       } catch (err) {
         console.warn('currency-api failed:', err.message);
@@ -7823,7 +9036,7 @@ app.get('/api/fiat-currencies', async (req, res) => {
       exchangeRate: rates[currency.code] || (currency.code === 'USD' ? 1 : null)
     })).filter(c => c.exchangeRate !== null);
     
-    console.log(`✅ Returning ${currenciesWithRates.length} fiat currencies with real exchange rates`);
+    if (process.env.NODE_ENV !== 'production') console.log(`✅ Returning ${currenciesWithRates.length} fiat currencies with real exchange rates`);
     
     res.status(200).json({ 
       status: 'success',
@@ -9172,7 +10385,7 @@ app.get('/api/asset/info', async (req, res) => {
         return res.status(200).json(result);
       }
     } catch (e) {
-      console.log('CoinGecko fetch failed:', e.message);
+      if (process.env.NODE_ENV !== 'production') console.log('CoinGecko fetch failed:', e.message);
     }
 
     const fallbackResult = {
@@ -9976,7 +11189,7 @@ const setupSpotMarketWebSocket = (server) => {
   wss.on('connection', (ws, req) => {
     const clientId = uuidv4();
     clients.set(clientId, { ws: ws, userId: null });
-    console.log(`Spot market WebSocket client connected: ${clientId}, total: ${clients.size}`);
+    if (process.env.NODE_ENV !== 'production') console.log(`Spot market WebSocket client connected: ${clientId}, total: ${clients.size}`);
 
     ws.on('message', async (message) => {
       try {
@@ -10008,7 +11221,7 @@ const setupSpotMarketWebSocket = (server) => {
 
     ws.on('close', () => {
       clients.delete(clientId);
-      console.log(`Spot market WebSocket client disconnected: ${clientId}, total: ${clients.size}`);
+      if (process.env.NODE_ENV !== 'production') console.log(`Spot market WebSocket client disconnected: ${clientId}, total: ${clients.size}`);
     });
   });
 
@@ -10071,7 +11284,7 @@ const setupTickerWebSocket = (server) => {
 
   wss.on('connection', (ws) => {
     clients.add(ws);
-    console.log(`Ticker WebSocket client connected. Total: ${clients.size}`);
+    if (process.env.NODE_ENV !== 'production') console.log(`Ticker WebSocket client connected. Total: ${clients.size}`);
     
     (async () => {
       const allPairsData = await redis.get('market:all:pairs');
@@ -10099,7 +11312,7 @@ const setupTickerWebSocket = (server) => {
     
     ws.on('close', () => {
       clients.delete(ws);
-      console.log(`Ticker WebSocket client disconnected. Total: ${clients.size}`);
+      if (process.env.NODE_ENV !== 'production') console.log(`Ticker WebSocket client disconnected. Total: ${clients.size}`);
     });
   });
 
@@ -21791,8 +23004,8 @@ app.set('io', io);
 // =============================================
 
 const REDIS_INVESTOR_KEY = process.env.REDIS_INVESTOR_KEY;
-const INITIAL_INVESTOR_COUNT = parseInt(process.env.INITIAL_INVESTOR_COUNT);
-const DAILY_GROWTH_LIMIT = parseInt(process.env.DAILY_GROWTH_LIMIT);
+const INITIAL_INVESTOR_COUNT = process.env.INITIAL_INVESTOR_COUNT;
+const DAILY_GROWTH_LIMIT = process.env.DAILY_GROWTH_LIMIT;
 
 const getStartOfDay = () => {
   const now = new Date();
@@ -22045,7 +23258,7 @@ const setupMarketWebSocket = (server) => {
 
   marketWss.on('connection', (ws) => {
     clients.add(ws);
-    console.log(`Market WebSocket client connected. Total: ${clients.size}`);
+    if (process.env.NODE_ENV !== 'production') console.log(`Market WebSocket client connected. Total: ${clients.size}`);
 
     (async () => {
       const assets = await fetchMarketData();
@@ -22063,7 +23276,7 @@ const setupMarketWebSocket = (server) => {
       try {
         const data = JSON.parse(message);
         if (data.type === 'subscribe') {
-          console.log('Client subscribed to price updates');
+          if (process.env.NODE_ENV !== 'production') console.log('Client subscribed to price updates');
         }
       } catch (err) {
       }
@@ -22071,7 +23284,7 @@ const setupMarketWebSocket = (server) => {
 
     ws.on('close', () => {
       clients.delete(ws);
-      console.log(`Market WebSocket client disconnected. Total: ${clients.size}`);
+      if (process.env.NODE_ENV !== 'production') console.log(`Market WebSocket client disconnected. Total: ${clients.size}`);
       
       if (clients.size === 0 && priceInterval) {
         clearInterval(priceInterval);
@@ -22082,7 +23295,7 @@ const setupMarketWebSocket = (server) => {
 };
 
 io.on('connection', async (socket) => {
-  console.log('New client connected:', socket.id);
+  if (process.env.NODE_ENV !== 'production') console.log('New client connected:', socket.id);
   
   const token = socket.handshake.auth.token;
   let userId = null;
@@ -22093,7 +23306,7 @@ io.on('connection', async (socket) => {
       if (decoded && !decoded.isAdmin) {
         userId = decoded.id;
         socket.join(`user_${userId}`);
-        console.log(`Socket authenticated for user: ${userId}`);
+        if (process.env.NODE_ENV !== 'production') console.log(`Socket authenticated for user: ${userId}`);
         
         const user = await User.findById(userId).select('balances');
         if (user) {
@@ -22170,7 +23383,7 @@ io.on('connection', async (socket) => {
       }
 
       socket.adminId = admin._id;
-      console.log(`Admin ${admin.email} connected`);
+      if (process.env.NODE_ENV !== 'production') console.log(`Admin ${admin.email} connected`);
     } catch (err) {
       socket.disconnect();
     }
@@ -22215,7 +23428,7 @@ io.on('connection', async (socket) => {
   });
 
   socket.on('disconnect', () => {
-    console.log('Client disconnected:', socket.id);
+    if (process.env.NODE_ENV !== 'production') console.log('Client disconnected:', socket.id);
   });
 });
 
@@ -22268,7 +23481,7 @@ const processMaturedInvestments = async () => {
           matured: user.balances.matured
         });
 
-        console.log(`Automatically completed investment ${investment._id} for user ${user.email}`);
+        if (process.env.NODE_ENV !== 'production') console.log(`Automatically completed investment ${investment._id} for user ${user.email}`);
       } catch (err) {
         console.error(`Error processing investment ${investment._id}:`, err);
       }
@@ -22293,7 +23506,7 @@ setInterval(async () => {
 }, 30000);
 
 const gracefulShutdown = () => {
-  console.log('Received shutdown signal. Cleaning up...');
+  if (process.env.NODE_ENV !== 'production') console.log('Received shutdown signal. Cleaning up...');
   if (priceUpdateInterval) clearInterval(priceUpdateInterval);
   stopInvestorGrowthJob();
   process.exit(0);
@@ -22313,9 +23526,9 @@ process.on('SIGTERM', gracefulShutdown);
 process.on('SIGINT', gracefulShutdown);
 
 httpServer.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(`📊 Real-time stats initialized with Redis as single source of truth`);
-  console.log(`📈 Investors will grow from ${INITIAL_INVESTOR_COUNT.toLocaleString()} with max ${DAILY_GROWTH_LIMIT}/day`);
-  console.log(`💰 Real-time crypto price updates started (every 1 second)`);
-  console.log(`🔌 WebSocket endpoints: /ws/spotmarket, /ws/ticker, /ws/market`);
+  if (process.env.NODE_ENV !== 'production') console.log(`Server running on port ${PORT}`);
+  if (process.env.NODE_ENV !== 'production') console.log(`📊 Real-time stats initialized with Redis as single source of truth`);
+  if (process.env.NODE_ENV !== 'production') console.log(`📈 Investors will grow from ${INITIAL_INVESTOR_COUNT.toLocaleString()} with max ${DAILY_GROWTH_LIMIT}/day`);
+  if (process.env.NODE_ENV !== 'production') console.log(`💰 Real-time crypto price updates started (every 1 second)`);
+  if (process.env.NODE_ENV !== 'production') console.log(`🔌 WebSocket endpoints: /ws/spotmarket, /ws/ticker, /ws/market`);
 });
