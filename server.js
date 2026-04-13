@@ -21472,9 +21472,9 @@ const io = new Server(httpServer, {
 
 app.set('io', io);
 
-const REDIS_INVESTOR_KEY = process.env.REDIS_INVESTOR_KEY || 'cloud_miner_count';
-const INITIAL_INVESTOR_COUNT_VAL = parseInt(process.env.INITIAL_INVESTOR_COUNT) || 5104329;
-const DAILY_GROWTH_LIMIT_VAL = parseInt(process.env.DAILY_GROWTH_LIMIT) || 7999;
+// --- Investor Stats Section (No duplicate declarations) ---
+// Using the already declared variables from the top:
+// REDIS_INVESTOR_KEY, INITIAL_INVESTOR_COUNT, DAILY_GROWTH_LIMIT
 
 const getStartOfDay = () => {
   const now = new Date();
@@ -21491,7 +21491,7 @@ const initializeInvestorCount = async () => {
     let currentCount = await redis.get(REDIS_INVESTOR_KEY);
     
     if (!currentCount) {
-      currentCount = INITIAL_INVESTOR_COUNT_VAL;
+      currentCount = parseInt(INITIAL_INVESTOR_COUNT) || 5104329;
       await redis.set(REDIS_INVESTOR_KEY, currentCount);
       if (process.env.NODE_ENV !== 'production') console.log(`✅ Initialized investor count to ${currentCount.toLocaleString()}`);
     } else {
@@ -21502,7 +21502,7 @@ const initializeInvestorCount = async () => {
     return currentCount;
   } catch (err) {
     console.error('Error initializing investor count:', err);
-    return INITIAL_INVESTOR_COUNT_VAL;
+    return parseInt(INITIAL_INVESTOR_COUNT) || 5104329;
   }
 };
 
@@ -21531,17 +21531,18 @@ const checkAndResetDailyGrowth = async () => {
 const addInvestors = async () => {
   try {
     let dailyGrowth = await checkAndResetDailyGrowth();
+    const dailyLimit = parseInt(DAILY_GROWTH_LIMIT) || 7999;
     
-    if (dailyGrowth >= DAILY_GROWTH_LIMIT_VAL) {
-      if (process.env.NODE_ENV !== 'production') console.log(`⏸️ Daily growth limit reached (${DAILY_GROWTH_LIMIT_VAL}). No more investors today.`);
+    if (dailyGrowth >= dailyLimit) {
+      if (process.env.NODE_ENV !== 'production') console.log(`⏸️ Daily growth limit reached (${dailyLimit}). No more investors today.`);
       return false;
     }
     
     const increment = Math.floor(Math.random() * 49) + 1;
     
     const newDailyGrowth = dailyGrowth + increment;
-    const actualIncrement = newDailyGrowth > DAILY_GROWTH_LIMIT_VAL 
-      ? DAILY_GROWTH_LIMIT_VAL - dailyGrowth 
+    const actualIncrement = newDailyGrowth > dailyLimit 
+      ? dailyLimit - dailyGrowth 
       : increment;
     
     if (actualIncrement <= 0) {
@@ -21556,7 +21557,7 @@ const addInvestors = async () => {
     await redis.incrby(todayKey, actualIncrement);
     
     if (process.env.NODE_ENV !== 'production') console.log(`📈 Investor count increased by ${actualIncrement}. New count: ${newCount.toLocaleString()}`);
-    if (process.env.NODE_ENV !== 'production') console.log(`📊 Daily progress: ${dailyGrowth + actualIncrement}/${DAILY_GROWTH_LIMIT_VAL}`);
+    if (process.env.NODE_ENV !== 'production') console.log(`📊 Daily progress: ${dailyGrowth + actualIncrement}/${dailyLimit}`);
     
     return { newCount, increment: actualIncrement };
   } catch (err) {
@@ -21568,7 +21569,7 @@ const addInvestors = async () => {
 const broadcastStats = async () => {
   try {
     const currentCount = await redis.get(REDIS_INVESTOR_KEY);
-    const count = currentCount ? parseInt(currentCount) : INITIAL_INVESTOR_COUNT_VAL;
+    const count = currentCount ? parseInt(currentCount) : (parseInt(INITIAL_INVESTOR_COUNT) || 5104329);
     
     const stats = {
       totalInvestors: count,
@@ -21586,7 +21587,7 @@ const broadcastStats = async () => {
 const getCurrentStats = async () => {
   try {
     const currentCount = await redis.get(REDIS_INVESTOR_KEY);
-    const count = currentCount ? parseInt(currentCount) : INITIAL_INVESTOR_COUNT_VAL;
+    const count = currentCount ? parseInt(currentCount) : (parseInt(INITIAL_INVESTOR_COUNT) || 5104329);
     
     return {
       totalInvestors: count,
@@ -21595,7 +21596,7 @@ const getCurrentStats = async () => {
   } catch (err) {
     console.error('Error getting current stats:', err);
     return {
-      totalInvestors: INITIAL_INVESTOR_COUNT_VAL,
+      totalInvestors: parseInt(INITIAL_INVESTOR_COUNT) || 5104329,
       timestamp: Date.now()
     };
   }
@@ -21626,7 +21627,7 @@ const startInvestorGrowthJob = async () => {
   };
   
   scheduleNextGrowth();
-  if (process.env.NODE_ENV !== 'production') console.log(`🚀 Investor growth job started. Will add 1-49 investors every 3-120 seconds (max ${DAILY_GROWTH_LIMIT_VAL}/day)`);
+  if (process.env.NODE_ENV !== 'production') console.log(`🚀 Investor growth job started. Will add 1-49 investors every 3-120 seconds (max ${parseInt(DAILY_GROWTH_LIMIT) || 7999}/day)`);
 };
 
 const stopInvestorGrowthJob = () => {
@@ -21664,8 +21665,8 @@ app.get('/api/stats/daily-progress', async (req, res) => {
       status: 'success',
       data: {
         dailyGrowth: dailyGrowth ? parseInt(dailyGrowth) : 0,
-        dailyLimit: DAILY_GROWTH_LIMIT_VAL,
-        totalInvestors: currentCount ? parseInt(currentCount) : INITIAL_INVESTOR_COUNT_VAL,
+        dailyLimit: parseInt(DAILY_GROWTH_LIMIT) || 7999,
+        totalInvestors: currentCount ? parseInt(currentCount) : (parseInt(INITIAL_INVESTOR_COUNT) || 5104329),
         date: new Date(today).toISOString()
       }
     });
