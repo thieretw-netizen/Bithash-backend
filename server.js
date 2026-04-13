@@ -45,23 +45,10 @@ app.use(helmet({
   crossOriginOpenerPolicy: { policy: "unsafe-none" }
 }));
 
-const corsOptions = {
-  origin: function(origin, callback) {
-    const allowedOrigins = [
-      'https://www.bithashcapital.live',
-      'https://bithashcapital.live',
-      'http://localhost:3000',
-      'http://localhost:3001',
-      'https://bithhash.vercel.app'
-    ];
-    
-    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, true);
-    } else {
-      if (process.env.NODE_ENV !== 'production') console.log('CORS blocked origin:', origin);
-      callback(null, true);
-    }
-  },
+app.use(cors({
+  origin: [
+    'https://www.bithashcapital.live', 
+  ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: [
@@ -72,24 +59,14 @@ const corsOptions = {
     'X-Requested-With',
     'Accept',
     'Origin',
-    'X-2FA-Verified',
-    'admin_jwt',
-    'x-admin-token'
+    'X-2FA-Verified'
   ],
   exposedHeaders: [
     'X-Rate-Limit-Limit',
     'X-Rate-Limit-Remaining',
-    'X-Rate-Limit-Reset',
-    'Authorization'
-  ],
-  preflightContinue: false,
-  optionsSuccessStatus: 204
-};
-
-app.use(cors(corsOptions));
-
-// Handle preflight requests explicitly for all routes
-app.options('*', cors(corsOptions));
+    'X-Rate-Limit-Reset'
+  ]
+}));
 
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -111,7 +88,7 @@ app.use(hpp());
 
 const redis = new Redis({
   host: process.env.REDIS_HOST,
-  port: process.env.REDIS_PORT || 14450,
+  port: process.env.REDIS_PORT,
   password: process.env.REDIS_PASSWORD,
   retryStrategy: (times) => {
     const delay = Math.min(times * 50, 2000);
@@ -305,6 +282,11 @@ const UserSchema = new mongoose.Schema({
   twoFactorAuth: {
     enabled: { type: Boolean, default: false },
     secret: { type: String, select: false }
+  },
+  balances: {
+    main: { type: Number, default: 0, min: [0, 'Balance cannot be negative'] },
+    active: { type: Number, default: 0, min: [0, 'Balance cannot be negative'] },
+    matured: { type: Number, default: 0, min: [0, 'Balance cannot be negative'] }
   },
   referralCode: { type: String, unique: true, index: true },
   referredBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true },
@@ -2565,10 +2547,10 @@ const fs = require('fs');
 
 const ensureUploadDirectories = () => {
   const dirs = [
-    process.env.KYC_UPLOAD_PATH || 'uploads/kyc/identity',
-    process.env.KYC_UPLOAD_PATH || 'uploads/kyc/address',
-    process.env.KYC_UPLOAD_PATH || 'uploads/kyc/facial',
-    process.env.TEMP_UPLOAD_PATH || 'uploads/temp'
+    process.env.KYC_IDENTITY_PATH,
+    process.env.KYC_ADDRESS_PATH,
+    process.env.KYC_FACIAL_PATH,
+    process.env.TEMP_UPLOAD_PATH
   ];
   
   dirs.forEach(dir => {
@@ -2582,14 +2564,14 @@ ensureUploadDirectories();
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    let uploadPath = process.env.TEMP_UPLOAD_PATH || 'uploads/temp';
+    let uploadPath = process.env.TEMP_UPLOAD_PATH;
     
     if (file.fieldname.includes('identity')) {
-      uploadPath = process.env.KYC_IDENTITY_PATH || 'uploads/kyc/identity';
+      uploadPath = process.env.KYC_IDENTITY_PATH;
     } else if (file.fieldname.includes('address')) {
-      uploadPath = process.env.KYC_ADDRESS_PATH || 'uploads/kyc/address';
+      uploadPath = process.env.KYC_ADDRESS_PATH;
     } else if (file.fieldname.includes('facial')) {
-      uploadPath = process.env.KYC_FACIAL_PATH || 'uploads/kyc/facial';
+      uploadPath = process.env.KYC_FACIAL_PATH;
     }
     
     cb(null, uploadPath);
@@ -2603,8 +2585,9 @@ const storage = multer.diskStorage({
 
 const fileFilter = (req, file, cb) => {
   const allowedMimes = JSON.parse(process.env.KYC_ALLOWED_MIME_TYPES || '["image/jpeg","image/jpg","image/png","image/gif","application/pdf","video/mp4","video/webm"]');
+  const allowedMimesSet = new Set(allowedMimes);
   
-  if (allowedMimes.includes(file.mimetype)) {
+  if (allowedMimesSet.has(file.mimetype)) {
     cb(null, true);
   } else {
     cb(new Error(`Invalid file type: ${file.mimetype}. Only images, PDFs, and videos are allowed.`), false);
@@ -2713,7 +2696,7 @@ const setupWebSocketServer = (server) => {
           }
         }
       } catch (err) {
-        if (process.env.NODE_ENV !== 'production') console.error('Authentication error:', err);
+        console.error('Authentication error:', err);
         return false;
       }
       return false;
@@ -2860,7 +2843,7 @@ const setupWebSocketServer = (server) => {
           }
         }
       } catch (err) {
-        if (process.env.NODE_ENV !== 'production') console.error('WebSocket message error:', err);
+        console.error('WebSocket message error:', err);
         sendToClient(clientId, {
           type: 'error',
           message: 'Internal server error'
@@ -2887,7 +2870,7 @@ const setupWebSocketServer = (server) => {
     });
 
     ws.on('error', (err) => {
-      if (process.env.NODE_ENV !== 'production') console.error('WebSocket error:', err);
+      console.error('WebSocket error:', err);
       ws.close();
     });
 
@@ -2930,7 +2913,7 @@ const verifyJWT = (token) => {
   try {
     return jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('JWT verification error:', err);
+    console.error('JWT verification error:', err);
     throw new Error('Invalid or expired token');
   }
 };
@@ -2992,7 +2975,7 @@ const detectAndSetIPPreferences = async (userId, req) => {
         detectedLanguage = languageMap[countryCode] || 'en';
       }
     } catch (geoError) {
-      if (process.env.NODE_ENV !== 'production') console.warn('IP geolocation failed, using defaults:', geoError.message);
+      console.warn('IP geolocation failed, using defaults:', geoError.message);
       try {
         const ipinfoToken = process.env.IPINFO_TOKEN || 'b56ce6e91d732d';
         const ipinfoResponse = await axios.get(`https://ipinfo.io/${ip}?token=${ipinfoToken}`, { timeout: 3000 });
@@ -3007,7 +2990,7 @@ const detectAndSetIPPreferences = async (userId, req) => {
           detectedLanguage = languageMap[countryCode] || 'en';
         }
       } catch (fallbackError) {
-        if (process.env.NODE_ENV !== 'production') console.warn('Fallback IP geolocation also failed');
+        console.warn('Fallback IP geolocation also failed');
       }
     }
     
@@ -3034,40 +3017,175 @@ const detectAndSetIPPreferences = async (userId, req) => {
       { upsert: true, new: true }
     );
     
-    if (process.env.NODE_ENV !== 'production') console.log(`IP-based preferences set for user ${userId}: language=${detectedLanguage}, currency=${detectedCurrency}, country=${detectedCountry}`);
+    console.log(`IP-based preferences set for user ${userId}: language=${detectedLanguage}, currency=${detectedCurrency}, country=${detectedCountry}`);
     
     return { language: detectedLanguage, currency: detectedCurrency, country: detectedCountry };
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error detecting IP preferences:', err);
+    console.error('Error detecting IP preferences:', err);
     return null;
   }
 };
 
-// Updated getCryptoPrice to fetch from Binance only
 const getCryptoPrice = async (asset) => {
   try {
-    const symbol = `${asset.toUpperCase()}USDT`;
-    const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`, { timeout: 5000 });
-    if (response.data && response.data.price) {
-      return parseFloat(response.data.price);
+    const assetMap = {
+      'BTC': 'bitcoin',
+      'ETH': 'ethereum',
+      'USDT': 'tether',
+      'BNB': 'binancecoin',
+      'SOL': 'solana',
+      'USDC': 'usd-coin',
+      'XRP': 'ripple',
+      'DOGE': 'dogecoin',
+      'ADA': 'cardano',
+      'SHIB': 'shiba-inu',
+      'AVAX': 'avalanche-2',
+      'DOT': 'polkadot',
+      'TRX': 'tron',
+      'LINK': 'chainlink',
+      'MATIC': 'matic-network',
+      'LTC': 'litecoin'
+    };
+    
+    const coinId = assetMap[asset.toUpperCase()];
+    if (!coinId) return null;
+    
+    const errors = [];
+    
+    try {
+      const binancePair = asset.toUpperCase() === 'USDT' ? 'USDTUSDT' : `${asset.toUpperCase()}USDT`;
+      const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${binancePair}`, { timeout: 5000 });
+      if (response.data && response.data.price) {
+        if (process.env.NODE_ENV !== 'production') console.log(`Fetched ${asset} price from Binance: $${response.data.price}`);
+        return parseFloat(response.data.price);
+      }
+      errors.push('Binance: Invalid response');
+    } catch (err) {
+      errors.push(`Binance: ${err.message}`);
     }
+    
+    try {
+      const response = await axios.get(`https://min-api.cryptocompare.com/data/price?fsym=${asset.toUpperCase()}&tsyms=USD`, { timeout: 5000 });
+      if (response.data && response.data.USD) {
+        if (process.env.NODE_ENV !== 'production') console.log(`Fetched ${asset} price from CryptoCompare: $${response.data.USD}`);
+        return response.data.USD;
+      }
+      errors.push('CryptoCompare: Invalid response');
+    } catch (err) {
+      errors.push(`CryptoCompare: ${err.message}`);
+    }
+    
+    try {
+      const krakenMap = {
+        'BTC': 'XBTUSD',
+        'ETH': 'ETHUSD',
+        'USDT': 'USDTUSD',
+        'SOL': 'SOLUSD',
+        'XRP': 'XRPUSD',
+        'DOGE': 'DOGEUSD',
+        'ADA': 'ADAUSD',
+        'LTC': 'LTCUSD'
+      };
+      const pair = krakenMap[asset.toUpperCase()];
+      if (pair) {
+        const response = await axios.get(`https://api.kraken.com/0/public/Ticker?pair=${pair}`, { timeout: 5000 });
+        if (response.data && response.data.result && response.data.result[pair]) {
+          const price = parseFloat(response.data.result[pair].c[0]);
+          if (process.env.NODE_ENV !== 'production') console.log(`Fetched ${asset} price from Kraken: $${price}`);
+          return price;
+        }
+      }
+      errors.push('Kraken: No data or unsupported pair');
+    } catch (err) {
+      errors.push(`Kraken: ${err.message}`);
+    }
+    
+    try {
+      const response = await axios.get(`https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=${asset.toUpperCase()}-USDT`, { timeout: 5000 });
+      if (response.data && response.data.data && response.data.data.price) {
+        if (process.env.NODE_ENV !== 'production') console.log(`Fetched ${asset} price from KuCoin: $${response.data.data.price}`);
+        return parseFloat(response.data.data.price);
+      }
+      errors.push('KuCoin: Invalid response');
+    } catch (err) {
+      errors.push(`KuCoin: ${err.message}`);
+    }
+    
+    console.error(`All price APIs failed for ${asset}:`, errors);
     return null;
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error(`Error fetching ${asset} price:`, err.message);
+    console.error('Error fetching crypto price:', err);
     return null;
   }
 };
 
 const getExchangeRate = async (asset, fiat = 'usd') => {
   try {
-    const symbol = `${asset.toUpperCase()}USDT`;
-    const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`, { timeout: 5000 });
-    if (response.data && response.data.price) {
-      return parseFloat(response.data.price);
+    const assetMap = {
+      'BTC': 'bitcoin',
+      'ETH': 'ethereum',
+      'USDT': 'tether',
+      'BNB': 'binancecoin',
+      'SOL': 'solana',
+      'USDC': 'usd-coin',
+      'XRP': 'ripple',
+      'DOGE': 'dogecoin',
+      'ADA': 'cardano',
+      'SHIB': 'shiba-inu'
+    };
+    
+    const coinId = assetMap[asset.toUpperCase()];
+    if (!coinId) return null;
+    
+    const errors = [];
+    
+    try {
+      const binancePair = asset.toUpperCase() === 'USDT' ? 'USDTUSDT' : `${asset.toUpperCase()}USDT`;
+      const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${binancePair}`, { timeout: 5000 });
+      if (response.data && response.data.price) {
+        return parseFloat(response.data.price);
+      }
+      errors.push('Binance: Invalid response');
+    } catch (err) {
+      errors.push(`Binance: ${err.message}`);
     }
+    
+    try {
+      const response = await axios.get(`https://min-api.cryptocompare.com/data/price?fsym=${asset.toUpperCase()}&tsyms=USD`, { timeout: 5000 });
+      if (response.data && response.data.USD) {
+        return response.data.USD;
+      }
+      errors.push('CryptoCompare: Invalid response');
+    } catch (err) {
+      errors.push(`CryptoCompare: ${err.message}`);
+    }
+    
+    try {
+      const krakenMap = {
+        'BTC': 'XBTUSD',
+        'ETH': 'ETHUSD',
+        'USDT': 'USDTUSD',
+        'SOL': 'SOLUSD',
+        'XRP': 'XRPUSD',
+        'DOGE': 'DOGEUSD',
+        'ADA': 'ADAUSD'
+      };
+      const pair = krakenMap[asset.toUpperCase()];
+      if (pair) {
+        const response = await axios.get(`https://api.kraken.com/0/public/Ticker?pair=${pair}`, { timeout: 5000 });
+        if (response.data && response.data.result && response.data.result[pair]) {
+          return parseFloat(response.data.result[pair].c[0]);
+        }
+      }
+      errors.push('Kraken: No data or unsupported pair');
+    } catch (err) {
+      errors.push(`Kraken: ${err.message}`);
+    }
+    
+    console.error(`All exchange rate APIs failed for ${asset}:`, errors);
     return null;
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error(`Error fetching exchange rate for ${asset}:`, err.message);
+    console.error('Error fetching exchange rate:', err);
     return null;
   }
 };
@@ -3104,10 +3222,10 @@ const getFiatExchangeRates = async () => {
       if (process.env.NODE_ENV !== 'production') console.warn('currency-api failed:', err.message);
     }
     
-    if (process.env.NODE_ENV !== 'production') console.error('All fiat exchange rate APIs failed');
+    console.error('All fiat exchange rate APIs failed');
     return null;
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error fetching fiat exchange rates:', err);
+    console.error('Error fetching fiat exchange rates:', err);
     return null;
   }
 };
@@ -3143,10 +3261,8 @@ const getAllWorldCurrencies = async () => {
     { code: 'SAR', name: 'Saudi Riyal', symbol: '﷼', flag: 'https://flagcdn.com/w40/sa.png' },
     { code: 'ILS', name: 'Israeli Shekel', symbol: '₪', flag: 'https://flagcdn.com/w40/il.png' },
     { code: 'RON', name: 'Romanian Leu', symbol: 'lei', flag: 'https://flagcdn.com/w40/ro.png' },
-    { code: 'CZK', name: 'Czech Koruna', symbol: 'Kč', flag: 'https://flagcdn.com/w40/cz.png' },
-    { code: 'HUF', name: 'Hungarian Forint', symbol: 'Ft', flag: 'https://flagcdn.com/w40/hu.png' },
-    { code: 'BGN', name: 'Bulgarian Lev', symbol: 'лв', flag: 'https://flagcdn.com/w40/bg.png' },
-    { code: 'HRK', name: 'Croatian Kuna', symbol: 'kn', flag: 'https://flagcdn.com/w40/hr.png' },
+    { code: 'KES', name: 'Kenyan Shilling', symbol: 'KSh', flag: 'https://flagcdn.com/w40/ke.png' },
+    { code: 'NGN', name: 'Nigerian Naira', symbol: '₦', flag: 'https://flagcdn.com/w40/ng.png' },
     { code: 'THB', name: 'Thai Baht', symbol: '฿', flag: 'https://flagcdn.com/w40/th.png' },
     { code: 'VND', name: 'Vietnamese Dong', symbol: '₫', flag: 'https://flagcdn.com/w40/vn.png' },
     { code: 'IDR', name: 'Indonesian Rupiah', symbol: 'Rp', flag: 'https://flagcdn.com/w40/id.png' },
@@ -3154,33 +3270,12 @@ const getAllWorldCurrencies = async () => {
     { code: 'PHP', name: 'Philippine Peso', symbol: '₱', flag: 'https://flagcdn.com/w40/ph.png' },
     { code: 'PKR', name: 'Pakistani Rupee', symbol: '₨', flag: 'https://flagcdn.com/w40/pk.png' },
     { code: 'BDT', name: 'Bangladeshi Taka', symbol: '৳', flag: 'https://flagcdn.com/w40/bd.png' },
-    { code: 'LKR', name: 'Sri Lankan Rupee', symbol: 'Rs', flag: 'https://flagcdn.com/w40/lk.png' },
-    { code: 'NPR', name: 'Nepalese Rupee', symbol: 'Rs', flag: 'https://flagcdn.com/w40/np.png' },
     { code: 'EGP', name: 'Egyptian Pound', symbol: 'E£', flag: 'https://flagcdn.com/w40/eg.png' },
-    { code: 'QAR', name: 'Qatari Riyal', symbol: '﷼', flag: 'https://flagcdn.com/w40/qa.png' },
-    { code: 'KWD', name: 'Kuwaiti Dinar', symbol: 'KD', flag: 'https://flagcdn.com/w40/kw.png' },
-    { code: 'BHD', name: 'Bahraini Dinar', symbol: '.د.ب', flag: 'https://flagcdn.com/w40/bh.png' },
-    { code: 'OMR', name: 'Omani Rial', symbol: '﷼', flag: 'https://flagcdn.com/w40/om.png' },
-    { code: 'JOD', name: 'Jordanian Dinar', symbol: 'JD', flag: 'https://flagcdn.com/w40/jo.png' },
-    { code: 'KES', name: 'Kenyan Shilling', symbol: 'KSh', flag: 'https://flagcdn.com/w40/ke.png' },
-    { code: 'NGN', name: 'Nigerian Naira', symbol: '₦', flag: 'https://flagcdn.com/w40/ng.png' },
-    { code: 'GHS', name: 'Ghanaian Cedi', symbol: '₵', flag: 'https://flagcdn.com/w40/gh.png' },
-    { code: 'MAD', name: 'Moroccan Dirham', symbol: 'DH', flag: 'https://flagcdn.com/w40/ma.png' },
-    { code: 'TZS', name: 'Tanzanian Shilling', symbol: 'TSh', flag: 'https://flagcdn.com/w40/tz.png' },
-    { code: 'UGX', name: 'Ugandan Shilling', symbol: 'USh', flag: 'https://flagcdn.com/w40/ug.png' },
-    { code: 'ARS', name: 'Argentine Peso', symbol: '$', flag: 'https://flagcdn.com/w40/ar.png' },
+    { code: 'UAH', name: 'Ukrainian Hryvnia', symbol: '₴', flag: 'https://flagcdn.com/w40/ua.png' },
+    { code: 'KZT', name: 'Kazakhstani Tenge', symbol: '₸', flag: 'https://flagcdn.com/w40/kz.png' },
     { code: 'CLP', name: 'Chilean Peso', symbol: '$', flag: 'https://flagcdn.com/w40/cl.png' },
     { code: 'COP', name: 'Colombian Peso', symbol: '$', flag: 'https://flagcdn.com/w40/co.png' },
-    { code: 'PEN', name: 'Peruvian Sol', symbol: 'S/', flag: 'https://flagcdn.com/w40/pe.png' },
-    { code: 'UYU', name: 'Uruguayan Peso', symbol: '$', flag: 'https://flagcdn.com/w40/uy.png' },
-    { code: 'PYG', name: 'Paraguayan Guarani', symbol: '₲', flag: 'https://flagcdn.com/w40/py.png' },
-    { code: 'BOB', name: 'Bolivian Boliviano', symbol: 'Bs', flag: 'https://flagcdn.com/w40/bo.png' },
-    { code: 'CRC', name: 'Costa Rican Colón', symbol: '₡', flag: 'https://flagcdn.com/w40/cr.png' },
-    { code: 'TWD', name: 'New Taiwan Dollar', symbol: 'NT$', flag: 'https://flagcdn.com/w40/tw.png' },
-    { code: 'MNT', name: 'Mongolian Tugrik', symbol: '₮', flag: 'https://flagcdn.com/w40/mn.png' },
-    { code: 'KHR', name: 'Cambodian Riel', symbol: '៛', flag: 'https://flagcdn.com/w40/kh.png' },
-    { code: 'LAK', name: 'Lao Kip', symbol: '₭', flag: 'https://flagcdn.com/w40/la.png' },
-    { code: 'MMK', name: 'Myanmar Kyat', symbol: 'Ks', flag: 'https://flagcdn.com/w40/mm.png' }
+    { code: 'PEN', name: 'Peruvian Sol', symbol: 'S/', flag: 'https://flagcdn.com/w40/pe.png' }
   ];
   
   return allCurrencies.map(currency => ({
@@ -3213,7 +3308,7 @@ const sendEmail = async (options) => {
     await mailTransporter.sendMail(mailOptions);
     if (process.env.NODE_ENV !== 'production') console.log('Email sent successfully using', mailTransporter === supportTransporter ? 'SUPPORT' : 'INFO', 'email');
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error sending email:', err);
+    console.error('Error sending email:', err);
     throw new Error('Failed to send email');
   }
 };
@@ -3385,7 +3480,7 @@ const getUserDeviceInfo = async (req) => {
           }
         }
       } catch (err) {
-        if (process.env.NODE_ENV !== 'production') console.error('All exact location lookup services failed:', err.message);
+        console.error('All exact location lookup services failed:', err.message);
         location = 'Location Unavailable';
       }
     } else if (!isPublicIP) {
@@ -3401,7 +3496,7 @@ const getUserDeviceInfo = async (req) => {
       locationDetails: locationDetails
     };
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error getting device info:', err);
+    console.error('Error getting device info:', err);
     return {
       ip: req.ip || 'Unknown',
       device: req.headers['user-agent'] || 'Unknown',
@@ -3460,7 +3555,7 @@ const logActivity = async (action, entity, entityId, performedBy, performedByMod
       isPublicIP: locationData.isPublicIP
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error logging activity:', err);
+    console.error('Error logging activity:', err);
   }
 };
 
@@ -3497,7 +3592,7 @@ const initializeAdmin = async () => {
       if (process.env.NODE_ENV !== 'production') console.log('Default admin created');
     }
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error initializing admin:', err);
+    console.error('Error initializing admin:', err);
   }
 };
 
@@ -3558,7 +3653,7 @@ const initializePlans = async () => {
       }
     }
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error initializing plans:', err);
+    console.error('Error initializing plans:', err);
   }
 };
 
@@ -3705,7 +3800,7 @@ const calculateReferralCommissions = async (investment) => {
       .populate('plan');
 
     if (!populatedInvestment) {
-      if (process.env.NODE_ENV !== 'production') console.log(`Investment not found: ${investment._id}`);
+      console.log(`Investment not found: ${investment._id}`);
       return;
     }
 
@@ -3713,7 +3808,7 @@ const calculateReferralCommissions = async (investment) => {
     const investorId = populatedInvestment.user._id;
     const investmentAmount = populatedInvestment.amount;
 
-    if (process.env.NODE_ENV !== 'production') console.log(`Checking downline commissions for investment: ${investmentId}, user: ${investorId}, amount: $${investmentAmount}`);
+    console.log(`Checking downline commissions for investment: ${investmentId}, user: ${investorId}, amount: $${investmentAmount}`);
 
     const relationship = await DownlineRelationship.findOne({
       downline: investorId,
@@ -3722,7 +3817,7 @@ const calculateReferralCommissions = async (investment) => {
     }).populate('upline', 'firstName lastName email balances referralStats downlineStats');
 
     if (!relationship) {
-      if (process.env.NODE_ENV !== 'production') console.log(`No active downline relationship found for user: ${investorId}`);
+      console.log(`No active downline relationship found for user: ${investorId}`);
       return;
     }
 
@@ -3731,7 +3826,7 @@ const calculateReferralCommissions = async (investment) => {
     const commissionPercentage = relationship.commissionPercentage;
     const commissionAmount = (investmentAmount * commissionPercentage) / 100;
 
-    if (process.env.NODE_ENV !== 'production') console.log(`Downline commission: $${investmentAmount} * ${commissionPercentage}% = $${commissionAmount} for upline: ${uplineUser.email}`);
+    console.log(`Downline commission: $${investmentAmount} * ${commissionPercentage}% = $${commissionAmount} for upline: ${uplineUser.email}`);
 
     const commissionHistory = await CommissionHistory.create({
       upline: uplineId,
@@ -3759,14 +3854,14 @@ const calculateReferralCommissions = async (investment) => {
       { new: true }
     );
 
-    if (process.env.NODE_ENV !== 'production') console.log(`Updated upline ${uplineUser.email} MAIN balance with $${commissionAmount}. New balance: $${updatedUpline.balances.main}`);
+    console.log(`Updated upline ${uplineUser.email} MAIN balance with $${commissionAmount}. New balance: $${updatedUpline.balances.main}`);
 
     relationship.remainingRounds -= 1;
     relationship.totalCommissionEarned += commissionAmount;
     
     if (relationship.remainingRounds === 0) {
       relationship.status = 'completed';
-      if (process.env.NODE_ENV !== 'production') console.log(`Commission rounds completed for relationship: ${relationship._id}`);
+      console.log(`Commission rounds completed for relationship: ${relationship._id}`);
     }
 
     await relationship.save();
@@ -3816,7 +3911,7 @@ const calculateReferralCommissions = async (investment) => {
       'downlineStats.activeDownlines': activeDownlinesCount
     });
 
-    if (process.env.NODE_ENV !== 'production') console.log(`Downline commission of $${commissionAmount} paid to upline ${uplineUser.email} for investment ${investmentId} (Round ${relationship.commissionRounds - relationship.remainingRounds + 1}/${relationship.commissionRounds})`);
+    console.log(`Downline commission of $${commissionAmount} paid to upline ${uplineUser.email} for investment ${investmentId} (Round ${relationship.commissionRounds - relationship.remainingRounds + 1}/${relationship.commissionRounds})`);
 
     await logActivity('downline_commission_paid', 'commission', commissionHistory._id, uplineId, 'User', null, {
       amount: commissionAmount,
@@ -3828,13 +3923,13 @@ const calculateReferralCommissions = async (investment) => {
     });
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Downline commission calculation error:', err);
+    console.error('Downline commission calculation error:', err);
   }
 };
 
 const recalculateAllUserBalances = async (io) => {
   try {
-    if (process.env.NODE_ENV !== 'production') console.log('Recalculating ALL user balances based on current crypto prices...');
+    console.log('Recalculating ALL user balances based on current crypto prices...');
     
     const users = await User.find({}).select('_id balances');
     let updatedCount = 0;
@@ -3922,10 +4017,10 @@ const recalculateAllUserBalances = async (io) => {
       }
     }
     
-    if (process.env.NODE_ENV !== 'production') console.log(`Recalculated balances for ${updatedCount} users (Main: fluctuates, Active: fluctuates, Matured: fluctuates)`);
+    console.log(`Recalculated balances for ${updatedCount} users (Main: fluctuates, Active: fluctuates, Matured: fluctuates)`);
     
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error recalculating user balances:', err);
+    console.error('Error recalculating user balances:', err);
   }
 };
 
@@ -4018,11 +4113,11 @@ async function fetchAllTradingPairs() {
     await redis.set(REDIS_KEYS.ALL_PAIRS, JSON.stringify(allPairs));
     await redis.set(REDIS_KEYS.QUOTE_ASSETS, JSON.stringify(Array.from(quoteAssetsSet)));
     
-    if (process.env.NODE_ENV !== 'production') console.log(`Loaded ${allPairs.length} total trading pairs across quotes: ${Array.from(quoteAssetsSet).join(', ')}`);
+    console.log(`Loaded ${allPairs.length} total trading pairs across quotes: ${Array.from(quoteAssetsSet).join(', ')}`);
     
     return { pairs: allPairs, quoteAssets: Array.from(quoteAssetsSet) };
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Failed to fetch trading pairs:', err);
+    console.error('Failed to fetch trading pairs:', err);
     const cached = await redis.get(REDIS_KEYS.ALL_PAIRS);
     if (cached) {
       const pairs = JSON.parse(cached);
@@ -4059,15 +4154,15 @@ async function subscribeToSymbol(symbol) {
   
   binanceWs.send(JSON.stringify(subscribeMsg));
   subscribedSymbols.add(symbol);
-  if (process.env.NODE_ENV !== 'production') console.log(`Subscribed to ${symbol} with ${streams.length} streams`);
+  console.log(`Subscribed to ${symbol} with ${streams.length} streams`);
 }
 
 async function initializePriceAggregator() {
-  if (process.env.NODE_ENV !== 'production') console.log('🚀 Starting Price Aggregator Worker...');
+  console.log('🚀 Starting Price Aggregator Worker...');
   
   const { pairs, quoteAssets } = await fetchAllTradingPairs();
   
-  if (process.env.NODE_ENV !== 'production') console.log(`📊 Will subscribe to ${pairs.length} trading pairs`);
+  console.log(`📊 Will subscribe to ${pairs.length} trading pairs`);
   
   for (const pair of pairs) {
     const symbol = pair.symbol;
@@ -4083,10 +4178,10 @@ async function initializePriceAggregator() {
           await redis.set(REDIS_KEYS.TICKER(symbol), JSON.stringify({
             symbol, lastPrice: price, priceChangePercent: 0, volume: 0, quoteVolume: 0
           }));
-          if (process.env.NODE_ENV !== 'production') console.log(`Preloaded initial price for ${symbol}: $${price}`);
+          console.log(`Preloaded initial price for ${symbol}: $${price}`);
         }
       } catch (err) {
-        if (process.env.NODE_ENV !== 'production') console.log(`Could not preload ${symbol}, will wait for WebSocket`);
+        console.log(`Could not preload ${symbol}, will wait for WebSocket`);
       }
     }
   }
@@ -4099,11 +4194,11 @@ function connectBinanceWebSocket() {
     try { binanceWs.close(); } catch(e) {}
   }
   
-  if (process.env.NODE_ENV !== 'production') console.log('🔌 Connecting to Binance WebSocket...');
+  console.log('🔌 Connecting to Binance WebSocket...');
   binanceWs = new WebSocket('wss://stream.binance.com:9443/ws');
   
   binanceWs.on('open', async () => {
-    if (process.env.NODE_ENV !== 'production') console.log('✅ Binance WebSocket connected');
+    console.log('✅ Binance WebSocket connected');
     wsReconnectAttempts = 0;
     
     const { pairs } = await fetchAllTradingPairs();
@@ -4119,7 +4214,7 @@ function connectBinanceWebSocket() {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     
-    if (process.env.NODE_ENV !== 'production') console.log(`Subscribed to ${subscribedSymbols.size} symbols`);
+    console.log(`Subscribed to ${subscribedSymbols.size} symbols`);
   });
   
   binanceWs.on('message', async (data) => {
@@ -4134,16 +4229,16 @@ function connectBinanceWebSocket() {
         await processStreamMessage(parsed);
       }
     } catch (err) {
-      if (process.env.NODE_ENV !== 'production') console.error('Error processing WebSocket message:', err);
+      console.error('Error processing WebSocket message:', err);
     }
   });
   
   binanceWs.on('error', (err) => {
-    if (process.env.NODE_ENV !== 'production') console.error('Binance WebSocket error:', err);
+    console.error('Binance WebSocket error:', err);
   });
   
   binanceWs.on('close', () => {
-    if (process.env.NODE_ENV !== 'production') console.log('Binance WebSocket closed, reconnecting...');
+    console.log('Binance WebSocket closed, reconnecting...');
     const delay = Math.min(5000 * Math.pow(2, wsReconnectAttempts), 60000);
     wsReconnectAttempts++;
     setTimeout(connectBinanceWebSocket, delay);
@@ -4171,7 +4266,7 @@ async function processStreamMessage(message) {
   const latency = now - eventTime;
   
   if (latency > MAX_STALENESS_MS) {
-    if (process.env.NODE_ENV !== 'production') console.warn(`Stale update for ${symbol}@${channel}: ${latency}ms > ${MAX_STALENESS_MS}ms, rejecting`);
+    console.warn(`Stale update for ${symbol}@${channel}: ${latency}ms > ${MAX_STALENESS_MS}ms, rejecting`);
     return;
   }
   
@@ -4367,446 +4462,20 @@ async function getQuoteAssetsFromRedis() {
 
 initializePriceAggregator();
 
-// =============================================
-// ENHANCED EMAIL SERVICE WITH PROFESSIONAL TEMPLATES - EDGE TO EDGE LAYOUT
-// =============================================
-const sendProfessionalEmail = async ({ email, template, data }) => {
-  try {
-    let subject = '';
-    let html = '';
-    const currentYear = new Date().getFullYear();
-    const logoUrl = 'https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png';
-    const transactionCryptoLogo = (asset) => {
-      const logos = {
-        btc: 'https://cryptologos.cc/logos/bitcoin-btc-logo.png',
-        eth: 'https://cryptologos.cc/logos/ethereum-eth-logo.png',
-        usdt: 'https://cryptologos.cc/logos/tether-usdt-logo.png',
-        bnb: 'https://cryptologos.cc/logos/bnb-bnb-logo.png',
-        sol: 'https://cryptologos.cc/logos/solana-sol-logo.png',
-        default: 'https://cryptologos.cc/logos/bitcoin-btc-logo.png'
-      };
-      return logos[asset?.toLowerCase()] || logos.default;
-    };
-
-    // Base Header with Logo and Title
-    const header = `
-      <div style="background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%); padding: 30px 0; text-align: center; border-bottom: 1px solid #1E2329;">
-        <div style="max-width: 600px; margin: 0 auto;">
-          <img src="${logoUrl}" alt="BitHash Logo" style="width: 60px; height: 60px; margin-bottom: 10px; display: block; margin-left: auto; margin-right: auto;">
-          <h1 style="font-family: 'Rowdies', sans-serif; font-size: 28px; font-weight: bold; color: #FFFFFF; margin: 0; letter-spacing: 1px;">₿itHash</h1>
-          <p style="font-family: 'Domine', serif; font-optical-sizing: auto; font-weight: 700; font-style: normal; color: #F7A600; margin: 8px 0 0; font-size: 14px;"><strong><em>Where Your Financial Goals Become Reality</em></strong></p>
-        </div>
-      </div>
-    `;
-
-    const footer = `
-      <div style="background: #0B0E11; padding: 30px 0; text-align: center; border-top: 1px solid #1E2329;">
-        <div style="max-width: 600px; margin: 0 auto;">
-          <p style="color: #6C7480; font-size: 12px; margin: 0;">&copy; ${currentYear} BitHash Capital. All rights reserved.</p>
-          <p style="color: #6C7480; font-size: 12px; margin: 10px 0 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-          <p style="color: #6C7480; font-size: 12px; margin: 10px 0 0;">
-            <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">Website</a> &nbsp;|&nbsp;
-            <a href="mailto:support@bithash.com" style="color: #F7A600; text-decoration: none;">Support</a>
-          </p>
-        </div>
-      </div>
-    `;
-
-    switch (template) {
-      case 'otp':
-        subject = `🔐 Your OTP Verification Code - ₿itHash Capital`;
-        html = `
-          ${header}
-          <div style="background: #FFFFFF; padding: 40px 20px;">
-            <div style="max-width: 560px; margin: 0 auto;">
-              <h2 style="color: #0B0E11; font-size: 24px; margin-bottom: 20px;">One-Time Password (OTP)</h2>
-              <p style="color: #4A5568; font-size: 16px; line-height: 1.5; margin-bottom: 30px;">Hello ${data.name},</p>
-              <p style="color: #4A5568; font-size: 16px; line-height: 1.5; margin-bottom: 30px;">Use the verification code below to complete your ${data.action} process. This code expires in <strong>5 minutes</strong>.</p>
-              <div style="background: #F7FAFC; padding: 20px; text-align: center; border-radius: 12px; margin: 30px 0;">
-                <span style="font-family: monospace; font-size: 32px; font-weight: bold; letter-spacing: 8px; color: #F7A600;">${data.otp}</span>
-              </div>
-              <p style="color: #718096; font-size: 14px; line-height: 1.5;">If you didn't request this code, please ignore this email or contact support immediately.</p>
-            </div>
-          </div>
-          ${footer}
-        `;
-        break;
-
-      case 'welcome':
-        subject = `🎉 Welcome to ₿itHash Capital, ${data.firstName}!`;
-        html = `
-          ${header}
-          <div style="background: #FFFFFF; padding: 40px 20px;">
-            <div style="max-width: 560px; margin: 0 auto;">
-              <h2 style="color: #0B0E11; font-size: 24px; margin-bottom: 20px;">Welcome to the Future of Mining</h2>
-              <p style="color: #4A5568; font-size: 16px; line-height: 1.5; margin-bottom: 20px;">Hello ${data.firstName},</p>
-              <p style="color: #4A5568; font-size: 16px; line-height: 1.5; margin-bottom: 20px;">Thank you for joining ₿itHash Capital! Your account has been successfully created, and you're now part of a community that turns financial goals into reality.</p>
-              <p style="color: #4A5568; font-size: 16px; line-height: 1.5; margin-bottom: 30px;">To get started, please verify your email address using the OTP we sent, then complete your profile and explore our institutional-grade investment plans.</p>
-              <a href="https://www.bithashcapital.live/dashboard" style="display: inline-block; background: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600;">Go to Dashboard</a>
-            </div>
-          </div>
-          ${footer}
-        `;
-        break;
-
-      case 'login_success':
-        const deviceIcon = data.device?.toLowerCase().includes('mobile') ? '📱' : '💻';
-        subject = `🔐 New Sign-in to Your ₿itHash Account`;
-        html = `
-          ${header}
-          <div style="background: #FFFFFF; padding: 40px 20px;">
-            <div style="max-width: 560px; margin: 0 auto;">
-              <h2 style="color: #0B0E11; font-size: 24px; margin-bottom: 20px;">Security Alert: New Sign-in Detected</h2>
-              <p style="color: #4A5568; font-size: 16px; line-height: 1.5; margin-bottom: 20px;">Hello ${data.name},</p>
-              <p style="color: #4A5568; font-size: 16px; line-height: 1.5; margin-bottom: 20px;">We noticed a new sign-in to your ₿itHash Capital account. Here are the details:</p>
-              <div style="background: #F7FAFC; padding: 20px; border-radius: 12px; margin: 20px 0;">
-                <p style="margin: 5px 0;"><strong>${deviceIcon} Device:</strong> ${data.device || 'Unknown'}</p>
-                <p style="margin: 5px 0;"><strong>📍 Location:</strong> ${data.location || 'Unknown'}</p>
-                <p style="margin: 5px 0;"><strong>🌐 IP Address:</strong> ${data.ip || 'Unknown'}</p>
-                <p style="margin: 5px 0;"><strong>⏰ Time:</strong> ${new Date(data.timestamp).toLocaleString()}</p>
-              </div>
-              <p style="color: #4A5568; font-size: 16px; line-height: 1.5;">If this was you, you can safely ignore this email. If not, please reset your password immediately and contact our support team.</p>
-            </div>
-          </div>
-          ${footer}
-        `;
-        break;
-
-      case 'investment_created':
-        subject = `✅ Investment Confirmed - ${data.planName} - ₿itHash`;
-        html = `
-          ${header}
-          <div style="background: #FFFFFF; padding: 40px 20px;">
-            <div style="max-width: 560px; margin: 0 auto;">
-              <h2 style="color: #0B0E11; font-size: 24px; margin-bottom: 20px;">Investment Initiated Successfully</h2>
-              <p style="color: #4A5568; font-size: 16px; line-height: 1.5; margin-bottom: 20px;">Dear ${data.name},</p>
-              <p style="color: #4A5568; font-size: 16px; line-height: 1.5; margin-bottom: 20px;">Your investment in the <strong>${data.planName}</strong> has been confirmed. Your funds are now actively generating returns.</p>
-              <div style="background: #F7FAFC; padding: 20px; border-radius: 12px; margin: 20px 0;">
-                <p style="margin: 5px 0;"><strong>💰 Investment Amount:</strong> $${data.amount.toLocaleString()}</p>
-                <p style="margin: 5px 0;"><strong>📈 Expected Return:</strong> $${data.expectedReturn.toLocaleString()}</p>
-                <p style="margin: 5px 0;"><strong>⏳ Duration:</strong> ${data.duration} hours</p>
-                <p style="margin: 5px 0;"><strong>📅 Start Date:</strong> ${new Date(data.startDate).toLocaleString()}</p>
-                <p style="margin: 5px 0;"><strong>🔚 Maturity Date:</strong> ${new Date(data.endDate).toLocaleString()}</p>
-              </div>
-              <p style="color: #4A5568; font-size: 16px; line-height: 1.5;">You can track your investment performance in real-time from your dashboard.</p>
-            </div>
-          </div>
-          ${footer}
-        `;
-        break;
-
-      case 'investment_matured':
-        subject = `🎉 Your Investment Has Matured - ₿itHash`;
-        html = `
-          ${header}
-          <div style="background: #FFFFFF; padding: 40px 20px;">
-            <div style="max-width: 560px; margin: 0 auto;">
-              <h2 style="color: #0B0E11; font-size: 24px; margin-bottom: 20px;">Investment Maturity Notification</h2>
-              <p style="color: #4A5568; font-size: 16px; line-height: 1.5; margin-bottom: 20px;">Congratulations ${data.name}!</p>
-              <p style="color: #4A5568; font-size: 16px; line-height: 1.5; margin-bottom: 20px;">Your investment in the <strong>${data.planName}</strong> has reached maturity. Your returns have been credited to your Matured Wallet.</p>
-              <div style="background: #F7FAFC; padding: 20px; border-radius: 12px; margin: 20px 0;">
-                <p style="margin: 5px 0;"><strong>💰 Initial Investment:</strong> $${data.amount.toLocaleString()}</p>
-                <p style="margin: 5px 0;"><strong>📈 Total Return:</strong> $${data.totalReturn.toLocaleString()}</p>
-                <p style="margin: 5px 0;"><strong>✨ Profit Earned:</strong> $${data.profit.toLocaleString()}</p>
-                <p style="margin: 5px 0;"><strong>✅ Completion Date:</strong> ${new Date(data.completionDate).toLocaleString()}</p>
-              </div>
-              <p style="color: #4A5568; font-size: 16px; line-height: 1.5;">You can reinvest your matured balance or withdraw it to your external wallet.</p>
-            </div>
-          </div>
-          ${footer}
-        `;
-        break;
-
-      case 'withdrawal_request':
-        const assetLogo = transactionCryptoLogo(data.asset);
-        subject = `📤 Withdrawal Request Submitted - ₿itHash`;
-        html = `
-          ${header}
-          <div style="background: #FFFFFF; padding: 40px 20px;">
-            <div style="max-width: 560px; margin: 0 auto;">
-              <h2 style="color: #0B0E11; font-size: 24px; margin-bottom: 20px;">Withdrawal Request Received</h2>
-              <p style="color: #4A5568; font-size: 16px; line-height: 1.5; margin-bottom: 20px;">Hello ${data.name},</p>
-              <p style="color: #4A5568; font-size: 16px; line-height: 1.5; margin-bottom: 20px;">We have received your request to withdraw funds. Our team will process it shortly.</p>
-              <div style="background: #F7FAFC; padding: 20px; border-radius: 12px; margin: 20px 0;">
-                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 15px;">
-                  <img src="${assetLogo}" alt="${data.asset}" style="width: 24px; height: 24px;">
-                  <strong style="font-size: 18px;">${data.amount} ${data.asset.toUpperCase()}</strong>
-                </div>
-                <p style="margin: 5px 0;"><strong>💵 USD Value:</strong> $${data.usdValue.toLocaleString()}</p>
-                <p style="margin: 5px 0;"><strong>⛽ Network Fee:</strong> ${data.fee} ${data.asset.toUpperCase()} (≈$${data.feeUsd.toFixed(2)})</p>
-                <p style="margin: 5px 0;"><strong>📤 Net Amount:</strong> ${data.netAmount.toFixed(8)} ${data.asset.toUpperCase()}</p>
-                <p style="margin: 5px 0;"><strong>🏦 Withdrawal Address:</strong> ${data.withdrawalAddress}</p>
-                <p style="margin: 5px 0;"><strong>🆔 Request ID:</strong> ${data.requestId}</p>
-                <p style="margin: 5px 0;"><strong>⏰ Timestamp:</strong> ${new Date(data.timestamp).toLocaleString()}</p>
-                <p style="margin: 5px 0;"><strong>🌐 Network:</strong> ${data.network}</p>
-              </div>
-              <p style="color: #4A5568; font-size: 16px; line-height: 1.5;">Withdrawals are typically processed within 24-48 hours. You will receive a confirmation email once completed.</p>
-            </div>
-          </div>
-          ${footer}
-        `;
-        break;
-
-      case 'withdrawal_approved':
-        const approvalAssetLogo = transactionCryptoLogo(data.asset);
-        subject = `✅ Withdrawal Completed - ₿itHash`;
-        html = `
-          ${header}
-          <div style="background: #FFFFFF; padding: 40px 20px;">
-            <div style="max-width: 560px; margin: 0 auto;">
-              <h2 style="color: #0B0E11; font-size: 24px; margin-bottom: 20px;">Withdrawal Processed Successfully</h2>
-              <p style="color: #4A5568; font-size: 16px; line-height: 1.5; margin-bottom: 20px;">Dear ${data.name},</p>
-              <p style="color: #4A5568; font-size: 16px; line-height: 1.5; margin-bottom: 20px;">Your withdrawal request has been approved and the funds have been sent to your wallet.</p>
-              <div style="background: #F7FAFC; padding: 20px; border-radius: 12px; margin: 20px 0;">
-                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 15px;">
-                  <img src="${approvalAssetLogo}" alt="${data.asset}" style="width: 24px; height: 24px;">
-                  <strong style="font-size: 18px;">${data.amount} ${data.asset.toUpperCase()}</strong>
-                </div>
-                <p style="margin: 5px 0;"><strong>💵 USD Value:</strong> $${data.usdValue.toLocaleString()}</p>
-                <p style="margin: 5px 0;"><strong>⛽ Network Fee:</strong> ${data.fee} ${data.asset.toUpperCase()} (≈$${data.feeUsd.toFixed(2)})</p>
-                <p style="margin: 5px 0;"><strong>📤 Net Amount:</strong> ${data.netAmount.toFixed(8)} ${data.asset.toUpperCase()}</p>
-                <p style="margin: 5px 0;"><strong>🆔 Transaction ID:</strong> ${data.txid || 'Pending blockchain confirmation'}</p>
-                <p style="margin: 5px 0;"><strong>✅ Processed At:</strong> ${new Date(data.processedAt).toLocaleString()}</p>
-              </div>
-              <p style="color: #4A5568; font-size: 16px; line-height: 1.5;">Funds may take 10-60 minutes to appear in your external wallet depending on network congestion.</p>
-            </div>
-          </div>
-          ${footer}
-        `;
-        break;
-
-      case 'deposit_approved':
-        subject = `💰 Deposit Confirmed - ₿itHash`;
-        html = `
-          ${header}
-          <div style="background: #FFFFFF; padding: 40px 20px;">
-            <div style="max-width: 560px; margin: 0 auto;">
-              <h2 style="color: #0B0E11; font-size: 24px; margin-bottom: 20px;">Deposit Successfully Credited</h2>
-              <p style="color: #4A5568; font-size: 16px; line-height: 1.5; margin-bottom: 20px;">Hello ${data.name},</p>
-              <p style="color: #4A5568; font-size: 16px; line-height: 1.5; margin-bottom: 20px;">Your deposit of <strong>$${data.amount.toLocaleString()}</strong> via <strong>${data.method}</strong> has been approved and credited to your Main Wallet.</p>
-              <div style="background: #F7FAFC; padding: 20px; border-radius: 12px; margin: 20px 0;">
-                <p style="margin: 5px 0;"><strong>💰 Amount:</strong> $${data.amount.toLocaleString()}</p>
-                <p style="margin: 5px 0;"><strong>💳 Method:</strong> ${data.method}</p>
-                <p style="margin: 5px 0;"><strong>🆔 Reference:</strong> ${data.reference}</p>
-                <p style="margin: 5px 0;"><strong>📅 Processed At:</strong> ${new Date(data.processedAt).toLocaleString()}</p>
-              </div>
-              <p style="color: #4A5568; font-size: 16px; line-height: 1.5;">Your updated balance is now <strong>$${data.newBalance.toLocaleString()}</strong>. You can start investing immediately.</p>
-            </div>
-          </div>
-          ${footer}
-        `;
-        break;
-
-      case 'kyc_approved':
-        subject = `✅ KYC Verification Approved - ₿itHash`;
-        html = `
-          ${header}
-          <div style="background: #FFFFFF; padding: 40px 20px;">
-            <div style="max-width: 560px; margin: 0 auto;">
-              <h2 style="color: #0B0E11; font-size: 24px; margin-bottom: 20px;">KYC Verification Complete</h2>
-              <p style="color: #4A5568; font-size: 16px; line-height: 1.5; margin-bottom: 20px;">Congratulations ${data.name}!</p>
-              <p style="color: #4A5568; font-size: 16px; line-height: 1.5; margin-bottom: 20px;">Your identity verification has been approved. You now have full access to all features, including increased withdrawal and investment limits.</p>
-              <a href="https://www.bithashcapital.live/dashboard" style="display: inline-block; background: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600;">Go to Dashboard</a>
-            </div>
-          </div>
-          ${footer}
-        `;
-        break;
-
-      case 'kyc_rejected':
-        subject = `❌ KYC Verification Update - ₿itHash`;
-        html = `
-          ${header}
-          <div style="background: #FFFFFF; padding: 40px 20px;">
-            <div style="max-width: 560px; margin: 0 auto;">
-              <h2 style="color: #0B0E11; font-size: 24px; margin-bottom: 20px;">KYC Verification Status</h2>
-              <p style="color: #4A5568; font-size: 16px; line-height: 1.5; margin-bottom: 20px;">Hello ${data.name},</p>
-              <p style="color: #4A5568; font-size: 16px; line-height: 1.5; margin-bottom: 20px;">We were unable to verify your identity with the documents provided.</p>
-              <div style="background: #F7FAFC; padding: 20px; border-radius: 12px; margin: 20px 0;">
-                <p style="margin: 5px 0;"><strong>Reason:</strong> ${data.reason}</p>
-              </div>
-              <p style="color: #4A5568; font-size: 16px; line-height: 1.5;">Please log in to your account and resubmit clear, valid documents for verification.</p>
-            </div>
-          </div>
-          ${footer}
-        `;
-        break;
-
-      case 'password_changed':
-        subject = `🔒 Password Changed Successfully - ₿itHash`;
-        html = `
-          ${header}
-          <div style="background: #FFFFFF; padding: 40px 20px;">
-            <div style="max-width: 560px; margin: 0 auto;">
-              <h2 style="color: #0B0E11; font-size: 24px; margin-bottom: 20px;">Password Updated</h2>
-              <p style="color: #4A5568; font-size: 16px; line-height: 1.5; margin-bottom: 20px;">Hello ${data.name},</p>
-              <p style="color: #4A5568; font-size: 16px; line-height: 1.5; margin-bottom: 20px;">The password for your ₿itHash Capital account was recently changed.</p>
-              <div style="background: #F7FAFC; padding: 20px; border-radius: 12px; margin: 20px 0;">
-                <p style="margin: 5px 0;"><strong>💻 Device:</strong> ${data.device || 'Unknown'}</p>
-                <p style="margin: 5px 0;"><strong>📍 Location:</strong> ${data.location || 'Unknown'}</p>
-                <p style="margin: 5px 0;"><strong>🌐 IP Address:</strong> ${data.ip || 'Unknown'}</p>
-                <p style="margin: 5px 0;"><strong>⏰ Time:</strong> ${new Date().toLocaleString()}</p>
-              </div>
-              <p style="color: #4A5568; font-size: 16px; line-height: 1.5;">If you did not make this change, please contact our support team immediately.</p>
-            </div>
-          </div>
-          ${footer}
-        `;
-        break;
-
-      case 'password_reset':
-        subject = `🔐 Reset Your Password - ₿itHash Capital`;
-        html = `
-          ${header}
-          <div style="background: #FFFFFF; padding: 40px 20px;">
-            <div style="max-width: 560px; margin: 0 auto;">
-              <h2 style="color: #0B0E11; font-size: 24px; margin-bottom: 20px;">Password Reset Request</h2>
-              <p style="color: #4A5568; font-size: 16px; line-height: 1.5; margin-bottom: 20px;">Hello ${data.name},</p>
-              <p style="color: #4A5568; font-size: 16px; line-height: 1.5; margin-bottom: 20px;">We received a request to reset your password. Click the button below to create a new password.</p>
-              <div style="text-align: center; margin: 30px 0;">
-                <a href="${data.resetUrl}" style="display: inline-block; background: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600;">Reset Password</a>
-              </div>
-              <p style="color: #718096; font-size: 14px; line-height: 1.5;">This link will expire in 60 minutes. If you didn't request this, please ignore this email.</p>
-            </div>
-          </div>
-          ${footer}
-        `;
-        break;
-
-      case 'account_restricted':
-        subject = `⚠️ Account Restrictions Applied - ₿itHash`;
-        html = `
-          ${header}
-          <div style="background: #FFFFFF; padding: 40px 20px;">
-            <div style="max-width: 560px; margin: 0 auto;">
-              <h2 style="color: #0B0E11; font-size: 24px; margin-bottom: 20px;">Account Restrictions Notice</h2>
-              <p style="color: #4A5568; font-size: 16px; line-height: 1.5; margin-bottom: 20px;">Hello ${data.name},</p>
-              <p style="color: #4A5568; font-size: 16px; line-height: 1.5; margin-bottom: 20px;">Certain restrictions have been applied to your account to ensure security and compliance.</p>
-              <div style="background: #F7FAFC; padding: 20px; border-radius: 12px; margin: 20px 0;">
-                <ul style="margin: 0; padding-left: 20px;">
-                  ${data.reasons.map(r => `<li style="margin: 8px 0;">${r}</li>`).join('')}
-                </ul>
-              </div>
-              <p style="color: #4A5568; font-size: 16px; line-height: 1.5;">Please complete the required actions to have restrictions lifted automatically.</p>
-            </div>
-          </div>
-          ${footer}
-        `;
-        break;
-
-      default:
-        subject = `Update from ₿itHash Capital`;
-        html = `
-          ${header}
-          <div style="background: #FFFFFF; padding: 40px 20px;">
-            <div style="max-width: 560px; margin: 0 auto;">
-              <h2 style="color: #0B0E11; font-size: 24px; margin-bottom: 20px;">Notification</h2>
-              <p style="color: #4A5568; font-size: 16px; line-height: 1.5;">${data.message || 'This is an automated message from ₿itHash Capital.'}</p>
-            </div>
-          </div>
-          ${footer}
-        `;
-    }
-
-    await sendEmail({
-      email,
-      subject,
-      html
-    });
-
-    if (process.env.NODE_ENV !== 'production') console.log(`Professional email sent: ${template} to ${email}`);
-    return true;
-  } catch (error) {
-    if (process.env.NODE_ENV !== 'production') console.error(`Failed to send professional email (${template}):`, error);
-    return false;
-  }
-};
-
+// Enhanced Email service with professional, highly visible templates - Edge to Edge Layout
 const sendAutomatedEmail = async (user, action, data = {}) => {
   try {
-    let template = action;
-    let templateData = { ...data, name: user.firstName || user.email.split('@')[0] };
-
-    switch (action) {
-      case 'login_success':
-        template = 'login_success';
-        break;
-      case 'investment_created':
-        template = 'investment_created';
-        break;
-      case 'investment_matured':
-        template = 'investment_matured';
-        break;
-      case 'withdrawal_request':
-        template = 'withdrawal_request';
-        break;
-      case 'withdrawal_approved':
-        template = 'withdrawal_approved';
-        break;
-      case 'withdrawal_rejected':
-        template = 'withdrawal_rejected';
-        break;
-      case 'deposit_approved':
-        template = 'deposit_approved';
-        break;
-      case 'deposit_rejected':
-        template = 'deposit_rejected';
-        break;
-      case 'kyc_approved':
-        template = 'kyc_approved';
-        break;
-      case 'kyc_rejected':
-        template = 'kyc_rejected';
-        break;
-      case 'password_changed':
-        template = 'password_changed';
-        break;
-      case 'password_reset':
-        template = 'password_reset';
-        break;
-      case 'welcome':
-        template = 'welcome';
-        break;
-      case 'account_restricted':
-        template = 'account_restricted';
-        break;
-      default:
-        template = 'default';
-    }
-
-    return await sendProfessionalEmail({
-      email: user.email,
-      template,
-      data: templateData
-    });
-  } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error(`Automated email error (${action}):`, err);
-    return false;
-  }
-};
-
-// Additional CORS headers middleware - add this right after app.use(cors(...))
-app.use((req, res, next) => {
-  const allowedOrigins = [
-    'https://www.bithashcapital.live',
-    'https://bithashcapital.live',
-    'http://localhost:3000',
-    'https://bithhash.vercel.app'
-  ];
-  const origin = req.headers.origin;
-  if (allowedOrigins.includes(origin)) {
-    res.header('Access-Control-Allow-Origin', origin);
-  }
-  res.header('Access-Control-Allow-Credentials', 'true');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CSRF-Token, X-Requested-With, Accept, Origin, X-2FA-Verified, admin_jwt, x-admin-token');
-  res.header('Access-Control-Expose-Headers', 'X-Rate-Limit-Limit, X-Rate-Limit-Remaining, X-Rate-Limit-Reset, Authorization');
-  
-  if (req.method === 'OPTIONS') {
-    return res.status(204).end();
-  }
-  next();
-});
+    // Helper function to get real-time exchange rate from multiple APIs
+    const getExchangeRate = async (asset, fiat = 'usd') => {
+      try {
+        const assetId = asset.toLowerCase();
+        const response = await axios.get(`https://api.coingecko.com/api/v3/simple/price?ids=${assetId}&vs_currencies=${fiat}`);
+        return response.data[assetId]?.[fiat] || 0;
+      } catch (error) {
+        console.error('Error fetching exchange rate:', error);
+        return 0;
+      }
+    };
 
 // Routes
 
@@ -4854,7 +4523,7 @@ app.post('/api/auth/signup', [
 
     // Handle referral code from URL parameter
     if (referralCode) {
-      if (process.env.NODE_ENV !== 'production') console.log('Processing referral code:', referralCode);
+      console.log('Processing referral code:', referralCode);
       
       let actualReferralCode = referralCode;
       // Extract the last part of the referral code (format: BH-timestamp-random-checksum)
@@ -4872,7 +4541,7 @@ app.post('/api/auth/signup', [
       
       if (referredByUser) {
         referralSource = 'referral_link';
-        if (process.env.NODE_ENV !== 'production') console.log(`Referral found: ${referredByUser.firstName} ${referredByUser.lastName} (${referredByUser.email})`);
+        console.log(`Referral found: ${referredByUser.firstName} ${referredByUser.lastName} (${referredByUser.email})`);
       }
     }
 
@@ -4939,7 +4608,7 @@ app.post('/api/auth/signup', [
     await logActivity('signup_initiated', 'user', newUser._id, newUser._id, 'User', req);
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Signup error:', err);
+    console.error('Signup error:', err);
     res.status(500).json({
       status: 'error',
       message: 'An error occurred during signup'
@@ -4998,7 +4667,7 @@ app.get('/api/referrals/validate/:code', async (req, res) => {
         });
 
     } catch (err) {
-        if (process.env.NODE_ENV !== 'production') console.error('Referral validation error:', err);
+        console.error('Referral validation error:', err);
         res.status(500).json({
             status: 'error',
             message: 'Failed to validate referral code'
@@ -5118,9 +4787,9 @@ app.post('/api/auth/login', [
         ip: deviceInfo.ip,
         timestamp: new Date()
       });
-      if (process.env.NODE_ENV !== 'production') console.log(`📧 Login attempt email sent to ${user.email}`);
+      console.log(`📧 Login attempt email sent to ${user.email}`);
     } catch (emailError) {
-      if (process.env.NODE_ENV !== 'production') console.error('Failed to send login attempt email:', emailError);
+      console.error('Failed to send login attempt email:', emailError);
       // Don't fail the login if email fails
     }
 
@@ -5148,7 +4817,7 @@ app.post('/api/auth/login', [
     }, user);
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Login error:', err);
+    console.error('Login error:', err);
     
     await logUserActivity(req, 'login_error', 'failed', {
       error: err.message,
@@ -5164,19 +4833,19 @@ app.post('/api/auth/login', [
 
 app.post('/api/auth/google', async (req, res) => {
   try {
-    if (process.env.NODE_ENV !== 'production') console.log('Google auth request received');
+    console.log('Google auth request received');
     
     const { credential, isSignup } = req.body;
     
     if (!credential) {
-      if (process.env.NODE_ENV !== 'production') console.error('No credential provided');
+      console.error('No credential provided');
       return res.status(400).json({
         status: 'fail',
         message: 'Google credential is required'
       });
     }
 
-    if (process.env.NODE_ENV !== 'production') console.log('Verifying Google token...');
+    console.log('Verifying Google token...');
 
     // Verify the Google token
     let payload;
@@ -5186,9 +4855,9 @@ app.post('/api/auth/google', async (req, res) => {
         audience: process.env.GOOGLE_CLIENT_ID
       });
       payload = ticket.getPayload();
-      if (process.env.NODE_ENV !== 'production') console.log('Google token verified successfully');
+      console.log('Google token verified successfully');
     } catch (verifyError) {
-      if (process.env.NODE_ENV !== 'production') console.error('Google token verification failed:', verifyError);
+      console.error('Google token verification failed:', verifyError);
       return res.status(400).json({
         status: 'fail',
         message: 'Invalid Google token. Please try again.'
@@ -5196,7 +4865,7 @@ app.post('/api/auth/google', async (req, res) => {
     }
 
     if (!payload) {
-      if (process.env.NODE_ENV !== 'production') console.error('No payload from Google token');
+      console.error('No payload from Google token');
       return res.status(400).json({
         status: 'fail',
         message: 'Invalid token payload'
@@ -5206,14 +4875,14 @@ app.post('/api/auth/google', async (req, res) => {
     const { email, given_name, family_name, sub } = payload;
 
     if (!email) {
-      if (process.env.NODE_ENV !== 'production') console.error('No email in Google payload');
+      console.error('No email in Google payload');
       return res.status(400).json({
         status: 'fail',
         message: 'No email found in Google account'
       });
     }
 
-    if (process.env.NODE_ENV !== 'production') console.log('Google auth successful for:', email);
+    console.log('Google auth successful for:', email);
 
     // Use the EXACT email from Google - no normalization
     const originalEmail = email;
@@ -5223,32 +4892,23 @@ app.post('/api/auth/google', async (req, res) => {
 
     try {
       user = await User.findOne({ email: originalEmail });
-      if (process.env.NODE_ENV !== 'production') console.log('User lookup result:', user ? 'Found' : 'Not found');
+      console.log('User lookup result:', user ? 'Found' : 'Not found');
     } catch (dbError) {
-      if (process.env.NODE_ENV !== 'production') console.error('Database lookup error:', dbError);
+      console.error('Database lookup error:', dbError);
       return res.status(500).json({
         status: 'error',
         message: 'Database error during user lookup'
       });
     }
 
-    // If isSignup is true and user exists, return error
-    if (isSignup && user) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'An account with this email already exists. Please log in instead.'
-      });
-    }
-
-    // If isSignup is false (login) and user does NOT exist, return error
-    if (!isSignup && !user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'No account found with this email. Please sign up first.'
-      });
-    }
-
     if (!user) {
+      if (isSignup === false) {
+        return res.status(404).json({
+          status: 'fail',
+          message: 'Account not found. Please sign up first.'
+        });
+      }
+      
       // Create new user with Google auth using exact email
       try {
         const referralCode = generateReferralCode();
@@ -5262,7 +4922,7 @@ app.post('/api/auth/google', async (req, res) => {
           status: 'active'
         });
         isNewUser = true;
-        if (process.env.NODE_ENV !== 'production') console.log('New user created via Google:', originalEmail);
+        console.log('New user created via Google:', originalEmail);
 
         // Send welcome email
         try {
@@ -5270,11 +4930,11 @@ app.post('/api/auth/google', async (req, res) => {
             firstName: given_name || 'Google User'
           });
         } catch (emailError) {
-          if (process.env.NODE_ENV !== 'production') console.error('Welcome email failed:', emailError);
+          console.error('Welcome email failed:', emailError);
           // Don't fail the request if email fails
         }
       } catch (createError) {
-        if (process.env.NODE_ENV !== 'production') console.error('User creation error:', createError);
+        console.error('User creation error:', createError);
         return res.status(500).json({
           status: 'error',
           message: 'Failed to create user account'
@@ -5286,9 +4946,9 @@ app.post('/api/auth/google', async (req, res) => {
         user.googleId = sub;
         user.isVerified = true;
         await user.save();
-        if (process.env.NODE_ENV !== 'production') console.log('Existing user linked with Google:', originalEmail);
+        console.log('Existing user linked with Google:', originalEmail);
       } catch (updateError) {
-        if (process.env.NODE_ENV !== 'production') console.error('User update error:', updateError);
+        console.error('User update error:', updateError);
         return res.status(500).json({
           status: 'error',
           message: 'Failed to link Google account'
@@ -5372,13 +5032,13 @@ app.post('/api/auth/google', async (req, res) => {
           ip: deviceInfo.ip,
           timestamp: new Date()
         });
-        if (process.env.NODE_ENV !== 'production') console.log(`📧 Google login attempt email sent to ${user.email}`);
+        console.log(`📧 Google login attempt email sent to ${user.email}`);
       } catch (emailError) {
-        if (process.env.NODE_ENV !== 'production') console.error('Failed to send Google login attempt email:', emailError);
+        console.error('Failed to send Google login attempt email:', emailError);
       }
       
     } catch (otpError) {
-      if (process.env.NODE_ENV !== 'production') console.error('OTP creation error:', otpError);
+      console.error('OTP creation error:', otpError);
       // Continue even if OTP fails for now
     }
 
@@ -5392,7 +5052,7 @@ app.post('/api/auth/google', async (req, res) => {
       user.loginHistory.push(deviceInfo);
       await user.save();
     } catch (updateError) {
-      if (process.env.NODE_ENV !== 'production') console.error('User update error:', updateError);
+      console.error('User update error:', updateError);
       // Continue even if update fails
     }
 
@@ -5421,12 +5081,12 @@ app.post('/api/auth/google', async (req, res) => {
         email: originalEmail
       });
     } catch (logError) {
-      if (process.env.NODE_ENV !== 'production') console.error('Activity logging error:', logError);
+      console.error('Activity logging error:', logError);
     }
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Google auth UNEXPECTED error:', err);
-    if (process.env.NODE_ENV !== 'production') console.error('Error stack:', err.stack);
+    console.error('Google auth UNEXPECTED error:', err);
+    console.error('Error stack:', err.stack);
     
     res.status(500).json({
       status: 'error',
@@ -5478,7 +5138,7 @@ app.post('/api/auth/forgot-password', [
 
     await logActivity('forgot-password', 'user', user._id, user._id, 'User', req);
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Forgot password error:', err);
+    console.error('Forgot password error:', err);
     res.status(500).json({
       status: 'error',
       message: 'An error occurred while sending the password reset email'
@@ -5550,7 +5210,7 @@ app.post('/api/auth/reset-password', [
 
     await logActivity('reset-password', 'user', user._id, user._id, 'User', req);
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Reset password error:', err);
+    console.error('Reset password error:', err);
     res.status(500).json({
       status: 'error',
       message: 'An error occurred while resetting the password'
@@ -5910,7 +5570,7 @@ app.post('/api/investments', protect, [
       };
       await investment.save();
 
-      if (process.env.NODE_ENV !== 'production') console.log(`🎁 Direct referral bonus of $${referralBonus} paid to ${user.referredBy}`);
+      console.log(`🎁 Direct referral bonus of $${referralBonus} paid to ${user.referredBy}`);
     }
 
     // ✅ SEND INVESTMENT CREATION EMAIL
@@ -5924,9 +5584,9 @@ app.post('/api/investments', protect, [
         startDate: investment.startDate,
         endDate: investment.endDate
       });
-      if (process.env.NODE_ENV !== 'production') console.log(`📧 Investment creation email sent to ${user.email}`);
+      console.log(`📧 Investment creation email sent to ${user.email}`);
     } catch (emailError) {
-      if (process.env.NODE_ENV !== 'production') console.error('Failed to send investment creation email:', emailError);
+      console.error('Failed to send investment creation email:', emailError);
       // Don't fail the investment if email fails
     }
 
@@ -5950,7 +5610,7 @@ app.post('/api/investments', protect, [
       }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Investment creation error:', err);
+    console.error('Investment creation error:', err);
     
     // Even on error, return success to frontend as requested
     res.status(200).json({
@@ -6104,9 +5764,9 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
           completionDate: investment.completionDate,
           newMaturedBalance: user.balances.matured
         });
-        if (process.env.NODE_ENV !== 'production') console.log(`📧 Investment completion email sent to ${user.email}`);
+        console.log(`📧 Investment completion email sent to ${user.email}`);
       } catch (emailError) {
-        if (process.env.NODE_ENV !== 'production') console.error('Failed to send investment completion email:', emailError);
+        console.error('Failed to send investment completion email:', emailError);
         // Don't fail the investment completion if email fails
       }
 
@@ -6140,7 +5800,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
     }
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Complete investment error:', err);
+    console.error('Complete investment error:', err);
     res.status(500).json({
       status: 'error',
       message: 'An error occurred while completing the investment'
@@ -6167,7 +5827,7 @@ app.get('/api/admin/deposits/:id', adminProtect, async (req, res) => {
       data: { deposit }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin get deposit error:', err);
+    console.error('Admin get deposit error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch deposit details'
@@ -6194,7 +5854,7 @@ app.get('/api/admin/withdrawals/:id', adminProtect, async (req, res) => {
       data: { withdrawal }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin get withdrawal error:', err);
+    console.error('Admin get withdrawal error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch withdrawal details'
@@ -6306,9 +5966,9 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
         method: deposit.method,
         reason: reason
       });
-      if (process.env.NODE_ENV !== 'production') console.log(`📧 Deposit rejection email sent to ${deposit.user.email}`);
+      console.log(`📧 Deposit rejection email sent to ${deposit.user.email}`);
     } catch (emailError) {
-      if (process.env.NODE_ENV !== 'production') console.error('Failed to send deposit rejection email:', emailError);
+      console.error('Failed to send deposit rejection email:', emailError);
       // Don't fail the deposit rejection if email fails
     }
     
@@ -6323,7 +5983,7 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
       userId: deposit.user._id
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin reject deposit error:', err);
+    console.error('Admin reject deposit error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to reject deposit',
@@ -6451,9 +6111,9 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
         method: withdrawal.method,
         asset: withdrawal.asset || 'USD'
       });
-      if (process.env.NODE_ENV !== 'production') console.log(`📧 Withdrawal rejection email sent to ${user.email}`);
+      console.log(`📧 Withdrawal rejection email sent to ${user.email}`);
     } catch (emailError) {
-      if (process.env.NODE_ENV !== 'production') console.error('Failed to send withdrawal rejection email:', emailError);
+      console.error('Failed to send withdrawal rejection email:', emailError);
       // Don't fail the withdrawal rejection if email fails
     }
     
@@ -6468,145 +6128,11 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
       userId: user._id
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin reject withdrawal error:', err);
+    console.error('Admin reject withdrawal error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to reject withdrawal',
       error: process.env.NODE_ENV === 'development' ? err.message : undefined
-    });
-  }
-});
-
-// Alternative: Soft delete user (suspend instead of permanent delete)
-app.put('/api/admin/users/:userId/suspend', adminProtect, async (req, res) => {
-  try {
-    const { userId } = req.params;
-    const { reason } = req.body;
-    
-    // Validate userId format
-    if (!mongoose.Types.ObjectId.isValid(userId)) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Invalid user ID format'
-      });
-    }
-    
-    const user = await User.findById(userId);
-    
-    if (!user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found'
-      });
-    }
-    
-    // Check if trying to suspend yourself
-    if (req.admin && req.admin._id && req.admin._id.toString() === userId) {
-      return res.status(403).json({
-        status: 'fail',
-        message: 'You cannot suspend your own admin account'
-      });
-    }
-    
-    // Update user status to suspended
-    user.status = 'suspended';
-    await user.save();
-    
-    // Log the suspension activity
-    await logActivity(
-      'suspend_user',
-      'User',
-      userId,
-      req.admin._id,
-      'Admin',
-      req,
-      {
-        reason: reason || 'No reason provided',
-        previousStatus: user.status,
-        newStatus: 'suspended'
-      }
-    );
-    
-    res.status(200).json({
-      status: 'success',
-      message: `User ${user.firstName} ${user.lastName} has been suspended`,
-      data: {
-        user: {
-          id: user._id,
-          name: `${user.firstName} ${user.lastName}`,
-          email: user.email,
-          status: user.status
-        }
-      }
-    });
-    
-  } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin suspend user error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'An error occurred while suspending the user'
-    });
-  }
-});
-
-// Reactivate a suspended user
-app.put('/api/admin/users/:userId/reactivate', adminProtect, async (req, res) => {
-  try {
-    const { userId } = req.params;
-    
-    // Validate userId format
-    if (!mongoose.Types.ObjectId.isValid(userId)) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Invalid user ID format'
-      });
-    }
-    
-    const user = await User.findById(userId);
-    
-    if (!user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found'
-      });
-    }
-    
-    // Update user status to active
-    user.status = 'active';
-    await user.save();
-    
-    // Log the reactivation activity
-    await logActivity(
-      'reactivate_user',
-      'User',
-      userId,
-      req.admin._id,
-      'Admin',
-      req,
-      {
-        previousStatus: user.status,
-        newStatus: 'active'
-      }
-    );
-    
-    res.status(200).json({
-      status: 'success',
-      message: `User ${user.firstName} ${user.lastName} has been reactivated`,
-      data: {
-        user: {
-          id: user._id,
-          name: `${user.firstName} ${user.lastName}`,
-          email: user.email,
-          status: user.status
-        }
-      }
-    });
-    
-  } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin reactivate user error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'An error occurred while reactivating the user'
     });
   }
 });
@@ -6644,7 +6170,7 @@ app.get('/api/admin/downline', adminProtect, restrictTo('super', 'support'), asy
       }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get downline relationships error:', err);
+    console.error('Get downline relationships error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch downline relationships'
@@ -6740,7 +6266,7 @@ app.post('/api/admin/downline/assign', adminProtect, restrictTo('super', 'suppor
     });
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Assign downline error:', err);
+    console.error('Assign downline error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to assign downline relationship'
@@ -6773,7 +6299,7 @@ app.delete('/api/admin/downline/:relationshipId', adminProtect, restrictTo('supe
     });
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Remove downline error:', err);
+    console.error('Remove downline error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to remove downline relationship'
@@ -6802,7 +6328,7 @@ app.get('/api/admin/commission-settings', adminProtect, restrictTo('super', 'sup
       }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get commission settings error:', err);
+    console.error('Get commission settings error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch commission settings'
@@ -6862,7 +6388,7 @@ app.post('/api/admin/commission-settings', adminProtect, restrictTo('super'), [
     });
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Update commission settings error:', err);
+    console.error('Update commission settings error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to update commission settings'
@@ -6901,7 +6427,7 @@ app.get('/api/admin/commission-history', adminProtect, restrictTo('super', 'supp
       }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get commission history error:', err);
+    console.error('Get commission history error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch commission history'
@@ -6936,7 +6462,7 @@ app.get('/api/users/downline', protect, async (req, res) => {
     });
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get user downline error:', err);
+    console.error('Get user downline error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch downline information'
@@ -6956,7 +6482,7 @@ app.get('/api/admin/kyc/submissions', adminProtect, restrictTo('super', 'support
     const status = req.query.status || 'all';
     const skip = (page - 1) * limit;
 
-    if (process.env.NODE_ENV !== 'production') console.log('Fetching KYC submissions with params:', { page, limit, status });
+    console.log('Fetching KYC submissions with params:', { page, limit, status });
 
     // Build query based on status filter
     let query = {};
@@ -7004,7 +6530,7 @@ app.get('/api/admin/kyc/submissions', adminProtect, restrictTo('super', 'support
       adminNotes: submission.adminNotes
     }));
 
-    if (process.env.NODE_ENV !== 'production') console.log(`Found ${formattedSubmissions.length} KYC submissions`);
+    console.log(`Found ${formattedSubmissions.length} KYC submissions`);
 
     res.status(200).json({
       status: 'success',
@@ -7022,7 +6548,7 @@ app.get('/api/admin/kyc/submissions', adminProtect, restrictTo('super', 'support
     });
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get KYC submissions error:', err);
+    console.error('Get KYC submissions error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch KYC submissions'
@@ -7057,7 +6583,7 @@ app.get('/api/admin/kyc/submissions/:submissionId', adminProtect, restrictTo('su
     });
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get KYC submission details error:', err);
+    console.error('Get KYC submission details error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch KYC submission details'
@@ -7170,9 +6696,9 @@ app.post('/api/admin/kyc/submissions/:submissionId/approve', adminProtect, restr
       await sendAutomatedEmail(kycSubmission.user, 'kyc_approved', {
         name: kycSubmission.user.firstName
       });
-      if (process.env.NODE_ENV !== 'production') console.log(`📧 KYC approval email sent to ${kycSubmission.user.email}`);
+      console.log(`📧 KYC approval email sent to ${kycSubmission.user.email}`);
     } catch (emailError) {
-      if (process.env.NODE_ENV !== 'production') console.error('Failed to send KYC approval email:', emailError);
+      console.error('Failed to send KYC approval email:', emailError);
       // Don't fail the KYC approval if email fails
     }
 
@@ -7193,7 +6719,7 @@ app.post('/api/admin/kyc/submissions/:submissionId/approve', adminProtect, restr
     });
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Approve KYC error:', err);
+    console.error('Approve KYC error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to approve KYC application',
@@ -7341,9 +6867,9 @@ app.post('/api/admin/kyc/submissions/:submissionId/reject', adminProtect, restri
         name: kycSubmission.user.firstName,
         reason: reason
       });
-      if (process.env.NODE_ENV !== 'production') console.log(`📧 KYC rejection email sent to ${kycSubmission.user.email}`);
+      console.log(`📧 KYC rejection email sent to ${kycSubmission.user.email}`);
     } catch (emailError) {
-      if (process.env.NODE_ENV !== 'production') console.error('Failed to send KYC rejection email:', emailError);
+      console.error('Failed to send KYC rejection email:', emailError);
       // Don't fail the KYC rejection if email fails
     }
 
@@ -7362,7 +6888,7 @@ app.post('/api/admin/kyc/submissions/:submissionId/reject', adminProtect, restri
     });
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Reject KYC error:', err);
+    console.error('Reject KYC error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to reject KYC application',
@@ -7379,23 +6905,23 @@ app.get('/api/admin/kyc/files/:type/:filename', adminProtect, restrictTo('super'
     let filePath;
     switch (type) {
       case 'identity-front':
-        filePath = path.join(process.env.KYC_IDENTITY_PATH || 'uploads/kyc/identity', filename);
+        filePath = path.join(process.env.KYC_IDENTITY_PATH, filename);
         break;
       
       case 'identity-back':
-        filePath = path.join(process.env.KYC_IDENTITY_PATH || 'uploads/kyc/identity', filename);
+        filePath = path.join(process.env.KYC_IDENTITY_PATH, filename);
         break;
       
       case 'address':
-        filePath = path.join(process.env.KYC_ADDRESS_PATH || 'uploads/kyc/address', filename);
+        filePath = path.join(process.env.KYC_ADDRESS_PATH, filename);
         break;
       
       case 'facial-video':
-        filePath = path.join(process.env.KYC_FACIAL_PATH || 'uploads/kyc/facial', filename);
+        filePath = path.join(process.env.KYC_FACIAL_PATH, filename);
         break;
       
       case 'facial-photo':
-        filePath = path.join(process.env.KYC_FACIAL_PATH || 'uploads/kyc/facial', filename);
+        filePath = path.join(process.env.KYC_FACIAL_PATH, filename);
         break;
       
       default:
@@ -7489,7 +7015,7 @@ app.get('/api/admin/kyc/files/:type/:filename', adminProtect, restrictTo('super'
     }
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Serve KYC file error:', err);
+    console.error('Serve KYC file error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to serve file'
@@ -7523,7 +7049,7 @@ app.get('/api/admin/kyc/files/secure/:type/:filename', adminProtect, restrictTo(
     });
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Generate secure URL error:', err);
+    console.error('Generate secure URL error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to generate secure URL'
@@ -7732,7 +7258,7 @@ app.get('/api/referrals', protect, async (req, res) => {
         await logActivity('view_referrals', 'referral', userId, userId, 'User', req);
 
     } catch (error) {
-        if (process.env.NODE_ENV !== 'production') console.error('Error loading referral data:', error);
+        console.error('Error loading referral data:', error);
         res.status(500).json({
             status: 'error',
             message: 'Failed to load referral data'
@@ -7799,7 +7325,7 @@ app.post('/api/admin/users', adminProtect, [
     
     await logActivity('create-user', 'user', user._id, req.admin._id, 'Admin', req);
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin add user error:', err);
+    console.error('Admin add user error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to create user'
@@ -7866,7 +7392,7 @@ const logUserActivity = async (req, action, status = 'success', metadata = {}, r
     });
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error logging user activity:', err);
+    console.error('Error logging user activity:', err);
     // Fail silently to not disrupt user experience
   }
 };
@@ -7957,7 +7483,7 @@ const trackUserActivity = (action, options = {}) => {
         await logUserActivity(req, action, 'success', metadata, relatedEntity);
       }
     } catch (err) {
-      if (process.env.NODE_ENV !== 'production') console.error('Activity tracking middleware error:', err);
+      console.error('Activity tracking middleware error:', err);
       // Don't interrupt the request flow if tracking fails
     }
   };
@@ -7976,7 +7502,7 @@ const trackFailedLogin = async (req, res, next) => {
       });
     }
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Failed login tracking error:', err);
+    console.error('Failed login tracking error:', err);
   }
 };
 
@@ -8100,7 +7626,7 @@ app.post('/api/auth/verify-otp', [
     }, user);
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('OTP verification error:', err);
+    console.error('OTP verification error:', err);
     res.status(500).json({
       status: 'error',
       message: 'An error occurred during verification'
@@ -8174,7 +7700,7 @@ app.post('/api/auth/send-otp', [
     });
 
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Send OTP error:', err);
+    console.error('Send OTP error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to send OTP'
@@ -8442,7 +7968,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             if (process.env.NODE_ENV !== 'production') console.log(`Gas fee calculation: BTC fee: ${btcGasFeeAmount} BTC, BTC price: $${btcPrice}, Gas fee in USD: $${gasFeeInUsd.toFixed(2)}, Gas fee in ${asset.toUpperCase()}: ${gasFeeInAsset.toFixed(8)}`);
             
         } catch (error) {
-            if (process.env.NODE_ENV !== 'production') console.error('Price fetch error:', error);
+            console.error('Price fetch error:', error);
             return res.status(503).json({
                 status: 'error',
                 message: error.message || 'Unable to fetch current cryptocurrency prices. Please try again.'
@@ -8632,9 +8158,9 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 timestamp: new Date(),
                 network: asset === 'USDT' ? 'ERC-20' : asset === 'BTC' ? 'Bitcoin' : 'Mainnet'
             });
-            if (process.env.NODE_ENV !== 'production') console.log(`📧 Withdrawal request email sent to ${user.email}`);
+            console.log(`📧 Withdrawal request email sent to ${user.email}`);
         } catch (emailError) {
-            if (process.env.NODE_ENV !== 'production') console.error('Failed to send withdrawal request email:', emailError);
+            console.error('Failed to send withdrawal request email:', emailError);
             // Don't fail the withdrawal request if email fails
         }
 
@@ -8686,7 +8212,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
         });
 
     } catch (err) {
-        if (process.env.NODE_ENV !== 'production') console.error('Asset withdrawal error:', err);
+        console.error('Asset withdrawal error:', err);
         
         // Handle API errors specifically
         if (err.code === 'ECONNABORTED' || err.message.includes('timeout')) {
@@ -8784,7 +8310,7 @@ app.post('/api/users/location', protect, async (req, res) => {
         }
       }
     } catch (geoError) {
-      if (process.env.NODE_ENV !== 'production') console.log('Geolocation failed for exact location:', geoError.message);
+      console.log('Geolocation failed for exact location:', geoError.message);
     }
     
     // Update user with exact location
@@ -8836,98 +8362,10 @@ app.post('/api/users/location', protect, async (req, res) => {
     });
     
   } catch (error) {
-    if (process.env.NODE_ENV !== 'production') console.error('Location update error:', error);
+    console.error('Location update error:', error);
     res.status(500).json({
       status: 'error',
       message: 'Failed to update location'
-    });
-  }
-});
-
-// =============================================
-// ENDPOINT 2: COOKIE PREFERENCES - ROBUST ENTERPRISE VERSION
-// =============================================
-app.post('/api/users/cookie-preferences', protect, async (req, res) => {
-  try {
-    const { cookieConsent, cookieSettings } = req.body;
-    const userId = req.user._id;
-    const ipAddress = getRealClientIP(req);
-    const userAgent = req.headers['user-agent'] || 'Unknown';
-    
-    // Validate consent
-    const validValues = ['all', 'essential', 'functional', 'analytics', 'custom', 'reject'];
-    if (!cookieConsent || !validValues.includes(cookieConsent)) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Invalid cookie consent value'
-      });
-    }
-    
-    // Validate settings if provided
-    let validatedSettings = null;
-    if (cookieSettings && typeof cookieSettings === 'object') {
-      validatedSettings = {
-        essential: true,
-        functional: cookieSettings.functional === true,
-        analytics: cookieSettings.analytics === true,
-        marketing: cookieSettings.marketing === true,
-        lastUpdated: new Date()
-      };
-    }
-    
-    // Update user preferences
-    await User.findByIdAndUpdate(userId, {
-      $set: {
-        'cookiePreferences.consent': cookieConsent,
-        'cookiePreferences.updatedAt': new Date(),
-        'cookiePreferences.ipAddress': ipAddress,
-        'cookiePreferences.settings': validatedSettings
-      }
-    });
-    
-    // Set cookies based on consent
-    const cookieOptions = {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 365 * 24 * 60 * 60 * 1000
-    };
-    
-    res.cookie('cookie_consent', cookieConsent, cookieOptions);
-    
-    if (cookieConsent === 'all' || cookieConsent === 'functional') {
-      res.cookie('functional_enabled', 'true', cookieOptions);
-    } else {
-      res.clearCookie('functional_enabled');
-    }
-    
-    if (cookieConsent === 'all' || cookieConsent === 'analytics') {
-      res.cookie('analytics_enabled', 'true', cookieOptions);
-    } else {
-      res.clearCookie('analytics_enabled');
-    }
-    
-    // Log activity
-    await logActivity('cookie_preferences_updated', 'User', userId, userId, 'User', req, { 
-      consent: cookieConsent, 
-      settings: validatedSettings 
-    });
-    
-    res.status(200).json({
-      status: 'success',
-      message: 'Cookie preferences saved successfully',
-      data: {
-        consent: cookieConsent,
-        settings: validatedSettings,
-        updatedAt: new Date()
-      }
-    });
-    
-  } catch (error) {
-    if (process.env.NODE_ENV !== 'production') console.error('Cookie preferences error:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to save cookie preferences'
     });
   }
 });
@@ -8949,7 +8387,7 @@ app.get('/api/admin/restrictions', adminProtect, restrictTo('super'), async (req
       }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('GET restrictions error:', err);
+    console.error('GET restrictions error:', err);
     res.status(500).json({ status: 'error', message: 'Failed to fetch restriction settings' });
   }
 });
@@ -8994,7 +8432,7 @@ app.post('/api/admin/restrictions', adminProtect, restrictTo('super'), async (re
     
     res.json({ status: 'success', message: 'Restrictions saved successfully' });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('POST restrictions error:', err);
+    console.error('POST restrictions error:', err);
     res.status(500).json({ status: 'error', message: err.message || 'Failed to save restrictions' });
   }
 });
@@ -9007,7 +8445,7 @@ const triggerTransactionCheck = async (userId) => {
 // Scheduled job to run daily at midnight to check all users
 const scheduleDailyRestrictionChecks = () => {
   setInterval(async () => {
-    if (process.env.NODE_ENV !== 'production') console.log('Running daily restriction checks...');
+    console.log('Running daily restriction checks...');
     const restrictions = await AccountRestrictions.getInstance();
     if (restrictions.auto_restrictions_enabled !== false) {
       const users = await User.find({ status: 'active' }).select('_id');
@@ -9019,7 +8457,7 @@ const scheduleDailyRestrictionChecks = () => {
           updated++;
         }
       }
-      if (process.env.NODE_ENV !== 'production') console.log(`Daily restriction check complete. ${updated} users had status changes.`);
+      console.log(`Daily restriction check complete. ${updated} users had status changes.`);
     }
   }, 24 * 60 * 60 * 1000); // 24 hours
 };
@@ -9059,7 +8497,7 @@ app.get('/api/user/restriction-status', protect, async (req, res) => {
       }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get user restriction status error:', err);
+    console.error('Get user restriction status error:', err);
     res.status(500).json({ status: 'error', message: 'Failed to fetch restriction status' });
   }
 });
@@ -9071,7 +8509,7 @@ app.get('/api/user/restriction-status', protect, async (req, res) => {
 // =============================================
 app.get('/api/fiat-currencies', async (req, res) => {
   try {
-    if (process.env.NODE_ENV !== 'production') console.log('🌐 Fetching real-time fiat currencies from external APIs...');
+    console.log('🌐 Fetching real-time fiat currencies from external APIs...');
     
     let rates = null;
     let apiSuccess = false;
@@ -9084,10 +8522,10 @@ app.get('/api/fiat-currencies', async (req, res) => {
       if (response.data && response.data.rates) {
         rates = response.data.rates;
         apiSuccess = true;
-        if (process.env.NODE_ENV !== 'production') console.log('✅ Fetched rates from exchangerate-api.com');
+        console.log('✅ Fetched rates from exchangerate-api.com');
       }
     } catch (err) {
-      if (process.env.NODE_ENV !== 'production') console.warn('exchangerate-api.com failed:', err.message);
+      console.warn('exchangerate-api.com failed:', err.message);
     }
     
     if (!apiSuccess) {
@@ -9098,10 +8536,10 @@ app.get('/api/fiat-currencies', async (req, res) => {
         if (response.data && response.data.rates) {
           rates = response.data.rates;
           apiSuccess = true;
-          if (process.env.NODE_ENV !== 'production') console.log('✅ Fetched rates from frankfurter.app');
+          console.log('✅ Fetched rates from frankfurter.app');
         }
       } catch (err) {
-        if (process.env.NODE_ENV !== 'production') console.warn('frankfurter.app failed:', err.message);
+        console.warn('frankfurter.app failed:', err.message);
       }
     }
     
@@ -9113,15 +8551,15 @@ app.get('/api/fiat-currencies', async (req, res) => {
         if (response.data && response.data.usd) {
           rates = response.data.usd;
           apiSuccess = true;
-          if (process.env.NODE_ENV !== 'production') console.log('✅ Fetched rates from currency-api');
+          console.log('✅ Fetched rates from currency-api');
         }
       } catch (err) {
-        if (process.env.NODE_ENV !== 'production') console.warn('currency-api failed:', err.message);
+        console.warn('currency-api failed:', err.message);
       }
     }
     
     if (!apiSuccess || !rates) {
-      if (process.env.NODE_ENV !== 'production') console.error('❌ All exchange rate APIs failed');
+      console.error('❌ All exchange rate APIs failed');
       return res.status(503).json({
         status: 'error',
         message: 'Unable to fetch exchange rates. Please try again later.',
@@ -9201,7 +8639,7 @@ app.get('/api/fiat-currencies', async (req, res) => {
       exchangeRate: rates[currency.code] || (currency.code === 'USD' ? 1 : null)
     })).filter(c => c.exchangeRate !== null);
     
-    if (process.env.NODE_ENV !== 'production') console.log(`✅ Returning ${currenciesWithRates.length} fiat currencies with real exchange rates`);
+    console.log(`✅ Returning ${currenciesWithRates.length} fiat currencies with real exchange rates`);
     
     res.status(200).json({ 
       status: 'success',
@@ -9210,7 +8648,7 @@ app.get('/api/fiat-currencies', async (req, res) => {
     });
     
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('❌ Error fetching fiat currencies:', err);
+    console.error('❌ Error fetching fiat currencies:', err);
     res.status(500).json({ 
       status: 'error', 
       message: 'Failed to fetch exchange rates. Please try again.'
@@ -9244,7 +8682,7 @@ app.get('/api/convert/assets', protect, async (req, res) => {
     
     res.status(200).json({ assets: availableAssets });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error fetching convert assets:', err);
+    console.error('Error fetching convert assets:', err);
     res.status(500).json({ status: 'error', message: 'Failed to fetch available assets' });
   }
 });
@@ -9416,26 +8854,8 @@ app.post('/api/convert', protect, async (req, res) => {
       }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Conversion error:', err);
+    console.error('Conversion error:', err);
     res.status(500).json({ status: 'error', message: 'Conversion failed' });
-  }
-});
-
-// =============================================
-// DEPOSIT ASSET ENDPOINT - Get user's default deposit asset
-// =============================================
-app.get('/api/users/deposit-asset', protect, async (req, res) => {
-  try {
-    const userPref = await UserPreference.findOne({ user: req.user._id });
-    const asset = userPref?.displayAsset || 'btc';
-    
-    res.status(200).json({
-      status: 'success',
-      data: { asset }
-    });
-  } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error fetching deposit asset:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch deposit asset' });
   }
 });
 
@@ -9617,9 +9037,9 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
         processedAt: deposit.processedAt,
         asset: deposit.method !== 'BANK' && deposit.method !== 'CARD' ? deposit.method : 'USD'
       });
-      if (process.env.NODE_ENV !== 'production') console.log(`📧 Deposit approval email sent to ${user.email}`);
+      console.log(`📧 Deposit approval email sent to ${user.email}`);
     } catch (emailError) {
-      if (process.env.NODE_ENV !== 'production') console.error('Failed to send deposit approval email:', emailError);
+      console.error('Failed to send deposit approval email:', emailError);
     }
     
     await AccountRestrictions.checkAndUpdateRestrictions(user._id, 'transaction_completion');
@@ -9663,7 +9083,7 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       assetAmount: assetAmount
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin approve deposit error:', err);
+    console.error('Admin approve deposit error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to approve deposit',
@@ -9822,9 +9242,9 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
         txid: txid || withdrawal.details?.txid,
         method: withdrawal.method
       });
-      if (process.env.NODE_ENV !== 'production') console.log(`📧 Withdrawal approval email sent to ${withdrawal.user.email}`);
+      console.log(`📧 Withdrawal approval email sent to ${withdrawal.user.email}`);
     } catch (emailError) {
-      if (process.env.NODE_ENV !== 'production') console.error('Failed to send withdrawal approval email:', emailError);
+      console.error('Failed to send withdrawal approval email:', emailError);
     }
     
     await AccountRestrictions.checkAndUpdateRestrictions(withdrawal.user._id, 'transaction_completion');
@@ -9879,7 +9299,7 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
       assetAmount: withdrawal.assetAmount
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Admin approve withdrawal error:', err);
+    console.error('Admin approve withdrawal error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to approve withdrawal',
@@ -9932,75 +9352,51 @@ app.get('/api/users/assets', protect, async (req, res) => {
     
     res.status(200).json(assetData);
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error fetching user assets:', err);
+    console.error('Error fetching user assets:', err);
     res.status(500).json({ status: 'error', message: 'Failed to fetch assets' });
   }
 });
 
-// =============================================
-// GET USER BALANCES ENDPOINT
-// =============================================
-app.get('/api/users/balances', protect, async (req, res) => {
+// UPDATE PRICES EVERY 1 SECOND FOR TRUE REAL-TIME
+priceUpdateInterval = setInterval(async () => {
   try {
-    const user = await User.findById(req.user._id).select('balances');
-    res.status(200).json({
-      main: user.balances.main,
-      active: user.balances.active,
-      matured: user.balances.matured
-    });
-  } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error fetching balances:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch balances' });
-  }
-});
-
-let priceUpdateInterval = null;
-let lastPrices = {};
-let isRecalculating = false;
-
-const startRealTimePriceUpdates = (io) => {
-  if (priceUpdateInterval) clearInterval(priceUpdateInterval);
-
-  // UPDATE PRICES EVERY 1 SECOND FOR TRUE REAL-TIME
-  priceUpdateInterval = setInterval(async () => {
-    try {
-      const assets = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'ADA', 'SHIB', 'AVAX', 'DOT', 'TRX', 'LINK', 'MATIC', 'LTC'];
-      const priceUpdates = {};
-      
-      // Fetch all prices in parallel for speed
-      const pricePromises = assets.map(async (asset) => {
-        const price = await getCryptoPrice(asset);
-        if (price) {
-          priceUpdates[asset.toLowerCase()] = {
-            price: price,
-            timestamp: Date.now()
-          };
-        }
-      });
-      
-      await Promise.all(pricePromises);
-      
-      if (Object.keys(priceUpdates).length > 0 && io) {
-        // Broadcast price updates to all clients
-        io.emit('price_update', priceUpdates);
-        lastPrices = priceUpdates;
-
-        // Broadcast to WebSocket clients as well
-        const marketWss = req?.app?.get('marketWss');
-        if (marketWss) {
-          marketWss.clients.forEach(client => {
-            if (client.readyState === WebSocket.OPEN) {
-              client.send(JSON.stringify({ type: 'price_update', data: priceUpdates }));
-            }
-          });
-        }
+    const assets = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'ADA', 'SHIB', 'AVAX', 'DOT', 'TRX', 'LINK', 'MATIC', 'LTC'];
+    const priceUpdates = {};
+    
+    // Fetch all prices in parallel for speed
+    const pricePromises = assets.map(async (asset) => {
+      const price = await getCryptoPrice(asset);
+      if (price) {
+        priceUpdates[asset.toLowerCase()] = {
+          price: price,
+          timestamp: Date.now()
+        };
       }
-      
-      // IMMEDIATELY recalculate ALL user wallet values based on new prices
-      await recalculateAllWalletValuesRealtime(io, priceUpdates);
+    });
+    
+    await Promise.all(pricePromises);
+    
+    if (Object.keys(priceUpdates).length > 0 && io) {
+      // Broadcast price updates to all clients
+      io.emit('price_update', priceUpdates);
+      lastPrices = priceUpdates;
+
+  // ADD THIS LINE - Broadcast to WebSocket clients as well
+  const marketWss = req?.app?.get('marketWss');
+  if (marketWss) {
+    marketWss.clients.forEach(client => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify({ type: 'price_update', data: priceUpdates }));
+      }
+    });
+  }
+}
+        
+        // IMMEDIATELY recalculate ALL user wallet values based on new prices
+        await recalculateAllWalletValuesRealtime(io, priceUpdates);
       
     } catch (err) {
-      if (process.env.NODE_ENV !== 'production') console.error('Error in price update interval:', err);
+      console.error('Error in price update interval:', err);
     }
   }, 1000); // EVERY SECOND
 };
@@ -10112,7 +9508,7 @@ const recalculateAllWalletValuesRealtime = async (io, currentPrices) => {
     }
     
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error in real-time wallet recalculation:', err);
+    console.error('Error in real-time wallet recalculation:', err);
   } finally {
     isRecalculating = false;
   }
@@ -10122,1332 +9518,6 @@ const recalculateAllWalletValuesRealtime = async (io, currentPrices) => {
 const recalculateAllUserMainBalances = async (io) => {
   const currentPrices = lastPrices;
   await recalculateAllWalletValuesRealtime(io, currentPrices);
-};
-
-// =============================================
-// SPOT TRADING MARKET DATA ENDPOINTS - PRODUCTION
-// ALL ENDPOINTS READ FROM HOT REDIS - NO ON-DEMAND FETCHING
-// =============================================
-
-// GET /api/market/all-pairs - All trading pairs with logos for worker subscription
-app.get('/api/market/all-pairs', async (req, res) => {
-  try {
-    const cacheKey = 'market:all:pairs';
-    let pairs = await redis.get(cacheKey);
-    let quoteAssets = await redis.get('market:quote:assets');
-    
-    if (!pairs) {
-      const response = await axios.get('https://api.binance.com/api/v3/exchangeInfo', { timeout: 10000 });
-      
-      const usdtPairs = response.data.symbols.filter(s => s.quoteAsset === 'USDT' && s.status === 'TRADING');
-      const usdcPairs = response.data.symbols.filter(s => s.quoteAsset === 'USDC' && s.status === 'TRADING');
-      const eurcPairs = response.data.symbols.filter(s => s.quoteAsset === 'EURC' && s.status === 'TRADING');
-      const usdPairs = response.data.symbols.filter(s => s.quoteAsset === 'USD' && s.status === 'TRADING');
-      const bnbPairs = response.data.symbols.filter(s => s.quoteAsset === 'BNB' && s.status === 'TRADING');
-      const btcPairs = response.data.symbols.filter(s => s.quoteAsset === 'BTC' && s.status === 'TRADING');
-      
-      const allPairs = [];
-      
-      usdtPairs.forEach(pair => {
-        allPairs.push({ symbol: pair.symbol, base: pair.baseAsset, quote: 'USDT', logo: '' });
-      });
-      usdcPairs.forEach(pair => {
-        allPairs.push({ symbol: pair.symbol, base: pair.baseAsset, quote: 'USDC', logo: '' });
-      });
-      eurcPairs.forEach(pair => {
-        allPairs.push({ symbol: pair.symbol, base: pair.baseAsset, quote: 'EURC', logo: '' });
-      });
-      usdPairs.forEach(pair => {
-        allPairs.push({ symbol: pair.symbol, base: pair.baseAsset, quote: 'USD', logo: '' });
-      });
-      bnbPairs.forEach(pair => {
-        allPairs.push({ symbol: pair.symbol, base: pair.baseAsset, quote: 'BNB', logo: '' });
-      });
-      btcPairs.forEach(pair => {
-        allPairs.push({ symbol: pair.symbol, base: pair.baseAsset, quote: 'BTC', logo: '' });
-      });
-      
-      const quoteAssetsList = ['USDT', 'USDC', 'EURC', 'USD', 'BNB', 'BTC'];
-      
-      await redis.setex(cacheKey, 3600, JSON.stringify(allPairs));
-      await redis.setex('market:quote:assets', 3600, JSON.stringify(quoteAssetsList));
-      
-      return res.status(200).json({ pairs: allPairs, quoteAssets: quoteAssetsList });
-    }
-    
-    const pairsData = JSON.parse(pairs);
-    const quoteData = quoteAssets ? JSON.parse(quoteAssets) : ['USDT', 'USDC', 'EURC', 'USD', 'BNB', 'BTC'];
-    
-    res.status(200).json({ pairs: pairsData, quoteAssets: quoteData });
-  } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('All pairs fetch error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch market pairs', error: err.message });
-  }
-});
-
-// GET /api/market/orderbook - Order book depth from HOT REDIS
-app.get('/api/market/orderbook', async (req, res) => {
-  try {
-    const { symbol, limit = 100 } = req.query;
-    if (!symbol) {
-      return res.status(400).json({ status: 'fail', message: 'Symbol is required' });
-    }
-
-    const orderbookKey = `orderbook:${symbol.toUpperCase()}`;
-    const cached = await redis.get(orderbookKey);
-    
-    if (!cached) {
-      return res.status(503).json({ status: 'error', message: 'Order book data not yet available. Please try again.' });
-    }
-    
-    const orderbookData = JSON.parse(cached);
-    const dataAge = Date.now() - (orderbookData.updatedAt || 0);
-    
-    if (dataAge > 500) {
-      return res.status(503).json({ status: 'error', message: 'Order book data is stale. Please try again.' });
-    }
-    
-    const limitedData = {
-      bids: orderbookData.bids.slice(0, Math.min(limit, 100)),
-      asks: orderbookData.asks.slice(0, Math.min(limit, 100)),
-      lastUpdateId: orderbookData.lastUpdateId
-    };
-
-    res.status(200).json(limitedData);
-  } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Orderbook fetch error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch order book', error: err.message });
-  }
-});
-
-// GET /api/market/ticker/24hr - 24hr ticker stats from HOT REDIS
-app.get('/api/market/ticker/24hr', async (req, res) => {
-  try {
-    const { symbol } = req.query;
-    
-    if (symbol) {
-      const tickerKey = `ticker:${symbol.toUpperCase()}`;
-      const cached = await redis.get(tickerKey);
-      
-      if (!cached) {
-        return res.status(503).json({ status: 'error', message: 'Ticker data not yet available. Please try again.' });
-      }
-      
-      const tickerData = JSON.parse(cached);
-      const dataAge = Date.now() - (tickerData.updatedAt || 0);
-      
-      if (dataAge > 500) {
-        return res.status(503).json({ status: 'error', message: 'Ticker data is stale. Please try again.' });
-      }
-      
-      return res.status(200).json(tickerData);
-    }
-    
-    const allPairs = await redis.get('market:all:pairs');
-    if (!allPairs) {
-      return res.status(503).json({ status: 'error', message: 'Market data not yet available.' });
-    }
-    
-    const pairs = JSON.parse(allPairs);
-    const tickers = [];
-    
-    for (const pair of pairs.slice(0, 50)) {
-      const tickerKey = `ticker:${pair.symbol}`;
-      const cached = await redis.get(tickerKey);
-      if (cached) {
-        const tickerData = JSON.parse(cached);
-        tickers.push({
-          symbol: tickerData.symbol,
-          lastPrice: tickerData.lastPrice,
-          priceChangePercent: tickerData.priceChangePercent,
-          volume: tickerData.volume,
-          quoteVolume: tickerData.quoteVolume
-        });
-      }
-    }
-    
-    res.status(200).json(tickers);
-  } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Ticker fetch error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch ticker data', error: err.message });
-  }
-});
-
-// GET /api/market/trades - Recent trades from HOT REDIS
-app.get('/api/market/trades', async (req, res) => {
-  try {
-    const { symbol, limit = 50 } = req.query;
-    if (!symbol) {
-      return res.status(400).json({ status: 'fail', message: 'Symbol is required' });
-    }
-
-    const tradesKey = `trades:${symbol.toUpperCase()}:recent`;
-    const cached = await redis.get(tradesKey);
-    
-    if (!cached) {
-      return res.status(503).json({ status: 'error', message: 'Trade data not yet available. Please try again.' });
-    }
-    
-    const trades = JSON.parse(cached);
-    const limitedTrades = trades.slice(0, Math.min(limit, 100));
-
-    res.status(200).json(limitedTrades);
-  } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Trades fetch error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch trades', error: err.message });
-  }
-});
-
-// GET /api/market/candles - Kline/candle data from HOT REDIS Sorted Sets
-app.get('/api/market/candles', async (req, res) => {
-  try {
-    const { symbol, interval = '15m', limit = 200 } = req.query;
-    if (!symbol) {
-      return res.status(400).json({ status: 'fail', message: 'Symbol is required' });
-    }
-
-    const validIntervals = ['1s', '15m', '1h', '4h', '1d', '1w'];
-    if (!validIntervals.includes(interval)) {
-      return res.status(400).json({ status: 'fail', message: 'Invalid interval. Use: 1s, 15m, 1h, 4h, 1d, 1w' });
-    }
-
-    const candlesKey = `kline:${symbol.toUpperCase()}:${interval}`;
-    const cached = await redis.zrevrange(candlesKey, 0, parseInt(limit) - 1);
-    
-    if (!cached || cached.length === 0) {
-      return res.status(503).json({ status: 'error', message: 'Candle data not yet available. Please try again.' });
-    }
-    
-    const candles = cached.map(c => JSON.parse(c)).reverse().map(candle => ({
-      time: candle.openTime,
-      open: candle.open,
-      high: candle.high,
-      low: candle.low,
-      close: candle.close,
-      volume: candle.volume,
-      closeTime: candle.closeTime,
-      quoteVolume: candle.quoteVolume,
-      trades: candle.trades
-    }));
-
-    res.status(200).json({ candles });
-  } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Candles fetch error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch candle data', error: err.message });
-  }
-});
-
-// GET /api/market/pairs - All trading pairs with logos from HOT REDIS
-app.get('/api/market/pairs', async (req, res) => {
-  try {
-    const { quote = 'USDT' } = req.query;
-    
-    const allPairsData = await redis.get('market:all:pairs');
-    if (!allPairsData) {
-      return res.status(503).json({ status: 'error', message: 'Market data not yet available. Please try again.' });
-    }
-    
-    const allPairs = JSON.parse(allPairsData);
-    const filteredPairs = allPairs.filter(p => p.quote === quote).slice(0, 50);
-    
-    const pairsWithPrices = [];
-    
-    for (const pair of filteredPairs) {
-      const priceKey = `price:${pair.symbol}:last`;
-      const priceData = await redis.get(priceKey);
-      const changeKey = `price:${pair.symbol}:change`;
-      const changeData = await redis.get(changeKey);
-      const volumeKey = `volume:${pair.symbol}:24h`;
-      const volumeData = await redis.get(volumeKey);
-      
-      let price = 0;
-      let change24h = 0;
-      let volume = 0;
-      
-      if (priceData) {
-        const parsed = JSON.parse(priceData);
-        price = parsed.price;
-      }
-      if (changeData) {
-        const parsed = JSON.parse(changeData);
-        change24h = parsed.changePercent;
-      }
-      if (volumeData) {
-        const parsed = JSON.parse(volumeData);
-        volume = parsed.volume;
-      }
-      
-      pairsWithPrices.push({
-        symbol: pair.symbol,
-        base: pair.base,
-        quote: pair.quote,
-        price: price,
-        change24h: change24h,
-        volume: volume,
-        logoUrl: pair.logo || '',
-        status: 'active'
-      });
-    }
-    
-    const result = { data: pairsWithPrices };
-    res.status(200).json(result);
-  } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Pairs fetch error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch market pairs', error: err.message });
-  }
-});
-
-// =============================================
-// ASSET ENDPOINTS - FROM HOT REDIS
-// =============================================
-
-// GET /api/asset/logo - Asset logo URL from HOT REDIS
-app.get('/api/asset/logo', async (req, res) => {
-  try {
-    const { symbol } = req.query;
-    if (!symbol) {
-      return res.status(400).json({ status: 'fail', message: 'Symbol is required' });
-    }
-
-    const cacheKey = `asset:logo:${symbol.toUpperCase()}`;
-    const cached = await redis.get(cacheKey);
-    if (cached) {
-      return res.status(200).json(JSON.parse(cached));
-    }
-
-    let logoUrl = '';
-    try {
-      const response = await axios.get(`https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${symbol.toLowerCase()}&sparkline=false`, { timeout: 5000 });
-      if (response.data && response.data[0] && response.data[0].image) {
-        logoUrl = response.data[0].image;
-      }
-    } catch (e) {
-      logoUrl = '';
-    }
-
-    const result = { logoUrl };
-    await redis.setex(cacheKey, 86400, JSON.stringify(result));
-
-    res.status(200).json(result);
-  } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Logo fetch error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch logo', error: err.message });
-  }
-});
-
-// GET /api/asset/extra - Asset networks and tags from HOT REDIS
-app.get('/api/asset/extra', async (req, res) => {
-  try {
-    const { symbol } = req.query;
-    if (!symbol) {
-      return res.status(400).json({ status: 'fail', message: 'Symbol is required' });
-    }
-
-    const cacheKey = `asset:extra:${symbol.toUpperCase()}`;
-    const cached = await redis.get(cacheKey);
-    if (cached) {
-      return res.status(200).json(JSON.parse(cached));
-    }
-
-    const assetData = {
-      'BTC': { tags: ['POW', 'Store of Value', 'Payments', 'Layer 1'], networks: ['Bitcoin', 'Lightning'] },
-      'ETH': { tags: ['Smart Contracts', 'DeFi', 'NFT', 'Layer 1'], networks: ['ERC-20', 'ERC-721', 'Arbitrum', 'Optimism'] },
-      'BNB': { tags: ['Exchange', 'Smart Contracts', 'Layer 1'], networks: ['BEP-2', 'BEP-20'] },
-      'SOL': { tags: ['High Performance', 'DeFi', 'Layer 1'], networks: ['Solana', 'SPL'] },
-      'XRP': { tags: ['Payments', 'Enterprise', 'Layer 1'], networks: ['XRP Ledger'] },
-      'ADA': { tags: ['Smart Contracts', 'Research', 'Layer 1'], networks: ['Cardano'] },
-      'DOGE': { tags: ['Meme', 'Payments'], networks: ['Dogecoin'] },
-      'TRX': { tags: ['Smart Contracts', 'DeFi'], networks: ['TRC-20', 'TRC-10'] }
-    };
-
-    const defaultData = { tags: ['Crypto', 'Digital Asset'], networks: ['Mainnet'] };
-    const result = assetData[symbol.toUpperCase()] || defaultData;
-
-    await redis.setex(cacheKey, 86400, JSON.stringify(result));
-
-    res.status(200).json(result);
-  } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Asset extra fetch error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch asset info', error: err.message });
-  }
-});
-
-// GET /api/asset/info - Asset info from HOT REDIS or external
-app.get('/api/asset/info', async (req, res) => {
-  try {
-    const { symbol } = req.query;
-    if (!symbol) {
-      return res.status(400).json({ status: 'fail', message: 'Symbol is required' });
-    }
-
-    const cacheKey = `asset:info:${symbol.toUpperCase()}`;
-    const cached = await redis.get(cacheKey);
-    if (cached) {
-      return res.status(200).json(JSON.parse(cached));
-    }
-
-    try {
-      const response = await axios.get(`https://api.coingecko.com/api/v3/coins/${symbol.toLowerCase()}`, { timeout: 5000 });
-      if (response.data) {
-        const data = response.data;
-        const result = {
-          symbol: symbol.toUpperCase(),
-          name: data.name,
-          logo: data.image?.large || '',
-          rank: data.market_cap_rank || 0,
-          marketCap: data.market_data?.market_cap?.usd || 0,
-          fullyDilutedMarketCap: data.market_data?.fully_diluted_valuation?.usd || 0,
-          marketDominance: 0,
-          volume24h: data.market_data?.total_volume?.usd || 0,
-          circulatingSupply: data.market_data?.circulating_supply || 0,
-          maxSupply: data.market_data?.max_supply || 0,
-          totalSupply: data.market_data?.total_supply || 0,
-          networks: data.links?.blockchain_site || [],
-          tags: data.categories || [],
-          description: data.description?.en || '',
-          website: data.links?.homepage?.[0] || '',
-          explorer: data.links?.blockchain_site?.[0] || '',
-          twitter: data.links?.twitter_screen_name || '',
-          reddit: data.links?.subreddit_url || '',
-          lastUpdated: Date.now()
-        };
-        
-        await redis.setex(cacheKey, 3600, JSON.stringify(result));
-        return res.status(200).json(result);
-      }
-    } catch (e) {
-      if (process.env.NODE_ENV !== 'production') console.log('CoinGecko fetch failed:', e.message);
-    }
-
-    const fallbackResult = {
-      symbol: symbol.toUpperCase(),
-      name: symbol.toUpperCase(),
-      logo: '',
-      rank: 0,
-      marketCap: 0,
-      fullyDilutedMarketCap: 0,
-      marketDominance: 0,
-      volume24h: 0,
-      circulatingSupply: 0,
-      maxSupply: 0,
-      totalSupply: 0,
-      networks: [],
-      tags: [],
-      description: '',
-      website: '',
-      explorer: '',
-      twitter: '',
-      reddit: '',
-      lastUpdated: Date.now()
-    };
-    
-    res.status(200).json(fallbackResult);
-  } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Asset info fetch error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch asset info', error: err.message });
-  }
-});
-
-// GET /api/trading/data - Trading data from HOT REDIS
-app.get('/api/trading/data', async (req, res) => {
-  try {
-    const { pair } = req.query;
-    if (!pair) {
-      return res.status(400).json({ status: 'fail', message: 'Pair is required' });
-    }
-
-    const cacheKey = `trading:data:${pair.toUpperCase()}`;
-    const cached = await redis.get(cacheKey);
-    if (cached) {
-      return res.status(200).json(JSON.parse(cached));
-    }
-
-    const defaultData = {
-      fundFlowLong: 50,
-      fundFlowShort: 50,
-      netFlow: [0, 0, 0, 0, 0, 0, 0],
-      inflow24h: 0,
-      outflow24h: 0,
-      netFlow24h: 0,
-      updatedAt: Date.now()
-    };
-
-    res.status(200).json(defaultData);
-  } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Trading data fetch error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch trading data', error: err.message });
-  }
-});
-
-// GET /api/analysis - Analysis data from HOT REDIS
-app.get('/api/analysis', async (req, res) => {
-  try {
-    const { pair } = req.query;
-    if (!pair) {
-      return res.status(400).json({ status: 'fail', message: 'Pair is required' });
-    }
-
-    const cacheKey = `analysis:${pair.toUpperCase()}`;
-    const cached = await redis.get(cacheKey);
-    if (cached) {
-      return res.status(200).json(JSON.parse(cached));
-    }
-
-    const defaultData = {
-      longShortRatio: 1.0,
-      marginData: 0,
-      volatility: 0,
-      sentiment: 'neutral',
-      rsi: 50,
-      macd: 0,
-      movingAverage50: 0,
-      movingAverage200: 0,
-      updatedAt: Date.now()
-    };
-
-    res.status(200).json(defaultData);
-  } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Analysis fetch error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch analysis data', error: err.message });
-  }
-});
-
-// GET /api/trading/pairlimits - Max buy/sell amounts per pair
-app.get('/api/trading/pairlimits', async (req, res) => {
-  try {
-    const { symbol } = req.query;
-    if (!symbol) {
-      return res.status(400).json({ status: 'fail', message: 'Symbol is required' });
-    }
-
-    const cacheKey = `pairlimits:${symbol}`;
-    const cached = await redis.get(cacheKey);
-    if (cached) {
-      return res.status(200).json(JSON.parse(cached));
-    }
-
-    let pairLimits = await PairLimits.findOne({ symbol: symbol.toUpperCase() });
-    
-    if (!pairLimits) {
-      const base = symbol.replace(/USDT|USDC|EURC|USD|BNB|BTC$/, '');
-      const quote = symbol.slice(base.length);
-      
-      pairLimits = {
-        symbol: symbol.toUpperCase(),
-        baseAsset: base,
-        quoteAsset: quote,
-        maxBuyAmount: 10000,
-        maxSellAmount: 10000,
-        minOrderValue: 10,
-        logoUrl: ''
-      };
-    }
-
-    await redis.setex(cacheKey, 300, JSON.stringify(pairLimits));
-
-    res.status(200).json(pairLimits);
-  } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Pair limits fetch error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch pair limits', error: err.message });
-  }
-});
-
-// =============================================
-// TRADING ENDPOINTS - Using existing Order model
-// =============================================
-
-// GET /api/trading/orders - User orders
-app.get('/api/trading/orders', protect, async (req, res) => {
-  try {
-    const { symbol, status, limit = 100 } = req.query;
-    const userId = req.user._id;
-
-    let query = { user: userId };
-    if (symbol) query.symbol = symbol.toUpperCase();
-    if (status) query.status = status;
-
-    const orders = await Order.find(query)
-      .sort({ createdAt: -1 })
-      .limit(parseInt(limit));
-
-    res.status(200).json({ status: 'success', data: orders });
-  } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get orders error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch orders', error: err.message });
-  }
-});
-
-// POST /api/trading/orders/buy - Place buy order (taker fee 0.10%)
-app.post('/api/trading/orders/buy', protect, async (req, res) => {
-  try {
-    const { symbol, type, price, amount } = req.body;
-    const userId = req.user._id;
-
-    if (!symbol || !amount || amount <= 0) {
-      return res.status(400).json({ status: 'fail', message: 'Invalid order parameters' });
-    }
-
-    const priceKey = `price:${symbol.toUpperCase()}:last`;
-    const priceData = await redis.get(priceKey);
-    if (!priceData) {
-      return res.status(503).json({ status: 'error', message: 'Market price not available. Please try again.' });
-    }
-    
-    const currentPriceObj = JSON.parse(priceData);
-    const currentPrice = currentPriceObj.price;
-    const priceTimestamp = currentPriceObj.timestamp;
-    
-    if (Date.now() - priceTimestamp > 500) {
-      return res.status(503).json({ status: 'error', message: 'Price data is stale. Please try again.' });
-    }
-    
-    const finalPrice = type === 'market' ? currentPrice : (price || currentPrice);
-
-    if (!finalPrice || finalPrice <= 0) {
-      return res.status(400).json({ status: 'fail', message: 'Invalid price' });
-    }
-
-    const totalCost = amount * finalPrice;
-    const takerFee = totalCost * 0.001;
-    const totalWithFee = totalCost + takerFee;
-
-    let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
-    if (!userAssetBalance) {
-      userAssetBalance = new UserAssetBalance({ user: userId, balances: {} });
-      await userAssetBalance.save();
-    }
-
-    const usdtBalance = userAssetBalance.balances.usdt || 0;
-    if (totalWithFee > usdtBalance) {
-      return res.status(400).json({ status: 'fail', message: 'Insufficient USDT balance' });
-    }
-
-    userAssetBalance.balances.usdt = (userAssetBalance.balances.usdt || 0) - totalWithFee;
-    const baseLower = symbol.replace(/USDT|USDC|EURC|USD|BNB|BTC$/, '').toLowerCase();
-    userAssetBalance.balances[baseLower] = (userAssetBalance.balances[baseLower] || 0) + amount;
-    userAssetBalance.lastUpdated = new Date();
-    await userAssetBalance.save();
-
-    const orderId = `ORD-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    
-    const order = new Order({
-      user: userId,
-      symbol: symbol.toUpperCase(),
-      orderId: orderId,
-      side: 'buy',
-      type: type,
-      price: finalPrice,
-      originalQty: amount,
-      remainingQty: 0,
-      executedQty: amount,
-      status: 'filled',
-      total: totalCost,
-      fee: takerFee,
-      feeAsset: 'USDT'
-    });
-    await order.save();
-
-    const tradeId = `TRD-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    const trade = new Trade({
-      user: userId,
-      orderId: orderId,
-      symbol: symbol.toUpperCase(),
-      tradeId: tradeId,
-      side: 'buy',
-      price: finalPrice,
-      qty: amount,
-      quoteQty: totalCost,
-      commission: takerFee,
-      commissionAsset: 'USDT',
-      time: new Date()
-    });
-    await trade.save();
-
-    await TradingRevenue.create({
-      source: 'taker_fee',
-      orderId: orderId,
-      tradeId: tradeId,
-      userId: userId,
-      symbol: symbol.toUpperCase(),
-      amount: takerFee,
-      feePercentage: 0.10,
-      currency: 'USDT',
-      usdValue: takerFee,
-      recordedAt: new Date()
-    });
-
-    let totalMainBalance = 0;
-    for (const [asset, bal] of Object.entries(userAssetBalance.balances)) {
-      if (bal > 0) {
-        const assetPriceKey = `price:${asset.toUpperCase()}USDT:last`;
-        const assetPriceData = await redis.get(assetPriceKey);
-        if (assetPriceData) {
-          const parsed = JSON.parse(assetPriceData);
-          totalMainBalance += bal * parsed.price;
-        }
-      }
-    }
-    await User.findByIdAndUpdate(userId, { 'balances.main': totalMainBalance });
-
-    const io = req.app.get('io');
-    if (io) {
-      io.to(`user_${userId}`).emit('balance_update', { main: totalMainBalance });
-      io.to(`user_${userId}`).emit('order_update', { order: order });
-      io.to(`user_${userId}`).emit('crypto_balances', { balances: userAssetBalance.balances });
-    }
-    
-    await redis.publish('user:orders', JSON.stringify({ userId, order }));
-    await redis.publish('user:balances', JSON.stringify({ userId, balances: userAssetBalance.balances }));
-
-    res.status(200).json({ status: 'success', message: 'Buy order executed', data: { order, totalCost, fee: takerFee } });
-  } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Buy order error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to place buy order', error: err.message });
-  }
-});
-
-// POST /api/trading/orders/sell - Place sell order (taker fee 0.10%)
-app.post('/api/trading/orders/sell', protect, async (req, res) => {
-  try {
-    const { symbol, type, price, amount } = req.body;
-    const userId = req.user._id;
-
-    if (!symbol || !amount || amount <= 0) {
-      return res.status(400).json({ status: 'fail', message: 'Invalid order parameters' });
-    }
-
-    const priceKey = `price:${symbol.toUpperCase()}:last`;
-    const priceData = await redis.get(priceKey);
-    if (!priceData) {
-      return res.status(503).json({ status: 'error', message: 'Market price not available. Please try again.' });
-    }
-    
-    const currentPriceObj = JSON.parse(priceData);
-    const currentPrice = currentPriceObj.price;
-    const priceTimestamp = currentPriceObj.timestamp;
-    
-    if (Date.now() - priceTimestamp > 500) {
-      return res.status(503).json({ status: 'error', message: 'Price data is stale. Please try again.' });
-    }
-    
-    const finalPrice = type === 'market' ? currentPrice : (price || currentPrice);
-
-    if (!finalPrice || finalPrice <= 0) {
-      return res.status(400).json({ status: 'fail', message: 'Invalid price' });
-    }
-
-    const totalValue = amount * finalPrice;
-    const takerFee = totalValue * 0.001;
-    const netAmount = totalValue - takerFee;
-
-    let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
-    if (!userAssetBalance) {
-      userAssetBalance = new UserAssetBalance({ user: userId, balances: {} });
-      await userAssetBalance.save();
-    }
-
-    const baseLower = symbol.replace(/USDT|USDC|EURC|USD|BNB|BTC$/, '').toLowerCase();
-    const baseBalance = userAssetBalance.balances[baseLower] || 0;
-    
-    if (amount > baseBalance) {
-      return res.status(400).json({ status: 'fail', message: `Insufficient ${baseLower.toUpperCase()} balance` });
-    }
-
-    userAssetBalance.balances[baseLower] = baseBalance - amount;
-    userAssetBalance.balances.usdt = (userAssetBalance.balances.usdt || 0) + netAmount;
-    userAssetBalance.lastUpdated = new Date();
-    await userAssetBalance.save();
-
-    const orderId = `ORD-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    
-    const order = new Order({
-      user: userId,
-      symbol: symbol.toUpperCase(),
-      orderId: orderId,
-      side: 'sell',
-      type: type,
-      price: finalPrice,
-      originalQty: amount,
-      remainingQty: 0,
-      executedQty: amount,
-      status: 'filled',
-      total: totalValue,
-      fee: takerFee,
-      feeAsset: 'USDT'
-    });
-    await order.save();
-
-    const tradeId = `TRD-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    const trade = new Trade({
-      user: userId,
-      orderId: orderId,
-      symbol: symbol.toUpperCase(),
-      tradeId: tradeId,
-      side: 'sell',
-      price: finalPrice,
-      qty: amount,
-      quoteQty: totalValue,
-      commission: takerFee,
-      commissionAsset: 'USDT',
-      time: new Date()
-    });
-    await trade.save();
-
-    await TradingRevenue.create({
-      source: 'taker_fee',
-      orderId: orderId,
-      tradeId: tradeId,
-      userId: userId,
-      symbol: symbol.toUpperCase(),
-      amount: takerFee,
-      feePercentage: 0.10,
-      currency: 'USDT',
-      usdValue: takerFee,
-      recordedAt: new Date()
-    });
-
-    let totalMainBalance = 0;
-    for (const [asset, bal] of Object.entries(userAssetBalance.balances)) {
-      if (bal > 0) {
-        const assetPriceKey = `price:${asset.toUpperCase()}USDT:last`;
-        const assetPriceData = await redis.get(assetPriceKey);
-        if (assetPriceData) {
-          const parsed = JSON.parse(assetPriceData);
-          totalMainBalance += bal * parsed.price;
-        }
-      }
-    }
-    await User.findByIdAndUpdate(userId, { 'balances.main': totalMainBalance });
-
-    const io = req.app.get('io');
-    if (io) {
-      io.to(`user_${userId}`).emit('balance_update', { main: totalMainBalance });
-      io.to(`user_${userId}`).emit('order_update', { order: order });
-      io.to(`user_${userId}`).emit('crypto_balances', { balances: userAssetBalance.balances });
-    }
-    
-    await redis.publish('user:orders', JSON.stringify({ userId, order }));
-    await redis.publish('user:balances', JSON.stringify({ userId, balances: userAssetBalance.balances }));
-
-    res.status(200).json({ status: 'success', message: 'Sell order executed', data: { order, totalValue, fee: takerFee, netAmount } });
-  } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Sell order error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to place sell order', error: err.message });
-  }
-});
-
-// POST /api/trading/orders/cancel - Cancel order
-app.post('/api/trading/orders/cancel', protect, async (req, res) => {
-  try {
-    const { orderId } = req.body;
-    const userId = req.user._id;
-
-    const order = await Order.findOne({ orderId, user: userId });
-    if (!order) {
-      return res.status(404).json({ status: 'fail', message: 'Order not found' });
-    }
-
-    if (order.status !== 'new' && order.status !== 'partial' && order.status !== 'pending') {
-      return res.status(400).json({ status: 'fail', message: 'Order cannot be cancelled' });
-    }
-
-    order.status = 'cancelled';
-    order.updatedAt = new Date();
-    await order.save();
-
-    const io = req.app.get('io');
-    if (io) {
-      io.to(`user_${userId}`).emit('order_update', { order: order });
-    }
-    
-    await redis.publish('user:orders', JSON.stringify({ userId, order }));
-
-    res.status(200).json({ status: 'success', message: 'Order cancelled' });
-  } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Cancel order error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to cancel order', error: err.message });
-  }
-});
-
-// POST /api/trading/orders/cancel-all - Cancel all orders
-app.post('/api/trading/orders/cancel-all', protect, async (req, res) => {
-  try {
-    const { symbol } = req.body;
-    const userId = req.user._id;
-
-    let query = { user: userId, status: { $in: ['new', 'partial', 'pending'] } };
-    if (symbol) query.symbol = symbol.toUpperCase();
-
-    const result = await Order.updateMany(query, { status: 'cancelled', updatedAt: new Date() });
-
-    const io = req.app.get('io');
-    if (io) {
-      io.to(`user_${userId}`).emit('orders_update', { cancelled: result.modifiedCount });
-    }
-
-    res.status(200).json({ status: 'success', message: `${result.modifiedCount} orders cancelled` });
-  } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Cancel all orders error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to cancel orders', error: err.message });
-  }
-});
-
-// GET /api/trading/trades - User trade history
-app.get('/api/trading/trades', protect, async (req, res) => {
-  try {
-    const { symbol, limit = 100 } = req.query;
-    const userId = req.user._id;
-
-    let query = { user: userId };
-    if (symbol) query.symbol = symbol.toUpperCase();
-
-    const trades = await Trade.find(query)
-      .sort({ time: -1 })
-      .limit(parseInt(limit));
-
-    res.status(200).json({ status: 'success', data: trades });
-  } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get trades error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch trades', error: err.message });
-  }
-});
-
-// GET /api/trading/positions - User positions
-app.get('/api/trading/positions', protect, async (req, res) => {
-  try {
-    const { symbol } = req.query;
-    const userId = req.user._id;
-
-    let query = { user: userId, status: 'open' };
-    if (symbol) query.symbol = symbol.toUpperCase();
-
-    const positions = await Position.find(query);
-
-    res.status(200).json({ status: 'success', data: positions });
-  } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get positions error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch positions', error: err.message });
-  }
-});
-
-// POST /api/trading/positions/close - Close position
-app.post('/api/trading/positions/close', protect, async (req, res) => {
-  try {
-    const { positionId } = req.body;
-    const userId = req.user._id;
-
-    const position = await Position.findOne({ _id: positionId, user: userId, status: 'open' });
-    if (!position) {
-      return res.status(404).json({ status: 'fail', message: 'Position not found' });
-    }
-
-    const priceKey = `price:${position.symbol}:last`;
-    const priceData = await redis.get(priceKey);
-    if (!priceData) {
-      return res.status(503).json({ status: 'error', message: 'Market price not available. Please try again.' });
-    }
-    
-    const currentPriceObj = JSON.parse(priceData);
-    const currentPrice = currentPriceObj.price;
-    
-    let realizedPnL = 0;
-    if (position.side === 'long') {
-      realizedPnL = (currentPrice - position.entryPrice) * position.quantity;
-    } else {
-      realizedPnL = (position.entryPrice - currentPrice) * position.quantity;
-    }
-
-    position.status = 'closed';
-    position.realizedPnL = realizedPnL;
-    position.closedAt = new Date();
-    await position.save();
-
-    let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
-    if (userAssetBalance) {
-      userAssetBalance.balances.usdt = (userAssetBalance.balances.usdt || 0) + position.margin + realizedPnL;
-      await userAssetBalance.save();
-    }
-
-    const io = req.app.get('io');
-    if (io) {
-      io.to(`user_${userId}`).emit('position_closed', { positionId, realizedPnL });
-      io.to(`user_${userId}`).emit('crypto_balances', { balances: userAssetBalance?.balances || {} });
-    }
-
-    res.status(200).json({ status: 'success', message: 'Position closed', data: { realizedPnL } });
-  } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Close position error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to close position', error: err.message });
-  }
-});
-
-// =============================================
-// USER SETTINGS ENDPOINTS
-// =============================================
-
-// GET /api/user/chart-settings - Get chart settings
-app.get('/api/user/chart-settings', protect, async (req, res) => {
-  try {
-    const userId = req.user._id;
-    
-    let settings = await UserTradingSettings.findOne({ user: userId });
-    
-    if (!settings) {
-      return res.status(200).json({ 
-        status: 'success', 
-        chartSettings: {
-          style: 'candlestick',
-          backgroundColor: '#0B0E11',
-          bullishColor: '#228B22',
-          bearishColor: '#FF0000',
-          solidCandles: false,
-          showBorders: true,
-          showWick: true,
-          tradeMarker: 'both'
-        }
-      });
-    }
-
-    res.status(200).json({ status: 'success', chartSettings: settings.chartSettings || {} });
-  } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get chart settings error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch chart settings', error: err.message });
-  }
-});
-
-// POST /api/user/chart-settings - Save chart settings
-app.post('/api/user/chart-settings', protect, async (req, res) => {
-  try {
-    const userId = req.user._id;
-    const { chartSettings } = req.body;
-
-    await UserTradingSettings.findOneAndUpdate(
-      { user: userId },
-      { chartSettings: chartSettings },
-      { upsert: true, new: true }
-    );
-
-    res.status(200).json({ status: 'success', message: 'Chart settings saved' });
-  } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Save chart settings error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to save chart settings', error: err.message });
-  }
-});
-
-// GET /api/user/settings - Get order book settings
-app.get('/api/user/settings', protect, async (req, res) => {
-  try {
-    const userId = req.user._id;
-    
-    let settings = await UserTradingSettings.findOne({ user: userId });
-    
-    if (!settings) {
-      return res.status(200).json({ 
-        status: 'success', 
-        orderBookSettings: {
-          precision: 0.01,
-          depthSize: 20,
-          showCumulativeTotal: false,
-          colorMode: 'default',
-          displaySize: 'compact'
-        }
-      });
-    }
-
-    res.status(200).json({ status: 'success', orderBookSettings: settings.orderBookSettings || {} });
-  } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get settings error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch settings', error: err.message });
-  }
-});
-
-// POST /api/user/settings - Save order book settings
-app.post('/api/user/settings', protect, async (req, res) => {
-  try {
-    const userId = req.user._id;
-    const { orderBookSettings } = req.body;
-
-    await UserTradingSettings.findOneAndUpdate(
-      { user: userId },
-      { orderBookSettings: orderBookSettings },
-      { upsert: true, new: true }
-    );
-
-    res.status(200).json({ status: 'success', message: 'Settings saved' });
-  } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Save settings error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to save settings', error: err.message });
-  }
-});
-
-// GET /api/users/assets - Get user crypto balances
-app.get('/api/users/assets', protect, async (req, res) => {
-  try {
-    const userId = req.user._id;
-    
-    let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
-    
-    if (!userAssetBalance) {
-      userAssetBalance = new UserAssetBalance({ user: userId, balances: {} });
-      await userAssetBalance.save();
-    }
-    
-    const assets = [];
-    for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
-      if (balance > 0) {
-        const priceKey = `price:${asset.toUpperCase()}USDT:last`;
-        const priceData = await redis.get(priceKey);
-        let currentPrice = 0;
-        if (priceData) {
-          const parsed = JSON.parse(priceData);
-          currentPrice = parsed.price;
-        }
-        
-        assets.push({
-          symbol: asset.toUpperCase(),
-          balance: balance,
-          usdValue: balance * currentPrice,
-          currentPrice: currentPrice
-        });
-      }
-    }
-    
-    res.status(200).json({ status: 'success', data: { assets } });
-  } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get user assets error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch assets', error: err.message });
-  }
-});
-
-// GET /api/users/me - Get current user
-app.get('/api/users/me', protect, async (req, res) => {
-  try {
-    const user = await User.findById(req.user._id).select('-password -twoFactorAuth.secret');
-    res.status(200).json({ status: 'success', data: { user } });
-  } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get user error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch user', error: err.message });
-  }
-});
-
-// GET /api/users/balances - Get user balances
-app.get('/api/users/balances', protect, async (req, res) => {
-  try {
-    const user = await User.findById(req.user._id).select('balances');
-    res.status(200).json({ status: 'success', data: { balances: user.balances } });
-  } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Get balances error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch balances', error: err.message });
-  }
-});
-
-// =============================================
-// SPOT MARKET WEBSOCKET - FOR /ws/spotmarket
-// Reads from Redis Pub/Sub for real-time updates
-// =============================================
-
-const setupSpotMarketWebSocket = (server) => {
-  const wss = new WebSocket.Server({ server, path: '/ws/spotmarket' });
-  
-  const clients = new Map();
-  let redisSubscriber = null;
-
-  const setupRedisSubscriber = () => {
-    redisSubscriber = new Redis({
-      host: process.env.REDIS_HOST,
-      port: process.env.REDIS_PORT || 14450,
-      password: process.env.REDIS_PASSWORD,
-    });
-    
-    redisSubscriber.subscribe('market:ticker', 'market:orderbook', 'market:trade', 'market:candles', 'user:orders', 'user:balances');
-    
-    redisSubscriber.on('message', (channel, message) => {
-      const data = JSON.parse(message);
-      
-      clients.forEach((client) => {
-        if (client.ws.readyState === WebSocket.OPEN) {
-          let messageToSend = null;
-          
-          if (channel === 'market:ticker') {
-            messageToSend = {
-              type: 'ticker',
-              symbol: data.symbol,
-              price: data.price,
-              priceChangePercent: data.priceChangePercent,
-              highPrice: data.highPrice,
-              lowPrice: data.lowPrice,
-              volume: data.volume,
-              quoteVolume: data.quoteVolume,
-              stats: data.stats
-            };
-          } else if (channel === 'market:orderbook') {
-            messageToSend = {
-              type: 'orderbook',
-              symbol: data.symbol,
-              bids: data.bids,
-              asks: data.asks
-            };
-          } else if (channel === 'market:trade') {
-            messageToSend = {
-              type: 'trade',
-              symbol: data.symbol,
-              price: data.price,
-              amount: data.amount,
-              time: data.time,
-              isBuyerMaker: data.isBuyerMaker
-            };
-          } else if (channel === 'market:candles') {
-            messageToSend = {
-              type: 'candles',
-              symbol: data.symbol,
-              interval: data.interval,
-              candles: data.candles
-            };
-          } else if (channel === 'user:orders' && client.userId === data.userId) {
-            messageToSend = { type: 'orders', order: data.order };
-          } else if (channel === 'user:balances' && client.userId === data.userId) {
-            messageToSend = { type: 'crypto_balances', balances: data.balances };
-          }
-          
-          if (messageToSend) {
-            client.ws.send(JSON.stringify(messageToSend));
-          }
-        }
-      });
-    });
-  };
-
-  wss.on('connection', (ws, req) => {
-    const clientId = uuidv4();
-    clients.set(clientId, { ws: ws, userId: null });
-    if (process.env.NODE_ENV !== 'production') console.log(`Spot market WebSocket client connected: ${clientId}, total: ${clients.size}`);
-
-    ws.on('message', async (message) => {
-      try {
-        const data = JSON.parse(message);
-        
-        if (data.type === 'authenticate' && data.token) {
-          try {
-            const decoded = verifyJWT(data.token);
-            if (decoded && !decoded.isAdmin) {
-              const client = clients.get(clientId);
-              if (client) client.userId = decoded.id;
-              ws.send(JSON.stringify({ type: 'authenticated', status: 'success' }));
-              
-              const userAssetBalance = await UserAssetBalance.findOne({ user: decoded.id });
-              if (userAssetBalance) {
-                ws.send(JSON.stringify({ type: 'crypto_balances', balances: userAssetBalance.balances }));
-              }
-            }
-          } catch (err) {
-            ws.send(JSON.stringify({ type: 'authenticated', status: 'fail', message: 'Invalid token' }));
-          }
-        }
-        
-        if (data.type === 'ping') {
-          ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
-        }
-      } catch (err) {}
-    });
-
-    ws.on('close', () => {
-      clients.delete(clientId);
-      if (process.env.NODE_ENV !== 'production') console.log(`Spot market WebSocket client disconnected: ${clientId}, total: ${clients.size}`);
-    });
-  });
-
-  setupRedisSubscriber();
-  return wss;
-};
-
-// =============================================
-// TICKER WEBSOCKET FOR FOOTER - /ws/ticker
-// =============================================
-
-const setupTickerWebSocket = (server) => {
-  const wss = new WebSocket.Server({ server, path: '/ws/ticker' });
-  const clients = new Set();
-  let redisSubscriber = null;
-
-  const setupTickerSubscriber = () => {
-    redisSubscriber = new Redis({
-      host: process.env.REDIS_HOST,
-      port: process.env.REDIS_PORT || 14450,
-      password: process.env.REDIS_PASSWORD,
-    });
-    
-    redisSubscriber.subscribe('market:ticker');
-    
-    redisSubscriber.on('message', async (channel, message) => {
-      if (channel !== 'market:ticker') return;
-      
-      const data = JSON.parse(message);
-      
-      const allPairsData = await redis.get('market:all:pairs');
-      if (!allPairsData) return;
-      
-      const allPairs = JSON.parse(allPairsData);
-      const topPairs = allPairs.slice(0, 30);
-      
-      const tickers = [];
-      for (const pair of topPairs) {
-        const tickerKey = `ticker:${pair.symbol}`;
-        const tickerData = await redis.get(tickerKey);
-        if (tickerData) {
-          const parsed = JSON.parse(tickerData);
-          tickers.push({
-            symbol: `${pair.base}/${pair.quote}`,
-            price: parsed.lastPrice,
-            change24h: parsed.priceChangePercent
-          });
-        }
-      }
-      
-      const messageToSend = JSON.stringify({ type: 'ticker_update', data: tickers });
-      
-      clients.forEach(client => {
-        if (client.readyState === WebSocket.OPEN) {
-          client.send(messageToSend);
-        }
-      });
-    });
-  };
-
-  wss.on('connection', (ws) => {
-    clients.add(ws);
-    if (process.env.NODE_ENV !== 'production') console.log(`Ticker WebSocket client connected. Total: ${clients.size}`);
-    
-    (async () => {
-      const allPairsData = await redis.get('market:all:pairs');
-      if (allPairsData) {
-        const allPairs = JSON.parse(allPairsData);
-        const topPairs = allPairs.slice(0, 30);
-        const initialTickers = [];
-        
-        for (const pair of topPairs) {
-          const tickerKey = `ticker:${pair.symbol}`;
-          const tickerData = await redis.get(tickerKey);
-          if (tickerData) {
-            const parsed = JSON.parse(tickerData);
-            initialTickers.push({
-              symbol: `${pair.base}/${pair.quote}`,
-              price: parsed.lastPrice,
-              change24h: parsed.priceChangePercent
-            });
-          }
-        }
-        
-        ws.send(JSON.stringify({ type: 'initial_tickers', data: initialTickers }));
-      }
-    })();
-    
-    ws.on('close', () => {
-      clients.delete(ws);
-      if (process.env.NODE_ENV !== 'production') console.log(`Ticker WebSocket client disconnected. Total: ${clients.size}`);
-    });
-  });
-
-  setupTickerSubscriber();
 };
 
 /**
@@ -11485,7 +9555,7 @@ app.get('/api/withdrawals/asset', protect, async (req, res) => {
                         usdValue = amount * currentPrice;
                     }
                 } catch (err) {
-                    if (process.env.NODE_ENV !== 'production') console.warn(`Could not fetch price for ${symbol}`);
+                    console.warn(`Could not fetch price for ${symbol}`);
                 }
 
                 assets.push({
@@ -11508,10 +9578,55 @@ app.get('/api/withdrawals/asset', protect, async (req, res) => {
         });
 
     } catch (err) {
-        if (process.env.NODE_ENV !== 'production') console.error('Error fetching assets:', err);
+        console.error('Error fetching assets:', err);
         return res.status(500).json({
             status: 'error',
             message: 'Failed to fetch assets'
+        });
+    }
+});
+
+/**
+ * POST /api/withdrawals/confirm-gas-payment - Confirm gas fee payment
+ */
+app.post('/api/withdrawals/confirm-gas-payment', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const {
+            asset,
+            amount,
+            address,
+            withdrawalData
+        } = req.body;
+
+        // Create a deposit record for the gas fee
+        const gasFeeDeposit = await DepositAsset.create({
+            user: userId,
+            asset: asset,
+            amount: amount,
+            usdValue: amount * (withdrawalData?.exchangeRate || 1),
+            status: 'pending',
+            metadata: {
+                type: 'gas_fee',
+                withdrawalReference: withdrawalData?.reference,
+                destinationAddress: address,
+                submittedAt: new Date()
+            }
+        });
+
+        return res.status(200).json({
+            status: 'success',
+            data: {
+                depositId: gasFeeDeposit._id,
+                message: 'Gas fee payment recorded, awaiting confirmation'
+            }
+        });
+
+    } catch (err) {
+        console.error('Error confirming gas payment:', err);
+        return res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to confirm gas payment'
         });
     }
 });
@@ -11572,7 +9687,7 @@ async function fetchMarketData() {
     return marketDataCache.data || [];
     
   } catch (error) {
-    if (process.env.NODE_ENV !== 'production') console.error('Market data fetch error:', error);
+    console.error('Market data fetch error:', error);
     return marketDataCache.data || [];
   }
 }
@@ -11594,7 +9709,7 @@ app.get('/api/market/assets', async (req, res) => {
     });
     
   } catch (error) {
-    if (process.env.NODE_ENV !== 'production') console.error('Market assets error:', error);
+    console.error('Market assets error:', error);
     res.json({
       status: 'error',
       data: []
@@ -11609,6 +9724,228 @@ setInterval(async () => {
 
 // Initial cache on startup
 fetchMarketData();
+
+// POST /api/admin/users/:userId/crypto-balance
+app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { currency, amount, walletType, description } = req.body;
+    
+    if (!currency || !amount || amount <= 0) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Please provide a valid currency and amount'
+      });
+    }
+    
+    if (!['main', 'matured'].includes(walletType)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Wallet type must be "main" or "matured"'
+      });
+    }
+    
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+    
+    // Get current crypto price
+    const price = await getCryptoPrice(currency);
+    if (!price) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Unable to fetch price for ${currency}`
+      });
+    }
+    
+    const usdValue = amount * price;
+    
+    // Update UserAssetBalance
+    let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
+    if (!userAssetBalance) {
+      userAssetBalance = new UserAssetBalance({ user: userId, balances: {} });
+    }
+    
+    const currencyLower = currency.toLowerCase();
+    if (!userAssetBalance.balances[currencyLower]) {
+      userAssetBalance.balances[currencyLower] = 0;
+    }
+    
+    userAssetBalance.balances[currencyLower] += amount;
+    userAssetBalance.lastUpdated = new Date();
+    
+    // Add to history
+    userAssetBalance.history.push({
+      asset: currencyLower,
+      type: 'deposit',
+      amount: amount,
+      balance: userAssetBalance.balances[currencyLower],
+      usdValue: usdValue,
+      price: price,
+      timestamp: new Date(),
+      transactionId: null
+    });
+    
+    await userAssetBalance.save();
+    
+    // Update user's main or matured balance in USD
+    const updateField = walletType === 'main' ? 'balances.main' : 'balances.matured';
+    await User.findByIdAndUpdate(userId, {
+      $inc: { [updateField]: usdValue }
+    });
+    
+    // Create transaction record
+    const transaction = await Transaction.create({
+      user: userId,
+      type: 'deposit',
+      amount: usdValue,
+      asset: currency,
+      assetAmount: amount,
+      currency: 'USD',
+      status: 'completed',
+      method: currency,
+      reference: `ADMIN-CRYPTO-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`,
+      details: {
+        cryptoCurrency: currency,
+        cryptoAmount: amount,
+        usdValue: usdValue,
+        price: price,
+        walletType: walletType,
+        adminId: req.admin._id,
+        adminName: req.admin.name,
+        description: description || `Crypto balance added by admin`
+      },
+      fee: 0,
+      netAmount: usdValue,
+      exchangeRateAtTime: price,
+      processedBy: req.admin._id,
+      processedAt: new Date()
+    });
+    
+    // Log activity
+    await logActivity(
+      'admin_add_crypto_balance',
+      'User',
+      userId,
+      req.admin._id,
+      'Admin',
+      req,
+      {
+        currency,
+        amount,
+        usdValue,
+        walletType,
+        description
+      }
+    );
+    
+    // Send email notification to user
+    try {
+      const userEmail = user.email;
+      await sendEmail({
+        email: userEmail,
+        subject: `${currency.toUpperCase()} Deposit Confirmed`,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="text-align: center; margin-bottom: 20px;">
+              <img src="https://cryptologos.cc/logos/${currency.toLowerCase()}-${currency.toLowerCase()}-logo.png" alt="${currency.toUpperCase()} logo" style="width: 60px; height: 60px;">
+            </div>
+            <h2 style="color: #2563eb;">Deposit Received</h2>
+            <p>Dear ${user.firstName} ${user.lastName},</p>
+            <p>You have received a deposit from Bithash Capital Secure Asset Fund (BCSAF).</p>
+            <div style="background: #f8fafc; padding: 15px; border-radius: 8px; margin: 15px 0;">
+              <p><strong>Amount:</strong> ${amount} ${currency.toUpperCase()}</p>
+              <p><strong>USD Value:</strong> $${usdValue.toFixed(2)}</p>
+              <p><strong>Wallet Type:</strong> ${walletType === 'main' ? 'Main Wallet' : 'Matured Wallet'}</p>
+              <p><strong>Date:</strong> ${new Date().toLocaleString()}</p>
+              ${description ? `<p><strong>Note:</strong> ${description}</p>` : ''}
+            </div>
+            <div style="text-align: center; margin: 30px 0;">
+              <a href="https://www.bithashcapital.live/dashboard" style="background-color: #2563eb; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block;">Go to Dashboard</a>
+            </div>
+            <hr>
+            <p style="font-size: 12px; color: #666;">Bithash Finance Team</p>
+          </div>
+        `
+      });
+    } catch (emailErr) {
+      console.error('Failed to send email notification:', emailErr);
+    }
+    
+    // Emit real-time update via Socket.IO
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${userId}`).emit('balance_update', {
+        main: user.balances.main + (walletType === 'main' ? usdValue : 0),
+        matured: user.balances.matured + (walletType === 'matured' ? usdValue : 0),
+        active: user.balances.active
+      });
+      
+      io.to(`user_${userId}`).emit('crypto_balance_update', {
+        currency: currencyLower,
+        balance: userAssetBalance.balances[currencyLower],
+        usdValue: userAssetBalance.balances[currencyLower] * price
+      });
+    }
+    
+    res.json({
+      status: 'success',
+      message: `${amount} ${currency.toUpperCase()} added to user's ${walletType} wallet successfully`,
+      data: {
+        transaction: transaction,
+        newBalance: userAssetBalance.balances[currencyLower],
+        usdValue: usdValue
+      }
+    });
+    
+  } catch (err) {
+    console.error('Error adding crypto balance:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to add crypto balance'
+    });
+  }
+});
+
+// GET /api/admin/supported-cryptos
+app.get('/api/admin/supported-cryptos', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+  try {
+    // Get all supported cryptos from MarketPair or AssetInfo
+    const marketPairs = await MarketPair.find({ status: 'active' }).select('symbol baseAsset logo');
+    
+    const cryptos = [];
+    for (const pair of marketPairs) {
+      // Get user balances for this crypto (optional - for display)
+      const totalBalance = await UserAssetBalance.aggregate([
+        { $group: { _id: null, total: { $sum: `$balances.${pair.baseAsset.toLowerCase()}` } } }
+      ]);
+      
+      cryptos.push({
+        code: pair.baseAsset.toUpperCase(),
+        name: pair.baseAsset.toUpperCase(),
+        logoUrl: pair.logo || `https://cryptologos.cc/logos/${pair.baseAsset.toLowerCase()}-${pair.baseAsset.toLowerCase()}-logo.png`,
+        balance: totalBalance[0]?.total || 0
+      });
+    }
+    
+    res.json({
+      status: 'success',
+      data: { cryptos }
+    });
+  } catch (err) {
+    console.error('Error fetching supported cryptos:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch supported cryptocurrencies'
+    });
+  }
+});
+
+
 
 
 
@@ -11918,228 +10255,6 @@ app.post('/api/users/cookie-preferences', protect, async (req, res) => {
     });
   }
 });
-
-
-// POST /api/admin/users/:userId/crypto-balance
-app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
-  try {
-    const { userId } = req.params;
-    const { currency, amount, walletType, description } = req.body;
-    
-    if (!currency || !amount || amount <= 0) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Please provide a valid currency and amount'
-      });
-    }
-    
-    if (!['main', 'matured'].includes(walletType)) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Wallet type must be "main" or "matured"'
-      });
-    }
-    
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found'
-      });
-    }
-    
-    // Get current crypto price
-    const price = await getCryptoPrice(currency);
-    if (!price) {
-      return res.status(400).json({
-        status: 'fail',
-        message: `Unable to fetch price for ${currency}`
-      });
-    }
-    
-    const usdValue = amount * price;
-    
-    // Update UserAssetBalance
-    let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
-    if (!userAssetBalance) {
-      userAssetBalance = new UserAssetBalance({ user: userId, balances: {} });
-    }
-    
-    const currencyLower = currency.toLowerCase();
-    if (!userAssetBalance.balances[currencyLower]) {
-      userAssetBalance.balances[currencyLower] = 0;
-    }
-    
-    userAssetBalance.balances[currencyLower] += amount;
-    userAssetBalance.lastUpdated = new Date();
-    
-    // Add to history
-    userAssetBalance.history.push({
-      asset: currencyLower,
-      type: 'deposit',
-      amount: amount,
-      balance: userAssetBalance.balances[currencyLower],
-      usdValue: usdValue,
-      price: price,
-      timestamp: new Date(),
-      transactionId: null
-    });
-    
-    await userAssetBalance.save();
-    
-    // Update user's main or matured balance in USD
-    const updateField = walletType === 'main' ? 'balances.main' : 'balances.matured';
-    await User.findByIdAndUpdate(userId, {
-      $inc: { [updateField]: usdValue }
-    });
-    
-    // Create transaction record
-    const transaction = await Transaction.create({
-      user: userId,
-      type: 'deposit',
-      amount: usdValue,
-      asset: currency,
-      assetAmount: amount,
-      currency: 'USD',
-      status: 'completed',
-      method: currency,
-      reference: `ADMIN-CRYPTO-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`,
-      details: {
-        cryptoCurrency: currency,
-        cryptoAmount: amount,
-        usdValue: usdValue,
-        price: price,
-        walletType: walletType,
-        adminId: req.admin._id,
-        adminName: req.admin.name,
-        description: description || `Crypto balance added by admin`
-      },
-      fee: 0,
-      netAmount: usdValue,
-      exchangeRateAtTime: price,
-      processedBy: req.admin._id,
-      processedAt: new Date()
-    });
-    
-    // Log activity
-    await logActivity(
-      'admin_add_crypto_balance',
-      'User',
-      userId,
-      req.admin._id,
-      'Admin',
-      req,
-      {
-        currency,
-        amount,
-        usdValue,
-        walletType,
-        description
-      }
-    );
-    
-    // Send email notification to user
-    try {
-      const userEmail = user.email;
-      await sendEmail({
-        email: userEmail,
-        subject: `${currency.toUpperCase()} Deposit Confirmed`,
-        html: `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-            <div style="text-align: center; margin-bottom: 20px;">
-              <img src="https://cryptologos.cc/logos/${currency.toLowerCase()}-${currency.toLowerCase()}-logo.png" alt="${currency.toUpperCase()} logo" style="width: 60px; height: 60px;">
-            </div>
-            <h2 style="color: #2563eb;">Deposit Received</h2>
-            <p>Dear ${user.firstName} ${user.lastName},</p>
-            <p>You have received a deposit from Bithash Capital Secure Asset Fund (BCSAF).</p>
-            <div style="background: #f8fafc; padding: 15px; border-radius: 8px; margin: 15px 0;">
-              <p><strong>Amount:</strong> ${amount} ${currency.toUpperCase()}</p>
-              <p><strong>USD Value:</strong> $${usdValue.toFixed(2)}</p>
-              <p><strong>Wallet Type:</strong> ${walletType === 'main' ? 'Main Wallet' : 'Matured Wallet'}</p>
-              <p><strong>Date:</strong> ${new Date().toLocaleString()}</p>
-              ${description ? `<p><strong>Note:</strong> ${description}</p>` : ''}
-            </div>
-            <div style="text-align: center; margin: 30px 0;">
-              <a href="https://www.bithashcapital.live/dashboard" style="background-color: #2563eb; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block;">Go to Dashboard</a>
-            </div>
-            <hr>
-            <p style="font-size: 12px; color: #666;">Bithash Finance Team</p>
-          </div>
-        `
-      });
-    } catch (emailErr) {
-      console.error('Failed to send email notification:', emailErr);
-    }
-    
-    // Emit real-time update via Socket.IO
-    const io = req.app.get('io');
-    if (io) {
-      io.to(`user_${userId}`).emit('balance_update', {
-        main: user.balances.main + (walletType === 'main' ? usdValue : 0),
-        matured: user.balances.matured + (walletType === 'matured' ? usdValue : 0),
-        active: user.balances.active
-      });
-      
-      io.to(`user_${userId}`).emit('crypto_balance_update', {
-        currency: currencyLower,
-        balance: userAssetBalance.balances[currencyLower],
-        usdValue: userAssetBalance.balances[currencyLower] * price
-      });
-    }
-    
-    res.json({
-      status: 'success',
-      message: `${amount} ${currency.toUpperCase()} added to user's ${walletType} wallet successfully`,
-      data: {
-        transaction: transaction,
-        newBalance: userAssetBalance.balances[currencyLower],
-        usdValue: usdValue
-      }
-    });
-    
-  } catch (err) {
-    console.error('Error adding crypto balance:', err);
-    res.status(500).json({
-      status: 'error',
-      message: err.message || 'Failed to add crypto balance'
-    });
-  }
-});
-
-// GET /api/admin/supported-cryptos
-app.get('/api/admin/supported-cryptos', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
-  try {
-    // Get all supported cryptos from MarketPair or AssetInfo
-    const marketPairs = await MarketPair.find({ status: 'active' }).select('symbol baseAsset logo');
-    
-    const cryptos = [];
-    for (const pair of marketPairs) {
-      // Get user balances for this crypto (optional - for display)
-      const totalBalance = await UserAssetBalance.aggregate([
-        { $group: { _id: null, total: { $sum: `$balances.${pair.baseAsset.toLowerCase()}` } } }
-      ]);
-      
-      cryptos.push({
-        code: pair.baseAsset.toUpperCase(),
-        name: pair.baseAsset.toUpperCase(),
-        logoUrl: pair.logo || `https://cryptologos.cc/logos/${pair.baseAsset.toLowerCase()}-${pair.baseAsset.toLowerCase()}-logo.png`,
-        balance: totalBalance[0]?.total || 0
-      });
-    }
-    
-    res.json({
-      status: 'success',
-      data: { cryptos }
-    });
-  } catch (err) {
-    console.error('Error fetching supported cryptos:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch supported cryptocurrencies'
-    });
-  }
-});
-
 
 
 
@@ -23092,11 +21207,12 @@ function maskCardNumber(cardNumber) {
 
 
 
+  
 // SNIPPET C - COMPLETE REWRITE
 
 // Error handling middleware
 app.use((err, req, res, next) => {
-  if (process.env.NODE_ENV !== 'production') console.error('Global error handler:', err);
+  console.error('Global error handler:', err);
   res.status(500).json({
     status: 'error',
     message: 'Something went wrong on the server'
@@ -23129,7 +21245,7 @@ app.set('io', io);
 // REAL-TIME STATS WITH REDIS SINGLE SOURCE OF TRUTH
 // =============================================
 
-const REDIS_INVESTOR_KEY = process.env.REDIS_INVESTOR_KEY || 'cloud_miner_count';
+const REDIS_INVESTOR_KEY = process.env.REDIS_INVESTOR_KEY;
 const INITIAL_INVESTOR_COUNT = parseInt(process.env.INITIAL_INVESTOR_COUNT) || 5104329;
 const DAILY_GROWTH_LIMIT = parseInt(process.env.DAILY_GROWTH_LIMIT) || 7999;
 
@@ -23158,7 +21274,7 @@ const initializeInvestorCount = async () => {
     
     return currentCount;
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error initializing investor count:', err);
+    console.error('Error initializing investor count:', err);
     return INITIAL_INVESTOR_COUNT;
   }
 };
@@ -23180,7 +21296,7 @@ const checkAndResetDailyGrowth = async () => {
     
     return dailyGrowth;
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error checking daily growth:', err);
+    console.error('Error checking daily growth:', err);
     return 0;
   }
 };
@@ -23217,7 +21333,7 @@ const addInvestors = async () => {
     
     return { newCount, increment: actualIncrement };
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error adding investors:', err);
+    console.error('Error adding investors:', err);
     return false;
   }
 };
@@ -23236,7 +21352,7 @@ const broadcastStats = async () => {
     
     if (process.env.NODE_ENV !== 'production') console.log(`📡 Broadcasted stats to ${io.engine.clientsCount} clients: ${count.toLocaleString()} investors`);
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error broadcasting stats:', err);
+    console.error('Error broadcasting stats:', err);
   }
 };
 
@@ -23250,7 +21366,7 @@ const getCurrentStats = async () => {
       timestamp: Date.now()
     };
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error getting current stats:', err);
+    console.error('Error getting current stats:', err);
     return {
       totalInvestors: INITIAL_INVESTOR_COUNT,
       timestamp: Date.now()
@@ -23276,7 +21392,7 @@ const startInvestorGrowthJob = async () => {
         
         scheduleNextGrowth();
       } catch (err) {
-        if (process.env.NODE_ENV !== 'production') console.error('Error in growth job:', err);
+        console.error('Error in growth job:', err);
         scheduleNextGrowth();
       }
     }, interval);
@@ -23302,7 +21418,7 @@ app.get('/api/stats/investors', async (req, res) => {
       data: stats
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error fetching investor stats:', err);
+    console.error('Error fetching investor stats:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch investor stats'
@@ -23327,7 +21443,7 @@ app.get('/api/stats/daily-progress', async (req, res) => {
       }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error fetching daily progress:', err);
+    console.error('Error fetching daily progress:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch daily progress'
@@ -23378,7 +21494,7 @@ const setupMarketWebSocket = (server) => {
         });
       }
     } catch (error) {
-      if (process.env.NODE_ENV !== 'production') console.error('WebSocket price broadcast error:', error);
+      console.error('WebSocket price broadcast error:', error);
     }
   };
 
@@ -23486,7 +21602,7 @@ io.on('connection', async (socket) => {
         }
       }
     } catch (err) {
-      if (process.env.NODE_ENV !== 'production') console.error('Socket auth error:', err);
+      console.error('Socket auth error:', err);
     }
   }
   
@@ -23609,11 +21725,11 @@ const processMaturedInvestments = async () => {
 
         if (process.env.NODE_ENV !== 'production') console.log(`Automatically completed investment ${investment._id} for user ${user.email}`);
       } catch (err) {
-        if (process.env.NODE_ENV !== 'production') console.error(`Error processing investment ${investment._id}:`, err);
+        console.error(`Error processing investment ${investment._id}:`, err);
       }
     }
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error processing matured investments:', err);
+    console.error('Error processing matured investments:', err);
   }
 };
 
@@ -23632,7 +21748,7 @@ setInterval(async () => {
 }, 30000);
 
 const gracefulShutdown = () => {
-  if (process.env.NODE_ENV !== 'production') console.log('Received shutdown signal. Cleaning up...');
+  console.log('Received shutdown signal. Cleaning up...');
   if (priceUpdateInterval) clearInterval(priceUpdateInterval);
   stopInvestorGrowthJob();
   process.exit(0);
@@ -23649,11 +21765,9 @@ process.on('SIGTERM', gracefulShutdown);
 process.on('SIGINT', gracefulShutdown);
 
 httpServer.listen(PORT, () => {
-  if (process.env.NODE_ENV !== 'production') {
-    console.log(`Server running on port ${PORT}`);
-    console.log(`📊 Real-time stats initialized with Redis as single source of truth`);
-    console.log(`📈 Investors will grow from ${INITIAL_INVESTOR_COUNT.toLocaleString()} with max ${DAILY_GROWTH_LIMIT}/day`);
-    console.log(`💰 Real-time crypto price updates started (every 1 second)`);
-    console.log(`🔌 WebSocket endpoints: /ws/spotmarket, /ws/ticker, /ws/market`);
-  }
+  console.log(`Server running on port ${PORT}`);
+  console.log(`📊 Real-time stats initialized with Redis as single source of truth`);
+  console.log(`📈 Investors will grow from ${INITIAL_INVESTOR_COUNT.toLocaleString()} with max ${DAILY_GROWTH_LIMIT}/day`);
+  console.log(`💰 Real-time crypto price updates started (every 1 second)`);
+  console.log(`🔌 WebSocket endpoints: /ws/spotmarket, /ws/ticker, /ws/market`);
 });
