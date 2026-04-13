@@ -19899,7 +19899,107 @@ app.get('/api/users/asset-balances', protect, async (req, res) => {
 });
 
 
-
+// =============================================
+// GET USER ASSETS BALANCES ENDPOINT (RESTORED)
+// =============================================
+app.get('/api/users/assets', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+    
+    const assetData = [];
+    
+    // Get all assets from main wallet with their current values
+    for (const [asset, balance] of user.wallets.main.entries()) {
+      if (balance > 0) {
+        const price = await getCryptoPrice(asset.toUpperCase());
+        const currentValue = balance * (price || 0);
+        
+        // Get buy history for this asset from transactions
+        const buyTransactions = await Transaction.find({
+          user: userId,
+          type: 'buy',
+          asset: asset.toUpperCase(),
+          status: 'completed'
+        }).sort({ createdAt: -1 }).limit(20);
+        
+        let totalSpent = 0;
+        let totalBought = 0;
+        buyTransactions.forEach(t => {
+          totalSpent += t.amountUSD || 0;
+          totalBought += t.assetAmount || 0;
+        });
+        
+        const avgPrice = totalBought > 0 ? totalSpent / totalBought : 0;
+        const unrealizedPnl = currentValue - totalSpent;
+        const unrealizedPercentage = totalSpent > 0 ? (unrealizedPnl / totalSpent) * 100 : 0;
+        
+        assetData.push({
+          symbol: asset,
+          balance: balance,
+          currentValue: currentValue,
+          avgPrice: avgPrice,
+          unrealizedPnl: unrealizedPnl,
+          unrealizedPnlPercent: unrealizedPercentage,
+          id: asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset,
+          transactions: buyTransactions.map(t => ({
+            type: t.type,
+            amount: t.assetAmount,
+            usdValue: t.amountUSD,
+            price: t.exchangeRateAtTime || (t.amountUSD / t.assetAmount),
+            date: t.createdAt
+          }))
+        });
+      }
+    }
+    
+    // Also include matured wallet assets
+    for (const [asset, balance] of user.wallets.matured.entries()) {
+      if (balance > 0) {
+        const price = await getCryptoPrice(asset.toUpperCase());
+        const currentValue = balance * (price || 0);
+        
+        // Check if asset already added from main wallet
+        const existingIndex = assetData.findIndex(a => a.symbol === asset);
+        if (existingIndex >= 0) {
+          assetData[existingIndex].maturedBalance = balance;
+          assetData[existingIndex].maturedValue = currentValue;
+          assetData[existingIndex].totalValue = assetData[existingIndex].currentValue + currentValue;
+        } else {
+          assetData.push({
+            symbol: asset,
+            balance: 0,
+            currentValue: 0,
+            maturedBalance: balance,
+            maturedValue: currentValue,
+            totalValue: currentValue,
+            avgPrice: 0,
+            unrealizedPnl: 0,
+            unrealizedPnlPercent: 0,
+            id: asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset,
+            transactions: []
+          });
+        }
+      }
+    }
+    
+    res.status(200).json(assetData);
+  } catch (err) {
+    console.error('Error fetching user assets:', err);
+    res.status(500).json({ 
+      status: 'error', 
+      message: 'Failed to fetch assets',
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+  }
+});
 
 // =============================================
 // GET /api/assets/portfolio - User Asset Portfolio with Profit/Loss Tracking
