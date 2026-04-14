@@ -1377,55 +1377,60 @@ const UserAssetBalanceSchema = new mongoose.Schema({
     index: true
   },
   balances: {
-    btc: { type: Number, default: 0, min: 0 },
-    eth: { type: Number, default: 0, min: 0 },
-    usdt: { type: Number, default: 0, min: 0 },
-    bnb: { type: Number, default: 0, min: 0 },
-    sol: { type: Number, default: 0, min: 0 },
-    usdc: { type: Number, default: 0, min: 0 },
-    xrp: { type: Number, default: 0, min: 0 },
-    doge: { type: Number, default: 0, min: 0 },
-    ada: { type: Number, default: 0, min: 0 },
-    shib: { type: Number, default: 0, min: 0 },
-    avax: { type: Number, default: 0, min: 0 },
-    dot: { type: Number, default: 0, min: 0 },
-    trx: { type: Number, default: 0, min: 0 },
-    link: { type: Number, default: 0, min: 0 },
-    matic: { type: Number, default: 0, min: 0 },
-    wbtc: { type: Number, default: 0, min: 0 },
-    ltc: { type: Number, default: 0, min: 0 },
-    near: { type: Number, default: 0, min: 0 },
-    uni: { type: Number, default: 0, min: 0 },
-    bch: { type: Number, default: 0, min: 0 },
-    xlm: { type: Number, default: 0, min: 0 },
-    atom: { type: Number, default: 0, min: 0 },
-    xmr: { type: Number, default: 0, min: 0 },
-    flow: { type: Number, default: 0, min: 0 },
-    vet: { type: Number, default: 0, min: 0 },
-    fil: { type: Number, default: 0, min: 0 },
-    theta: { type: Number, default: 0, min: 0 },
-    hbar: { type: Number, default: 0, min: 0 },
-    ftm: { type: Number, default: 0, min: 0 },
-    xtz: { type: Number, default: 0, min: 0 }
-  },
-  lastUpdated: {
-    type: Date,
-    default: Date.now
+    // Main wallet crypto balances
+    main: {
+      btc: { type: Number, default: 0, min: 0 },
+      eth: { type: Number, default: 0, min: 0 },
+      usdt: { type: Number, default: 0, min: 0 },
+      bnb: { type: Number, default: 0, min: 0 },
+      sol: { type: Number, default: 0, min: 0 },
+      usdc: { type: Number, default: 0, min: 0 },
+      xrp: { type: Number, default: 0, min: 0 },
+      doge: { type: Number, default: 0, min: 0 },
+      ada: { type: Number, default: 0, min: 0 },
+      shib: { type: Number, default: 0, min: 0 }
+    },
+    // Active wallet crypto balances (invested)
+    active: {
+      btc: { type: Number, default: 0, min: 0 },
+      eth: { type: Number, default: 0, min: 0 },
+      usdt: { type: Number, default: 0, min: 0 },
+      bnb: { type: Number, default: 0, min: 0 },
+      sol: { type: Number, default: 0, min: 0 },
+      usdc: { type: Number, default: 0, min: 0 },
+      xrp: { type: Number, default: 0, min: 0 },
+      doge: { type: Number, default: 0, min: 0 },
+      ada: { type: Number, default: 0, min: 0 },
+      shib: { type: Number, default: 0, min: 0 }
+    },
+    // Matured wallet crypto balances (completed investments)
+    matured: {
+      btc: { type: Number, default: 0, min: 0 },
+      eth: { type: Number, default: 0, min: 0 },
+      usdt: { type: Number, default: 0, min: 0 },
+      bnb: { type: Number, default: 0, min: 0 },
+      sol: { type: Number, default: 0, min: 0 },
+      usdc: { type: Number, default: 0, min: 0 },
+      xrp: { type: Number, default: 0, min: 0 },
+      doge: { type: Number, default: 0, min: 0 },
+      ada: { type: Number, default: 0, min: 0 },
+      shib: { type: Number, default: 0, min: 0 }
+    }
   },
   history: [{
     asset: { type: String, required: true },
-    type: { type: String, enum: ['deposit', 'withdrawal', 'buy', 'sell', 'interest', 'referral'], required: true },
+    walletType: { type: String, enum: ['main', 'active', 'matured'], required: true },
+    type: { type: String, enum: ['deposit', 'withdrawal', 'investment', 'maturity'], required: true },
     amount: { type: Number, required: true },
     balance: { type: Number, required: true },
     usdValue: { type: Number, required: true },
     price: { type: Number, required: true },
-    profitLoss: { type: Number },
-    profitLossPercentage: { type: Number },
     timestamp: { type: Date, default: Date.now },
-    transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' }
-  }]
+    transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
+    description: String
+  }],
+  lastUpdated: { type: Date, default: Date.now }
 }, { timestamps: true });
-
 UserAssetBalanceSchema.index({ user: 1 });
 UserAssetBalanceSchema.index({ 'history.timestamp': -1 });
 
