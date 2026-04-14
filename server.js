@@ -9737,7 +9737,7 @@ app.get('/api/users/assets', protect, async (req, res) => {
       if (process.env.NODE_ENV !== 'production') console.error('Error in price update interval:', err);
     }
   }, 1000);
-};
+
 
 const recalculateAllWalletValuesRealtime = async (io, currentPrices) => {
   if (isRecalculating) return;
