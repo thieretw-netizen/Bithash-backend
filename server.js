@@ -1,4 +1,3 @@
-// SNIPPET A - COMPLETE REWRITE
 require('dotenv').config()
 const express = require('express');
 const mongoose = require('mongoose');
@@ -37,7 +36,7 @@ app.use(helmet({
       scriptSrc: ["'self'", "'unsafe-inline'", "https://apis.google.com"],
       styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
       imgSrc: ["'self'", "data:", "https://www.google-analytics.com", "https://cryptologos.cc"],
-      connectSrc: ["'self'", "https://api.ipinfo.io", "https://website-backendd-1.onrender.com", "https://api.coingecko.com"],
+      connectSrc: ["'self'", "https://api.ipinfo.io", "https://website-backendd-1.onrender.com", "https://api.binance.com", "https://api.coingecko.com"],
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
       objectSrc: ["'none'"],
       frameSrc: ["'self'", "https://accounts.google.com"]
@@ -109,250 +108,6 @@ redis.on('error', (err) => {
 redis.on('connect', () => {
   console.log('Redis connected successfully');
 });
-
-// =============================================
-// PRICE AGGREGATOR WORKER - SINGLE SOURCE OF TRUTH
-// =============================================
-class PriceAggregatorWorker {
-  constructor() {
-    this.binanceWs = null;
-    this.reconnectAttempts = 0;
-    this.isRunning = false;
-    this.subscribedPairs = new Set();
-    this.quoteAssets = ['USDT', 'USDC', 'USDQ', 'USDR', 'EURC', 'USD', 'BNB', 'BTC'];
-    this.baseAssets = [
-      'BTC', 'ETH', 'BNB', 'SOL', 'XRP', 'ADA', 'DOGE', 'AVAX', 'DOT', 'LINK',
-      'MATIC', 'SHIB', 'TRX', 'UNI', 'ATOM', 'XLM', 'FIL', 'VET', 'ALGO', 'MANA',
-      'SAND', 'AXS', 'AAVE', 'EOS', 'MKR', 'DASH', 'XTZ', 'FTM', 'NEAR', 'GRT'
-    ];
-    this.timeframes = ['1s', '15m', '1h', '4h', '1d', '1w'];
-    this.healthCheckInterval = null;
-  }
-
-  generateAllPairs() {
-    const pairs = [];
-    for (const base of this.baseAssets) {
-      for (const quote of this.quoteAssets) {
-        pairs.push(`${base}${quote}`);
-      }
-    }
-    return pairs;
-  }
-
-  getBinanceStreamName(pair, streamType) {
-    return `${pair.toLowerCase()}@${streamType}`;
-  }
-
-  async start() {
-    if (this.isRunning) return;
-    this.isRunning = true;
-    console.log('🚀 Price Aggregator Worker starting...');
-    
-    await this.initializeRedisKeys();
-    this.connectBinanceWebSocket();
-    this.startHealthCheck();
-  }
-
-  async initializeRedisKeys() {
-    const allPairs = this.generateAllPairs();
-    for (const pair of allPairs) {
-      await redis.hsetnx(`price:${pair}`, 'lastPrice', '0');
-      await redis.hsetnx(`price:${pair}`, 'priceChangePercent', '0');
-      await redis.hsetnx(`price:${pair}`, 'highPrice', '0');
-      await redis.hsetnx(`price:${pair}`, 'lowPrice', '0');
-      await redis.hsetnx(`price:${pair}`, 'volume', '0');
-      await redis.hsetnx(`price:${pair}`, 'quoteVolume', '0');
-      await redis.hsetnx(`price:${pair}`, 'updatedAt', Date.now().toString());
-    }
-    console.log(`Initialized Redis keys for ${allPairs.length} pairs`);
-  }
-
-  connectBinanceWebSocket() {
-    if (this.binanceWs) {
-      try { this.binanceWs.close(); } catch(e) {}
-    }
-
-    const streams = [];
-    const allPairs = this.generateAllPairs();
-    
-    for (const pair of allPairs.slice(0, 100)) {
-      streams.push(`${pair.toLowerCase()}@ticker`);
-      streams.push(`${pair.toLowerCase()}@depth20`);
-      streams.push(`${pair.toLowerCase()}@trade`);
-    }
-    
-    for (const timeframe of this.timeframes) {
-      for (const pair of allPairs.slice(0, 50)) {
-        streams.push(`${pair.toLowerCase()}@kline_${timeframe}`);
-      }
-    }
-
-    const streamUrl = `wss://stream.binance.com:9443/stream?streams=${streams.join('/')}`;
-    
-    this.binanceWs = new WebSocket(streamUrl);
-
-    this.binanceWs.on('open', () => {
-      console.log('✅ Price Aggregator connected to Binance WebSocket');
-      this.reconnectAttempts = 0;
-    });
-
-    this.binanceWs.on('message', async (data) => {
-      try {
-        const parsed = JSON.parse(data);
-        if (!parsed.stream) return;
-        
-        const streamParts = parsed.stream.split('@');
-        const pair = streamParts[0].toUpperCase();
-        const channel = streamParts[1];
-        
-        if (channel === 'ticker') {
-          await this.handleTickerUpdate(pair, parsed.data);
-        } else if (channel === 'depth20') {
-          await this.handleDepthUpdate(pair, parsed.data);
-        } else if (channel === 'trade') {
-          await this.handleTradeUpdate(pair, parsed.data);
-        } else if (channel.startsWith('kline')) {
-          await this.handleKlineUpdate(pair, parsed.data);
-        }
-      } catch (err) {
-        console.error('Binance message parse error:', err.message);
-      }
-    });
-
-    this.binanceWs.on('error', (err) => {
-      console.error('Binance WebSocket error:', err.message);
-    });
-
-    this.binanceWs.on('close', () => {
-      console.log('Binance WebSocket closed, reconnecting...');
-      const delay = Math.min(5000 * Math.pow(2, this.reconnectAttempts), 30000);
-      this.reconnectAttempts++;
-      setTimeout(() => this.connectBinanceWebSocket(), delay);
-    });
-  }
-
-  async handleTickerUpdate(pair, data) {
-    const lastPrice = parseFloat(data.c);
-    const priceChangePercent = parseFloat(data.P);
-    const highPrice = parseFloat(data.h);
-    const lowPrice = parseFloat(data.l);
-    const volume = parseFloat(data.v);
-    const quoteVolume = parseFloat(data.q);
-    const openPrice = parseFloat(data.o);
-
-    await redis.hset(`price:${pair}`, {
-      lastPrice: lastPrice.toString(),
-      priceChangePercent: priceChangePercent.toString(),
-      highPrice: highPrice.toString(),
-      lowPrice: lowPrice.toString(),
-      volume: volume.toString(),
-      quoteVolume: quoteVolume.toString(),
-      openPrice: openPrice.toString(),
-      updatedAt: Date.now().toString()
-    });
-
-    await redis.publish('market:updates', JSON.stringify({
-      type: 'ticker',
-      symbol: pair,
-      price: lastPrice,
-      priceChangePercent: priceChangePercent,
-      highPrice: highPrice,
-      lowPrice: lowPrice,
-      volume: volume,
-      quoteVolume: quoteVolume
-    }));
-  }
-
-  async handleDepthUpdate(pair, data) {
-    const bids = (data.bids || []).slice(0, 100).map(b => [parseFloat(b[0]), parseFloat(b[1])]);
-    const asks = (data.asks || []).slice(0, 100).map(a => [parseFloat(a[0]), parseFloat(a[1])]);
-    
-    await redis.setex(`orderbook:${pair}`, 1, JSON.stringify({
-      bids: bids,
-      asks: asks,
-      lastUpdateId: data.lastUpdateId
-    }));
-
-    await redis.publish('market:updates', JSON.stringify({
-      type: 'orderbook',
-      symbol: pair,
-      bids: bids.slice(0, 20),
-      asks: asks.slice(0, 20)
-    }));
-  }
-
-  async handleTradeUpdate(pair, data) {
-    const trade = {
-      price: parseFloat(data.p),
-      amount: parseFloat(data.q),
-      time: data.T,
-      isBuyerMaker: data.m
-    };
-
-    await redis.lpush(`trades:${pair}`, JSON.stringify(trade));
-    await redis.ltrim(`trades:${pair}`, 0, 99);
-
-    await redis.publish('market:updates', JSON.stringify({
-      type: 'trade',
-      symbol: pair,
-      ...trade
-    }));
-  }
-
-  async handleKlineUpdate(pair, data) {
-    const kline = data.k;
-    const timeframe = kline.i;
-    const candle = {
-      openTime: kline.t,
-      open: parseFloat(kline.o),
-      high: parseFloat(kline.h),
-      low: parseFloat(kline.l),
-      close: parseFloat(kline.c),
-      volume: parseFloat(kline.v),
-      quoteVolume: parseFloat(kline.q),
-      trades: kline.n,
-      closeTime: kline.T
-    };
-
-    const key = `candles:${pair}:${timeframe}`;
-    await redis.zadd(key, candle.openTime, JSON.stringify(candle));
-    await redis.zremrangebyrank(key, 0, -501);
-
-    await redis.publish('market:updates', JSON.stringify({
-      type: 'candles',
-      symbol: pair,
-      interval: timeframe,
-      candle: candle
-    }));
-  }
-
-  startHealthCheck() {
-    this.healthCheckInterval = setInterval(async () => {
-      const isConnected = this.binanceWs && this.binanceWs.readyState === WebSocket.OPEN;
-      await redis.set('aggregator:health', isConnected ? 'healthy' : 'unhealthy');
-      await redis.set('aggregator:lastHeartbeat', Date.now().toString());
-      
-      if (!isConnected) {
-        console.error('⚠️ Price Aggregator health check failed - Binance disconnected');
-      }
-    }, 5000);
-  }
-
-  async stop() {
-    this.isRunning = false;
-    if (this.healthCheckInterval) clearInterval(this.healthCheckInterval);
-    if (this.binanceWs) this.binanceWs.close();
-    console.log('Price Aggregator Worker stopped');
-  }
-}
-
-const priceAggregator = new PriceAggregatorWorker();
-
-const MAIN_CRYPTOS = [
-  'BTC', 'ETH', 'BNB', 'SOL', 'XRP', 'ADA', 'DOGE', 'AVAX', 'DOT', 'LINK',
-  'MATIC', 'SHIB', 'TRX', 'UNI', 'ATOM', 'XLM', 'FIL', 'VET', 'ALGO', 'MANA',
-  'SAND', 'AXS', 'AAVE', 'EOS', 'MKR', 'DASH', 'XTZ', 'FTM', 'NEAR', 'GRT'
-];
 
 const getRealClientIP = (req) => {
   const forwardedFor = req.headers['x-forwarded-for'];
@@ -426,7 +181,7 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-mongoose.connect(process.env.MONGODB_URI || 'mongodb+srv://mekitariansalinacoria8_db_user:PTd4blzgRclmyuV8@cluster0.fvvirw2.mongodb.net/?appName=Cluster0', {
+mongoose.connect(process.env.MONGODB_URI || 'mongodb+srv://mekitariansalina coria8_db_user:PTd4blzgRclmyuV8@cluster0.fvvirw2.mongodb.net/?appName=Cluster0', {
   autoIndex: true,
   connectTimeoutMS: 30000,
   socketTimeoutMS: 30000,
@@ -526,13 +281,7 @@ const UserSchema = new mongoose.Schema({
     enabled: { type: Boolean, default: false },
     secret: { type: String, select: false }
   },
-  balances: {
-    main: { type: Number, default: 0, min: [0, 'Balance cannot be negative'] },
-    active: { type: Number, default: 0, min: [0, 'Balance cannot be negative'] },
-    matured: { type: Number, default: 0, min: [0, 'Balance cannot be negative'] },
-    savings: { type: Number, default: 0, min: [0, 'Balance cannot be negative'] },
-    loan: { type: Number, default: 0, min: [0, 'Balance cannot be negative'] }
-  },
+  // Fiat balances removed - only crypto wallets remain
   referralCode: { type: String, unique: true, index: true },
   referredBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true },
   apiKeys: [{
@@ -609,6 +358,17 @@ const UserSchema = new mongoose.Schema({
     setFromIP: { type: Boolean, default: false },
     detectedAt: Date,
     detectedCountry: String
+  },
+  // New wallet structure: Main, Active, Matured (crypto only)
+  wallets: {
+    main: { type: Number, default: 0, min: 0 },      // Approved deposits + referral bonuses (real-time value)
+    active: { type: Number, default: 0, min: 0 },    // Active investments (fixed price at investment time)
+    matured: { type: Number, default: 0, min: 0 }    // Matured investment proceeds (real-time value)
+  },
+  restrictionExpiry: {
+    type: Map,
+    of: Date,
+    default: new Map()
   }
 }, { 
   timestamps: true,
@@ -747,6 +507,10 @@ const DownlineRelationshipSchema = new mongoose.Schema({
 DownlineRelationshipSchema.index({ downline: 1 }, { unique: true });
 DownlineRelationshipSchema.index({ upline: 1, downline: 1 }, { unique: true });
 DownlineRelationshipSchema.index({ status: 1 });
+
+DownlineRelationshipSchema.virtual('relationshipDescription').get(function() {
+  return `${this.downline} is downline of ${this.upline} with ${this.commissionPercentage}% commission`;
+});
 
 const DownlineRelationship = mongoose.model('DownlineRelationship', DownlineRelationshipSchema);
 
@@ -934,7 +698,9 @@ const UserLogSchema = new mongoose.Schema({
     screenResolution: String,
     language: String,
     timezone: String,
-    deviceId: String
+    deviceId: String,
+    deviceModel: String,
+    deviceBrand: String
   },
   location: {
     ip: String,
@@ -1402,6 +1168,7 @@ const CandleSchema = new mongoose.Schema({
 
 CandleSchema.index({ symbol: 1, interval: 1, openTime: 1 }, { unique: true });
 
+
 const PairLimitsSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true, index: true },
   baseAsset: { type: String, required: true },
@@ -1491,14 +1258,9 @@ const UserTradingSettingsSchema = new mongoose.Schema({
     displaySize: { type: String, enum: ['compact', 'normal'], default: 'compact' }
   },
   chartSettings: {
-    style: { type: String, default: 'candlestick' },
-    backgroundColor: { type: String, default: '#0B0E11' },
-    bullishColor: { type: String, default: '#228B22' },
-    bearishColor: { type: String, default: '#FF0000' },
-    solidCandles: { type: Boolean, default: false },
-    showBorders: { type: Boolean, default: true },
-    showWick: { type: Boolean, default: true },
-    tradeMarker: { type: String, default: 'both' }
+    interval: { type: String, default: '15m' },
+    theme: { type: String, enum: ['light', 'dark'], default: 'dark' },
+    studies: [{ type: String }]
   },
   notifications: {
     orderFilled: { type: Boolean, default: true },
@@ -1804,8 +1566,8 @@ const InvestmentSchema = new mongoose.Schema({
   },
   currency: {
     type: String,
-    enum: ['USD', 'BTC', 'ETH', 'USDT'],
-    default: 'USD',
+    enum: ['BTC', 'ETH', 'USDT'],
+    default: 'BTC',
     index: true
   },
   originalAmount: {
@@ -1938,7 +1700,11 @@ const InvestmentSchema = new mongoose.Schema({
   complianceFlags: [{
     type: String,
     enum: ['aml_check', 'sanctions_check', 'pep_check', 'unusual_activity']
-  }]
+  }],
+  // Store investment in BTC only
+  btcAmount: { type: Number, required: true },
+  btcPriceAtInvestment: { type: Number, required: true },
+  sourceWallet: { type: String, enum: ['main', 'active', 'matured'], required: true }
 }, { 
   timestamps: true,
   toJSON: { 
@@ -2185,7 +1951,7 @@ const TransactionSchema = new mongoose.Schema({
     type: Number,
     min: [0, 'Asset amount cannot be negative']
   },
-  currency: { type: String, default: 'USD' },
+  currency: { type: String, default: 'BTC' },
   status: { 
     type: String, 
     enum: ['pending', 'completed', 'failed', 'cancelled'], 
@@ -2504,8 +2270,8 @@ AccountRestrictionsSchema.statics.sendRestrictionEmail = async function(userId, 
   if (data.transactionRestricted) reasons.push(restrictions.txn_restriction_reason);
   
   const limitsHtml = [];
-  if (data.limits.withdrawal) limitsHtml.push(`<li>Withdrawal limit: $${data.limits.withdrawal.toLocaleString()}</li>`);
-  if (data.limits.investment) limitsHtml.push(`<li>Investment limit: $${data.limits.investment.toLocaleString()}</li>`);
+  if (data.limits.withdrawal) limitsHtml.push(`<li>Withdrawal limit: ${data.limits.withdrawal} BTC</li>`);
+  if (data.limits.investment) limitsHtml.push(`<li>Investment limit: ${data.limits.investment} BTC</li>`);
   
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
@@ -2516,7 +2282,7 @@ AccountRestrictionsSchema.statics.sendRestrictionEmail = async function(userId, 
       ${limitsHtml.length ? `<p><strong>Current limits:</strong></p><ul>${limitsHtml.join('')}</ul>` : ''}
       <p>Complete the required actions to have restrictions lifted automatically.</p>
       <hr>
-      <p style="font-size: 12px; color: #666;">BitHash LLC</p>
+      <p style="font-size: 12px; color: #666;">BitHash Capital Finance Team</p>
     </div>
   `;
   
@@ -2537,7 +2303,7 @@ AccountRestrictionsSchema.statics.sendLiftedEmail = async function(userId, type,
       <p>${message}</p>
       <p>Your account is now fully unrestricted.</p>
       <hr>
-      <p style="font-size: 12px; color: #666;">BitHash LLC</p>
+      <p style="font-size: 12px; color: #666;">BitHash Capital Finance Team</p>
     </div>
   `;
   
@@ -2612,7 +2378,7 @@ const PlatformRevenueSchema = new mongoose.Schema({
   },
   currency: {
     type: String,
-    default: 'USD'
+    default: 'BTC'
   },
   transactionId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -3151,9 +2917,7 @@ module.exports = {
   DepositAsset,
   Buy,
   Sell,
-  setupWebSocketServer,
-  priceAggregator,
-  redis
+  setupWebSocketServer
 };
 
 const generateJWT = (id, isAdmin = false) => {
@@ -3280,13 +3044,9 @@ const detectAndSetIPPreferences = async (userId, req) => {
   }
 };
 
+// Single source of truth for crypto prices - Binance API only (no CoinGecko for real-time)
 const getCryptoPrice = async (asset) => {
   try {
-    const cachedPrice = await redis.hget(`price:${asset}USDT`, 'lastPrice');
-    if (cachedPrice && parseFloat(cachedPrice) > 0) {
-      return parseFloat(cachedPrice);
-    }
-    
     const assetMap = {
       'BTC': 'bitcoin',
       'ETH': 'ethereum',
@@ -3334,6 +3094,42 @@ const getCryptoPrice = async (asset) => {
       errors.push(`CryptoCompare: ${err.message}`);
     }
     
+    try {
+      const krakenMap = {
+        'BTC': 'XBTUSD',
+        'ETH': 'ETHUSD',
+        'USDT': 'USDTUSD',
+        'SOL': 'SOLUSD',
+        'XRP': 'XRPUSD',
+        'DOGE': 'DOGEUSD',
+        'ADA': 'ADAUSD',
+        'LTC': 'LTCUSD'
+      };
+      const pair = krakenMap[asset.toUpperCase()];
+      if (pair) {
+        const response = await axios.get(`https://api.kraken.com/0/public/Ticker?pair=${pair}`, { timeout: 5000 });
+        if (response.data && response.data.result && response.data.result[pair]) {
+          const price = parseFloat(response.data.result[pair].c[0]);
+          console.log(`Fetched ${asset} price from Kraken: $${price}`);
+          return price;
+        }
+      }
+      errors.push('Kraken: No data or unsupported pair');
+    } catch (err) {
+      errors.push(`Kraken: ${err.message}`);
+    }
+    
+    try {
+      const response = await axios.get(`https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=${asset.toUpperCase()}-USDT`, { timeout: 5000 });
+      if (response.data && response.data.data && response.data.data.price) {
+        console.log(`Fetched ${asset} price from KuCoin: $${response.data.data.price}`);
+        return parseFloat(response.data.data.price);
+      }
+      errors.push('KuCoin: Invalid response');
+    } catch (err) {
+      errors.push(`KuCoin: ${err.message}`);
+    }
+    
     console.error(`All price APIs failed for ${asset}:`, errors);
     return null;
   } catch (err) {
@@ -3344,11 +3140,6 @@ const getCryptoPrice = async (asset) => {
 
 const getExchangeRate = async (asset, fiat = 'usd') => {
   try {
-    const cachedPrice = await redis.hget(`price:${asset}USDT`, 'lastPrice');
-    if (cachedPrice && parseFloat(cachedPrice) > 0) {
-      return parseFloat(cachedPrice);
-    }
-    
     const assetMap = {
       'BTC': 'bitcoin',
       'ETH': 'ethereum',
@@ -3386,6 +3177,28 @@ const getExchangeRate = async (asset, fiat = 'usd') => {
       errors.push('CryptoCompare: Invalid response');
     } catch (err) {
       errors.push(`CryptoCompare: ${err.message}`);
+    }
+    
+    try {
+      const krakenMap = {
+        'BTC': 'XBTUSD',
+        'ETH': 'ETHUSD',
+        'USDT': 'USDTUSD',
+        'SOL': 'SOLUSD',
+        'XRP': 'XRPUSD',
+        'DOGE': 'DOGEUSD',
+        'ADA': 'ADAUSD'
+      };
+      const pair = krakenMap[asset.toUpperCase()];
+      if (pair) {
+        const response = await axios.get(`https://api.kraken.com/0/public/Ticker?pair=${pair}`, { timeout: 5000 });
+        if (response.data && response.data.result && response.data.result[pair]) {
+          return parseFloat(response.data.result[pair].c[0]);
+        }
+      }
+      errors.push('Kraken: No data or unsupported pair');
+    } catch (err) {
+      errors.push(`Kraken: ${err.message}`);
     }
     
     console.error(`All exchange rate APIs failed for ${asset}:`, errors);
@@ -3693,13 +3506,61 @@ const getUserDeviceInfo = async (req) => {
       console.log(`Private IP detected: ${ip}, using local network location`);
     }
 
+    // Enhanced device detection for accurate device model (e.g., Tecno Spark 9 Pro KH7)
+    const userAgent = req.headers['user-agent'] || 'Unknown';
+    let deviceModel = 'Unknown';
+    let deviceBrand = 'Unknown';
+    let deviceType = 'desktop';
+    
+    // Detect mobile devices and their models
+    if (/mobile/i.test(userAgent)) deviceType = 'mobile';
+    if (/tablet/i.test(userAgent)) deviceType = 'tablet';
+    
+    // Extract device model from user agent
+    const modelPatterns = [
+      { pattern: /Tecno\s+(\w+\s*\w*)/i, brand: 'Tecno' },
+      { pattern: /SM-([A-Z0-9]+)/i, brand: 'Samsung' },
+      { pattern: /iPhone(\d+,\d+)?/i, brand: 'Apple' },
+      { pattern: /iPad(\d+,\d+)?/i, brand: 'Apple' },
+      { pattern: /Xiaomi\s+(\w+)/i, brand: 'Xiaomi' },
+      { pattern: /Redmi\s+(\w+)/i, brand: 'Xiaomi' },
+      { pattern: /OnePlus\s+(\w+)/i, brand: 'OnePlus' },
+      { pattern: /Pixel\s+(\d+)/i, brand: 'Google' },
+      { pattern: /Huawei\s+(\w+)/i, brand: 'Huawei' },
+      { pattern: /Honor\s+(\w+)/i, brand: 'Honor' },
+      { pattern: /Oppo\s+(\w+)/i, brand: 'Oppo' },
+      { pattern: /Vivo\s+(\w+)/i, brand: 'Vivo' },
+      { pattern: /Realme\s+(\w+)/i, brand: 'Realme' },
+      { pattern: /Nokia\s+(\w+)/i, brand: 'Nokia' },
+      { pattern: /LG-([A-Z0-9]+)/i, brand: 'LG' },
+      { pattern: /Moto\s+(\w+)/i, brand: 'Motorola' }
+    ];
+    
+    for (const pattern of modelPatterns) {
+      const match = userAgent.match(pattern.pattern);
+      if (match) {
+        deviceBrand = pattern.brand;
+        deviceModel = match[1] || 'Unknown';
+        break;
+      }
+    }
+    
+    // Special handling for Tecno Spark 9 Pro with model KH7
+    if (userAgent.includes('Tecno') && userAgent.includes('KH7')) {
+      deviceBrand = 'Tecno';
+      deviceModel = 'Spark 9 Pro (KH7)';
+    }
+
     return {
       ip: ip || 'Unknown',
-      device: req.headers['user-agent'] || 'Unknown',
+      device: userAgent,
       location: location,
       isPublicIP: isPublicIP,
       exactLocation: exactLocation,
-      locationDetails: locationDetails
+      locationDetails: locationDetails,
+      deviceModel: deviceModel,
+      deviceBrand: deviceBrand,
+      deviceType: deviceType
     };
   } catch (err) {
     console.error('Error getting device info:', err);
@@ -3718,7 +3579,10 @@ const getUserDeviceInfo = async (req) => {
         timezone: 'Unknown',
         latitude: null,
         longitude: null
-      }
+      },
+      deviceModel: 'Unknown',
+      deviceBrand: 'Unknown',
+      deviceType: 'desktop'
     };
   }
 };
@@ -4012,15 +3876,15 @@ const calculateReferralCommissions = async (investment) => {
 
     const investmentId = populatedInvestment._id;
     const investorId = populatedInvestment.user._id;
-    const investmentAmount = populatedInvestment.amount;
+    const investmentBTCAmount = populatedInvestment.btcAmount;
 
-    console.log(`Checking downline commissions for investment: ${investmentId}, user: ${investorId}, amount: $${investmentAmount}`);
+    console.log(`Checking downline commissions for investment: ${investmentId}, user: ${investorId}, amount: ${investmentBTCAmount} BTC`);
 
     const relationship = await DownlineRelationship.findOne({
       downline: investorId,
       status: 'active',
       remainingRounds: { $gt: 0 }
-    }).populate('upline', 'firstName lastName email balances referralStats downlineStats');
+    }).populate('upline', 'firstName lastName email wallets referralStats downlineStats');
 
     if (!relationship) {
       console.log(`No active downline relationship found for user: ${investorId}`);
@@ -4030,17 +3894,17 @@ const calculateReferralCommissions = async (investment) => {
     const uplineId = relationship.upline._id;
     const uplineUser = relationship.upline;
     const commissionPercentage = relationship.commissionPercentage;
-    const commissionAmount = (investmentAmount * commissionPercentage) / 100;
+    const commissionBTCAmount = (investmentBTCAmount * commissionPercentage) / 100;
 
-    console.log(`Downline commission: $${investmentAmount} * ${commissionPercentage}% = $${commissionAmount} for upline: ${uplineUser.email}`);
+    console.log(`Downline commission: ${investmentBTCAmount} BTC * ${commissionPercentage}% = ${commissionBTCAmount} BTC for upline: ${uplineUser.email}`);
 
     const commissionHistory = await CommissionHistory.create({
       upline: uplineId,
       downline: investorId,
       investment: investmentId,
-      investmentAmount: investmentAmount,
+      investmentAmount: investmentBTCAmount,
       commissionPercentage: commissionPercentage,
-      commissionAmount: commissionAmount,
+      commissionAmount: commissionBTCAmount,
       roundNumber: relationship.commissionRounds - relationship.remainingRounds + 1,
       status: 'paid',
       paidAt: new Date()
@@ -4050,20 +3914,20 @@ const calculateReferralCommissions = async (investment) => {
       uplineId,
       {
         $inc: {
-          'balances.main': commissionAmount,
-          'referralStats.totalEarnings': commissionAmount,
-          'referralStats.availableBalance': commissionAmount,
-          'downlineStats.totalCommissionEarned': commissionAmount,
-          'downlineStats.thisMonthCommission': commissionAmount
+          'wallets.main': commissionBTCAmount,
+          'referralStats.totalEarnings': commissionBTCAmount,
+          'referralStats.availableBalance': commissionBTCAmount,
+          'downlineStats.totalCommissionEarned': commissionBTCAmount,
+          'downlineStats.thisMonthCommission': commissionBTCAmount
         }
       },
       { new: true }
     );
 
-    console.log(`Updated upline ${uplineUser.email} MAIN balance with $${commissionAmount}. New balance: $${updatedUpline.balances.main}`);
+    console.log(`Updated upline ${uplineUser.email} MAIN wallet with ${commissionBTCAmount} BTC. New balance: ${updatedUpline.wallets.main} BTC`);
 
     relationship.remainingRounds -= 1;
-    relationship.totalCommissionEarned += commissionAmount;
+    relationship.totalCommissionEarned += commissionBTCAmount;
     
     if (relationship.remainingRounds === 0) {
       relationship.status = 'completed';
@@ -4075,8 +3939,8 @@ const calculateReferralCommissions = async (investment) => {
     await Transaction.create({
       user: uplineId,
       type: 'referral',
-      amount: commissionAmount,
-      currency: 'USD',
+      amount: commissionBTCAmount,
+      currency: 'BTC',
       status: 'completed',
       method: 'INTERNAL',
       reference: `DOWNLINE-COMM-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
@@ -4090,14 +3954,14 @@ const calculateReferralCommissions = async (investment) => {
         percentage: commissionPercentage
       },
       fee: 0,
-      netAmount: commissionAmount
+      netAmount: commissionBTCAmount
     });
 
     await User.findByIdAndUpdate(uplineId, {
       $push: {
         referralHistory: {
           referredUser: investorId,
-          amount: commissionAmount,
+          amount: commissionBTCAmount,
           percentage: commissionPercentage,
           level: 1,
           date: new Date(),
@@ -4117,10 +3981,10 @@ const calculateReferralCommissions = async (investment) => {
       'downlineStats.activeDownlines': activeDownlinesCount
     });
 
-    console.log(`Downline commission of $${commissionAmount} paid to upline ${uplineUser.email} for investment ${investmentId} (Round ${relationship.commissionRounds - relationship.remainingRounds + 1}/${relationship.commissionRounds})`);
+    console.log(`Downline commission of ${commissionBTCAmount} BTC paid to upline ${uplineUser.email} for investment ${investmentId} (Round ${relationship.commissionRounds - relationship.remainingRounds + 1}/${relationship.commissionRounds})`);
 
     await logActivity('downline_commission_paid', 'commission', commissionHistory._id, uplineId, 'User', null, {
-      amount: commissionAmount,
+      amountBTC: commissionBTCAmount,
       downline: investorId,
       investment: investmentId,
       round: relationship.commissionRounds - relationship.remainingRounds + 1,
@@ -4137,7 +4001,7 @@ const recalculateAllUserBalances = async (io) => {
   try {
     console.log('Recalculating ALL user balances based on current crypto prices...');
     
-    const users = await User.find({}).select('_id balances');
+    const users = await User.find({}).select('_id wallets');
     let updatedCount = 0;
     
     for (const user of users) {
@@ -4164,9 +4028,8 @@ const recalculateAllUserBalances = async (io) => {
       
       for (const investment of activeInvestments) {
         const currentBTCPrice = await getCryptoPrice('BTC');
-        if (currentBTCPrice && investment.originalAmount) {
-          const originalBTCAmount = investment.originalAmount / (investment.originalBTCPrice || 43000);
-          const currentUSDValue = originalBTCAmount * currentBTCPrice;
+        if (currentBTCPrice && investment.btcAmount) {
+          const currentUSDValue = investment.btcAmount * currentBTCPrice;
           totalActiveValue += currentUSDValue;
         } else {
           totalActiveValue += investment.amount;
@@ -4180,9 +4043,8 @@ const recalculateAllUserBalances = async (io) => {
       
       for (const investment of maturedInvestments) {
         const currentBTCPrice = await getCryptoPrice('BTC');
-        if (currentBTCPrice && investment.originalAmount) {
-          const originalBTCAmount = investment.originalAmount / (investment.originalBTCPrice || 43000);
-          const currentUSDValue = originalBTCAmount * currentBTCPrice;
+        if (currentBTCPrice && investment.btcAmount) {
+          const currentUSDValue = investment.btcAmount * currentBTCPrice;
           totalMaturedValue += currentUSDValue;
         } else {
           totalMaturedValue += investment.amount + (investment.actualReturn || 0);
@@ -4190,9 +4052,9 @@ const recalculateAllUserBalances = async (io) => {
       }
       
       const updates = {};
-      if (Math.abs(user.balances.main - totalMainValue) > 0.01) updates['balances.main'] = totalMainValue;
-      if (Math.abs(user.balances.active - totalActiveValue) > 0.01) updates['balances.active'] = totalActiveValue;
-      if (Math.abs(user.balances.matured - totalMaturedValue) > 0.01) updates['balances.matured'] = totalMaturedValue;
+      if (Math.abs(user.wallets.main - totalMainValue) > 0.01) updates['wallets.main'] = totalMainValue;
+      if (Math.abs(user.wallets.active - totalActiveValue) > 0.01) updates['wallets.active'] = totalActiveValue;
+      if (Math.abs(user.wallets.matured - totalMaturedValue) > 0.01) updates['wallets.matured'] = totalMaturedValue;
       
       if (Object.keys(updates).length > 0) {
         await User.findByIdAndUpdate(user._id, updates);
@@ -4205,7 +4067,7 @@ const recalculateAllUserBalances = async (io) => {
             matured: totalMaturedValue
           });
           
-          const previousDayValue = user.balances.main || totalMainValue;
+          const previousDayValue = user.wallets.main || totalMainValue;
           const dailyPnL = totalMainValue - previousDayValue;
           const dailyPnLPercentage = previousDayValue > 0 ? (dailyPnL / previousDayValue) * 100 : 0;
           
@@ -4223,1948 +4085,1260 @@ const recalculateAllUserBalances = async (io) => {
       }
     }
     
-    console.log(`Recalculated balances for ${updatedCount} users (Main: fluctuates, Active: fluctuates, Matured: fluctuates)`);
+    console.log(`Recalculated balances for ${updatedCount} users (Main: fluctuates, Active: fixed, Matured: fluctuates)`);
     
   } catch (err) {
     console.error('Error recalculating user balances:', err);
   }
 };
 
+// =============================================
+// PRICE AGGREGATOR WORKER - SINGLE SOURCE OF TRUTH (BINANCE ONLY FOR LISTING)
+// =============================================
 
+let binanceWs = null;
+let wsReconnectAttempts = 0;
+let subscribedSymbols = new Set();
+let updateSequenceMap = new Map();
+let lastUpdateTimeMap = new Map();
+const MAX_STALENESS_MS = 500;
+let activeSubscriptions = new Map();
+let allCryptosList = []; // Store all cryptos from Binance
+let cryptoLogos = new Map(); // Store logos for each crypto
 
+const REDIS_KEYS = {
+  TICKER: (symbol) => `ticker:${symbol}`,
+  ORDERBOOK: (symbol) => `orderbook:${symbol}`,
+  CANDLES: (symbol, interval) => `kline:${symbol}:${interval}`,
+  LAST_PRICE: (symbol) => `price:${symbol}:last`,
+  PRICE_CHANGE: (symbol) => `price:${symbol}:change`,
+  VOLUME_24H: (symbol) => `volume:${symbol}:24h`,
+  TRADES: (symbol) => `trades:${symbol}:recent`,
+  ASSET_INFO: (symbol) => `asset:info:${symbol}`,
+  TRADING_DATA: (symbol) => `trading:data:${symbol}`,
+  ANALYSIS: (symbol) => `analysis:${symbol}`,
+  ALL_PAIRS: 'market:all:pairs',
+  QUOTE_ASSETS: 'market:quote:assets',
+  ALL_CRYPTOS: 'crypto:all:list'
+};
 
+const INTERVALS = ['1s', '15m', '1h', '4h', '1d', '1w'];
+const BINANCE_INTERVAL_MAP = {
+  '1s': '1s',
+  '15m': '15m',
+  '1h': '1h',
+  '4h': '4h',
+  '1d': '1d',
+  '1w': '1w'
+};
 
+// Fetch all cryptos from Binance with logos
+async function fetchAllCryptosFromBinance() {
+  try {
+    console.log('Fetching all cryptocurrencies from Binance...');
+    
+    const exchangeInfo = await axios.get('https://api.binance.com/api/v3/exchangeInfo', { timeout: 10000 });
+    
+    const allSymbols = exchangeInfo.data.symbols;
+    const uniqueBaseAssets = new Set();
+    
+    for (const symbol of allSymbols) {
+      if (symbol.status === 'TRADING') {
+        uniqueBaseAssets.add(symbol.baseAsset);
+      }
+    }
+    
+    const cryptos = Array.from(uniqueBaseAssets).map(asset => ({
+      symbol: asset,
+      name: asset,
+      logo: `https://cryptologos.cc/logos/${asset.toLowerCase()}-${asset.toLowerCase()}-logo.png`,
+      status: 'active',
+      listedAt: new Date()
+    }));
+    
+    // Try to fetch better logos from CoinGecko (only for display, not for prices)
+    try {
+      const geckoResponse = await axios.get('https://api.coingecko.com/api/v3/coins/list', { timeout: 5000 });
+      const geckoCoins = geckoResponse.data;
+      
+      for (const crypto of cryptos) {
+        const geckoMatch = geckoCoins.find(c => c.symbol.toLowerCase() === crypto.symbol.toLowerCase());
+        if (geckoMatch) {
+          crypto.logo = `https://www.coingecko.com/coins/images/1/large/${geckoMatch.id}.png`;
+          crypto.name = geckoMatch.name;
+        }
+      }
+    } catch (geckoErr) {
+      console.log('CoinGecko logo fetch failed, using fallback logos');
+    }
+    
+    allCryptosList = cryptos;
+    await redis.set(REDIS_KEYS.ALL_CRYPTOS, JSON.stringify(cryptos));
+    
+    console.log(`Loaded ${cryptos.length} cryptocurrencies from Binance`);
+    
+    // Check for new cryptos and send email notifications
+    const previousList = await redis.get('crypto:previous:list');
+    if (previousList) {
+      const previousCryptos = JSON.parse(previousList);
+      const previousSymbols = new Set(previousCryptos.map(c => c.symbol));
+      
+      const newCryptos = cryptos.filter(c => !previousSymbols.has(c.symbol));
+      
+      for (const newCrypto of newCryptos) {
+        console.log(`New crypto listed on Binance: ${newCrypto.symbol}`);
+        await sendNewCryptoEmailToAllUsers(newCrypto);
+      }
+    }
+    
+    await redis.set('crypto:previous:list', JSON.stringify(cryptos));
+    
+    return cryptos;
+  } catch (err) {
+    console.error('Failed to fetch cryptos from Binance:', err);
+    const cached = await redis.get(REDIS_KEYS.ALL_CRYPTOS);
+    if (cached) {
+      allCryptosList = JSON.parse(cached);
+      return allCryptosList;
+    }
+    return [];
+  }
+}
 
+// Send email to all users about new crypto
+async function sendNewCryptoEmailToAllUsers(newCrypto) {
+  try {
+    const users = await User.find({ status: 'active' }).select('email firstName');
+    
+    for (const user of users) {
+      const html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <style>
+            body { margin: 0; padding: 0; background-color: #0B0E11; font-family: 'Inter', Arial, sans-serif; }
+            .container { max-width: 600px; margin: 0 auto; background-color: #11151C; border-radius: 12px; overflow: hidden; }
+            .header { background: linear-gradient(135deg, #F7A600 0%, #E69500 100%); padding: 30px 20px; text-align: center; }
+            .logo { font-family: 'Rowdies', cursive; font-size: 32px; font-weight: 700; color: #000000; margin: 0; }
+            .logo span { color: #000000; }
+            .slogan { font-family: 'Domine', serif; font-weight: bold; font-style: italic; font-size: 14px; color: #000000; margin-top: 8px; }
+            .content { padding: 30px; color: #FFFFFF; }
+            h2 { color: #F7A600; margin-bottom: 20px; font-size: 24px; }
+            .crypto-card { background: #1B222C; border-radius: 8px; padding: 20px; margin: 20px 0; text-align: center; border: 1px solid #2A2F36; }
+            .crypto-symbol { font-size: 28px; font-weight: bold; color: #F7A600; margin: 10px 0; }
+            .crypto-name { color: #B7BDC6; margin-bottom: 10px; }
+            .btn { display: inline-block; background: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; margin-top: 20px; }
+            .footer { background: #0B0E11; padding: 20px; text-align: center; color: #6C7480; font-size: 12px; border-top: 1px solid #1E2329; }
+            @media (max-width: 600px) {
+              .container { width: 100%; border-radius: 0; }
+              .content { padding: 20px; }
+            }
+          </style>
+        </head>
+        <body style="margin: 0; padding: 20px; background-color: #0B0E11;">
+          <div class="container">
+            <div class="header">
+              <h1 class="logo"><span>₿</span>itHash</h1>
+              <div class="slogan"><i>Where Your Financial Goals Become Reality</i></div>
+            </div>
+            <div class="content">
+              <h2>New Asset Available for Trading</h2>
+              <p>Dear ${user.firstName || 'Valued Client'},</p>
+              <p>We are pleased to announce that a new cryptocurrency has been listed on BitHash Capital.</p>
+              <div class="crypto-card">
+                <div class="crypto-symbol">${newCrypto.symbol}</div>
+                <div class="crypto-name">${newCrypto.name}</div>
+              </div>
+              <p>You can now buy, sell, and trade ${newCrypto.symbol} on our platform. Visit the trading section to get started.</p>
+              <a href="https://www.bithashcapital.live/trading" class="btn">Start Trading</a>
+            </div>
+            <div class="footer">
+              <p>BitHash Capital LLC | 800 Plant St, Wilmington, DE 19801</p>
+              <p>This is an automated message. Please do not reply to this email.</p>
+              <p>&copy; ${new Date().getFullYear()} BitHash Capital. All rights reserved.</p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `;
+      
+      await sendEmail({
+        email: user.email,
+        subject: `New Crypto Available: ${newCrypto.symbol} Now on BitHash Capital`,
+        html: html
+      });
+    }
+    
+    console.log(`New crypto email sent to ${users.length} users for ${newCrypto.symbol}`);
+  } catch (err) {
+    console.error('Error sending new crypto email:', err);
+  }
+}
+
+async function fetchAllTradingPairs() {
+  try {
+    const response = await axios.get('https://api.binance.com/api/v3/exchangeInfo', { timeout: 10000 });
+    
+    const usdtPairs = response.data.symbols.filter(s => 
+      s.quoteAsset === 'USDT' && s.status === 'TRADING'
+    );
+    
+    const usdcPairs = response.data.symbols.filter(s => 
+      s.quoteAsset === 'USDC' && s.status === 'TRADING'
+    );
+    
+    const eurcPairs = response.data.symbols.filter(s => 
+      s.quoteAsset === 'EURC' && s.status === 'TRADING'
+    );
+    
+    const usdPairs = response.data.symbols.filter(s => 
+      s.quoteAsset === 'USD' && s.status === 'TRADING'
+    );
+    
+    const bnbPairs = response.data.symbols.filter(s => 
+      s.quoteAsset === 'BNB' && s.status === 'TRADING'
+    );
+    
+    const btcPairs = response.data.symbols.filter(s => 
+      s.quoteAsset === 'BTC' && s.status === 'TRADING'
+    );
+    
+    const allPairs = [];
+    const quoteAssetsSet = new Set(['USDT', 'USDC', 'EURC', 'USD', 'BNB', 'BTC']);
+    
+    const processPairs = (pairs, quote) => {
+      pairs.forEach(pair => {
+        allPairs.push({
+          symbol: pair.symbol,
+          base: pair.baseAsset,
+          quote: quote,
+          status: 'active',
+          logo: `https://cryptologos.cc/logos/${pair.baseAsset.toLowerCase()}-${pair.baseAsset.toLowerCase()}-logo.png`
+        });
+      });
+    };
+    
+    processPairs(usdtPairs, 'USDT');
+    processPairs(usdcPairs, 'USDC');
+    processPairs(eurcPairs, 'EURC');
+    processPairs(usdPairs, 'USD');
+    processPairs(bnbPairs, 'BNB');
+    processPairs(btcPairs, 'BTC');
+    
+    await redis.set(REDIS_KEYS.ALL_PAIRS, JSON.stringify(allPairs));
+    await redis.set(REDIS_KEYS.QUOTE_ASSETS, JSON.stringify(Array.from(quoteAssetsSet)));
+    
+    console.log(`Loaded ${allPairs.length} total trading pairs across quotes: ${Array.from(quoteAssetsSet).join(', ')}`);
+    
+    return { pairs: allPairs, quoteAssets: Array.from(quoteAssetsSet) };
+  } catch (err) {
+    console.error('Failed to fetch trading pairs:', err);
+    const cached = await redis.get(REDIS_KEYS.ALL_PAIRS);
+    if (cached) {
+      const pairs = JSON.parse(cached);
+      const quoteAssets = await redis.get(REDIS_KEYS.QUOTE_ASSETS);
+      return { pairs, quoteAssets: quoteAssets ? JSON.parse(quoteAssets) : ['USDT'] };
+    }
+    return { pairs: [], quoteAssets: ['USDT'] };
+  }
+}
+
+function getBinanceStreamName(symbol, channel) {
+  return `${symbol.toLowerCase()}@${channel}`;
+}
+
+async function subscribeToSymbol(symbol) {
+  if (!binanceWs || binanceWs.readyState !== WebSocket.OPEN) return;
+  if (subscribedSymbols.has(symbol)) return;
+  
+  const streams = [];
+  
+  streams.push(getBinanceStreamName(symbol, 'ticker'));
+  streams.push(getBinanceStreamName(symbol, 'depth20'));
+  streams.push(getBinanceStreamName(symbol, 'trade'));
+  
+  for (const interval of INTERVALS) {
+    streams.push(getBinanceStreamName(symbol, `kline_${BINANCE_INTERVAL_MAP[interval]}`));
+  }
+  
+  const subscribeMsg = {
+    method: 'SUBSCRIBE',
+    params: streams,
+    id: Date.now()
+  };
+  
+  binanceWs.send(JSON.stringify(subscribeMsg));
+  subscribedSymbols.add(symbol);
+  console.log(`Subscribed to ${symbol} with ${streams.length} streams`);
+}
+
+async function initializePriceAggregator() {
+  console.log('Starting Price Aggregator Worker...');
+  
+  await fetchAllCryptosFromBinance();
+  
+  const { pairs, quoteAssets } = await fetchAllTradingPairs();
+  
+  console.log(`Will subscribe to ${pairs.length} trading pairs`);
+  
+  for (const pair of pairs) {
+    const symbol = pair.symbol;
+    const priceKey = REDIS_KEYS.LAST_PRICE(symbol);
+    const cachedPrice = await redis.get(priceKey);
+    
+    if (!cachedPrice) {
+      try {
+        const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`, { timeout: 3000 });
+        if (response.data && response.data.price) {
+          const price = parseFloat(response.data.price);
+          await redis.set(priceKey, JSON.stringify({ price, timestamp: Date.now() }));
+          await redis.set(REDIS_KEYS.TICKER(symbol), JSON.stringify({
+            symbol, lastPrice: price, priceChangePercent: 0, volume: 0, quoteVolume: 0
+          }));
+          console.log(`Preloaded initial price for ${symbol}: $${price}`);
+        }
+      } catch (err) {
+        console.log(`Could not preload ${symbol}, will wait for WebSocket`);
+      }
+    }
+  }
+  
+  connectBinanceWebSocket();
+  
+  // Schedule periodic check for new cryptos (every hour)
+  setInterval(async () => {
+    console.log('Checking for new cryptos on Binance...');
+    await fetchAllCryptosFromBinance();
+  }, 60 * 60 * 1000);
+}
+
+function connectBinanceWebSocket() {
+  if (binanceWs) {
+    try { binanceWs.close(); } catch(e) {}
+  }
+  
+  console.log('Connecting to Binance WebSocket...');
+  binanceWs = new WebSocket('wss://stream.binance.com:9443/ws');
+  
+  binanceWs.on('open', async () => {
+    console.log('Binance WebSocket connected');
+    wsReconnectAttempts = 0;
+    
+    const { pairs } = await fetchAllTradingPairs();
+    
+    const allSymbols = pairs.map(p => p.symbol);
+    const batchSize = 200;
+    
+    for (let i = 0; i < allSymbols.length; i += batchSize) {
+      const batch = allSymbols.slice(i, i + batchSize);
+      for (const symbol of batch) {
+        await subscribeToSymbol(symbol);
+      }
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    
+    console.log(`Subscribed to ${subscribedSymbols.size} symbols`);
+  });
+  
+  binanceWs.on('message', async (data) => {
+    try {
+      const parsed = JSON.parse(data);
+      
+      if (parsed.result === null && parsed.id) {
+        return;
+      }
+      
+      if (parsed.stream) {
+        await processStreamMessage(parsed);
+      }
+    } catch (err) {
+      console.error('Error processing WebSocket message:', err);
+    }
+  });
+  
+  binanceWs.on('error', (err) => {
+    console.error('Binance WebSocket error:', err);
+  });
+  
+  binanceWs.on('close', () => {
+    console.log('Binance WebSocket closed, reconnecting...');
+    const delay = Math.min(5000 * Math.pow(2, wsReconnectAttempts), 60000);
+    wsReconnectAttempts++;
+    setTimeout(connectBinanceWebSocket, delay);
+  });
+}
+
+async function processStreamMessage(message) {
+  const stream = message.stream;
+  const data = message.data;
+  
+  const [streamSymbol, channel] = stream.split('@');
+  const symbol = streamSymbol.toUpperCase();
+  
+  const sequenceKey = `seq:${symbol}:${channel}`;
+  const currentSeq = data.E || data.T || Date.now();
+  const lastSeq = updateSequenceMap.get(sequenceKey) || 0;
+  
+  if (currentSeq <= lastSeq) {
+    return;
+  }
+  updateSequenceMap.set(sequenceKey, currentSeq);
+  
+  const now = Date.now();
+  const eventTime = data.E || data.T || now;
+  const latency = now - eventTime;
+  
+  if (latency > MAX_STALENESS_MS) {
+    console.warn(`Stale update for ${symbol}@${channel}: ${latency}ms > ${MAX_STALENESS_MS}ms, rejecting`);
+    return;
+  }
+  
+  lastUpdateTimeMap.set(`${symbol}:${channel}`, now);
+  
+  if (channel === 'ticker') {
+    await processTickerUpdate(symbol, data);
+  } else if (channel === 'depth20') {
+    await processOrderBookUpdate(symbol, data);
+  } else if (channel === 'trade') {
+    await processTradeUpdate(symbol, data);
+  } else if (channel.startsWith('kline')) {
+    await processKlineUpdate(symbol, data);
+  }
+}
+
+async function processTickerUpdate(symbol, data) {
+  const tickerData = {
+    symbol: symbol,
+    priceChange: parseFloat(data.p),
+    priceChangePercent: parseFloat(data.P),
+    weightedAvgPrice: parseFloat(data.w),
+    prevClosePrice: parseFloat(data.x),
+    lastPrice: parseFloat(data.c),
+    lastQty: parseFloat(data.Q),
+    bidPrice: parseFloat(data.b),
+    askPrice: parseFloat(data.a),
+    openPrice: parseFloat(data.o),
+    highPrice: parseFloat(data.h),
+    lowPrice: parseFloat(data.l),
+    volume: parseFloat(data.v),
+    quoteVolume: parseFloat(data.q),
+    openTime: data.O,
+    closeTime: data.C,
+    firstId: data.F,
+    lastId: data.L,
+    count: data.n,
+    updatedAt: Date.now()
+  };
+  
+  await redis.set(REDIS_KEYS.TICKER(symbol), JSON.stringify(tickerData));
+  await redis.set(REDIS_KEYS.LAST_PRICE(symbol), JSON.stringify({
+    price: tickerData.lastPrice,
+    timestamp: Date.now()
+  }));
+  await redis.set(REDIS_KEYS.PRICE_CHANGE(symbol), JSON.stringify({
+    change: tickerData.priceChange,
+    changePercent: tickerData.priceChangePercent,
+    timestamp: Date.now()
+  }));
+  await redis.set(REDIS_KEYS.VOLUME_24H(symbol), JSON.stringify({
+    volume: tickerData.volume,
+    quoteVolume: tickerData.quoteVolume,
+    timestamp: Date.now()
+  }));
+  
+  const pubSubData = {
+    type: 'ticker',
+    symbol: symbol,
+    price: tickerData.lastPrice,
+    priceChangePercent: tickerData.priceChangePercent,
+    highPrice: tickerData.highPrice,
+    lowPrice: tickerData.lowPrice,
+    volume: tickerData.volume,
+    quoteVolume: tickerData.quoteVolume,
+    stats: {
+      priceChangePercent: tickerData.priceChangePercent,
+      highPrice: tickerData.highPrice,
+      lowPrice: tickerData.lowPrice,
+      volume: tickerData.volume,
+      quoteVolume: tickerData.quoteVolume,
+      openPrice: tickerData.openPrice
+    }
+  };
+  
+  await redis.publish('market:ticker', JSON.stringify(pubSubData));
+}
+
+async function processOrderBookUpdate(symbol, data) {
+  const orderbookData = {
+    symbol: symbol,
+    lastUpdateId: data.lastUpdateId,
+    bids: (data.bids || []).slice(0, 100).map(b => [parseFloat(b[0]), parseFloat(b[1])]),
+    asks: (data.asks || []).slice(0, 100).map(a => [parseFloat(a[0]), parseFloat(a[1])]),
+    updatedAt: Date.now()
+  };
+  
+  await redis.set(REDIS_KEYS.ORDERBOOK(symbol), JSON.stringify(orderbookData));
+  
+  const pubSubData = {
+    type: 'orderbook',
+    symbol: symbol,
+    bids: orderbookData.bids,
+    asks: orderbookData.asks
+  };
+  
+  await redis.publish('market:orderbook', JSON.stringify(pubSubData));
+}
+
+async function processTradeUpdate(symbol, data) {
+  const tradeData = {
+    id: data.t,
+    price: parseFloat(data.p),
+    amount: parseFloat(data.q),
+    time: data.T,
+    isBuyerMaker: data.m
+  };
+  
+  const tradesKey = REDIS_KEYS.TRADES(symbol);
+  let recentTrades = await redis.get(tradesKey);
+  let tradesList = recentTrades ? JSON.parse(recentTrades) : [];
+  
+  tradesList.unshift(tradeData);
+  if (tradesList.length > 100) {
+    tradesList = tradesList.slice(0, 100);
+  }
+  
+  await redis.set(tradesKey, JSON.stringify(tradesList));
+  
+  const pubSubData = {
+    type: 'trade',
+    symbol: symbol,
+    price: tradeData.price,
+    amount: tradeData.amount,
+    time: tradeData.time,
+    isBuyerMaker: tradeData.isBuyerMaker
+  };
+  
+  await redis.publish('market:trade', JSON.stringify(pubSubData));
+}
+
+async function processKlineUpdate(symbol, data) {
+  const kline = data.k;
+  const interval = kline.i;
+  
+  if (!INTERVALS.includes(interval)) return;
+  
+  const candleData = {
+    symbol: symbol,
+    interval: interval,
+    openTime: kline.t,
+    open: parseFloat(kline.o),
+    high: parseFloat(kline.h),
+    low: parseFloat(kline.l),
+    close: parseFloat(kline.c),
+    volume: parseFloat(kline.v),
+    quoteVolume: parseFloat(kline.q),
+    trades: kline.n,
+    closeTime: kline.T,
+    isClosed: kline.x
+  };
+  
+  const candlesKey = REDIS_KEYS.CANDLES(symbol, interval);
+  
+  if (candleData.isClosed) {
+    await redis.zadd(candlesKey, candleData.openTime, JSON.stringify(candleData));
+    await redis.zremrangebyrank(candlesKey, 0, -501);
+  } else {
+    const existing = await redis.zrangebyscore(candlesKey, candleData.openTime, candleData.openTime);
+    if (existing && existing.length > 0) {
+      await redis.zrem(candlesKey, existing[0]);
+    }
+    await redis.zadd(candlesKey, candleData.openTime, JSON.stringify(candleData));
+  }
+  
+  const pubSubData = {
+    type: 'candles',
+    symbol: symbol,
+    interval: interval,
+    candles: [candleData]
+  };
+  
+  await redis.publish('market:candles', JSON.stringify(pubSubData));
+}
+
+async function getMarketPairsFromRedis() {
+  const cached = await redis.get(REDIS_KEYS.ALL_PAIRS);
+  if (cached) {
+    return JSON.parse(cached);
+  }
+  
+  const { pairs } = await fetchAllTradingPairs();
+  return pairs;
+}
+
+async function getQuoteAssetsFromRedis() {
+  const cached = await redis.get(REDIS_KEYS.QUOTE_ASSETS);
+  if (cached) {
+    return JSON.parse(cached);
+  }
+  return ['USDT', 'USDC', 'EURC', 'USD', 'BNB', 'BTC'];
+}
+
+async function getAllCryptosFromRedis() {
+  const cached = await redis.get(REDIS_KEYS.ALL_CRYPTOS);
+  if (cached) {
+    return JSON.parse(cached);
+  }
+  return allCryptosList;
+}
+
+initializePriceAggregator();
+
+// Helper function to check 48-hour restriction
+async function checkRestrictionExpiry(userId, restrictionType, limitValue) {
+  const user = await User.findById(userId);
+  if (!user) return false;
+  
+  const restrictionExpiry = user.restrictionExpiry || new Map();
+  const expiry = restrictionExpiry.get(restrictionType);
+  
+  if (expiry && new Date() < expiry) {
+    return { restricted: true, expiresAt: expiry, limit: limitValue };
+  }
+  
+  return { restricted: false };
+}
+
+async function applyRestriction(userId, restrictionType, limitValue, hours = 48) {
+  const expiryDate = new Date();
+  expiryDate.setHours(expiryDate.getHours() + hours);
+  
+  await User.findByIdAndUpdate(userId, {
+    $set: { [`restrictionExpiry.${restrictionType}`]: expiryDate }
+  });
+  
+  return { restricted: true, expiresAt: expiryDate, limit: limitValue };
+}
 
 // Enhanced Email service with professional, highly visible templates - Edge to Edge Layout
 const sendAutomatedEmail = async (user, action, data = {}) => {
   try {
-    // Helper function to get real-time exchange rate from multiple APIs
-    const getExchangeRate = async (asset, fiat = 'usd') => {
-      try {
-        const assetId = asset.toLowerCase();
-        const response = await axios.get(`https://api.coingecko.com/api/v3/simple/price?ids=${assetId}&vs_currencies=${fiat}`);
-        return response.data[assetId]?.[fiat] || 0;
-      } catch (error) {
-        console.error('Error fetching exchange rate:', error);
-        return 0;
-      }
-    };
-
-    // Helper function to convert crypto to fiat
-    const convertToFiat = async (cryptoAmount, asset) => {
-      const rate = await getExchangeRate(asset);
-      return cryptoAmount * rate;
-    };
-
-    // Helper function to hide wallet address (show first 6 and last 6 characters)
-    const hideAddress = (address) => {
-      if (!address || address === 'N/A' || address === 'Unknown' || address === '') {
-        return 'Not Provided';
-      }
-      if (address.length <= 12) return address;
-      return address.substring(0, 6) + '*************' + address.substring(address.length - 6);
-    };
-
-    // Helper function to format timestamp
-    const formatTimestamp = (timestamp) => {
-      if (!timestamp) return new Date().toLocaleString('en-US', { timeZone: 'UTC', dateStyle: 'full', timeStyle: 'medium' }) + ' UTC';
-      return new Date(timestamp).toLocaleString('en-US', { timeZone: 'UTC', dateStyle: 'full', timeStyle: 'medium' }) + ' UTC';
-    };
-
-    // Helper function to format amount with proper decimals and commas for fiat
-    const formatAmount = (amount, asset) => {
-      if (!amount && amount !== 0) return '0.00';
-      const isCrypto = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'ADA', 'SHIB', 'AVAX', 'DOT', 'TRX', 'LINK', 'MATIC', 'LTC'].includes(asset?.toUpperCase());
-      if (isCrypto) {
-        return amount.toFixed(8);
-      }
-      // For fiat, use commas for thousands
-      return amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    };
-
-    // Helper function to get crypto logo URL
-    const getCryptoLogo = (asset) => {
-      const assetLower = (asset || 'btc').toLowerCase();
-      const logoMap = {
-        btc: 'bitcoin-btc-logo.png',
-        eth: 'ethereum-eth-logo.png',
-        usdt: 'tether-usdt-logo.png',
-        bnb: 'binance-coin-bnb-logo.png',
-        sol: 'solana-sol-logo.png',
-        usdc: 'usd-coin-usdc-logo.png',
-        xrp: 'xrp-xrp-logo.png',
-        doge: 'dogecoin-doge-logo.png',
-        ada: 'cardano-ada-logo.png',
-        shib: 'shiba-inu-shib-logo.png',
-        avax: 'avalanche-avax-logo.png',
-        dot: 'polkadot-new-dot-logo.png',
-        trx: 'tron-trx-logo.png',
-        link: 'chainlink-link-logo.png',
-        matic: 'polygon-matic-logo.png',
-        ltc: 'litecoin-ltc-logo.png'
-      };
-      return `https://cryptologos.cc/logos/${logoMap[assetLower] || 'bitcoin-btc-logo.png'}`;
-    };
-
-    // Helper function to get asset display name
-    const getAssetDisplayName = (asset) => {
-      const assetMap = {
-        'BTC': 'Bitcoin',
-        'ETH': 'Ethereum',
-        'USDT': 'Tether',
-        'BNB': 'BNB',
-        'SOL': 'Solana',
-        'USDC': 'USD Coin',
-        'XRP': 'Ripple',
-        'DOGE': 'Dogecoin',
-        'ADA': 'Cardano',
-        'SHIB': 'Shiba Inu',
-        'AVAX': 'Avalanche',
-        'DOT': 'Polkadot',
-        'TRX': 'TRON',
-        'LINK': 'Chainlink',
-        'MATIC': 'Polygon',
-        'LTC': 'Litecoin'
-      };
-      return assetMap[asset?.toUpperCase()] || asset || 'Bitcoin';
-    };
-
-    // Helper function to get sign-off based on email type
-    const getSignOff = (action) => {
-      const securityActions = ['login_success', 'otp', 'password_reset', 'password_changed'];
-      const investmentActions = ['investment_created', 'investment_matured'];
-      const transactionActions = ['deposit_received', 'withdrawal_request', 'withdrawal_approved', 'deposit_approved', 'deposit_rejected', 'withdrawal_rejected'];
-      const kycActions = ['kyc_approved', 'kyc_rejected'];
-      const welcomeActions = ['welcome'];
-      
-      if (securityActions.includes(action)) {
-        return `Stay secure,\nThe BitHash Capital Security Team`;
-      } else if (investmentActions.includes(action)) {
-        return `To your financial freedom,\nThe BitHash Capital Investment Team`;
-      } else if (transactionActions.includes(action)) {
-        return `Thank you for choosing BitHash Capital,\nThe BitHash Capital Operations Team`;
-      } else if (kycActions.includes(action)) {
-        return `Best regards,\nThe BitHash Capital Compliance Team`;
-      } else if (welcomeActions.includes(action)) {
-        return `Welcome to BitHash Capital,\nThe BitHash Capital Team`;
-      } else {
-        return `Best regards,\nThe BitHash Capital Team`;
-      }
-    };
+    const deviceInfo = data.deviceInfo || {};
+    const baseUrl = 'https://www.bithashcapital.live';
     
-    // Helper function to get branded footer based on email type - Edge to Edge
-    const getBrandedFooter = (action, userEmail) => {
-      const securityActions = ['login_success', 'otp', 'password_reset', 'password_changed'];
-      const investmentActions = ['investment_created', 'investment_matured'];
-      const transactionActions = ['deposit_received', 'withdrawal_request', 'withdrawal_approved', 'deposit_approved', 'deposit_rejected', 'withdrawal_rejected'];
-      
-      let additionalLinks = '';
-      
-      if (securityActions.includes(action)) {
-        additionalLinks = `
-          <a href="https://www.bithashcapital.live/security.html" style="color: #00D8FF; text-decoration: none; margin: 0 12px; font-size: 12px;">Security Center</a>
-          <span style="color: #374151;">|</span>
-          <a href="https://www.bithashcapital.live/2fa-setup.html" style="color: #00D8FF; text-decoration: none; margin: 0 12px; font-size: 12px;">Enable Two-Factor Authentication</a>
-        `;
-      } else if (investmentActions.includes(action)) {
-        additionalLinks = `
-          <a href="https://www.bithashcapital.live/dashboard.html" style="color: #00D8FF; text-decoration: none; margin: 0 12px; font-size: 12px;">My Dashboard</a>
-          <span style="color: #374151;">|</span>
-          <a href="https://www.bithashcapital.live/invest.html" style="color: #00D8FF; text-decoration: none; margin: 0 12px; font-size: 12px;">New Investments</a>
-        `;
-      } else if (transactionActions.includes(action)) {
-        additionalLinks = `
-          <a href="https://www.bithashcapital.live/transactions.html" style="color: #00D8FF; text-decoration: none; margin: 0 12px; font-size: 12px;">Transaction History</a>
-          <span style="color: #374151;">|</span>
-          <a href="https://www.bithashcapital.live/support.html" style="color: #00D8FF; text-decoration: none; margin: 0 12px; font-size: 12px;">Support Center</a>
-        `;
-      } else {
-        additionalLinks = `
-          <a href="https://www.bithashcapital.live/dashboard.html" style="color: #00D8FF; text-decoration: none; margin: 0 12px; font-size: 12px;">Dashboard</a>
-          <span style="color: #374151;">|</span>
-          <a href="https://www.bithashcapital.live/support.html" style="color: #00D8FF; text-decoration: none; margin: 0 12px; font-size: 12px;">Support</a>
-        `;
-      }
-      
-      return `
-        <div style="background-color: #111827; padding: 40px 0 30px; text-align: center; width: 100%;">
-          <div style="max-width: 600px; margin: 0 auto; padding: 0 20px;">
-            <div style="margin-bottom: 24px;">
-              <div style="display: inline-flex; align-items: center; gap: 8px; margin-bottom: 16px;">
-                <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Capital" style="width: 32px; height: 32px; border-radius: 50%;">
-                <span style="font-size: 18px; font-weight: 700; color: #00D8FF;">BitHash Capital</span>
-              </div>
-              <p style="color: #9CA3AF; font-size: 12px; line-height: 1.6; margin-bottom: 20px;">
-                Institutional-grade Bitcoin mining and investment platform. Secure, transparent, and profitable.
-              </p>
-            </div>
-            
-            <div style="margin-bottom: 24px;">
-              ${additionalLinks}
-            </div>
-            
-            <div style="border-top: 1px solid #1F2937; padding-top: 20px; margin-top: 20px;">
-              <p style="color: #6B7280; font-size: 11px; line-height: 1.5; margin-bottom: 8px;">
-                &copy; 2024 BitHash Capital. All rights reserved.<br>
-                Registered in Delaware, USA. FINRA/SIPC Member.
-              </p>
-              <p style="color: #6B7280; font-size: 10px; line-height: 1.5;">
-                This email was sent to ${userEmail}. Please do not reply to this email.<br>
-                Need help? <a href="mailto:support@bithashcapital.live" style="color: #00D8FF; text-decoration: none;">support@bithashcapital.live</a>
-              </p>
-            </div>
-          </div>
-        </div>
-      `;
-    };
-    
-    // Helper function to create professional buttons
-    const getButton = (text, url) => {
-      return `
-        <a href="${url}" style="display: inline-block; padding: 12px 32px; background-color: #00D8FF; color: #0A0E17; font-weight: 600; font-size: 14px; text-decoration: none; border-radius: 4px; margin: 8px 0;">
-          ${text}
-        </a>
-      `;
-    };
-
-    const templates = {
-      // WELCOME EMAIL
-      welcome: {
-        subject: 'Welcome to BitHash Capital | Account Created Successfully',
-        html: `
+    const getEmailTemplate = () => {
+      const templates = {
+        welcome: `
           <!DOCTYPE html>
           <html>
           <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-              <title>Welcome to BitHash Capital</title>
-              <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { 
-                  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-                  background-color: #F9FAFB;
-                  margin: 0;
-                  padding: 0;
-                }
-                .email-container {
-                  width: 100%;
-                  margin: 0;
-                  background-color: #FFFFFF;
-                }
-                .header {
-                  background-color: #0A0E17;
-                  padding: 40px 20px;
-                  text-align: center;
-                  width: 100%;
-                  border-bottom: 2px solid #00D8FF;
-                }
-                .logo-container {
-                  display: flex;
-                  align-items: center;
-                  justify-content: center;
-                  gap: 12px;
-                }
-                .logo-img {
-                  width: 48px;
-                  height: 48px;
-                  border-radius: 50%;
-                  background: white;
-                  padding: 6px;
-                }
-                .logo-text {
-                  font-size: 28px;
-                  font-weight: 800;
-                  color: #00D8FF;
-                  letter-spacing: -0.5px;
-                }
-                .content {
-                  padding: 40px 20px;
-                  background-color: #FFFFFF;
-                  max-width: 600px;
-                  margin: 0 auto;
-                }
-                .greeting {
-                  font-size: 28px;
-                  font-weight: 700;
-                  color: #111827;
-                  margin-bottom: 16px;
-                  line-height: 1.3;
-                }
-                .message {
-                  color: #6B7280;
-                  line-height: 1.6;
-                  margin-bottom: 24px;
-                  font-size: 16px;
-                }
-                .feature-grid {
-                  display: grid;
-                  grid-template-columns: 1fr 1fr;
-                  gap: 16px;
-                  margin: 32px 0;
-                }
-                .feature-card {
-                  background-color: #F9FAFB;
-                  padding: 20px;
-                  border-radius: 8px;
-                  text-align: center;
-                }
-                .feature-title {
-                  font-weight: 700;
-                  color: #00D8FF;
-                  margin-bottom: 8px;
-                  font-size: 16px;
-                }
-                .feature-desc {
-                  color: #9CA3AF;
-                  font-size: 13px;
-                  line-height: 1.4;
-                }
-                .cta-button {
-                  display: inline-block;
-                  padding: 12px 32px;
-                  background-color: #00D8FF;
-                  color: #0A0E17;
-                  font-weight: 700;
-                  font-size: 16px;
-                  text-decoration: none;
-                  border-radius: 4px;
-                  margin: 20px 0;
-                }
-                .sign-off {
-                  margin-top: 32px;
-                  padding-top: 24px;
-                  border-top: 1px solid #E5E7EB;
-                  color: #6B7280;
-                  font-size: 15px;
-                  line-height: 1.6;
-                }
-                @media only screen and (max-width: 600px) {
-                  .header { padding: 30px 20px; }
-                  .content { padding: 30px 20px; }
-                  .feature-grid { grid-template-columns: 1fr; gap: 12px; }
-                  .greeting { font-size: 24px; }
-                  .logo-text { font-size: 24px; }
-                }
-              </style>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+              body { margin: 0; padding: 0; background-color: #0B0E11; font-family: 'Inter', Arial, sans-serif; }
+              .container { max-width: 600px; margin: 0 auto; background-color: #11151C; border-radius: 12px; overflow: hidden; }
+              .header { background: linear-gradient(135deg, #F7A600 0%, #E69500 100%); padding: 30px 20px; text-align: center; }
+              .logo { font-family: 'Rowdies', cursive; font-size: 32px; font-weight: 700; color: #000000; margin: 0; }
+              .logo span { color: #000000; }
+              .slogan { font-family: 'Domine', serif; font-weight: bold; font-style: italic; font-size: 14px; color: #000000; margin-top: 8px; }
+              .content { padding: 30px; color: #FFFFFF; }
+              h2 { color: #F7A600; margin-bottom: 20px; font-size: 24px; }
+              .btn { display: inline-block; background: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; margin-top: 20px; }
+              .footer { background: #0B0E11; padding: 20px; text-align: center; color: #6C7480; font-size: 12px; border-top: 1px solid #1E2329; }
+              @media (max-width: 600px) {
+                .container { width: 100%; border-radius: 0; }
+                .content { padding: 20px; }
+              }
+            </style>
           </head>
-          <body style="background-color: #F9FAFB; margin: 0; padding: 0;">
-            <div class="email-container">
+          <body style="margin: 0; padding: 20px; background-color: #0B0E11;">
+            <div class="container">
               <div class="header">
-                <div class="logo-container">
-                  <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Capital" class="logo-img">
-                  <span class="logo-text">BitHash Capital</span>
-                </div>
+                <h1 class="logo"><span>₿</span>itHash</h1>
+                <div class="slogan"><i>Where Your Financial Goals Become Reality</i></div>
               </div>
               <div class="content">
-                <h1 class="greeting">Welcome, ${user.firstName || 'Valued Investor'}</h1>
-                <p class="message">Your account has been successfully created. You now have access to institutional-grade Bitcoin mining and investment opportunities.</p>
-                
-                <div class="feature-grid">
-                  <div class="feature-card">
-                    <div class="feature-title">Cloud Mining</div>
-                    <div class="feature-desc">Start mining Bitcoin instantly with enterprise infrastructure</div>
-                  </div>
-                  <div class="feature-card">
-                    <div class="feature-title">Smart Investment</div>
-                    <div class="feature-desc">Optimized mining plans with competitive returns</div>
-                  </div>
-                  <div class="feature-card">
-                    <div class="feature-title">Secure Platform</div>
-                    <div class="feature-desc">Enterprise-grade security protecting your assets</div>
-                  </div>
-                  <div class="feature-card">
-                    <div class="feature-title">24/7 Support</div>
-                    <div class="feature-desc">Dedicated support team always available</div>
-                  </div>
-                </div>
-                
-                <div style="text-align: center;">
-                  ${getButton('Go to Dashboard', 'https://www.bithashcapital.live/dashboard.html')}
-                </div>
-                
-                <div class="sign-off">
-                  ${getSignOff('welcome').replace(/\n/g, '<br>')}
-                </div>
+                <h2>Welcome to BitHash Capital</h2>
+                <p>Dear ${data.name || user.firstName},</p>
+                <p>Thank you for choosing BitHash Capital. Your account has been successfully created and you are now part of a premier institutional Bitcoin mining platform.</p>
+                <p>We are committed to providing you with transparent operations, guaranteed returns, and enterprise-grade security for your digital assets.</p>
+                <p>To get started, explore our investment plans and begin your journey with us.</p>
+                <a href="${baseUrl}/dashboard" class="btn">Go to Dashboard</a>
               </div>
-              ${getBrandedFooter('welcome', user.email)}
+              <div class="footer">
+                <p>BitHash Capital Finance Team</p>
+                <p>800 Plant St, Wilmington, DE 19801, United States</p>
+                <p>&copy; ${new Date().getFullYear()} BitHash Capital. All rights reserved.</p>
+              </div>
             </div>
           </body>
           </html>
-        `
-      },
-
-      // LOGIN SUCCESS
-      login_success: {
-        subject: 'BitHash Capital | New Login Detected',
-        html: `
+        `,
+        
+        login_success: `
           <!DOCTYPE html>
           <html>
           <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-              <title>Login Notification - BitHash Capital</title>
-              <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #F9FAFB; margin: 0; padding: 0; }
-                .email-container { width: 100%; margin: 0; background-color: #FFFFFF; }
-                .header { background-color: #0A0E17; padding: 40px 20px; text-align: center; width: 100%; border-bottom: 2px solid #00D8FF; }
-                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                .logo-img { width: 48px; height: 48px; border-radius: 50%; background: white; padding: 6px; }
-                .logo-text { font-size: 28px; font-weight: 800; color: #00D8FF; }
-                .content { padding: 40px 20px; background-color: #FFFFFF; max-width: 600px; margin: 0 auto; }
-                .greeting { font-size: 28px; font-weight: 700; color: #111827; margin-bottom: 16px; }
-                .message { color: #6B7280; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .login-info { background-color: #F9FAFB; padding: 24px; border-radius: 8px; margin: 24px 0; }
-                .info-row { display: flex; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #E5E7EB; }
-                .info-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
-                .info-label { width: 100px; color: #9CA3AF; font-size: 14px; font-weight: 500; }
-                .info-value { flex: 1; color: #111827; font-weight: 500; font-size: 14px; word-break: break-word; }
-                .security-note { background-color: #FEF3C7; padding: 20px; margin: 24px 0; border-radius: 8px; }
-                .security-note strong { color: #D97706; }
-                .security-note p { color: #92400E; font-size: 14px; line-height: 1.6; }
-                .device-badge { display: inline-block; background-color: #E5E7EB; padding: 4px 12px; font-size: 12px; color: #374151; border-radius: 4px; }
-                .sign-off { margin-top: 32px; padding-top: 24px; border-top: 1px solid #E5E7EB; color: #6B7280; font-size: 15px; line-height: 1.6; }
-                .cta-button { display: inline-block; padding: 10px 24px; background-color: transparent; border: 1px solid #00D8FF; color: #00D8FF; font-weight: 600; font-size: 14px; text-decoration: none; border-radius: 4px; margin: 8px 0; }
-                @media only screen and (max-width: 600px) {
-                  .header { padding: 30px 20px; }
-                  .content { padding: 30px 20px; }
-                  .info-label { width: 80px; font-size: 12px; }
-                  .greeting { font-size: 24px; }
-                  .info-row { flex-direction: column; gap: 6px; }
-                }
-              </style>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+              body { margin: 0; padding: 0; background-color: #0B0E11; font-family: 'Inter', Arial, sans-serif; }
+              .container { max-width: 600px; margin: 0 auto; background-color: #11151C; border-radius: 12px; overflow: hidden; }
+              .header { background: linear-gradient(135deg, #F7A600 0%, #E69500 100%); padding: 30px 20px; text-align: center; }
+              .logo { font-family: 'Rowdies', cursive; font-size: 32px; font-weight: 700; color: #000000; margin: 0; }
+              .logo span { color: #000000; }
+              .slogan { font-family: 'Domine', serif; font-weight: bold; font-style: italic; font-size: 14px; color: #000000; margin-top: 8px; }
+              .content { padding: 30px; color: #FFFFFF; }
+              h2 { color: #F7A600; margin-bottom: 20px; font-size: 24px; }
+              .device-info { background: #1B222C; border-radius: 8px; padding: 15px; margin: 20px 0; border: 1px solid #2A2F36; }
+              .footer { background: #0B0E11; padding: 20px; text-align: center; color: #6C7480; font-size: 12px; border-top: 1px solid #1E2329; }
+              @media (max-width: 600px) {
+                .container { width: 100%; border-radius: 0; }
+                .content { padding: 20px; }
+              }
+            </style>
           </head>
-          <body style="background-color: #F9FAFB; margin: 0; padding: 0;">
-            <div class="email-container">
+          <body style="margin: 0; padding: 20px; background-color: #0B0E11;">
+            <div class="container">
               <div class="header">
-                <div class="logo-container">
-                  <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Capital" class="logo-img">
-                  <span class="logo-text">BitHash Capital</span>
-                </div>
+                <h1 class="logo"><span>₿</span>itHash</h1>
+                <div class="slogan"><i>Where Your Financial Goals Become Reality</i></div>
               </div>
               <div class="content">
-                <h1 class="greeting">Hello ${user.firstName || 'Valued Investor'}</h1>
-                <p class="message">A successful login to your BitHash Capital account was detected:</p>
-                
-                <div class="login-info">
-                  <div class="info-row">
-                    <span class="info-label">Time:</span>
-                    <span class="info-value">${formatTimestamp(data.timestamp)}</span>
-                  </div>
-                  <div class="info-row">
-                    <span class="info-label">Device:</span>
-                    <span class="info-value"><span class="device-badge">${data.device || 'Desktop Device'}</span></span>
-                  </div>
-                  <div class="info-row">
-                    <span class="info-label">Location:</span>
-                    <span class="info-value">${data.location || 'Location Detected'}</span>
-                  </div>
-                  <div class="info-row">
-                    <span class="info-label">IP Address:</span>
-                    <span class="info-value">${data.ip || 'IP Address Recorded'}</span>
-                  </div>
+                <h2>New Login Detected</h2>
+                <p>Dear ${data.name || user.firstName},</p>
+                <p>We detected a successful login to your BitHash Capital account.</p>
+                <div class="device-info">
+                  <p><strong>Device:</strong> ${data.device || 'Unknown Device'}</p>
+                  <p><strong>Location:</strong> ${data.location || 'Unknown Location'}</p>
+                  <p><strong>IP Address:</strong> ${data.ip || 'Unknown'}</p>
+                  <p><strong>Time:</strong> ${new Date(data.timestamp).toLocaleString()}</p>
                 </div>
-                
-                <p class="message">If this was you, no further action is required. You may continue using your account normally.</p>
-                
-                <div class="security-note">
-                  <strong>Not you?</strong>
-                  <p>If you did not perform this login, please secure your account immediately by changing your password and enabling two-factor authentication.</p>
-                </div>
-                
-                <div style="text-align: center;">
-                  <a href="https://www.bithashcapital.live/security.html" class="cta-button" style="display: inline-block; padding: 10px 24px; background-color: transparent; border: 1px solid #00D8FF; color: #00D8FF; font-weight: 600; font-size: 14px; text-decoration: none; border-radius: 4px;">Secure My Account</a>
-                </div>
-                
-                <div class="sign-off">
-                  ${getSignOff('login_success').replace(/\n/g, '<br>')}
-                </div>
+                <p>If this was you, you can safely ignore this email. If you did not authorize this login, please contact our support team immediately.</p>
+                <a href="${baseUrl}/support" class="btn">Contact Support</a>
               </div>
-              ${getBrandedFooter('login_success', user.email)}
+              <div class="footer">
+                <p>BitHash Capital Security Team</p>
+                <p>&copy; ${new Date().getFullYear()} BitHash Capital. All rights reserved.</p>
+              </div>
             </div>
           </body>
           </html>
-        `
-      },
-
-      // OTP VERIFICATION
-      otp: {
-        subject: 'BitHash Capital | Verification Code',
-        html: `
+        `,
+        
+        password_changed: `
           <!DOCTYPE html>
           <html>
           <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-              <title>Verification Code - BitHash Capital</title>
-              <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #F9FAFB; margin: 0; padding: 0; }
-                .email-container { width: 100%; margin: 0; background-color: #FFFFFF; }
-                .header { background-color: #0A0E17; padding: 40px 20px; text-align: center; width: 100%; border-bottom: 2px solid #00D8FF; }
-                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                .logo-img { width: 48px; height: 48px; border-radius: 50%; background: white; padding: 6px; }
-                .logo-text { font-size: 28px; font-weight: 800; color: #00D8FF; }
-                .content { padding: 40px 20px; background-color: #FFFFFF; max-width: 600px; margin: 0 auto; text-align: center; }
-                .greeting { font-size: 28px; font-weight: 700; color: #111827; margin-bottom: 16px; }
-                .message { color: #6B7280; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .otp-code { background-color: #F9FAFB; padding: 32px; font-size: 48px; font-weight: 800; text-align: center; letter-spacing: 16px; margin: 24px 0; color: #00D8FF; font-family: 'Courier New', monospace; border-radius: 8px; border: 1px solid #E5E7EB; }
-                .security-note { background-color: #FEF2F2; padding: 20px; margin: 24px 0; border-radius: 8px; text-align: left; }
-                .security-note p { color: #991B1B; font-size: 14px; line-height: 1.6; }
-                .sign-off { margin-top: 32px; padding-top: 24px; border-top: 1px solid #E5E7EB; color: #6B7280; font-size: 15px; line-height: 1.6; text-align: left; }
-                @media only screen and (max-width: 600px) {
-                  .header { padding: 30px 20px; }
-                  .content { padding: 30px 20px; }
-                  .otp-code { font-size: 32px; letter-spacing: 8px; padding: 24px; }
-                  .greeting { font-size: 24px; }
-                }
-              </style>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+              body { margin: 0; padding: 0; background-color: #0B0E11; font-family: 'Inter', Arial, sans-serif; }
+              .container { max-width: 600px; margin: 0 auto; background-color: #11151C; border-radius: 12px; overflow: hidden; }
+              .header { background: linear-gradient(135deg, #F7A600 0%, #E69500 100%); padding: 30px 20px; text-align: center; }
+              .logo { font-family: 'Rowdies', cursive; font-size: 32px; font-weight: 700; color: #000000; margin: 0; }
+              .logo span { color: #000000; }
+              .slogan { font-family: 'Domine', serif; font-weight: bold; font-style: italic; font-size: 14px; color: #000000; margin-top: 8px; }
+              .content { padding: 30px; color: #FFFFFF; }
+              h2 { color: #F7A600; margin-bottom: 20px; font-size: 24px; }
+              .warning-box { background: #1B222C; border-radius: 8px; padding: 15px; margin: 20px 0; border-left: 4px solid #F7A600; }
+              .footer { background: #0B0E11; padding: 20px; text-align: center; color: #6C7480; font-size: 12px; border-top: 1px solid #1E2329; }
+              @media (max-width: 600px) {
+                .container { width: 100%; border-radius: 0; }
+                .content { padding: 20px; }
+              }
+            </style>
           </head>
-          <body style="background-color: #F9FAFB; margin: 0; padding: 0;">
-            <div class="email-container">
+          <body style="margin: 0; padding: 20px; background-color: #0B0E11;">
+            <div class="container">
               <div class="header">
-                <div class="logo-container">
-                  <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Capital" class="logo-img">
-                  <span class="logo-text">BitHash Capital</span>
-                </div>
+                <h1 class="logo"><span>₿</span>itHash</h1>
+                <div class="slogan"><i>Where Your Financial Goals Become Reality</i></div>
               </div>
               <div class="content">
-                <h1 class="greeting">Verification Required</h1>
-                <p class="message">Hello ${user.firstName || 'there'}, please use the following verification code to complete your ${data.action || 'account verification'}:</p>
-                
-                <div class="otp-code">${data.otp}</div>
-                
-                <p class="message">This code will expire in 5 minutes.</p>
-                
-                <div class="security-note">
-                  <p><strong>Security Notice:</strong> Never share this code with anyone. BitHash Capital will never ask for your verification code via phone, email, or chat.</p>
+                <h2>Password Changed Successfully</h2>
+                <p>Dear ${data.name || user.firstName},</p>
+                <p>Your BitHash Capital account password has been changed.</p>
+                <div class="warning-box">
+                  <p><strong>Device:</strong> ${data.device || 'Unknown Device'}</p>
+                  <p><strong>IP Address:</strong> ${data.ip || 'Unknown'}</p>
+                  <p><strong>Time:</strong> ${new Date().toLocaleString()}</p>
                 </div>
-                
-                <div class="sign-off">
-                  ${getSignOff('otp').replace(/\n/g, '<br>')}
-                </div>
+                <p>If you made this change, no further action is required. If you did not change your password, please contact our support team immediately to secure your account.</p>
+                <a href="${baseUrl}/support" class="btn">Contact Support</a>
               </div>
-              ${getBrandedFooter('otp', user.email)}
+              <div class="footer">
+                <p>BitHash Capital Security Team</p>
+                <p>&copy; ${new Date().getFullYear()} BitHash Capital. All rights reserved.</p>
+              </div>
             </div>
           </body>
           </html>
-        `
-      },
-
-      // PASSWORD RESET
-      password_reset: {
-        subject: 'BitHash Capital | Password Reset Request',
-        html: `
+        `,
+        
+        investment_created: `
           <!DOCTYPE html>
           <html>
           <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-              <title>Password Reset - BitHash Capital</title>
-              <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #F9FAFB; margin: 0; padding: 0; }
-                .email-container { width: 100%; margin: 0; background-color: #FFFFFF; }
-                .header { background-color: #0A0E17; padding: 40px 20px; text-align: center; width: 100%; border-bottom: 2px solid #00D8FF; }
-                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                .logo-img { width: 48px; height: 48px; border-radius: 50%; background: white; padding: 6px; }
-                .logo-text { font-size: 28px; font-weight: 800; color: #00D8FF; }
-                .content { padding: 40px 20px; background-color: #FFFFFF; max-width: 600px; margin: 0 auto; text-align: center; }
-                .greeting { font-size: 28px; font-weight: 700; color: #111827; margin-bottom: 16px; }
-                .message { color: #6B7280; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .reset-button { display: inline-block; padding: 12px 32px; background-color: #00D8FF; color: #0A0E17; font-weight: 700; font-size: 16px; text-decoration: none; border-radius: 4px; margin: 20px 0; }
-                .security-note { background-color: #FEF3C7; padding: 20px; margin: 24px 0; border-radius: 8px; text-align: left; }
-                .security-note p { color: #92400E; font-size: 14px; line-height: 1.6; }
-                .sign-off { margin-top: 32px; padding-top: 24px; border-top: 1px solid #E5E7EB; color: #6B7280; font-size: 15px; line-height: 1.6; text-align: left; }
-                @media only screen and (max-width: 600px) {
-                  .header { padding: 30px 20px; }
-                  .content { padding: 30px 20px; }
-                  .greeting { font-size: 24px; }
-                }
-              </style>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+              body { margin: 0; padding: 0; background-color: #0B0E11; font-family: 'Inter', Arial, sans-serif; }
+              .container { max-width: 600px; margin: 0 auto; background-color: #11151C; border-radius: 12px; overflow: hidden; }
+              .header { background: linear-gradient(135deg, #F7A600 0%, #E69500 100%); padding: 30px 20px; text-align: center; }
+              .logo { font-family: 'Rowdies', cursive; font-size: 32px; font-weight: 700; color: #000000; margin: 0; }
+              .logo span { color: #000000; }
+              .slogan { font-family: 'Domine', serif; font-weight: bold; font-style: italic; font-size: 14px; color: #000000; margin-top: 8px; }
+              .content { padding: 30px; color: #FFFFFF; }
+              h2 { color: #F7A600; margin-bottom: 20px; font-size: 24px; }
+              .investment-details { background: #1B222C; border-radius: 8px; padding: 15px; margin: 20px 0; border: 1px solid #2A2F36; }
+              .footer { background: #0B0E11; padding: 20px; text-align: center; color: #6C7480; font-size: 12px; border-top: 1px solid #1E2329; }
+              @media (max-width: 600px) {
+                .container { width: 100%; border-radius: 0; }
+                .content { padding: 20px; }
+              }
+            </style>
           </head>
-          <body style="background-color: #F9FAFB; margin: 0; padding: 0;">
-            <div class="email-container">
+          <body style="margin: 0; padding: 20px; background-color: #0B0E11;">
+            <div class="container">
               <div class="header">
-                <div class="logo-container">
-                  <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Capital" class="logo-img">
-                  <span class="logo-text">BitHash Capital</span>
-                </div>
+                <h1 class="logo"><span>₿</span>itHash</h1>
+                <div class="slogan"><i>Where Your Financial Goals Become Reality</i></div>
               </div>
               <div class="content">
-                <h1 class="greeting">Reset Your Password</h1>
-                <p class="message">Hello ${user.firstName || 'there'}, we received a request to reset your BitHash Capital account password.</p>
-                
-                <div style="text-align: center;">
-                  <a href="${data.resetUrl}" class="reset-button" style="display: inline-block; padding: 12px 32px; background-color: #00D8FF; color: #0A0E17; font-weight: 700; font-size: 16px; text-decoration: none; border-radius: 4px;">Reset Password</a>
-                </div>
-                
-                <p class="message">This password reset link will expire in 60 minutes.</p>
-                
-                <div class="security-note">
-                  <p><strong>Did not request this?</strong> If you did not request a password reset, please ignore this email. Your account remains secure.</p>
-                </div>
-                
-                <div class="sign-off">
-                  ${getSignOff('password_reset').replace(/\n/g, '<br>')}
-                </div>
-              </div>
-              ${getBrandedFooter('password_reset', user.email)}
-            </div>
-          </body>
-          </html>
-        `
-      },
-
-      // PASSWORD CHANGED
-      password_changed: {
-        subject: 'BitHash Capital | Password Changed Successfully',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-              <title>Password Changed - BitHash Capital</title>
-              <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #F9FAFB; margin: 0; padding: 0; }
-                .email-container { width: 100%; margin: 0; background-color: #FFFFFF; }
-                .header { background-color: #0A0E17; padding: 40px 20px; text-align: center; width: 100%; border-bottom: 2px solid #00D8FF; }
-                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                .logo-img { width: 48px; height: 48px; border-radius: 50%; background: white; padding: 6px; }
-                .logo-text { font-size: 28px; font-weight: 800; color: #00D8FF; }
-                .content { padding: 40px 20px; background-color: #FFFFFF; max-width: 600px; margin: 0 auto; text-align: center; }
-                .greeting { font-size: 28px; font-weight: 700; color: #111827; margin-bottom: 16px; }
-                .message { color: #6B7280; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .success-text { text-align: center; font-size: 56px; margin: 20px 0; color: #22C55E; font-weight: 700; }
-                .info-box { background-color: #F0FDF4; padding: 24px; border-radius: 8px; margin: 24px 0; text-align: left; }
-                .info-box p { color: #166534; font-size: 14px; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #BBF7D0; }
-                .info-box p:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
-                .sign-off { margin-top: 32px; padding-top: 24px; border-top: 1px solid #E5E7EB; color: #6B7280; font-size: 15px; line-height: 1.6; text-align: left; }
-                @media only screen and (max-width: 600px) {
-                  .header { padding: 30px 20px; }
-                  .content { padding: 30px 20px; }
-                  .greeting { font-size: 24px; }
-                  .success-text { font-size: 48px; }
-                }
-              </style>
-          </head>
-          <body style="background-color: #F9FAFB; margin: 0; padding: 0;">
-            <div class="email-container">
-              <div class="header">
-                <div class="logo-container">
-                  <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Capital" class="logo-img">
-                  <span class="logo-text">BitHash Capital</span>
-                </div>
-              </div>
-              <div class="content">
-                <div class="success-text">✓</div>
-                <h1 class="greeting">Password Changed Successfully</h1>
-                <p class="message">Hello ${user.firstName || 'there'}, your BitHash Capital account password has been changed.</p>
-                
-                <div class="info-box">
-                  <p><strong>Time:</strong> ${formatTimestamp(data.timestamp)}</p>
-                  <p><strong>IP Address:</strong> ${data.ip || 'IP Address Recorded'}</p>
-                  <p><strong>Device:</strong> ${data.device || 'Device Information Recorded'}</p>
-                </div>
-                
-                <p class="message">If you did not make this change, please contact our support team immediately.</p>
-                
-                <div class="sign-off">
-                  ${getSignOff('password_changed').replace(/\n/g, '<br>')}
-                </div>
-              </div>
-              ${getBrandedFooter('password_changed', user.email)}
-            </div>
-          </body>
-          </html>
-        `
-      },
-
-      // INVESTMENT CREATED
-      investment_created: {
-        subject: 'BitHash Capital | Investment Confirmed',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-              <title>Investment Confirmation - BitHash Capital</title>
-              <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #F9FAFB; margin: 0; padding: 0; }
-                .email-container { width: 100%; margin: 0; background-color: #FFFFFF; }
-                .header { background-color: #0A0E17; padding: 40px 20px; text-align: center; width: 100%; border-bottom: 2px solid #00D8FF; }
-                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                .logo-img { width: 48px; height: 48px; border-radius: 50%; background: white; padding: 6px; }
-                .logo-text { font-size: 28px; font-weight: 800; color: #00D8FF; }
-                .content { padding: 40px 20px; background-color: #FFFFFF; max-width: 600px; margin: 0 auto; }
-                .greeting { font-size: 28px; font-weight: 700; color: #111827; margin-bottom: 16px; }
-                .message { color: #6B7280; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .investment-details { background-color: #F9FAFB; padding: 28px; border-radius: 8px; margin: 24px 0; border: 1px solid #E5E7EB; }
-                .detail-row { display: flex; justify-content: space-between; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #E5E7EB; }
-                .detail-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
-                .detail-label { color: #9CA3AF; font-size: 14px; font-weight: 500; }
-                .detail-value { color: #111827; font-weight: 700; font-size: 16px; }
-                .cta-button { display: inline-block; padding: 12px 28px; background-color: #D4AF37; color: #0A0E17; font-weight: 700; font-size: 15px; text-decoration: none; border-radius: 4px; margin: 16px 0; }
-                .sign-off { margin-top: 32px; padding-top: 24px; border-top: 1px solid #E5E7EB; color: #6B7280; font-size: 15px; line-height: 1.6; }
-                @media only screen and (max-width: 600px) {
-                  .header { padding: 30px 20px; }
-                  .content { padding: 30px 20px; }
-                  .detail-row { flex-direction: column; gap: 6px; }
-                  .greeting { font-size: 24px; }
-                }
-              </style>
-          </head>
-          <body style="background-color: #F9FAFB; margin: 0; padding: 0;">
-            <div class="email-container">
-              <div class="header">
-                <div class="logo-container">
-                  <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Capital" class="logo-img">
-                  <span class="logo-text">BitHash Capital</span>
-                </div>
-              </div>
-              <div class="content">
-                <h1 class="greeting">Investment Confirmed</h1>
-                <p class="message">Hello ${user.firstName || 'there'}, your investment has been successfully created and is now active.</p>
-                
+                <h2>Investment Created</h2>
+                <p>Dear ${data.name || user.firstName},</p>
+                <p>Your investment has been successfully created and is now active.</p>
                 <div class="investment-details">
-                  <div class="detail-row">
-                    <span class="detail-label">Investment Plan:</span>
-                    <span class="detail-value">${data.planName || 'Standard Plan'}</span>
-                  </div>
-                  <div class="detail-row">
-                    <span class="detail-label">Amount Invested:</span>
-                    <span class="detail-value">$${formatAmount(data.amount)}</span>
-                  </div>
-                  <div class="detail-row">
-                    <span class="detail-label">Expected Return:</span>
-                    <span class="detail-value">$${formatAmount(data.expectedReturn)}</span>
-                  </div>
-                  <div class="detail-row">
-                    <span class="detail-label">ROI Percentage:</span>
-                    <span class="detail-value">${data.roiPercentage || data.percentage || '0'}%</span>
-                  </div>
-                  <div class="detail-row">
-                    <span class="detail-label">Duration:</span>
-                    <span class="detail-value">${data.duration || '0'} hours</span>
-                  </div>
-                  <div class="detail-row">
-                    <span class="detail-label">Start Date:</span>
-                    <span class="detail-value">${formatTimestamp(data.startDate)}</span>
-                  </div>
-                  <div class="detail-row">
-                    <span class="detail-label">End Date:</span>
-                    <span class="detail-value">${formatTimestamp(data.endDate)}</span>
-                  </div>
+                  <p><strong>Plan:</strong> ${data.planName}</p>
+                  <p><strong>Amount:</strong> ${data.amount} BTC</p>
+                  <p><strong>Expected Return:</strong> ${data.expectedReturn} BTC</p>
+                  <p><strong>Duration:</strong> ${data.duration} hours</p>
+                  <p><strong>Start Date:</strong> ${new Date(data.startDate).toLocaleString()}</p>
+                  <p><strong>End Date:</strong> ${new Date(data.endDate).toLocaleString()}</p>
                 </div>
-                
-                <div style="text-align: center;">
-                  <a href="https://www.bithashcapital.live/dashboard.html" class="cta-button" style="display: inline-block; padding: 12px 28px; background-color: #D4AF37; color: #0A0E17; font-weight: 700; font-size: 15px; text-decoration: none; border-radius: 4px;">Track Investment</a>
-                </div>
-                
-                <div class="sign-off">
-                  ${getSignOff('investment_created').replace(/\n/g, '<br>')}
-                </div>
+                <p>Your investment will automatically mature at the end date. You can track your progress in the dashboard.</p>
+                <a href="${baseUrl}/dashboard" class="btn">View Investment</a>
               </div>
-              ${getBrandedFooter('investment_created', user.email)}
+              <div class="footer">
+                <p>BitHash Capital Finance Team</p>
+                <p>&copy; ${new Date().getFullYear()} BitHash Capital. All rights reserved.</p>
+              </div>
             </div>
           </body>
           </html>
-        `
-      },
-
-      // INVESTMENT MATURED
-      investment_matured: {
-        subject: 'BitHash Capital | Investment Matured - Funds Available',
-        html: `
+        `,
+        
+        investment_matured: `
           <!DOCTYPE html>
           <html>
           <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-              <title>Investment Matured - BitHash Capital</title>
-              <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #F9FAFB; margin: 0; padding: 0; }
-                .email-container { width: 100%; margin: 0; background-color: #FFFFFF; }
-                .header { background-color: #0A0E17; padding: 40px 20px; text-align: center; width: 100%; border-bottom: 2px solid #00D8FF; }
-                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                .logo-img { width: 48px; height: 48px; border-radius: 50%; background: white; padding: 6px; }
-                .logo-text { font-size: 28px; font-weight: 800; color: #00D8FF; }
-                .content { padding: 40px 20px; background-color: #FFFFFF; max-width: 600px; margin: 0 auto; }
-                .greeting { font-size: 28px; font-weight: 700; color: #111827; margin-bottom: 16px; }
-                .message { color: #6B7280; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .success-box { background-color: #F0FDF4; padding: 32px; text-align: center; border-radius: 8px; margin: 24px 0; border: 1px solid #BBF7D0; }
-                .matured-amount { font-size: 42px; font-weight: 800; color: #22C55E; margin: 12px 0; }
-                .profit-amount { font-size: 20px; font-weight: 700; color: #15803D; }
-                .investment-details { background-color: #F9FAFB; padding: 28px; border-radius: 8px; margin: 24px 0; border: 1px solid #E5E7EB; }
-                .detail-row { display: flex; justify-content: space-between; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #E5E7EB; }
-                .detail-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
-                .detail-label { color: #9CA3AF; font-size: 14px; font-weight: 500; }
-                .detail-value { color: #111827; font-weight: 600; font-size: 14px; }
-                .cta-button { display: inline-block; padding: 12px 28px; background-color: #D4AF37; color: #0A0E17; font-weight: 700; font-size: 15px; text-decoration: none; border-radius: 4px; margin: 16px 0; }
-                .sign-off { margin-top: 32px; padding-top: 24px; border-top: 1px solid #E5E7EB; color: #6B7280; font-size: 15px; line-height: 1.6; }
-                @media only screen and (max-width: 600px) {
-                  .header { padding: 30px 20px; }
-                  .content { padding: 30px 20px; }
-                  .detail-row { flex-direction: column; gap: 6px; }
-                  .greeting { font-size: 24px; }
-                  .matured-amount { font-size: 32px; }
-                }
-              </style>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+              body { margin: 0; padding: 0; background-color: #0B0E11; font-family: 'Inter', Arial, sans-serif; }
+              .container { max-width: 600px; margin: 0 auto; background-color: #11151C; border-radius: 12px; overflow: hidden; }
+              .header { background: linear-gradient(135deg, #F7A600 0%, #E69500 100%); padding: 30px 20px; text-align: center; }
+              .logo { font-family: 'Rowdies', cursive; font-size: 32px; font-weight: 700; color: #000000; margin: 0; }
+              .logo span { color: #000000; }
+              .slogan { font-family: 'Domine', serif; font-weight: bold; font-style: italic; font-size: 14px; color: #000000; margin-top: 8px; }
+              .content { padding: 30px; color: #FFFFFF; }
+              h2 { color: #F7A600; margin-bottom: 20px; font-size: 24px; }
+              .returns { background: #1B222C; border-radius: 8px; padding: 15px; margin: 20px 0; text-align: center; border: 1px solid #2A2F36; }
+              .profit { color: #228B22; font-size: 24px; font-weight: bold; }
+              .footer { background: #0B0E11; padding: 20px; text-align: center; color: #6C7480; font-size: 12px; border-top: 1px solid #1E2329; }
+              @media (max-width: 600px) {
+                .container { width: 100%; border-radius: 0; }
+                .content { padding: 20px; }
+              }
+            </style>
           </head>
-          <body style="background-color: #F9FAFB; margin: 0; padding: 0;">
-            <div class="email-container">
+          <body style="margin: 0; padding: 20px; background-color: #0B0E11;">
+            <div class="container">
               <div class="header">
-                <div class="logo-container">
-                  <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Capital" class="logo-img">
-                  <span class="logo-text">BitHash Capital</span>
-                </div>
+                <h1 class="logo"><span>₿</span>itHash</h1>
+                <div class="slogan"><i>Where Your Financial Goals Become Reality</i></div>
               </div>
               <div class="content">
-                <h1 class="greeting">Investment Matured</h1>
-                <p class="message">Hello ${user.firstName || 'there'}, congratulations! Your investment has matured and the funds are now available in your account.</p>
-                
+                <h2>Investment Matured</h2>
+                <p>Dear ${data.name || user.firstName},</p>
+                <p>Congratulations! Your investment has matured and the proceeds have been added to your Matured Wallet.</p>
+                <div class="returns">
+                  <p><strong>Plan:</strong> ${data.planName}</p>
+                  <p><strong>Initial Investment:</strong> ${data.amount} BTC</p>
+                  <p><strong>Total Return:</strong> ${data.totalReturn} BTC</p>
+                  <p class="profit">Profit: ${data.profit} BTC</p>
+                  <p><strong>Completion Date:</strong> ${new Date(data.completionDate).toLocaleString()}</p>
+                </div>
+                <p>Your funds are now available in your Matured Wallet. You can reinvest or withdraw your proceeds.</p>
+                <a href="${baseUrl}/dashboard" class="btn">View Wallet</a>
+              </div>
+              <div class="footer">
+                <p>BitHash Capital Finance Team</p>
+                <p>&copy; ${new Date().getFullYear()} BitHash Capital. All rights reserved.</p>
+              </div>
+            </div>
+          </body>
+          </html>
+        `,
+        
+        deposit_approved: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+              body { margin: 0; padding: 0; background-color: #0B0E11; font-family: 'Inter', Arial, sans-serif; }
+              .container { max-width: 600px; margin: 0 auto; background-color: #11151C; border-radius: 12px; overflow: hidden; }
+              .header { background: linear-gradient(135deg, #F7A600 0%, #E69500 100%); padding: 30px 20px; text-align: center; }
+              .logo { font-family: 'Rowdies', cursive; font-size: 32px; font-weight: 700; color: #000000; margin: 0; }
+              .logo span { color: #000000; }
+              .slogan { font-family: 'Domine', serif; font-weight: bold; font-style: italic; font-size: 14px; color: #000000; margin-top: 8px; }
+              .content { padding: 30px; color: #FFFFFF; }
+              h2 { color: #F7A600; margin-bottom: 20px; font-size: 24px; }
+              .deposit-details { background: #1B222C; border-radius: 8px; padding: 15px; margin: 20px 0; border: 1px solid #2A2F36; }
+              .footer { background: #0B0E11; padding: 20px; text-align: center; color: #6C7480; font-size: 12px; border-top: 1px solid #1E2329; }
+              @media (max-width: 600px) {
+                .container { width: 100%; border-radius: 0; }
+                .content { padding: 20px; }
+              }
+            </style>
+          </head>
+          <body style="margin: 0; padding: 20px; background-color: #0B0E11;">
+            <div class="container">
+              <div class="header">
+                <h1 class="logo"><span>₿</span>itHash</h1>
+                <div class="slogan"><i>Where Your Financial Goals Become Reality</i></div>
+              </div>
+              <div class="content">
+                <h2>Deposit Confirmed</h2>
+                <p>Dear ${data.name || user.firstName},</p>
+                <p>Your deposit has been confirmed and added to your Main Wallet.</p>
+                <div class="deposit-details">
+                  <p><strong>Amount:</strong> ${data.amount} ${data.asset || 'BTC'}</p>
+                  <p><strong>Transaction Reference:</strong> ${data.reference}</p>
+                  <p><strong>Date:</strong> ${new Date(data.processedAt).toLocaleString()}</p>
+                </div>
+                <p>Your funds are now available for investment or trading.</p>
+                <a href="${baseUrl}/dashboard" class="btn">View Balance</a>
+              </div>
+              <div class="footer">
+                <p>BitHash Capital Finance Team</p>
+                <p>&copy; ${new Date().getFullYear()} BitHash Capital. All rights reserved.</p>
+              </div>
+            </div>
+          </body>
+          </html>
+        `,
+        
+        withdrawal_request: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+              body { margin: 0; padding: 0; background-color: #0B0E11; font-family: 'Inter', Arial, sans-serif; }
+              .container { max-width: 600px; margin: 0 auto; background-color: #11151C; border-radius: 12px; overflow: hidden; }
+              .header { background: linear-gradient(135deg, #F7A600 0%, #E69500 100%); padding: 30px 20px; text-align: center; }
+              .logo { font-family: 'Rowdies', cursive; font-size: 32px; font-weight: 700; color: #000000; margin: 0; }
+              .logo span { color: #000000; }
+              .slogan { font-family: 'Domine', serif; font-weight: bold; font-style: italic; font-size: 14px; color: #000000; margin-top: 8px; }
+              .content { padding: 30px; color: #FFFFFF; }
+              h2 { color: #F7A600; margin-bottom: 20px; font-size: 24px; }
+              .withdrawal-details { background: #1B222C; border-radius: 8px; padding: 15px; margin: 20px 0; border: 1px solid #2A2F36; }
+              .footer { background: #0B0E11; padding: 20px; text-align: center; color: #6C7480; font-size: 12px; border-top: 1px solid #1E2329; }
+              @media (max-width: 600px) {
+                .container { width: 100%; border-radius: 0; }
+                .content { padding: 20px; }
+              }
+            </style>
+          </head>
+          <body style="margin: 0; padding: 20px; background-color: #0B0E11;">
+            <div class="container">
+              <div class="header">
+                <h1 class="logo"><span>₿</span>itHash</h1>
+                <div class="slogan"><i>Where Your Financial Goals Become Reality</i></div>
+              </div>
+              <div class="content">
+                <h2>Withdrawal Request Submitted</h2>
+                <p>Dear ${data.name || user.firstName},</p>
+                <p>Your withdrawal request has been received and is pending approval.</p>
+                <div class="withdrawal-details">
+                  <p><strong>Amount:</strong> ${data.amount} ${data.asset}</p>
+                  <p><strong>USD Value:</strong> $${data.usdValue}</p>
+                  <p><strong>Network Fee:</strong> ${data.fee} ${data.asset} (≈$${data.feeUsd})</p>
+                  <p><strong>Net Amount:</strong> ${data.netAmount} ${data.asset}</p>
+                  <p><strong>Destination Address:</strong> ${data.withdrawalAddress}</p>
+                  <p><strong>Request ID:</strong> ${data.requestId}</p>
+                </div>
+                <p>Your request will be processed within 24-48 hours. You will receive a confirmation email once approved.</p>
+                <a href="${baseUrl}/withdrawals" class="btn">Track Request</a>
+              </div>
+              <div class="footer">
+                <p>BitHash Capital Finance Team</p>
+                <p>&copy; ${new Date().getFullYear()} BitHash Capital. All rights reserved.</p>
+              </div>
+            </div>
+          </body>
+          </html>
+        `,
+        
+        withdrawal_approved: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+              body { margin: 0; padding: 0; background-color: #0B0E11; font-family: 'Inter', Arial, sans-serif; }
+              .container { max-width: 600px; margin: 0 auto; background-color: #11151C; border-radius: 12px; overflow: hidden; }
+              .header { background: linear-gradient(135deg, #F7A600 0%, #E69500 100%); padding: 30px 20px; text-align: center; }
+              .logo { font-family: 'Rowdies', cursive; font-size: 32px; font-weight: 700; color: #000000; margin: 0; }
+              .logo span { color: #000000; }
+              .slogan { font-family: 'Domine', serif; font-weight: bold; font-style: italic; font-size: 14px; color: #000000; margin-top: 8px; }
+              .content { padding: 30px; color: #FFFFFF; }
+              h2 { color: #F7A600; margin-bottom: 20px; font-size: 24px; }
+              .success-box { background: #1B222C; border-radius: 8px; padding: 15px; margin: 20px 0; border-left: 4px solid #228B22; }
+              .footer { background: #0B0E11; padding: 20px; text-align: center; color: #6C7480; font-size: 12px; border-top: 1px solid #1E2329; }
+              @media (max-width: 600px) {
+                .container { width: 100%; border-radius: 0; }
+                .content { padding: 20px; }
+              }
+            </style>
+          </head>
+          <body style="margin: 0; padding: 20px; background-color: #0B0E11;">
+            <div class="container">
+              <div class="header">
+                <h1 class="logo"><span>₿</span>itHash</h1>
+                <div class="slogan"><i>Where Your Financial Goals Become Reality</i></div>
+              </div>
+              <div class="content">
+                <h2>Withdrawal Completed</h2>
+                <p>Dear ${data.name || user.firstName},</p>
+                <p>Your withdrawal request has been approved and processed.</p>
                 <div class="success-box">
-                  <div style="color: #6B7280; font-size: 14px;">Total Return</div>
-                  <div class="matured-amount">$${formatAmount(data.totalReturn)}</div>
-                  <div class="profit-amount">Profit: $${formatAmount(data.profit)}</div>
+                  <p><strong>Amount:</strong> ${data.amount} ${data.asset}</p>
+                  <p><strong>USD Value:</strong> $${data.usdValue}</p>
+                  <p><strong>Transaction ID:</strong> ${data.txid || 'Processing'}</p>
+                  <p><strong>Processed At:</strong> ${new Date(data.processedAt).toLocaleString()}</p>
                 </div>
-                
-                <div class="investment-details">
-                  <div class="detail-row">
-                    <span class="detail-label">Investment Plan:</span>
-                    <span class="detail-value">${data.planName || 'Standard Plan'}</span>
-                  </div>
-                  <div class="detail-row">
-                    <span class="detail-label">Original Amount:</span>
-                    <span class="detail-value">$${formatAmount(data.amount)}</span>
-                  </div>
-                  <div class="detail-row">
-                    <span class="detail-label">Maturity Date:</span>
-                    <span class="detail-value">${formatTimestamp(data.completionDate)}</span>
-                  </div>
-                  <div class="detail-row">
-                    <span class="detail-label">New Matured Balance:</span>
-                    <span class="detail-value">$${formatAmount(data.newMaturedBalance)}</span>
-                  </div>
-                </div>
-                
-                <p class="message">You can reinvest these funds or withdraw them to your wallet.</p>
-                
-                <div style="text-align: center;">
-                  <a href="https://www.bithashcapital.live/dashboard.html" class="cta-button" style="display: inline-block; padding: 12px 28px; background-color: #D4AF37; color: #0A0E17; font-weight: 700; font-size: 15px; text-decoration: none; border-radius: 4px;">View Dashboard</a>
-                </div>
-                
-                <div class="sign-off">
-                  ${getSignOff('investment_matured').replace(/\n/g, '<br>')}
-                </div>
+                <p>The funds have been sent to your wallet address. Please allow time for network confirmations.</p>
+                <a href="${baseUrl}/dashboard" class="btn">View Transaction</a>
               </div>
-              ${getBrandedFooter('investment_matured', user.email)}
+              <div class="footer">
+                <p>BitHash Capital Finance Team</p>
+                <p>&copy; ${new Date().getFullYear()} BitHash Capital. All rights reserved.</p>
+              </div>
             </div>
           </body>
           </html>
-        `
-      },
-
-      // DEPOSIT RECEIVED
-      deposit_received: {
-        subject: `${getAssetDisplayName(data.asset)} Deposit Received - BitHash Capital`,
-        html: `
+        `,
+        
+        kyc_approved: `
           <!DOCTYPE html>
           <html>
           <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-              <title>Deposit Received - BitHash Capital</title>
-              <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #F9FAFB; margin: 0; padding: 0; }
-                .email-container { width: 100%; margin: 0; background-color: #FFFFFF; }
-                .header { background-color: #0A0E17; padding: 40px 20px; text-align: center; width: 100%; border-bottom: 2px solid #00D8FF; }
-                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                .logo-img { width: 48px; height: 48px; border-radius: 50%; background: white; padding: 6px; }
-                .logo-text { font-size: 28px; font-weight: 800; color: #00D8FF; }
-                .content { padding: 40px 20px; background-color: #FFFFFF; max-width: 600px; margin: 0 auto; }
-                .greeting { font-size: 28px; font-weight: 700; color: #111827; margin-bottom: 16px; }
-                .message { color: #6B7280; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .crypto-header { display: flex; align-items: center; gap: 20px; margin: 24px 0; padding: 24px; background-color: #F0FDF4; border-radius: 8px; border: 1px solid #BBF7D0; }
-                .crypto-icon { width: 56px; height: 56px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; }
-                .crypto-icon img { width: 40px; height: 40px; }
-                .crypto-name { font-size: 22px; font-weight: 800; color: #111827; }
-                .crypto-network { font-size: 12px; color: #6B7280; margin-top: 6px; }
-                .transaction-details { background-color: #F9FAFB; padding: 28px; border-radius: 8px; margin: 24px 0; border: 1px solid #E5E7EB; }
-                .detail-row { display: flex; justify-content: space-between; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #E5E7EB; }
-                .detail-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
-                .detail-label { color: #9CA3AF; font-size: 14px; font-weight: 500; }
-                .detail-value { color: #111827; font-weight: 600; font-size: 14px; word-break: break-all; }
-                .address-value { font-family: monospace; background: #FFFFFF; padding: 4px 10px; border-radius: 4px; font-size: 12px; border: 1px solid #E5E7EB; }
-                .sign-off { margin-top: 32px; padding-top: 24px; border-top: 1px solid #E5E7EB; color: #6B7280; font-size: 15px; line-height: 1.6; }
-                @media only screen and (max-width: 600px) {
-                  .header { padding: 30px 20px; }
-                  .content { padding: 30px 20px; }
-                  .crypto-header { flex-direction: column; text-align: center; }
-                  .detail-row { flex-direction: column; gap: 6px; }
-                  .greeting { font-size: 24px; }
-                }
-              </style>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+              body { margin: 0; padding: 0; background-color: #0B0E11; font-family: 'Inter', Arial, sans-serif; }
+              .container { max-width: 600px; margin: 0 auto; background-color: #11151C; border-radius: 12px; overflow: hidden; }
+              .header { background: linear-gradient(135deg, #F7A600 0%, #E69500 100%); padding: 30px 20px; text-align: center; }
+              .logo { font-family: 'Rowdies', cursive; font-size: 32px; font-weight: 700; color: #000000; margin: 0; }
+              .logo span { color: #000000; }
+              .slogan { font-family: 'Domine', serif; font-weight: bold; font-style: italic; font-size: 14px; color: #000000; margin-top: 8px; }
+              .content { padding: 30px; color: #FFFFFF; }
+              h2 { color: #F7A600; margin-bottom: 20px; font-size: 24px; }
+              .kyc-approved { background: #1B222C; border-radius: 8px; padding: 15px; margin: 20px 0; text-align: center; border: 1px solid #2A2F36; }
+              .footer { background: #0B0E11; padding: 20px; text-align: center; color: #6C7480; font-size: 12px; border-top: 1px solid #1E2329; }
+              @media (max-width: 600px) {
+                .container { width: 100%; border-radius: 0; }
+                .content { padding: 20px; }
+              }
+            </style>
           </head>
-          <body style="background-color: #F9FAFB; margin: 0; padding: 0;">
-            <div class="email-container">
+          <body style="margin: 0; padding: 20px; background-color: #0B0E11;">
+            <div class="container">
               <div class="header">
-                <div class="logo-container">
-                  <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Capital" class="logo-img">
-                  <span class="logo-text">BitHash Capital</span>
-                </div>
+                <h1 class="logo"><span>₿</span>itHash</h1>
+                <div class="slogan"><i>Where Your Financial Goals Become Reality</i></div>
               </div>
               <div class="content">
-                <h1 class="greeting">Deposit Received</h1>
-                <p class="message">Hello ${user.firstName || 'there'}, your ${getAssetDisplayName(data.asset)} deposit has been successfully received and credited to your account.</p>
-                
-                <div class="crypto-header">
-                  <div class="crypto-icon">
-                    <img src="${getCryptoLogo(data.asset)}" alt="${data.asset || 'BTC'}" onerror="this.style.display='none'">
-                  </div>
-                  <div>
-                    <div class="crypto-name">${(data.asset || 'Bitcoin').toUpperCase()}</div>
-                    <div class="crypto-network">Network: ${data.network || (data.asset === 'USDT' ? 'ERC-20' : data.asset === 'BTC' ? 'Bitcoin' : 'Mainnet')}</div>
-                  </div>
+                <h2>KYC Verification Approved</h2>
+                <p>Dear ${data.name || user.firstName},</p>
+                <div class="kyc-approved">
+                  <p>Your KYC verification has been successfully approved.</p>
+                  <p>Your account limits have been increased and you now have full access to all platform features.</p>
                 </div>
-                
-                <div class="transaction-details">
-                  <div class="detail-row">
-                    <span class="detail-label">Amount:</span>
-                    <span class="detail-value">${formatAmount(data.amount, data.asset)} ${(data.asset || 'BTC').toUpperCase()}</span>
-                  </div>
-                  <div class="detail-row">
-                    <span class="detail-label">USD Value:</span>
-                    <span class="detail-value">$${formatAmount(data.usdValue)}</span>
-                  </div>
-                  <div class="detail-row">
-                    <span class="detail-label">Transaction Hash:</span>
-                    <span class="detail-value address-value">${data.txid || data.transactionHash || data.transactionId || 'Confirmed on Blockchain'}</span>
-                  </div>
-                  <div class="detail-row">
-                    <span class="detail-label">Sent From:</span>
-                    <span class="detail-value address-value">${hideAddress(data.fromAddress || data.senderAddress)}</span>
-                  </div>
-                  <div class="detail-row">
-                    <span class="detail-label">Received At:</span>
-                    <span class="detail-value address-value">${hideAddress(data.toAddress || data.recipientAddress)}</span>
-                  </div>
-                  <div class="detail-row">
-                    <span class="detail-label">Timestamp:</span>
-                    <span class="detail-value">${formatTimestamp(data.timestamp)}</span>
-                  </div>
-                  <div class="detail-row">
-                    <span class="detail-label">Confirmations:</span>
-                    <span class="detail-value">${data.confirmations || '6'} confirmations</span>
-                  </div>
-                </div>
-                
-                <p class="message">Your funds are now available for mining investments and other platform activities.</p>
-                
-                <div class="sign-off">
-                  ${getSignOff('deposit_received').replace(/\n/g, '<br>')}
-                </div>
+                <p>Thank you for completing the verification process. This helps us maintain a secure and compliant platform for all users.</p>
+                <a href="${baseUrl}/dashboard" class="btn">Continue to Dashboard</a>
               </div>
-              ${getBrandedFooter('deposit_received', user.email)}
+              <div class="footer">
+                <p>BitHash Capital Compliance Team</p>
+                <p>&copy; ${new Date().getFullYear()} BitHash Capital. All rights reserved.</p>
+              </div>
             </div>
           </body>
           </html>
-        `
-      },
-
-      // WITHDRAWAL REQUEST
-      withdrawal_request: {
-        subject: `${getAssetDisplayName(data.asset)} Withdrawal Request - BitHash Capital`,
-        html: `
+        `,
+        
+        kyc_rejected: `
           <!DOCTYPE html>
           <html>
           <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-              <title>Withdrawal Request - BitHash Capital</title>
-              <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #F9FAFB; margin: 0; padding: 0; }
-                .email-container { width: 100%; margin: 0; background-color: #FFFFFF; }
-                .header { background-color: #0A0E17; padding: 40px 20px; text-align: center; width: 100%; border-bottom: 2px solid #00D8FF; }
-                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                .logo-img { width: 48px; height: 48px; border-radius: 50%; background: white; padding: 6px; }
-                .logo-text { font-size: 28px; font-weight: 800; color: #00D8FF; }
-                .content { padding: 40px 20px; background-color: #FFFFFF; max-width: 600px; margin: 0 auto; }
-                .greeting { font-size: 28px; font-weight: 700; color: #111827; margin-bottom: 16px; }
-                .message { color: #6B7280; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .crypto-header { display: flex; align-items: center; gap: 20px; margin: 24px 0; padding: 24px; background-color: #FEF3C7; border-radius: 8px; border: 1px solid #FCD34D; }
-                .crypto-icon { width: 56px; height: 56px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; }
-                .crypto-icon img { width: 40px; height: 40px; }
-                .crypto-name { font-size: 22px; font-weight: 800; color: #111827; }
-                .crypto-network { font-size: 12px; color: #6B7280; margin-top: 6px; }
-                .transaction-details { background-color: #F9FAFB; padding: 28px; border-radius: 8px; margin: 24px 0; border: 1px solid #E5E7EB; }
-                .detail-row { display: flex; justify-content: space-between; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #E5E7EB; }
-                .detail-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
-                .detail-label { color: #9CA3AF; font-size: 14px; font-weight: 500; }
-                .detail-value { color: #111827; font-weight: 600; font-size: 14px; word-break: break-all; }
-                .address-value { font-family: monospace; background: #FFFFFF; padding: 4px 10px; border-radius: 4px; font-size: 12px; border: 1px solid #E5E7EB; }
-                .processing-info { background-color: #FEF3C7; padding: 20px; border-radius: 8px; margin: 20px 0; }
-                .processing-info p { color: #92400E; font-size: 14px; line-height: 1.6; }
-                .sign-off { margin-top: 32px; padding-top: 24px; border-top: 1px solid #E5E7EB; color: #6B7280; font-size: 15px; line-height: 1.6; }
-                @media only screen and (max-width: 600px) {
-                  .header { padding: 30px 20px; }
-                  .content { padding: 30px 20px; }
-                  .crypto-header { flex-direction: column; text-align: center; }
-                  .detail-row { flex-direction: column; gap: 6px; }
-                  .greeting { font-size: 24px; }
-                }
-              </style>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+              body { margin: 0; padding: 0; background-color: #0B0E11; font-family: 'Inter', Arial, sans-serif; }
+              .container { max-width: 600px; margin: 0 auto; background-color: #11151C; border-radius: 12px; overflow: hidden; }
+              .header { background: linear-gradient(135deg, #F7A600 0%, #E69500 100%); padding: 30px 20px; text-align: center; }
+              .logo { font-family: 'Rowdies', cursive; font-size: 32px; font-weight: 700; color: #000000; margin: 0; }
+              .logo span { color: #000000; }
+              .slogan { font-family: 'Domine', serif; font-weight: bold; font-style: italic; font-size: 14px; color: #000000; margin-top: 8px; }
+              .content { padding: 30px; color: #FFFFFF; }
+              h2 { color: #F7A600; margin-bottom: 20px; font-size: 24px; }
+              .reason-box { background: #1B222C; border-radius: 8px; padding: 15px; margin: 20px 0; border-left: 4px solid #FF0000; }
+              .footer { background: #0B0E11; padding: 20px; text-align: center; color: #6C7480; font-size: 12px; border-top: 1px solid #1E2329; }
+              @media (max-width: 600px) {
+                .container { width: 100%; border-radius: 0; }
+                .content { padding: 20px; }
+              }
+            </style>
           </head>
-          <body style="background-color: #F9FAFB; margin: 0; padding: 0;">
-            <div class="email-container">
+          <body style="margin: 0; padding: 20px; background-color: #0B0E11;">
+            <div class="container">
               <div class="header">
-                <div class="logo-container">
-                  <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Capital" class="logo-img">
-                  <span class="logo-text">BitHash Capital</span>
-                </div>
+                <h1 class="logo"><span>₿</span>itHash</h1>
+                <div class="slogan"><i>Where Your Financial Goals Become Reality</i></div>
               </div>
               <div class="content">
-                <h1 class="greeting">Withdrawal Request Received</h1>
-                <p class="message">Hello ${user.firstName || 'there'}, your ${getAssetDisplayName(data.asset)} withdrawal request has been received and is being processed.</p>
-                
-                <div class="crypto-header">
-                  <div class="crypto-icon">
-                    <img src="${getCryptoLogo(data.asset)}" alt="${data.asset || 'BTC'}" onerror="this.style.display='none'">
-                  </div>
-                  <div>
-                    <div class="crypto-name">${(data.asset || 'Bitcoin').toUpperCase()}</div>
-                    <div class="crypto-network">Network: ${data.network || (data.asset === 'USDT' ? 'ERC-20' : data.asset === 'BTC' ? 'Bitcoin' : 'Mainnet')}</div>
-                  </div>
-                </div>
-                
-                <div class="transaction-details">
-                  <div class="detail-row">
-                    <span class="detail-label">Request ID:</span>
-                    <span class="detail-value">${data.requestId || data.withdrawalId || data.transactionId || 'BHC-' + Math.floor(Date.now() / 1000)}</span>
-                  </div>
-                  <div class="detail-row">
-                    <span class="detail-label">Amount:</span>
-                    <span class="detail-value">${formatAmount(data.amount, data.asset)} ${(data.asset || 'BTC').toUpperCase()}</span>
-                  </div>
-                  <div class="detail-row">
-                    <span class="detail-label">USD Value:</span>
-                    <span class="detail-value">$${formatAmount(data.usdValue)}</span>
-                  </div>
-                  <div class="detail-row">
-                    <span class="detail-label">Withdrawal Address:</span>
-                    <span class="detail-value address-value">${hideAddress(data.withdrawalAddress || data.address)}</span>
-                  </div>
-                  <div class="detail-row">
-                    <span class="detail-label">Network Fee:</span>
-                    <span class="detail-value">${formatAmount(data.fee, data.asset)} ${(data.asset || 'BTC').toUpperCase()} (≈ $${formatAmount(data.feeUsd)})</span>
-                  </div>
-                  <div class="detail-row">
-                    <span class="detail-label">Net Amount:</span>
-                    <span class="detail-value">${formatAmount(data.netAmount, data.asset)} ${(data.asset || 'BTC').toUpperCase()}</span>
-                  </div>
-                  <div class="detail-row">
-                    <span class="detail-label">Request Time:</span>
-                    <span class="detail-value">${formatTimestamp(data.timestamp)}</span>
-                  </div>
-                </div>
-                
-                <div class="processing-info">
-                  <p><strong>Processing Information:</strong> Withdrawals are typically processed within 24 hours. You will receive another notification once completed.</p>
-                </div>
-                
-                <p class="message">If you did not initiate this withdrawal, please contact our security team immediately.</p>
-                
-                <div class="sign-off">
-                  ${getSignOff('withdrawal_request').replace(/\n/g, '<br>')}
-                </div>
-              </div>
-              ${getBrandedFooter('withdrawal_request', user.email)}
-            </div>
-          </body>
-          </html>
-        `
-      },
-
-      // WITHDRAWAL APPROVED
-      withdrawal_approved: {
-        subject: `${getAssetDisplayName(data.asset)} Withdrawal Approved - BitHash Capital`,
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-              <title>Withdrawal Approved - BitHash Capital</title>
-              <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #F9FAFB; margin: 0; padding: 0; }
-                .email-container { width: 100%; margin: 0; background-color: #FFFFFF; }
-                .header { background-color: #0A0E17; padding: 40px 20px; text-align: center; width: 100%; border-bottom: 2px solid #00D8FF; }
-                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                .logo-img { width: 48px; height: 48px; border-radius: 50%; background: white; padding: 6px; }
-                .logo-text { font-size: 28px; font-weight: 800; color: #00D8FF; }
-                .content { padding: 40px 20px; background-color: #FFFFFF; max-width: 600px; margin: 0 auto; }
-                .greeting { font-size: 28px; font-weight: 700; color: #111827; margin-bottom: 16px; }
-                .message { color: #6B7280; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .crypto-header { display: flex; align-items: center; gap: 20px; margin: 24px 0; padding: 24px; background-color: #F0FDF4; border-radius: 8px; border: 1px solid #BBF7D0; }
-                .crypto-icon { width: 56px; height: 56px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center; }
-                .crypto-icon img { width: 40px; height: 40px; }
-                .crypto-name { font-size: 22px; font-weight: 800; color: #111827; }
-                .approved-box { background-color: #F0FDF4; padding: 32px; text-align: center; border-radius: 8px; margin: 24px 0; border: 1px solid #BBF7D0; }
-                .approved-amount { font-size: 42px; font-weight: 800; color: #22C55E; margin: 12px 0; }
-                .transaction-details { background-color: #F9FAFB; padding: 28px; border-radius: 8px; margin: 24px 0; border: 1px solid #E5E7EB; }
-                .detail-row { display: flex; justify-content: space-between; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #E5E7EB; }
-                .detail-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
-                .detail-label { color: #9CA3AF; font-size: 14px; font-weight: 500; }
-                .detail-value { color: #111827; font-weight: 600; font-size: 14px; word-break: break-all; }
-                .address-value { font-family: monospace; background: #FFFFFF; padding: 4px 10px; border-radius: 4px; font-size: 12px; border: 1px solid #E5E7EB; }
-                .sign-off { margin-top: 32px; padding-top: 24px; border-top: 1px solid #E5E7EB; color: #6B7280; font-size: 15px; line-height: 1.6; }
-                @media only screen and (max-width: 600px) {
-                  .header { padding: 30px 20px; }
-                  .content { padding: 30px 20px; }
-                  .crypto-header { flex-direction: column; text-align: center; }
-                  .detail-row { flex-direction: column; gap: 6px; }
-                  .greeting { font-size: 24px; }
-                  .approved-amount { font-size: 32px; }
-                }
-              </style>
-          </head>
-          <body style="background-color: #F9FAFB; margin: 0; padding: 0;">
-            <div class="email-container">
-              <div class="header">
-                <div class="logo-container">
-                  <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Capital" class="logo-img">
-                  <span class="logo-text">BitHash Capital</span>
-                </div>
-              </div>
-              <div class="content">
-                <h1 class="greeting">Withdrawal Approved</h1>
-                <p class="message">Hello ${user.firstName || 'there'}, your ${getAssetDisplayName(data.asset)} withdrawal has been approved and processed successfully.</p>
-                
-                <div class="crypto-header">
-                  <div class="crypto-icon">
-                    <img src="${getCryptoLogo(data.asset)}" alt="${data.asset || 'BTC'}" onerror="this.style.display='none'">
-                  </div>
-                  <div>
-                    <div class="crypto-name">${(data.asset || 'Bitcoin').toUpperCase()}</div>
-                    <div class="crypto-network">Network: ${data.network || (data.asset === 'USDT' ? 'ERC-20' : data.asset === 'BTC' ? 'Bitcoin' : 'Mainnet')}</div>
-                  </div>
-                </div>
-                
-                <div class="approved-box">
-                  <div style="color: #6B7280; font-size: 14px;">Amount Withdrawn</div>
-                  <div class="approved-amount">${formatAmount(data.amount, data.asset)} ${(data.asset || 'BTC').toUpperCase()}</div>
-                  <div style="color: #6B7280; font-size: 12px;">Transaction ID: ${data.txid || data.transactionHash || data.transactionId || 'Broadcasted to Network'}</div>
-                </div>
-                
-                <div class="transaction-details">
-                  <div class="detail-row">
-                    <span class="detail-label">Withdrawal Address:</span>
-                    <span class="detail-value address-value">${hideAddress(data.withdrawalAddress || data.address)}</span>
-                  </div>
-                  <div class="detail-row">
-                    <span class="detail-label">Network Fee:</span>
-                    <span class="detail-value">${formatAmount(data.fee, data.asset)} ${(data.asset || 'BTC').toUpperCase()} (≈ $${formatAmount(data.feeUsd)})</span>
-                  </div>
-                  <div class="detail-row">
-                    <span class="detail-label">Processed At:</span>
-                    <span class="detail-value">${formatTimestamp(data.processedAt)}</span>
-                  </div>
-                </div>
-                
-                <p class="message">The funds have been sent to your designated withdrawal address. Please allow time for the transaction to be confirmed on the blockchain.</p>
-                
-                <div class="sign-off">
-                  ${getSignOff('withdrawal_approved').replace(/\n/g, '<br>')}
-                </div>
-              </div>
-              ${getBrandedFooter('withdrawal_approved', user.email)}
-            </div>
-          </body>
-          </html>
-        `
-      },
-
-      // DEPOSIT APPROVED
-      deposit_approved: {
-        subject: 'Deposit Approved - BitHash Capital',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-              <title>Deposit Approved - BitHash Capital</title>
-              <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #F9FAFB; margin: 0; padding: 0; }
-                .email-container { width: 100%; margin: 0; background-color: #FFFFFF; }
-                .header { background-color: #0A0E17; padding: 40px 20px; text-align: center; width: 100%; border-bottom: 2px solid #00D8FF; }
-                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                .logo-img { width: 48px; height: 48px; border-radius: 50%; background: white; padding: 6px; }
-                .logo-text { font-size: 28px; font-weight: 800; color: #00D8FF; }
-                .content { padding: 40px 20px; background-color: #FFFFFF; max-width: 600px; margin: 0 auto; }
-                .greeting { font-size: 28px; font-weight: 700; color: #111827; margin-bottom: 16px; }
-                .message { color: #6B7280; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .approved-box { background-color: #F0FDF4; padding: 32px; text-align: center; border-radius: 8px; margin: 24px 0; border: 1px solid #BBF7D0; }
-                .approved-amount { font-size: 42px; font-weight: 800; color: #22C55E; margin: 12px 0; }
-                .transaction-details { background-color: #F9FAFB; padding: 28px; border-radius: 8px; margin: 24px 0; border: 1px solid #E5E7EB; }
-                .detail-row { display: flex; justify-content: space-between; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #E5E7EB; }
-                .detail-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
-                .detail-label { color: #9CA3AF; font-size: 14px; font-weight: 500; }
-                .detail-value { color: #111827; font-weight: 600; font-size: 14px; word-break: break-all; }
-                .cta-button { display: inline-block; padding: 12px 28px; background-color: #00D8FF; color: #0A0E17; font-weight: 700; font-size: 15px; text-decoration: none; border-radius: 4px; margin: 16px 0; }
-                .sign-off { margin-top: 32px; padding-top: 24px; border-top: 1px solid #E5E7EB; color: #6B7280; font-size: 15px; line-height: 1.6; }
-                @media only screen and (max-width: 600px) {
-                  .header { padding: 30px 20px; }
-                  .content { padding: 30px 20px; }
-                  .detail-row { flex-direction: column; gap: 6px; }
-                  .greeting { font-size: 24px; }
-                  .approved-amount { font-size: 32px; }
-                }
-              </style>
-          </head>
-          <body style="background-color: #F9FAFB; margin: 0; padding: 0;">
-            <div class="email-container">
-              <div class="header">
-                <div class="logo-container">
-                  <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Capital" class="logo-img">
-                  <span class="logo-text">BitHash Capital</span>
-                </div>
-              </div>
-              <div class="content">
-                <h1 class="greeting">Deposit Approved</h1>
-                <p class="message">Hello ${user.firstName || 'there'}, your deposit has been approved and credited to your account.</p>
-                
-                <div class="approved-box">
-                  <div style="color: #6B7280; font-size: 14px;">Amount Deposited</div>
-                  <div class="approved-amount">$${formatAmount(data.amount)}</div>
-                  <div style="color: #6B7280; font-size: 12px;">Reference: ${data.reference || 'Deposit Reference'}</div>
-                </div>
-                
-                <div class="transaction-details">
-                  <div class="detail-row">
-                    <span class="detail-label">Payment Method:</span>
-                    <span class="detail-value">${data.method || 'Bank Transfer'}</span>
-                  </div>
-                  <div class="detail-row">
-                    <span class="detail-label">New Balance:</span>
-                    <span class="detail-value">$${formatAmount(data.newBalance)}</span>
-                  </div>
-                  <div class="detail-row">
-                    <span class="detail-label">Processed At:</span>
-                    <span class="detail-value">${formatTimestamp(data.processedAt)}</span>
-                  </div>
-                </div>
-                
-                <div style="text-align: center;">
-                  <a href="https://www.bithashcapital.live/dashboard.html" class="cta-button" style="display: inline-block; padding: 12px 28px; background-color: #00D8FF; color: #0A0E17; font-weight: 700; font-size: 15px; text-decoration: none; border-radius: 4px;">View Dashboard</a>
-                </div>
-                
-                <div class="sign-off">
-                  ${getSignOff('deposit_approved').replace(/\n/g, '<br>')}
-                </div>
-              </div>
-              ${getBrandedFooter('deposit_approved', user.email)}
-            </div>
-          </body>
-          </html>
-        `
-      },
-
-      // DEPOSIT REJECTED
-      deposit_rejected: {
-        subject: 'Deposit Rejected - BitHash Capital',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-              <title>Deposit Rejected - BitHash Capital</title>
-              <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #F9FAFB; margin: 0; padding: 0; }
-                .email-container { width: 100%; margin: 0; background-color: #FFFFFF; }
-                .header { background-color: #0A0E17; padding: 40px 20px; text-align: center; width: 100%; border-bottom: 2px solid #00D8FF; }
-                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                .logo-img { width: 48px; height: 48px; border-radius: 50%; background: white; padding: 6px; }
-                .logo-text { font-size: 28px; font-weight: 800; color: #00D8FF; }
-                .content { padding: 40px 20px; background-color: #FFFFFF; max-width: 600px; margin: 0 auto; }
-                .greeting { font-size: 28px; font-weight: 700; color: #111827; margin-bottom: 16px; }
-                .message { color: #6B7280; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .rejected-box { background-color: #FEF2F2; padding: 32px; text-align: center; border-radius: 8px; margin: 24px 0; border: 1px solid #FECACA; }
-                .rejected-amount { font-size: 42px; font-weight: 800; color: #DC2626; margin: 12px 0; }
-                .reason-box { background-color: #FEF2F2; padding: 24px; border-radius: 8px; margin: 24px 0; }
-                .reason-box p { color: #991B1B; font-size: 14px; line-height: 1.6; }
-                .support-link { background-color: #EF4444; color: white; padding: 12px 28px; text-decoration: none; display: inline-block; font-weight: 700; font-size: 15px; border-radius: 4px; margin: 16px 0; }
-                .sign-off { margin-top: 32px; padding-top: 24px; border-top: 1px solid #E5E7EB; color: #6B7280; font-size: 15px; line-height: 1.6; }
-                @media only screen and (max-width: 600px) {
-                  .header { padding: 30px 20px; }
-                  .content { padding: 30px 20px; }
-                  .greeting { font-size: 24px; }
-                  .rejected-amount { font-size: 32px; }
-                }
-              </style>
-          </head>
-          <body style="background-color: #F9FAFB; margin: 0; padding: 0;">
-            <div class="email-container">
-              <div class="header">
-                <div class="logo-container">
-                  <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Capital" class="logo-img">
-                  <span class="logo-text">BitHash Capital</span>
-                </div>
-              </div>
-              <div class="content">
-                <h1 class="greeting">Deposit Rejected</h1>
-                <p class="message">Hello ${user.firstName || 'there'}, your deposit request has been reviewed and rejected.</p>
-                
-                <div class="rejected-box">
-                  <div style="color: #6B7280; font-size: 14px;">Amount</div>
-                  <div class="rejected-amount">$${formatAmount(data.amount)}</div>
-                  <div style="color: #6B7280; font-size: 12px;">Method: ${data.method || 'Bank Transfer'}</div>
-                </div>
-                
+                <h2>KYC Verification Update</h2>
+                <p>Dear ${data.name || user.firstName},</p>
                 <div class="reason-box">
-                  <strong>Rejection Reason:</strong>
-                  <p>${data.reason || 'The deposit could not be processed due to verification issues. Please contact support for assistance.'}</p>
+                  <p>Your KYC verification could not be approved at this time.</p>
+                  <p><strong>Reason:</strong> ${data.reason}</p>
                 </div>
-                
-                <p class="message">If you have any questions, please contact our support team.</p>
-                
-                <div style="text-align: center;">
-                  <a href="https://www.bithashcapital.live/support.html" class="support-link" style="background-color: #EF4444; color: white; padding: 12px 28px; text-decoration: none; display: inline-block; font-weight: 700; font-size: 15px; border-radius: 4px;">Contact Support</a>
-                </div>
-                
-                <div class="sign-off">
-                  ${getSignOff('deposit_rejected').replace(/\n/g, '<br>')}
-                </div>
+                <p>Please review the information provided and resubmit your KYC documents. Our support team is available to assist you with any questions.</p>
+                <a href="${baseUrl}/kyc" class="btn">Resubmit KYC</a>
               </div>
-              ${getBrandedFooter('deposit_rejected', user.email)}
+              <div class="footer">
+                <p>BitHash Capital Compliance Team</p>
+                <p>&copy; ${new Date().getFullYear()} BitHash Capital. All rights reserved.</p>
+              </div>
             </div>
           </body>
           </html>
         `
-      },
-
-      // WITHDRAWAL REJECTED
-      withdrawal_rejected: {
-        subject: 'Withdrawal Request Rejected - BitHash Capital',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-              <title>Withdrawal Rejected - BitHash Capital</title>
-              <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #F9FAFB; margin: 0; padding: 0; }
-                .email-container { width: 100%; margin: 0; background-color: #FFFFFF; }
-                .header { background-color: #0A0E17; padding: 40px 20px; text-align: center; width: 100%; border-bottom: 2px solid #00D8FF; }
-                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                .logo-img { width: 48px; height: 48px; border-radius: 50%; background: white; padding: 6px; }
-                .logo-text { font-size: 28px; font-weight: 800; color: #00D8FF; }
-                .content { padding: 40px 20px; background-color: #FFFFFF; max-width: 600px; margin: 0 auto; }
-                .greeting { font-size: 28px; font-weight: 700; color: #111827; margin-bottom: 16px; }
-                .message { color: #6B7280; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .rejected-box { background-color: #FEF2F2; padding: 32px; text-align: center; border-radius: 8px; margin: 24px 0; border: 1px solid #FECACA; }
-                .rejected-amount { font-size: 42px; font-weight: 800; color: #DC2626; margin: 12px 0; }
-                .reason-box { background-color: #FEF2F2; padding: 24px; border-radius: 8px; margin: 24px 0; }
-                .reason-box p { color: #991B1B; font-size: 14px; line-height: 1.6; }
-                .support-link { background-color: #EF4444; color: white; padding: 12px 28px; text-decoration: none; display: inline-block; font-weight: 700; font-size: 15px; border-radius: 4px; margin: 16px 0; }
-                .sign-off { margin-top: 32px; padding-top: 24px; border-top: 1px solid #E5E7EB; color: #6B7280; font-size: 15px; line-height: 1.6; }
-                @media only screen and (max-width: 600px) {
-                  .header { padding: 30px 20px; }
-                  .content { padding: 30px 20px; }
-                  .greeting { font-size: 24px; }
-                  .rejected-amount { font-size: 32px; }
-                }
-              </style>
-          </head>
-          <body style="background-color: #F9FAFB; margin: 0; padding: 0;">
-            <div class="email-container">
-              <div class="header">
-                <div class="logo-container">
-                  <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Capital" class="logo-img">
-                  <span class="logo-text">BitHash Capital</span>
-                </div>
-              </div>
-              <div class="content">
-                <h1 class="greeting">Withdrawal Rejected</h1>
-                <p class="message">Hello ${user.firstName || 'there'}, your withdrawal request has been reviewed and rejected.</p>
-                
-                <div class="rejected-box">
-                  <div style="color: #6B7280; font-size: 14px;">Amount</div>
-                  <div class="rejected-amount">$${formatAmount(data.amount)}</div>
-                  <div style="color: #6B7280; font-size: 12px;">Method: ${data.method || 'Crypto Withdrawal'}</div>
-                </div>
-                
-                <div class="reason-box">
-                  <strong>Rejection Reason:</strong>
-                  <p>${data.reason || 'The withdrawal could not be processed due to security verification issues. Please ensure your KYC is completed and try again.'}</p>
-                </div>
-                
-                <p class="message">The funds have been returned to your balance. If you have any questions, please contact our support team.</p>
-                
-                <div style="text-align: center;">
-                  <a href="https://www.bithashcapital.live/support.html" class="support-link" style="background-color: #EF4444; color: white; padding: 12px 28px; text-decoration: none; display: inline-block; font-weight: 700; font-size: 15px; border-radius: 4px;">Contact Support</a>
-                </div>
-                
-                <div class="sign-off">
-                  ${getSignOff('withdrawal_rejected').replace(/\n/g, '<br>')}
-                </div>
-              </div>
-              ${getBrandedFooter('withdrawal_rejected', user.email)}
-            </div>
-          </body>
-          </html>
-        `
-      },
-
-      // KYC APPROVED
-      kyc_approved: {
-        subject: 'KYC Verification Approved - BitHash Capital',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-              <title>KYC Approved - BitHash Capital</title>
-              <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #F9FAFB; margin: 0; padding: 0; }
-                .email-container { width: 100%; margin: 0; background-color: #FFFFFF; }
-                .header { background-color: #0A0E17; padding: 40px 20px; text-align: center; width: 100%; border-bottom: 2px solid #00D8FF; }
-                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                .logo-img { width: 48px; height: 48px; border-radius: 50%; background: white; padding: 6px; }
-                .logo-text { font-size: 28px; font-weight: 800; color: #00D8FF; }
-                .content { padding: 40px 20px; background-color: #FFFFFF; max-width: 600px; margin: 0 auto; }
-                .greeting { font-size: 28px; font-weight: 700; color: #111827; margin-bottom: 16px; }
-                .message { color: #6B7280; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .success-box { background-color: #F0FDF4; padding: 32px; text-align: center; border-radius: 8px; margin: 24px 0; border: 1px solid #BBF7D0; }
-                .check-icon { font-size: 72px; color: #22C55E; margin-bottom: 16px; font-weight: 700; }
-                .benefits-list { margin: 24px 0; background-color: #F9FAFB; padding: 24px; border-radius: 8px; border: 1px solid #E5E7EB; }
-                .benefit-item { display: flex; align-items: center; margin-bottom: 12px; color: #374151; }
-                .benefit-icon { color: #22C55E; margin-right: 12px; font-weight: bold; font-size: 18px; }
-                .cta-button { display: inline-block; padding: 12px 28px; background-color: #00D8FF; color: #0A0E17; font-weight: 700; font-size: 15px; text-decoration: none; border-radius: 4px; margin: 16px 0; }
-                .sign-off { margin-top: 32px; padding-top: 24px; border-top: 1px solid #E5E7EB; color: #6B7280; font-size: 15px; line-height: 1.6; }
-                @media only screen and (max-width: 600px) {
-                  .header { padding: 30px 20px; }
-                  .content { padding: 30px 20px; }
-                  .greeting { font-size: 24px; }
-                  .check-icon { font-size: 56px; }
-                }
-              </style>
-          </head>
-          <body style="background-color: #F9FAFB; margin: 0; padding: 0;">
-            <div class="email-container">
-              <div class="header">
-                <div class="logo-container">
-                  <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Capital" class="logo-img">
-                  <span class="logo-text">BitHash Capital</span>
-                </div>
-              </div>
-              <div class="content">
-                <h1 class="greeting">KYC Approved</h1>
-                <p class="message">Hello ${user.firstName || 'there'}, congratulations! Your KYC verification has been approved.</p>
-                
-                <div class="success-box">
-                  <div class="check-icon">✓</div>
-                  <div style="font-size: 22px; font-weight: 800; color: #166534;">Identity Verified</div>
-                  <p style="color: #15803D; margin-top: 8px;">Your account is now fully verified</p>
-                </div>
-                
-                <div class="benefits-list">
-                  <div class="benefit-item"><span class="benefit-icon">✓</span> Increased withdrawal limits</div>
-                  <div class="benefit-item"><span class="benefit-icon">✓</span> Access to all investment plans</div>
-                  <div class="benefit-item"><span class="benefit-icon">✓</span> Priority customer support</div>
-                  <div class="benefit-item"><span class="benefit-icon">✓</span> Faster transaction processing</div>
-                </div>
-                
-                <div style="text-align: center;">
-                  <a href="https://www.bithashcapital.live/dashboard.html" class="cta-button" style="display: inline-block; padding: 12px 28px; background-color: #00D8FF; color: #0A0E17; font-weight: 700; font-size: 15px; text-decoration: none; border-radius: 4px;">Go to Dashboard</a>
-                </div>
-                
-                <div class="sign-off">
-                  ${getSignOff('kyc_approved').replace(/\n/g, '<br>')}
-                </div>
-              </div>
-              ${getBrandedFooter('kyc_approved', user.email)}
-            </div>
-          </body>
-          </html>
-        `
-      },
-
-      // KYC REJECTED
-      kyc_rejected: {
-        subject: 'KYC Verification Update - BitHash Capital',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-              <title>KYC Update - BitHash Capital</title>
-              <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #F9FAFB; margin: 0; padding: 0; }
-                .email-container { width: 100%; margin: 0; background-color: #FFFFFF; }
-                .header { background-color: #0A0E17; padding: 40px 20px; text-align: center; width: 100%; border-bottom: 2px solid #00D8FF; }
-                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                .logo-img { width: 48px; height: 48px; border-radius: 50%; background: white; padding: 6px; }
-                .logo-text { font-size: 28px; font-weight: 800; color: #00D8FF; }
-                .content { padding: 40px 20px; background-color: #FFFFFF; max-width: 600px; margin: 0 auto; }
-                .greeting { font-size: 28px; font-weight: 700; color: #111827; margin-bottom: 16px; }
-                .message { color: #6B7280; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .rejected-box { background-color: #FEF2F2; padding: 32px; text-align: center; border-radius: 8px; margin: 24px 0; border: 1px solid #FECACA; }
-                .reason-box { background-color: #FEF2F2; padding: 24px; border-radius: 8px; margin: 24px 0; }
-                .reason-box p { color: #991B1B; font-size: 14px; line-height: 1.6; }
-                .cta-button { display: inline-block; padding: 12px 28px; background-color: #00D8FF; color: #0A0E17; font-weight: 700; font-size: 15px; text-decoration: none; border-radius: 4px; margin: 16px 0; }
-                .sign-off { margin-top: 32px; padding-top: 24px; border-top: 1px solid #E5E7EB; color: #6B7280; font-size: 15px; line-height: 1.6; }
-                @media only screen and (max-width: 600px) {
-                  .header { padding: 30px 20px; }
-                  .content { padding: 30px 20px; }
-                  .greeting { font-size: 24px; }
-                }
-              </style>
-          </head>
-          <body style="background-color: #F9FAFB; margin: 0; padding: 0;">
-            <div class="email-container">
-              <div class="header">
-                <div class="logo-container">
-                  <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Capital" class="logo-img">
-                  <span class="logo-text">BitHash Capital</span>
-                </div>
-              </div>
-              <div class="content">
-                <h1 class="greeting">KYC Update Required</h1>
-                <p class="message">Hello ${user.firstName || 'there'}, your KYC verification requires attention.</p>
-                
-                <div class="rejected-box">
-                  <div style="font-size: 56px; color: #DC2626;">!</div>
-                  <div style="font-size: 22px; font-weight: 800; color: #991B1B; margin-top: 8px;">Verification Issue</div>
-                </div>
-                
-                <div class="reason-box">
-                  <strong>Reason for Rejection:</strong>
-                  <p>${data.reason || 'The submitted documents could not be verified. Please ensure all documents are clear, valid, and match your account information.'}</p>
-                </div>
-                
-                <p class="message">Please resubmit your KYC documents with the correct information to continue enjoying full platform benefits.</p>
-                
-                <div style="text-align: center;">
-                  <a href="https://www.bithashcapital.live/kyc.html" class="cta-button" style="display: inline-block; padding: 12px 28px; background-color: #00D8FF; color: #0A0E17; font-weight: 700; font-size: 15px; text-decoration: none; border-radius: 4px;">Resubmit KYC</a>
-                </div>
-                
-                <div class="sign-off">
-                  ${getSignOff('kyc_rejected').replace(/\n/g, '<br>')}
-                </div>
-              </div>
-              ${getBrandedFooter('kyc_rejected', user.email)}
-            </div>
-          </body>
-          </html>
-        `
-      },
-
-      // GENERAL NOTIFICATION
-      general: {
-        subject: data.subject || 'BitHash Capital | Notification',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-              <title>Notification - BitHash Capital</title>
-              <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #F9FAFB; margin: 0; padding: 0; }
-                .email-container { width: 100%; margin: 0; background-color: #FFFFFF; }
-                .header { background-color: #0A0E17; padding: 40px 20px; text-align: center; width: 100%; border-bottom: 2px solid #00D8FF; }
-                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                .logo-img { width: 48px; height: 48px; border-radius: 50%; background: white; padding: 6px; }
-                .logo-text { font-size: 28px; font-weight: 800; color: #00D8FF; }
-                .content { padding: 40px 20px; background-color: #FFFFFF; max-width: 600px; margin: 0 auto; }
-                .greeting { font-size: 28px; font-weight: 700; color: #111827; margin-bottom: 16px; }
-                .message-content { background-color: #F9FAFB; padding: 28px; border-radius: 8px; margin: 24px 0; color: #1F2937; line-height: 1.6; font-size: 16px; border: 1px solid #E5E7EB; }
-                .cta-button { display: inline-block; padding: 12px 28px; background-color: #00D8FF; color: #0A0E17; font-weight: 700; font-size: 15px; text-decoration: none; border-radius: 4px; margin: 16px 0; }
-                .sign-off { margin-top: 32px; padding-top: 24px; border-top: 1px solid #E5E7EB; color: #6B7280; font-size: 15px; line-height: 1.6; }
-                @media only screen and (max-width: 600px) {
-                  .header { padding: 30px 20px; }
-                  .content { padding: 30px 20px; }
-                  .greeting { font-size: 24px; }
-                }
-              </style>
-          </head>
-          <body style="background-color: #F9FAFB; margin: 0; padding: 0;">
-            <div class="email-container">
-              <div class="header">
-                <div class="logo-container">
-                  <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Capital" class="logo-img">
-                  <span class="logo-text">BitHash Capital</span>
-                </div>
-              </div>
-              <div class="content">
-                <h1 class="greeting">Hello ${user.firstName || 'there'}</h1>
-                <div class="message-content">
-                  ${data.message || 'This is an important notification regarding your BitHash Capital account.'}
-                </div>
-                ${data.cta ? `
-                <div style="text-align: center;">
-                  <a href="${data.cta.url}" class="cta-button" style="display: inline-block; padding: 12px 28px; background-color: #00D8FF; color: #0A0E17; font-weight: 700; font-size: 15px; text-decoration: none; border-radius: 4px;">${data.cta.text}</a>
-                </div>
-                ` : ''}
-                <div class="sign-off">
-                  ${getSignOff('general').replace(/\n/g, '<br>')}
-                </div>
-              </div>
-              ${getBrandedFooter('general', user.email)}
-            </div>
-          </body>
-          </html>
-        `
-      }
+      };
+      
+      return templates[action] || templates.welcome;
     };
-
-    const template = templates[action];
-    if (!template) {
-      console.log(`Email template not found for action: ${action}`);
-      return;
-    }
-
-    // Determine which email to use for sending
-    let useSupportEmail = false;
     
-    // Use SUPPORT email for certain actions
-    if (action === 'withdrawal_request' || action === 'withdrawal_approved' || action === 'withdrawal_rejected' ||
-        action === 'deposit_approved' || action === 'deposit_rejected' || action === 'kyc_approved' || 
-        action === 'kyc_rejected' || action === 'support_ticket_created' || action === 'support_ticket_updated') {
-      useSupportEmail = true;
-    }
-
-    const mailOptions = {
-      from: `"BitHash Capital" <${useSupportEmail ? process.env.EMAIL_SUPPORT_USER : process.env.EMAIL_INFO_USER}>`,
-      to: user.email,
-      subject: template.subject,
-      html: template.html
-    };
-
-    const mailTransporter = useSupportEmail ? supportTransporter : infoTransporter;
-    await mailTransporter.sendMail(mailOptions);
-    console.log(`📧 ${action} email sent successfully to ${user.email} using ${useSupportEmail ? 'SUPPORT' : 'INFO'} email`);
+    const emailHtml = getEmailTemplate();
     
-    await logActivity('email_sent', 'notification', null, user._id, 'User', null, {
-      action: action,
-      email: user.email,
-      transporter: useSupportEmail ? 'SUPPORT' : 'INFO'
-    });
-
+    if (emailHtml) {
+      await sendEmail({
+        email: user.email,
+        subject: getEmailSubject(action, data),
+        html: emailHtml
+      });
+    }
   } catch (err) {
-    console.error(`❌ Error sending ${action} email:`, err);
+    console.error(`Error sending ${action} email:`, err);
   }
 };
 
-// Keep the sendProfessionalEmail function with the same professional styling
+function getEmailSubject(action, data) {
+  const subjects = {
+    welcome: 'Welcome to BitHash Capital',
+    login_success: 'New Login to Your BitHash Capital Account',
+    password_changed: 'Your BitHash Capital Password Has Been Changed',
+    password_reset: 'Reset Your BitHash Capital Password',
+    investment_created: 'Investment Created Successfully',
+    investment_matured: 'Investment Matured - Funds Available',
+    deposit_approved: 'Deposit Confirmed',
+    deposit_rejected: 'Deposit Update',
+    withdrawal_request: 'Withdrawal Request Received',
+    withdrawal_approved: 'Withdrawal Completed',
+    withdrawal_rejected: 'Withdrawal Update',
+    kyc_approved: 'KYC Verification Approved',
+    kyc_rejected: 'KYC Verification Update',
+    account_restricted: 'Account Restriction Applied',
+    suspicious_login: 'Security Alert - Suspicious Login Detected'
+  };
+  
+  return subjects[action] || 'Update from BitHash Capital';
+}
+
 const sendProfessionalEmail = async (options) => {
   try {
-    const { email, subject, template, data } = options;
+    const { email, template, data } = options;
     
-    const hideAddress = (address) => {
-      if (!address || address === 'N/A' || address === 'Unknown' || address === '') {
-        return 'Not Provided';
-      }
-      if (address.length <= 12) return address;
-      return address.substring(0, 6) + '*************' + address.substring(address.length - 6);
-    };
-
-    const formatTimestamp = (timestamp) => {
-      if (!timestamp) return new Date().toLocaleString('en-US', { timeZone: 'UTC', dateStyle: 'full', timeStyle: 'medium' }) + ' UTC';
-      return new Date(timestamp).toLocaleString('en-US', { timeZone: 'UTC', dateStyle: 'full', timeStyle: 'medium' }) + ' UTC';
-    };
-
-    const formatAmount = (amount, asset) => {
-      if (!amount && amount !== 0) return '0.00';
-      const isCrypto = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'ADA'].includes(asset?.toUpperCase());
-      if (isCrypto) {
-        return amount.toFixed(8);
-      }
-      return amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    };
-    
-    // Helper function to get sign-off based on email type for professional emails
-    const getProfessionalSignOff = (templateType) => {
-      const securityTemplates = ['otp', 'password_reset'];
-      const welcomeTemplates = ['welcome'];
-      
-      if (securityTemplates.includes(templateType)) {
-        return `Stay secure,\nThe BitHash Capital Security Team`;
-      } else if (welcomeTemplates.includes(templateType)) {
-        return `Welcome to BitHash Capital,\nThe BitHash Capital Team`;
-      } else {
-        return `Best regards,\nThe BitHash Capital Team`;
-      }
-    };
-    
-    // Helper function to get branded footer for professional emails
-    const getProfessionalBrandedFooter = (templateType, userEmail) => {
-      return `
-        <div style="background-color: #111827; padding: 40px 0 30px; text-align: center; width: 100%;">
-          <div style="max-width: 600px; margin: 0 auto; padding: 0 20px;">
-            <div style="margin-bottom: 24px;">
-              <div style="display: inline-flex; align-items: center; gap: 8px; margin-bottom: 16px;">
-                <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Capital" style="width: 32px; height: 32px; border-radius: 50%;">
-                <span style="font-size: 18px; font-weight: 700; color: #00D8FF;">BitHash Capital</span>
-              </div>
-              <p style="color: #9CA3AF; font-size: 12px; line-height: 1.6; margin-bottom: 20px;">
-                Institutional-grade Bitcoin mining and investment platform. Secure, transparent, and profitable.
-              </p>
+    const templates = {
+      otp: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <style>
+            body { margin: 0; padding: 0; background-color: #0B0E11; font-family: 'Inter', Arial, sans-serif; }
+            .container { max-width: 600px; margin: 0 auto; background-color: #11151C; border-radius: 12px; overflow: hidden; }
+            .header { background: linear-gradient(135deg, #F7A600 0%, #E69500 100%); padding: 30px 20px; text-align: center; }
+            .logo { font-family: 'Rowdies', cursive; font-size: 32px; font-weight: 700; color: #000000; margin: 0; }
+            .logo span { color: #000000; }
+            .slogan { font-family: 'Domine', serif; font-weight: bold; font-style: italic; font-size: 14px; color: #000000; margin-top: 8px; }
+            .content { padding: 30px; color: #FFFFFF; }
+            h2 { color: #F7A600; margin-bottom: 20px; font-size: 24px; }
+            .otp-code { font-size: 36px; font-weight: bold; text-align: center; letter-spacing: 10px; background: #1B222C; padding: 20px; border-radius: 8px; margin: 20px 0; font-family: monospace; color: #F7A600; }
+            .footer { background: #0B0E11; padding: 20px; text-align: center; color: #6C7480; font-size: 12px; border-top: 1px solid #1E2329; }
+            @media (max-width: 600px) {
+              .container { width: 100%; border-radius: 0; }
+              .content { padding: 20px; }
+              .otp-code { font-size: 28px; letter-spacing: 5px; }
+            }
+          </style>
+        </head>
+        <body style="margin: 0; padding: 20px; background-color: #0B0E11;">
+          <div class="container">
+            <div class="header">
+              <h1 class="logo"><span>₿</span>itHash</h1>
+              <div class="slogan"><i>Where Your Financial Goals Become Reality</i></div>
             </div>
-            
-            <div style="margin-bottom: 24px;">
-              <a href="https://www.bithashcapital.live/dashboard.html" style="color: #00D8FF; text-decoration: none; margin: 0 12px; font-size: 12px;">Dashboard</a>
-              <span style="color: #374151;">|</span>
-              <a href="https://www.bithashcapital.live/support.html" style="color: #00D8FF; text-decoration: none; margin: 0 12px; font-size: 12px;">Support</a>
-              <span style="color: #374151;">|</span>
-              <a href="https://www.bithashcapital.live/security.html" style="color: #00D8FF; text-decoration: none; margin: 0 12px; font-size: 12px;">Security</a>
+            <div class="content">
+              <h2>Verification Code</h2>
+              <p>Dear ${data.name},</p>
+              <p>You have requested a verification code for ${data.action}. Please use the code below to complete your request.</p>
+              <div class="otp-code">${data.otp}</div>
+              <p>This code will expire in 5 minutes. If you did not request this code, please ignore this email or contact our support team.</p>
             </div>
-            
-            <div style="border-top: 1px solid #1F2937; padding-top: 20px; margin-top: 20px;">
-              <p style="color: #6B7280; font-size: 11px; line-height: 1.5; margin-bottom: 8px;">
-                &copy; 2024 BitHash Capital. All rights reserved.<br>
-                Registered in Delaware, USA. FINRA/SIPC Member.
-              </p>
-              <p style="color: #6B7280; font-size: 10px; line-height: 1.5;">
-                This email was sent to ${userEmail}. Need assistance? <a href="mailto:support@bithashcapital.live" style="color: #00D8FF; text-decoration: none;">support@bithashcapital.live</a>
-              </p>
+            <div class="footer">
+              <p>BitHash Capital Security Team</p>
+              <p>&copy; ${new Date().getFullYear()} BitHash Capital. All rights reserved.</p>
             </div>
           </div>
-        </div>
-      `;
+        </body>
+        </html>
+      `
     };
     
-    // Helper function to create professional buttons
-    const getProfessionalButton = (text, url) => {
-      return `
-        <a href="${url}" style="display: inline-block; padding: 12px 32px; background-color: #00D8FF; color: #0A0E17; font-weight: 600; font-size: 14px; text-decoration: none; border-radius: 4px; margin: 8px 0;">
-          ${text}
-        </a>
-      `;
-    };
-
-    const emailTemplates = {
-      welcome: {
-        subject: 'Welcome to BitHash Capital - Your Mining Journey Begins',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-              <title>Welcome to BitHash Capital</title>
-              <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #F9FAFB; margin: 0; padding: 0; }
-                .email-container { width: 100%; margin: 0; background-color: #FFFFFF; }
-                .header { background-color: #0A0E17; padding: 40px 20px; text-align: center; width: 100%; border-bottom: 2px solid #00D8FF; }
-                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                .logo-img { width: 48px; height: 48px; border-radius: 50%; background: white; padding: 6px; }
-                .logo-text { font-size: 28px; font-weight: 800; color: #00D8FF; }
-                .content { padding: 40px 20px; background-color: #FFFFFF; max-width: 600px; margin: 0 auto; }
-                .greeting { font-size: 28px; font-weight: 700; color: #111827; margin-bottom: 16px; }
-                .message { color: #6B7280; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .features-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 32px 0; }
-                .feature-card { background-color: #F9FAFB; padding: 20px; border-radius: 8px; text-align: center; }
-                .feature-title { font-weight: 700; color: #00D8FF; margin-bottom: 8px; font-size: 16px; }
-                .feature-desc { color: #9CA3AF; font-size: 13px; line-height: 1.4; }
-                .benefits-list { margin: 24px 0; background-color: #F9FAFB; padding: 24px; border-radius: 8px; border: 1px solid #E5E7EB; }
-                .benefit-item { display: flex; align-items: center; margin-bottom: 12px; color: #374151; }
-                .benefit-icon { color: #22C55E; margin-right: 12px; font-weight: bold; font-size: 18px; }
-                .cta-button { display: inline-block; padding: 12px 32px; background-color: #00D8FF; color: #0A0E17; font-weight: 700; font-size: 16px; text-decoration: none; border-radius: 4px; margin: 20px 0; }
-                .security-note { background-color: #FEF3C7; padding: 20px; border-radius: 8px; margin: 24px 0; }
-                .sign-off { margin-top: 32px; padding-top: 24px; border-top: 1px solid #E5E7EB; color: #6B7280; font-size: 15px; line-height: 1.6; }
-                @media only screen and (max-width: 600px) {
-                  .header { padding: 30px 20px; }
-                  .content { padding: 30px 20px; }
-                  .features-grid { grid-template-columns: 1fr; gap: 12px; }
-                  .greeting { font-size: 24px; }
-                }
-              </style>
-          </head>
-          <body style="background-color: #F9FAFB; margin: 0; padding: 0;">
-            <div class="email-container">
-              <div class="header">
-                <div class="logo-container">
-                  <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Capital" class="logo-img">
-                  <span class="logo-text">BitHash Capital</span>
-                </div>
-              </div>
-              <div class="content">
-                <h1 class="greeting">Welcome, ${data.firstName || 'Valued Investor'}</h1>
-                <p class="message">Welcome to BitHash Capital! We're excited to have you join our community of professional Bitcoin miners and investors.</p>
-                
-                <div class="features-grid">
-                  <div class="feature-card">
-                    <div class="feature-title">Cloud Mining</div>
-                    <div class="feature-desc">Start mining Bitcoin instantly with enterprise-grade infrastructure</div>
-                  </div>
-                  <div class="feature-card">
-                    <div class="feature-title">Smart Investment</div>
-                    <div class="feature-desc">Optimized mining plans with competitive returns</div>
-                  </div>
-                  <div class="feature-card">
-                    <div class="feature-title">Secure Platform</div>
-                    <div class="feature-desc">Enterprise-grade security protecting your assets</div>
-                  </div>
-                  <div class="feature-card">
-                    <div class="feature-title">24/7 Support</div>
-                    <div class="feature-desc">Dedicated support team always available</div>
-                  </div>
-                </div>
-                
-                <div class="benefits-list">
-                  <div class="benefit-item"><span class="benefit-icon">✓</span> Access enterprise-grade Bitcoin mining infrastructure</div>
-                  <div class="benefit-item"><span class="benefit-icon">✓</span> Invest in optimized mining plans with competitive returns</div>
-                  <div class="benefit-item"><span class="benefit-icon">✓</span> Monitor your mining operations in real-time</div>
-                  <div class="benefit-item"><span class="benefit-icon">✓</span> Earn referral bonuses by expanding our mining community</div>
-                </div>
-                
-                <div style="text-align: center;">
-                  ${getProfessionalButton('Start Mining Now', 'https://www.bithashcapital.live/dashboard.html')}
-                </div>
-                
-                <div class="security-note">
-                  <strong>Security Notice:</strong> Enable two-factor authentication and use strong, unique passwords to protect your account.
-                </div>
-                
-                <div class="sign-off">
-                  ${getProfessionalSignOff('welcome').replace(/\n/g, '<br>')}
-                </div>
-              </div>
-              ${getProfessionalBrandedFooter('welcome', email)}
-            </div>
-          </body>
-          </html>
-        `
-      },
-      
-      otp: {
-        subject: 'BitHash Capital - Verification Code Required',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-              <title>Verification Code - BitHash Capital</title>
-              <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #F9FAFB; margin: 0; padding: 0; }
-                .email-container { width: 100%; margin: 0; background-color: #FFFFFF; }
-                .header { background-color: #0A0E17; padding: 40px 20px; text-align: center; width: 100%; border-bottom: 2px solid #00D8FF; }
-                .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; }
-                .logo-img { width: 48px; height: 48px; border-radius: 50%; background: white; padding: 6px; }
-                .logo-text { font-size: 28px; font-weight: 800; color: #00D8FF; }
-                .content { padding: 40px 20px; background-color: #FFFFFF; max-width: 600px; margin: 0 auto; text-align: center; }
-                .greeting { font-size: 28px; font-weight: 700; color: #111827; margin-bottom: 16px; }
-                .message { color: #6B7280; line-height: 1.6; margin-bottom: 24px; font-size: 16px; }
-                .otp-code { background-color: #F9FAFB; padding: 32px; font-size: 48px; font-weight: 800; text-align: center; letter-spacing: 16px; margin: 24px 0; color: #00D8FF; font-family: 'Courier New', monospace; border-radius: 8px; border: 1px solid #E5E7EB; }
-                .security-note { background-color: #FEF2F2; padding: 20px; margin: 24px 0; border-radius: 8px; text-align: left; }
-                .security-note p { color: #991B1B; font-size: 14px; line-height: 1.6; }
-                .sign-off { margin-top: 32px; padding-top: 24px; border-top: 1px solid #E5E7EB; color: #6B7280; font-size: 15px; line-height: 1.6; text-align: left; }
-                @media only screen and (max-width: 600px) {
-                  .header { padding: 30px 20px; }
-                  .content { padding: 30px 20px; }
-                  .otp-code { font-size: 32px; letter-spacing: 8px; padding: 24px; }
-                  .greeting { font-size: 24px; }
-                }
-              </style>
-          </head>
-          <body style="background-color: #F9FAFB; margin: 0; padding: 0;">
-            <div class="email-container">
-              <div class="header">
-                <div class="logo-container">
-                  <img src="https://media.bithashcapital.live/circular_dark_background%20(1).png" alt="BitHash Capital" class="logo-img">
-                  <span class="logo-text">BitHash Capital</span>
-                </div>
-              </div>
-              <div class="content">
-                <h1 class="greeting">Verification Required</h1>
-                <p class="message">Hello ${data.name || 'there'}, please use the following verification code to complete your ${data.action || 'account verification'}:</p>
-                
-                <div class="otp-code">${data.otp}</div>
-                
-                <p class="message">This code will expire in 5 minutes for security purposes.</p>
-                
-                <div class="security-note">
-                  <p><strong>Security Notice:</strong> This verification code is valid for one-time use only. Do not share this code with anyone, including BitHash Capital support staff.</p>
-                </div>
-                
-                <p class="message">If you didn't request this code, please secure your account immediately and contact our support team.</p>
-                
-                <div class="sign-off">
-                  ${getProfessionalSignOff('otp').replace(/\n/g, '<br>')}
-                </div>
-              </div>
-              ${getProfessionalBrandedFooter('otp', email)}
-            </div>
-          </body>
-          </html>
-        `
-      }
-    };
-
-    const templateData = emailTemplates[template];
-    if (!templateData) {
-      throw new Error(`Template ${template} not found`);
+    const html = templates[template];
+    if (html) {
+      await sendEmail({
+        email: email,
+        subject: `Verification Code for ${data.action}`,
+        html: html
+      });
     }
-
-    // Determine which email to use for sending
-    let useSupportEmail = false;
-    
-    // Use SUPPORT email for security-related communications
-    if (template === 'otp' || template === 'password_reset') {
-      useSupportEmail = true;
-    }
-
-    const mailOptions = {
-      from: `"BitHash Capital" <${useSupportEmail ? process.env.EMAIL_SUPPORT_USER : process.env.EMAIL_INFO_USER}>`,
-      to: email,
-      subject: templateData.subject,
-      html: templateData.html
-    };
-
-    const mailTransporter = useSupportEmail ? supportTransporter : infoTransporter;
-    await mailTransporter.sendMail(mailOptions);
-    console.log(`Professional email sent successfully to ${email} using ${useSupportEmail ? 'SUPPORT' : 'INFO'} email`);
   } catch (err) {
     console.error('Error sending professional email:', err);
-    throw new Error('Failed to send email');
   }
 };
 
-
-
-
-
-
-
-
-
 // Routes
-
-
 
 // Enhanced Signup Endpoint with OTP - FIXED email handling
 app.post('/api/auth/signup', [
@@ -6190,10 +5364,8 @@ app.post('/api/auth/signup', [
   try {
     const { firstName, lastName, email, password, city, referralCode } = req.body;
 
-    // Use exact email for all operations
     const originalEmail = email;
 
-    // Check if email already exists - exact match only
     const existingUser = await User.findOne({ email: originalEmail });
     if (existingUser) {
       return res.status(400).json({
@@ -6208,15 +5380,12 @@ app.post('/api/auth/signup', [
     let referredByUser = null;
     let referralSource = 'organic';
 
-    // Handle referral code from URL parameter
     if (referralCode) {
       console.log('Processing referral code:', referralCode);
       
       let actualReferralCode = referralCode;
-      // Extract the last part of the referral code (format: BH-timestamp-random-checksum)
       if (referralCode.includes('-')) {
         const parts = referralCode.split('-');
-        // Reconstruct the full code format: BH-timestamp-random-checksum
         if (parts.length >= 4) {
           actualReferralCode = `${parts[0]}-${parts[1]}-${parts[2]}-${parts[3]}`;
         } else {
@@ -6232,24 +5401,23 @@ app.post('/api/auth/signup', [
       }
     }
 
-    // Create user with exact email - no normalization
     const newUser = await User.create({
       firstName,
       lastName,
-      email: originalEmail, // Store exact email as provided
+      email: originalEmail,
       password: hashedPassword,
       city,
       referralCode: newReferralCode,
       referredBy: referredByUser ? referredByUser._id : undefined,
-      isVerified: false // User needs to verify via OTP first
+      isVerified: false,
+      wallets: { main: 0, active: 0, matured: 0 }
     });
 
-    // Generate OTP with exact email
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
     await OTP.create({
-      email: originalEmail, // Exact email
+      email: originalEmail,
       otp,
       type: 'signup',
       expiresAt,
@@ -6257,9 +5425,8 @@ app.post('/api/auth/signup', [
       userAgent: req.headers['user-agent']
     });
 
-    // Send OTP email to exact email address
     await sendProfessionalEmail({
-      email: originalEmail, // Exact email
+      email: originalEmail,
       template: 'otp',
       data: {
         name: firstName,
@@ -6268,12 +5435,10 @@ app.post('/api/auth/signup', [
       }
     });
 
-    // Send welcome email to exact email address
     await sendAutomatedEmail(newUser, 'welcome', {
       firstName
     });
 
-    // Generate temporary token for OTP verification
     const tempToken = generateJWT(newUser._id);
 
     res.status(201).json({
@@ -6285,13 +5450,12 @@ app.post('/api/auth/signup', [
           id: newUser._id,
           firstName: newUser.firstName,
           lastName: newUser.lastName,
-          email: newUser.email, // Return exact email from database
+          email: newUser.email,
           needsVerification: true
         }
       }
     });
 
-    // Log activity
     await logActivity('signup_initiated', 'user', newUser._id, newUser._id, 'User', req);
 
   } catch (err) {
@@ -6302,10 +5466,6 @@ app.post('/api/auth/signup', [
     });
   }
 });
-
-
-
-
 
 // Validate referral code endpoint
 app.get('/api/referrals/validate/:code', async (req, res) => {
@@ -6321,10 +5481,8 @@ app.get('/api/referrals/validate/:code', async (req, res) => {
 
         let actualReferralCode = code;
         
-        // Handle BH-timestamp-random-checksum format
         if (code.includes('-')) {
             const parts = code.split('-');
-            // Reconstruct the full code format: BH-timestamp-random-checksum
             if (parts.length >= 4) {
                 actualReferralCode = `${parts[0]}-${parts[1]}-${parts[2]}-${parts[3]}`;
             } else {
@@ -6366,14 +5524,6 @@ app.get('/api/referrals/validate/:code', async (req, res) => {
     }
 });
 
-
-
-
-
-
-
-
-
 // Enhanced Login Endpoint with OTP - FIXED email handling
 app.post('/api/auth/login', [
   body('email').isEmail().withMessage('Please provide a valid email'),
@@ -6391,13 +5541,11 @@ app.post('/api/auth/login', [
   try {
     const { email, password, rememberMe } = req.body;
 
-    // Use exact email for lookup - no normalization
     const user = await User.findOne({ email }).select('+password +twoFactorAuth.secret');
     if (!user || !(await bcrypt.compare(password, user.password))) {
-      // Log failed attempt
       await logUserActivity(req, 'login_attempt', 'failed', {
         error: 'Invalid credentials',
-        email: email // Log exact email used
+        email: email
       });
       
       return res.status(401).json({
@@ -6419,13 +5567,11 @@ app.post('/api/auth/login', [
       });
     }
 
-    // Generate OTP for login
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
-    // Store OTP with exact email
     await OTP.create({
-      email: email, // Exact email from request
+      email: email,
       otp,
       type: 'login',
       expiresAt,
@@ -6433,9 +5579,8 @@ app.post('/api/auth/login', [
       userAgent: req.headers['user-agent']
     });
 
-    // Send OTP email to exact email address
     await sendProfessionalEmail({
-      email: email, // Exact email from request
+      email: email,
       template: 'otp',
       data: {
         name: user.firstName,
@@ -6444,7 +5589,6 @@ app.post('/api/auth/login', [
       }
     });
 
-    // ✅ CREATE LOG FOR LOGIN ATTEMPT
     const deviceInfo = await getUserDeviceInfo(req);
     await UserLog.create({
       user: user._id,
@@ -6456,9 +5600,11 @@ app.post('/api/auth/login', [
       ipAddress: deviceInfo.ip,
       userAgent: deviceInfo.device,
       deviceInfo: {
-        type: getDeviceType(req),
+        type: deviceInfo.deviceType,
         os: getOSFromUserAgent(req.headers['user-agent']),
-        browser: getBrowserFromUserAgent(req.headers['user-agent'])
+        browser: getBrowserFromUserAgent(req.headers['user-agent']),
+        deviceModel: deviceInfo.deviceModel,
+        deviceBrand: deviceInfo.deviceBrand
       },
       location: {
         ip: deviceInfo.ip,
@@ -6473,26 +5619,27 @@ app.post('/api/auth/login', [
       metadata: {
         email: email,
         loginMethod: 'password',
-        otpSent: true
+        otpSent: true,
+        deviceModel: deviceInfo.deviceModel,
+        deviceBrand: deviceInfo.deviceBrand
       }
     });
 
-    // ✅ SEND LOGIN ATTEMPT EMAIL
     try {
       await sendAutomatedEmail(user, 'login_success', {
         name: user.firstName,
-        device: deviceInfo.device,
+        device: `${deviceInfo.deviceBrand} ${deviceInfo.deviceModel}`.trim() || deviceInfo.device,
         location: deviceInfo.location,
         ip: deviceInfo.ip,
-        timestamp: new Date()
+        timestamp: new Date(),
+        deviceModel: deviceInfo.deviceModel,
+        deviceBrand: deviceInfo.deviceBrand
       });
-      console.log(`📧 Login attempt email sent to ${user.email}`);
+      console.log(`Login attempt email sent to ${user.email}`);
     } catch (emailError) {
       console.error('Failed to send login attempt email:', emailError);
-      // Don't fail the login if email fails
     }
 
-    // Generate temporary token for OTP verification
     const tempToken = generateJWT(user._id);
 
     res.status(200).json({
@@ -6505,13 +5652,13 @@ app.post('/api/auth/login', [
           id: user._id,
           firstName: user.firstName,
           lastName: user.lastName,
-          email: user.email // Return exact email from database
+          email: user.email
         }
       }
     });
 
     await logUserActivity(req, 'login_otp_sent', 'pending', {
-      email: email, // Log exact email used
+      email: email,
       userId: user._id
     }, user);
 
@@ -6520,7 +5667,7 @@ app.post('/api/auth/login', [
     
     await logUserActivity(req, 'login_error', 'failed', {
       error: err.message,
-      email: req.body.email // Log exact email used
+      email: req.body.email
     });
 
     res.status(500).json({
@@ -6530,13 +5677,12 @@ app.post('/api/auth/login', [
   }
 });
 
-
-
+// Google Auth Endpoint - Check if user exists before allowing signup
 app.post('/api/auth/google', async (req, res) => {
   try {
     console.log('Google auth request received');
     
-    const { credential } = req.body;
+    const { credential, isSignup = false } = req.body;
     
     if (!credential) {
       console.error('No credential provided');
@@ -6548,7 +5694,6 @@ app.post('/api/auth/google', async (req, res) => {
 
     console.log('Verifying Google token...');
 
-    // Verify the Google token
     let payload;
     try {
       const ticket = await googleClient.verifyIdToken({
@@ -6585,7 +5730,6 @@ app.post('/api/auth/google', async (req, res) => {
 
     console.log('Google auth successful for:', email);
 
-    // Use the EXACT email from Google - no normalization
     const originalEmail = email;
 
     let user;
@@ -6603,8 +5747,7 @@ app.post('/api/auth/google', async (req, res) => {
     }
 
     if (!user) {
-      // Create new user with Google auth using exact email
-      try {
+      if (isSignup) {
         const referralCode = generateReferralCode();
         user = await User.create({
           firstName: given_name || 'Google',
@@ -6613,44 +5756,32 @@ app.post('/api/auth/google', async (req, res) => {
           googleId: sub,
           isVerified: true,
           referralCode,
-          status: 'active'
+          status: 'active',
+          wallets: { main: 0, active: 0, matured: 0 }
         });
         isNewUser = true;
         console.log('New user created via Google:', originalEmail);
 
-        // Send welcome email
         try {
           await sendAutomatedEmail(user, 'welcome', {
             firstName: given_name || 'Google User'
           });
         } catch (emailError) {
           console.error('Welcome email failed:', emailError);
-          // Don't fail the request if email fails
         }
-      } catch (createError) {
-        console.error('User creation error:', createError);
-        return res.status(500).json({
-          status: 'error',
-          message: 'Failed to create user account'
+      } else {
+        return res.status(404).json({
+          status: 'fail',
+          message: 'No account found with this Google email. Please sign up first.'
         });
       }
     } else if (!user.googleId) {
-      // Existing user, add Google auth
-      try {
-        user.googleId = sub;
-        user.isVerified = true;
-        await user.save();
-        console.log('Existing user linked with Google:', originalEmail);
-      } catch (updateError) {
-        console.error('User update error:', updateError);
-        return res.status(500).json({
-          status: 'error',
-          message: 'Failed to link Google account'
-        });
-      }
+      user.googleId = sub;
+      user.isVerified = true;
+      await user.save();
+      console.log('Existing user linked with Google:', originalEmail);
     }
 
-    // Check if user is active
     if (user.status !== 'active') {
       return res.status(401).json({
         status: 'fail',
@@ -6658,7 +5789,6 @@ app.post('/api/auth/google', async (req, res) => {
       });
     }
 
-    // Generate OTP for Google sign-in
     try {
       const otp = Math.floor(100000 + Math.random() * 900000).toString();
       const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
@@ -6672,7 +5802,6 @@ app.post('/api/auth/google', async (req, res) => {
         userAgent: req.headers['user-agent']
       });
 
-      // Send OTP email
       await sendProfessionalEmail({
         email: originalEmail,
         template: 'otp',
@@ -6683,7 +5812,6 @@ app.post('/api/auth/google', async (req, res) => {
         }
       });
       
-      // ✅ CREATE LOG FOR GOOGLE LOGIN ATTEMPT
       const deviceInfo = await getUserDeviceInfo(req);
       await UserLog.create({
         user: user._id,
@@ -6695,9 +5823,11 @@ app.post('/api/auth/google', async (req, res) => {
         ipAddress: deviceInfo.ip,
         userAgent: deviceInfo.device,
         deviceInfo: {
-          type: getDeviceType(req),
+          type: deviceInfo.deviceType,
           os: getOSFromUserAgent(req.headers['user-agent']),
-          browser: getBrowserFromUserAgent(req.headers['user-agent'])
+          browser: getBrowserFromUserAgent(req.headers['user-agent']),
+          deviceModel: deviceInfo.deviceModel,
+          deviceBrand: deviceInfo.deviceBrand
         },
         location: {
           ip: deviceInfo.ip,
@@ -6713,44 +5843,47 @@ app.post('/api/auth/google', async (req, res) => {
           email: originalEmail,
           loginMethod: 'google',
           otpSent: true,
-          isNewUser: isNewUser
+          isNewUser: isNewUser,
+          deviceModel: deviceInfo.deviceModel,
+          deviceBrand: deviceInfo.deviceBrand
         }
       });
       
-      // ✅ SEND LOGIN ATTEMPT EMAIL FOR GOOGLE SIGN-IN
       try {
         await sendAutomatedEmail(user, 'login_success', {
           name: user.firstName,
-          device: deviceInfo.device,
+          device: `${deviceInfo.deviceBrand} ${deviceInfo.deviceModel}`.trim() || deviceInfo.device,
           location: deviceInfo.location,
           ip: deviceInfo.ip,
-          timestamp: new Date()
+          timestamp: new Date(),
+          deviceModel: deviceInfo.deviceModel,
+          deviceBrand: deviceInfo.deviceBrand
         });
-        console.log(`📧 Google login attempt email sent to ${user.email}`);
+        console.log(`Google login attempt email sent to ${user.email}`);
       } catch (emailError) {
         console.error('Failed to send Google login attempt email:', emailError);
       }
       
     } catch (otpError) {
       console.error('OTP creation error:', otpError);
-      // Continue even if OTP fails for now
     }
 
-    // Generate temporary token
     const tempToken = generateJWT(user._id);
 
-    // Update last login
     try {
       user.lastLogin = new Date();
       const deviceInfo = await getUserDeviceInfo(req);
-      user.loginHistory.push(deviceInfo);
+      user.loginHistory.push({
+        ip: deviceInfo.ip,
+        device: `${deviceInfo.deviceBrand} ${deviceInfo.deviceModel}`.trim() || deviceInfo.device,
+        location: deviceInfo.location,
+        timestamp: new Date()
+      });
       await user.save();
     } catch (updateError) {
       console.error('User update error:', updateError);
-      // Continue even if update fails
     }
 
-    // SUCCESS RESPONSE
     res.status(200).json({
       status: 'success',
       message: 'OTP sent to your email. Please verify to complete Google sign-in.',
@@ -6767,7 +5900,6 @@ app.post('/api/auth/google', async (req, res) => {
       }
     });
 
-    // Log activity (don't let this break the response)
     try {
       await logActivity('google_signin_otp_sent', 'user', user._id, user._id, 'User', req, {
         isNewUser,
@@ -6789,8 +5921,6 @@ app.post('/api/auth/google', async (req, res) => {
   }
 });
 
-
-
 app.post('/api/auth/forgot-password', [
   body('email').isEmail().withMessage('Please provide a valid email').normalizeEmail()
 ], async (req, res) => {
@@ -6807,7 +5937,6 @@ app.post('/api/auth/forgot-password', [
     const user = await User.findOne({ email });
 
     if (!user) {
-      // Return success even if user doesn't exist to prevent email enumeration
       return res.status(200).json({
         status: 'success',
         message: 'If your email is registered, you will receive a password reset link'
@@ -6882,7 +6011,6 @@ app.post('/api/auth/reset-password', [
 
     const newToken = generateJWT(user._id);
 
-    // Set cookie
     res.cookie('jwt', newToken, {
       expires: new Date(Date.now() + JWT_COOKIE_EXPIRES * 24 * 60 * 60 * 1000),
       httpOnly: true,
@@ -6890,12 +6018,11 @@ app.post('/api/auth/reset-password', [
       sameSite: 'strict'
     });
 
-    // Send password changed notification
     const deviceInfo = await getUserDeviceInfo(req);
     await sendAutomatedEmail(user, 'password_changed', {
       name: user.firstName,
       ip: deviceInfo.ip,
-      device: deviceInfo.device
+      device: `${deviceInfo.deviceBrand} ${deviceInfo.deviceModel}`.trim() || deviceInfo.device
     });
 
     res.status(200).json({
@@ -6914,12 +6041,7 @@ app.post('/api/auth/reset-password', [
   }
 });
 
-
-
-
-
-
-// Investment routes - ENHANCED VERSION WITH RESTRICTION CHECKS
+// Investment routes - ENHANCED VERSION WITH RESTRICTION CHECKS AND 48-HOUR LIMIT
 app.post('/api/investments', protect, [
   body('planId').notEmpty().withMessage('Plan ID is required').isMongoId().withMessage('Invalid Plan ID'),
   body('amount').isFloat({ min: 1 }).withMessage('Amount must be a positive number'),
@@ -6937,15 +6059,24 @@ app.post('/api/investments', protect, [
     const { planId, amount, balanceType } = req.body;
     const userId = req.user._id;
 
-    // ✅ CHECK RESTRICTIONS BEFORE ALLOWING INVESTMENT
+    // Check 48-hour restriction for investment limit
+    const investmentLimitBTC = 0.0056;
+    const restrictionCheck = await checkRestrictionExpiry(userId, 'investment_limit', investmentLimitBTC);
+    if (restrictionCheck.restricted && amount > restrictionCheck.limit) {
+      const expiresAt = new Date(restrictionCheck.expiresAt);
+      const hoursRemaining = Math.ceil((expiresAt - new Date()) / (1000 * 60 * 60));
+      return res.status(403).json({
+        status: 'fail',
+        message: `You cannot invest more than ${investmentLimitBTC} BTC within 48 hours. This restriction will expire in ${hoursRemaining} hours.`
+      });
+    }
+
     const restrictions = await AccountRestrictions.getInstance();
     const userRestrictionStatus = await UserRestrictionStatus.findOne({ user: userId });
     
-    // Get user's KYC status
     const kycStatus = await KYC.findOne({ user: userId });
     const hasKYC = kycStatus && kycStatus.overallStatus === 'verified';
     
-    // Get user's transaction history
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - (restrictions.inactivity_days || 30));
     const hasRecentTx = await Transaction.findOne({
@@ -6955,15 +6086,13 @@ app.post('/api/investments', protect, [
       createdAt: { $gte: cutoff }
     });
     
-    // Calculate limits
     let withdrawalLimit = null;
     let investmentLimit = null;
     let restrictionMessage = null;
     
-    // Check KYC restriction
     if (!hasKYC && (restrictions.withdraw_limit_no_kyc !== null || restrictions.invest_limit_no_kyc !== null)) {
       if (restrictions.invest_limit_no_kyc !== null && amount > restrictions.invest_limit_no_kyc) {
-        restrictionMessage = restrictions.kyc_restriction_reason || `Please complete your KYC verification. Investment limit without KYC: $${restrictions.invest_limit_no_kyc.toLocaleString()}`;
+        restrictionMessage = restrictions.kyc_restriction_reason || `Please complete your KYC verification. Investment limit without KYC: ${restrictions.invest_limit_no_kyc} BTC`;
         return res.status(403).json({
           status: 'fail',
           message: restrictionMessage,
@@ -6977,10 +6106,9 @@ app.post('/api/investments', protect, [
       investmentLimit = restrictions.invest_limit_no_kyc;
     }
     
-    // Check transaction restriction (no recent deposits/withdrawals)
     if (!hasRecentTx && (restrictions.withdraw_limit_no_txn !== null || restrictions.invest_limit_no_txn !== null)) {
       if (restrictions.invest_limit_no_txn !== null && amount > restrictions.invest_limit_no_txn) {
-        restrictionMessage = restrictions.txn_restriction_reason || `Please complete at least one deposit or withdrawal. Investment limit without transaction activity: $${restrictions.invest_limit_no_txn.toLocaleString()}`;
+        restrictionMessage = restrictions.txn_restriction_reason || `Please complete at least one deposit or withdrawal. Investment limit without transaction activity: ${restrictions.invest_limit_no_txn} BTC`;
         return res.status(403).json({
           status: 'fail',
           message: restrictionMessage,
@@ -6997,7 +6125,6 @@ app.post('/api/investments', protect, [
       }
     }
     
-    // If there's an active restriction in the database, enforce it
     if (userRestrictionStatus) {
       if (userRestrictionStatus.kyc_restricted && restrictions.invest_limit_no_kyc !== null && amount > restrictions.invest_limit_no_kyc) {
         restrictionMessage = userRestrictionStatus.kyc_restriction_reason || restrictions.kyc_restriction_reason;
@@ -7027,9 +6154,8 @@ app.post('/api/investments', protect, [
       }
     }
     
-    // If we have an investment limit from any restriction, enforce it
     if (investmentLimit !== null && amount > investmentLimit) {
-      restrictionMessage = `Your investment amount exceeds the current limit of $${investmentLimit.toLocaleString()}. Please complete KYC verification or make a deposit/withdrawal to increase your limit.`;
+      restrictionMessage = `Your investment amount exceeds the current limit of ${investmentLimit} BTC. Please complete KYC verification or make a deposit/withdrawal to increase your limit.`;
       return res.status(403).json({
         status: 'fail',
         message: restrictionMessage,
@@ -7041,7 +6167,6 @@ app.post('/api/investments', protect, [
       });
     }
 
-    // Verify plan exists and is active
     const plan = await Plan.findById(planId);
     if (!plan || !plan.isActive) {
       return res.status(400).json({
@@ -7050,7 +6175,6 @@ app.post('/api/investments', protect, [
       });
     }
 
-    // Verify amount is within plan limits
     if (amount < plan.minAmount || amount > plan.maxAmount) {
       return res.status(400).json({
         status: 'fail',
@@ -7058,9 +6182,8 @@ app.post('/api/investments', protect, [
       });
     }
 
-    // Verify user has sufficient balance in the selected balance type
     const user = await User.findById(userId);
-    const selectedBalance = user.balances[balanceType];
+    const selectedBalance = balanceType === 'main' ? user.wallets.main : user.wallets.matured;
     
     if (selectedBalance < amount) {
       return res.status(400).json({
@@ -7069,23 +6192,23 @@ app.post('/api/investments', protect, [
       });
     }
 
-    // Calculate investment amount after 3% fee
     const investmentFee = amount * 0.03;
     const investmentAmountAfterFee = amount - investmentFee;
 
-    // Calculate expected return based on the amount after fee
     const expectedReturn = investmentAmountAfterFee + (investmentAmountAfterFee * plan.percentage / 100);
     const endDate = new Date(Date.now() + plan.duration * 60 * 60 * 1000);
 
-    // Create investment
+    const btcPrice = await getCryptoPrice('BTC');
+    const btcAmount = investmentAmountAfterFee / btcPrice;
+
     const investment = await Investment.create({
       user: userId,
       plan: planId,
-      amount: investmentAmountAfterFee, // Store the amount after fee
-      originalAmount: amount, // Store original amount before fee
+      amount: investmentAmountAfterFee,
+      originalAmount: amount,
       originalCurrency: 'USD',
-      currency: 'USD',
-      expectedReturn,
+      currency: 'BTC',
+      expectedReturn: expectedReturn / btcPrice,
       returnPercentage: plan.percentage,
       endDate,
       payoutSchedule: 'end_term',
@@ -7094,21 +6217,24 @@ app.post('/api/investments', protect, [
       userAgent: req.headers['user-agent'],
       deviceInfo: getDeviceType(req),
       termsAccepted: true,
-      investmentFee: investmentFee, // Store the fee for record keeping
-      balanceType: balanceType // Store which balance was used
+      btcAmount: btcAmount,
+      btcPriceAtInvestment: btcPrice,
+      sourceWallet: balanceType
     });
 
-    // Deduct from user's selected balance (only the original amount)
-    user.balances[balanceType] -= amount;
-    user.balances.active += investmentAmountAfterFee; // Add the amount after fee to active balance
+    if (balanceType === 'main') {
+      user.wallets.main -= amount;
+    } else {
+      user.wallets.matured -= amount;
+    }
+    user.wallets.active += investmentAmountAfterFee;
     await user.save();
 
-    // Create transaction record for the investment with fee
     const transaction = await Transaction.create({
       user: userId,
       type: 'investment',
       amount: -amount,
-      currency: 'USD',
+      currency: 'BTC',
       status: 'completed',
       method: 'INTERNAL',
       reference: `INV-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
@@ -7117,17 +6243,18 @@ app.post('/api/investments', protect, [
         planName: plan.name,
         balanceType: balanceType,
         investmentFee: investmentFee,
-        amountAfterFee: investmentAmountAfterFee
+        amountAfterFee: investmentAmountAfterFee,
+        btcAmount: btcAmount,
+        btcPriceAtInvestment: btcPrice
       },
       fee: investmentFee,
       netAmount: -investmentAmountAfterFee
     });
 
-    // RECORD PLATFORM REVENUE
     await PlatformRevenue.create({
       source: 'investment_fee',
       amount: investmentFee,
-      currency: 'USD',
+      currency: 'BTC',
       transactionId: transaction._id,
       investmentId: investment._id,
       userId: userId,
@@ -7136,11 +6263,11 @@ app.post('/api/investments', protect, [
         planName: plan.name,
         originalAmount: amount,
         amountAfterFee: investmentAmountAfterFee,
-        feePercentage: 3
+        feePercentage: 3,
+        btcPriceAtInvestment: btcPrice
       }
     });
 
-    // ✅ CREATE LOG IN DATABASE FOR INVESTMENT CREATION
     const deviceInfo = await getUserDeviceInfo(req);
     await UserLog.create({
       user: userId,
@@ -7163,7 +6290,9 @@ app.post('/api/investments', protect, [
         },
         platform: req.headers['user-agent'] || 'Unknown',
         language: req.headers['accept-language'] || 'Unknown',
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        deviceModel: deviceInfo.deviceModel,
+        deviceBrand: deviceInfo.deviceBrand
       },
       location: {
         ip: getRealClientIP(req),
@@ -7193,6 +6322,8 @@ app.post('/api/investments', protect, [
         duration: plan.duration,
         roiPercentage: plan.percentage,
         endDate: endDate,
+        btcAmount: btcAmount,
+        btcPrice: btcPrice,
         restrictionStatusAtTime: {
           kyc_restricted: userRestrictionStatus?.kyc_restricted || false,
           transaction_restricted: userRestrictionStatus?.transaction_restricted || false,
@@ -7204,24 +6335,21 @@ app.post('/api/investments', protect, [
       relatedEntityModel: 'Investment'
     });
 
-    // ✅ CHECK FOR DOWNLINE COMMISSIONS
     await calculateReferralCommissions(investment);
 
-    // ✅ HANDLE DIRECT REFERRAL BONUS
     if (user.referredBy) {
-      const referralBonus = (amount * plan.referralBonus) / 100;
+      const referralBonusBTC = (btcAmount * plan.referralBonus) / 100;
       
-      // Update referring user's balance for direct referral bonus
       await User.findByIdAndUpdate(user.referredBy, {
         $inc: {
-          'balances.main': referralBonus,
-          'referralStats.totalEarnings': referralBonus,
-          'referralStats.availableBalance': referralBonus
+          'wallets.main': referralBonusBTC,
+          'referralStats.totalEarnings': referralBonusBTC,
+          'referralStats.availableBalance': referralBonusBTC
         },
         $push: {
           referralHistory: {
             referredUser: userId,
-            amount: referralBonus,
+            amount: referralBonusBTC,
             percentage: plan.referralBonus,
             level: 1,
             status: 'available',
@@ -7230,25 +6358,23 @@ app.post('/api/investments', protect, [
         }
       });
 
-      // Create referral commission record for direct referral
       await CommissionHistory.create({
         upline: user.referredBy,
         downline: userId,
         investment: investment._id,
-        investmentAmount: amount,
+        investmentAmount: btcAmount,
         commissionPercentage: plan.referralBonus,
-        commissionAmount: referralBonus,
+        commissionAmount: referralBonusBTC,
         roundNumber: 0,
         status: 'paid',
         paidAt: new Date()
       });
 
-      // Create transaction for direct referral bonus
       await Transaction.create({
         user: user.referredBy,
         type: 'referral',
-        amount: referralBonus,
-        currency: 'USD',
+        amount: referralBonusBTC,
+        currency: 'BTC',
         status: 'completed',
         method: 'INTERNAL',
         reference: `REF-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
@@ -7256,42 +6382,42 @@ app.post('/api/investments', protect, [
           referralFrom: userId,
           investmentId: investment._id,
           type: 'direct_referral',
-          bonusPercentage: plan.referralBonus
+          bonusPercentage: plan.referralBonus,
+          btcAmount: referralBonusBTC
         },
         fee: 0,
-        netAmount: referralBonus
+        netAmount: referralBonusBTC
       });
 
-      // Mark investment with referral info
       investment.referredBy = user.referredBy;
-      investment.referralBonusAmount = referralBonus;
+      investment.referralBonusAmount = referralBonusBTC;
       investment.referralBonusDetails = {
         percentage: plan.referralBonus,
         payoutDate: new Date()
       };
       await investment.save();
 
-      console.log(`🎁 Direct referral bonus of $${referralBonus} paid to ${user.referredBy}`);
+      console.log(`Direct referral bonus of ${referralBonusBTC} BTC paid to ${user.referredBy}`);
     }
 
-    // ✅ SEND INVESTMENT CREATION EMAIL
+    // Apply 48-hour restriction after investment
+    await applyRestriction(userId, 'investment_limit', investmentLimitBTC, 48);
+
     try {
       await sendAutomatedEmail(user, 'investment_created', {
         name: user.firstName,
         planName: plan.name,
-        amount: amount,
-        expectedReturn: expectedReturn,
+        amount: btcAmount,
+        expectedReturn: expectedReturn / btcPrice,
         duration: plan.duration,
         startDate: investment.startDate,
         endDate: investment.endDate
       });
-      console.log(`📧 Investment creation email sent to ${user.email}`);
+      console.log(`Investment creation email sent to ${user.email}`);
     } catch (emailError) {
       console.error('Failed to send investment creation email:', emailError);
-      // Don't fail the investment if email fails
     }
 
-    // Log activity
     await logActivity('create_investment', 'investment', investment._id, userId, 'User', req);
 
     res.status(201).json({
@@ -7301,6 +6427,7 @@ app.post('/api/investments', protect, [
           id: investment._id,
           plan: plan.name,
           amount: investment.amount,
+          btcAmount: btcAmount,
           originalAmount: investment.originalAmount,
           investmentFee: investmentFee,
           expectedReturn: investment.expectedReturn,
@@ -7313,7 +6440,6 @@ app.post('/api/investments', protect, [
   } catch (err) {
     console.error('Investment creation error:', err);
     
-    // Even on error, return success to frontend as requested
     res.status(200).json({
       status: 'success',
       message: 'Investment created successfully'
@@ -7321,17 +6447,11 @@ app.post('/api/investments', protect, [
   }
 });
 
-
-
-
-
-
 app.post('/api/investments/:id/complete', protect, async (req, res) => {
   try {
     const investmentId = req.params.id;
     const userId = req.user._id;
 
-    // Find the investment with more comprehensive query
     const investment = await Investment.findOne({ 
       _id: investmentId, 
       user: userId,
@@ -7345,7 +6465,6 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
       });
     }
 
-    // Enhanced completion check - ensure investment has actually matured
     const now = new Date();
     if (now < investment.endDate) {
       return res.status(400).json({
@@ -7354,7 +6473,6 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
       });
     }
 
-    // Find the user with proper session handling
     const user = await User.findById(userId);
     if (!user) {
       return res.status(404).json({
@@ -7363,42 +6481,35 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
       });
     }
 
-    // Calculate total return (principal + profit) - based on amount after fee
-    const totalReturn = investment.expectedReturn;
+    const totalReturnBTC = investment.expectedReturn;
 
-    // Enhanced balance transfer with validation
-    if (user.balances.active < investment.amount) {
+    if (user.wallets.active < investment.amount) {
       return res.status(400).json({
         status: 'fail',
         message: 'Insufficient active balance to complete investment'
       });
     }
 
-    // Use transaction to ensure atomic operation
     const session = await mongoose.startSession();
     session.startTransaction();
 
     try {
-      // Transfer from active to matured balance
-      user.balances.active -= investment.amount;
-      user.balances.matured += totalReturn;
+      user.wallets.active -= investment.amount;
+      user.wallets.matured += totalReturnBTC;
       
-      // Update investment status with completion details
       investment.status = 'completed';
       investment.completionDate = now;
-      investment.actualReturn = totalReturn - investment.amount;
+      investment.actualReturn = totalReturnBTC - investment.amount;
       investment.isProcessed = true;
 
-      // Save changes with session
       await user.save({ session });
       await investment.save({ session });
 
-      // Create transaction record for the return
       await Transaction.create([{
         user: userId,
         type: 'interest',
-        amount: totalReturn - investment.amount,
-        currency: 'USD',
+        amount: totalReturnBTC - investment.amount,
+        currency: 'BTC',
         status: 'completed',
         method: 'INTERNAL',
         reference: `RET-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
@@ -7406,15 +6517,15 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
           investmentId: investment._id,
           planName: investment.plan.name,
           principal: investment.amount,
-          interest: totalReturn - investment.amount,
+          interest: totalReturnBTC - investment.amount,
           originalInvestment: investment.originalAmount,
-          investmentFee: investment.investmentFee
+          investmentFee: investment.investmentFee,
+          btcAmount: totalReturnBTC
         },
         fee: 0,
-        netAmount: totalReturn - investment.amount
+        netAmount: totalReturnBTC - investment.amount
       }], { session });
 
-      // ✅ CREATE LOG IN DATABASE FOR INVESTMENT MATURITY
       const deviceInfo = await getUserDeviceInfo(req);
       await UserLog.create({
         user: userId,
@@ -7428,7 +6539,9 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
         deviceInfo: {
           type: getDeviceType(req),
           os: getOSFromUserAgent(req.headers['user-agent']),
-          browser: getBrowserFromUserAgent(req.headers['user-agent'])
+          browser: getBrowserFromUserAgent(req.headers['user-agent']),
+          deviceModel: deviceInfo.deviceModel,
+          deviceBrand: deviceInfo.deviceBrand
         },
         location: {
           ip: getRealClientIP(req),
@@ -7444,10 +6557,11 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
           planName: investment.plan.name,
           originalAmount: investment.originalAmount,
           amountAfterFee: investment.amount,
+          btcAmount: investment.btcAmount,
           investmentFee: investment.investmentFee,
           expectedReturn: investment.expectedReturn,
-          actualReturn: totalReturn,
-          profit: totalReturn - investment.amount,
+          actualReturn: totalReturnBTC,
+          profit: totalReturnBTC - investment.amount,
           startDate: investment.startDate,
           endDate: investment.endDate,
           completionDate: investment.completionDate
@@ -7456,24 +6570,21 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
         relatedEntityModel: 'Investment'
       });
 
-      // Commit transaction
       await session.commitTransaction();
       
-      // ✅ SEND INVESTMENT COMPLETION EMAIL
       try {
         await sendAutomatedEmail(user, 'investment_matured', {
           name: user.firstName,
           planName: investment.plan.name,
-          amount: investment.originalAmount,
-          totalReturn: totalReturn,
-          profit: totalReturn - investment.amount,
+          amount: investment.btcAmount,
+          totalReturn: totalReturnBTC,
+          profit: totalReturnBTC - investment.amount,
           completionDate: investment.completionDate,
-          newMaturedBalance: user.balances.matured
+          newMaturedBalance: user.wallets.matured
         });
-        console.log(`📧 Investment completion email sent to ${user.email}`);
+        console.log(`Investment completion email sent to ${user.email}`);
       } catch (emailError) {
         console.error('Failed to send investment completion email:', emailError);
-        // Don't fail the investment completion if email fails
       }
 
       res.status(200).json({
@@ -7483,14 +6594,14 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
             id: investment._id,
             status: investment.status,
             completionDate: investment.completionDate,
-            amountReturned: totalReturn,
-            profit: totalReturn - investment.amount,
+            amountReturned: totalReturnBTC,
+            profit: totalReturnBTC - investment.amount,
             originalInvestment: investment.originalAmount,
             investmentFee: investment.investmentFee
           },
-          balances: {
-            active: user.balances.active,
-            matured: user.balances.matured
+          wallets: {
+            active: user.wallets.active,
+            matured: user.wallets.matured
           }
         }
       });
@@ -7498,7 +6609,6 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
       await logActivity('complete_investment', 'investment', investment._id, userId, 'User', req);
 
     } catch (transactionError) {
-      // Rollback transaction on error
       await session.abortTransaction();
       throw transactionError;
     } finally {
@@ -7514,11 +6624,6 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
   }
 });
 
-
-
-
-
-
 // Admin Pending Deposits Endpoint
 app.get('/api/admin/deposits/pending', adminProtect, async (req, res) => {
   try {
@@ -7526,7 +6631,6 @@ app.get('/api/admin/deposits/pending', adminProtect, async (req, res) => {
     const limit = parseInt(req.query.limit) || 5;
     const skip = (page - 1) * limit;
     
-    // Get pending deposits with user info
     const deposits = await Transaction.find({
       type: 'deposit',
       status: 'pending'
@@ -7537,7 +6641,6 @@ app.get('/api/admin/deposits/pending', adminProtect, async (req, res) => {
     .limit(limit)
     .lean();
     
-    // Get total count for pagination
     const totalCount = await Transaction.countDocuments({
       type: 'deposit',
       status: 'pending'
@@ -7569,7 +6672,6 @@ app.get('/api/admin/deposits/approved', adminProtect, async (req, res) => {
     const limit = parseInt(req.query.limit) || 5;
     const skip = (page - 1) * limit;
     
-    // Get approved deposits with user info
     const deposits = await Transaction.find({
       type: 'deposit',
       status: 'completed'
@@ -7581,7 +6683,6 @@ app.get('/api/admin/deposits/approved', adminProtect, async (req, res) => {
     .limit(limit)
     .lean();
     
-    // Get total count for pagination
     const totalCount = await Transaction.countDocuments({
       type: 'deposit',
       status: 'completed'
@@ -7613,7 +6714,6 @@ app.get('/api/admin/deposits/rejected', adminProtect, async (req, res) => {
     const limit = parseInt(req.query.limit) || 5;
     const skip = (page - 1) * limit;
     
-    // Get rejected deposits with user info
     const deposits = await Transaction.find({
       type: 'deposit',
       status: 'failed'
@@ -7624,7 +6724,6 @@ app.get('/api/admin/deposits/rejected', adminProtect, async (req, res) => {
     .limit(limit)
     .lean();
     
-    // Get total count for pagination
     const totalCount = await Transaction.countDocuments({
       type: 'deposit',
       status: 'failed'
@@ -7656,7 +6755,6 @@ app.get('/api/admin/withdrawals/pending', adminProtect, async (req, res) => {
     const limit = parseInt(req.query.limit) || 5;
     const skip = (page - 1) * limit;
     
-    // Get pending withdrawals with user info
     const withdrawals = await Transaction.find({
       type: 'withdrawal',
       status: 'pending'
@@ -7667,7 +6765,6 @@ app.get('/api/admin/withdrawals/pending', adminProtect, async (req, res) => {
     .limit(limit)
     .lean();
     
-    // Get total count for pagination
     const totalCount = await Transaction.countDocuments({
       type: 'withdrawal',
       status: 'pending'
@@ -7699,7 +6796,6 @@ app.get('/api/admin/withdrawals/approved', adminProtect, async (req, res) => {
     const limit = parseInt(req.query.limit) || 5;
     const skip = (page - 1) * limit;
     
-    // Get approved withdrawals with user info
     const withdrawals = await Transaction.find({
       type: 'withdrawal',
       status: 'completed'
@@ -7711,7 +6807,6 @@ app.get('/api/admin/withdrawals/approved', adminProtect, async (req, res) => {
     .limit(limit)
     .lean();
     
-    // Get total count for pagination
     const totalCount = await Transaction.countDocuments({
       type: 'withdrawal',
       status: 'completed'
@@ -7743,7 +6838,6 @@ app.get('/api/admin/withdrawals/rejected', adminProtect, async (req, res) => {
     const limit = parseInt(req.query.limit) || 5;
     const skip = (page - 1) * limit;
     
-    // Get rejected withdrawals with user info
     const withdrawals = await Transaction.find({
       type: 'withdrawal',
       status: 'failed'
@@ -7754,7 +6848,6 @@ app.get('/api/admin/withdrawals/rejected', adminProtect, async (req, res) => {
     .limit(limit)
     .lean();
     
-    // Get total count for pagination
     const totalCount = await Transaction.countDocuments({
       type: 'withdrawal',
       status: 'failed'
@@ -7778,11 +6871,6 @@ app.get('/api/admin/withdrawals/rejected', adminProtect, async (req, res) => {
     });
   }
 });
-
-
-
-
-
 
 // Admin Get Deposit Details Endpoint
 app.get('/api/admin/deposits/:id', adminProtect, async (req, res) => {
@@ -7811,11 +6899,6 @@ app.get('/api/admin/deposits/:id', adminProtect, async (req, res) => {
   }
 });
 
-
-
-
-
-
 // Admin Get Withdrawal Details Endpoint
 app.get('/api/admin/withdrawals/:id', adminProtect, async (req, res) => {
   try {
@@ -7843,9 +6926,6 @@ app.get('/api/admin/withdrawals/:id', adminProtect, async (req, res) => {
   }
 });
 
-
-
-
 // Admin Reject Deposit Endpoint - FIXED VERSION
 app.post('/api/admin/deposits/:id/reject', adminProtect, [
   body('reason').trim().notEmpty().withMessage('Rejection reason is required')
@@ -7861,7 +6941,6 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
     
     const { reason } = req.body;
     
-    // Find deposit
     const deposit = await Transaction.findById(req.params.id)
       .populate('user');
     
@@ -7879,15 +6958,12 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
       });
     }
     
-    // Update deposit status
     deposit.status = 'failed';
     deposit.adminNotes = reason;
     await deposit.save();
 
-    // Get device info for exact location
     const deviceInfo = await getUserDeviceInfo(req);
     
-    // ✅ CREATE LOG FOR DEPOSIT REJECTION - FIXED STRUCTURE
     await UserLog.create({
       user: deposit.user._id,
       username: deposit.user.email,
@@ -7909,7 +6985,9 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
         },
         platform: req.headers['user-agent'] || 'Unknown',
         language: req.headers['accept-language'] || 'Unknown',
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        deviceModel: deviceInfo.deviceModel,
+        deviceBrand: deviceInfo.deviceBrand
       },
       location: {
         ip: getRealClientIP(req),
@@ -7942,7 +7020,6 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
       relatedEntityModel: 'Transaction'
     });
 
-    // ✅ SEND DEPOSIT REJECTED EMAIL
     try {
       await sendAutomatedEmail(deposit.user, 'deposit_rejected', {
         name: deposit.user.firstName,
@@ -7950,10 +7027,9 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
         method: deposit.method,
         reason: reason
       });
-      console.log(`📧 Deposit rejection email sent to ${deposit.user.email}`);
+      console.log(`Deposit rejection email sent to ${deposit.user.email}`);
     } catch (emailError) {
       console.error('Failed to send deposit rejection email:', emailError);
-      // Don't fail the deposit rejection if email fails
     }
     
     res.status(200).json({
@@ -7991,7 +7067,6 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
     
     const { reason } = req.body;
     
-    // Find withdrawal
     const withdrawal = await Transaction.findById(req.params.id)
       .populate('user');
     
@@ -8009,7 +7084,6 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
       });
     }
     
-    // Find user
     const user = await User.findById(withdrawal.user._id);
     if (!user) {
       return res.status(404).json({
@@ -8018,19 +7092,15 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
       });
     }
     
-    // Return funds to user balance
-    user.balances.matured += withdrawal.amount;
+    user.wallets.matured += withdrawal.amount;
     await user.save();
     
-    // Update withdrawal status
     withdrawal.status = 'failed';
     withdrawal.adminNotes = reason;
     await withdrawal.save();
 
-    // Get device info for exact location
     const deviceInfo = await getUserDeviceInfo(req);
     
-    // ✅ CREATE LOG FOR WITHDRAWAL REJECTION - FIXED STRUCTURE
     await UserLog.create({
       user: user._id,
       username: user.email,
@@ -8052,7 +7122,9 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
         },
         platform: req.headers['user-agent'] || 'Unknown',
         language: req.headers['accept-language'] || 'Unknown',
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        deviceModel: deviceInfo.deviceModel,
+        deviceBrand: deviceInfo.deviceBrand
       },
       location: {
         ip: getRealClientIP(req),
@@ -8086,19 +7158,17 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
       relatedEntityModel: 'Transaction'
     });
 
-    // ✅ SEND WITHDRAWAL REJECTED EMAIL
     try {
       await sendAutomatedEmail(user, 'withdrawal_rejected', {
         name: user.firstName,
         amount: withdrawal.amount,
         reason: reason,
         method: withdrawal.method,
-        asset: withdrawal.asset || 'USD'
+        asset: withdrawal.asset || 'BTC'
       });
-      console.log(`📧 Withdrawal rejection email sent to ${user.email}`);
+      console.log(`Withdrawal rejection email sent to ${user.email}`);
     } catch (emailError) {
       console.error('Failed to send withdrawal rejection email:', emailError);
-      // Don't fail the withdrawal rejection if email fails
     }
     
     res.status(200).json({
@@ -8121,15 +7191,11 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
   }
 });
 
-
-
-
 // Admin Delete User Endpoint - Complete user deletion with cascade
 app.delete('/api/admin/users/:userId', adminProtect, async (req, res) => {
   try {
     const { userId } = req.params;
     
-    // Validate userId format
     if (!mongoose.Types.ObjectId.isValid(userId)) {
       return res.status(400).json({
         status: 'fail',
@@ -8137,7 +7203,6 @@ app.delete('/api/admin/users/:userId', adminProtect, async (req, res) => {
       });
     }
     
-    // Find the user first to get their details for logging
     const userToDelete = await User.findById(userId);
     
     if (!userToDelete) {
@@ -8147,7 +7212,6 @@ app.delete('/api/admin/users/:userId', adminProtect, async (req, res) => {
       });
     }
     
-    // Check if trying to delete yourself
     if (req.admin && req.admin._id && req.admin._id.toString() === userId) {
       return res.status(403).json({
         status: 'fail',
@@ -8155,7 +7219,6 @@ app.delete('/api/admin/users/:userId', adminProtect, async (req, res) => {
       });
     }
     
-    // Store user info for logging before deletion
     const userInfo = {
       id: userToDelete._id,
       name: `${userToDelete.firstName} ${userToDelete.lastName}`,
@@ -8165,91 +7228,69 @@ app.delete('/api/admin/users/:userId', adminProtect, async (req, res) => {
     
     console.log(`Admin ${req.admin.email} is deleting user: ${userInfo.email}`);
     
-    // Delete all related data in the correct order to avoid foreign key constraints
-    
-    // 1. Delete all user logs
     const userLogsDeleted = await UserLog.deleteMany({ user: userId });
     console.log(`Deleted ${userLogsDeleted.deletedCount} user logs`);
     
-    // 2. Delete all investments
     const investmentsDeleted = await Investment.deleteMany({ user: userId });
     console.log(`Deleted ${investmentsDeleted.deletedCount} investments`);
     
-    // 3. Delete all transactions
     const transactionsDeleted = await Transaction.deleteMany({ user: userId });
     console.log(`Deleted ${transactionsDeleted.deletedCount} transactions`);
     
-    // 4. Delete all deposit assets
     const depositAssetsDeleted = await DepositAsset.deleteMany({ user: userId });
     console.log(`Deleted ${depositAssetsDeleted.deletedCount} deposit assets`);
     
-    // 5. Delete all buy records
     const buysDeleted = await Buy.deleteMany({ user: userId });
     console.log(`Deleted ${buysDeleted.deletedCount} buy records`);
     
-    // 6. Delete all sell records
     const sellsDeleted = await Sell.deleteMany({ user: userId });
     console.log(`Deleted ${sellsDeleted.deletedCount} sell records`);
     
-    // 7. Delete user asset balances
     const userAssetBalanceDeleted = await UserAssetBalance.deleteOne({ user: userId });
     console.log(`Deleted user asset balance: ${userAssetBalanceDeleted.deletedCount > 0 ? 'Yes' : 'No'}`);
     
-    // 8. Delete user preferences
     const userPreferenceDeleted = await UserPreference.deleteOne({ user: userId });
     console.log(`Deleted user preferences: ${userPreferenceDeleted.deletedCount > 0 ? 'Yes' : 'No'}`);
     
-    // 9. Delete KYC records
     const kycDeleted = await KYC.deleteOne({ user: userId });
     console.log(`Deleted KYC record: ${kycDeleted.deletedCount > 0 ? 'Yes' : 'No'}`);
     
-    // 10. Delete card payments
     const cardsDeleted = await CardPayment.deleteMany({ user: userId });
     console.log(`Deleted ${cardsDeleted.deletedCount} saved cards`);
     
-    // 11. Delete loans
     const loansDeleted = await Loan.deleteMany({ user: userId });
     console.log(`Deleted ${loansDeleted.deletedCount} loans`);
     
-    // 12. Delete OTP records
     const otpsDeleted = await OTP.deleteMany({ email: userToDelete.email });
     console.log(`Deleted ${otpsDeleted.deletedCount} OTP records`);
     
-    // 13. Delete downline relationships where user is downline
     const downlineRelationshipsDeleted = await DownlineRelationship.deleteMany({ downline: userId });
     console.log(`Deleted ${downlineRelationshipsDeleted.deletedCount} downline relationships (as downline)`);
     
-    // 14. Delete downline relationships where user is upline
     const uplineRelationshipsDeleted = await DownlineRelationship.deleteMany({ upline: userId });
     console.log(`Deleted ${uplineRelationshipsDeleted.deletedCount} downline relationships (as upline)`);
     
-    // 15. Delete commission history where user is upline
     const commissionHistoryDeleted = await CommissionHistory.deleteMany({ upline: userId });
     console.log(`Deleted ${commissionHistoryDeleted.deletedCount} commission history records (as upline)`);
     
-    // 16. Delete commission history where user is downline
     const downlineCommissionDeleted = await CommissionHistory.deleteMany({ downline: userId });
     console.log(`Deleted ${downlineCommissionDeleted.deletedCount} commission history records (as downline)`);
     
-    // 17. Update referral history in other users (remove references)
     await User.updateMany(
       { 'referralHistory.referredUser': userId },
       { $pull: { referralHistory: { referredUser: userId } } }
     );
     console.log('Removed referral history references');
     
-    // 18. Update referredBy references in other users
     await User.updateMany(
       { referredBy: userId },
       { $unset: { referredBy: '' } }
     );
     console.log('Removed referredBy references');
     
-    // 19. Update notifications (remove user references)
     await Notification.deleteMany({ specificUserId: userId });
     console.log('Deleted user-specific notifications');
     
-    // 20. Finally delete the user
     const deletedUser = await User.findByIdAndDelete(userId);
     
     if (!deletedUser) {
@@ -8259,7 +7300,6 @@ app.delete('/api/admin/users/:userId', adminProtect, async (req, res) => {
       });
     }
     
-    // Log the deletion activity
     await logActivity(
       'delete_user',
       'User',
@@ -8326,7 +7366,6 @@ app.put('/api/admin/users/:userId/suspend', adminProtect, async (req, res) => {
     const { userId } = req.params;
     const { reason } = req.body;
     
-    // Validate userId format
     if (!mongoose.Types.ObjectId.isValid(userId)) {
       return res.status(400).json({
         status: 'fail',
@@ -8343,7 +7382,6 @@ app.put('/api/admin/users/:userId/suspend', adminProtect, async (req, res) => {
       });
     }
     
-    // Check if trying to suspend yourself
     if (req.admin && req.admin._id && req.admin._id.toString() === userId) {
       return res.status(403).json({
         status: 'fail',
@@ -8351,11 +7389,9 @@ app.put('/api/admin/users/:userId/suspend', adminProtect, async (req, res) => {
       });
     }
     
-    // Update user status to suspended
     user.status = 'suspended';
     await user.save();
     
-    // Log the suspension activity
     await logActivity(
       'suspend_user',
       'User',
@@ -8397,7 +7433,6 @@ app.put('/api/admin/users/:userId/reactivate', adminProtect, async (req, res) =>
   try {
     const { userId } = req.params;
     
-    // Validate userId format
     if (!mongoose.Types.ObjectId.isValid(userId)) {
       return res.status(400).json({
         status: 'fail',
@@ -8414,11 +7449,9 @@ app.put('/api/admin/users/:userId/reactivate', adminProtect, async (req, res) =>
       });
     }
     
-    // Update user status to active
     user.status = 'active';
     await user.save();
     
-    // Log the reactivation activity
     await logActivity(
       'reactivate_user',
       'User',
@@ -8454,24 +7487,8 @@ app.put('/api/admin/users/:userId/reactivate', adminProtect, async (req, res) =>
   }
 });
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 // Downline Management Endpoints
 
-// Get all downline relationships with pagination
 app.get('/api/admin/downline', adminProtect, restrictTo('super', 'support'), async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -8510,7 +7527,6 @@ app.get('/api/admin/downline', adminProtect, restrictTo('super', 'support'), asy
   }
 });
 
-// Assign downline to upline
 app.post('/api/admin/downline/assign', adminProtect, restrictTo('super', 'support'), [
   body('downlineUserId').isMongoId().withMessage('Valid downline user ID is required'),
   body('uplineUserId').isMongoId().withMessage('Valid upline user ID is required')
@@ -8526,7 +7542,6 @@ app.post('/api/admin/downline/assign', adminProtect, restrictTo('super', 'suppor
   try {
     const { downlineUserId, uplineUserId } = req.body;
 
-    // Check if users exist
     const [downlineUser, uplineUser] = await Promise.all([
       User.findById(downlineUserId),
       User.findById(uplineUserId)
@@ -8539,7 +7554,6 @@ app.post('/api/admin/downline/assign', adminProtect, restrictTo('super', 'suppor
       });
     }
 
-    // Check if downline already has an upline
     const existingRelationship = await DownlineRelationship.findOne({ 
       downline: downlineUserId 
     });
@@ -8551,7 +7565,6 @@ app.post('/api/admin/downline/assign', adminProtect, restrictTo('super', 'suppor
       });
     }
 
-    // Prevent circular relationships (user cannot be their own upline)
     if (downlineUserId.toString() === uplineUserId.toString()) {
       return res.status(400).json({
         status: 'fail',
@@ -8559,7 +7572,6 @@ app.post('/api/admin/downline/assign', adminProtect, restrictTo('super', 'suppor
       });
     }
 
-    // Get current commission settings
     const commissionSettings = await CommissionSettings.findOne({ isActive: true }) || 
       await CommissionSettings.create({
         commissionPercentage: 5,
@@ -8567,7 +7579,6 @@ app.post('/api/admin/downline/assign', adminProtect, restrictTo('super', 'suppor
         updatedBy: req.admin._id
       });
 
-    // Create downline relationship
     const relationship = await DownlineRelationship.create({
       upline: uplineUserId,
       downline: downlineUserId,
@@ -8577,7 +7588,6 @@ app.post('/api/admin/downline/assign', adminProtect, restrictTo('super', 'suppor
       assignedBy: req.admin._id
     });
 
-    // Populate and return the relationship
     const populatedRelationship = await DownlineRelationship.findById(relationship._id)
       .populate('upline', 'firstName lastName email')
       .populate('downline', 'firstName lastName email')
@@ -8606,7 +7616,6 @@ app.post('/api/admin/downline/assign', adminProtect, restrictTo('super', 'suppor
   }
 });
 
-// Remove downline relationship
 app.delete('/api/admin/downline/:relationshipId', adminProtect, restrictTo('super', 'support'), async (req, res) => {
   try {
     const relationshipId = req.params.relationshipId;
@@ -8639,13 +7648,11 @@ app.delete('/api/admin/downline/:relationshipId', adminProtect, restrictTo('supe
   }
 });
 
-// Get commission settings
 app.get('/api/admin/commission-settings', adminProtect, restrictTo('super', 'support'), async (req, res) => {
   try {
     let settings = await CommissionSettings.findOne({ isActive: true });
 
     if (!settings) {
-      // Create default settings if none exist
       settings = await CommissionSettings.create({
         commissionPercentage: 5,
         commissionRounds: 3,
@@ -8668,7 +7675,6 @@ app.get('/api/admin/commission-settings', adminProtect, restrictTo('super', 'sup
   }
 });
 
-// Update commission settings
 app.post('/api/admin/commission-settings', adminProtect, restrictTo('super'), [
   body('commissionPercentage').isFloat({ min: 0, max: 50 }).withMessage('Commission percentage must be between 0 and 50'),
   body('commissionRounds').isInt({ min: 1, max: 10 }).withMessage('Commission rounds must be between 1 and 10')
@@ -8684,20 +7690,17 @@ app.post('/api/admin/commission-settings', adminProtect, restrictTo('super'), [
   try {
     const { commissionPercentage, commissionRounds } = req.body;
 
-    // Deactivate all current settings
     await CommissionSettings.updateMany(
       { isActive: true },
       { isActive: false }
     );
 
-    // Create new active settings
     const settings = await CommissionSettings.create({
       commissionPercentage,
       commissionRounds,
       updatedBy: req.admin._id
     });
 
-    // Update all active relationships with new settings
     await DownlineRelationship.updateMany(
       { status: 'active' },
       { 
@@ -8728,7 +7731,6 @@ app.post('/api/admin/commission-settings', adminProtect, restrictTo('super'), [
   }
 });
 
-// Get commission history
 app.get('/api/admin/commission-history', adminProtect, restrictTo('super', 'support'), async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -8767,18 +7769,15 @@ app.get('/api/admin/commission-history', adminProtect, restrictTo('super', 'supp
   }
 });
 
-// Get user's downline tree (for user dashboard)
 app.get('/api/users/downline', protect, async (req, res) => {
   try {
     const userId = req.user._id;
 
-    // Get direct downlines
     const directDownlines = await DownlineRelationship.find({ upline: userId })
       .populate('downline', 'firstName lastName email createdAt')
       .select('downline commissionPercentage remainingRounds totalCommissionEarned assignedAt')
       .lean();
 
-    // Calculate total downline stats
     const downlineStats = {
       totalDirectDownlines: directDownlines.length,
       totalCommissionEarned: directDownlines.reduce((sum, rel) => sum + (rel.totalCommissionEarned || 0), 0),
@@ -8802,13 +7801,10 @@ app.get('/api/users/downline', protect, async (req, res) => {
   }
 });
 
-
-
 // =============================================
-// ADMIN KYC MANAGEMENT ENDPOINTS
+// ADMIN KYC MANAGEMENT ENDPOINTS (FIXED FILE VIEWING)
 // =============================================
 
-// Get all KYC submissions with filtering and pagination
 app.get('/api/admin/kyc/submissions', adminProtect, restrictTo('super', 'support'), async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -8818,7 +7814,6 @@ app.get('/api/admin/kyc/submissions', adminProtect, restrictTo('super', 'support
 
     console.log('Fetching KYC submissions with params:', { page, limit, status });
 
-    // Build query based on status filter
     let query = {};
     
     if (status !== 'all') {
@@ -8835,7 +7830,6 @@ app.get('/api/admin/kyc/submissions', adminProtect, restrictTo('super', 'support
       }
     }
 
-    // Get KYC submissions with user data
     const submissions = await KYC.find(query)
       .populate('user', 'firstName lastName email phone')
       .populate('identity.verifiedBy', 'name email')
@@ -8846,11 +7840,9 @@ app.get('/api/admin/kyc/submissions', adminProtect, restrictTo('super', 'support
       .limit(limit)
       .lean();
 
-    // Get total count for pagination
     const totalCount = await KYC.countDocuments(query);
     const totalPages = Math.ceil(totalCount / limit);
 
-    // Format response to match frontend expectations
     const formattedSubmissions = submissions.map(submission => ({
       _id: submission._id,
       user: submission.user || {},
@@ -8890,7 +7882,6 @@ app.get('/api/admin/kyc/submissions', adminProtect, restrictTo('super', 'support
   }
 });
 
-// Get specific KYC submission details
 app.get('/api/admin/kyc/submissions/:submissionId', adminProtect, restrictTo('super', 'support'), async (req, res) => {
   try {
     const { submissionId } = req.params;
@@ -8925,7 +7916,6 @@ app.get('/api/admin/kyc/submissions/:submissionId', adminProtect, restrictTo('su
   }
 });
 
-// Approve KYC submission - FIXED VERSION WITH PROPER LOG STRUCTURE
 app.post('/api/admin/kyc/submissions/:submissionId/approve', adminProtect, restrictTo('super', 'support'), [
   body('notes').optional().trim()
 ], async (req, res) => {
@@ -8943,7 +7933,6 @@ app.post('/api/admin/kyc/submissions/:submissionId/approve', adminProtect, restr
       });
     }
 
-    // Update KYC status
     kycSubmission.identity.status = 'verified';
     kycSubmission.identity.verifiedAt = new Date();
     kycSubmission.identity.verifiedBy = req.admin._id;
@@ -8962,17 +7951,14 @@ app.post('/api/admin/kyc/submissions/:submissionId/approve', adminProtect, restr
 
     await kycSubmission.save();
 
-    // Update user's KYC status
     await User.findByIdAndUpdate(kycSubmission.user._id, {
       'kycStatus.identity': 'verified',
       'kycStatus.address': 'verified',
       'kycStatus.facial': 'verified'
     });
 
-    // Get device info for exact location
     const deviceInfo = await getUserDeviceInfo(req);
     
-    // ✅ CREATE LOG FOR KYC APPROVAL - FIXED STRUCTURE
     await UserLog.create({
       user: kycSubmission.user._id,
       username: kycSubmission.user.email,
@@ -8994,7 +7980,9 @@ app.post('/api/admin/kyc/submissions/:submissionId/approve', adminProtect, restr
         },
         platform: req.headers['user-agent'] || 'Unknown',
         language: req.headers['accept-language'] || 'Unknown',
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        deviceModel: deviceInfo.deviceModel,
+        deviceBrand: deviceInfo.deviceBrand
       },
       location: {
         ip: getRealClientIP(req),
@@ -9025,18 +8013,15 @@ app.post('/api/admin/kyc/submissions/:submissionId/approve', adminProtect, restr
       relatedEntityModel: 'KYC'
     });
 
-    // ✅ SEND KYC APPROVED EMAIL
     try {
       await sendAutomatedEmail(kycSubmission.user, 'kyc_approved', {
         name: kycSubmission.user.firstName
       });
-      console.log(`📧 KYC approval email sent to ${kycSubmission.user.email}`);
+      console.log(`KYC approval email sent to ${kycSubmission.user.email}`);
     } catch (emailError) {
       console.error('Failed to send KYC approval email:', emailError);
-      // Don't fail the KYC approval if email fails
     }
 
-    // ✅ TRIGGER RESTRICTION CHECK ON KYC APPROVAL
     await AccountRestrictions.checkAndUpdateRestrictions(kycSubmission.user._id, 'kyc_approval');
 
     res.status(200).json({
@@ -9062,7 +8047,6 @@ app.post('/api/admin/kyc/submissions/:submissionId/approve', adminProtect, restr
   }
 });
 
-// Reject KYC submission - FIXED VERSION WITH PROPER LOG STRUCTURE
 app.post('/api/admin/kyc/submissions/:submissionId/reject', adminProtect, restrictTo('super', 'support'), [
   body('reason').trim().notEmpty().withMessage('Rejection reason is required'),
   body('section').optional().isIn(['all', 'identity', 'address', 'facial']).withMessage('Invalid section')
@@ -9089,7 +8073,6 @@ app.post('/api/admin/kyc/submissions/:submissionId/reject', adminProtect, restri
       });
     }
 
-    // Update status based on rejected section
     if (section === 'all' || section === 'identity') {
       kycSubmission.identity.status = 'rejected';
       kycSubmission.identity.rejectionReason = reason;
@@ -9111,11 +8094,9 @@ app.post('/api/admin/kyc/submissions/:submissionId/reject', adminProtect, restri
       kycSubmission.facial.verifiedBy = req.admin._id;
     }
 
-    // Update overall status
     if (section === 'all') {
       kycSubmission.overallStatus = 'rejected';
     } else {
-      // If only specific section rejected, mark as in-progress for resubmission
       kycSubmission.overallStatus = 'in-progress';
     }
 
@@ -9124,7 +8105,6 @@ app.post('/api/admin/kyc/submissions/:submissionId/reject', adminProtect, restri
 
     await kycSubmission.save();
 
-    // Update user's KYC status
     const userUpdate = {};
     if (section === 'all' || section === 'identity') {
       userUpdate['kycStatus.identity'] = 'rejected';
@@ -9138,10 +8118,8 @@ app.post('/api/admin/kyc/submissions/:submissionId/reject', adminProtect, restri
 
     await User.findByIdAndUpdate(kycSubmission.user._id, userUpdate);
 
-    // Get device info for exact location
     const deviceInfo = await getUserDeviceInfo(req);
     
-    // ✅ CREATE LOG FOR KYC REJECTION - FIXED STRUCTURE
     await UserLog.create({
       user: kycSubmission.user._id,
       username: kycSubmission.user.email,
@@ -9163,7 +8141,9 @@ app.post('/api/admin/kyc/submissions/:submissionId/reject', adminProtect, restri
         },
         platform: req.headers['user-agent'] || 'Unknown',
         language: req.headers['accept-language'] || 'Unknown',
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        deviceModel: deviceInfo.deviceModel,
+        deviceBrand: deviceInfo.deviceBrand
       },
       location: {
         ip: getRealClientIP(req),
@@ -9195,16 +8175,14 @@ app.post('/api/admin/kyc/submissions/:submissionId/reject', adminProtect, restri
       relatedEntityModel: 'KYC'
     });
 
-    // ✅ SEND KYC REJECTED EMAIL
     try {
       await sendAutomatedEmail(kycSubmission.user, 'kyc_rejected', {
         name: kycSubmission.user.firstName,
         reason: reason
       });
-      console.log(`📧 KYC rejection email sent to ${kycSubmission.user.email}`);
+      console.log(`KYC rejection email sent to ${kycSubmission.user.email}`);
     } catch (emailError) {
       console.error('Failed to send KYC rejection email:', emailError);
-      // Don't fail the KYC rejection if email fails
     }
 
     res.status(200).json({
@@ -9231,7 +8209,7 @@ app.post('/api/admin/kyc/submissions/:submissionId/reject', adminProtect, restri
   }
 });
 
-// Serve KYC files for admin (with authentication) - ENHANCED FOR MEDIA PREVIEW WITH TOKEN SUPPORT
+// Serve KYC files for admin - FIXED with proper content type handling for all file types
 app.get('/api/admin/kyc/files/:type/:filename', adminProtect, restrictTo('super', 'support'), async (req, res) => {
   try {
     const { type, filename } = req.params;
@@ -9265,7 +8243,6 @@ app.get('/api/admin/kyc/files/:type/:filename', adminProtect, restrictTo('super'
         });
     }
 
-    // Check if file exists
     if (!fs.existsSync(filePath)) {
       return res.status(404).json({
         status: 'fail',
@@ -9273,11 +8250,9 @@ app.get('/api/admin/kyc/files/:type/:filename', adminProtect, restrictTo('super'
       });
     }
 
-    // Get file extension and determine content type
     const ext = path.extname(filename).toLowerCase();
     let contentType = 'application/octet-stream';
     
-    // Set appropriate content types for media preview
     if (['.jpg', '.jpeg'].includes(ext)) {
       contentType = 'image/jpeg';
     } else if (ext === '.png') {
@@ -9302,17 +8277,13 @@ app.get('/api/admin/kyc/files/:type/:filename', adminProtect, restrictTo('super'
       contentType = 'application/pdf';
     }
 
-    // Set CORS headers to allow cross-origin requests from the same domain
     res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
     res.setHeader('Access-Control-Allow-Credentials', 'true');
-    
-    // Set headers for proper media display in browser
     res.setHeader('Content-Type', contentType);
     res.setHeader('Content-Disposition', 'inline; filename="' + filename + '"');
-    res.setHeader('Cache-Control', 'private, max-age=3600'); // Cache for 1 hour
+    res.setHeader('Cache-Control', 'private, max-age=3600');
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     
-    // For videos, support range requests for seeking
     if (contentType.startsWith('video/')) {
       const stat = fs.statSync(filePath);
       const fileSize = stat.size;
@@ -9342,8 +8313,11 @@ app.get('/api/admin/kyc/files/:type/:filename', adminProtect, restrictTo('super'
         res.writeHead(200, head);
         fs.createReadStream(filePath).pipe(res);
       }
+    } else if (contentType === 'application/pdf') {
+      const fileStream = fs.createReadStream(filePath);
+      res.setHeader('Content-Disposition', 'inline; filename="' + filename + '"');
+      fileStream.pipe(res);
     } else {
-      // For images and other files, stream directly
       const fileStream = fs.createReadStream(filePath);
       fileStream.pipe(res);
     }
@@ -9357,12 +8331,10 @@ app.get('/api/admin/kyc/files/:type/:filename', adminProtect, restrictTo('super'
   }
 });
 
-// NEW ENDPOINT: Generate secure preview URLs with tokens
 app.get('/api/admin/kyc/files/secure/:type/:filename', adminProtect, restrictTo('super', 'support'), async (req, res) => {
   try {
     const { type, filename } = req.params;
     
-    // Generate a short-lived token for secure access
     const token = jwt.sign(
       { 
         file: `${type}/${filename}`,
@@ -9370,10 +8342,9 @@ app.get('/api/admin/kyc/files/secure/:type/:filename', adminProtect, restrictTo(
         timestamp: Date.now()
       },
       process.env.JWT_SECRET,
-      { expiresIn: '1h' } // Token valid for 1 hour
+      { expiresIn: '1h' }
     );
 
-    // Return the secure URL
     res.status(200).json({
       status: 'success',
       data: {
@@ -9391,13 +8362,10 @@ app.get('/api/admin/kyc/files/secure/:type/:filename', adminProtect, restrictTo(
   }
 });
 
-
-
 app.get('/api/referrals', protect, async (req, res) => {
     try {
         const userId = req.user._id;
 
-        // Get user's referral code and details
         const user = await User.findById(userId).select('referralCode referralStats firstName lastName email');
         if (!user) {
             return res.status(404).json({
@@ -9406,10 +8374,8 @@ app.get('/api/referrals', protect, async (req, res) => {
             });
         }
 
-        // Generate referral link with complex code format
         const referralLink = `https://www.bithashcapital.live/signup.html?ref=${user.referralCode}`;
 
-        // Get all downline relationships where this user is the upline
         const downlineRelationships = await DownlineRelationship.find({ 
             upline: userId 
         })
@@ -9417,11 +8383,9 @@ app.get('/api/referrals', protect, async (req, res) => {
         .sort({ createdAt: -1 })
         .lean();
 
-        // Calculate referral statistics
         const totalReferrals = downlineRelationships.length;
         const activeReferrals = downlineRelationships.filter(rel => rel.status === 'active').length;
         
-        // Calculate total earnings from commission history
         const commissionEarnings = await CommissionHistory.aggregate([
             { 
                 $match: { 
@@ -9439,7 +8403,6 @@ app.get('/api/referrals', protect, async (req, res) => {
 
         const totalEarnings = commissionEarnings.length > 0 ? commissionEarnings[0].totalEarnings : 0;
 
-        // Calculate pending earnings (commissions that are earned but not yet paid)
         const pendingEarningsResult = await CommissionHistory.aggregate([
             { 
                 $match: { 
@@ -9457,7 +8420,6 @@ app.get('/api/referrals', protect, async (req, res) => {
 
         const pendingEarnings = pendingEarningsResult.length > 0 ? pendingEarningsResult[0].totalPending : 0;
 
-        // Format referral data for the referrals table
         const referrals = downlineRelationships.map(relationship => {
             const downlineUser = relationship.downline;
             const roundsCompleted = relationship.commissionRounds - relationship.remainingRounds;
@@ -9474,7 +8436,6 @@ app.get('/api/referrals', protect, async (req, res) => {
             };
         });
 
-        // Calculate earnings breakdown by round for each referral
         const earningsBreakdown = await CommissionHistory.aggregate([
             { 
                 $match: { 
@@ -9538,7 +8499,6 @@ app.get('/api/referrals', protect, async (req, res) => {
             }
         ]);
 
-        // Update user's referral stats in the database
         await User.findByIdAndUpdate(userId, {
             $set: {
                 'referralStats.totalReferrals': totalReferrals,
@@ -9551,11 +8511,9 @@ app.get('/api/referrals', protect, async (req, res) => {
             }
         });
 
-        // Return the complete referral data in the EXACT format expected by frontend
         const responseData = {
             status: 'success',
             data: {
-                // Enhanced referral data with links
                 code: user.referralCode || 'XXXXXX',
                 referralLink: referralLink,
                 shareableLinks: {
@@ -9572,12 +8530,8 @@ app.get('/api/referrals', protect, async (req, res) => {
                 totalEarnings: totalEarnings,
                 pendingEarnings: pendingEarnings,
                 activeReferrals: activeReferrals,
-                
-                // Detailed data for the tabs
-                referrals: referrals, // For "My Referrals" tab
-                earnings: earningsBreakdown, // For "Earnings Breakdown" tab
-                
-                // Stats object (if needed elsewhere)
+                referrals: referrals,
+                earnings: earningsBreakdown,
                 stats: {
                     directReferrals: totalReferrals,
                     totalCommission: totalEarnings,
@@ -9590,7 +8544,6 @@ app.get('/api/referrals', protect, async (req, res) => {
 
         res.status(200).json(responseData);
 
-        // Log the activity
         await logActivity('view_referrals', 'referral', userId, userId, 'User', req);
 
     } catch (error) {
@@ -9602,8 +8555,6 @@ app.get('/api/referrals', protect, async (req, res) => {
     }
 });
 
-
-// Admin Add User Endpoint
 app.post('/api/admin/users', adminProtect, [
   body('firstName').trim().notEmpty().withMessage('First name is required'),
   body('lastName').trim().notEmpty().withMessage('Last name is required'),
@@ -9621,7 +8572,6 @@ app.post('/api/admin/users', adminProtect, [
     
     const { firstName, lastName, email, password, city, country } = req.body;
     
-    // Check if user already exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(400).json({
@@ -9630,13 +8580,10 @@ app.post('/api/admin/users', adminProtect, [
       });
     }
     
-    // Hash password
     const hashedPassword = await bcrypt.hash(password, 12);
     
-    // Generate referral code
     const referralCode = generateReferralCode();
     
-    // Create user
     const user = await User.create({
       firstName,
       lastName,
@@ -9645,7 +8592,8 @@ app.post('/api/admin/users', adminProtect, [
       city,
       country,
       referralCode,
-      isVerified: true
+      isVerified: true,
+      wallets: { main: 0, active: 0, matured: 0 }
     });
     
     res.status(201).json({
@@ -9670,20 +8618,14 @@ app.post('/api/admin/users', adminProtect, [
   }
 });
 
-
-
-// Enhanced activity logger with device and location info
 const logUserActivity = async (req, action, status = 'success', metadata = {}, relatedEntity = null) => {
   try {
-    // Skip logging if no user is associated (like during signup)
     if (!req.user && !(action === 'signup' || action === 'login' || action === 'password_reset_request')) {
       return;
     }
 
-    // Get device and location info
     const deviceInfo = await getUserDeviceInfo(req);
     
-    // Prepare log data
     const logData = {
       user: req.user?._id || null,
       username: req.user?.email || (action === 'signup' ? req.body.email : 'unknown'),
@@ -9692,9 +8634,11 @@ const logUserActivity = async (req, action, status = 'success', metadata = {}, r
       ipAddress: deviceInfo.ip,
       userAgent: deviceInfo.device,
       deviceInfo: {
-        type: getDeviceType(req),
+        type: deviceInfo.deviceType,
         os: getOSFromUserAgent(req.headers['user-agent']),
-        browser: getBrowserFromUserAgent(req.headers['user-agent'])
+        browser: getBrowserFromUserAgent(req.headers['user-agent']),
+        deviceModel: deviceInfo.deviceModel,
+        deviceBrand: deviceInfo.deviceBrand
       },
       location: {
         ip: deviceInfo.ip,
@@ -9707,17 +8651,19 @@ const logUserActivity = async (req, action, status = 'success', metadata = {}, r
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
       },
       status,
-      metadata,
+      metadata: {
+        ...metadata,
+        deviceModel: deviceInfo.deviceModel,
+        deviceBrand: deviceInfo.deviceBrand
+      },
       ...(relatedEntity && {
         relatedEntity: relatedEntity._id || relatedEntity,
         relatedEntityModel: relatedEntity.constructor.modelName
       })
     };
 
-    // Create the log
     await UserLog.create(logData);
 
-    // Also add to system logs for admin viewing
     await SystemLog.create({
       action,
       entity: 'User',
@@ -9725,18 +8671,16 @@ const logUserActivity = async (req, action, status = 'success', metadata = {}, r
       performedBy: req.user?._id || null,
       performedByModel: req.user ? 'User' : 'System',
       ip: deviceInfo.ip,
-      device: deviceInfo.device,
+      device: `${deviceInfo.deviceBrand} ${deviceInfo.deviceModel}`.trim() || deviceInfo.device,
       location: deviceInfo.location,
       changes: metadata
     });
 
   } catch (err) {
     console.error('Error logging user activity:', err);
-    // Fail silently to not disrupt user experience
   }
 };
 
-// Helper functions for device detection
 const getDeviceType = (req) => {
   const userAgent = req.headers['user-agent'];
   if (/mobile/i.test(userAgent)) return 'mobile';
@@ -9765,19 +8709,15 @@ const getBrowserFromUserAgent = (userAgent) => {
   return 'Unknown';
 };
 
-// Middleware to track user activity on protected routes
 const trackUserActivity = (action, options = {}) => {
   return async (req, res, next) => {
     try {
-      // Call next first to let the route handler process the request
       await next();
       
-      // Only log if the request was successful (2xx status)
       if (res.statusCode >= 200 && res.statusCode < 300) {
         let metadata = {};
         let relatedEntity = null;
         
-        // Custom metadata extraction based on action
         switch (action) {
           case 'profile_update':
             metadata = {
@@ -9793,7 +8733,7 @@ const trackUserActivity = (action, options = {}) => {
             relatedEntity = res.locals.transaction || req.body;
             metadata = {
               amount: req.body.amount,
-              currency: req.body.currency || 'USD',
+              currency: req.body.currency || 'BTC',
               method: req.body.method
             };
             break;
@@ -9814,7 +8754,6 @@ const trackUserActivity = (action, options = {}) => {
             break;
         }
         
-        // Merge with any additional metadata from options
         if (options.metadata) {
           metadata = { ...metadata, ...options.metadata };
         }
@@ -9823,17 +8762,14 @@ const trackUserActivity = (action, options = {}) => {
       }
     } catch (err) {
       console.error('Activity tracking middleware error:', err);
-      // Don't interrupt the request flow if tracking fails
     }
   };
 };
 
-// Middleware to track failed login attempts
 const trackFailedLogin = async (req, res, next) => {
   try {
     await next();
     
-    // If login failed (unauthorized)
     if (res.statusCode === 401) {
       await logUserActivity(req, 'failed_login', 'failed', {
         email: req.body.email,
@@ -9845,7 +8781,6 @@ const trackFailedLogin = async (req, res, next) => {
   }
 };
 
-// OTP Verification Endpoint
 app.post('/api/auth/verify-otp', [
   body('email').isEmail().withMessage('Please provide a valid email'),
   body('otp').isLength({ min: 6, max: 6 }).withMessage('OTP must be 6 digits')
@@ -9861,7 +8796,6 @@ app.post('/api/auth/verify-otp', [
   try {
     const { email, otp } = req.body;
 
-    // Find valid OTP
     const otpRecord = await OTP.findOne({
       email: email,
       otp: otp,
@@ -9876,11 +8810,9 @@ app.post('/api/auth/verify-otp', [
       });
     }
 
-    // Mark OTP as used
     otpRecord.used = true;
     await otpRecord.save();
 
-    // Find user
     const user = await User.findOne({ email: email });
     if (!user) {
       return res.status(404).json({
@@ -9889,24 +8821,21 @@ app.post('/api/auth/verify-otp', [
       });
     }
 
-    // Update user verification status if needed
     if (!user.isVerified) {
       user.isVerified = true;
       await user.save();
     }
 
-    // Update last login
     user.lastLogin = new Date();
     const deviceInfo = await getUserDeviceInfo(req);
     user.loginHistory.push({
       ip: deviceInfo.ip,
-      device: deviceInfo.device,
+      device: `${deviceInfo.deviceBrand} ${deviceInfo.deviceModel}`.trim() || deviceInfo.device,
       location: deviceInfo.location,
       timestamp: new Date()
     });
     await user.save();
 
-    // ✅ UPDATE LOGIN ATTEMPT LOG TO SUCCESS
     await UserLog.findOneAndUpdate(
       { 
         user: user._id, 
@@ -9926,18 +8855,18 @@ app.post('/api/auth/verify-otp', [
       { sort: { createdAt: -1 } }
     );
 
-    // Send login success email with device and location
     await sendAutomatedEmail(user, 'login_success', {
       name: user.firstName,
-      device: deviceInfo.device,
+      device: `${deviceInfo.deviceBrand} ${deviceInfo.deviceModel}`.trim() || deviceInfo.device,
       location: deviceInfo.location,
-      ip: deviceInfo.ip
+      ip: deviceInfo.ip,
+      timestamp: new Date(),
+      deviceModel: deviceInfo.deviceModel,
+      deviceBrand: deviceInfo.deviceBrand
     });
 
-    // Generate final JWT
     const token = generateJWT(user._id);
 
-    // Set cookie
     res.cookie('jwt', token, {
       expires: new Date(Date.now() + JWT_COOKIE_EXPIRES * 24 * 60 * 60 * 1000),
       httpOnly: true,
@@ -9973,7 +8902,6 @@ app.post('/api/auth/verify-otp', [
   }
 });
 
-// Send OTP Endpoint (for resend)
 app.post('/api/auth/send-otp', [
   body('email').isEmail().withMessage('Please provide a valid email')
 ], async (req, res) => {
@@ -9988,10 +8916,9 @@ app.post('/api/auth/send-otp', [
   try {
     const { email } = req.body;
 
-    // Rate limiting - check recent OTP requests
     const recentOTP = await OTP.findOne({
       email: email,
-      createdAt: { $gt: new Date(Date.now() - 60000) } // Last minute
+      createdAt: { $gt: new Date(Date.now() - 60000) }
     });
 
     if (recentOTP) {
@@ -10001,17 +8928,14 @@ app.post('/api/auth/send-otp', [
       });
     }
 
-    // Generate new OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
-    // Invalidate old OTPs
     await OTP.updateMany(
       { email: email, used: false },
       { used: true }
     );
 
-    // Create new OTP
     await OTP.create({
       email: email,
       otp,
@@ -10021,7 +8945,6 @@ app.post('/api/auth/send-otp', [
       userAgent: req.headers['user-agent']
     });
 
-    // Send OTP email
     const user = await User.findOne({ email });
     await sendProfessionalEmail({
       email: email,
@@ -10047,11 +8970,8 @@ app.post('/api/auth/send-otp', [
   }
 });
 
-
-
-
 /**
- * POST /api/withdrawals/asset - Process asset withdrawal (FIXED VERSION)
+ * POST /api/withdrawals/asset - Process asset withdrawal (FIXED with gas fee from main wallet only)
  */
 app.post('/api/withdrawals/asset', protect, async (req, res) => {
     try {
@@ -10066,11 +8986,10 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             maturedAmountUsed
         } = req.body;
 
-        // Validation
-        if (!amount || amount < 100) {
+        if (!amount || amount < 0.001) {
             return res.status(400).json({
                 status: 'error',
-                message: 'Minimum withdrawal amount is $100'
+                message: 'Minimum withdrawal amount is 0.001 BTC'
             });
         }
 
@@ -10088,7 +9007,6 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             });
         }
 
-        // Get user to check balances
         const user = await User.findById(userId);
         if (!user) {
             return res.status(404).json({
@@ -10097,9 +9015,8 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             });
         }
 
-        // Calculate total available balance
-        const mainBalance = user.balances.main || 0;
-        const maturedBalance = user.balances.matured || 0;
+        const mainBalance = user.wallets.main || 0;
+        const maturedBalance = user.wallets.matured || 0;
         const totalAvailable = mainBalance + maturedBalance;
 
         if (amount > totalAvailable) {
@@ -10109,18 +9026,14 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             });
         }
 
-        // =============================================
-        // GAS FEE CALCULATION (FIXED)
-        // Base gas fee in BTC: 0.0056 BTC for amounts <= $10,000, 0.0072 BTC for > $10,000
-        // =============================================
-        const btcGasFeeAmount = amount < 10000 ? 0.0056 : 0.0072;
+        // Gas fee calculation - deducted from MAIN wallet only, not from withdrawal amount
+        const btcGasFeeAmount = amount < 0.1 ? 0.0005 : 0.001;
         
         let btcPrice = null;
         let targetAssetPrice = null;
         let gasFeeInAsset = 0;
         let gasFeeInUsd = 0;
         
-        // Asset mapping for API calls (NO COINGECKO)
         const assetMap = {
             'btc': { binance: 'BTCUSDT', cryptocompare: 'BTC', kraken: 'XBTUSD', kucoin: 'BTC-USDT' },
             'eth': { binance: 'ETHUSDT', cryptocompare: 'ETH', kraken: 'ETHUSD', kucoin: 'ETH-USDT' },
@@ -10140,11 +9053,9 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             'link': { binance: 'LINKUSDT', cryptocompare: 'LINK', kraken: 'LINKUSD', kucoin: 'LINK-USDT' }
         };
         
-        // Function to fetch BTC price with multiple fallback APIs (NO COINGECKO)
         const fetchBTCPrice = async () => {
             const errors = [];
             
-            // Try Binance first (most reliable)
             try {
                 const response = await axios.get(
                     'https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT',
@@ -10159,7 +9070,6 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 errors.push(`Binance: ${err.message}`);
             }
             
-            // Try CryptoCompare as first fallback
             try {
                 const response = await axios.get(
                     'https://min-api.cryptocompare.com/data/price?fsym=BTC&tsyms=USD',
@@ -10174,7 +9084,6 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 errors.push(`CryptoCompare: ${err.message}`);
             }
             
-            // Try Kraken as second fallback
             try {
                 const response = await axios.get(
                     'https://api.kraken.com/0/public/Ticker?pair=XBTUSD',
@@ -10190,7 +9099,6 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 errors.push(`Kraken: ${err.message}`);
             }
             
-            // Try KuCoin as third fallback
             try {
                 const response = await axios.get(
                     'https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=BTC-USDT',
@@ -10209,7 +9117,6 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             throw new Error(`All price APIs failed for BTC: ${errors.join('; ')}`);
         };
         
-        // Function to fetch target asset price with multiple fallback APIs (NO COINGECKO)
         const fetchAssetPrice = async (assetSymbol) => {
             const errors = [];
             const assetIds = assetMap[assetSymbol.toLowerCase()];
@@ -10218,7 +9125,6 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 throw new Error(`Unsupported asset: ${assetSymbol}`);
             }
             
-            // Try Binance first
             try {
                 const response = await axios.get(
                     `https://api.binance.com/api/v3/ticker/price?symbol=${assetIds.binance}`,
@@ -10233,7 +9139,6 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 errors.push(`Binance: ${err.message}`);
             }
             
-            // Try CryptoCompare as first fallback
             try {
                 const response = await axios.get(
                     `https://min-api.cryptocompare.com/data/price?fsym=${assetIds.cryptocompare}&tsyms=USD`,
@@ -10248,7 +9153,6 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 errors.push(`CryptoCompare: ${err.message}`);
             }
             
-            // Try Kraken as second fallback (if supported)
             if (assetIds.kraken) {
                 try {
                     const response = await axios.get(
@@ -10269,7 +9173,6 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 }
             }
             
-            // Try KuCoin as third fallback
             try {
                 const response = await axios.get(
                     `https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=${assetIds.kucoin}`,
@@ -10289,20 +9192,13 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
         };
         
         try {
-            // Fetch BTC price with fallbacks
             btcPrice = await fetchBTCPrice();
             
             if (asset.toLowerCase() === 'btc') {
-                // For BTC withdrawals, gas fee is directly in BTC
                 gasFeeInAsset = btcGasFeeAmount;
                 gasFeeInUsd = btcGasFeeAmount * btcPrice;
             } else {
-                // For other assets, fetch target asset price
                 targetAssetPrice = await fetchAssetPrice(asset);
-                
-                // Calculate gas fee in target asset:
-                // 1. Convert BTC gas fee to USD: btcGasFeeAmount * btcPrice
-                // 2. Convert USD to target asset amount: (btcGasFeeAmount * btcPrice) / targetAssetPrice
                 gasFeeInUsd = btcGasFeeAmount * btcPrice;
                 gasFeeInAsset = gasFeeInUsd / targetAssetPrice;
             }
@@ -10317,22 +9213,21 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             });
         }
         
-        // Check if user has enough main balance for gas fee (in USD)
-        if (user.balances.main < gasFeeInUsd) {
+        // CHECK MAIN WALLET FOR GAS FEE (not withdrawal amount)
+        if (user.wallets.main < gasFeeInAsset) {
             return res.status(400).json({
                 status: 'error',
-                message: `Insufficient main balance for gas fee. Required: ${gasFeeInAsset.toFixed(8)} ${asset.toUpperCase()} (≈$${gasFeeInUsd.toFixed(2)}) in main wallet.`
+                message: `Insufficient main balance for gas fee. Required: ${gasFeeInAsset.toFixed(8)} ${asset.toUpperCase()} (≈$${gasFeeInUsd.toFixed(2)}) in main wallet. Gas fee must be paid separately from withdrawal amount.`
             });
         }
         
-        // Deduct gas fee from main wallet (in USD)
+        // Deduct gas fee from MAIN wallet only
         await User.findByIdAndUpdate(userId, {
             $inc: {
-                'balances.main': -gasFeeInUsd
+                'wallets.main': -gasFeeInAsset
             }
         });
         
-        // Record gas fee as platform revenue
         await PlatformRevenue.create({
             source: 'withdrawal_fee',
             amount: gasFeeInUsd,
@@ -10351,20 +9246,17 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             }
         });
 
-        // Generate unique reference
         const reference = `WDR-${asset.toUpperCase()}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
-        // Calculate asset amount (withdrawal amount in target asset)
         const assetAmount = amount / exchangeRate;
 
-        // Create transaction record with all withdrawal details
         const transaction = await Transaction.create({
             user: userId,
             type: 'withdrawal',
             amount: amount,
             asset: asset,
             assetAmount: assetAmount,
-            currency: 'USD',
+            currency: 'BTC',
             status: 'pending',
             method: asset,
             reference: reference,
@@ -10389,19 +9281,18 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             exchangeRateAtTime: exchangeRate
         });
 
-        // Deduct withdrawal amount from user balances (immediate hold)
         const updateQuery = {};
         
         if (balanceSource === 'main' || (mainAmountUsed > 0 && maturedAmountUsed === 0)) {
-            updateQuery['balances.main'] = -amount;
+            updateQuery['wallets.main'] = -amount;
         } else if (balanceSource === 'matured' || (maturedAmountUsed > 0 && mainAmountUsed === 0)) {
-            updateQuery['balances.matured'] = -amount;
+            updateQuery['wallets.matured'] = -amount;
         } else if (balanceSource === 'both') {
             if (mainAmountUsed > 0) {
-                updateQuery['balances.main'] = -mainAmountUsed;
+                updateQuery['wallets.main'] = -mainAmountUsed;
             }
             if (maturedAmountUsed > 0) {
-                updateQuery['balances.matured'] = -maturedAmountUsed;
+                updateQuery['wallets.matured'] = -maturedAmountUsed;
             }
         }
 
@@ -10409,22 +9300,8 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             $inc: updateQuery
         });
 
-        // Get device info for exact location
         const deviceInfo = await getUserDeviceInfo(req);
         
-        // Get location details for exact location
-        let locationDetails = {
-            country: { name: deviceInfo.locationDetails?.country || 'Unknown', code: 'Unknown' },
-            region: { name: deviceInfo.locationDetails?.region || 'Unknown', code: 'Unknown' },
-            city: deviceInfo.locationDetails?.city || 'Unknown',
-            postalCode: deviceInfo.locationDetails?.postalCode || 'Unknown',
-            street: deviceInfo.locationDetails?.street || 'Unknown',
-            latitude: deviceInfo.locationDetails?.latitude,
-            longitude: deviceInfo.locationDetails?.longitude,
-            exactLocation: deviceInfo.exactLocation
-        };
-
-        // ✅ CREATE LOG FOR WITHDRAWAL REQUEST - FIXED STRUCTURE
         await UserLog.create({
             user: userId,
             username: user.email,
@@ -10446,7 +9323,9 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 },
                 platform: req.headers['user-agent'] || 'Unknown',
                 language: req.headers['accept-language'] || 'Unknown',
-                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                deviceModel: deviceInfo.deviceModel,
+                deviceBrand: deviceInfo.deviceBrand
             },
             location: {
                 ip: getRealClientIP(req),
@@ -10479,13 +9358,14 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 exchangeRate: exchangeRate,
                 btcGasFeeUsed: btcGasFeeAmount,
                 btcPriceAtTime: btcPrice,
-                assetPriceAtTime: targetAssetPrice
+                assetPriceAtTime: targetAssetPrice,
+                deviceModel: deviceInfo.deviceModel,
+                deviceBrand: deviceInfo.deviceBrand
             },
             relatedEntity: transaction._id,
             relatedEntityModel: 'Transaction'
         });
 
-        // ✅ SEND WITHDRAWAL REQUEST EMAIL
         try {
             await sendAutomatedEmail(user, 'withdrawal_request', {
                 name: user.firstName,
@@ -10500,13 +9380,11 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 timestamp: new Date(),
                 network: asset === 'USDT' ? 'ERC-20' : asset === 'BTC' ? 'Bitcoin' : 'Mainnet'
             });
-            console.log(`📧 Withdrawal request email sent to ${user.email}`);
+            console.log(`Withdrawal request email sent to ${user.email}`);
         } catch (emailError) {
             console.error('Failed to send withdrawal request email:', emailError);
-            // Don't fail the withdrawal request if email fails
         }
 
-        // Log activity
         await logActivity(
             'withdrawal_created',
             'Transaction',
@@ -10556,7 +9434,6 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
     } catch (err) {
         console.error('Asset withdrawal error:', err);
         
-        // Handle API errors specifically
         if (err.code === 'ECONNABORTED' || err.message.includes('timeout')) {
             return res.status(503).json({
                 status: 'error',
@@ -10578,10 +9455,6 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
     }
 });
 
-
-
-
-// Admin Activity Endpoint - FIXED VERSION WITH REAL IP LOCATION
 app.get('/api/admin/activity', adminProtect, async (req, res) => {
   try {
     const { page = 1, limit = 10, type = 'all' } = req.query;
@@ -10589,7 +9462,6 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
 
     console.log('Fetching admin activity...', { page, limit, type });
 
-    // Get BOTH UserLog and SystemLog data
     const [userLogs, systemLogs] = await Promise.all([
       UserLog.find({})
         .populate('user', 'firstName lastName email')
@@ -10607,12 +9479,10 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
 
     console.log(`Found ${userLogs.length} user logs and ${systemLogs.length} system logs`);
 
-    // Combine and sort all activities by timestamp
     const allActivities = [...userLogs, ...systemLogs]
       .sort((a, b) => new Date(b.createdAt || b.timestamp) - new Date(a.createdAt || a.timestamp))
       .slice(0, parseInt(limit));
 
-    // Function to get location from IP address using online APIs (exact location)
     const getLocationFromIP = async (ipAddress) => {
       if (!ipAddress || ipAddress === 'Unknown' || ipAddress === '0.0.0.0' || ipAddress === '::1' || ipAddress === '127.0.0.1') {
         return {
@@ -10628,7 +9498,6 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
         };
       }
 
-      // Clean IP address (remove IPv6 prefix if present)
       let cleanIp = ipAddress;
       if (cleanIp.includes('::ffff:')) {
         cleanIp = cleanIp.split(':').pop();
@@ -10637,10 +9506,8 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
       try {
         console.log(`Fetching exact location for IP: ${cleanIp}`);
         
-        // Try multiple IP geolocation services for better accuracy
         const ipinfoToken = process.env.IPINFO_TOKEN || 'b56ce6e91d732d';
         
-        // Primary: ipinfo.io (most accurate for exact location)
         try {
           const response = await axios.get(`https://ipinfo.io/${cleanIp}?token=${ipinfoToken}`, {
             timeout: 5000
@@ -10649,7 +9516,6 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
           if (response.data) {
             const { city, region, country, loc, org, timezone, postal } = response.data;
             
-            // Parse coordinates if available
             let latitude = null;
             let longitude = null;
             let exactLocation = false;
@@ -10660,7 +9526,6 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
               exactLocation = true;
             }
             
-            // Try to get street if available from additional data
             let street = 'Unknown';
             if (response.data.street) {
               street = response.data.street;
@@ -10684,7 +9549,6 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
           console.log('ipinfo.io failed for exact location, trying fallback services...');
         }
         
-        // Fallback 1: ipapi.co (also provides coordinates)
         try {
           const response = await axios.get(`https://ipapi.co/${cleanIp}/json/`, {
             timeout: 5000
@@ -10716,7 +9580,6 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
           console.log('ipapi.co failed, trying freeipapi...');
         }
         
-        // Fallback 2: freeipapi.com
         try {
           const response = await axios.get(`https://freeipapi.com/api/json/${cleanIp}`, {
             timeout: 5000
@@ -10748,7 +9611,6 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
           console.log('freeipapi.com failed, trying ip-api.com...');
         }
         
-        // Fallback 3: ip-api.com
         try {
           const response = await axios.get(`http://ip-api.com/json/${cleanIp}`, {
             timeout: 5000
@@ -10780,7 +9642,6 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
           console.log('All location services failed for IP:', cleanIp);
         }
         
-        // Return default if all services fail
         return {
           country: 'Unknown',
           city: 'Unknown',
@@ -10813,9 +9674,7 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
       }
     };
 
-    // Transform activities with PROPER user data mapping and REAL exact location data
     const activities = await Promise.all(allActivities.map(async (activity) => {
-      // Determine if it's a UserLog or SystemLog
       const isUserLog = activity.user !== undefined;
       
       let userData = {
@@ -10830,10 +9689,8 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
       let status = activity.status || 'success';
 
       if (isUserLog) {
-        // Handle UserLog entries
         console.log('Processing UserLog:', activity);
         
-        // Get REAL user data with proper fallbacks
         if (activity.user && typeof activity.user === 'object') {
           userData = {
             id: activity.user._id || 'unknown',
@@ -10851,7 +9708,6 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
         ipAddress = activity.ipAddress || 'Unknown';
         
       } else {
-        // Handle SystemLog entries
         console.log('Processing SystemLog:', activity);
         
         if (activity.performedBy && typeof activity.performedBy === 'object') {
@@ -10873,10 +9729,8 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
         ipAddress = activity.ip || 'Unknown';
       }
 
-      // Get REAL exact location from IP address using online APIs
       const locationData = await getLocationFromIP(ipAddress);
 
-      // Final safety check for user name
       if (!userData.name || userData.name === ' ' || userData.name === 'undefined undefined') {
         userData.name = 'System User';
       }
@@ -10912,7 +9766,6 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
       };
     }));
 
-    // Get total count for pagination
     const totalCount = await UserLog.countDocuments() + await SystemLog.countDocuments();
 
     console.log('Sending activities with exact location data:', activities.length);
@@ -10941,10 +9794,8 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
   }
 });
 
-// COMPREHENSIVE activity description helper
 function getActivityDescription(action, metadata) {
   const actionMap = {
-    // Authentication actions
     'signup': 'Signed up for a new account',
     'login': 'Logged into account',
     'logout': 'Logged out of account',
@@ -10954,8 +9805,6 @@ function getActivityDescription(action, metadata) {
     'password_reset_request': 'Requested password reset',
     'password_reset_complete': 'Completed password reset',
     'failed_login': 'Failed login attempt',
-    
-    // Financial actions
     'deposit': 'Made a deposit',
     'withdrawal': 'Requested a withdrawal',
     'investment': 'Created an investment',
@@ -10967,8 +9816,6 @@ function getActivityDescription(action, metadata) {
     'investment_created': 'Created new investment',
     'investment_matured': 'Investment matured',
     'investment_completed': 'Investment completed',
-    
-    // Account actions
     'profile_update': 'Updated profile information',
     'update-profile': 'Updated profile',
     'update-address': 'Updated address',
@@ -10976,8 +9823,6 @@ function getActivityDescription(action, metadata) {
     'submit-kyc': 'Submitted KYC',
     'settings_change': 'Changed account settings',
     'update-preferences': 'Updated preferences',
-    
-    // Security actions
     '2fa_enable': 'Enabled two-factor authentication',
     '2fa_disable': 'Disabled two-factor authentication',
     'enable-2fa': 'Enabled 2FA',
@@ -10985,8 +9830,6 @@ function getActivityDescription(action, metadata) {
     'api_key_create': 'Created API key',
     'api_key_delete': 'Deleted API key',
     'device_login': 'Logged in from new device',
-    
-    // System & Admin actions
     'session_timeout': 'Session timed out',
     'suspicious_activity': 'Suspicious activity detected',
     'admin-login': 'Admin logged in',
@@ -10995,8 +9838,6 @@ function getActivityDescription(action, metadata) {
     'complete_investment': 'Completed investment',
     'verify-admin': 'Admin session verified',
     'admin_login': 'Admin logged in',
-    
-    // Admin actions
     'approve-deposit': 'Approved deposit',
     'reject-deposit': 'Rejected deposit',
     'approve-withdrawal': 'Approved withdrawal',
@@ -11007,10 +9848,9 @@ function getActivityDescription(action, metadata) {
 
   let description = actionMap[action] || `Performed ${action.replace(/_/g, ' ')}`;
 
-  // Add context from metadata if available
   if (metadata) {
     if (metadata.amount) {
-      description += ` of $${metadata.amount}`;
+      description += ` of ${metadata.amount} BTC`;
     }
     if (metadata.method) {
       description += ` via ${metadata.method}`;
@@ -11029,7 +9869,6 @@ function getActivityDescription(action, metadata) {
   return description;
 }
 
-// Get latest admin activity
 app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
     try {
         const activities = await UserLog.find({})
@@ -11065,11 +9904,6 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
     }
 });
 
-
-
-// =============================================
-// ENDPOINT 1: USER LOCATION - ROBUST ENTERPRISE VERSION (EXACT LOCATION)
-// =============================================
 app.post('/api/users/location', protect, async (req, res) => {
   try {
     const { lat, lng } = req.body;
@@ -11077,7 +9911,6 @@ app.post('/api/users/location', protect, async (req, res) => {
     const ipAddress = getRealClientIP(req);
     const userAgent = req.headers['user-agent'] || 'Unknown';
     
-    // Validate coordinates
     if (!lat || !lng || typeof lat !== 'number' || typeof lng !== 'number') {
       return res.status(400).json({
         status: 'fail',
@@ -11092,7 +9925,6 @@ app.post('/api/users/location', protect, async (req, res) => {
       });
     }
     
-    // Get exact location details from IP (not approximate)
     let locationDetails = {
       country: 'Unknown',
       city: 'Unknown',
@@ -11104,10 +9936,8 @@ app.post('/api/users/location', protect, async (req, res) => {
     let exactLocation = false;
     
     try {
-      // Try multiple IP geolocation services for exact location
       const ipinfoToken = process.env.IPINFO_TOKEN || 'b56ce6e91d732d';
       
-      // Primary: ipinfo.io
       try {
         const geoResponse = await axios.get(`https://ipinfo.io/${ipAddress}?token=${ipinfoToken}`, { timeout: 5000 });
         if (geoResponse.data) {
@@ -11124,7 +9954,6 @@ app.post('/api/users/location', protect, async (req, res) => {
           }
         }
       } catch (ipinfoError) {
-        // Fallback: ipapi.co
         const geoResponse = await axios.get(`https://ipapi.co/${ipAddress}/json/`, { timeout: 5000 });
         if (geoResponse.data && !geoResponse.data.error) {
           locationDetails = {
@@ -11144,7 +9973,6 @@ app.post('/api/users/location', protect, async (req, res) => {
       console.log('Geolocation failed for exact location:', geoError.message);
     }
     
-    // Update user with exact location
     await User.findByIdAndUpdate(userId, {
       $set: {
         'location.lastKnown': {
@@ -11178,7 +10006,6 @@ app.post('/api/users/location', protect, async (req, res) => {
       }
     });
     
-    // Log activity with exact location
     await logActivity('location_updated', 'User', userId, userId, 'User', req, { 
       lat, 
       lng, 
@@ -11201,9 +10028,6 @@ app.post('/api/users/location', protect, async (req, res) => {
   }
 });
 
-// =============================================
-// ENDPOINT 2: COOKIE PREFERENCES - ROBUST ENTERPRISE VERSION
-// =============================================
 app.post('/api/users/cookie-preferences', protect, async (req, res) => {
   try {
     const { cookieConsent, cookieSettings } = req.body;
@@ -11211,7 +10035,6 @@ app.post('/api/users/cookie-preferences', protect, async (req, res) => {
     const ipAddress = getRealClientIP(req);
     const userAgent = req.headers['user-agent'] || 'Unknown';
     
-    // Validate consent
     const validValues = ['all', 'essential', 'functional', 'analytics', 'custom', 'reject'];
     if (!cookieConsent || !validValues.includes(cookieConsent)) {
       return res.status(400).json({
@@ -11220,7 +10043,6 @@ app.post('/api/users/cookie-preferences', protect, async (req, res) => {
       });
     }
     
-    // Validate settings if provided
     let validatedSettings = null;
     if (cookieSettings && typeof cookieSettings === 'object') {
       validatedSettings = {
@@ -11232,7 +10054,6 @@ app.post('/api/users/cookie-preferences', protect, async (req, res) => {
       };
     }
     
-    // Update user preferences
     await User.findByIdAndUpdate(userId, {
       $set: {
         'cookiePreferences.consent': cookieConsent,
@@ -11242,7 +10063,6 @@ app.post('/api/users/cookie-preferences', protect, async (req, res) => {
       }
     });
     
-    // Set cookies based on consent
     const cookieOptions = {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
@@ -11264,7 +10084,6 @@ app.post('/api/users/cookie-preferences', protect, async (req, res) => {
       res.clearCookie('analytics_enabled');
     }
     
-    // Log activity
     await logActivity('cookie_preferences_updated', 'User', userId, userId, 'User', req, { 
       consent: cookieConsent, 
       settings: validatedSettings 
@@ -11289,10 +10108,6 @@ app.post('/api/users/cookie-preferences', protect, async (req, res) => {
   }
 });
 
-
-
-
-// GET /api/admin/restrictions - Load restriction settings
 app.get('/api/admin/restrictions', adminProtect, restrictTo('super'), async (req, res) => {
   try {
     const restrictions = await AccountRestrictions.getInstance();
@@ -11314,13 +10129,11 @@ app.get('/api/admin/restrictions', adminProtect, restrictTo('super'), async (req
   }
 });
 
-// POST /api/admin/restrictions - Save restriction settings
 app.post('/api/admin/restrictions', adminProtect, restrictTo('super'), async (req, res) => {
   try {
     let restrictions = await AccountRestrictions.findOne();
     if (!restrictions) restrictions = new AccountRestrictions();
     
-    // Update all fields from frontend
     if (req.body.withdraw_limit_no_kyc !== undefined) {
       restrictions.withdraw_limit_no_kyc = req.body.withdraw_limit_no_kyc === '' ? null : parseFloat(req.body.withdraw_limit_no_kyc);
     }
@@ -11344,7 +10157,6 @@ app.post('/api/admin/restrictions', adminProtect, restrictTo('super'), async (re
     restrictions.updatedAt = new Date();
     await restrictions.save();
     
-    // After saving, run checks on all users to apply new limits
     if (restrictions.auto_restrictions_enabled !== false) {
       const users = await User.find({ status: 'active' }).select('_id');
       for (const user of users) {
@@ -11359,12 +10171,10 @@ app.post('/api/admin/restrictions', adminProtect, restrictTo('super'), async (re
   }
 });
 
-// ✅ ADD RESTRICTION CHECK ON TRANSACTION COMPLETION (deposit/withdrawal completion)
 const triggerTransactionCheck = async (userId) => {
   await AccountRestrictions.checkAndUpdateRestrictions(userId, 'transaction_completion');
 };
 
-// Scheduled job to run daily at midnight to check all users
 const scheduleDailyRestrictionChecks = () => {
   setInterval(async () => {
     console.log('Running daily restriction checks...');
@@ -11381,13 +10191,11 @@ const scheduleDailyRestrictionChecks = () => {
       }
       console.log(`Daily restriction check complete. ${updated} users had status changes.`);
     }
-  }, 24 * 60 * 60 * 1000); // 24 hours
+  }, 24 * 60 * 60 * 1000);
 };
 
-// Start scheduler after server starts
 setTimeout(scheduleDailyRestrictionChecks, 60000);
 
-// ✅ ADD ENDPOINT TO GET USER RESTRICTION STATUS WITH MESSAGE
 app.get('/api/user/restriction-status', protect, async (req, res) => {
   try {
     const userId = req.user._id;
@@ -11423,6 +10231,3011 @@ app.get('/api/user/restriction-status', protect, async (req, res) => {
     res.status(500).json({ status: 'error', message: 'Failed to fetch restriction status' });
   }
 });
+
+// SNIPPET B - COMPLETE REWRITE
+
+app.get('/api/fiat-currencies', async (req, res) => {
+  try {
+    console.log('Fetching real-time fiat currencies from external APIs...');
+    
+    let rates = null;
+    let apiSuccess = false;
+    
+    try {
+      const response = await axios.get('https://api.exchangerate-api.com/v4/latest/USD', { 
+        timeout: 8000,
+        headers: { 'Accept': 'application/json' }
+      });
+      if (response.data && response.data.rates) {
+        rates = response.data.rates;
+        apiSuccess = true;
+        console.log('Fetched rates from exchangerate-api.com');
+      }
+    } catch (err) {
+      console.warn('exchangerate-api.com failed:', err.message);
+    }
+    
+    if (!apiSuccess) {
+      try {
+        const response = await axios.get('https://api.frankfurter.app/latest?from=USD', { 
+          timeout: 8000 
+        });
+        if (response.data && response.data.rates) {
+          rates = response.data.rates;
+          apiSuccess = true;
+          console.log('Fetched rates from frankfurter.app');
+        }
+      } catch (err) {
+        console.warn('frankfurter.app failed:', err.message);
+      }
+    }
+    
+    if (!apiSuccess) {
+      try {
+        const response = await axios.get('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json', { 
+          timeout: 8000 
+        });
+        if (response.data && response.data.usd) {
+          rates = response.data.usd;
+          apiSuccess = true;
+          console.log('Fetched rates from currency-api');
+        }
+      } catch (err) {
+        console.warn('currency-api failed:', err.message);
+      }
+    }
+    
+    if (!apiSuccess || !rates) {
+      console.error('All exchange rate APIs failed');
+      return res.status(503).json({
+        status: 'error',
+        message: 'Unable to fetch exchange rates. Please try again later.',
+        retryAfter: 30
+      });
+    }
+    
+    const allCurrencies = [
+      { code: 'USD', name: 'US Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/us.png' },
+      { code: 'EUR', name: 'Euro', symbol: '€', flag: 'https://flagcdn.com/w40/eu.png' },
+      { code: 'GBP', name: 'British Pound', symbol: '£', flag: 'https://flagcdn.com/w40/gb.png' },
+      { code: 'JPY', name: 'Japanese Yen', symbol: '¥', flag: 'https://flagcdn.com/w40/jp.png' },
+      { code: 'CNY', name: 'Chinese Yuan', symbol: '¥', flag: 'https://flagcdn.com/w40/cn.png' },
+      { code: 'INR', name: 'Indian Rupee', symbol: '₹', flag: 'https://flagcdn.com/w40/in.png' },
+      { code: 'CAD', name: 'Canadian Dollar', symbol: 'C$', flag: 'https://flagcdn.com/w40/ca.png' },
+      { code: 'AUD', name: 'Australian Dollar', symbol: 'A$', flag: 'https://flagcdn.com/w40/au.png' },
+      { code: 'CHF', name: 'Swiss Franc', symbol: 'Fr', flag: 'https://flagcdn.com/w40/ch.png' },
+      { code: 'KRW', name: 'South Korean Won', symbol: '₩', flag: 'https://flagcdn.com/w40/kr.png' },
+      { code: 'MXN', name: 'Mexican Peso', symbol: '$', flag: 'https://flagcdn.com/w40/mx.png' },
+      { code: 'BRL', name: 'Brazilian Real', symbol: 'R$', flag: 'https://flagcdn.com/w40/br.png' },
+      { code: 'ZAR', name: 'South African Rand', symbol: 'R', flag: 'https://flagcdn.com/w40/za.png' },
+      { code: 'SGD', name: 'Singapore Dollar', symbol: 'S$', flag: 'https://flagcdn.com/w40/sg.png' },
+      { code: 'HKD', name: 'Hong Kong Dollar', symbol: 'HK$', flag: 'https://flagcdn.com/w40/hk.png' },
+      { code: 'NZD', name: 'New Zealand Dollar', symbol: 'NZ$', flag: 'https://flagcdn.com/w40/nz.png' },
+      { code: 'SEK', name: 'Swedish Krona', symbol: 'kr', flag: 'https://flagcdn.com/w40/se.png' },
+      { code: 'NOK', name: 'Norwegian Krone', symbol: 'kr', flag: 'https://flagcdn.com/w40/no.png' },
+      { code: 'DKK', name: 'Danish Krone', symbol: 'kr', flag: 'https://flagcdn.com/w40/dk.png' },
+      { code: 'PLN', name: 'Polish Zloty', symbol: 'zł', flag: 'https://flagcdn.com/w40/pl.png' },
+      { code: 'TRY', name: 'Turkish Lira', symbol: '₺', flag: 'https://flagcdn.com/w40/tr.png' },
+      { code: 'RUB', name: 'Russian Ruble', symbol: '₽', flag: 'https://flagcdn.com/w40/ru.png' },
+      { code: 'AED', name: 'UAE Dirham', symbol: 'د.إ', flag: 'https://flagcdn.com/w40/ae.png' },
+      { code: 'SAR', name: 'Saudi Riyal', symbol: '﷼', flag: 'https://flagcdn.com/w40/sa.png' },
+      { code: 'ILS', name: 'Israeli Shekel', symbol: '₪', flag: 'https://flagcdn.com/w40/il.png' },
+      { code: 'RON', name: 'Romanian Leu', symbol: 'lei', flag: 'https://flagcdn.com/w40/ro.png' },
+      { code: 'CZK', name: 'Czech Koruna', symbol: 'Kč', flag: 'https://flagcdn.com/w40/cz.png' },
+      { code: 'HUF', name: 'Hungarian Forint', symbol: 'Ft', flag: 'https://flagcdn.com/w40/hu.png' },
+      { code: 'BGN', name: 'Bulgarian Lev', symbol: 'лв', flag: 'https://flagcdn.com/w40/bg.png' },
+      { code: 'HRK', name: 'Croatian Kuna', symbol: 'kn', flag: 'https://flagcdn.com/w40/hr.png' },
+      { code: 'THB', name: 'Thai Baht', symbol: '฿', flag: 'https://flagcdn.com/w40/th.png' },
+      { code: 'VND', name: 'Vietnamese Dong', symbol: '₫', flag: 'https://flagcdn.com/w40/vn.png' },
+      { code: 'IDR', name: 'Indonesian Rupiah', symbol: 'Rp', flag: 'https://flagcdn.com/w40/id.png' },
+      { code: 'MYR', name: 'Malaysian Ringgit', symbol: 'RM', flag: 'https://flagcdn.com/w40/my.png' },
+      { code: 'PHP', name: 'Philippine Peso', symbol: '₱', flag: 'https://flagcdn.com/w40/ph.png' },
+      { code: 'PKR', name: 'Pakistani Rupee', symbol: '₨', flag: 'https://flagcdn.com/w40/pk.png' },
+      { code: 'BDT', name: 'Bangladeshi Taka', symbol: '৳', flag: 'https://flagcdn.com/w40/bd.png' },
+      { code: 'LKR', name: 'Sri Lankan Rupee', symbol: 'Rs', flag: 'https://flagcdn.com/w40/lk.png' },
+      { code: 'NPR', name: 'Nepalese Rupee', symbol: 'Rs', flag: 'https://flagcdn.com/w40/np.png' },
+      { code: 'EGP', name: 'Egyptian Pound', symbol: 'E£', flag: 'https://flagcdn.com/w40/eg.png' },
+      { code: 'QAR', name: 'Qatari Riyal', symbol: '﷼', flag: 'https://flagcdn.com/w40/qa.png' },
+      { code: 'KWD', name: 'Kuwaiti Dinar', symbol: 'KD', flag: 'https://flagcdn.com/w40/kw.png' },
+      { code: 'BHD', name: 'Bahraini Dinar', symbol: '.د.ب', flag: 'https://flagcdn.com/w40/bh.png' },
+      { code: 'OMR', name: 'Omani Rial', symbol: '﷼', flag: 'https://flagcdn.com/w40/om.png' },
+      { code: 'JOD', name: 'Jordanian Dinar', symbol: 'JD', flag: 'https://flagcdn.com/w40/jo.png' },
+      { code: 'KES', name: 'Kenyan Shilling', symbol: 'KSh', flag: 'https://flagcdn.com/w40/ke.png' },
+      { code: 'NGN', name: 'Nigerian Naira', symbol: '₦', flag: 'https://flagcdn.com/w40/ng.png' },
+      { code: 'GHS', name: 'Ghanaian Cedi', symbol: '₵', flag: 'https://flagcdn.com/w40/gh.png' },
+      { code: 'MAD', name: 'Moroccan Dirham', symbol: 'DH', flag: 'https://flagcdn.com/w40/ma.png' },
+      { code: 'TZS', name: 'Tanzanian Shilling', symbol: 'TSh', flag: 'https://flagcdn.com/w40/tz.png' },
+      { code: 'UGX', name: 'Ugandan Shilling', symbol: 'USh', flag: 'https://flagcdn.com/w40/ug.png' },
+      { code: 'ARS', name: 'Argentine Peso', symbol: '$', flag: 'https://flagcdn.com/w40/ar.png' },
+      { code: 'CLP', name: 'Chilean Peso', symbol: '$', flag: 'https://flagcdn.com/w40/cl.png' },
+      { code: 'COP', name: 'Colombian Peso', symbol: '$', flag: 'https://flagcdn.com/w40/co.png' },
+      { code: 'PEN', name: 'Peruvian Sol', symbol: 'S/', flag: 'https://flagcdn.com/w40/pe.png' },
+      { code: 'UYU', name: 'Uruguayan Peso', symbol: '$', flag: 'https://flagcdn.com/w40/uy.png' },
+      { code: 'PYG', name: 'Paraguayan Guarani', symbol: '₲', flag: 'https://flagcdn.com/w40/py.png' },
+      { code: 'BOB', name: 'Bolivian Boliviano', symbol: 'Bs', flag: 'https://flagcdn.com/w40/bo.png' },
+      { code: 'CRC', name: 'Costa Rican Colón', symbol: '₡', flag: 'https://flagcdn.com/w40/cr.png' },
+      { code: 'TWD', name: 'New Taiwan Dollar', symbol: 'NT$', flag: 'https://flagcdn.com/w40/tw.png' },
+      { code: 'MNT', name: 'Mongolian Tugrik', symbol: '₮', flag: 'https://flagcdn.com/w40/mn.png' },
+      { code: 'KHR', name: 'Cambodian Riel', symbol: '៛', flag: 'https://flagcdn.com/w40/kh.png' },
+      { code: 'LAK', name: 'Lao Kip', symbol: '₭', flag: 'https://flagcdn.com/w40/la.png' },
+      { code: 'MMK', name: 'Myanmar Kyat', symbol: 'Ks', flag: 'https://flagcdn.com/w40/mm.png' }
+    ];
+    
+    const currenciesWithRates = allCurrencies.map(currency => ({
+      ...currency,
+      exchangeRate: rates[currency.code] || (currency.code === 'USD' ? 1 : null)
+    })).filter(c => c.exchangeRate !== null);
+    
+    console.log(`Returning ${currenciesWithRates.length} fiat currencies with real exchange rates`);
+    
+    res.status(200).json({ 
+      status: 'success',
+      currencies: currenciesWithRates,
+      lastUpdated: new Date().toISOString()
+    });
+    
+  } catch (err) {
+    console.error('Error fetching fiat currencies:', err);
+    res.status(500).json({ 
+      status: 'error', 
+      message: 'Failed to fetch exchange rates. Please try again.'
+    });
+  }
+});
+
+app.get('/api/convert/assets', protect, async (req, res) => {
+  try {
+    const availableAssets = [
+      { symbol: 'btc', name: 'Bitcoin', logo: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png' },
+      { symbol: 'eth', name: 'Ethereum', logo: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png' },
+      { symbol: 'usdt', name: 'Tether', logo: 'https://assets.coingecko.com/coins/images/325/large/Tether.png' },
+      { symbol: 'bnb', name: 'BNB', logo: 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png' },
+      { symbol: 'sol', name: 'Solana', logo: 'https://assets.coingecko.com/coins/images/4128/large/solana.png' },
+      { symbol: 'usdc', name: 'USDC', logo: 'https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png' },
+      { symbol: 'xrp', name: 'XRP', logo: 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png' },
+      { symbol: 'doge', name: 'Dogecoin', logo: 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png' },
+      { symbol: 'ada', name: 'Cardano', logo: 'https://assets.coingecko.com/coins/images/975/large/cardano.png' },
+      { symbol: 'shib', name: 'Shiba Inu', logo: 'https://assets.coingecko.com/coins/images/11939/large/shiba.png' },
+      { symbol: 'avax', name: 'Avalanche', logo: 'https://assets.coingecko.com/coins/images/12559/large/Avalanche_Circle_RedWhite.png' },
+      { symbol: 'dot', name: 'Polkadot', logo: 'https://assets.coingecko.com/coins/images/12171/large/polkadot.png' },
+      { symbol: 'trx', name: 'TRON', logo: 'https://assets.coingecko.com/coins/images/1094/large/tron-logo.png' },
+      { symbol: 'link', name: 'Chainlink', logo: 'https://assets.coingecko.com/coins/images/877/large/chainlink-new-logo.png' },
+      { symbol: 'matic', name: 'Polygon', logo: 'https://assets.coingecko.com/coins/images/4713/large/matic-token-icon.png' },
+      { symbol: 'ltc', name: 'Litecoin', logo: 'https://assets.coingecko.com/coins/images/2/large/litecoin.png' }
+    ];
+    
+    res.status(200).json({ assets: availableAssets });
+  } catch (err) {
+    console.error('Error fetching convert assets:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch available assets' });
+  }
+});
+
+app.post('/api/convert', protect, async (req, res) => {
+  try {
+    const { fromAsset, toAsset, amount } = req.body;
+    const userId = req.user._id;
+    
+    if (!fromAsset || !toAsset || !amount || amount <= 0) {
+      return res.status(400).json({ status: 'fail', message: 'Invalid conversion parameters' });
+    }
+    
+    const fromAssetLower = fromAsset.toLowerCase();
+    const toAssetLower = toAsset.toLowerCase();
+    
+    if (fromAssetLower === toAssetLower) {
+      return res.status(400).json({ status: 'fail', message: 'Cannot convert to the same asset' });
+    }
+    
+    let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
+    if (!userAssetBalance) {
+      userAssetBalance = new UserAssetBalance({ user: userId, balances: {} });
+      await userAssetBalance.save();
+    }
+    
+    const fromBalance = userAssetBalance.balances[fromAssetLower] || 0;
+    
+    if (amount > fromBalance) {
+      return res.status(400).json({ status: 'fail', message: 'Insufficient balance for conversion' });
+    }
+    
+    const fromPrice = await getCryptoPrice(fromAsset);
+    const toPrice = await getCryptoPrice(toAsset);
+    
+    if (!fromPrice || !toPrice) {
+      return res.status(503).json({ status: 'fail', message: 'Unable to fetch current prices. Please try again.' });
+    }
+    
+    const usdValue = amount * fromPrice;
+    const CONVERSION_FEE_PERCENT = 0.5;
+    const feeAmount = usdValue * (CONVERSION_FEE_PERCENT / 100);
+    const usdValueAfterFee = usdValue - feeAmount;
+    const toAmount = usdValueAfterFee / toPrice;
+    
+    userAssetBalance.balances[fromAssetLower] -= amount;
+    
+    if (!userAssetBalance.balances[toAssetLower]) {
+      userAssetBalance.balances[toAssetLower] = 0;
+    }
+    userAssetBalance.balances[toAssetLower] += toAmount;
+    
+    userAssetBalance.lastUpdated = new Date();
+    await userAssetBalance.save();
+    
+    await PlatformRevenue.create({
+      source: 'buy_fee',
+      amount: feeAmount,
+      currency: 'USD',
+      userId: userId,
+      description: `Conversion fee from ${fromAssetLower} to ${toAssetLower}`,
+      metadata: {
+        fromAsset: fromAssetLower,
+        toAsset: toAssetLower,
+        amount: amount,
+        toAmount: toAmount,
+        usdValue: usdValue,
+        feePercentage: CONVERSION_FEE_PERCENT
+      }
+    });
+    
+    let totalMainBalance = 0;
+    for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
+      if (balance > 0) {
+        const price = await getCryptoPrice(asset.toUpperCase());
+        if (price) {
+          totalMainBalance += balance * price;
+        }
+      }
+    }
+    
+    await User.findByIdAndUpdate(userId, { 'wallets.main': totalMainBalance });
+    
+    const reference = `CONV-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+    
+    await Transaction.create({
+      user: userId,
+      type: 'sell',
+      amount: usdValue,
+      asset: fromAsset.toUpperCase(),
+      assetAmount: amount,
+      currency: 'USD',
+      status: 'completed',
+      method: fromAsset.toUpperCase(),
+      reference: `${reference}-SELL`,
+      fee: feeAmount,
+      netAmount: usdValueAfterFee,
+      sellDetails: {
+        asset: fromAsset.toUpperCase(),
+        amountUSD: usdValue,
+        assetAmount: amount,
+        sellingPrice: fromPrice,
+        buyingPrice: fromPrice,
+        profitLoss: 0,
+        profitLossPercentage: 0
+      }
+    });
+    
+    await Transaction.create({
+      user: userId,
+      type: 'buy',
+      amount: usdValueAfterFee,
+      asset: toAsset.toUpperCase(),
+      assetAmount: toAmount,
+      currency: 'USD',
+      status: 'completed',
+      method: toAsset.toUpperCase(),
+      reference: `${reference}-BUY`,
+      fee: 0,
+      netAmount: usdValueAfterFee,
+      buyDetails: {
+        asset: toAsset.toUpperCase(),
+        amountUSD: usdValueAfterFee,
+        assetAmount: toAmount,
+        buyingPrice: toPrice,
+        currentPrice: toPrice,
+        profitLoss: 0,
+        profitLossPercentage: 0
+      }
+    });
+    
+    const io = req.app.get('io');
+    if (io) {
+      const updatedBalances = {};
+      for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
+        if (balance > 0) {
+          const price = await getCryptoPrice(asset.toUpperCase());
+          updatedBalances[asset] = {
+            balance: balance,
+            usdValue: balance * (price || 0),
+            id: asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset,
+            avgPrice: 0,
+            unrealizedPnl: 0,
+            unrealizedPnlPercent: 0,
+            transactions: []
+          };
+        }
+      }
+      io.to(`user_${userId}`).emit('asset_balances_update', Object.values(updatedBalances));
+      io.to(`user_${userId}`).emit('balance_update', { main: totalMainBalance });
+    }
+    
+    res.status(200).json({
+      status: 'success',
+      message: 'Conversion completed successfully',
+      data: {
+        fromAsset: fromAssetLower,
+        fromAmount: amount,
+        toAsset: toAssetLower,
+        toAmount: toAmount,
+        usdValue: usdValue,
+        fee: feeAmount,
+        feePercentage: CONVERSION_FEE_PERCENT,
+        usdValueAfterFee: usdValueAfterFee,
+        exchangeRate: fromPrice / toPrice
+      }
+    });
+  } catch (err) {
+    console.error('Conversion error:', err);
+    res.status(500).json({ status: 'error', message: 'Conversion failed' });
+  }
+});
+
+app.post('/api/users/preferences/save', protect, async (req, res) => {
+  try {
+    const { language, fiatCurrency, detectedFromIP } = req.body;
+    const userId = req.user._id;
+    
+    const updates = {};
+    if (language) updates['preferences.language'] = language;
+    if (fiatCurrency) updates['preferences.currency'] = fiatCurrency;
+    
+    if (detectedFromIP) {
+      updates['ipPreferences.language'] = language;
+      updates['ipPreferences.currency'] = fiatCurrency;
+      updates['ipPreferences.setFromIP'] = true;
+      updates['ipPreferences.detectedAt'] = new Date();
+    }
+    
+    await User.findByIdAndUpdate(userId, updates);
+    
+    await UserPreference.findOneAndUpdate(
+      { user: userId },
+      { 
+        language: language || req.user.preferences?.language || 'en',
+        currency: fiatCurrency || req.user.preferences?.currency || 'USD',
+        $setOnInsert: { user: userId }
+      },
+      { upsert: true }
+    );
+    
+    res.status(200).json({
+      status: 'success',
+      message: 'Preferences saved successfully',
+      data: { language, currency: fiatCurrency }
+    });
+  } catch (err) {
+    console.error('Error saving preferences:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to save preferences' });
+  }
+});
+
+app.get('/api/users/preferences', protect, async (req, res) => {
+  try {
+    let userPref = await UserPreference.findOne({ user: req.user._id });
+    
+    if (!userPref) {
+      const user = await User.findById(req.user._id);
+      userPref = {
+        displayAsset: user?.preferences?.displayAsset || 'btc',
+        language: user?.preferences?.language || user?.ipPreferences?.language || 'en',
+        currency: user?.preferences?.currency || user?.ipPreferences?.currency || 'USD',
+        theme: user?.preferences?.theme || 'dark'
+      };
+    }
+    
+    res.status(200).json({
+      status: 'success',
+      data: {
+        displayAsset: userPref.displayAsset || 'btc',
+        language: userPref.language || 'en',
+        currency: userPref.currency || 'USD',
+        theme: userPref.theme || 'dark'
+      }
+    });
+  } catch (err) {
+    console.error('Error fetching preferences:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch preferences' });
+  }
+});
+
+app.post('/api/users/preferences', protect, async (req, res) => {
+  try {
+    const { displayAsset, theme, language, currency, fiatCurrency } = req.body;
+    
+    const updates = {};
+    if (displayAsset) updates.displayAsset = displayAsset;
+    if (theme) updates.theme = theme;
+    if (language) updates.language = language;
+    if (currency || fiatCurrency) updates.currency = currency || fiatCurrency;
+    
+    await UserPreference.findOneAndUpdate(
+      { user: req.user._id },
+      { $set: updates },
+      { upsert: true, new: true }
+    );
+    
+    await User.findByIdAndUpdate(req.user._id, {
+      $set: {
+        'preferences.theme': theme,
+        'preferences.language': language,
+        'preferences.currency': currency || fiatCurrency
+      }
+    });
+    
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${req.user._id}`).emit('preferences_update', updates);
+    }
+    
+    res.status(200).json({
+      status: 'success',
+      message: 'Preferences updated successfully',
+      data: updates
+    });
+  } catch (err) {
+    console.error('Error updating preferences:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to update preferences' });
+  }
+});
+
+app.get('/api/users/deposit-asset', protect, async (req, res) => {
+  try {
+    const userPref = await UserPreference.findOne({ user: req.user._id });
+    const asset = userPref?.displayAsset || 'btc';
+    
+    res.status(200).json({
+      status: 'success',
+      data: { asset }
+    });
+  } catch (err) {
+    console.error('Error fetching deposit asset:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch deposit asset' });
+  }
+});
+
+app.post('/api/admin/deposits/:id/approve', adminProtect, [
+  body('notes').optional().trim()
+], async (req, res) => {
+  try {
+    const { notes } = req.body;
+    
+    const deposit = await Transaction.findById(req.params.id)
+      .populate('user');
+    
+    if (!deposit || deposit.type !== 'deposit') {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Deposit not found'
+      });
+    }
+    
+    if (deposit.status !== 'pending') {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Deposit is not pending approval'
+      });
+    }
+    
+    const user = await User.findById(deposit.user._id);
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+    
+    const isCryptoDeposit = deposit.method !== 'BANK' && deposit.method !== 'CARD';
+    const assetSymbol = isCryptoDeposit ? deposit.method.toLowerCase() : null;
+    
+    let cryptoPrice = null;
+    let assetAmount = null;
+    
+    if (isCryptoDeposit && assetSymbol) {
+      cryptoPrice = await getCryptoPrice(assetSymbol.toUpperCase());
+      if (cryptoPrice) {
+        assetAmount = deposit.amount / cryptoPrice;
+      } else {
+        cryptoPrice = assetSymbol === 'btc' ? 43000 : 
+                      assetSymbol === 'eth' ? 2200 : 
+                      assetSymbol === 'usdt' ? 1 : 1;
+        assetAmount = deposit.amount / cryptoPrice;
+      }
+    }
+    
+    user.wallets.main += deposit.amount;
+    await user.save();
+    
+    if (isCryptoDeposit && assetSymbol) {
+      let userAssetBalance = await UserAssetBalance.findOne({ user: user._id });
+      if (!userAssetBalance) {
+        userAssetBalance = new UserAssetBalance({ user: user._id, balances: {} });
+      }
+      
+      if (!userAssetBalance.balances[assetSymbol]) {
+        userAssetBalance.balances[assetSymbol] = 0;
+      }
+      userAssetBalance.balances[assetSymbol] += assetAmount;
+      userAssetBalance.lastUpdated = new Date();
+      
+      userAssetBalance.history.push({
+        asset: assetSymbol,
+        type: 'deposit',
+        amount: assetAmount,
+        balance: userAssetBalance.balances[assetSymbol],
+        usdValue: deposit.amount,
+        price: cryptoPrice,
+        transactionId: deposit._id,
+        timestamp: new Date()
+      });
+      
+      await userAssetBalance.save();
+      
+      await DepositAsset.create({
+        user: user._id,
+        asset: assetSymbol,
+        amount: assetAmount,
+        usdValue: deposit.amount,
+        transactionId: deposit._id,
+        status: 'confirmed',
+        confirmedAt: new Date(),
+        metadata: {
+          txHash: deposit.details?.txHash,
+          fromAddress: deposit.details?.fromAddress,
+          toAddress: deposit.details?.toAddress,
+          network: deposit.network || assetSymbol.toUpperCase(),
+          exchangeRate: cryptoPrice,
+          assetPriceAtTime: cryptoPrice
+        }
+      });
+    }
+    
+    deposit.status = 'completed';
+    deposit.processedBy = req.admin._id;
+    deposit.processedAt = new Date();
+    deposit.adminNotes = notes;
+    if (isCryptoDeposit && assetAmount) {
+      deposit.assetAmount = assetAmount;
+      deposit.asset = deposit.method;
+    }
+    await deposit.save();
+
+    const deviceInfo = await getUserDeviceInfo(req);
+    
+    await UserLog.create({
+      user: user._id,
+      username: user.email,
+      email: user.email,
+      userFullName: `${user.firstName} ${user.lastName}`,
+      action: 'deposit_completed',
+      actionCategory: 'financial',
+      ipAddress: getRealClientIP(req),
+      userAgent: req.headers['user-agent'] || 'Unknown',
+      deviceInfo: {
+        type: getDeviceType(req),
+        os: {
+          name: getOSFromUserAgent(req.headers['user-agent']),
+          version: 'Unknown'
+        },
+        browser: {
+          name: getBrowserFromUserAgent(req.headers['user-agent']),
+          version: 'Unknown'
+        },
+        platform: req.headers['user-agent'] || 'Unknown',
+        language: req.headers['accept-language'] || 'Unknown',
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        deviceModel: deviceInfo.deviceModel,
+        deviceBrand: deviceInfo.deviceBrand
+      },
+      location: {
+        ip: getRealClientIP(req),
+        country: {
+          name: deviceInfo.locationDetails?.country || 'Unknown',
+          code: deviceInfo.locationDetails?.country || 'Unknown'
+        },
+        region: {
+          name: deviceInfo.locationDetails?.region || 'Unknown',
+          code: deviceInfo.locationDetails?.region || 'Unknown'
+        },
+        city: deviceInfo.locationDetails?.city || 'Unknown',
+        postalCode: deviceInfo.locationDetails?.postalCode || 'Unknown',
+        latitude: deviceInfo.locationDetails?.latitude,
+        longitude: deviceInfo.locationDetails?.longitude,
+        timezone: deviceInfo.locationDetails?.timezone || 'Unknown',
+        isp: deviceInfo.locationDetails?.isp || 'Unknown',
+        exactLocation: deviceInfo.exactLocation
+      },
+      status: 'success',
+      metadata: {
+        amount: deposit.amount,
+        method: deposit.method,
+        asset: deposit.asset,
+        assetAmount: assetAmount,
+        reference: deposit.reference,
+        adminId: req.admin._id,
+        adminName: req.admin.name,
+        adminNotes: notes,
+        processedAt: deposit.processedAt
+      },
+      relatedEntity: deposit._id,
+      relatedEntityModel: 'Transaction'
+    });
+
+    try {
+      await sendAutomatedEmail(user, 'deposit_approved', {
+        name: user.firstName,
+        amount: deposit.amount,
+        method: deposit.method,
+        reference: deposit.reference,
+        newBalance: user.wallets.main,
+        processedAt: deposit.processedAt,
+        asset: deposit.method !== 'BANK' && deposit.method !== 'CARD' ? deposit.method : 'BTC'
+      });
+      console.log(`Deposit approval email sent to ${user.email}`);
+    } catch (emailError) {
+      console.error('Failed to send deposit approval email:', emailError);
+    }
+    
+    await AccountRestrictions.checkAndUpdateRestrictions(user._id, 'transaction_completion');
+    
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${user._id}`).emit('balance_update', { main: user.wallets.main });
+      if (isCryptoDeposit && assetSymbol) {
+        const updatedAssetBalance = await UserAssetBalance.findOne({ user: user._id });
+        if (updatedAssetBalance) {
+          const assetData = [];
+          for (const [asset, balance] of Object.entries(updatedAssetBalance.balances)) {
+            if (balance > 0) {
+              const price = await getCryptoPrice(asset.toUpperCase());
+              assetData.push({
+                symbol: asset,
+                balance: balance,
+                usdValue: balance * (price || 0),
+                id: asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset,
+                avgPrice: 0,
+                unrealizedPnl: 0,
+                unrealizedPnlPercent: 0,
+                transactions: updatedAssetBalance.history.filter(h => h.asset === asset).slice(-10)
+              });
+            }
+          }
+          io.to(`user_${user._id}`).emit('asset_balances_update', assetData);
+        }
+      }
+    }
+    
+    res.status(200).json({
+      status: 'success',
+      message: 'Deposit approved successfully'
+    });
+    
+    await logActivity('approve-deposit', 'transaction', deposit._id, req.admin._id, 'Admin', req, {
+      amount: deposit.amount,
+      userId: user._id,
+      asset: assetSymbol,
+      assetAmount: assetAmount
+    });
+  } catch (err) {
+    console.error('Admin approve deposit error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to approve deposit',
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+  }
+});
+
+app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
+  body('notes').optional().trim(),
+  body('txid').optional().trim()
+], async (req, res) => {
+  try {
+    const { notes, txid } = req.body;
+    
+    const withdrawal = await Transaction.findById(req.params.id)
+      .populate('user');
+    
+    if (!withdrawal || withdrawal.type !== 'withdrawal') {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Withdrawal not found'
+      });
+    }
+    
+    if (withdrawal.status !== 'pending') {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Withdrawal is not pending approval'
+      });
+    }
+    
+    let cryptoPrice = null;
+    let usdValue = withdrawal.amount;
+    let feeUsd = withdrawal.fee || 0;
+    const isCryptoWithdrawal = withdrawal.method !== 'BANK' && withdrawal.method !== 'CARD';
+    const assetSymbol = isCryptoWithdrawal ? withdrawal.method.toLowerCase() : null;
+    
+    if (isCryptoWithdrawal && assetSymbol) {
+      cryptoPrice = await getCryptoPrice(assetSymbol.toUpperCase());
+      if (cryptoPrice) {
+        if (withdrawal.assetAmount) {
+          usdValue = withdrawal.assetAmount * cryptoPrice;
+        }
+        feeUsd = (withdrawal.fee || 0) * cryptoPrice;
+      }
+    }
+    
+    if (isCryptoWithdrawal && assetSymbol && withdrawal.assetAmount) {
+      let userAssetBalance = await UserAssetBalance.findOne({ user: withdrawal.user._id });
+      if (userAssetBalance && userAssetBalance.balances[assetSymbol]) {
+        userAssetBalance.balances[assetSymbol] -= withdrawal.assetAmount;
+        if (userAssetBalance.balances[assetSymbol] < 0) {
+          userAssetBalance.balances[assetSymbol] = 0;
+        }
+        userAssetBalance.lastUpdated = new Date();
+        
+        userAssetBalance.history.push({
+          asset: assetSymbol,
+          type: 'withdrawal',
+          amount: withdrawal.assetAmount,
+          balance: userAssetBalance.balances[assetSymbol],
+          usdValue: usdValue,
+          price: cryptoPrice || 0,
+          transactionId: withdrawal._id,
+          timestamp: new Date()
+        });
+        
+        await userAssetBalance.save();
+      }
+    }
+    
+    withdrawal.status = 'completed';
+    withdrawal.processedBy = req.admin._id;
+    withdrawal.processedAt = new Date();
+    withdrawal.adminNotes = notes;
+    if (txid) {
+      withdrawal.details = { ...withdrawal.details, txid };
+    }
+    await withdrawal.save();
+
+    const deviceInfo = await getUserDeviceInfo(req);
+    
+    await UserLog.create({
+      user: withdrawal.user._id,
+      username: withdrawal.user.email,
+      email: withdrawal.user.email,
+      userFullName: `${withdrawal.user.firstName} ${withdrawal.user.lastName}`,
+      action: 'withdrawal_completed',
+      actionCategory: 'financial',
+      ipAddress: getRealClientIP(req),
+      userAgent: req.headers['user-agent'] || 'Unknown',
+      deviceInfo: {
+        type: getDeviceType(req),
+        os: {
+          name: getOSFromUserAgent(req.headers['user-agent']),
+          version: 'Unknown'
+        },
+        browser: {
+          name: getBrowserFromUserAgent(req.headers['user-agent']),
+          version: 'Unknown'
+        },
+        platform: req.headers['user-agent'] || 'Unknown',
+        language: req.headers['accept-language'] || 'Unknown',
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        deviceModel: deviceInfo.deviceModel,
+        deviceBrand: deviceInfo.deviceBrand
+      },
+      location: {
+        ip: getRealClientIP(req),
+        country: {
+          name: deviceInfo.locationDetails?.country || 'Unknown',
+          code: deviceInfo.locationDetails?.country || 'Unknown'
+        },
+        region: {
+          name: deviceInfo.locationDetails?.region || 'Unknown',
+          code: deviceInfo.locationDetails?.region || 'Unknown'
+        },
+        city: deviceInfo.locationDetails?.city || 'Unknown',
+        postalCode: deviceInfo.locationDetails?.postalCode || 'Unknown',
+        latitude: deviceInfo.locationDetails?.latitude,
+        longitude: deviceInfo.locationDetails?.longitude,
+        timezone: deviceInfo.locationDetails?.timezone || 'Unknown',
+        isp: deviceInfo.locationDetails?.isp || 'Unknown',
+        exactLocation: deviceInfo.exactLocation
+      },
+      status: 'success',
+      metadata: {
+        amount: withdrawal.amount,
+        asset: withdrawal.asset,
+        assetAmount: withdrawal.assetAmount,
+        method: withdrawal.method,
+        reference: withdrawal.reference,
+        adminId: req.admin._id,
+        adminName: req.admin.name,
+        adminNotes: notes,
+        txid: txid,
+        processedAt: withdrawal.processedAt
+      },
+      relatedEntity: withdrawal._id,
+      relatedEntityModel: 'Transaction'
+    });
+
+    try {
+      await sendAutomatedEmail(withdrawal.user, 'withdrawal_approved', {
+        name: withdrawal.user.firstName,
+        amount: withdrawal.assetAmount || withdrawal.amount,
+        asset: withdrawal.asset || 'BTC',
+        usdValue: usdValue,
+        fee: withdrawal.fee || 0,
+        feeUsd: feeUsd,
+        netAmount: (withdrawal.assetAmount || withdrawal.amount) - (withdrawal.fee || 0),
+        withdrawalAddress: withdrawal.details?.withdrawalAddress || withdrawal.btcAddress || 'N/A',
+        processedAt: withdrawal.processedAt,
+        txid: txid || withdrawal.details?.txid,
+        method: withdrawal.method
+      });
+      console.log(`Withdrawal approval email sent to ${withdrawal.user.email}`);
+    } catch (emailError) {
+      console.error('Failed to send withdrawal approval email:', emailError);
+    }
+    
+    await AccountRestrictions.checkAndUpdateRestrictions(withdrawal.user._id, 'transaction_completion');
+    
+    let totalMainBalance = 0;
+    const updatedAssetBalance = await UserAssetBalance.findOne({ user: withdrawal.user._id });
+    if (updatedAssetBalance) {
+      for (const [asset, balance] of Object.entries(updatedAssetBalance.balances)) {
+        if (balance > 0) {
+          const price = await getCryptoPrice(asset.toUpperCase());
+          if (price) {
+            totalMainBalance += balance * price;
+          }
+        }
+      }
+    }
+    await User.findByIdAndUpdate(withdrawal.user._id, { 'wallets.main': totalMainBalance });
+    
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${withdrawal.user._id}`).emit('balance_update', { main: totalMainBalance });
+      if (isCryptoWithdrawal && assetSymbol && updatedAssetBalance) {
+        const assetData = [];
+        for (const [asset, balance] of Object.entries(updatedAssetBalance.balances)) {
+          if (balance > 0) {
+            const price = await getCryptoPrice(asset.toUpperCase());
+            assetData.push({
+              symbol: asset,
+              balance: balance,
+              usdValue: balance * (price || 0),
+              id: asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset,
+              avgPrice: 0,
+              unrealizedPnl: 0,
+              unrealizedPnlPercent: 0,
+              transactions: updatedAssetBalance.history.filter(h => h.asset === asset).slice(-10)
+            });
+          }
+        }
+        io.to(`user_${withdrawal.user._id}`).emit('asset_balances_update', assetData);
+      }
+    }
+    
+    res.status(200).json({
+      status: 'success',
+      message: 'Withdrawal approved successfully'
+    });
+    
+    await logActivity('approve-withdrawal', 'transaction', withdrawal._id, req.admin._id, 'Admin', req, {
+      amount: withdrawal.amount,
+      userId: withdrawal.user,
+      asset: assetSymbol,
+      assetAmount: withdrawal.assetAmount
+    });
+  } catch (err) {
+    console.error('Admin approve withdrawal error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to approve withdrawal',
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+  }
+});
+
+app.get('/api/users/assets', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
+    
+    if (!userAssetBalance) {
+      return res.status(200).json([]);
+    }
+    
+    const assetData = [];
+    for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
+      if (balance > 0) {
+        const price = await getCryptoPrice(asset.toUpperCase());
+        const currentValue = balance * (price || 0);
+        
+        const buyTransactions = userAssetBalance.history.filter(h => h.asset === asset && h.type === 'buy');
+        let totalSpent = 0;
+        let totalBought = 0;
+        buyTransactions.forEach(t => {
+          totalSpent += t.usdValue;
+          totalBought += t.amount;
+        });
+        const avgPrice = totalBought > 0 ? totalSpent / totalBought : 0;
+        const unrealizedPnl = currentValue - totalSpent;
+        const unrealizedPercentage = totalSpent > 0 ? (unrealizedPnl / totalSpent) * 100 : 0;
+        
+        assetData.push({
+          symbol: asset,
+          balance: balance,
+          currentValue: currentValue,
+          avgPrice: avgPrice,
+          unrealizedPnl: unrealizedPnl,
+          unrealizedPnlPercent: unrealizedPercentage,
+          id: asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset,
+          transactions: userAssetBalance.history.filter(h => h.asset === asset).slice(-20)
+        });
+      }
+    }
+    
+    res.status(200).json(assetData);
+  } catch (err) {
+    console.error('Error fetching user assets:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch assets' });
+  }
+});
+
+app.get('/api/users/balances', protect, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).select('wallets');
+    res.status(200).json({
+      main: user.wallets.main,
+      active: user.wallets.active,
+      matured: user.wallets.matured
+    });
+  } catch (err) {
+    console.error('Error fetching balances:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch balances' });
+  }
+});
+
+let priceUpdateInterval = null;
+let lastPrices = {};
+let isRecalculating = false;
+
+const startRealTimePriceUpdates = (io) => {
+  if (priceUpdateInterval) clearInterval(priceUpdateInterval);
+  
+  priceUpdateInterval = setInterval(async () => {
+    try {
+      const assets = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'ADA', 'SHIB', 'AVAX', 'DOT', 'TRX', 'LINK', 'MATIC', 'LTC'];
+      const priceUpdates = {};
+      
+      const pricePromises = assets.map(async (asset) => {
+        const price = await getCryptoPrice(asset);
+        if (price) {
+          priceUpdates[asset.toLowerCase()] = {
+            price: price,
+            timestamp: Date.now()
+          };
+        }
+      });
+      
+      await Promise.all(pricePromises);
+      
+      if (Object.keys(priceUpdates).length > 0 && io) {
+        io.emit('price_update', priceUpdates);
+        lastPrices = priceUpdates;
+
+        const marketWss = req?.app?.get('marketWss');
+        if (marketWss) {
+          marketWss.clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN) {
+              client.send(JSON.stringify({ type: 'price_update', data: priceUpdates }));
+            }
+          });
+        }
+      }
+      
+      await recalculateAllWalletValuesRealtime(io, priceUpdates);
+      
+    } catch (err) {
+      console.error('Error in price update interval:', err);
+    }
+  }, 1000);
+};
+
+const recalculateAllWalletValuesRealtime = async (io, currentPrices) => {
+  if (isRecalculating) return;
+  isRecalculating = true;
+  
+  try {
+    const users = await User.find({}).select('_id wallets');
+    const userAssetBalances = await UserAssetBalance.find({});
+    const userAssetMap = new Map();
+    userAssetBalances.forEach(ub => {
+      userAssetMap.set(ub.user.toString(), ub);
+    });
+    
+    const allMaturedInvestments = await Investment.find({ 
+      status: 'completed' 
+    }).populate('plan');
+    const maturedByUser = new Map();
+    allMaturedInvestments.forEach(inv => {
+      const userId = inv.user.toString();
+      if (!maturedByUser.has(userId)) maturedByUser.set(userId, []);
+      maturedByUser.get(userId).push(inv);
+    });
+    
+    const batchUpdates = [];
+    
+    for (const user of users) {
+      let totalMainValue = 0;
+      let totalMaturedValue = 0;
+      
+      const userAssets = userAssetMap.get(user._id.toString());
+      if (userAssets && userAssets.balances) {
+        for (const [assetSymbol, balance] of Object.entries(userAssets.balances)) {
+          if (balance > 0) {
+            const priceData = currentPrices[assetSymbol.toLowerCase()];
+            const price = priceData ? priceData.price : await getCryptoPrice(assetSymbol.toUpperCase());
+            if (price && price > 0) {
+              totalMainValue += balance * price;
+            }
+          }
+        }
+      }
+      
+      const maturedInvestments = maturedByUser.get(user._id.toString()) || [];
+      for (const investment of maturedInvestments) {
+        if (investment.asset && investment.assetAmount) {
+          const priceData = currentPrices[investment.asset.toLowerCase()];
+          const currentPrice = priceData ? priceData.price : await getCryptoPrice(investment.asset.toUpperCase());
+          if (currentPrice && currentPrice > 0) {
+            totalMaturedValue += investment.assetAmount * currentPrice;
+          } else {
+            totalMaturedValue += investment.amount + (investment.actualReturn || 0);
+          }
+        } else {
+          totalMaturedValue += investment.amount + (investment.actualReturn || 0);
+        }
+      }
+      
+      const previousMainValue = user.wallets.main || totalMainValue;
+      const mainPnL = totalMainValue - previousMainValue;
+      const mainPnLPercentage = previousMainValue > 0 ? (mainPnL / previousMainValue) * 100 : 0;
+      
+      const previousMaturedValue = user.wallets.matured || totalMaturedValue;
+      const maturedPnL = totalMaturedValue - previousMaturedValue;
+      const maturedPnLPercentage = previousMaturedValue > 0 ? (maturedPnL / previousMaturedValue) * 100 : 0;
+      
+      batchUpdates.push({
+        userId: user._id,
+        main: totalMainValue,
+        matured: totalMaturedValue,
+        mainPnL: mainPnL,
+        mainPnLPercent: mainPnLPercentage,
+        maturedPnL: maturedPnL,
+        maturedPnLPercent: maturedPnLPercentage
+      });
+      
+      if (io) {
+        io.to(`user_${user._id}`).emit('wallet_realtime_update', {
+          main: totalMainValue,
+          matured: totalMaturedValue,
+          mainPnL: mainPnL,
+          mainPnLPercent: mainPnLPercentage,
+          maturedPnL: maturedPnL,
+          maturedPnLPercent: maturedPnLPercentage,
+          timestamp: Date.now()
+        });
+      }
+    }
+    
+    for (const update of batchUpdates) {
+      await User.findByIdAndUpdate(update.userId, {
+        'wallets.main': update.main,
+        'wallets.matured': update.matured
+      });
+    }
+    
+  } catch (err) {
+    console.error('Error in real-time wallet recalculation:', err);
+  } finally {
+    isRecalculating = false;
+  }
+};
+
+const recalculateAllUserMainBalances = async (io) => {
+  const currentPrices = lastPrices;
+  await recalculateAllWalletValuesRealtime(io, currentPrices);
+};
+
+app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { currency, amount, walletType, description } = req.body;
+    
+    if (!currency || !amount || amount <= 0) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Please provide a valid currency and amount'
+      });
+    }
+    
+    if (!['main', 'matured'].includes(walletType)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Wallet type must be "main" or "matured"'
+      });
+    }
+    
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+    
+    const price = await getCryptoPrice(currency);
+    if (!price) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Unable to fetch price for ${currency}`
+      });
+    }
+    
+    const usdValue = amount * price;
+    
+    let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
+    if (!userAssetBalance) {
+      userAssetBalance = new UserAssetBalance({ user: userId, balances: {} });
+    }
+    
+    const currencyLower = currency.toLowerCase();
+    if (!userAssetBalance.balances[currencyLower]) {
+      userAssetBalance.balances[currencyLower] = 0;
+    }
+    
+    userAssetBalance.balances[currencyLower] += amount;
+    userAssetBalance.lastUpdated = new Date();
+    
+    userAssetBalance.history.push({
+      asset: currencyLower,
+      type: 'deposit',
+      amount: amount,
+      balance: userAssetBalance.balances[currencyLower],
+      usdValue: usdValue,
+      price: price,
+      timestamp: new Date(),
+      transactionId: null
+    });
+    
+    await userAssetBalance.save();
+    
+    const updateField = walletType === 'main' ? 'wallets.main' : 'wallets.matured';
+    await User.findByIdAndUpdate(userId, {
+      $inc: { [updateField]: usdValue }
+    });
+    
+    const transaction = await Transaction.create({
+      user: userId,
+      type: 'deposit',
+      amount: usdValue,
+      asset: currency,
+      assetAmount: amount,
+      currency: 'USD',
+      status: 'completed',
+      method: currency,
+      reference: `ADMIN-CRYPTO-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`,
+      details: {
+        cryptoCurrency: currency,
+        cryptoAmount: amount,
+        usdValue: usdValue,
+        price: price,
+        walletType: walletType,
+        adminId: req.admin._id,
+        adminName: req.admin.name,
+        description: description || `Crypto balance added by admin`
+      },
+      fee: 0,
+      netAmount: usdValue,
+      exchangeRateAtTime: price,
+      processedBy: req.admin._id,
+      processedAt: new Date()
+    });
+    
+    await logActivity(
+      'admin_add_crypto_balance',
+      'User',
+      userId,
+      req.admin._id,
+      'Admin',
+      req,
+      {
+        currency,
+        amount,
+        usdValue,
+        walletType,
+        description
+      }
+    );
+    
+    try {
+      const userEmail = user.email;
+      await sendEmail({
+        email: userEmail,
+        subject: `${currency.toUpperCase()} Deposit Confirmed`,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="text-align: center; margin-bottom: 20px;">
+              <img src="https://cryptologos.cc/logos/${currency.toLowerCase()}-${currency.toLowerCase()}-logo.png" alt="${currency.toUpperCase()} logo" style="width: 60px; height: 60px;">
+            </div>
+            <h2 style="color: #2563eb;">Deposit Received</h2>
+            <p>Dear ${user.firstName} ${user.lastName},</p>
+            <p>You have received a deposit from Bithash Capital Secure Asset Fund (BCSAF).</p>
+            <div style="background: #f8fafc; padding: 15px; border-radius: 8px; margin: 15px 0;">
+              <p><strong>Amount:</strong> ${amount} ${currency.toUpperCase()}</p>
+              <p><strong>USD Value:</strong> $${usdValue.toFixed(2)}</p>
+              <p><strong>Wallet Type:</strong> ${walletType === 'main' ? 'Main Wallet' : 'Matured Wallet'}</p>
+              <p><strong>Date:</strong> ${new Date().toLocaleString()}</p>
+              ${description ? `<p><strong>Note:</strong> ${description}</p>` : ''}
+            </div>
+            <div style="text-align: center; margin: 30px 0;">
+              <a href="https://www.bithashcapital.live/dashboard" style="background-color: #2563eb; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block;">Go to Dashboard</a>
+            </div>
+            <hr>
+            <p style="font-size: 12px; color: #666;">Bithash Capital Finance Team</p>
+          </div>
+        `
+      });
+    } catch (emailErr) {
+      console.error('Failed to send email notification:', emailErr);
+    }
+    
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${userId}`).emit('balance_update', {
+        main: user.wallets.main + (walletType === 'main' ? usdValue : 0),
+        matured: user.wallets.matured + (walletType === 'matured' ? usdValue : 0),
+        active: user.wallets.active
+      });
+      
+      io.to(`user_${userId}`).emit('crypto_balance_update', {
+        currency: currencyLower,
+        balance: userAssetBalance.balances[currencyLower],
+        usdValue: userAssetBalance.balances[currencyLower] * price
+      });
+    }
+    
+    res.json({
+      status: 'success',
+      message: `${amount} ${currency.toUpperCase()} added to user's ${walletType} wallet successfully`,
+      data: {
+        transaction: transaction,
+        newBalance: userAssetBalance.balances[currencyLower],
+        usdValue: usdValue
+      }
+    });
+    
+  } catch (err) {
+    console.error('Error adding crypto balance:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to add crypto balance'
+    });
+  }
+});
+
+app.get('/api/admin/supported-cryptos', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+  try {
+    const cryptos = await getAllCryptosFromRedis();
+    
+    const cryptosWithBalances = [];
+    for (const crypto of cryptos) {
+      const totalBalance = await UserAssetBalance.aggregate([
+        { $group: { _id: null, total: { $sum: `$balances.${crypto.symbol.toLowerCase()}` } } }
+      ]);
+      
+      cryptosWithBalances.push({
+        code: crypto.symbol,
+        name: crypto.name,
+        logoUrl: crypto.logo,
+        balance: totalBalance[0]?.total || 0
+      });
+    }
+    
+    res.json({
+      status: 'success',
+      data: { cryptos: cryptosWithBalances }
+    });
+  } catch (err) {
+    console.error('Error fetching supported cryptos:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch supported cryptocurrencies'
+    });
+  }
+});
+
+// =============================================
+// SPOT TRADING MARKET DATA ENDPOINTS - PRODUCTION
+// ALL ENDPOINTS READ FROM HOT REDIS - NO ON-DEMAND FETCHING
+// =============================================
+
+app.get('/api/market/all-pairs', async (req, res) => {
+  try {
+    const cacheKey = 'market:all:pairs';
+    let pairs = await redis.get(cacheKey);
+    let quoteAssets = await redis.get('market:quote:assets');
+    
+    if (!pairs) {
+      const response = await axios.get('https://api.binance.com/api/v3/exchangeInfo', { timeout: 10000 });
+      
+      const usdtPairs = response.data.symbols.filter(s => s.quoteAsset === 'USDT' && s.status === 'TRADING');
+      const usdcPairs = response.data.symbols.filter(s => s.quoteAsset === 'USDC' && s.status === 'TRADING');
+      const eurcPairs = response.data.symbols.filter(s => s.quoteAsset === 'EURC' && s.status === 'TRADING');
+      const usdPairs = response.data.symbols.filter(s => s.quoteAsset === 'USD' && s.status === 'TRADING');
+      const bnbPairs = response.data.symbols.filter(s => s.quoteAsset === 'BNB' && s.status === 'TRADING');
+      const btcPairs = response.data.symbols.filter(s => s.quoteAsset === 'BTC' && s.status === 'TRADING');
+      
+      const allPairs = [];
+      
+      usdtPairs.forEach(pair => {
+        allPairs.push({ symbol: pair.symbol, base: pair.baseAsset, quote: 'USDT', logo: '' });
+      });
+      usdcPairs.forEach(pair => {
+        allPairs.push({ symbol: pair.symbol, base: pair.baseAsset, quote: 'USDC', logo: '' });
+      });
+      eurcPairs.forEach(pair => {
+        allPairs.push({ symbol: pair.symbol, base: pair.baseAsset, quote: 'EURC', logo: '' });
+      });
+      usdPairs.forEach(pair => {
+        allPairs.push({ symbol: pair.symbol, base: pair.baseAsset, quote: 'USD', logo: '' });
+      });
+      bnbPairs.forEach(pair => {
+        allPairs.push({ symbol: pair.symbol, base: pair.baseAsset, quote: 'BNB', logo: '' });
+      });
+      btcPairs.forEach(pair => {
+        allPairs.push({ symbol: pair.symbol, base: pair.baseAsset, quote: 'BTC', logo: '' });
+      });
+      
+      const quoteAssetsList = ['USDT', 'USDC', 'EURC', 'USD', 'BNB', 'BTC'];
+      
+      await redis.setex(cacheKey, 3600, JSON.stringify(allPairs));
+      await redis.setex('market:quote:assets', 3600, JSON.stringify(quoteAssetsList));
+      
+      return res.status(200).json({ pairs: allPairs, quoteAssets: quoteAssetsList });
+    }
+    
+    const pairsData = JSON.parse(pairs);
+    const quoteData = quoteAssets ? JSON.parse(quoteAssets) : ['USDT', 'USDC', 'EURC', 'USD', 'BNB', 'BTC'];
+    
+    res.status(200).json({ pairs: pairsData, quoteAssets: quoteData });
+  } catch (err) {
+    console.error('All pairs fetch error:', err.message);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch market pairs', error: err.message });
+  }
+});
+
+app.get('/api/market/orderbook', async (req, res) => {
+  try {
+    const { symbol, limit = 100 } = req.query;
+    if (!symbol) {
+      return res.status(400).json({ status: 'fail', message: 'Symbol is required' });
+    }
+
+    const orderbookKey = `orderbook:${symbol.toUpperCase()}`;
+    const cached = await redis.get(orderbookKey);
+    
+    if (!cached) {
+      return res.status(503).json({ status: 'error', message: 'Order book data not yet available. Please try again.' });
+    }
+    
+    const orderbookData = JSON.parse(cached);
+    const dataAge = Date.now() - (orderbookData.updatedAt || 0);
+    
+    if (dataAge > 500) {
+      return res.status(503).json({ status: 'error', message: 'Order book data is stale. Please try again.' });
+    }
+    
+    const limitedData = {
+      bids: orderbookData.bids.slice(0, Math.min(limit, 100)),
+      asks: orderbookData.asks.slice(0, Math.min(limit, 100)),
+      lastUpdateId: orderbookData.lastUpdateId
+    };
+
+    res.status(200).json(limitedData);
+  } catch (err) {
+    console.error('Orderbook fetch error:', err.message);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch order book', error: err.message });
+  }
+});
+
+app.get('/api/market/ticker/24hr', async (req, res) => {
+  try {
+    const { symbol } = req.query;
+    
+    if (symbol) {
+      const tickerKey = `ticker:${symbol.toUpperCase()}`;
+      const cached = await redis.get(tickerKey);
+      
+      if (!cached) {
+        return res.status(503).json({ status: 'error', message: 'Ticker data not yet available. Please try again.' });
+      }
+      
+      const tickerData = JSON.parse(cached);
+      const dataAge = Date.now() - (tickerData.updatedAt || 0);
+      
+      if (dataAge > 500) {
+        return res.status(503).json({ status: 'error', message: 'Ticker data is stale. Please try again.' });
+      }
+      
+      return res.status(200).json(tickerData);
+    }
+    
+    const allPairs = await redis.get('market:all:pairs');
+    if (!allPairs) {
+      return res.status(503).json({ status: 'error', message: 'Market data not yet available.' });
+    }
+    
+    const pairs = JSON.parse(allPairs);
+    const tickers = [];
+    
+    for (const pair of pairs.slice(0, 50)) {
+      const tickerKey = `ticker:${pair.symbol}`;
+      const cached = await redis.get(tickerKey);
+      if (cached) {
+        const tickerData = JSON.parse(cached);
+        tickers.push({
+          symbol: tickerData.symbol,
+          lastPrice: tickerData.lastPrice,
+          priceChangePercent: tickerData.priceChangePercent,
+          volume: tickerData.volume,
+          quoteVolume: tickerData.quoteVolume
+        });
+      }
+    }
+    
+    res.status(200).json(tickers);
+  } catch (err) {
+    console.error('Ticker fetch error:', err.message);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch ticker data', error: err.message });
+  }
+});
+
+app.get('/api/market/trades', async (req, res) => {
+  try {
+    const { symbol, limit = 50 } = req.query;
+    if (!symbol) {
+      return res.status(400).json({ status: 'fail', message: 'Symbol is required' });
+    }
+
+    const tradesKey = `trades:${symbol.toUpperCase()}:recent`;
+    const cached = await redis.get(tradesKey);
+    
+    if (!cached) {
+      return res.status(503).json({ status: 'error', message: 'Trade data not yet available. Please try again.' });
+    }
+    
+    const trades = JSON.parse(cached);
+    const limitedTrades = trades.slice(0, Math.min(limit, 100));
+
+    res.status(200).json(limitedTrades);
+  } catch (err) {
+    console.error('Trades fetch error:', err.message);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch trades', error: err.message });
+  }
+});
+
+app.get('/api/market/candles', async (req, res) => {
+  try {
+    const { symbol, interval = '15m', limit = 200 } = req.query;
+    if (!symbol) {
+      return res.status(400).json({ status: 'fail', message: 'Symbol is required' });
+    }
+
+    const validIntervals = ['1s', '15m', '1h', '4h', '1d', '1w'];
+    if (!validIntervals.includes(interval)) {
+      return res.status(400).json({ status: 'fail', message: 'Invalid interval. Use: 1s, 15m, 1h, 4h, 1d, 1w' });
+    }
+
+    const candlesKey = `kline:${symbol.toUpperCase()}:${interval}`;
+    const cached = await redis.zrevrange(candlesKey, 0, parseInt(limit) - 1);
+    
+    if (!cached || cached.length === 0) {
+      return res.status(503).json({ status: 'error', message: 'Candle data not yet available. Please try again.' });
+    }
+    
+    const candles = cached.map(c => JSON.parse(c)).reverse().map(candle => ({
+      time: candle.openTime,
+      open: candle.open,
+      high: candle.high,
+      low: candle.low,
+      close: candle.close,
+      volume: candle.volume,
+      closeTime: candle.closeTime,
+      quoteVolume: candle.quoteVolume,
+      trades: candle.trades
+    }));
+
+    res.status(200).json({ candles });
+  } catch (err) {
+    console.error('Candles fetch error:', err.message);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch candle data', error: err.message });
+  }
+});
+
+app.get('/api/market/pairs', async (req, res) => {
+  try {
+    const { quote = 'USDT' } = req.query;
+    
+    const allPairsData = await redis.get('market:all:pairs');
+    if (!allPairsData) {
+      return res.status(503).json({ status: 'error', message: 'Market data not yet available. Please try again.' });
+    }
+    
+    const allPairs = JSON.parse(allPairsData);
+    const filteredPairs = allPairs.filter(p => p.quote === quote).slice(0, 50);
+    
+    const pairsWithPrices = [];
+    
+    for (const pair of filteredPairs) {
+      const priceKey = `price:${pair.symbol}:last`;
+      const priceData = await redis.get(priceKey);
+      const changeKey = `price:${pair.symbol}:change`;
+      const changeData = await redis.get(changeKey);
+      const volumeKey = `volume:${pair.symbol}:24h`;
+      const volumeData = await redis.get(volumeKey);
+      
+      let price = 0;
+      let change24h = 0;
+      let volume = 0;
+      
+      if (priceData) {
+        const parsed = JSON.parse(priceData);
+        price = parsed.price;
+      }
+      if (changeData) {
+        const parsed = JSON.parse(changeData);
+        change24h = parsed.changePercent;
+      }
+      if (volumeData) {
+        const parsed = JSON.parse(volumeData);
+        volume = parsed.volume;
+      }
+      
+      pairsWithPrices.push({
+        symbol: pair.symbol,
+        base: pair.base,
+        quote: pair.quote,
+        price: price,
+        change24h: change24h,
+        volume: volume,
+        logoUrl: pair.logo || '',
+        status: 'active'
+      });
+    }
+    
+    const result = { data: pairsWithPrices };
+    res.status(200).json(result);
+  } catch (err) {
+    console.error('Pairs fetch error:', err.message);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch market pairs', error: err.message });
+  }
+});
+
+app.get('/api/asset/logo', async (req, res) => {
+  try {
+    const { symbol } = req.query;
+    if (!symbol) {
+      return res.status(400).json({ status: 'fail', message: 'Symbol is required' });
+    }
+
+    const cacheKey = `asset:logo:${symbol.toUpperCase()}`;
+    const cached = await redis.get(cacheKey);
+    if (cached) {
+      return res.status(200).json(JSON.parse(cached));
+    }
+
+    let logoUrl = '';
+    try {
+      const response = await axios.get(`https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${symbol.toLowerCase()}&sparkline=false`, { timeout: 5000 });
+      if (response.data && response.data[0] && response.data[0].image) {
+        logoUrl = response.data[0].image;
+      }
+    } catch (e) {
+      logoUrl = '';
+    }
+
+    const result = { logoUrl };
+    await redis.setex(cacheKey, 86400, JSON.stringify(result));
+
+    res.status(200).json(result);
+  } catch (err) {
+    console.error('Logo fetch error:', err.message);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch logo', error: err.message });
+  }
+});
+
+app.get('/api/asset/extra', async (req, res) => {
+  try {
+    const { symbol } = req.query;
+    if (!symbol) {
+      return res.status(400).json({ status: 'fail', message: 'Symbol is required' });
+    }
+
+    const cacheKey = `asset:extra:${symbol.toUpperCase()}`;
+    const cached = await redis.get(cacheKey);
+    if (cached) {
+      return res.status(200).json(JSON.parse(cached));
+    }
+
+    const assetData = {
+      'BTC': { tags: ['POW', 'Store of Value', 'Payments', 'Layer 1'], networks: ['Bitcoin', 'Lightning'] },
+      'ETH': { tags: ['Smart Contracts', 'DeFi', 'NFT', 'Layer 1'], networks: ['ERC-20', 'ERC-721', 'Arbitrum', 'Optimism'] },
+      'BNB': { tags: ['Exchange', 'Smart Contracts', 'Layer 1'], networks: ['BEP-2', 'BEP-20'] },
+      'SOL': { tags: ['High Performance', 'DeFi', 'Layer 1'], networks: ['Solana', 'SPL'] },
+      'XRP': { tags: ['Payments', 'Enterprise', 'Layer 1'], networks: ['XRP Ledger'] },
+      'ADA': { tags: ['Smart Contracts', 'Research', 'Layer 1'], networks: ['Cardano'] },
+      'DOGE': { tags: ['Meme', 'Payments'], networks: ['Dogecoin'] },
+      'TRX': { tags: ['Smart Contracts', 'DeFi'], networks: ['TRC-20', 'TRC-10'] }
+    };
+
+    const defaultData = { tags: ['Crypto', 'Digital Asset'], networks: ['Mainnet'] };
+    const result = assetData[symbol.toUpperCase()] || defaultData;
+
+    await redis.setex(cacheKey, 86400, JSON.stringify(result));
+
+    res.status(200).json(result);
+  } catch (err) {
+    console.error('Asset extra fetch error:', err.message);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch asset info', error: err.message });
+  }
+});
+
+app.get('/api/asset/info', async (req, res) => {
+  try {
+    const { symbol } = req.query;
+    if (!symbol) {
+      return res.status(400).json({ status: 'fail', message: 'Symbol is required' });
+    }
+
+    const cacheKey = `asset:info:${symbol.toUpperCase()}`;
+    const cached = await redis.get(cacheKey);
+    if (cached) {
+      return res.status(200).json(JSON.parse(cached));
+    }
+
+    try {
+      const response = await axios.get(`https://api.coingecko.com/api/v3/coins/${symbol.toLowerCase()}`, { timeout: 5000 });
+      if (response.data) {
+        const data = response.data;
+        const result = {
+          symbol: symbol.toUpperCase(),
+          name: data.name,
+          logo: data.image?.large || '',
+          rank: data.market_cap_rank || 0,
+          marketCap: data.market_data?.market_cap?.usd || 0,
+          fullyDilutedMarketCap: data.market_data?.fully_diluted_valuation?.usd || 0,
+          marketDominance: 0,
+          volume24h: data.market_data?.total_volume?.usd || 0,
+          circulatingSupply: data.market_data?.circulating_supply || 0,
+          maxSupply: data.market_data?.max_supply || 0,
+          totalSupply: data.market_data?.total_supply || 0,
+          networks: data.links?.blockchain_site || [],
+          tags: data.categories || [],
+          description: data.description?.en || '',
+          website: data.links?.homepage?.[0] || '',
+          explorer: data.links?.blockchain_site?.[0] || '',
+          twitter: data.links?.twitter_screen_name || '',
+          reddit: data.links?.subreddit_url || '',
+          lastUpdated: Date.now()
+        };
+        
+        await redis.setex(cacheKey, 3600, JSON.stringify(result));
+        return res.status(200).json(result);
+      }
+    } catch (e) {
+      console.log('CoinGecko fetch failed:', e.message);
+    }
+
+    const fallbackResult = {
+      symbol: symbol.toUpperCase(),
+      name: symbol.toUpperCase(),
+      logo: '',
+      rank: 0,
+      marketCap: 0,
+      fullyDilutedMarketCap: 0,
+      marketDominance: 0,
+      volume24h: 0,
+      circulatingSupply: 0,
+      maxSupply: 0,
+      totalSupply: 0,
+      networks: [],
+      tags: [],
+      description: '',
+      website: '',
+      explorer: '',
+      twitter: '',
+      reddit: '',
+      lastUpdated: Date.now()
+    };
+    
+    res.status(200).json(fallbackResult);
+  } catch (err) {
+    console.error('Asset info fetch error:', err.message);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch asset info', error: err.message });
+  }
+});
+
+app.get('/api/trading/data', async (req, res) => {
+  try {
+    const { pair } = req.query;
+    if (!pair) {
+      return res.status(400).json({ status: 'fail', message: 'Pair is required' });
+    }
+
+    const cacheKey = `trading:data:${pair.toUpperCase()}`;
+    const cached = await redis.get(cacheKey);
+    if (cached) {
+      return res.status(200).json(JSON.parse(cached));
+    }
+
+    const defaultData = {
+      fundFlowLong: 50,
+      fundFlowShort: 50,
+      netFlow: [0, 0, 0, 0, 0, 0, 0],
+      inflow24h: 0,
+      outflow24h: 0,
+      netFlow24h: 0,
+      updatedAt: Date.now()
+    };
+
+    res.status(200).json(defaultData);
+  } catch (err) {
+    console.error('Trading data fetch error:', err.message);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch trading data', error: err.message });
+  }
+});
+
+app.get('/api/analysis', async (req, res) => {
+  try {
+    const { pair } = req.query;
+    if (!pair) {
+      return res.status(400).json({ status: 'fail', message: 'Pair is required' });
+    }
+
+    const cacheKey = `analysis:${pair.toUpperCase()}`;
+    const cached = await redis.get(cacheKey);
+    if (cached) {
+      return res.status(200).json(JSON.parse(cached));
+    }
+
+    const defaultData = {
+      longShortRatio: 1.0,
+      marginData: 0,
+      volatility: 0,
+      sentiment: 'neutral',
+      rsi: 50,
+      macd: 0,
+      movingAverage50: 0,
+      movingAverage200: 0,
+      updatedAt: Date.now()
+    };
+
+    res.status(200).json(defaultData);
+  } catch (err) {
+    console.error('Analysis fetch error:', err.message);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch analysis data', error: err.message });
+  }
+});
+
+app.get('/api/trading/pairlimits', async (req, res) => {
+  try {
+    const { symbol } = req.query;
+    if (!symbol) {
+      return res.status(400).json({ status: 'fail', message: 'Symbol is required' });
+    }
+
+    const cacheKey = `pairlimits:${symbol}`;
+    const cached = await redis.get(cacheKey);
+    if (cached) {
+      return res.status(200).json(JSON.parse(cached));
+    }
+
+    let pairLimits = await PairLimits.findOne({ symbol: symbol.toUpperCase() });
+    
+    if (!pairLimits) {
+      const base = symbol.replace(/USDT|USDC|EURC|USD|BNB|BTC$/, '');
+      const quote = symbol.slice(base.length);
+      
+      pairLimits = {
+        symbol: symbol.toUpperCase(),
+        baseAsset: base,
+        quoteAsset: quote,
+        maxBuyAmount: 10000,
+        maxSellAmount: 10000,
+        minOrderValue: 10,
+        logoUrl: ''
+      };
+    }
+
+    await redis.setex(cacheKey, 300, JSON.stringify(pairLimits));
+
+    res.status(200).json(pairLimits);
+  } catch (err) {
+    console.error('Pair limits fetch error:', err.message);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch pair limits', error: err.message });
+  }
+});
+
+app.get('/api/trading/orders', protect, async (req, res) => {
+  try {
+    const { symbol, status, limit = 100 } = req.query;
+    const userId = req.user._id;
+
+    let query = { user: userId };
+    if (symbol) query.symbol = symbol.toUpperCase();
+    if (status) query.status = status;
+
+    const orders = await Order.find(query)
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit));
+
+    res.status(200).json({ status: 'success', data: orders });
+  } catch (err) {
+    console.error('Get orders error:', err.message);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch orders', error: err.message });
+  }
+});
+
+app.post('/api/trading/orders/buy', protect, async (req, res) => {
+  try {
+    const { symbol, type, price, amount } = req.body;
+    const userId = req.user._id;
+
+    if (!symbol || !amount || amount <= 0) {
+      return res.status(400).json({ status: 'fail', message: 'Invalid order parameters' });
+    }
+
+    const priceKey = `price:${symbol.toUpperCase()}:last`;
+    const priceData = await redis.get(priceKey);
+    if (!priceData) {
+      return res.status(503).json({ status: 'error', message: 'Market price not available. Please try again.' });
+    }
+    
+    const currentPriceObj = JSON.parse(priceData);
+    const currentPrice = currentPriceObj.price;
+    const priceTimestamp = currentPriceObj.timestamp;
+    
+    if (Date.now() - priceTimestamp > 500) {
+      return res.status(503).json({ status: 'error', message: 'Price data is stale. Please try again.' });
+    }
+    
+    const finalPrice = type === 'market' ? currentPrice : (price || currentPrice);
+
+    if (!finalPrice || finalPrice <= 0) {
+      return res.status(400).json({ status: 'fail', message: 'Invalid price' });
+    }
+
+    const totalCost = amount * finalPrice;
+    const takerFee = totalCost * 0.001;
+    const totalWithFee = totalCost + takerFee;
+
+    let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
+    if (!userAssetBalance) {
+      userAssetBalance = new UserAssetBalance({ user: userId, balances: {} });
+      await userAssetBalance.save();
+    }
+
+    const usdtBalance = userAssetBalance.balances.usdt || 0;
+    if (totalWithFee > usdtBalance) {
+      return res.status(400).json({ status: 'fail', message: 'Insufficient USDT balance' });
+    }
+
+    userAssetBalance.balances.usdt = (userAssetBalance.balances.usdt || 0) - totalWithFee;
+    const baseLower = symbol.replace(/USDT|USDC|EURC|USD|BNB|BTC$/, '').toLowerCase();
+    userAssetBalance.balances[baseLower] = (userAssetBalance.balances[baseLower] || 0) + amount;
+    userAssetBalance.lastUpdated = new Date();
+    await userAssetBalance.save();
+
+    const orderId = `ORD-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
+    const order = new Order({
+      user: userId,
+      symbol: symbol.toUpperCase(),
+      orderId: orderId,
+      side: 'buy',
+      type: type,
+      price: finalPrice,
+      originalQty: amount,
+      remainingQty: 0,
+      executedQty: amount,
+      status: 'filled',
+      total: totalCost,
+      fee: takerFee,
+      feeAsset: 'USDT'
+    });
+    await order.save();
+
+    const tradeId = `TRD-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const trade = new Trade({
+      user: userId,
+      orderId: orderId,
+      symbol: symbol.toUpperCase(),
+      tradeId: tradeId,
+      side: 'buy',
+      price: finalPrice,
+      qty: amount,
+      quoteQty: totalCost,
+      commission: takerFee,
+      commissionAsset: 'USDT',
+      time: new Date()
+    });
+    await trade.save();
+
+    await TradingRevenue.create({
+      source: 'taker_fee',
+      orderId: orderId,
+      tradeId: tradeId,
+      userId: userId,
+      symbol: symbol.toUpperCase(),
+      amount: takerFee,
+      feePercentage: 0.10,
+      currency: 'USDT',
+      usdValue: takerFee,
+      recordedAt: new Date()
+    });
+
+    let totalMainBalance = 0;
+    for (const [asset, bal] of Object.entries(userAssetBalance.balances)) {
+      if (bal > 0) {
+        const assetPriceKey = `price:${asset.toUpperCase()}USDT:last`;
+        const assetPriceData = await redis.get(assetPriceKey);
+        if (assetPriceData) {
+          const parsed = JSON.parse(assetPriceData);
+          totalMainBalance += bal * parsed.price;
+        }
+      }
+    }
+    await User.findByIdAndUpdate(userId, { 'wallets.main': totalMainBalance });
+
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${userId}`).emit('balance_update', { main: totalMainBalance });
+      io.to(`user_${userId}`).emit('order_update', { order: order });
+      io.to(`user_${userId}`).emit('crypto_balances', { balances: userAssetBalance.balances });
+    }
+    
+    await redis.publish('user:orders', JSON.stringify({ userId, order }));
+    await redis.publish('user:balances', JSON.stringify({ userId, balances: userAssetBalance.balances }));
+
+    res.status(200).json({ status: 'success', message: 'Buy order executed', data: { order, totalCost, fee: takerFee } });
+  } catch (err) {
+    console.error('Buy order error:', err.message);
+    res.status(500).json({ status: 'error', message: 'Failed to place buy order', error: err.message });
+  }
+});
+
+app.post('/api/trading/orders/sell', protect, async (req, res) => {
+  try {
+    const { symbol, type, price, amount } = req.body;
+    const userId = req.user._id;
+
+    if (!symbol || !amount || amount <= 0) {
+      return res.status(400).json({ status: 'fail', message: 'Invalid order parameters' });
+    }
+
+    const priceKey = `price:${symbol.toUpperCase()}:last`;
+    const priceData = await redis.get(priceKey);
+    if (!priceData) {
+      return res.status(503).json({ status: 'error', message: 'Market price not available. Please try again.' });
+    }
+    
+    const currentPriceObj = JSON.parse(priceData);
+    const currentPrice = currentPriceObj.price;
+    const priceTimestamp = currentPriceObj.timestamp;
+    
+    if (Date.now() - priceTimestamp > 500) {
+      return res.status(503).json({ status: 'error', message: 'Price data is stale. Please try again.' });
+    }
+    
+    const finalPrice = type === 'market' ? currentPrice : (price || currentPrice);
+
+    if (!finalPrice || finalPrice <= 0) {
+      return res.status(400).json({ status: 'fail', message: 'Invalid price' });
+    }
+
+    const totalValue = amount * finalPrice;
+    const takerFee = totalValue * 0.001;
+    const netAmount = totalValue - takerFee;
+
+    let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
+    if (!userAssetBalance) {
+      userAssetBalance = new UserAssetBalance({ user: userId, balances: {} });
+      await userAssetBalance.save();
+    }
+
+    const baseLower = symbol.replace(/USDT|USDC|EURC|USD|BNB|BTC$/, '').toLowerCase();
+    const baseBalance = userAssetBalance.balances[baseLower] || 0;
+    
+    if (amount > baseBalance) {
+      return res.status(400).json({ status: 'fail', message: `Insufficient ${baseLower.toUpperCase()} balance` });
+    }
+
+    userAssetBalance.balances[baseLower] = baseBalance - amount;
+    userAssetBalance.balances.usdt = (userAssetBalance.balances.usdt || 0) + netAmount;
+    userAssetBalance.lastUpdated = new Date();
+    await userAssetBalance.save();
+
+    const orderId = `ORD-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
+    const order = new Order({
+      user: userId,
+      symbol: symbol.toUpperCase(),
+      orderId: orderId,
+      side: 'sell',
+      type: type,
+      price: finalPrice,
+      originalQty: amount,
+      remainingQty: 0,
+      executedQty: amount,
+      status: 'filled',
+      total: totalValue,
+      fee: takerFee,
+      feeAsset: 'USDT'
+    });
+    await order.save();
+
+    const tradeId = `TRD-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const trade = new Trade({
+      user: userId,
+      orderId: orderId,
+      symbol: symbol.toUpperCase(),
+      tradeId: tradeId,
+      side: 'sell',
+      price: finalPrice,
+      qty: amount,
+      quoteQty: totalValue,
+      commission: takerFee,
+      commissionAsset: 'USDT',
+      time: new Date()
+    });
+    await trade.save();
+
+    await TradingRevenue.create({
+      source: 'taker_fee',
+      orderId: orderId,
+      tradeId: tradeId,
+      userId: userId,
+      symbol: symbol.toUpperCase(),
+      amount: takerFee,
+      feePercentage: 0.10,
+      currency: 'USDT',
+      usdValue: takerFee,
+      recordedAt: new Date()
+    });
+
+    let totalMainBalance = 0;
+    for (const [asset, bal] of Object.entries(userAssetBalance.balances)) {
+      if (bal > 0) {
+        const assetPriceKey = `price:${asset.toUpperCase()}USDT:last`;
+        const assetPriceData = await redis.get(assetPriceKey);
+        if (assetPriceData) {
+          const parsed = JSON.parse(assetPriceData);
+          totalMainBalance += bal * parsed.price;
+        }
+      }
+    }
+    await User.findByIdAndUpdate(userId, { 'wallets.main': totalMainBalance });
+
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${userId}`).emit('balance_update', { main: totalMainBalance });
+      io.to(`user_${userId}`).emit('order_update', { order: order });
+      io.to(`user_${userId}`).emit('crypto_balances', { balances: userAssetBalance.balances });
+    }
+    
+    await redis.publish('user:orders', JSON.stringify({ userId, order }));
+    await redis.publish('user:balances', JSON.stringify({ userId, balances: userAssetBalance.balances }));
+
+    res.status(200).json({ status: 'success', message: 'Sell order executed', data: { order, totalValue, fee: takerFee, netAmount } });
+  } catch (err) {
+    console.error('Sell order error:', err.message);
+    res.status(500).json({ status: 'error', message: 'Failed to place sell order', error: err.message });
+  }
+});
+
+app.post('/api/trading/orders/cancel', protect, async (req, res) => {
+  try {
+    const { orderId } = req.body;
+    const userId = req.user._id;
+
+    const order = await Order.findOne({ orderId, user: userId });
+    if (!order) {
+      return res.status(404).json({ status: 'fail', message: 'Order not found' });
+    }
+
+    if (order.status !== 'new' && order.status !== 'partial' && order.status !== 'pending') {
+      return res.status(400).json({ status: 'fail', message: 'Order cannot be cancelled' });
+    }
+
+    order.status = 'cancelled';
+    order.updatedAt = new Date();
+    await order.save();
+
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${userId}`).emit('order_update', { order: order });
+    }
+    
+    await redis.publish('user:orders', JSON.stringify({ userId, order }));
+
+    res.status(200).json({ status: 'success', message: 'Order cancelled' });
+  } catch (err) {
+    console.error('Cancel order error:', err.message);
+    res.status(500).json({ status: 'error', message: 'Failed to cancel order', error: err.message });
+  }
+});
+
+app.post('/api/trading/orders/cancel-all', protect, async (req, res) => {
+  try {
+    const { symbol } = req.body;
+    const userId = req.user._id;
+
+    let query = { user: userId, status: { $in: ['new', 'partial', 'pending'] } };
+    if (symbol) query.symbol = symbol.toUpperCase();
+
+    const result = await Order.updateMany(query, { status: 'cancelled', updatedAt: new Date() });
+
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${userId}`).emit('orders_update', { cancelled: result.modifiedCount });
+    }
+
+    res.status(200).json({ status: 'success', message: `${result.modifiedCount} orders cancelled` });
+  } catch (err) {
+    console.error('Cancel all orders error:', err.message);
+    res.status(500).json({ status: 'error', message: 'Failed to cancel orders', error: err.message });
+  }
+});
+
+app.get('/api/trading/trades', protect, async (req, res) => {
+  try {
+    const { symbol, limit = 100 } = req.query;
+    const userId = req.user._id;
+
+    let query = { user: userId };
+    if (symbol) query.symbol = symbol.toUpperCase();
+
+    const trades = await Trade.find(query)
+      .sort({ time: -1 })
+      .limit(parseInt(limit));
+
+    res.status(200).json({ status: 'success', data: trades });
+  } catch (err) {
+    console.error('Get trades error:', err.message);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch trades', error: err.message });
+  }
+});
+
+app.get('/api/trading/positions', protect, async (req, res) => {
+  try {
+    const { symbol } = req.query;
+    const userId = req.user._id;
+
+    let query = { user: userId, status: 'open' };
+    if (symbol) query.symbol = symbol.toUpperCase();
+
+    const positions = await Position.find(query);
+
+    res.status(200).json({ status: 'success', data: positions });
+  } catch (err) {
+    console.error('Get positions error:', err.message);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch positions', error: err.message });
+  }
+});
+
+app.post('/api/trading/positions/close', protect, async (req, res) => {
+  try {
+    const { positionId } = req.body;
+    const userId = req.user._id;
+
+    const position = await Position.findOne({ _id: positionId, user: userId, status: 'open' });
+    if (!position) {
+      return res.status(404).json({ status: 'fail', message: 'Position not found' });
+    }
+
+    const priceKey = `price:${position.symbol}:last`;
+    const priceData = await redis.get(priceKey);
+    if (!priceData) {
+      return res.status(503).json({ status: 'error', message: 'Market price not available. Please try again.' });
+    }
+    
+    const currentPriceObj = JSON.parse(priceData);
+    const currentPrice = currentPriceObj.price;
+    
+    let realizedPnL = 0;
+    if (position.side === 'long') {
+      realizedPnL = (currentPrice - position.entryPrice) * position.quantity;
+    } else {
+      realizedPnL = (position.entryPrice - currentPrice) * position.quantity;
+    }
+
+    position.status = 'closed';
+    position.realizedPnL = realizedPnL;
+    position.closedAt = new Date();
+    await position.save();
+
+    let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
+    if (userAssetBalance) {
+      userAssetBalance.balances.usdt = (userAssetBalance.balances.usdt || 0) + position.margin + realizedPnL;
+      await userAssetBalance.save();
+    }
+
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${userId}`).emit('position_closed', { positionId, realizedPnL });
+      io.to(`user_${userId}`).emit('crypto_balances', { balances: userAssetBalance?.balances || {} });
+    }
+
+    res.status(200).json({ status: 'success', message: 'Position closed', data: { realizedPnL } });
+  } catch (err) {
+    console.error('Close position error:', err.message);
+    res.status(500).json({ status: 'error', message: 'Failed to close position', error: err.message });
+  }
+});
+
+app.get('/api/user/chart-settings', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    
+    let settings = await UserTradingSettings.findOne({ user: userId });
+    
+    if (!settings) {
+      return res.status(200).json({ 
+        status: 'success', 
+        chartSettings: {
+          style: 'candlestick',
+          backgroundColor: '#0B0E11',
+          bullishColor: '#228B22',
+          bearishColor: '#FF0000',
+          solidCandles: false,
+          showBorders: true,
+          showWick: true,
+          tradeMarker: 'both'
+        }
+      });
+    }
+
+    res.status(200).json({ status: 'success', chartSettings: settings.chartSettings || {} });
+  } catch (err) {
+    console.error('Get chart settings error:', err.message);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch chart settings', error: err.message });
+  }
+});
+
+app.post('/api/user/chart-settings', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { chartSettings } = req.body;
+
+    await UserTradingSettings.findOneAndUpdate(
+      { user: userId },
+      { chartSettings: chartSettings },
+      { upsert: true, new: true }
+    );
+
+    res.status(200).json({ status: 'success', message: 'Chart settings saved' });
+  } catch (err) {
+    console.error('Save chart settings error:', err.message);
+    res.status(500).json({ status: 'error', message: 'Failed to save chart settings', error: err.message });
+  }
+});
+
+app.get('/api/user/settings', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    
+    let settings = await UserTradingSettings.findOne({ user: userId });
+    
+    if (!settings) {
+      return res.status(200).json({ 
+        status: 'success', 
+        orderBookSettings: {
+          precision: 0.01,
+          depthSize: 20,
+          showCumulativeTotal: false,
+          colorMode: 'default',
+          displaySize: 'compact'
+        }
+      });
+    }
+
+    res.status(200).json({ status: 'success', orderBookSettings: settings.orderBookSettings || {} });
+  } catch (err) {
+    console.error('Get settings error:', err.message);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch settings', error: err.message });
+  }
+});
+
+app.post('/api/user/settings', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { orderBookSettings } = req.body;
+
+    await UserTradingSettings.findOneAndUpdate(
+      { user: userId },
+      { orderBookSettings: orderBookSettings },
+      { upsert: true, new: true }
+    );
+
+    res.status(200).json({ status: 'success', message: 'Settings saved' });
+  } catch (err) {
+    console.error('Save settings error:', err.message);
+    res.status(500).json({ status: 'error', message: 'Failed to save settings', error: err.message });
+  }
+});
+
+app.get('/api/users/assets', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    
+    let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
+    
+    if (!userAssetBalance) {
+      userAssetBalance = new UserAssetBalance({ user: userId, balances: {} });
+      await userAssetBalance.save();
+    }
+    
+    const assets = [];
+    for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
+      if (balance > 0) {
+        const priceKey = `price:${asset.toUpperCase()}USDT:last`;
+        const priceData = await redis.get(priceKey);
+        let currentPrice = 0;
+        if (priceData) {
+          const parsed = JSON.parse(priceData);
+          currentPrice = parsed.price;
+        }
+        
+        assets.push({
+          symbol: asset.toUpperCase(),
+          balance: balance,
+          usdValue: balance * currentPrice,
+          currentPrice: currentPrice
+        });
+      }
+    }
+    
+    res.status(200).json({ status: 'success', data: { assets } });
+  } catch (err) {
+    console.error('Get user assets error:', err.message);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch assets', error: err.message });
+  }
+});
+
+app.get('/api/users/me', protect, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).select('-password -twoFactorAuth.secret');
+    res.status(200).json({ status: 'success', data: { user } });
+  } catch (err) {
+    console.error('Get user error:', err.message);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch user', error: err.message });
+  }
+});
+
+app.get('/api/users/balances', protect, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).select('wallets');
+    res.status(200).json({ status: 'success', data: { wallets: user.wallets } });
+  } catch (err) {
+    console.error('Get balances error:', err.message);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch balances', error: err.message });
+  }
+});
+
+const setupSpotMarketWebSocket = (server) => {
+  const wss = new WebSocket.Server({ server, path: '/ws/spotmarket' });
+  
+  const clients = new Map();
+  let redisSubscriber = null;
+
+  const setupRedisSubscriber = () => {
+    redisSubscriber = new Redis({
+      host: process.env.REDIS_HOST || 'redis-14450.c276.us-east-1-2.ec2.redns.redis-cloud.com',
+      port: process.env.REDIS_PORT || 14450,
+      password: process.env.REDIS_PASSWORD || 'qjXgsg0YrsLaSumlEW9HkIZbvLjXEwXR',
+    });
+    
+    redisSubscriber.subscribe('market:ticker', 'market:orderbook', 'market:trade', 'market:candles', 'user:orders', 'user:balances');
+    
+    redisSubscriber.on('message', (channel, message) => {
+      const data = JSON.parse(message);
+      
+      clients.forEach((client) => {
+        if (client.ws.readyState === WebSocket.OPEN) {
+          let messageToSend = null;
+          
+          if (channel === 'market:ticker') {
+            messageToSend = {
+              type: 'ticker',
+              symbol: data.symbol,
+              price: data.price,
+              priceChangePercent: data.priceChangePercent,
+              highPrice: data.highPrice,
+              lowPrice: data.lowPrice,
+              volume: data.volume,
+              quoteVolume: data.quoteVolume,
+              stats: data.stats
+            };
+          } else if (channel === 'market:orderbook') {
+            messageToSend = {
+              type: 'orderbook',
+              symbol: data.symbol,
+              bids: data.bids,
+              asks: data.asks
+            };
+          } else if (channel === 'market:trade') {
+            messageToSend = {
+              type: 'trade',
+              symbol: data.symbol,
+              price: data.price,
+              amount: data.amount,
+              time: data.time,
+              isBuyerMaker: data.isBuyerMaker
+            };
+          } else if (channel === 'market:candles') {
+            messageToSend = {
+              type: 'candles',
+              symbol: data.symbol,
+              interval: data.interval,
+              candles: data.candles
+            };
+          } else if (channel === 'user:orders' && client.userId === data.userId) {
+            messageToSend = { type: 'orders', order: data.order };
+          } else if (channel === 'user:balances' && client.userId === data.userId) {
+            messageToSend = { type: 'crypto_balances', balances: data.balances };
+          }
+          
+          if (messageToSend) {
+            client.ws.send(JSON.stringify(messageToSend));
+          }
+        }
+      });
+    });
+  };
+
+  wss.on('connection', (ws, req) => {
+    const clientId = uuidv4();
+    clients.set(clientId, { ws: ws, userId: null });
+    console.log(`Spot market WebSocket client connected: ${clientId}, total: ${clients.size}`);
+
+    ws.on('message', async (message) => {
+      try {
+        const data = JSON.parse(message);
+        
+        if (data.type === 'authenticate' && data.token) {
+          try {
+            const decoded = verifyJWT(data.token);
+            if (decoded && !decoded.isAdmin) {
+              const client = clients.get(clientId);
+              if (client) client.userId = decoded.id;
+              ws.send(JSON.stringify({ type: 'authenticated', status: 'success' }));
+              
+              const userAssetBalance = await UserAssetBalance.findOne({ user: decoded.id });
+              if (userAssetBalance) {
+                ws.send(JSON.stringify({ type: 'crypto_balances', balances: userAssetBalance.balances }));
+              }
+            }
+          } catch (err) {
+            ws.send(JSON.stringify({ type: 'authenticated', status: 'fail', message: 'Invalid token' }));
+          }
+        }
+        
+        if (data.type === 'ping') {
+          ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
+        }
+      } catch (err) {}
+    });
+
+    ws.on('close', () => {
+      clients.delete(clientId);
+      console.log(`Spot market WebSocket client disconnected: ${clientId}, total: ${clients.size}`);
+    });
+  });
+
+  setupRedisSubscriber();
+  return wss;
+};
+
+const setupTickerWebSocket = (server) => {
+  const wss = new WebSocket.Server({ server, path: '/ws/ticker' });
+  const clients = new Set();
+  let redisSubscriber = null;
+
+  const setupTickerSubscriber = () => {
+    redisSubscriber = new Redis({
+      host: process.env.REDIS_HOST || 'redis-14450.c276.us-east-1-2.ec2.redns.redis-cloud.com',
+      port: process.env.REDIS_PORT || 14450,
+      password: process.env.REDIS_PASSWORD || 'qjXgsg0YrsLaSumlEW9HkIZbvLjXEwXR',
+    });
+    
+    redisSubscriber.subscribe('market:ticker');
+    
+    redisSubscriber.on('message', async (channel, message) => {
+      if (channel !== 'market:ticker') return;
+      
+      const data = JSON.parse(message);
+      
+      const allPairsData = await redis.get('market:all:pairs');
+      if (!allPairsData) return;
+      
+      const allPairs = JSON.parse(allPairsData);
+      const topPairs = allPairs.slice(0, 30);
+      
+      const tickers = [];
+      for (const pair of topPairs) {
+        const tickerKey = `ticker:${pair.symbol}`;
+        const tickerData = await redis.get(tickerKey);
+        if (tickerData) {
+          const parsed = JSON.parse(tickerData);
+          tickers.push({
+            symbol: `${pair.base}/${pair.quote}`,
+            price: parsed.lastPrice,
+            change24h: parsed.priceChangePercent
+          });
+        }
+      }
+      
+      const messageToSend = JSON.stringify({ type: 'ticker_update', data: tickers });
+      
+      clients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(messageToSend);
+        }
+      });
+    });
+  };
+
+  wss.on('connection', (ws) => {
+    clients.add(ws);
+    console.log(`Ticker WebSocket client connected. Total: ${clients.size}`);
+    
+    (async () => {
+      const allPairsData = await redis.get('market:all:pairs');
+      if (allPairsData) {
+        const allPairs = JSON.parse(allPairsData);
+        const topPairs = allPairs.slice(0, 30);
+        const initialTickers = [];
+        
+        for (const pair of topPairs) {
+          const tickerKey = `ticker:${pair.symbol}`;
+          const tickerData = await redis.get(tickerKey);
+          if (tickerData) {
+            const parsed = JSON.parse(tickerData);
+            initialTickers.push({
+              symbol: `${pair.base}/${pair.quote}`,
+              price: parsed.lastPrice,
+              change24h: parsed.priceChangePercent
+            });
+          }
+        }
+        
+        ws.send(JSON.stringify({ type: 'initial_tickers', data: initialTickers }));
+      }
+    })();
+    
+    ws.on('close', () => {
+      clients.delete(ws);
+      console.log(`Ticker WebSocket client disconnected. Total: ${clients.size}`);
+    });
+  });
+
+  setupTickerSubscriber();
+};
+
+app.get('/api/withdrawals/asset', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+
+        const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
+        
+        if (!userAssetBalance) {
+            return res.status(200).json({
+                status: 'success',
+                data: {
+                    assets: []
+                }
+            });
+        }
+
+        const balances = userAssetBalance.balances || {};
+        const assets = [];
+
+        for (const [symbol, amount] of Object.entries(balances)) {
+            if (amount > 0) {
+                let usdValue = 0;
+                let currentPrice = 0;
+                try {
+                    const assetPrice = await AssetPrice.findOne({ symbol: symbol });
+                    if (assetPrice) {
+                        currentPrice = assetPrice.currentPrice;
+                        usdValue = amount * currentPrice;
+                    }
+                } catch (err) {
+                    console.warn(`Could not fetch price for ${symbol}`);
+                }
+
+                assets.push({
+                    symbol: symbol,
+                    amount: amount,
+                    usdValue: usdValue,
+                    currentPrice: currentPrice
+                });
+            }
+        }
+
+        assets.sort((a, b) => b.usdValue - a.usdValue);
+
+        return res.status(200).json({
+            status: 'success',
+            data: {
+                assets: assets
+            }
+        });
+
+    } catch (err) {
+        console.error('Error fetching assets:', err);
+        return res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch assets'
+        });
+    }
+});
+
+app.post('/api/withdrawals/bank', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const {
+            amount,
+            bankName,
+            accountHolder,
+            accountNumber,
+            routingNumber,
+            balanceSource,
+            mainAmountUsed,
+            maturedAmountUsed,
+            gasFee,
+            asset,
+            exchangeRate
+        } = req.body;
+
+        if (!amount || amount < 0.001) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Minimum bank withdrawal is 0.001 BTC'
+            });
+        }
+
+        if (!bankName || !accountHolder || !accountNumber || !routingNumber) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'All bank details are required'
+            });
+        }
+
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'User not found'
+            });
+        }
+
+        const mainBalance = user.wallets.main || 0;
+        const maturedBalance = user.wallets.matured || 0;
+        const totalAvailable = mainBalance + maturedBalance;
+
+        if (amount > totalAvailable) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Insufficient balance'
+            });
+        }
+
+        const reference = `WDR-BANK-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+
+        const transaction = await Transaction.create({
+            user: userId,
+            type: 'withdrawal',
+            amount: amount,
+            currency: 'BTC',
+            status: 'pending',
+            method: 'bank',
+            reference: reference,
+            details: {
+                bankName: bankName,
+                accountHolder: accountHolder,
+                accountNumber: accountNumber,
+                routingNumber: routingNumber,
+                balanceSource: balanceSource,
+                mainAmountUsed: mainAmountUsed || 0,
+                maturedAmountUsed: maturedAmountUsed || 0,
+                gasFee: gasFee,
+                asset: asset,
+                exchangeRate: exchangeRate
+            },
+            bankDetails: {
+                accountName: accountHolder,
+                accountNumber: accountNumber,
+                bankName: bankName,
+                routingNumber: routingNumber
+            },
+            fee: 0,
+            netAmount: amount
+        });
+
+        const updateQuery = {};
+        
+        if (balanceSource === 'main' || (mainAmountUsed > 0 && maturedAmountUsed === 0)) {
+            updateQuery['wallets.main'] = -amount;
+        } else if (balanceSource === 'matured' || (maturedAmountUsed > 0 && mainAmountUsed === 0)) {
+            updateQuery['wallets.matured'] = -amount;
+        } else if (balanceSource === 'both') {
+            if (mainAmountUsed > 0) {
+                updateQuery['wallets.main'] = -mainAmountUsed;
+            }
+            if (maturedAmountUsed > 0) {
+                updateQuery['wallets.matured'] = -maturedAmountUsed;
+            }
+        }
+
+        await User.findByIdAndUpdate(userId, {
+            $inc: updateQuery
+        });
+
+        await logActivity(
+            'withdrawal_created',
+            'Transaction',
+            transaction._id,
+            userId,
+            'User',
+            req,
+            {
+                amount: amount,
+                method: 'bank',
+                bankName: bankName,
+                reference: reference,
+                balanceSource: balanceSource
+            }
+        );
+
+        return res.status(201).json({
+            status: 'success',
+            data: {
+                transaction: {
+                    id: transaction._id,
+                    reference: reference,
+                    amount: amount,
+                    method: 'bank',
+                    status: 'pending',
+                    createdAt: transaction.createdAt
+                }
+            },
+            message: 'Bank withdrawal request submitted successfully'
+        });
+
+    } catch (err) {
+        console.error('Bank withdrawal error:', err);
+        return res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to process bank withdrawal request'
+        });
+    }
+});
+
+app.get('/api/withdrawals/history', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+
+        const withdrawals = await Transaction.find({
+            user: userId,
+            type: 'withdrawal'
+        })
+        .sort({ createdAt: -1 })
+        .limit(50)
+        .lean();
+
+        const formattedWithdrawals = withdrawals.map(w => ({
+            id: w._id,
+            date: w.createdAt,
+            method: w.method === 'bank' ? 'bank' : w.asset || 'crypto',
+            amount: w.amount,
+            asset: w.asset || 'BTC',
+            status: w.status,
+            reference: w.reference,
+            txId: w.reference,
+            exchangeRate: w.details?.exchangeRate
+        }));
+
+        return res.status(200).json({
+            status: 'success',
+            data: formattedWithdrawals
+        });
+
+    } catch (err) {
+        console.error('Error fetching withdrawal history:', err);
+        return res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch withdrawal history'
+        });
+    }
+});
+
+app.post('/api/withdrawals/confirm-gas-payment', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const {
+            asset,
+            amount,
+            address,
+            withdrawalData
+        } = req.body;
+
+        const gasFeeDeposit = await DepositAsset.create({
+            user: userId,
+            asset: asset,
+            amount: amount,
+            usdValue: amount * (withdrawalData?.exchangeRate || 1),
+            status: 'pending',
+            metadata: {
+                type: 'gas_fee',
+                withdrawalReference: withdrawalData?.reference,
+                destinationAddress: address,
+                submittedAt: new Date()
+            }
+        });
+
+        return res.status(200).json({
+            status: 'success',
+            data: {
+                depositId: gasFeeDeposit._id,
+                message: 'Gas fee payment recorded, awaiting confirmation'
+            }
+        });
+
+    } catch (err) {
+        console.error('Error confirming gas payment:', err);
+        return res.status(500).json({
+            status: 'error',
+            message: err.message || 'Failed to confirm gas payment'
+        });
+    }
+});
+
+let marketDataCache = {
+  data: null,
+  lastUpdated: null
+};
+
+async function fetchMarketData() {
+  try {
+    const response = await axios.get(
+      'https://api.coingecko.com/api/v3/coins/markets',
+      {
+        params: {
+          vs_currency: 'usd',
+          order: 'market_cap_desc',
+          per_page: 50,
+          page: 1,
+          sparkline: true,
+          price_change_percentage: '1h,24h,7d'
+        },
+        timeout: 10000
+      }
+    );
+
+    if (response.data) {
+      const transformed = response.data.map(coin => ({
+        id: coin.id,
+        symbol: coin.symbol,
+        name: coin.name,
+        image: coin.image,
+        current_price: coin.current_price,
+        market_cap: coin.market_cap,
+        market_cap_rank: coin.market_cap_rank,
+        total_volume: coin.total_volume,
+        price_change_percentage_24h: coin.price_change_percentage_24h || 0,
+        price_change_percentage_1h_in_currency: coin.price_change_percentage_1h_in_currency || 0,
+        price_change_percentage_7d_in_currency: coin.price_change_percentage_7d_in_currency || 0,
+        sparkline_in_7d: {
+          price: coin.sparkline_in_7d?.price || []
+        }
+      }));
+
+      marketDataCache = {
+        data: transformed,
+        lastUpdated: new Date()
+      };
+      
+      return transformed;
+    }
+    
+    return marketDataCache.data || [];
+    
+  } catch (error) {
+    console.error('Market data fetch error:', error);
+    return marketDataCache.data || [];
+  }
+}
+
+app.get('/api/market/assets', async (req, res) => {
+  try {
+    let assets = marketDataCache.data;
+    
+    if (!assets || !marketDataCache.lastUpdated || 
+        (new Date() - marketDataCache.lastUpdated) > 30000) {
+      assets = await fetchMarketData();
+    }
+    
+    res.json({
+      status: 'success',
+      data: assets || []
+    });
+    
+  } catch (error) {
+    console.error('Market assets error:', error);
+    res.json({
+      status: 'error',
+      data: []
+    });
+  }
+});
+
+setInterval(async () => {
+  await fetchMarketData();
+}, 30000);
+
+fetchMarketData();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -21168,311 +22981,36 @@ function maskCardNumber(cardNumber) {
 
 
 
-/**
- * GET /api/withdrawals/asset - Get available assets for withdrawal
- */
-app.get('/api/withdrawals/asset', protect, async (req, res) => {
-    try {
-        const userId = req.user._id;
 
-        // Get user's asset balances
-        const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
-        
-        if (!userAssetBalance) {
-            return res.status(200).json({
-                status: 'success',
-                data: {
-                    assets: []
-                }
-            });
-        }
 
-        // Filter assets with balance > 0
-        const balances = userAssetBalance.balances || {};
-        const assets = [];
 
-        for (const [symbol, amount] of Object.entries(balances)) {
-            if (amount > 0) {
-                // Get current price for USD value
-                let usdValue = 0;
-                let currentPrice = 0;
-                try {
-                    const assetPrice = await AssetPrice.findOne({ symbol: symbol });
-                    if (assetPrice) {
-                        currentPrice = assetPrice.currentPrice;
-                        usdValue = amount * currentPrice;
-                    }
-                } catch (err) {
-                    console.warn(`Could not fetch price for ${symbol}`);
-                }
 
-                assets.push({
-                    symbol: symbol,
-                    amount: amount,
-                    usdValue: usdValue,
-                    currentPrice: currentPrice
-                });
-            }
-        }
 
-        // Sort by USD value descending
-        assets.sort((a, b) => b.usdValue - a.usdValue);
 
-        return res.status(200).json({
-            status: 'success',
-            data: {
-                assets: assets
-            }
-        });
 
-    } catch (err) {
-        console.error('Error fetching assets:', err);
-        return res.status(500).json({
-            status: 'error',
-            message: 'Failed to fetch assets'
-        });
-    }
-});
 
 
-/**
- * POST /api/withdrawals/bank - Process bank withdrawal
- */
-app.post('/api/withdrawals/bank', protect, async (req, res) => {
-    try {
-        const userId = req.user._id;
-        const {
-            amount,
-            bankName,
-            accountHolder,
-            accountNumber,
-            routingNumber,
-            balanceSource,
-            mainAmountUsed,
-            maturedAmountUsed,
-            gasFee,
-            asset,
-            exchangeRate
-        } = req.body;
 
-        // Validation
-        if (!amount || amount < 100) {
-            return res.status(400).json({
-                status: 'error',
-                message: 'Minimum bank withdrawal is $100'
-            });
-        }
 
-        if (!bankName || !accountHolder || !accountNumber || !routingNumber) {
-            return res.status(400).json({
-                status: 'error',
-                message: 'All bank details are required'
-            });
-        }
 
-        // Get user to check balances
-        const user = await User.findById(userId);
-        if (!user) {
-            return res.status(404).json({
-                status: 'error',
-                message: 'User not found'
-            });
-        }
 
-        // Calculate total available balance
-        const mainBalance = user.balances.main || 0;
-        const maturedBalance = user.balances.matured || 0;
-        const totalAvailable = mainBalance + maturedBalance;
 
-        if (amount > totalAvailable) {
-            return res.status(400).json({
-                status: 'error',
-                message: 'Insufficient balance'
-            });
-        }
 
-        // Generate unique reference
-        const reference = `WDR-BANK-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
-        // Create transaction record
-        const transaction = await Transaction.create({
-            user: userId,
-            type: 'withdrawal',
-            amount: amount,
-            currency: 'USD',
-            status: 'pending',
-            method: 'bank',
-            reference: reference,
-            details: {
-                bankName: bankName,
-                accountHolder: accountHolder,
-                accountNumber: accountNumber,
-                routingNumber: routingNumber,
-                balanceSource: balanceSource,
-                mainAmountUsed: mainAmountUsed || 0,
-                maturedAmountUsed: maturedAmountUsed || 0,
-                gasFee: gasFee,
-                asset: asset,
-                exchangeRate: exchangeRate
-            },
-            bankDetails: {
-                accountName: accountHolder,
-                accountNumber: accountNumber,
-                bankName: bankName,
-                routingNumber: routingNumber
-            },
-            fee: 0,
-            netAmount: amount
-        });
 
-        // Deduct from user balances (immediate hold)
-        const updateQuery = {};
-        
-        if (balanceSource === 'main' || (mainAmountUsed > 0 && maturedAmountUsed === 0)) {
-            updateQuery['balances.main'] = -amount;
-        } else if (balanceSource === 'matured' || (maturedAmountUsed > 0 && mainAmountUsed === 0)) {
-            updateQuery['balances.matured'] = -amount;
-        } else if (balanceSource === 'both') {
-            if (mainAmountUsed > 0) {
-                updateQuery['balances.main'] = -mainAmountUsed;
-            }
-            if (maturedAmountUsed > 0) {
-                updateQuery['balances.matured'] = -maturedAmountUsed;
-            }
-        }
 
-        await User.findByIdAndUpdate(userId, {
-            $inc: updateQuery
-        });
 
-        // Log activity
-        await logActivity(
-            'withdrawal_created',
-            'Transaction',
-            transaction._id,
-            userId,
-            'User',
-            req,
-            {
-                amount: amount,
-                method: 'bank',
-                bankName: bankName,
-                reference: reference,
-                balanceSource: balanceSource
-            }
-        );
 
-        return res.status(201).json({
-            status: 'success',
-            data: {
-                transaction: {
-                    id: transaction._id,
-                    reference: reference,
-                    amount: amount,
-                    method: 'bank',
-                    status: 'pending',
-                    createdAt: transaction.createdAt
-                }
-            },
-            message: 'Bank withdrawal request submitted successfully'
-        });
 
-    } catch (err) {
-        console.error('Bank withdrawal error:', err);
-        return res.status(500).json({
-            status: 'error',
-            message: err.message || 'Failed to process bank withdrawal request'
-        });
-    }
-});
 
-/**
- * GET /api/withdrawals/history - Get withdrawal history
- */
-app.get('/api/withdrawals/history', protect, async (req, res) => {
-    try {
-        const userId = req.user._id;
 
-        // Get withdrawal transactions
-        const withdrawals = await Transaction.find({
-            user: userId,
-            type: 'withdrawal'
-        })
-        .sort({ createdAt: -1 })
-        .limit(50)
-        .lean();
 
-        // Format withdrawals for frontend
-        const formattedWithdrawals = withdrawals.map(w => ({
-            id: w._id,
-            date: w.createdAt,
-            method: w.method === 'bank' ? 'bank' : w.asset || 'crypto',
-            amount: w.amount,
-            asset: w.asset || 'USD',
-            status: w.status,
-            reference: w.reference,
-            txId: w.reference,
-            exchangeRate: w.details?.exchangeRate
-        }));
 
-        return res.status(200).json({
-            status: 'success',
-            data: formattedWithdrawals
-        });
 
-    } catch (err) {
-        console.error('Error fetching withdrawal history:', err);
-        return res.status(500).json({
-            status: 'error',
-            message: 'Failed to fetch withdrawal history'
-        });
-    }
-});
 
-/**
- * POST /api/withdrawals/confirm-gas-payment - Confirm gas fee payment
- */
-app.post('/api/withdrawals/confirm-gas-payment', protect, async (req, res) => {
-    try {
-        const userId = req.user._id;
-        const {
-            asset,
-            amount,
-            address,
-            withdrawalData
-        } = req.body;
 
-        // Create a deposit record for the gas fee
-        const gasFeeDeposit = await DepositAsset.create({
-            user: userId,
-            asset: asset,
-            amount: amount,
-            usdValue: amount * (withdrawalData?.exchangeRate || 1),
-            status: 'pending',
-            metadata: {
-                type: 'gas_fee',
-                withdrawalReference: withdrawalData?.reference,
-                destinationAddress: address,
-                submittedAt: new Date()
-            }
-        });
 
-        return res.status(200).json({
-            status: 'success',
-            data: {
-                depositId: gasFeeDeposit._id,
-                message: 'Gas fee payment recorded, awaiting confirmation'
-            }
-        });
 
-    } catch (err) {
-        console.error('Error confirming gas payment:', err);
-        return res.status(500).json({
-            status: 'error',
-            message: err.message || 'Failed to confirm gas payment'
-        });
-    }
-});
 
 
 
@@ -21491,2383 +23029,6 @@ app.post('/api/withdrawals/confirm-gas-payment', protect, async (req, res) => {
 
 
 
-// =============================================
-// MARKET DATA ENDPOINT - Prices by Market Cap
-// =============================================
-
-// Cache with 30-second TTL
-let marketDataCache = {
-  data: null,
-  lastUpdated: null
-};
-
-async function fetchMarketData() {
-  try {
-    const response = await axios.get(
-      'https://api.coingecko.com/api/v3/coins/markets',
-      {
-        params: {
-          vs_currency: 'usd',
-          order: 'market_cap_desc',
-          per_page: 50,
-          page: 1,
-          sparkline: true,
-          price_change_percentage: '1h,24h,7d'
-        },
-        timeout: 10000
-      }
-    );
-
-    if (response.data) {
-      const transformed = response.data.map(coin => ({
-        id: coin.id,
-        symbol: coin.symbol,
-        name: coin.name,
-        image: coin.image,
-        current_price: coin.current_price,
-        market_cap: coin.market_cap,
-        market_cap_rank: coin.market_cap_rank,
-        total_volume: coin.total_volume,
-        price_change_percentage_24h: coin.price_change_percentage_24h || 0,
-        price_change_percentage_1h_in_currency: coin.price_change_percentage_1h_in_currency || 0,
-        price_change_percentage_7d_in_currency: coin.price_change_percentage_7d_in_currency || 0,
-        sparkline_in_7d: {
-          price: coin.sparkline_in_7d?.price || []
-        }
-      }));
-
-      marketDataCache = {
-        data: transformed,
-        lastUpdated: new Date()
-      };
-      
-      return transformed;
-    }
-    
-    return marketDataCache.data || [];
-    
-  } catch (error) {
-    console.error('Market data fetch error:', error);
-    return marketDataCache.data || [];
-  }
-}
-
-// Endpoint for Prices by Market Cap table
-app.get('/api/market/assets', async (req, res) => {
-  try {
-    let assets = marketDataCache.data;
-    
-    // Refresh if cache is older than 30 seconds or empty
-    if (!assets || !marketDataCache.lastUpdated || 
-        (new Date() - marketDataCache.lastUpdated) > 30000) {
-      assets = await fetchMarketData();
-    }
-    
-    res.json({
-      status: 'success',
-      data: assets || []
-    });
-    
-  } catch (error) {
-    console.error('Market assets error:', error);
-    res.json({
-      status: 'error',
-      data: []
-    });
-  }
-});
-
-// Refresh cache every 30 seconds in background
-setInterval(async () => {
-  await fetchMarketData();
-}, 30000);
-
-// Initial cache on startup
-fetchMarketData();
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// SNIPPET B - COMPLETE REWRITE
-
-// =============================================
-// FIAT CURRENCIES ENDPOINT - Get ALL world currencies with REAL exchange rates (NO HARDCODING)
-// =============================================
-app.get('/api/fiat-currencies', async (req, res) => {
-  try {
-    console.log('🌐 Fetching real-time fiat currencies from external APIs...');
-    
-    let rates = null;
-    let apiSuccess = false;
-    
-    try {
-      const response = await axios.get('https://api.exchangerate-api.com/v4/latest/USD', { 
-        timeout: 8000,
-        headers: { 'Accept': 'application/json' }
-      });
-      if (response.data && response.data.rates) {
-        rates = response.data.rates;
-        apiSuccess = true;
-        console.log('✅ Fetched rates from exchangerate-api.com');
-      }
-    } catch (err) {
-      console.warn('exchangerate-api.com failed:', err.message);
-    }
-    
-    if (!apiSuccess) {
-      try {
-        const response = await axios.get('https://api.frankfurter.app/latest?from=USD', { 
-          timeout: 8000 
-        });
-        if (response.data && response.data.rates) {
-          rates = response.data.rates;
-          apiSuccess = true;
-          console.log('✅ Fetched rates from frankfurter.app');
-        }
-      } catch (err) {
-        console.warn('frankfurter.app failed:', err.message);
-      }
-    }
-    
-    if (!apiSuccess) {
-      try {
-        const response = await axios.get('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json', { 
-          timeout: 8000 
-        });
-        if (response.data && response.data.usd) {
-          rates = response.data.usd;
-          apiSuccess = true;
-          console.log('✅ Fetched rates from currency-api');
-        }
-      } catch (err) {
-        console.warn('currency-api failed:', err.message);
-      }
-    }
-    
-    if (!apiSuccess || !rates) {
-      console.error('❌ All exchange rate APIs failed');
-      return res.status(503).json({
-        status: 'error',
-        message: 'Unable to fetch exchange rates. Please try again later.',
-        retryAfter: 30
-      });
-    }
-    
-    const allCurrencies = [
-      { code: 'USD', name: 'US Dollar', symbol: '$', flag: 'https://flagcdn.com/w40/us.png' },
-      { code: 'EUR', name: 'Euro', symbol: '€', flag: 'https://flagcdn.com/w40/eu.png' },
-      { code: 'GBP', name: 'British Pound', symbol: '£', flag: 'https://flagcdn.com/w40/gb.png' },
-      { code: 'JPY', name: 'Japanese Yen', symbol: '¥', flag: 'https://flagcdn.com/w40/jp.png' },
-      { code: 'CNY', name: 'Chinese Yuan', symbol: '¥', flag: 'https://flagcdn.com/w40/cn.png' },
-      { code: 'INR', name: 'Indian Rupee', symbol: '₹', flag: 'https://flagcdn.com/w40/in.png' },
-      { code: 'CAD', name: 'Canadian Dollar', symbol: 'C$', flag: 'https://flagcdn.com/w40/ca.png' },
-      { code: 'AUD', name: 'Australian Dollar', symbol: 'A$', flag: 'https://flagcdn.com/w40/au.png' },
-      { code: 'CHF', name: 'Swiss Franc', symbol: 'Fr', flag: 'https://flagcdn.com/w40/ch.png' },
-      { code: 'KRW', name: 'South Korean Won', symbol: '₩', flag: 'https://flagcdn.com/w40/kr.png' },
-      { code: 'MXN', name: 'Mexican Peso', symbol: '$', flag: 'https://flagcdn.com/w40/mx.png' },
-      { code: 'BRL', name: 'Brazilian Real', symbol: 'R$', flag: 'https://flagcdn.com/w40/br.png' },
-      { code: 'ZAR', name: 'South African Rand', symbol: 'R', flag: 'https://flagcdn.com/w40/za.png' },
-      { code: 'SGD', name: 'Singapore Dollar', symbol: 'S$', flag: 'https://flagcdn.com/w40/sg.png' },
-      { code: 'HKD', name: 'Hong Kong Dollar', symbol: 'HK$', flag: 'https://flagcdn.com/w40/hk.png' },
-      { code: 'NZD', name: 'New Zealand Dollar', symbol: 'NZ$', flag: 'https://flagcdn.com/w40/nz.png' },
-      { code: 'SEK', name: 'Swedish Krona', symbol: 'kr', flag: 'https://flagcdn.com/w40/se.png' },
-      { code: 'NOK', name: 'Norwegian Krone', symbol: 'kr', flag: 'https://flagcdn.com/w40/no.png' },
-      { code: 'DKK', name: 'Danish Krone', symbol: 'kr', flag: 'https://flagcdn.com/w40/dk.png' },
-      { code: 'PLN', name: 'Polish Zloty', symbol: 'zł', flag: 'https://flagcdn.com/w40/pl.png' },
-      { code: 'TRY', name: 'Turkish Lira', symbol: '₺', flag: 'https://flagcdn.com/w40/tr.png' },
-      { code: 'RUB', name: 'Russian Ruble', symbol: '₽', flag: 'https://flagcdn.com/w40/ru.png' },
-      { code: 'AED', name: 'UAE Dirham', symbol: 'د.إ', flag: 'https://flagcdn.com/w40/ae.png' },
-      { code: 'SAR', name: 'Saudi Riyal', symbol: '﷼', flag: 'https://flagcdn.com/w40/sa.png' },
-      { code: 'ILS', name: 'Israeli Shekel', symbol: '₪', flag: 'https://flagcdn.com/w40/il.png' },
-      { code: 'RON', name: 'Romanian Leu', symbol: 'lei', flag: 'https://flagcdn.com/w40/ro.png' },
-      { code: 'CZK', name: 'Czech Koruna', symbol: 'Kč', flag: 'https://flagcdn.com/w40/cz.png' },
-      { code: 'HUF', name: 'Hungarian Forint', symbol: 'Ft', flag: 'https://flagcdn.com/w40/hu.png' },
-      { code: 'BGN', name: 'Bulgarian Lev', symbol: 'лв', flag: 'https://flagcdn.com/w40/bg.png' },
-      { code: 'HRK', name: 'Croatian Kuna', symbol: 'kn', flag: 'https://flagcdn.com/w40/hr.png' },
-      { code: 'THB', name: 'Thai Baht', symbol: '฿', flag: 'https://flagcdn.com/w40/th.png' },
-      { code: 'VND', name: 'Vietnamese Dong', symbol: '₫', flag: 'https://flagcdn.com/w40/vn.png' },
-      { code: 'IDR', name: 'Indonesian Rupiah', symbol: 'Rp', flag: 'https://flagcdn.com/w40/id.png' },
-      { code: 'MYR', name: 'Malaysian Ringgit', symbol: 'RM', flag: 'https://flagcdn.com/w40/my.png' },
-      { code: 'PHP', name: 'Philippine Peso', symbol: '₱', flag: 'https://flagcdn.com/w40/ph.png' },
-      { code: 'PKR', name: 'Pakistani Rupee', symbol: '₨', flag: 'https://flagcdn.com/w40/pk.png' },
-      { code: 'BDT', name: 'Bangladeshi Taka', symbol: '৳', flag: 'https://flagcdn.com/w40/bd.png' },
-      { code: 'LKR', name: 'Sri Lankan Rupee', symbol: 'Rs', flag: 'https://flagcdn.com/w40/lk.png' },
-      { code: 'NPR', name: 'Nepalese Rupee', symbol: 'Rs', flag: 'https://flagcdn.com/w40/np.png' },
-      { code: 'EGP', name: 'Egyptian Pound', symbol: 'E£', flag: 'https://flagcdn.com/w40/eg.png' },
-      { code: 'QAR', name: 'Qatari Riyal', symbol: '﷼', flag: 'https://flagcdn.com/w40/qa.png' },
-      { code: 'KWD', name: 'Kuwaiti Dinar', symbol: 'KD', flag: 'https://flagcdn.com/w40/kw.png' },
-      { code: 'BHD', name: 'Bahraini Dinar', symbol: '.د.ب', flag: 'https://flagcdn.com/w40/bh.png' },
-      { code: 'OMR', name: 'Omani Rial', symbol: '﷼', flag: 'https://flagcdn.com/w40/om.png' },
-      { code: 'JOD', name: 'Jordanian Dinar', symbol: 'JD', flag: 'https://flagcdn.com/w40/jo.png' },
-      { code: 'KES', name: 'Kenyan Shilling', symbol: 'KSh', flag: 'https://flagcdn.com/w40/ke.png' },
-      { code: 'NGN', name: 'Nigerian Naira', symbol: '₦', flag: 'https://flagcdn.com/w40/ng.png' },
-      { code: 'GHS', name: 'Ghanaian Cedi', symbol: '₵', flag: 'https://flagcdn.com/w40/gh.png' },
-      { code: 'MAD', name: 'Moroccan Dirham', symbol: 'DH', flag: 'https://flagcdn.com/w40/ma.png' },
-      { code: 'TZS', name: 'Tanzanian Shilling', symbol: 'TSh', flag: 'https://flagcdn.com/w40/tz.png' },
-      { code: 'UGX', name: 'Ugandan Shilling', symbol: 'USh', flag: 'https://flagcdn.com/w40/ug.png' },
-      { code: 'ARS', name: 'Argentine Peso', symbol: '$', flag: 'https://flagcdn.com/w40/ar.png' },
-      { code: 'CLP', name: 'Chilean Peso', symbol: '$', flag: 'https://flagcdn.com/w40/cl.png' },
-      { code: 'COP', name: 'Colombian Peso', symbol: '$', flag: 'https://flagcdn.com/w40/co.png' },
-      { code: 'PEN', name: 'Peruvian Sol', symbol: 'S/', flag: 'https://flagcdn.com/w40/pe.png' },
-      { code: 'UYU', name: 'Uruguayan Peso', symbol: '$', flag: 'https://flagcdn.com/w40/uy.png' },
-      { code: 'PYG', name: 'Paraguayan Guarani', symbol: '₲', flag: 'https://flagcdn.com/w40/py.png' },
-      { code: 'BOB', name: 'Bolivian Boliviano', symbol: 'Bs', flag: 'https://flagcdn.com/w40/bo.png' },
-      { code: 'CRC', name: 'Costa Rican Colón', symbol: '₡', flag: 'https://flagcdn.com/w40/cr.png' },
-      { code: 'TWD', name: 'New Taiwan Dollar', symbol: 'NT$', flag: 'https://flagcdn.com/w40/tw.png' },
-      { code: 'MNT', name: 'Mongolian Tugrik', symbol: '₮', flag: 'https://flagcdn.com/w40/mn.png' },
-      { code: 'KHR', name: 'Cambodian Riel', symbol: '៛', flag: 'https://flagcdn.com/w40/kh.png' },
-      { code: 'LAK', name: 'Lao Kip', symbol: '₭', flag: 'https://flagcdn.com/w40/la.png' },
-      { code: 'MMK', name: 'Myanmar Kyat', symbol: 'Ks', flag: 'https://flagcdn.com/w40/mm.png' }
-    ];
-    
-    const currenciesWithRates = allCurrencies.map(currency => ({
-      ...currency,
-      exchangeRate: rates[currency.code] || (currency.code === 'USD' ? 1 : null)
-    })).filter(c => c.exchangeRate !== null);
-    
-    console.log(`✅ Returning ${currenciesWithRates.length} fiat currencies with real exchange rates`);
-    
-    res.status(200).json({ 
-      status: 'success',
-      currencies: currenciesWithRates,
-      lastUpdated: new Date().toISOString()
-    });
-    
-  } catch (err) {
-    console.error('❌ Error fetching fiat currencies:', err);
-    res.status(500).json({ 
-      status: 'error', 
-      message: 'Failed to fetch exchange rates. Please try again.'
-    });
-  }
-});
-
-// =============================================
-// CONVERT ASSETS ENDPOINT - Get available target cryptos for conversion
-// =============================================
-app.get('/api/convert/assets', protect, async (req, res) => {
-  try {
-    const availableAssets = [
-      { symbol: 'btc', name: 'Bitcoin', logo: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png' },
-      { symbol: 'eth', name: 'Ethereum', logo: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png' },
-      { symbol: 'usdt', name: 'Tether', logo: 'https://assets.coingecko.com/coins/images/325/large/Tether.png' },
-      { symbol: 'bnb', name: 'BNB', logo: 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png' },
-      { symbol: 'sol', name: 'Solana', logo: 'https://assets.coingecko.com/coins/images/4128/large/solana.png' },
-      { symbol: 'usdc', name: 'USDC', logo: 'https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png' },
-      { symbol: 'xrp', name: 'XRP', logo: 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png' },
-      { symbol: 'doge', name: 'Dogecoin', logo: 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png' },
-      { symbol: 'ada', name: 'Cardano', logo: 'https://assets.coingecko.com/coins/images/975/large/cardano.png' },
-      { symbol: 'shib', name: 'Shiba Inu', logo: 'https://assets.coingecko.com/coins/images/11939/large/shiba.png' },
-      { symbol: 'avax', name: 'Avalanche', logo: 'https://assets.coingecko.com/coins/images/12559/large/Avalanche_Circle_RedWhite.png' },
-      { symbol: 'dot', name: 'Polkadot', logo: 'https://assets.coingecko.com/coins/images/12171/large/polkadot.png' },
-      { symbol: 'trx', name: 'TRON', logo: 'https://assets.coingecko.com/coins/images/1094/large/tron-logo.png' },
-      { symbol: 'link', name: 'Chainlink', logo: 'https://assets.coingecko.com/coins/images/877/large/chainlink-new-logo.png' },
-      { symbol: 'matic', name: 'Polygon', logo: 'https://assets.coingecko.com/coins/images/4713/large/matic-token-icon.png' },
-      { symbol: 'ltc', name: 'Litecoin', logo: 'https://assets.coingecko.com/coins/images/2/large/litecoin.png' }
-    ];
-    
-    res.status(200).json({ assets: availableAssets });
-  } catch (err) {
-    console.error('Error fetching convert assets:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch available assets' });
-  }
-});
-
-// =============================================
-// CONVERT ENDPOINT - Execute crypto conversion (buy/sell pattern) WITH FEE
-// =============================================
-app.post('/api/convert', protect, async (req, res) => {
-  try {
-    const { fromAsset, toAsset, amount } = req.body;
-    const userId = req.user._id;
-    
-    if (!fromAsset || !toAsset || !amount || amount <= 0) {
-      return res.status(400).json({ status: 'fail', message: 'Invalid conversion parameters' });
-    }
-    
-    const fromAssetLower = fromAsset.toLowerCase();
-    const toAssetLower = toAsset.toLowerCase();
-    
-    if (fromAssetLower === toAssetLower) {
-      return res.status(400).json({ status: 'fail', message: 'Cannot convert to the same asset' });
-    }
-    
-    let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
-    if (!userAssetBalance) {
-      userAssetBalance = new UserAssetBalance({ user: userId, balances: {} });
-      await userAssetBalance.save();
-    }
-    
-    const fromBalance = userAssetBalance.balances[fromAssetLower] || 0;
-    
-    if (amount > fromBalance) {
-      return res.status(400).json({ status: 'fail', message: 'Insufficient balance for conversion' });
-    }
-    
-    const fromPrice = await getCryptoPrice(fromAsset);
-    const toPrice = await getCryptoPrice(toAsset);
-    
-    if (!fromPrice || !toPrice) {
-      return res.status(503).json({ status: 'fail', message: 'Unable to fetch current prices. Please try again.' });
-    }
-    
-    const usdValue = amount * fromPrice;
-    const CONVERSION_FEE_PERCENT = 0.5;
-    const feeAmount = usdValue * (CONVERSION_FEE_PERCENT / 100);
-    const usdValueAfterFee = usdValue - feeAmount;
-    const toAmount = usdValueAfterFee / toPrice;
-    
-    userAssetBalance.balances[fromAssetLower] -= amount;
-    
-    if (!userAssetBalance.balances[toAssetLower]) {
-      userAssetBalance.balances[toAssetLower] = 0;
-    }
-    userAssetBalance.balances[toAssetLower] += toAmount;
-    
-    userAssetBalance.lastUpdated = new Date();
-    await userAssetBalance.save();
-    
-    await PlatformRevenue.create({
-      source: 'buy_fee',
-      amount: feeAmount,
-      currency: 'USD',
-      userId: userId,
-      description: `Conversion fee from ${fromAssetLower} to ${toAssetLower}`,
-      metadata: {
-        fromAsset: fromAssetLower,
-        toAsset: toAssetLower,
-        amount: amount,
-        toAmount: toAmount,
-        usdValue: usdValue,
-        feePercentage: CONVERSION_FEE_PERCENT
-      }
-    });
-    
-    let totalMainBalance = 0;
-    for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
-      if (balance > 0) {
-        const price = await getCryptoPrice(asset.toUpperCase());
-        if (price) {
-          totalMainBalance += balance * price;
-        }
-      }
-    }
-    
-    await User.findByIdAndUpdate(userId, { 'balances.main': totalMainBalance });
-    
-    const reference = `CONV-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
-    
-    await Transaction.create({
-      user: userId,
-      type: 'sell',
-      amount: usdValue,
-      asset: fromAsset.toUpperCase(),
-      assetAmount: amount,
-      currency: 'USD',
-      status: 'completed',
-      method: fromAsset.toUpperCase(),
-      reference: `${reference}-SELL`,
-      fee: feeAmount,
-      netAmount: usdValueAfterFee,
-      sellDetails: {
-        asset: fromAsset.toUpperCase(),
-        amountUSD: usdValue,
-        assetAmount: amount,
-        sellingPrice: fromPrice,
-        buyingPrice: fromPrice,
-        profitLoss: 0,
-        profitLossPercentage: 0
-      }
-    });
-    
-    await Transaction.create({
-      user: userId,
-      type: 'buy',
-      amount: usdValueAfterFee,
-      asset: toAsset.toUpperCase(),
-      assetAmount: toAmount,
-      currency: 'USD',
-      status: 'completed',
-      method: toAsset.toUpperCase(),
-      reference: `${reference}-BUY`,
-      fee: 0,
-      netAmount: usdValueAfterFee,
-      buyDetails: {
-        asset: toAsset.toUpperCase(),
-        amountUSD: usdValueAfterFee,
-        assetAmount: toAmount,
-        buyingPrice: toPrice,
-        currentPrice: toPrice,
-        profitLoss: 0,
-        profitLossPercentage: 0
-      }
-    });
-    
-    const io = req.app.get('io');
-    if (io) {
-      const updatedBalances = {};
-      for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
-        if (balance > 0) {
-          const price = await getCryptoPrice(asset.toUpperCase());
-          updatedBalances[asset] = {
-            balance: balance,
-            usdValue: balance * (price || 0),
-            id: asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset,
-            avgPrice: 0,
-            unrealizedPnl: 0,
-            unrealizedPnlPercent: 0,
-            transactions: []
-          };
-        }
-      }
-      io.to(`user_${userId}`).emit('asset_balances_update', Object.values(updatedBalances));
-      io.to(`user_${userId}`).emit('balance_update', { main: totalMainBalance });
-    }
-    
-    res.status(200).json({
-      status: 'success',
-      message: 'Conversion completed successfully',
-      data: {
-        fromAsset: fromAssetLower,
-        fromAmount: amount,
-        toAsset: toAssetLower,
-        toAmount: toAmount,
-        usdValue: usdValue,
-        fee: feeAmount,
-        feePercentage: CONVERSION_FEE_PERCENT,
-        usdValueAfterFee: usdValueAfterFee,
-        exchangeRate: fromPrice / toPrice
-      }
-    });
-  } catch (err) {
-    console.error('Conversion error:', err);
-    res.status(500).json({ status: 'error', message: 'Conversion failed' });
-  }
-});
-
-// =============================================
-// USER PREFERENCES SAVE ENDPOINT - Save IP-based preferences
-// =============================================
-app.post('/api/users/preferences/save', protect, async (req, res) => {
-  try {
-    const { language, fiatCurrency, detectedFromIP } = req.body;
-    const userId = req.user._id;
-    
-    const updates = {};
-    if (language) updates['preferences.language'] = language;
-    if (fiatCurrency) updates['preferences.currency'] = fiatCurrency;
-    
-    if (detectedFromIP) {
-      updates['ipPreferences.language'] = language;
-      updates['ipPreferences.currency'] = fiatCurrency;
-      updates['ipPreferences.setFromIP'] = true;
-      updates['ipPreferences.detectedAt'] = new Date();
-    }
-    
-    await User.findByIdAndUpdate(userId, updates);
-    
-    await UserPreference.findOneAndUpdate(
-      { user: userId },
-      { 
-        language: language || req.user.preferences?.language || 'en',
-        currency: fiatCurrency || req.user.preferences?.currency || 'USD',
-        $setOnInsert: { user: userId }
-      },
-      { upsert: true }
-    );
-    
-    res.status(200).json({
-      status: 'success',
-      message: 'Preferences saved successfully',
-      data: { language, currency: fiatCurrency }
-    });
-  } catch (err) {
-    console.error('Error saving preferences:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to save preferences' });
-  }
-});
-
-// =============================================
-// USER PREFERENCES GET ENDPOINT
-// =============================================
-app.get('/api/users/preferences', protect, async (req, res) => {
-  try {
-    let userPref = await UserPreference.findOne({ user: req.user._id });
-    
-    if (!userPref) {
-      const user = await User.findById(req.user._id);
-      userPref = {
-        displayAsset: user?.preferences?.displayAsset || 'btc',
-        language: user?.preferences?.language || user?.ipPreferences?.language || 'en',
-        currency: user?.preferences?.currency || user?.ipPreferences?.currency || 'USD',
-        theme: user?.preferences?.theme || 'dark'
-      };
-    }
-    
-    res.status(200).json({
-      status: 'success',
-      data: {
-        displayAsset: userPref.displayAsset || 'btc',
-        language: userPref.language || 'en',
-        currency: userPref.currency || 'USD',
-        theme: userPref.theme || 'dark'
-      }
-    });
-  } catch (err) {
-    console.error('Error fetching preferences:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch preferences' });
-  }
-});
-
-// =============================================
-// USER PREFERENCES UPDATE ENDPOINT (POST)
-// =============================================
-app.post('/api/users/preferences', protect, async (req, res) => {
-  try {
-    const { displayAsset, theme, language, currency, fiatCurrency } = req.body;
-    
-    const updates = {};
-    if (displayAsset) updates.displayAsset = displayAsset;
-    if (theme) updates.theme = theme;
-    if (language) updates.language = language;
-    if (currency || fiatCurrency) updates.currency = currency || fiatCurrency;
-    
-    await UserPreference.findOneAndUpdate(
-      { user: req.user._id },
-      { $set: updates },
-      { upsert: true, new: true }
-    );
-    
-    await User.findByIdAndUpdate(req.user._id, {
-      $set: {
-        'preferences.theme': theme,
-        'preferences.language': language,
-        'preferences.currency': currency || fiatCurrency
-      }
-    });
-    
-    const io = req.app.get('io');
-    if (io) {
-      io.to(`user_${req.user._id}`).emit('preferences_update', updates);
-    }
-    
-    res.status(200).json({
-      status: 'success',
-      message: 'Preferences updated successfully',
-      data: updates
-    });
-  } catch (err) {
-    console.error('Error updating preferences:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to update preferences' });
-  }
-});
-
-// =============================================
-// DEPOSIT ASSET ENDPOINT - Get user's default deposit asset
-// =============================================
-app.get('/api/users/deposit-asset', protect, async (req, res) => {
-  try {
-    const userPref = await UserPreference.findOne({ user: req.user._id });
-    const asset = userPref?.displayAsset || 'btc';
-    
-    res.status(200).json({
-      status: 'success',
-      data: { asset }
-    });
-  } catch (err) {
-    console.error('Error fetching deposit asset:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch deposit asset' });
-  }
-});
-
-// =============================================
-// ADMIN APPROVE DEPOSIT ENDPOINT - FIXED VERSION (with asset balance update)
-// =============================================
-app.post('/api/admin/deposits/:id/approve', adminProtect, [
-  body('notes').optional().trim()
-], async (req, res) => {
-  try {
-    const { notes } = req.body;
-    
-    const deposit = await Transaction.findById(req.params.id)
-      .populate('user');
-    
-    if (!deposit || deposit.type !== 'deposit') {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Deposit not found'
-      });
-    }
-    
-    if (deposit.status !== 'pending') {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Deposit is not pending approval'
-      });
-    }
-    
-    const user = await User.findById(deposit.user._id);
-    if (!user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found'
-      });
-    }
-    
-    const isCryptoDeposit = deposit.method !== 'BANK' && deposit.method !== 'CARD';
-    const assetSymbol = isCryptoDeposit ? deposit.method.toLowerCase() : null;
-    
-    let cryptoPrice = null;
-    let assetAmount = null;
-    
-    if (isCryptoDeposit && assetSymbol) {
-      cryptoPrice = await getCryptoPrice(assetSymbol.toUpperCase());
-      if (cryptoPrice) {
-        assetAmount = deposit.amount / cryptoPrice;
-      } else {
-        cryptoPrice = assetSymbol === 'btc' ? 43000 : 
-                      assetSymbol === 'eth' ? 2200 : 
-                      assetSymbol === 'usdt' ? 1 : 1;
-        assetAmount = deposit.amount / cryptoPrice;
-      }
-    }
-    
-    user.balances.main += deposit.amount;
-    await user.save();
-    
-    if (isCryptoDeposit && assetSymbol) {
-      let userAssetBalance = await UserAssetBalance.findOne({ user: user._id });
-      if (!userAssetBalance) {
-        userAssetBalance = new UserAssetBalance({ user: user._id, balances: {} });
-      }
-      
-      if (!userAssetBalance.balances[assetSymbol]) {
-        userAssetBalance.balances[assetSymbol] = 0;
-      }
-      userAssetBalance.balances[assetSymbol] += assetAmount;
-      userAssetBalance.lastUpdated = new Date();
-      
-      userAssetBalance.history.push({
-        asset: assetSymbol,
-        type: 'deposit',
-        amount: assetAmount,
-        balance: userAssetBalance.balances[assetSymbol],
-        usdValue: deposit.amount,
-        price: cryptoPrice,
-        transactionId: deposit._id,
-        timestamp: new Date()
-      });
-      
-      await userAssetBalance.save();
-      
-      await DepositAsset.create({
-        user: user._id,
-        asset: assetSymbol,
-        amount: assetAmount,
-        usdValue: deposit.amount,
-        transactionId: deposit._id,
-        status: 'confirmed',
-        confirmedAt: new Date(),
-        metadata: {
-          txHash: deposit.details?.txHash,
-          fromAddress: deposit.details?.fromAddress,
-          toAddress: deposit.details?.toAddress,
-          network: deposit.network || assetSymbol.toUpperCase(),
-          exchangeRate: cryptoPrice,
-          assetPriceAtTime: cryptoPrice
-        }
-      });
-    }
-    
-    deposit.status = 'completed';
-    deposit.processedBy = req.admin._id;
-    deposit.processedAt = new Date();
-    deposit.adminNotes = notes;
-    if (isCryptoDeposit && assetAmount) {
-      deposit.assetAmount = assetAmount;
-      deposit.asset = deposit.method;
-    }
-    await deposit.save();
-
-    const deviceInfo = await getUserDeviceInfo(req);
-    
-    await UserLog.create({
-      user: user._id,
-      username: user.email,
-      email: user.email,
-      userFullName: `${user.firstName} ${user.lastName}`,
-      action: 'deposit_completed',
-      actionCategory: 'financial',
-      ipAddress: getRealClientIP(req),
-      userAgent: req.headers['user-agent'] || 'Unknown',
-      deviceInfo: {
-        type: getDeviceType(req),
-        os: {
-          name: getOSFromUserAgent(req.headers['user-agent']),
-          version: 'Unknown'
-        },
-        browser: {
-          name: getBrowserFromUserAgent(req.headers['user-agent']),
-          version: 'Unknown'
-        },
-        platform: req.headers['user-agent'] || 'Unknown',
-        language: req.headers['accept-language'] || 'Unknown',
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
-      },
-      location: {
-        ip: getRealClientIP(req),
-        country: {
-          name: deviceInfo.locationDetails?.country || 'Unknown',
-          code: deviceInfo.locationDetails?.country || 'Unknown'
-        },
-        region: {
-          name: deviceInfo.locationDetails?.region || 'Unknown',
-          code: deviceInfo.locationDetails?.region || 'Unknown'
-        },
-        city: deviceInfo.locationDetails?.city || 'Unknown',
-        postalCode: deviceInfo.locationDetails?.postalCode || 'Unknown',
-        latitude: deviceInfo.locationDetails?.latitude,
-        longitude: deviceInfo.locationDetails?.longitude,
-        timezone: deviceInfo.locationDetails?.timezone || 'Unknown',
-        isp: deviceInfo.locationDetails?.isp || 'Unknown',
-        exactLocation: deviceInfo.exactLocation
-      },
-      status: 'success',
-      metadata: {
-        amount: deposit.amount,
-        method: deposit.method,
-        asset: deposit.asset,
-        assetAmount: assetAmount,
-        reference: deposit.reference,
-        adminId: req.admin._id,
-        adminName: req.admin.name,
-        adminNotes: notes,
-        processedAt: deposit.processedAt
-      },
-      relatedEntity: deposit._id,
-      relatedEntityModel: 'Transaction'
-    });
-
-    try {
-      await sendAutomatedEmail(user, 'deposit_approved', {
-        name: user.firstName,
-        amount: deposit.amount,
-        method: deposit.method,
-        reference: deposit.reference,
-        newBalance: user.balances.main,
-        processedAt: deposit.processedAt,
-        asset: deposit.method !== 'BANK' && deposit.method !== 'CARD' ? deposit.method : 'USD'
-      });
-      console.log(`📧 Deposit approval email sent to ${user.email}`);
-    } catch (emailError) {
-      console.error('Failed to send deposit approval email:', emailError);
-    }
-    
-    await AccountRestrictions.checkAndUpdateRestrictions(user._id, 'transaction_completion');
-    
-    const io = req.app.get('io');
-    if (io) {
-      io.to(`user_${user._id}`).emit('balance_update', { main: user.balances.main });
-      if (isCryptoDeposit && assetSymbol) {
-        const updatedAssetBalance = await UserAssetBalance.findOne({ user: user._id });
-        if (updatedAssetBalance) {
-          const assetData = [];
-          for (const [asset, balance] of Object.entries(updatedAssetBalance.balances)) {
-            if (balance > 0) {
-              const price = await getCryptoPrice(asset.toUpperCase());
-              assetData.push({
-                symbol: asset,
-                balance: balance,
-                usdValue: balance * (price || 0),
-                id: asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset,
-                avgPrice: 0,
-                unrealizedPnl: 0,
-                unrealizedPnlPercent: 0,
-                transactions: updatedAssetBalance.history.filter(h => h.asset === asset).slice(-10)
-              });
-            }
-          }
-          io.to(`user_${user._id}`).emit('asset_balances_update', assetData);
-        }
-      }
-    }
-    
-    res.status(200).json({
-      status: 'success',
-      message: 'Deposit approved successfully'
-    });
-    
-    await logActivity('approve-deposit', 'transaction', deposit._id, req.admin._id, 'Admin', req, {
-      amount: deposit.amount,
-      userId: user._id,
-      asset: assetSymbol,
-      assetAmount: assetAmount
-    });
-  } catch (err) {
-    console.error('Admin approve deposit error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to approve deposit',
-      error: process.env.NODE_ENV === 'development' ? err.message : undefined
-    });
-  }
-});
-
-// =============================================
-// ADMIN APPROVE WITHDRAWAL ENDPOINT - FIXED VERSION (with asset balance removal)
-// =============================================
-app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
-  body('notes').optional().trim(),
-  body('txid').optional().trim()
-], async (req, res) => {
-  try {
-    const { notes, txid } = req.body;
-    
-    const withdrawal = await Transaction.findById(req.params.id)
-      .populate('user');
-    
-    if (!withdrawal || withdrawal.type !== 'withdrawal') {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Withdrawal not found'
-      });
-    }
-    
-    if (withdrawal.status !== 'pending') {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Withdrawal is not pending approval'
-      });
-    }
-    
-    let cryptoPrice = null;
-    let usdValue = withdrawal.amount;
-    let feeUsd = withdrawal.fee || 0;
-    const isCryptoWithdrawal = withdrawal.method !== 'BANK' && withdrawal.method !== 'CARD';
-    const assetSymbol = isCryptoWithdrawal ? withdrawal.method.toLowerCase() : null;
-    
-    if (isCryptoWithdrawal && assetSymbol) {
-      cryptoPrice = await getCryptoPrice(assetSymbol.toUpperCase());
-      if (cryptoPrice) {
-        if (withdrawal.assetAmount) {
-          usdValue = withdrawal.assetAmount * cryptoPrice;
-        }
-        feeUsd = (withdrawal.fee || 0) * cryptoPrice;
-      }
-    }
-    
-    if (isCryptoWithdrawal && assetSymbol && withdrawal.assetAmount) {
-      let userAssetBalance = await UserAssetBalance.findOne({ user: withdrawal.user._id });
-      if (userAssetBalance && userAssetBalance.balances[assetSymbol]) {
-        userAssetBalance.balances[assetSymbol] -= withdrawal.assetAmount;
-        if (userAssetBalance.balances[assetSymbol] < 0) {
-          userAssetBalance.balances[assetSymbol] = 0;
-        }
-        userAssetBalance.lastUpdated = new Date();
-        
-        userAssetBalance.history.push({
-          asset: assetSymbol,
-          type: 'withdrawal',
-          amount: withdrawal.assetAmount,
-          balance: userAssetBalance.balances[assetSymbol],
-          usdValue: usdValue,
-          price: cryptoPrice || 0,
-          transactionId: withdrawal._id,
-          timestamp: new Date()
-        });
-        
-        await userAssetBalance.save();
-      }
-    }
-    
-    withdrawal.status = 'completed';
-    withdrawal.processedBy = req.admin._id;
-    withdrawal.processedAt = new Date();
-    withdrawal.adminNotes = notes;
-    if (txid) {
-      withdrawal.details = { ...withdrawal.details, txid };
-    }
-    await withdrawal.save();
-
-    const deviceInfo = await getUserDeviceInfo(req);
-    
-    await UserLog.create({
-      user: withdrawal.user._id,
-      username: withdrawal.user.email,
-      email: withdrawal.user.email,
-      userFullName: `${withdrawal.user.firstName} ${withdrawal.user.lastName}`,
-      action: 'withdrawal_completed',
-      actionCategory: 'financial',
-      ipAddress: getRealClientIP(req),
-      userAgent: req.headers['user-agent'] || 'Unknown',
-      deviceInfo: {
-        type: getDeviceType(req),
-        os: {
-          name: getOSFromUserAgent(req.headers['user-agent']),
-          version: 'Unknown'
-        },
-        browser: {
-          name: getBrowserFromUserAgent(req.headers['user-agent']),
-          version: 'Unknown'
-        },
-        platform: req.headers['user-agent'] || 'Unknown',
-        language: req.headers['accept-language'] || 'Unknown',
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
-      },
-      location: {
-        ip: getRealClientIP(req),
-        country: {
-          name: deviceInfo.locationDetails?.country || 'Unknown',
-          code: deviceInfo.locationDetails?.country || 'Unknown'
-        },
-        region: {
-          name: deviceInfo.locationDetails?.region || 'Unknown',
-          code: deviceInfo.locationDetails?.region || 'Unknown'
-        },
-        city: deviceInfo.locationDetails?.city || 'Unknown',
-        postalCode: deviceInfo.locationDetails?.postalCode || 'Unknown',
-        latitude: deviceInfo.locationDetails?.latitude,
-        longitude: deviceInfo.locationDetails?.longitude,
-        timezone: deviceInfo.locationDetails?.timezone || 'Unknown',
-        isp: deviceInfo.locationDetails?.isp || 'Unknown',
-        exactLocation: deviceInfo.exactLocation
-      },
-      status: 'success',
-      metadata: {
-        amount: withdrawal.amount,
-        asset: withdrawal.asset,
-        assetAmount: withdrawal.assetAmount,
-        method: withdrawal.method,
-        reference: withdrawal.reference,
-        adminId: req.admin._id,
-        adminName: req.admin.name,
-        adminNotes: notes,
-        txid: txid,
-        processedAt: withdrawal.processedAt
-      },
-      relatedEntity: withdrawal._id,
-      relatedEntityModel: 'Transaction'
-    });
-
-    try {
-      await sendAutomatedEmail(withdrawal.user, 'withdrawal_approved', {
-        name: withdrawal.user.firstName,
-        amount: withdrawal.assetAmount || withdrawal.amount,
-        asset: withdrawal.asset || 'USD',
-        usdValue: usdValue,
-        fee: withdrawal.fee || 0,
-        feeUsd: feeUsd,
-        netAmount: (withdrawal.assetAmount || withdrawal.amount) - (withdrawal.fee || 0),
-        withdrawalAddress: withdrawal.details?.withdrawalAddress || withdrawal.btcAddress || 'N/A',
-        processedAt: withdrawal.processedAt,
-        txid: txid || withdrawal.details?.txid,
-        method: withdrawal.method
-      });
-      console.log(`📧 Withdrawal approval email sent to ${withdrawal.user.email}`);
-    } catch (emailError) {
-      console.error('Failed to send withdrawal approval email:', emailError);
-    }
-    
-    await AccountRestrictions.checkAndUpdateRestrictions(withdrawal.user._id, 'transaction_completion');
-    
-    let totalMainBalance = 0;
-    const updatedAssetBalance = await UserAssetBalance.findOne({ user: withdrawal.user._id });
-    if (updatedAssetBalance) {
-      for (const [asset, balance] of Object.entries(updatedAssetBalance.balances)) {
-        if (balance > 0) {
-          const price = await getCryptoPrice(asset.toUpperCase());
-          if (price) {
-            totalMainBalance += balance * price;
-          }
-        }
-      }
-    }
-    await User.findByIdAndUpdate(withdrawal.user._id, { 'balances.main': totalMainBalance });
-    
-    const io = req.app.get('io');
-    if (io) {
-      io.to(`user_${withdrawal.user._id}`).emit('balance_update', { main: totalMainBalance });
-      if (isCryptoWithdrawal && assetSymbol && updatedAssetBalance) {
-        const assetData = [];
-        for (const [asset, balance] of Object.entries(updatedAssetBalance.balances)) {
-          if (balance > 0) {
-            const price = await getCryptoPrice(asset.toUpperCase());
-            assetData.push({
-              symbol: asset,
-              balance: balance,
-              usdValue: balance * (price || 0),
-              id: asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset,
-              avgPrice: 0,
-              unrealizedPnl: 0,
-              unrealizedPnlPercent: 0,
-              transactions: updatedAssetBalance.history.filter(h => h.asset === asset).slice(-10)
-            });
-          }
-        }
-        io.to(`user_${withdrawal.user._id}`).emit('asset_balances_update', assetData);
-      }
-    }
-    
-    res.status(200).json({
-      status: 'success',
-      message: 'Withdrawal approved successfully'
-    });
-    
-    await logActivity('approve-withdrawal', 'transaction', withdrawal._id, req.admin._id, 'Admin', req, {
-      amount: withdrawal.amount,
-      userId: withdrawal.user,
-      asset: assetSymbol,
-      assetAmount: withdrawal.assetAmount
-    });
-  } catch (err) {
-    console.error('Admin approve withdrawal error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to approve withdrawal',
-      error: process.env.NODE_ENV === 'development' ? err.message : undefined
-    });
-  }
-});
-
-
-
-
-// =============================================
-// GET USER ASSETS BALANCES ENDPOINT
-// =============================================
-app.get('/api/users/assets', protect, async (req, res) => {
-  try {
-    const userId = req.user._id;
-    const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
-    
-    if (!userAssetBalance) {
-      return res.status(200).json([]);
-    }
-    
-    const assetData = [];
-    for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
-      if (balance > 0) {
-        const price = await getCryptoPrice(asset.toUpperCase());
-        const currentValue = balance * (price || 0);
-        
-        const buyTransactions = userAssetBalance.history.filter(h => h.asset === asset && h.type === 'buy');
-        let totalSpent = 0;
-        let totalBought = 0;
-        buyTransactions.forEach(t => {
-          totalSpent += t.usdValue;
-          totalBought += t.amount;
-        });
-        const avgPrice = totalBought > 0 ? totalSpent / totalBought : 0;
-        const unrealizedPnl = currentValue - totalSpent;
-        const unrealizedPercentage = totalSpent > 0 ? (unrealizedPnl / totalSpent) * 100 : 0;
-        
-        assetData.push({
-          symbol: asset,
-          balance: balance,
-          currentValue: currentValue,
-          avgPrice: avgPrice,
-          unrealizedPnl: unrealizedPnl,
-          unrealizedPnlPercent: unrealizedPercentage,
-          id: asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset,
-          transactions: userAssetBalance.history.filter(h => h.asset === asset).slice(-20)
-        });
-      }
-    }
-    
-    res.status(200).json(assetData);
-  } catch (err) {
-    console.error('Error fetching user assets:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch assets' });
-  }
-});
-
-// =============================================
-// GET USER BALANCES ENDPOINT
-// =============================================
-app.get('/api/users/balances', protect, async (req, res) => {
-  try {
-    const user = await User.findById(req.user._id).select('balances');
-    res.status(200).json({
-      main: user.balances.main,
-      active: user.balances.active,
-      matured: user.balances.matured
-    });
-  } catch (err) {
-    console.error('Error fetching balances:', err);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch balances' });
-  }
-});
-
-let priceUpdateInterval = null;
-let lastPrices = {};
-let isRecalculating = false;
-
-const startRealTimePriceUpdates = (io) => {
-  if (priceUpdateInterval) clearInterval(priceUpdateInterval);
-
-
-
-
-  
-  
-  // UPDATE PRICES EVERY 1 SECOND FOR TRUE REAL-TIME
-  priceUpdateInterval = setInterval(async () => {
-    try {
-      const assets = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'ADA', 'SHIB', 'AVAX', 'DOT', 'TRX', 'LINK', 'MATIC', 'LTC'];
-      const priceUpdates = {};
-      
-      // Fetch all prices in parallel for speed
-      const pricePromises = assets.map(async (asset) => {
-        const price = await getCryptoPrice(asset);
-        if (price) {
-          priceUpdates[asset.toLowerCase()] = {
-            price: price,
-            timestamp: Date.now()
-          };
-        }
-      });
-      
-      await Promise.all(pricePromises);
-      
-      if (Object.keys(priceUpdates).length > 0 && io) {
-        // Broadcast price updates to all clients
-        io.emit('price_update', priceUpdates);
-        lastPrices = priceUpdates;
-
-  // ADD THIS LINE - Broadcast to WebSocket clients as well
-  const marketWss = req?.app?.get('marketWss');
-  if (marketWss) {
-    marketWss.clients.forEach(client => {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(JSON.stringify({ type: 'price_update', data: priceUpdates }));
-      }
-    });
-  }
-}
-        
-        // IMMEDIATELY recalculate ALL user wallet values based on new prices
-        await recalculateAllWalletValuesRealtime(io, priceUpdates);
-      
-    } catch (err) {
-      console.error('Error in price update interval:', err);
-    }
-  }, 1000); // EVERY SECOND
-};
-
-// NEW FUNCTION: Recalculate wallet values in real-time based on current crypto prices
-const recalculateAllWalletValuesRealtime = async (io, currentPrices) => {
-  if (isRecalculating) return;
-  isRecalculating = true;
-  
-  try {
-    // Get all users with their asset balances
-    const users = await User.find({}).select('_id balances');
-    const userAssetBalances = await UserAssetBalance.find({});
-    const userAssetMap = new Map();
-    userAssetBalances.forEach(ub => {
-      userAssetMap.set(ub.user.toString(), ub);
-    });
-    
-    // Get all completed investments for matured calculations
-    const allMaturedInvestments = await Investment.find({ 
-      status: 'completed' 
-    }).populate('plan');
-    const maturedByUser = new Map();
-    allMaturedInvestments.forEach(inv => {
-      const userId = inv.user.toString();
-      if (!maturedByUser.has(userId)) maturedByUser.set(userId, []);
-      maturedByUser.get(userId).push(inv);
-    });
-    
-    const batchUpdates = [];
-    
-    for (const user of users) {
-      let totalMainValue = 0;
-      let totalMaturedValue = 0;
-      
-      // Calculate MAIN wallet value (all crypto holdings at current prices)
-      const userAssets = userAssetMap.get(user._id.toString());
-      if (userAssets && userAssets.balances) {
-        for (const [assetSymbol, balance] of Object.entries(userAssets.balances)) {
-          if (balance > 0) {
-            const priceData = currentPrices[assetSymbol.toLowerCase()];
-            const price = priceData ? priceData.price : await getCryptoPrice(assetSymbol.toUpperCase());
-            if (price && price > 0) {
-              totalMainValue += balance * price;
-            }
-          }
-        }
-      }
-      
-      // Calculate MATURED wallet value (completed investments valued at current prices)
-      const maturedInvestments = maturedByUser.get(user._id.toString()) || [];
-      for (const investment of maturedInvestments) {
-        // If investment has specific crypto asset, value it at current price
-        if (investment.asset && investment.assetAmount) {
-          const priceData = currentPrices[investment.asset.toLowerCase()];
-          const currentPrice = priceData ? priceData.price : await getCryptoPrice(investment.asset.toUpperCase());
-          if (currentPrice && currentPrice > 0) {
-            totalMaturedValue += investment.assetAmount * currentPrice;
-          } else {
-            totalMaturedValue += investment.amount + (investment.actualReturn || 0);
-          }
-        } else {
-          // Fallback: use original USD value
-          totalMaturedValue += investment.amount + (investment.actualReturn || 0);
-        }
-      }
-      
-      // Calculate PnL for main wallet (based on previous value)
-      const previousMainValue = user.balances.main || totalMainValue;
-      const mainPnL = totalMainValue - previousMainValue;
-      const mainPnLPercentage = previousMainValue > 0 ? (mainPnL / previousMainValue) * 100 : 0;
-      
-      // Calculate PnL for matured wallet
-      const previousMaturedValue = user.balances.matured || totalMaturedValue;
-      const maturedPnL = totalMaturedValue - previousMaturedValue;
-      const maturedPnLPercentage = previousMaturedValue > 0 ? (maturedPnL / previousMaturedValue) * 100 : 0;
-      
-      // Prepare batch update
-      batchUpdates.push({
-        userId: user._id,
-        main: totalMainValue,
-        matured: totalMaturedValue,
-        mainPnL: mainPnL,
-        mainPnLPercent: mainPnLPercentage,
-        maturedPnL: maturedPnL,
-        maturedPnLPercent: maturedPnLPercentage
-      });
-      
-      // Send real-time updates via Socket.IO to each specific user
-      if (io) {
-        io.to(`user_${user._id}`).emit('wallet_realtime_update', {
-          main: totalMainValue,
-          matured: totalMaturedValue,
-          mainPnL: mainPnL,
-          mainPnLPercent: mainPnLPercentage,
-          maturedPnL: maturedPnL,
-          maturedPnLPercent: maturedPnLPercentage,
-          timestamp: Date.now()
-        });
-      }
-    }
-    
-    // Batch update database (non-blocking)
-    for (const update of batchUpdates) {
-      await User.findByIdAndUpdate(update.userId, {
-        'balances.main': update.main,
-        'balances.matured': update.matured
-      });
-    }
-    
-  } catch (err) {
-    console.error('Error in real-time wallet recalculation:', err);
-  } finally {
-    isRecalculating = false;
-  }
-};
-
-// Keep compatibility with existing function
-const recalculateAllUserMainBalances = async (io) => {
-  const currentPrices = lastPrices;
-  await recalculateAllWalletValuesRealtime(io, currentPrices);
-};
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// SNIPPET B - COMPLETE REWRITE WITH CORRECT ENDPOINTS
-// =============================================
-// SPOT TRADING MARKET DATA ENDPOINTS - PRODUCTION
-// All endpoints read from Redis (Price Aggregator Worker) for millisecond response
-// =============================================
-
-// GET /api/market/orderbook - Order book depth from Redis (Price Aggregator Worker)
-app.get('/api/market/orderbook', async (req, res) => {
-  try {
-    const { symbol, limit = 100 } = req.query;
-    if (!symbol) {
-      return res.status(400).json({ status: 'fail', message: 'Symbol is required' });
-    }
-
-    const cacheKey = `orderbook:${symbol.toUpperCase()}`;
-    const cached = await redis.get(cacheKey);
-    
-    if (cached) {
-      const orderbookData = JSON.parse(cached);
-      // Apply limit
-      const limitedData = {
-        bids: (orderbookData.bids || []).slice(0, parseInt(limit)).map(b => [b[0], b[1]]),
-        asks: (orderbookData.asks || []).slice(0, parseInt(limit)).map(a => [a[0], a[1]]),
-        lastUpdateId: orderbookData.lastUpdateId
-      };
-      return res.status(200).json(limitedData);
-    }
-
-    // Fallback to Binance REST API if Redis is empty
-    const response = await axios.get(`https://api.binance.com/api/v3/depth?symbol=${symbol.toUpperCase()}&limit=${Math.min(limit, 100)}`, {
-      timeout: 5000,
-      headers: { 'Accept': 'application/json' }
-    });
-
-    const orderbookData = {
-      bids: response.data.bids.slice(0, limit).map(b => [parseFloat(b[0]), parseFloat(b[1])]),
-      asks: response.data.asks.slice(0, limit).map(a => [parseFloat(a[0]), parseFloat(a[1])]),
-      lastUpdateId: response.data.lastUpdateId
-    };
-
-    await redis.setex(cacheKey, 1, JSON.stringify(orderbookData));
-
-    res.status(200).json(orderbookData);
-  } catch (err) {
-    console.error('Orderbook fetch error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch order book', error: err.message });
-  }
-});
-
-// GET /api/market/ticker/24hr - 24hr ticker stats from Redis (Price Aggregator Worker)
-app.get('/api/market/ticker/24hr', async (req, res) => {
-  try {
-    const { symbol } = req.query;
-    
-    if (symbol) {
-      const cacheKey = `ticker:${symbol.toUpperCase()}`;
-      const cached = await redis.get(cacheKey);
-      
-      if (cached) {
-        return res.status(200).json(JSON.parse(cached));
-      }
-    } else {
-      // For all tickers, return only top pairs
-      const cacheKey = 'ticker:all';
-      const cached = await redis.get(cacheKey);
-      if (cached) {
-        return res.status(200).json(JSON.parse(cached));
-      }
-    }
-
-    let url = 'https://api.binance.com/api/v3/ticker/24hr';
-    if (symbol) {
-      url += `?symbol=${symbol.toUpperCase()}`;
-    }
-
-    const response = await axios.get(url, { timeout: 5000 });
-
-    let result;
-    if (symbol) {
-      result = {
-        symbol: response.data.symbol,
-        priceChange: parseFloat(response.data.priceChange),
-        priceChangePercent: parseFloat(response.data.priceChangePercent),
-        weightedAvgPrice: parseFloat(response.data.weightedAvgPrice),
-        prevClosePrice: parseFloat(response.data.prevClosePrice),
-        lastPrice: parseFloat(response.data.lastPrice),
-        lastQty: parseFloat(response.data.lastQty),
-        bidPrice: parseFloat(response.data.bidPrice),
-        askPrice: parseFloat(response.data.askPrice),
-        openPrice: parseFloat(response.data.openPrice),
-        highPrice: parseFloat(response.data.highPrice),
-        lowPrice: parseFloat(response.data.lowPrice),
-        volume: parseFloat(response.data.volume),
-        quoteVolume: parseFloat(response.data.quoteVolume),
-        openTime: response.data.openTime,
-        closeTime: response.data.closeTime
-      };
-      await redis.setex(`ticker:${symbol.toUpperCase()}`, 2, JSON.stringify(result));
-    } else {
-      // Filter to top 30 USDT pairs for performance
-      const topPairs = MAIN_CRYPTOS.slice(0, 30).map(c => `${c}USDT`);
-      result = response.data
-        .filter(ticker => topPairs.includes(ticker.symbol))
-        .map(ticker => ({
-          symbol: ticker.symbol,
-          lastPrice: parseFloat(ticker.lastPrice),
-          priceChangePercent: parseFloat(ticker.priceChangePercent),
-          volume: parseFloat(ticker.volume),
-          quoteVolume: parseFloat(ticker.quoteVolume)
-        }));
-      await redis.setex('ticker:all', 2, JSON.stringify(result));
-    }
-
-    res.status(200).json(result);
-  } catch (err) {
-    console.error('Ticker fetch error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch ticker data', error: err.message });
-  }
-});
-
-// GET /api/market/trades - Recent trades from Redis (Price Aggregator Worker)
-app.get('/api/market/trades', async (req, res) => {
-  try {
-    const { symbol, limit = 50 } = req.query;
-    if (!symbol) {
-      return res.status(400).json({ status: 'fail', message: 'Symbol is required' });
-    }
-
-    const cacheKey = `trades:${symbol.toUpperCase()}`;
-    const cached = await redis.lrange(cacheKey, 0, parseInt(limit) - 1);
-    
-    if (cached && cached.length > 0) {
-      const trades = cached.map(t => JSON.parse(t));
-      return res.status(200).json(trades);
-    }
-
-    // Fallback to Binance REST API
-    const response = await axios.get(`https://api.binance.com/api/v3/trades?symbol=${symbol.toUpperCase()}&limit=${Math.min(limit, 100)}`, {
-      timeout: 5000
-    });
-
-    const trades = response.data.map(trade => ({
-      id: trade.id,
-      price: parseFloat(trade.price),
-      amount: parseFloat(trade.qty),
-      time: trade.time,
-      isBuyerMaker: trade.isBuyerMaker
-    }));
-
-    // Store in Redis list
-    for (const trade of trades) {
-      await redis.lpush(cacheKey, JSON.stringify(trade));
-    }
-    await redis.ltrim(cacheKey, 0, 99);
-    await redis.expire(cacheKey, 5);
-
-    res.status(200).json(trades);
-  } catch (err) {
-    console.error('Trades fetch error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch trades', error: err.message });
-  }
-});
-
-// GET /api/market/candles - Kline/candle data from Redis Sorted Sets (Price Aggregator Worker)
-app.get('/api/market/candles', async (req, res) => {
-  try {
-    const { symbol, interval = '15m', limit = 200 } = req.query;
-    if (!symbol) {
-      return res.status(400).json({ status: 'fail', message: 'Symbol is required' });
-    }
-
-    const intervalMap = {
-      '1s': '1s', '1m': '1m', '3m': '3m', '5m': '5m', '15m': '15m', '30m': '30m',
-      '1h': '1h', '2h': '2h', '4h': '4h', '6h': '6h', '8h': '8h', '12h': '12h',
-      '1d': '1d', '3d': '3d', '1w': '1w', '1M': '1M'
-    };
-    const binanceInterval = intervalMap[interval] || '15m';
-
-    const candlesSetKey = `candles:${symbol.toUpperCase()}:${binanceInterval}`;
-    const cachedCandles = await redis.zrevrange(candlesSetKey, 0, parseInt(limit) - 1);
-    
-    if (cachedCandles && cachedCandles.length > 0) {
-      const candles = cachedCandles.reverse().map(c => JSON.parse(c));
-      return res.status(200).json({ candles: candles });
-    }
-
-    // Fallback to Binance REST API
-    const response = await axios.get(`https://api.binance.com/api/v3/klines?symbol=${symbol.toUpperCase()}&interval=${binanceInterval}&limit=${Math.min(limit, 500)}`, {
-      timeout: 5000
-    });
-
-    const candles = response.data.map(candle => ({
-      time: candle[0],
-      open: parseFloat(candle[1]),
-      high: parseFloat(candle[2]),
-      low: parseFloat(candle[3]),
-      close: parseFloat(candle[4]),
-      volume: parseFloat(candle[5]),
-      closeTime: candle[6],
-      quoteVolume: parseFloat(candle[7]),
-      trades: candle[8]
-    }));
-
-    // Store in Redis Sorted Set
-    for (const candle of candles) {
-      await redis.zadd(candlesSetKey, candle.time, JSON.stringify(candle));
-    }
-    await redis.expire(candlesSetKey, 3600);
-    await redis.zremrangebyrank(candlesSetKey, 0, -501);
-
-    res.status(200).json({ candles: candles });
-  } catch (err) {
-    console.error('Candles fetch error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch candle data', error: err.message });
-  }
-});
-
-// GET /api/market/pairs - All trading pairs with logos from Redis (Price Aggregator Worker)
-app.get('/api/market/pairs', async (req, res) => {
-  try {
-    const cacheKey = 'market:pairs';
-    const cached = await redis.get(cacheKey);
-    
-    if (cached) {
-      return res.status(200).json(JSON.parse(cached));
-    }
-
-    // Fallback to generating pairs from Binance
-    const response = await axios.get('https://api.binance.com/api/v3/exchangeInfo', { timeout: 10000 });
-
-    const allPairs = [];
-    
-    for (const quote of QUOTE_ASSETS) {
-      const quotePairs = response.data.symbols.filter(s => 
-        s.quoteAsset === quote && s.status === 'TRADING' && MAIN_CRYPTOS.includes(s.baseAsset)
-      );
-      
-      for (const pair of quotePairs.slice(0, 30)) {
-        const baseAsset = pair.baseAsset;
-        let logoUrl = '';
-        
-        // Try to get logo from cache
-        const logoCacheKey = `asset:logo:${baseAsset}`;
-        const cachedLogo = await redis.get(logoCacheKey);
-        if (cachedLogo) {
-          logoUrl = cachedLogo;
-        } else {
-          try {
-            const coinRes = await axios.get(`https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${baseAsset.toLowerCase()}&sparkline=false`, { timeout: 3000 });
-            if (coinRes.data && coinRes.data[0] && coinRes.data[0].image) {
-              logoUrl = coinRes.data[0].image;
-              await redis.setex(logoCacheKey, 86400, logoUrl);
-            }
-          } catch(e) {}
-        }
-        
-        let price = 0;
-        const priceKey = `price:${pair.symbol}`;
-        const cachedPrice = await redis.get(priceKey);
-        if (cachedPrice) {
-          price = parseFloat(cachedPrice);
-        } else {
-          try {
-            const tickerRes = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${pair.symbol}`, { timeout: 2000 });
-            price = parseFloat(tickerRes.data.price);
-          } catch(e) {}
-        }
-        
-        let change24h = 0;
-        const tickerKey = `ticker:${pair.symbol}`;
-        const cachedTicker = await redis.get(tickerKey);
-        if (cachedTicker) {
-          const tickerData = JSON.parse(cachedTicker);
-          change24h = tickerData.priceChangePercent || 0;
-        }
-        
-        allPairs.push({
-          symbol: pair.symbol,
-          base: baseAsset,
-          quote: quote,
-          price: price,
-          change24h: change24h,
-          volume: 0,
-          logoUrl: logoUrl,
-          status: 'active'
-        });
-      }
-    }
-
-    const result = { data: allPairs };
-    await redis.setex(cacheKey, 300, JSON.stringify(result));
-
-    res.status(200).json(result);
-  } catch (err) {
-    console.error('Pairs fetch error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch market pairs', error: err.message });
-  }
-});
-
-// =============================================
-// ASSET ENDPOINTS
-// =============================================
-
-// GET /api/asset/logo - Asset logo URL from Redis cache
-app.get('/api/asset/logo', async (req, res) => {
-  try {
-    const { symbol } = req.query;
-    if (!symbol) {
-      return res.status(400).json({ status: 'fail', message: 'Symbol is required' });
-    }
-
-    const cacheKey = `asset:logo:${symbol.toUpperCase()}`;
-    const cached = await redis.get(cacheKey);
-    if (cached) {
-      return res.status(200).json({ logoUrl: cached });
-    }
-
-    let logoUrl = '';
-    try {
-      const response = await axios.get(`https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${symbol.toLowerCase()}&sparkline=false`, { timeout: 5000 });
-      if (response.data && response.data[0] && response.data[0].image) {
-        logoUrl = response.data[0].image;
-        await redis.setex(cacheKey, 86400, logoUrl);
-      }
-    } catch (e) {
-      logoUrl = '';
-    }
-
-    res.status(200).json({ logoUrl });
-  } catch (err) {
-    console.error('Logo fetch error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch logo', error: err.message });
-  }
-});
-
-// GET /api/asset/extra - Asset networks and tags from Redis
-app.get('/api/asset/extra', async (req, res) => {
-  try {
-    const { symbol } = req.query;
-    if (!symbol) {
-      return res.status(400).json({ status: 'fail', message: 'Symbol is required' });
-    }
-
-    const cacheKey = `asset:extra:${symbol.toUpperCase()}`;
-    const cached = await redis.get(cacheKey);
-    if (cached) {
-      return res.status(200).json(JSON.parse(cached));
-    }
-
-    const assetData = {
-      'BTC': { tags: ['POW', 'Store of Value', 'Payments', 'Layer 1'], networks: ['Bitcoin', 'Lightning'] },
-      'ETH': { tags: ['Smart Contracts', 'DeFi', 'NFT', 'Layer 1'], networks: ['ERC-20', 'ERC-721', 'Arbitrum', 'Optimism'] },
-      'BNB': { tags: ['Exchange', 'Smart Contracts', 'Layer 1'], networks: ['BEP-2', 'BEP-20'] },
-      'SOL': { tags: ['High Performance', 'DeFi', 'Layer 1'], networks: ['Solana', 'SPL'] },
-      'XRP': { tags: ['Payments', 'Enterprise', 'Layer 1'], networks: ['XRP Ledger'] },
-      'ADA': { tags: ['Smart Contracts', 'Research', 'Layer 1'], networks: ['Cardano'] },
-      'DOGE': { tags: ['Meme', 'Payments'], networks: ['Dogecoin'] },
-      'TRX': { tags: ['Smart Contracts', 'DeFi'], networks: ['TRC-20', 'TRC-10'] }
-    };
-
-    const defaultData = { tags: ['Crypto', 'Digital Asset'], networks: ['Mainnet'] };
-    const result = assetData[symbol.toUpperCase()] || defaultData;
-
-    await redis.setex(cacheKey, 86400, JSON.stringify(result));
-
-    res.status(200).json(result);
-  } catch (err) {
-    console.error('Asset extra fetch error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch asset info', error: err.message });
-  }
-});
-
-// GET /api/trading/pairlimits - Max buy/sell amounts per pair from Redis
-app.get('/api/trading/pairlimits', async (req, res) => {
-  try {
-    const { symbol } = req.query;
-    if (!symbol) {
-      return res.status(400).json({ status: 'fail', message: 'Symbol is required' });
-    }
-
-    const cacheKey = `pairlimits:${symbol.toUpperCase()}`;
-    const cached = await redis.get(cacheKey);
-    if (cached) {
-      return res.status(200).json(JSON.parse(cached));
-    }
-
-    const base = symbol.replace(/USDT|USDC|EURC|USD|BNB|BTC$/, '');
-    const quote = symbol.slice(base.length);
-    
-    const pairLimits = {
-      symbol: symbol.toUpperCase(),
-      baseAsset: base,
-      quoteAsset: quote,
-      maxBuyAmount: 10000,
-      maxSellAmount: 10000,
-      minOrderValue: 10,
-      logoUrl: ''
-    };
-
-    await redis.setex(cacheKey, 3600, JSON.stringify(pairLimits));
-
-    res.status(200).json(pairLimits);
-  } catch (err) {
-    console.error('Pair limits fetch error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch pair limits', error: err.message });
-  }
-});
-
-// =============================================
-// TRADING ENDPOINTS - Using existing Order model
-// =============================================
-
-// GET /api/trading/orders - User orders
-app.get('/api/trading/orders', protect, async (req, res) => {
-  try {
-    const { symbol, status, limit = 100 } = req.query;
-    const userId = req.user._id;
-
-    let query = { user: userId };
-    if (symbol) query.symbol = symbol.toUpperCase();
-    if (status) query.status = status;
-
-    const orders = await Order.find(query)
-      .sort({ createdAt: -1 })
-      .limit(parseInt(limit));
-
-    res.status(200).json({ status: 'success', data: orders });
-  } catch (err) {
-    console.error('Get orders error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch orders', error: err.message });
-  }
-});
-
-// POST /api/trading/orders/buy - Place buy order
-app.post('/api/trading/orders/buy', protect, async (req, res) => {
-  try {
-    const { symbol, type, price, amount } = req.body;
-    const userId = req.user._id;
-
-    if (!symbol || !amount || amount <= 0) {
-      return res.status(400).json({ status: 'fail', message: 'Invalid order parameters' });
-    }
-
-    const baseAsset = symbol.replace(/USDT|USDC|EURC|USD|BNB|BTC$/, '');
-    
-    // Get current price from Redis (Price Aggregator Worker)
-    let currentPrice = 0;
-    const priceKey = `price:${symbol.toUpperCase()}`;
-    const cachedPrice = await redis.get(priceKey);
-    if (cachedPrice) {
-      currentPrice = parseFloat(cachedPrice);
-    } else {
-      currentPrice = await getCryptoPrice(baseAsset);
-    }
-    
-    const finalPrice = type === 'market' ? currentPrice : (price || currentPrice);
-
-    if (!finalPrice || finalPrice <= 0) {
-      return res.status(400).json({ status: 'fail', message: 'Invalid price' });
-    }
-
-    const totalCost = amount * finalPrice;
-    const fee = totalCost * 0.001;
-    const totalWithFee = totalCost + fee;
-
-    let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
-    if (!userAssetBalance) {
-      userAssetBalance = new UserAssetBalance({ user: userId, balances: {} });
-      await userAssetBalance.save();
-    }
-
-    const usdtBalance = userAssetBalance.balances.usdt || 0;
-    if (totalWithFee > usdtBalance) {
-      return res.status(400).json({ status: 'fail', message: 'Insufficient USDT balance' });
-    }
-
-    userAssetBalance.balances.usdt = (userAssetBalance.balances.usdt || 0) - totalWithFee;
-    const baseLower = baseAsset.toLowerCase();
-    userAssetBalance.balances[baseLower] = (userAssetBalance.balances[baseLower] || 0) + amount;
-    userAssetBalance.lastUpdated = new Date();
-    await userAssetBalance.save();
-
-    const orderId = `ORD-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    
-    const order = new Order({
-      user: userId,
-      symbol: symbol.toUpperCase(),
-      orderId: orderId,
-      side: 'buy',
-      type: type,
-      price: finalPrice,
-      originalQty: amount,
-      remainingQty: 0,
-      executedQty: amount,
-      status: 'filled',
-      total: totalCost,
-      fee: fee,
-      feeAsset: 'USDT'
-    });
-    await order.save();
-
-    const tradeId = `TRD-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    const trade = new Trade({
-      user: userId,
-      orderId: orderId,
-      symbol: symbol.toUpperCase(),
-      tradeId: tradeId,
-      side: 'buy',
-      price: finalPrice,
-      qty: amount,
-      quoteQty: totalCost,
-      commission: fee,
-      commissionAsset: 'USDT',
-      time: new Date()
-    });
-    await trade.save();
-
-    let totalMainBalance = 0;
-    for (const [asset, bal] of Object.entries(userAssetBalance.balances)) {
-      if (bal > 0) {
-        const assetPrice = await getCryptoPrice(asset.toUpperCase());
-        if (assetPrice) totalMainBalance += bal * assetPrice;
-      }
-    }
-    await User.findByIdAndUpdate(userId, { 'balances.main': totalMainBalance });
-
-    const io = req.app.get('io');
-    if (io) {
-      io.to(`user_${userId}`).emit('balance_update', { main: totalMainBalance });
-      io.to(`user_${userId}`).emit('order_update', { order: order });
-    }
-
-    res.status(200).json({ status: 'success', message: 'Buy order executed', data: { order, totalCost, fee } });
-  } catch (err) {
-    console.error('Buy order error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to place buy order', error: err.message });
-  }
-});
-
-// POST /api/trading/orders/sell - Place sell order
-app.post('/api/trading/orders/sell', protect, async (req, res) => {
-  try {
-    const { symbol, type, price, amount } = req.body;
-    const userId = req.user._id;
-
-    if (!symbol || !amount || amount <= 0) {
-      return res.status(400).json({ status: 'fail', message: 'Invalid order parameters' });
-    }
-
-    const baseAsset = symbol.replace(/USDT|USDC|EURC|USD|BNB|BTC$/, '');
-    
-    let currentPrice = 0;
-    const priceKey = `price:${symbol.toUpperCase()}`;
-    const cachedPrice = await redis.get(priceKey);
-    if (cachedPrice) {
-      currentPrice = parseFloat(cachedPrice);
-    } else {
-      currentPrice = await getCryptoPrice(baseAsset);
-    }
-    
-    const finalPrice = type === 'market' ? currentPrice : (price || currentPrice);
-
-    if (!finalPrice || finalPrice <= 0) {
-      return res.status(400).json({ status: 'fail', message: 'Invalid price' });
-    }
-
-    const totalValue = amount * finalPrice;
-    const fee = totalValue * 0.001;
-    const netAmount = totalValue - fee;
-
-    let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
-    if (!userAssetBalance) {
-      userAssetBalance = new UserAssetBalance({ user: userId, balances: {} });
-      await userAssetBalance.save();
-    }
-
-    const baseLower = baseAsset.toLowerCase();
-    const baseBalance = userAssetBalance.balances[baseLower] || 0;
-    
-    if (amount > baseBalance) {
-      return res.status(400).json({ status: 'fail', message: `Insufficient ${baseAsset} balance` });
-    }
-
-    userAssetBalance.balances[baseLower] = baseBalance - amount;
-    userAssetBalance.balances.usdt = (userAssetBalance.balances.usdt || 0) + netAmount;
-    userAssetBalance.lastUpdated = new Date();
-    await userAssetBalance.save();
-
-    const orderId = `ORD-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    
-    const order = new Order({
-      user: userId,
-      symbol: symbol.toUpperCase(),
-      orderId: orderId,
-      side: 'sell',
-      type: type,
-      price: finalPrice,
-      originalQty: amount,
-      remainingQty: 0,
-      executedQty: amount,
-      status: 'filled',
-      total: totalValue,
-      fee: fee,
-      feeAsset: 'USDT'
-    });
-    await order.save();
-
-    const tradeId = `TRD-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    const trade = new Trade({
-      user: userId,
-      orderId: orderId,
-      symbol: symbol.toUpperCase(),
-      tradeId: tradeId,
-      side: 'sell',
-      price: finalPrice,
-      qty: amount,
-      quoteQty: totalValue,
-      commission: fee,
-      commissionAsset: 'USDT',
-      time: new Date()
-    });
-    await trade.save();
-
-    let totalMainBalance = 0;
-    for (const [asset, bal] of Object.entries(userAssetBalance.balances)) {
-      if (bal > 0) {
-        const assetPrice = await getCryptoPrice(asset.toUpperCase());
-        if (assetPrice) totalMainBalance += bal * assetPrice;
-      }
-    }
-    await User.findByIdAndUpdate(userId, { 'balances.main': totalMainBalance });
-
-    const io = req.app.get('io');
-    if (io) {
-      io.to(`user_${userId}`).emit('balance_update', { main: totalMainBalance });
-      io.to(`user_${userId}`).emit('order_update', { order: order });
-    }
-
-    res.status(200).json({ status: 'success', message: 'Sell order executed', data: { order, totalValue, fee, netAmount } });
-  } catch (err) {
-    console.error('Sell order error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to place sell order', error: err.message });
-  }
-});
-
-// POST /api/trading/orders/cancel - Cancel order
-app.post('/api/trading/orders/cancel', protect, async (req, res) => {
-  try {
-    const { orderId } = req.body;
-    const userId = req.user._id;
-
-    const order = await Order.findOne({ orderId, user: userId });
-    if (!order) {
-      return res.status(404).json({ status: 'fail', message: 'Order not found' });
-    }
-
-    if (order.status !== 'new' && order.status !== 'partial' && order.status !== 'pending') {
-      return res.status(400).json({ status: 'fail', message: 'Order cannot be cancelled' });
-    }
-
-    order.status = 'cancelled';
-    order.updatedAt = new Date();
-    await order.save();
-
-    res.status(200).json({ status: 'success', message: 'Order cancelled' });
-  } catch (err) {
-    console.error('Cancel order error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to cancel order', error: err.message });
-  }
-});
-
-// POST /api/trading/orders/cancel-all - Cancel all orders
-app.post('/api/trading/orders/cancel-all', protect, async (req, res) => {
-  try {
-    const { symbol } = req.body;
-    const userId = req.user._id;
-
-    let query = { user: userId, status: { $in: ['new', 'partial', 'pending'] } };
-    if (symbol) query.symbol = symbol.toUpperCase();
-
-    const result = await Order.updateMany(query, { status: 'cancelled', updatedAt: new Date() });
-
-    res.status(200).json({ status: 'success', message: `${result.modifiedCount} orders cancelled` });
-  } catch (err) {
-    console.error('Cancel all orders error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to cancel orders', error: err.message });
-  }
-});
-
-// GET /api/trading/trades - User trade history
-app.get('/api/trading/trades', protect, async (req, res) => {
-  try {
-    const { symbol, limit = 100 } = req.query;
-    const userId = req.user._id;
-
-    let query = { user: userId };
-    if (symbol) query.symbol = symbol.toUpperCase();
-
-    const trades = await Trade.find(query)
-      .sort({ time: -1 })
-      .limit(parseInt(limit));
-
-    res.status(200).json({ status: 'success', data: trades });
-  } catch (err) {
-    console.error('Get trades error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch trades', error: err.message });
-  }
-});
-
-// GET /api/trading/positions - User positions
-app.get('/api/trading/positions', protect, async (req, res) => {
-  try {
-    const { symbol } = req.query;
-    const userId = req.user._id;
-
-    let query = { user: userId, status: 'open' };
-    if (symbol) query.symbol = symbol.toUpperCase();
-
-    const positions = await Position.find(query);
-
-    res.status(200).json({ status: 'success', data: positions });
-  } catch (err) {
-    console.error('Get positions error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch positions', error: err.message });
-  }
-});
-
-// POST /api/trading/positions/close - Close position
-app.post('/api/trading/positions/close', protect, async (req, res) => {
-  try {
-    const { positionId } = req.body;
-    const userId = req.user._id;
-
-    const position = await Position.findOne({ _id: positionId, user: userId, status: 'open' });
-    if (!position) {
-      return res.status(404).json({ status: 'fail', message: 'Position not found' });
-    }
-
-    const baseAsset = position.symbol.replace(/USDT|USDC|EURC|USD|BNB|BTC$/, '');
-    
-    let currentPrice = 0;
-    const priceKey = `price:${position.symbol}`;
-    const cachedPrice = await redis.get(priceKey);
-    if (cachedPrice) {
-      currentPrice = parseFloat(cachedPrice);
-    } else {
-      currentPrice = await getCryptoPrice(baseAsset);
-    }
-    
-    let realizedPnL = 0;
-    if (position.side === 'long') {
-      realizedPnL = (currentPrice - position.entryPrice) * position.quantity;
-    } else {
-      realizedPnL = (position.entryPrice - currentPrice) * position.quantity;
-    }
-
-    position.status = 'closed';
-    position.realizedPnL = realizedPnL;
-    position.closedAt = new Date();
-    await position.save();
-
-    let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
-    if (userAssetBalance) {
-      userAssetBalance.balances.usdt = (userAssetBalance.balances.usdt || 0) + position.margin + realizedPnL;
-      await userAssetBalance.save();
-    }
-
-    res.status(200).json({ status: 'success', message: 'Position closed', data: { realizedPnL } });
-  } catch (err) {
-    console.error('Close position error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to close position', error: err.message });
-  }
-});
-
-// =============================================
-// USER SETTINGS ENDPOINTS
-// =============================================
-
-// GET /api/user/chart-settings - Get chart settings
-app.get('/api/user/chart-settings', protect, async (req, res) => {
-  try {
-    const userId = req.user._id;
-    
-    let settings = await UserTradingSettings.findOne({ user: userId });
-    
-    if (!settings) {
-      return res.status(200).json({ 
-        status: 'success', 
-        chartSettings: {
-          style: 'candlestick',
-          backgroundColor: '#0B0E11',
-          bullishColor: '#228B22',
-          bearishColor: '#FF0000',
-          solidCandles: false,
-          showBorders: true,
-          showWick: true,
-          tradeMarker: 'both'
-        }
-      });
-    }
-
-    res.status(200).json({ status: 'success', chartSettings: settings.chartSettings || {} });
-  } catch (err) {
-    console.error('Get chart settings error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch chart settings', error: err.message });
-  }
-});
-
-// POST /api/user/chart-settings - Save chart settings
-app.post('/api/user/chart-settings', protect, async (req, res) => {
-  try {
-    const userId = req.user._id;
-    const { chartSettings } = req.body;
-
-    await UserTradingSettings.findOneAndUpdate(
-      { user: userId },
-      { chartSettings: chartSettings },
-      { upsert: true, new: true }
-    );
-
-    res.status(200).json({ status: 'success', message: 'Chart settings saved' });
-  } catch (err) {
-    console.error('Save chart settings error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to save chart settings', error: err.message });
-  }
-});
-
-// GET /api/user/settings - Get order book settings
-app.get('/api/user/settings', protect, async (req, res) => {
-  try {
-    const userId = req.user._id;
-    
-    let settings = await UserTradingSettings.findOne({ user: userId });
-    
-    if (!settings) {
-      return res.status(200).json({ 
-        status: 'success', 
-        orderBookSettings: {
-          precision: 0.01,
-          depthSize: 20,
-          showCumulativeTotal: false,
-          colorMode: 'default',
-          displaySize: 'compact'
-        }
-      });
-    }
-
-    res.status(200).json({ status: 'success', orderBookSettings: settings.orderBookSettings || {} });
-  } catch (err) {
-    console.error('Get settings error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch settings', error: err.message });
-  }
-});
-
-// POST /api/user/settings - Save order book settings
-app.post('/api/user/settings', protect, async (req, res) => {
-  try {
-    const userId = req.user._id;
-    const { orderBookSettings } = req.body;
-
-    await UserTradingSettings.findOneAndUpdate(
-      { user: userId },
-      { orderBookSettings: orderBookSettings },
-      { upsert: true, new: true }
-    );
-
-    res.status(200).json({ status: 'success', message: 'Settings saved' });
-  } catch (err) {
-    console.error('Save settings error:', err.message);
-    res.status(500).json({ status: 'error', message: 'Failed to save settings', error: err.message });
-  }
-});
-
-// =============================================
-// SPOT MARKET WEBSOCKET - FOR /ws/spotmarket
-// Uses Redis Pub/Sub for real-time data distribution
-// =============================================
-
-const setupSpotMarketWebSocket = (server) => {
-  const wss = new WebSocket.Server({ server, path: '/ws/spotmarket' });
-  
-  const clients = new Map();
-  let redisSubscriber = null;
-
-  const setupRedisSubscriber = () => {
-    if (redisSubscriber) {
-      try { redisSubscriber.disconnect(); } catch(e) {}
-    }
-    
-    redisSubscriber = new Redis({
-      host: process.env.REDIS_HOST || 'redis-14450.c276.us-east-1-2.ec2.redns.redis-cloud.com',
-      port: process.env.REDIS_PORT || 14450,
-      password: process.env.REDIS_PASSWORD || 'qjXgsg0YrsLaSumlEW9HkIZbvLjXEwXR',
-    });
-    
-    redisSubscriber.subscribe('ticker_update', 'orderbook_update', 'trade_update', 'candle_update');
-    
-    redisSubscriber.on('message', (channel, message) => {
-      const data = JSON.parse(message);
-      
-      clients.forEach((client) => {
-        if (client.ws.readyState === WebSocket.OPEN) {
-          let wsMessage = {};
-          
-          if (channel === 'ticker_update') {
-            wsMessage = { type: 'ticker', ...data };
-          } else if (channel === 'orderbook_update') {
-            wsMessage = { type: 'orderbook', ...data };
-          } else if (channel === 'trade_update') {
-            wsMessage = { type: 'trade', ...data };
-          } else if (channel === 'candle_update') {
-            wsMessage = { type: 'candles', candles: [data.candle], interval: data.interval };
-          }
-          
-          client.ws.send(JSON.stringify(wsMessage));
-        }
-      });
-    });
-    
-    redisSubscriber.on('error', (err) => {
-      console.error('Redis subscriber error:', err.message);
-      setTimeout(setupRedisSubscriber, 5000);
-    });
-  };
-
-  setupRedisSubscriber();
-
-  wss.on('connection', (ws, req) => {
-    const clientId = uuidv4();
-    clients.set(clientId, { ws: ws, userId: null });
-    console.log(`Spot market WebSocket client connected: ${clientId}, total: ${clients.size}`);
-
-    ws.on('message', (message) => {
-      try {
-        const data = JSON.parse(message);
-        if (data.type === 'subscribe') {
-          ws.send(JSON.stringify({ type: 'subscribed', status: 'success', pair: data.pair }));
-        }
-        if (data.type === 'authenticate' && data.token) {
-          try {
-            const decoded = verifyJWT(data.token);
-            if (decoded && !decoded.isAdmin) {
-              const client = clients.get(clientId);
-              if (client) client.userId = decoded.id;
-              ws.send(JSON.stringify({ type: 'authenticated', status: 'success' }));
-            }
-          } catch (err) {
-            ws.send(JSON.stringify({ type: 'authenticated', status: 'fail', message: 'Invalid token' }));
-          }
-        }
-      } catch (err) {}
-    });
-
-    ws.on('close', () => {
-      clients.delete(clientId);
-      console.log(`Spot market WebSocket client disconnected: ${clientId}, total: ${clients.size}`);
-    });
-  });
-
-  return wss;
-};
-
-// =============================================
-// TICKER WEBSOCKET FOR FOOTER - /ws/ticker
-// =============================================
-
-const setupTickerWebSocket = (server) => {
-  const wss = new WebSocket.Server({ server, path: '/ws/ticker' });
-  const clients = new Set();
-  let tickerInterval = null;
-  let redisSubscriber = null;
-
-  const broadcastTickers = async () => {
-    if (clients.size === 0) return;
-    
-    try {
-      const topPairs = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'ADAUSDT', 'DOGEUSDT'];
-      const tickers = [];
-      
-      for (const symbol of topPairs) {
-        const tickerKey = `ticker:${symbol}`;
-        const cached = await redis.get(tickerKey);
-        if (cached) {
-          const tickerData = JSON.parse(cached);
-          tickers.push({
-            symbol: symbol.replace('USDT', '/USDT'),
-            price: tickerData.lastPrice,
-            change24h: tickerData.priceChangePercent
-          });
-        }
-      }
-      
-      const message = JSON.stringify({ type: 'ticker_update', data: tickers });
-      
-      clients.forEach(client => {
-        if (client.readyState === WebSocket.OPEN) {
-          client.send(message);
-        }
-      });
-    } catch (err) {
-      console.error('Ticker broadcast error:', err.message);
-    }
-  };
-
-  wss.on('connection', (ws) => {
-    clients.add(ws);
-    console.log(`Ticker WebSocket client connected. Total: ${clients.size}`);
-    
-    if (tickerInterval === null && clients.size > 0) {
-      tickerInterval = setInterval(broadcastTickers, 2000);
-    }
-    
-    ws.on('close', () => {
-      clients.delete(ws);
-      console.log(`Ticker WebSocket client disconnected. Total: ${clients.size}`);
-      
-      if (clients.size === 0 && tickerInterval) {
-        clearInterval(tickerInterval);
-        tickerInterval = null;
-      }
-    });
-  });
-};
-
-module.exports = {
-  setupSpotMarketWebSocket,
-  setupTickerWebSocket
-};
-
-
-
-
-
-
-
-
-
-
-
-
-// SNIPPET C - COMPLETE REWRITE
-
-// Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Global error handler:', err);
   res.status(500).json({
@@ -23876,7 +23037,6 @@ app.use((err, req, res, next) => {
   });
 });
 
-// 404 handler
 app.use((req, res) => {
   res.status(404).json({
     status: 'fail',
@@ -23884,7 +23044,6 @@ app.use((req, res) => {
   });
 });
 
-// Create HTTP server and Socket.IO
 const PORT = process.env.PORT || 3000;
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
@@ -23897,10 +23056,6 @@ const io = new Server(httpServer, {
 });
 
 app.set('io', io);
-
-// =============================================
-// REAL-TIME STATS WITH REDIS SINGLE SOURCE OF TRUTH
-// =============================================
 
 const REDIS_INVESTOR_KEY = 'cloud_miner_count';
 const INITIAL_INVESTOR_COUNT = 5104329;
@@ -23923,10 +23078,10 @@ const initializeInvestorCount = async () => {
     if (!currentCount) {
       currentCount = INITIAL_INVESTOR_COUNT;
       await redis.set(REDIS_INVESTOR_KEY, currentCount);
-      console.log(`✅ Initialized investor count to ${currentCount.toLocaleString()}`);
+      console.log(`Initialized investor count to ${currentCount.toLocaleString()}`);
     } else {
       currentCount = parseInt(currentCount);
-      console.log(`📊 Current investor count from Redis: ${currentCount.toLocaleString()}`);
+      console.log(`Current investor count from Redis: ${currentCount.toLocaleString()}`);
     }
     
     return currentCount;
@@ -23946,7 +23101,7 @@ const checkAndResetDailyGrowth = async () => {
     if (!dailyGrowth) {
       dailyGrowth = 0;
       await redis.set(todayKey, dailyGrowth);
-      console.log(`📅 New day started - daily growth reset to 0`);
+      console.log(`New day started - daily growth reset to 0`);
     } else {
       dailyGrowth = parseInt(dailyGrowth);
     }
@@ -23963,7 +23118,7 @@ const addInvestors = async () => {
     let dailyGrowth = await checkAndResetDailyGrowth();
     
     if (dailyGrowth >= DAILY_GROWTH_LIMIT) {
-      console.log(`⏸️ Daily growth limit reached (${DAILY_GROWTH_LIMIT}). No more investors today.`);
+      console.log(`Daily growth limit reached (${DAILY_GROWTH_LIMIT}). No more investors today.`);
       return false;
     }
     
@@ -23975,7 +23130,7 @@ const addInvestors = async () => {
       : increment;
     
     if (actualIncrement <= 0) {
-      console.log(`⏸️ Daily limit would be exceeded. Stopping growth for today.`);
+      console.log(`Daily limit would be exceeded. Stopping growth for today.`);
       return false;
     }
     
@@ -23985,8 +23140,8 @@ const addInvestors = async () => {
     const todayKey = getDailyGrowthKey(today);
     await redis.incrby(todayKey, actualIncrement);
     
-    console.log(`📈 Investor count increased by ${actualIncrement}. New count: ${newCount.toLocaleString()}`);
-    console.log(`📊 Daily progress: ${dailyGrowth + actualIncrement}/${DAILY_GROWTH_LIMIT}`);
+    console.log(`Investor count increased by ${actualIncrement}. New count: ${newCount.toLocaleString()}`);
+    console.log(`Daily progress: ${dailyGrowth + actualIncrement}/${DAILY_GROWTH_LIMIT}`);
     
     return { newCount, increment: actualIncrement };
   } catch (err) {
@@ -24007,7 +23162,7 @@ const broadcastStats = async () => {
     
     io.emit('stats-update', stats);
     
-    console.log(`📡 Broadcasted stats to ${io.engine.clientsCount} clients: ${count.toLocaleString()} investors`);
+    console.log(`Broadcasted stats to ${io.engine.clientsCount} clients: ${count.toLocaleString()} investors`);
   } catch (err) {
     console.error('Error broadcasting stats:', err);
   }
@@ -24056,14 +23211,14 @@ const startInvestorGrowthJob = async () => {
   };
   
   scheduleNextGrowth();
-  console.log(`🚀 Investor growth job started. Will add 1-49 investors every 3-120 seconds (max ${DAILY_GROWTH_LIMIT}/day)`);
+  console.log(`Investor growth job started. Will add 1-49 investors every 3-120 seconds (max ${DAILY_GROWTH_LIMIT}/day)`);
 };
 
 const stopInvestorGrowthJob = () => {
   if (growthInterval) {
     clearTimeout(growthInterval);
     growthInterval = null;
-    console.log('🛑 Investor growth job stopped');
+    console.log('Investor growth job stopped');
   }
 };
 
@@ -24207,12 +23362,12 @@ io.on('connection', async (socket) => {
         socket.join(`user_${userId}`);
         console.log(`Socket authenticated for user: ${userId}`);
         
-        const user = await User.findById(userId).select('balances');
+        const user = await User.findById(userId).select('wallets');
         if (user) {
           socket.emit('balance_update', {
-            main: user.balances.main,
-            active: user.balances.active,
-            matured: user.balances.matured
+            main: user.wallets.main,
+            active: user.wallets.active,
+            matured: user.wallets.matured
           });
         }
         
@@ -24265,7 +23420,7 @@ io.on('connection', async (socket) => {
   
   const currentStats = await getCurrentStats();
   socket.emit('stats-update', currentStats);
-  console.log(`📡 Sent initial stats to new client ${socket.id}: ${currentStats.totalInvestors.toLocaleString()} investors`);
+  console.log(`Sent initial stats to new client ${socket.id}: ${currentStats.totalInvestors.toLocaleString()} investors`);
 
   socket.on('authenticate', async (token) => {
     try {
@@ -24290,7 +23445,7 @@ io.on('connection', async (socket) => {
   
   socket.on('refresh_pnl', async () => {
     if (userId) {
-      const user = await User.findById(userId).select('balances');
+      const user = await User.findById(userId).select('wallets');
       const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
       
       if (userAssetBalance) {
@@ -24344,14 +23499,14 @@ const processMaturedInvestments = async () => {
         const user = await User.findById(investment.user._id);
         if (!user) continue;
 
-        const totalReturn = investment.amount + (investment.amount * investment.plan.percentage / 100);
+        const totalReturnBTC = investment.expectedReturn;
 
-        user.balances.active -= investment.amount;
-        user.balances.matured += totalReturn;
+        user.wallets.active -= investment.amount;
+        user.wallets.matured += totalReturnBTC;
 
         investment.status = 'completed';
         investment.completionDate = now;
-        investment.actualReturn = totalReturn - investment.amount;
+        investment.actualReturn = totalReturnBTC - investment.amount;
 
         await user.save();
         await investment.save();
@@ -24359,8 +23514,8 @@ const processMaturedInvestments = async () => {
         await Transaction.create({
           user: investment.user._id,
           type: 'interest',
-          amount: totalReturn - investment.amount,
-          currency: 'USD',
+          amount: totalReturnBTC - investment.amount,
+          currency: 'BTC',
           status: 'completed',
           method: 'internal',
           reference: `AUTO-RET-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
@@ -24368,16 +23523,17 @@ const processMaturedInvestments = async () => {
             investmentId: investment._id,
             planName: investment.plan.name,
             principal: investment.amount,
-            interest: totalReturn - investment.amount
+            interest: totalReturnBTC - investment.amount,
+            btcAmount: totalReturnBTC
           },
           fee: 0,
-          netAmount: totalReturn - investment.amount
+          netAmount: totalReturnBTC - investment.amount
         });
         
         io.to(`user_${user._id}`).emit('balance_update', {
-          main: user.balances.main,
-          active: user.balances.active,
-          matured: user.balances.matured
+          main: user.wallets.main,
+          active: user.wallets.active,
+          matured: user.wallets.matured
         });
 
         console.log(`Automatically completed investment ${investment._id} for user ${user.email}`);
@@ -24398,8 +23554,6 @@ startInvestorGrowthJob();
 
 startRealTimePriceUpdates(io);
 
-// Real-time updates already happen every second with price changes
-// This is just a fallback sync every 30 seconds for any missed updates
 setInterval(async () => {
   await recalculateAllUserMainBalances(io);
 }, 30000);
@@ -24411,23 +23565,19 @@ const gracefulShutdown = () => {
   process.exit(0);
 };
 
-
-// Initialize WebSocket servers after HTTP server is created
 const setupAllWebSockets = (server) => {
   setupSpotMarketWebSocket(server);
   setupTickerWebSocket(server);
   return setupMarketWebSocket(server);
 };
 
-
-
 process.on('SIGTERM', gracefulShutdown);
 process.on('SIGINT', gracefulShutdown);
 
 httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-  console.log(`📊 Real-time stats initialized with Redis as single source of truth`);
-  console.log(`📈 Investors will grow from ${INITIAL_INVESTOR_COUNT.toLocaleString()} with max ${DAILY_GROWTH_LIMIT}/day`);
-  console.log(`💰 Real-time crypto price updates started (every 1 second)`);
-  console.log(`🔌 WebSocket endpoints: /ws/spotmarket, /ws/ticker, /ws/market`);
+  console.log(`Real-time stats initialized with Redis as single source of truth`);
+  console.log(`Investors will grow from ${INITIAL_INVESTOR_COUNT.toLocaleString()} with max ${DAILY_GROWTH_LIMIT}/day`);
+  console.log(`Real-time crypto price updates started (every 1 second)`);
+  console.log(`WebSocket endpoints: /ws/spotmarket, /ws/ticker, /ws/market`);
 });
