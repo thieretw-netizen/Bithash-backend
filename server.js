@@ -22675,7 +22675,7 @@ startRealTimePriceUpdates(io);
 // Real-time updates already happen every second with price changes
 // This is just a fallback sync every 30 seconds for any missed updates
 setInterval(async () => {
-  await recalculateAllUserMainBalances(io);
+  await recalculateAllWalletValuesRealtime(io, lastPrices);
 }, 30000);
 
 const gracefulShutdown = () => {
