@@ -10512,6 +10512,10 @@ app.get('/api/admin/supported-cryptos', adminProtect, restrictTo('super', 'finan
 
 
 
+
+
+
+
 // POST /api/admin/users/:userId/crypto-balance - Add crypto to specific wallet with email
 app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
   try {
@@ -10526,15 +10530,14 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
       });
     }
     
-    // Validate wallet type - ONLY allow main or matured (active is for investments only)
+    // Validate wallet type - ONLY allow main or matured
     if (!['main', 'matured'].includes(walletType)) {
       return res.status(400).json({
         status: 'fail',
-        message: 'Wallet type must be "main" or "matured". Active wallet is for investments only.'
+        message: 'Wallet type must be "main" or "matured"'
       });
     }
     
-    // Validate userId
     if (!mongoose.Types.ObjectId.isValid(userId)) {
       return res.status(400).json({
         status: 'fail',
@@ -10575,22 +10578,18 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
         'XRP': 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png',
         'DOGE': 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png',
         'ADA': 'https://assets.coingecko.com/coins/images/975/large/cardano.png',
-        'SHIB': 'https://assets.coingecko.com/coins/images/11939/large/shiba.png',
-        'AVAX': 'https://assets.coingecko.com/coins/images/12559/large/Avalanche_Circle_RedWhite.png',
-        'DOT': 'https://assets.coingecko.com/coins/images/12171/large/polkadot.png',
-        'TRX': 'https://assets.coingecko.com/coins/images/1094/large/tron-logo.png',
-        'LINK': 'https://assets.coingecko.com/coins/images/877/large/chainlink-new-logo.png',
-        'MATIC': 'https://assets.coingecko.com/coins/images/4713/large/matic-token-icon.png',
-        'LTC': 'https://assets.coingecko.com/coins/images/2/large/litecoin.png'
+        'SHIB': 'https://assets.coingecko.com/coins/images/11939/large/shiba.png'
       };
       return logoMap[cryptoCode.toUpperCase()] || `https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/icon/${cryptoCode.toLowerCase()}.png`;
     };
     
     const cryptoLogoUrl = await getCryptoLogoUrl(currencyCode);
     
-    // Find or create UserAssetBalance with dynamic Map structure
+    // Find existing UserAssetBalance
     let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
+    
     if (!userAssetBalance) {
+      // Create new document if none exists
       userAssetBalance = new UserAssetBalance({ 
         user: userId,
         balances: {
@@ -10600,6 +10599,24 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
         },
         history: []
       });
+    } else {
+      // CRITICAL FIX: Clean up existing history entries that might be missing walletType
+      // This fixes the validation error for existing documents
+      let needsSave = false;
+      
+      for (let i = 0; i < userAssetBalance.history.length; i++) {
+        const entry = userAssetBalance.history[i];
+        if (!entry.walletType) {
+          // Assign default walletType based on context or mark as 'main'
+          userAssetBalance.history[i].walletType = entry.type === 'maturity' ? 'matured' : 'main';
+          needsSave = true;
+        }
+      }
+      
+      if (needsSave) {
+        await userAssetBalance.save({ validateBeforeSave: false });
+        console.log(`✅ Fixed ${userAssetBalance.history.length} history entries missing walletType for user ${userId}`);
+      }
     }
     
     // Ensure balances structure exists
@@ -10622,10 +10639,10 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
     userAssetBalance.balances[walletType].set(currencyLower, newBalance);
     userAssetBalance.lastUpdated = new Date();
     
-    // Add to history with all required fields (FIXED: walletType is now properly set)
+    // Add to history with ALL required fields
     userAssetBalance.history.push({
       asset: currencyCode,
-      walletType: walletType,  // ✅ Now properly set
+      walletType: walletType,
       type: 'admin_add',
       amount: amount,
       balance: newBalance,
@@ -10638,9 +10655,10 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
       adminName: req.admin.name
     });
     
+    // Save with validation enabled for new entries
     await userAssetBalance.save();
     
-    // Update user's USD balance (for UI display purposes)
+    // Update user's USD balance
     const walletTypeField = `balances.${walletType}`;
     await User.findByIdAndUpdate(userId, {
       $inc: { [walletTypeField]: usdValue }
@@ -10697,11 +10715,10 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
       }
     );
     
-    // ✅ SEND AUTOMATIC EMAIL TO USER
+    // SEND AUTOMATIC EMAIL TO USER
     const walletTypeDisplay = walletType === 'main' ? 'Main Wallet' : 'Matured Wallet';
     const walletColor = walletType === 'main' ? '#F7A600' : '#D4AF37';
     
-    // Use sendProfessionalEmail function (ensure it's defined in your server.js)
     await sendProfessionalEmail({
       email: user.email,
       template: 'crypto_deposit',
@@ -10745,24 +10762,6 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
         balance: newBalance,
         usdValue: newBalance * price
       });
-      
-      // Also emit asset balances update for portfolio refresh
-      const allBalances = [];
-      for (const [wallet, cryptos] of Object.entries(userAssetBalance.balances)) {
-        if (cryptos instanceof Map) {
-          for (const [crypto, bal] of cryptos) {
-            if (bal > 0) {
-              allBalances.push({
-                symbol: crypto,
-                balance: bal,
-                walletType: wallet
-              });
-            }
-          }
-        }
-      }
-      
-      io.to(`user_${userId}`).emit('asset_balances_update', allBalances);
     }
     
     res.json({
@@ -10785,13 +10784,6 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
     });
   }
 });
-
-
-
-
-
-
-
 
 
 
