@@ -21687,3 +21687,4 @@ httpServer.listen(PORT, () => {
     console.log(`🔌 WebSocket endpoints: /ws/spotmarket, /ws/ticker, /ws/market`);
   }
 });
+}
