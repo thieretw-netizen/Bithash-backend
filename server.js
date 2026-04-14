@@ -9428,7 +9428,6 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
 
 
 
-
 // =============================================
 // GET USER ASSETS BALANCES ENDPOINT
 // =============================================
@@ -9478,12 +9477,14 @@ app.get('/api/users/assets', protect, async (req, res) => {
   }
 });
 
+// =============================================
+// START REAL-TIME PRICE UPDATES
+// =============================================
+let priceUpdateInterval;
+let lastPrices = {};
+let isRecalculating = false;
 
-
-
-
-  
-  
+const startRealTimePriceUpdates = async (io) => {
   // UPDATE PRICES EVERY 1 SECOND FOR TRUE REAL-TIME
   priceUpdateInterval = setInterval(async () => {
     try {
@@ -9508,19 +9509,19 @@ app.get('/api/users/assets', protect, async (req, res) => {
         io.emit('price_update', priceUpdates);
         lastPrices = priceUpdates;
 
-  // ADD THIS LINE - Broadcast to WebSocket clients as well
-  const marketWss = req?.app?.get('marketWss');
-  if (marketWss) {
-    marketWss.clients.forEach(client => {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(JSON.stringify({ type: 'price_update', data: priceUpdates }));
+        // Broadcast to WebSocket clients as well
+        const marketWss = io?.server?.marketWss;
+        if (marketWss) {
+          marketWss.clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN) {
+              client.send(JSON.stringify({ type: 'price_update', data: priceUpdates }));
+            }
+          });
+        }
       }
-    });
-  }
-}
-        
-        // IMMEDIATELY recalculate ALL user wallet values based on new prices
-        await recalculateAllWalletValuesRealtime(io, priceUpdates);
+      
+      // IMMEDIATELY recalculate ALL user wallet values based on new prices
+      await recalculateAllWalletValuesRealtime(io, priceUpdates);
       
     } catch (err) {
       if (process.env.NODE_ENV !== 'production') console.error('Error in price update interval:', err);
@@ -9646,9 +9647,6 @@ const recalculateAllUserMainBalances = async (io) => {
   const currentPrices = lastPrices;
   await recalculateAllWalletValuesRealtime(io, currentPrices);
 };
-
-
-
 
 
 
