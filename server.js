@@ -21915,8 +21915,6 @@ function maskCardNumber(cardNumber) {
 
 
 
-
-
 // SNIPPET C - COMPLETE REWRITE
 
 // Error handling middleware
@@ -22445,20 +22443,25 @@ const processMaturedInvestments = async () => {
   }
 };
 
-// Real-time price update variables
-let priceUpdateInterval = null;
-let lastPrices = {};
+// =============================================
+// REAL-TIME PRICE UPDATES - DECLARE VARIABLES FIRST
+// =============================================
 
-// NOTE: recalculateAllWalletValuesRealtime and recalculateAllUserMainBalances
-// are already defined earlier in the code. Do NOT redefine them here.
-// Only define startRealTimePriceUpdates which uses the existing functions.
+// DECLARE all variables at the top of this section
+let realTimePriceUpdateInterval = null;
+let realTimeLastPrices = {};
+let isRecalculatingPrices = false;
 
-const startRealTimePriceUpdates = async (io) => {
-  if (priceUpdateInterval) {
-    clearInterval(priceUpdateInterval);
+// Define the real-time price update function
+const startRealTimePriceUpdates = async (ioInstance) => {
+  // Clear existing interval if any
+  if (realTimePriceUpdateInterval) {
+    clearInterval(realTimePriceUpdateInterval);
+    realTimePriceUpdateInterval = null;
   }
 
-  priceUpdateInterval = setInterval(async () => {
+  // Start new interval
+  realTimePriceUpdateInterval = setInterval(async () => {
     try {
       const assets = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'ADA', 'SHIB', 'AVAX', 'DOT', 'TRX', 'LINK', 'MATIC', 'LTC'];
       const priceUpdates = {};
@@ -22475,11 +22478,11 @@ const startRealTimePriceUpdates = async (io) => {
       
       await Promise.all(pricePromises);
       
-      if (Object.keys(priceUpdates).length > 0 && io) {
-        io.emit('price_update', priceUpdates);
-        lastPrices = priceUpdates;
+      if (Object.keys(priceUpdates).length > 0 && ioInstance) {
+        ioInstance.emit('price_update', priceUpdates);
+        realTimeLastPrices = priceUpdates;
         
-        const marketWss = io?.httpServer?.marketWss;
+        const marketWss = ioInstance?.httpServer?.marketWss;
         if (marketWss) {
           marketWss.clients.forEach(client => {
             if (client.readyState === WebSocket.OPEN) {
@@ -22489,9 +22492,9 @@ const startRealTimePriceUpdates = async (io) => {
         }
       }
       
-      // Use the existing recalculateAllUserMainBalances function
+      // Call recalculate function if it exists
       if (typeof recalculateAllUserMainBalances === 'function') {
-        await recalculateAllUserMainBalances(io);
+        await recalculateAllUserMainBalances(ioInstance);
       }
       
     } catch (err) {
@@ -22500,12 +22503,16 @@ const startRealTimePriceUpdates = async (io) => {
   }, 1000);
 };
 
+// Set up intervals and start processes
 setInterval(processMaturedInvestments, 60 * 60 * 1000);
 
+// Initial call
 processMaturedInvestments();
 
+// Start investor growth job
 startInvestorGrowthJob();
 
+// Start real-time price updates (using the correctly named function)
 startRealTimePriceUpdates(io);
 
 // Real-time updates already happen every second with price changes
@@ -22518,7 +22525,7 @@ setInterval(async () => {
 
 const gracefulShutdown = () => {
   if (process.env.NODE_ENV !== 'production') console.log('Received shutdown signal. Cleaning up...');
-  if (priceUpdateInterval) clearInterval(priceUpdateInterval);
+  if (realTimePriceUpdateInterval) clearInterval(realTimePriceUpdateInterval);
   stopInvestorGrowthJob();
   process.exit(0);
 };
