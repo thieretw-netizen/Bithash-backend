@@ -10110,7 +10110,7 @@ priceUpdateInterval = setInterval(async () => {
     if (process.env.NODE_ENV !== 'production') console.error('Error in price update interval:', err);
   }
 }, 1000); // EVERY SECOND
-};
+
 
 // NEW FUNCTION: Recalculate wallet values in real-time based on current crypto prices
 const recalculateAllWalletValuesRealtime = async (io, currentPrices) => {
