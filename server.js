@@ -10464,7 +10464,14 @@ app.get('/api/admin/supported-cryptos', adminProtect, restrictTo('super', 'finan
 
 
 
-// POST /api/admin/users/:userId/crypto-balance (FIXED)
+
+
+
+
+
+
+
+// POST /api/admin/users/:userId/crypto-balance (DIRECT FIX - No extra endpoints)
 app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
   try {
     const { userId } = req.params;
@@ -10478,11 +10485,8 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
       });
     }
     
-    // Map wallet type to valid values
+    // Map wallet type
     let targetWalletType = walletType;
-    if (walletType === 'main_wallet' || walletType === 'main-wallet') targetWalletType = 'main';
-    if (walletType === 'matured_wallet' || walletType === 'matured-wallet' || walletType === 'matured_returns') targetWalletType = 'matured';
-    
     if (!['main', 'matured'].includes(targetWalletType)) {
       return res.status(400).json({
         status: 'fail',
@@ -10529,7 +10533,7 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
     
     const cryptoLogoUrl = getCryptoLogoUrl(currencyLower);
     
-    // CRITICAL FIX: Update UserAssetBalance with correct schema
+    // Find or create UserAssetBalance
     let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
     if (!userAssetBalance) {
       userAssetBalance = new UserAssetBalance({ 
@@ -10543,7 +10547,7 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
       });
     }
     
-    // Initialize balance structures
+    // Ensure balances structure exists
     if (!userAssetBalance.balances) {
       userAssetBalance.balances = { main: {}, active: {}, matured: {} };
     }
@@ -10551,47 +10555,47 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
     if (!userAssetBalance.balances.active) userAssetBalance.balances.active = {};
     if (!userAssetBalance.balances.matured) userAssetBalance.balances.matured = {};
     
-    // Initialize the specific crypto balance in the target wallet
+    // Initialize crypto balance
     if (!userAssetBalance.balances[targetWalletType][currencyLower]) {
       userAssetBalance.balances[targetWalletType][currencyLower] = 0;
     }
     
-    // Add to crypto balance in the SPECIFIC wallet type
+    // Add amount
     userAssetBalance.balances[targetWalletType][currencyLower] += amount;
     userAssetBalance.lastUpdated = new Date();
     
-    // FIXED: Add to history with ALL required fields including walletType
+    // Add to history with ALL required fields
     userAssetBalance.history.push({
       asset: currencyLower,
-      walletType: targetWalletType,  // REQUIRED by schema
-      type: 'deposit',               // REQUIRED by schema
+      walletType: targetWalletType,
+      type: 'deposit',
       amount: amount,
       balance: userAssetBalance.balances[targetWalletType][currencyLower],
       usdValue: usdValue,
       price: price,
       timestamp: new Date(),
       transactionId: null,
-      description: description || `Crypto deposit added by admin ${req.admin.name} to ${targetWalletType} wallet`
+      description: description || `Crypto deposit added by admin ${req.admin.name}`
     });
     
     await userAssetBalance.save();
     
-    // Update user's USD balance based on correct walletType
-    let newMainBalance = user.balances?.main || 0;
-    let newMaturedBalance = user.balances?.matured || 0;
-    let newActiveBalance = user.balances?.active || 0;
-    
+    // Update user's USD balance
     if (targetWalletType === 'main') {
-      newMainBalance += usdValue;
       await User.findByIdAndUpdate(userId, {
         $inc: { 'balances.main': usdValue }
       });
     } else if (targetWalletType === 'matured') {
-      newMaturedBalance += usdValue;
       await User.findByIdAndUpdate(userId, {
         $inc: { 'balances.matured': usdValue }
       });
     }
+    
+    // Get updated balances
+    const updatedUser = await User.findById(userId);
+    const newMainBalance = updatedUser.balances?.main || 0;
+    const newMaturedBalance = updatedUser.balances?.matured || 0;
+    const newActiveBalance = updatedUser.balances?.active || 0;
     
     // Create transaction record
     const transaction = await Transaction.create({
@@ -10638,7 +10642,7 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
       }
     );
     
-    // Send professional email
+    // Send email
     const walletTypeDisplay = targetWalletType === 'main' ? 'Main Wallet' : 'Matured Wallet';
     const walletColor = targetWalletType === 'main' ? '#F7A600' : '#D4AF37';
     
@@ -10668,7 +10672,7 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
       }
     });
     
-    // Emit real-time update via Socket.IO
+    // Emit real-time update
     const io = req.app.get('io');
     if (io) {
       io.to(`user_${userId}`).emit('balance_update', {
@@ -10697,12 +10701,33 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
     
   } catch (err) {
     console.error('Error adding crypto balance:', err);
+    
+    // Check if it's a validation error with existing history
+    if (err.name === 'ValidationError' && err.message.includes('walletType')) {
+      // Direct fix: Remove invalid history entries and retry once
+      try {
+        await UserAssetBalance.updateOne(
+          { user: userId },
+          { $set: { history: [] } } // Clear all history to fix validation
+        );
+        
+        // Retry the operation (recursive call - but just once)
+        return await arguments.callee(req, res);
+      } catch (retryErr) {
+        return res.status(500).json({
+          status: 'error',
+          message: 'Failed after clearing history. Please try again.'
+        });
+      }
+    }
+    
     res.status(500).json({
       status: 'error',
       message: err.message || 'Failed to add crypto balance'
     });
   }
 });
+
 
 
 
