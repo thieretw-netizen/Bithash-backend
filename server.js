@@ -1375,23 +1375,56 @@ const Plan = mongoose.model('Plan', PlanSchema);
 
 
 
+
+
+
 const UserAssetBalanceSchema = new mongoose.Schema({
-  user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true, index: true },
+  user: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+    unique: true,
+    index: true
+  },
   balances: {
+    // Main wallet crypto balances
     main: {
-      type: Map,
-      of: Number,
-      default: () => new Map()
+      btc: { type: Number, default: 0, min: 0 },
+      eth: { type: Number, default: 0, min: 0 },
+      usdt: { type: Number, default: 0, min: 0 },
+      bnb: { type: Number, default: 0, min: 0 },
+      sol: { type: Number, default: 0, min: 0 },
+      usdc: { type: Number, default: 0, min: 0 },
+      xrp: { type: Number, default: 0, min: 0 },
+      doge: { type: Number, default: 0, min: 0 },
+      ada: { type: Number, default: 0, min: 0 },
+      shib: { type: Number, default: 0, min: 0 }
     },
+    // Active wallet crypto balances (invested)
     active: {
-      type: Map,
-      of: Number,
-      default: () => new Map()
+      btc: { type: Number, default: 0, min: 0 },
+      eth: { type: Number, default: 0, min: 0 },
+      usdt: { type: Number, default: 0, min: 0 },
+      bnb: { type: Number, default: 0, min: 0 },
+      sol: { type: Number, default: 0, min: 0 },
+      usdc: { type: Number, default: 0, min: 0 },
+      xrp: { type: Number, default: 0, min: 0 },
+      doge: { type: Number, default: 0, min: 0 },
+      ada: { type: Number, default: 0, min: 0 },
+      shib: { type: Number, default: 0, min: 0 }
     },
+    // Matured wallet crypto balances (completed investments)
     matured: {
-      type: Map,
-      of: Number,
-      default: () => new Map()
+      btc: { type: Number, default: 0, min: 0 },
+      eth: { type: Number, default: 0, min: 0 },
+      usdt: { type: Number, default: 0, min: 0 },
+      bnb: { type: Number, default: 0, min: 0 },
+      sol: { type: Number, default: 0, min: 0 },
+      usdc: { type: Number, default: 0, min: 0 },
+      xrp: { type: Number, default: 0, min: 0 },
+      doge: { type: Number, default: 0, min: 0 },
+      ada: { type: Number, default: 0, min: 0 },
+      shib: { type: Number, default: 0, min: 0 }
     }
   },
   history: [{
@@ -1408,13 +1441,9 @@ const UserAssetBalanceSchema = new mongoose.Schema({
   }],
   lastUpdated: { type: Date, default: Date.now }
 }, { timestamps: true });
+
+// THIS WAS MISSING - Register the model
 const UserAssetBalance = mongoose.model('UserAssetBalance', UserAssetBalanceSchema);
-
-
-
-
-
-
 
 
 
