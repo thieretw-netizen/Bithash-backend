@@ -1368,6 +1368,15 @@ PlanSchema.index({ isActive: 1 });
 
 const Plan = mongoose.model('Plan', PlanSchema);
 
+
+
+
+
+
+
+
+
+// REPLACE the existing UserAssetBalanceSchema with this dynamic version
 const UserAssetBalanceSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
@@ -1377,62 +1386,98 @@ const UserAssetBalanceSchema = new mongoose.Schema({
     index: true
   },
   balances: {
-    // Main wallet crypto balances
-    main: {
-      btc: { type: Number, default: 0, min: 0 },
-      eth: { type: Number, default: 0, min: 0 },
-      usdt: { type: Number, default: 0, min: 0 },
-      bnb: { type: Number, default: 0, min: 0 },
-      sol: { type: Number, default: 0, min: 0 },
-      usdc: { type: Number, default: 0, min: 0 },
-      xrp: { type: Number, default: 0, min: 0 },
-      doge: { type: Number, default: 0, min: 0 },
-      ada: { type: Number, default: 0, min: 0 },
-      shib: { type: Number, default: 0, min: 0 }
+    // Dynamic structure for any crypto in any wallet type
+    // Example: { main: { btc: 1.5, eth: 2.0 }, matured: { btc: 0.5 }, active: { eth: 1.0 } }
+    type: Map,
+    of: {
+      type: Map,
+      of: Number,
+      default: {}
     },
-    // Active wallet crypto balances (invested)
-    active: {
-      btc: { type: Number, default: 0, min: 0 },
-      eth: { type: Number, default: 0, min: 0 },
-      usdt: { type: Number, default: 0, min: 0 },
-      bnb: { type: Number, default: 0, min: 0 },
-      sol: { type: Number, default: 0, min: 0 },
-      usdc: { type: Number, default: 0, min: 0 },
-      xrp: { type: Number, default: 0, min: 0 },
-      doge: { type: Number, default: 0, min: 0 },
-      ada: { type: Number, default: 0, min: 0 },
-      shib: { type: Number, default: 0, min: 0 }
-    },
-    // Matured wallet crypto balances (completed investments)
-    matured: {
-      btc: { type: Number, default: 0, min: 0 },
-      eth: { type: Number, default: 0, min: 0 },
-      usdt: { type: Number, default: 0, min: 0 },
-      bnb: { type: Number, default: 0, min: 0 },
-      sol: { type: Number, default: 0, min: 0 },
-      usdc: { type: Number, default: 0, min: 0 },
-      xrp: { type: Number, default: 0, min: 0 },
-      doge: { type: Number, default: 0, min: 0 },
-      ada: { type: Number, default: 0, min: 0 },
-      shib: { type: Number, default: 0, min: 0 }
+    default: {
+      main: new Map(),
+      active: new Map(),
+      matured: new Map()
     }
   },
   history: [{
-    asset: { type: String, required: true },
+    asset: { type: String, required: true, uppercase: true },
     walletType: { type: String, enum: ['main', 'active', 'matured'], required: true },
-    type: { type: String, enum: ['deposit', 'withdrawal', 'investment', 'maturity'], required: true },
+    type: { type: String, enum: ['deposit', 'withdrawal', 'investment', 'maturity', 'conversion'], required: true },
     amount: { type: Number, required: true },
     balance: { type: Number, required: true },
     usdValue: { type: Number, required: true },
     price: { type: Number, required: true },
     timestamp: { type: Date, default: Date.now },
     transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
-    description: String
+    description: String,
+    adminId: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
+    adminName: String
   }],
   lastUpdated: { type: Date, default: Date.now }
-}, { timestamps: true });
+}, { 
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
+});
+
+// Add index for faster queries
 UserAssetBalanceSchema.index({ user: 1 });
 UserAssetBalanceSchema.index({ 'history.timestamp': -1 });
+
+// Helper method to get balance for specific crypto and wallet
+UserAssetBalanceSchema.methods.getBalance = function(crypto, walletType) {
+  if (!this.balances || !this.balances[walletType]) return 0;
+  return this.balances[walletType].get(crypto.toLowerCase()) || 0;
+};
+
+// Helper method to set balance for specific crypto and wallet
+UserAssetBalanceSchema.methods.setBalance = function(crypto, walletType, amount) {
+  if (!this.balances) this.balances = { main: new Map(), active: new Map(), matured: new Map() };
+  if (!this.balances[walletType]) this.balances[walletType] = new Map();
+  this.balances[walletType].set(crypto.toLowerCase(), amount);
+  this.lastUpdated = new Date();
+};
+
+// Helper method to add to balance
+UserAssetBalanceSchema.methods.addToBalance = function(crypto, walletType, amount) {
+  const current = this.getBalance(crypto, walletType);
+  this.setBalance(crypto, walletType, current + amount);
+};
+
+// Helper method to get all balances for a wallet
+UserAssetBalanceSchema.methods.getWalletBalances = function(walletType) {
+  if (!this.balances || !this.balances[walletType]) return {};
+  return Object.fromEntries(this.balances[walletType]);
+};
+
+// Helper method to get total USD value of all balances
+UserAssetBalanceSchema.methods.getTotalUSDValue = async function(prices) {
+  let total = 0;
+  for (const walletType of ['main', 'active', 'matured']) {
+    const balances = this.getWalletBalances(walletType);
+    for (const [crypto, amount] of Object.entries(balances)) {
+      const price = prices[crypto] || await getCryptoPrice(crypto);
+      total += amount * price;
+    }
+  }
+  return total;
+};
+
+const UserAssetBalance = mongoose.model('UserAssetBalance', UserAssetBalanceSchema);
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 const UserPreferenceSchema = new mongoose.Schema({
   user: {
@@ -10471,7 +10516,9 @@ app.get('/api/admin/supported-cryptos', adminProtect, restrictTo('super', 'finan
 
 
 
-// POST /api/admin/users/:userId/crypto-balance (DIRECT FIX - No extra endpoints)
+
+
+// POST /api/admin/users/:userId/crypto-balance (DYNAMIC - supports ANY crypto)
 app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
   try {
     const { userId } = req.params;
@@ -10485,12 +10532,11 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
       });
     }
     
-    // Map wallet type
-    let targetWalletType = walletType;
-    if (!['main', 'matured'].includes(targetWalletType)) {
+    // Validate wallet type
+    if (!['main', 'active', 'matured'].includes(walletType)) {
       return res.status(400).json({
         status: 'fail',
-        message: 'Wallet type must be "main" or "matured"'
+        message: 'Wallet type must be "main", "active", or "matured"'
       });
     }
     
@@ -10512,36 +10558,35 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
     }
     
     const usdValue = amount * price;
+    const currencyCode = currency.toUpperCase();
     const currencyLower = currency.toLowerCase();
     
-    // Get crypto logo URL
-    const getCryptoLogoUrl = (cryptoCode) => {
-      const logos = {
-        btc: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png',
-        eth: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png',
-        usdt: 'https://assets.coingecko.com/coins/images/325/large/Tether.png',
-        bnb: 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png',
-        sol: 'https://assets.coingecko.com/coins/images/4128/large/solana.png',
-        usdc: 'https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png',
-        xrp: 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png',
-        doge: 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png',
-        ada: 'https://assets.coingecko.com/coins/images/975/large/cardano.png',
-        shib: 'https://assets.coingecko.com/coins/images/11939/large/shiba.png'
-      };
-      return logos[cryptoCode] || 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png';
+    // Get crypto logo URL (dynamic - works for any crypto)
+    const getCryptoLogoUrl = async (cryptoCode) => {
+      // Try CoinGecko first
+      try {
+        const response = await axios.get(`https://api.coingecko.com/api/v3/coins/${cryptoCode.toLowerCase()}`, { timeout: 3000 });
+        if (response.data && response.data.image && response.data.image.large) {
+          return response.data.image.large;
+        }
+      } catch (err) {
+        // Fallback to pattern
+      }
+      // Fallback to pattern URL
+      return `https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/icon/${cryptoCode.toLowerCase()}.png`;
     };
     
-    const cryptoLogoUrl = getCryptoLogoUrl(currencyLower);
+    const cryptoLogoUrl = await getCryptoLogoUrl(currencyCode);
     
-    // Find or create UserAssetBalance
+    // Find or create UserAssetBalance with dynamic structure
     let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
     if (!userAssetBalance) {
       userAssetBalance = new UserAssetBalance({ 
-        user: userId, 
-        balances: { 
-          main: {}, 
-          active: {}, 
-          matured: {} 
+        user: userId,
+        balances: {
+          main: new Map(),
+          active: new Map(),
+          matured: new Map()
         },
         history: []
       });
@@ -10549,43 +10594,48 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
     
     // Ensure balances structure exists
     if (!userAssetBalance.balances) {
-      userAssetBalance.balances = { main: {}, active: {}, matured: {} };
-    }
-    if (!userAssetBalance.balances.main) userAssetBalance.balances.main = {};
-    if (!userAssetBalance.balances.active) userAssetBalance.balances.active = {};
-    if (!userAssetBalance.balances.matured) userAssetBalance.balances.matured = {};
-    
-    // Initialize crypto balance
-    if (!userAssetBalance.balances[targetWalletType][currencyLower]) {
-      userAssetBalance.balances[targetWalletType][currencyLower] = 0;
+      userAssetBalance.balances = {
+        main: new Map(),
+        active: new Map(),
+        matured: new Map()
+      };
     }
     
-    // Add amount
-    userAssetBalance.balances[targetWalletType][currencyLower] += amount;
+    // Ensure the specific wallet exists as a Map
+    if (!userAssetBalance.balances[walletType]) {
+      userAssetBalance.balances[walletType] = new Map();
+    }
+    
+    // Get current balance and add new amount
+    const currentBalance = userAssetBalance.balances[walletType].get(currencyLower) || 0;
+    const newBalance = currentBalance + amount;
+    userAssetBalance.balances[walletType].set(currencyLower, newBalance);
     userAssetBalance.lastUpdated = new Date();
     
-    // Add to history with ALL required fields
+    // Add to history with all required fields
     userAssetBalance.history.push({
-      asset: currencyLower,
-      walletType: targetWalletType,
+      asset: currencyCode,
+      walletType: walletType,
       type: 'deposit',
       amount: amount,
-      balance: userAssetBalance.balances[targetWalletType][currencyLower],
+      balance: newBalance,
       usdValue: usdValue,
       price: price,
       timestamp: new Date(),
       transactionId: null,
-      description: description || `Crypto deposit added by admin ${req.admin.name}`
+      description: description || `Crypto deposit added by admin ${req.admin.name}`,
+      adminId: req.admin._id,
+      adminName: req.admin.name
     });
     
     await userAssetBalance.save();
     
     // Update user's USD balance
-    if (targetWalletType === 'main') {
+    if (walletType === 'main') {
       await User.findByIdAndUpdate(userId, {
         $inc: { 'balances.main': usdValue }
       });
-    } else if (targetWalletType === 'matured') {
+    } else if (walletType === 'matured') {
       await User.findByIdAndUpdate(userId, {
         $inc: { 'balances.matured': usdValue }
       });
@@ -10602,18 +10652,18 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
       user: userId,
       type: 'deposit',
       amount: usdValue,
-      asset: currency,
+      asset: currencyCode,
       assetAmount: amount,
       currency: 'USD',
       status: 'completed',
-      method: currency,
+      method: currencyCode,
       reference: `ADMIN-CRYPTO-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`,
       details: {
-        cryptoCurrency: currency,
+        cryptoCurrency: currencyCode,
         cryptoAmount: amount,
         usdValue: usdValue,
         price: price,
-        walletType: targetWalletType,
+        walletType: walletType,
         adminId: req.admin._id,
         adminName: req.admin.name,
         description: description || `Crypto balance added by admin ${req.admin.name}`
@@ -10634,24 +10684,24 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
       'Admin',
       req,
       {
-        currency,
+        currency: currencyCode,
         amount,
         usdValue,
-        walletType: targetWalletType,
+        walletType: walletType,
         description
       }
     );
     
-    // Send email
-    const walletTypeDisplay = targetWalletType === 'main' ? 'Main Wallet' : 'Matured Wallet';
-    const walletColor = targetWalletType === 'main' ? '#F7A600' : '#D4AF37';
+    // Send professional email
+    const walletTypeDisplay = walletType === 'main' ? 'Main Wallet' : walletType === 'matured' ? 'Matured Wallet' : 'Active Wallet';
+    const walletColor = walletType === 'main' ? '#F7A600' : walletType === 'matured' ? '#D4AF37' : '#1A73E8';
     
     await sendProfessionalEmail({
       email: user.email,
       template: 'crypto_deposit',
       data: {
         name: user.firstName || user.email.split('@')[0],
-        currency: currency.toUpperCase(),
+        currency: currencyCode,
         amount: amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 8 }),
         usdValue: usdValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
         walletType: walletTypeDisplay,
@@ -10672,7 +10722,7 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
       }
     });
     
-    // Emit real-time update
+    // Emit real-time update via Socket.IO
     const io = req.app.get('io');
     if (io) {
       io.to(`user_${userId}`).emit('balance_update', {
@@ -10683,54 +10733,48 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
       
       io.to(`user_${userId}`).emit('crypto_balance_update', {
         currency: currencyLower,
-        walletType: targetWalletType,
-        balance: userAssetBalance.balances[targetWalletType][currencyLower],
-        usdValue: userAssetBalance.balances[targetWalletType][currencyLower] * price
+        walletType: walletType,
+        balance: newBalance,
+        usdValue: newBalance * price
       });
+      
+      // Also emit asset balances update for portfolio refresh
+      const allBalances = [];
+      for (const [wallet, cryptos] of Object.entries(userAssetBalance.balances)) {
+        if (cryptos instanceof Map) {
+          for (const [crypto, bal] of cryptos) {
+            if (bal > 0) {
+              allBalances.push({
+                symbol: crypto,
+                balance: bal,
+                walletType: wallet
+              });
+            }
+          }
+        }
+      }
+      
+      io.to(`user_${userId}`).emit('asset_balances_update', allBalances);
     }
     
     res.json({
       status: 'success',
-      message: `${amount} ${currency.toUpperCase()} added to user's ${walletTypeDisplay} successfully`,
+      message: `${amount} ${currencyCode} added to user's ${walletTypeDisplay} successfully`,
       data: {
         transaction: transaction,
-        newCryptoBalance: userAssetBalance.balances[targetWalletType][currencyLower],
+        newCryptoBalance: newBalance,
         usdValue: usdValue
       }
     });
     
   } catch (err) {
     console.error('Error adding crypto balance:', err);
-    
-    // Check if it's a validation error with existing history
-    if (err.name === 'ValidationError' && err.message.includes('walletType')) {
-      // Direct fix: Remove invalid history entries and retry once
-      try {
-        await UserAssetBalance.updateOne(
-          { user: userId },
-          { $set: { history: [] } } // Clear all history to fix validation
-        );
-        
-        // Retry the operation (recursive call - but just once)
-        return await arguments.callee(req, res);
-      } catch (retryErr) {
-        return res.status(500).json({
-          status: 'error',
-          message: 'Failed after clearing history. Please try again.'
-        });
-      }
-    }
-    
     res.status(500).json({
       status: 'error',
       message: err.message || 'Failed to add crypto balance'
     });
   }
 });
-
-
-
-
 
 
 
