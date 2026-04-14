@@ -5081,29 +5081,7 @@ const getBrowserFromUserAgent = (userAgent) => {
       }
     }
 
-    if (isPublicIP && ip && ip !== 'Unknown' && ip !== '0.0.0.0') {
-      try {
-        if (process.env.NODE_ENV !== 'production') console.log(`Looking up exact location for IP: ${ip}`);
-        
-        const ipinfoToken = process.env.IPINFO_TOKEN || 'b56ce6e91d732d';
-        
-        try {
-          const response = await axios.get(`https://ipinfo.io/${ip}?token=${ipinfoToken}`, {
-            timeout: 5000
-          });
-          
-          if (response.data) {
-            const { city, region, country, loc, org, timezone, postal } = response.data;
-            
-            let latitude = null;
-            let longitude = null;
-            if (loc && loc.includes(',')) {
-              const coords = loc.split(',');
-              latitude = parseFloat(coords[0]);
-              longitude = parseFloat(coords[1]);
-              exactLocation = true;
-            }
-            
+   
             locationDetails = {
               country: country || 'Unknown',
               city: city || 'Unknown',
