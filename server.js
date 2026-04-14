@@ -22445,10 +22445,13 @@ const processMaturedInvestments = async () => {
   }
 };
 
-// Real-time price update function
+// Real-time price update variables
 let priceUpdateInterval = null;
 let lastPrices = {};
-let isRecalculating = false;
+
+// NOTE: recalculateAllWalletValuesRealtime and recalculateAllUserMainBalances
+// are already defined earlier in the code. Do NOT redefine them here.
+// Only define startRealTimePriceUpdates which uses the existing functions.
 
 const startRealTimePriceUpdates = async (io) => {
   if (priceUpdateInterval) {
@@ -22486,120 +22489,15 @@ const startRealTimePriceUpdates = async (io) => {
         }
       }
       
-      await recalculateAllWalletValuesRealtime(io, priceUpdates);
+      // Use the existing recalculateAllUserMainBalances function
+      if (typeof recalculateAllUserMainBalances === 'function') {
+        await recalculateAllUserMainBalances(io);
+      }
       
     } catch (err) {
       if (process.env.NODE_ENV !== 'production') console.error('Error in price update interval:', err);
     }
   }, 1000);
-};
-
-// Recalculate wallet values in real-time based on current crypto prices
-const recalculateAllWalletValuesRealtime = async (io, currentPrices) => {
-  if (isRecalculating) return;
-  isRecalculating = true;
-  
-  try {
-    const users = await User.find({}).select('_id cryptoBalances');
-    const userAssetBalances = await UserAssetBalance.find({});
-    const userAssetMap = new Map();
-    userAssetBalances.forEach(ub => {
-      userAssetMap.set(ub.user.toString(), ub);
-    });
-    
-    const allMaturedInvestments = await Investment.find({ 
-      status: 'completed' 
-    }).populate('plan');
-    const maturedByUser = new Map();
-    allMaturedInvestments.forEach(inv => {
-      const userId = inv.user.toString();
-      if (!maturedByUser.has(userId)) maturedByUser.set(userId, []);
-      maturedByUser.get(userId).push(inv);
-    });
-    
-    const batchUpdates = [];
-    
-    for (const user of users) {
-      let totalMainValue = 0;
-      let totalMaturedValue = 0;
-      
-      const userAssets = userAssetMap.get(user._id.toString());
-      if (userAssets && userAssets.balances) {
-        for (const [assetSymbol, balance] of Object.entries(userAssets.balances)) {
-          if (balance > 0) {
-            const priceData = currentPrices[assetSymbol.toLowerCase()];
-            const price = priceData ? priceData.price : await getCryptoPrice(assetSymbol.toUpperCase());
-            if (price && price > 0) {
-              totalMainValue += balance * price;
-            }
-          }
-        }
-      }
-      
-      const maturedInvestments = maturedByUser.get(user._id.toString()) || [];
-      for (const investment of maturedInvestments) {
-        if (investment.asset && investment.assetAmount) {
-          const priceData = currentPrices[investment.asset.toLowerCase()];
-          const currentPrice = priceData ? priceData.price : await getCryptoPrice(investment.asset.toUpperCase());
-          if (currentPrice && currentPrice > 0) {
-            totalMaturedValue += investment.assetAmount * currentPrice;
-          } else {
-            totalMaturedValue += investment.amount + (investment.actualReturn || 0);
-          }
-        } else {
-          totalMaturedValue += investment.amount + (investment.actualReturn || 0);
-        }
-      }
-      
-      const previousMainValue = user.cryptoBalances.main?.USD || totalMainValue;
-      const mainPnL = totalMainValue - previousMainValue;
-      const mainPnLPercentage = previousMainValue > 0 ? (mainPnL / previousMainValue) * 100 : 0;
-      
-      const previousMaturedValue = user.cryptoBalances.matured?.USD || totalMaturedValue;
-      const maturedPnL = totalMaturedValue - previousMaturedValue;
-      const maturedPnLPercentage = previousMaturedValue > 0 ? (maturedPnL / previousMaturedValue) * 100 : 0;
-      
-      batchUpdates.push({
-        userId: user._id,
-        main: totalMainValue,
-        matured: totalMaturedValue,
-        mainPnL: mainPnL,
-        mainPnLPercent: mainPnLPercentage,
-        maturedPnL: maturedPnL,
-        maturedPnLPercent: maturedPnLPercentage
-      });
-      
-      if (io) {
-        io.to(`user_${user._id}`).emit('wallet_realtime_update', {
-          main: totalMainValue,
-          matured: totalMaturedValue,
-          mainPnL: mainPnL,
-          mainPnLPercent: mainPnLPercentage,
-          maturedPnL: maturedPnL,
-          maturedPnLPercent: maturedPnLPercentage,
-          timestamp: Date.now()
-        });
-      }
-    }
-    
-    for (const update of batchUpdates) {
-      await User.findByIdAndUpdate(update.userId, {
-        'cryptoBalances.main.USD': update.main,
-        'cryptoBalances.matured.USD': update.matured
-      });
-    }
-    
-  } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error in real-time wallet recalculation:', err);
-  } finally {
-    isRecalculating = false;
-  }
-};
-
-// Keep compatibility with existing function
-const recalculateAllUserMainBalances = async (io) => {
-  const currentPrices = lastPrices;
-  await recalculateAllWalletValuesRealtime(io, currentPrices);
 };
 
 setInterval(processMaturedInvestments, 60 * 60 * 1000);
@@ -22613,7 +22511,9 @@ startRealTimePriceUpdates(io);
 // Real-time updates already happen every second with price changes
 // This is just a fallback sync every 30 seconds for any missed updates
 setInterval(async () => {
-  await recalculateAllUserMainBalances(io);
+  if (typeof recalculateAllUserMainBalances === 'function') {
+    await recalculateAllUserMainBalances(io);
+  }
 }, 30000);
 
 const gracefulShutdown = () => {
