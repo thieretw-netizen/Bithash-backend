@@ -21789,6 +21789,598 @@ function maskCardNumber(cardNumber) {
 
 
 
+// Get user balances with real-time crypto holdings from all wallets
+app.get('/api/users/balances', protect, async (req, res) => {
+  try {
+    // Find user with all necessary data
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+
+    // Get user's asset balances from UserAssetBalance collection
+    const userAssetBalance = await UserAssetBalance.findOne({ user: req.user.id });
+    
+    // Get all investment data
+    const investments = await Investment.find({ user: req.user.id });
+    const activeInvestments = investments.filter(inv => inv.status === 'active');
+    const completedInvestments = investments.filter(inv => inv.status === 'completed');
+    
+    // Get all transactions for PnL calculation
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayTransactions = await Transaction.find({
+      user: req.user.id,
+      createdAt: { $gte: today },
+      status: 'completed'
+    });
+
+    // Fetch current prices for all crypto assets
+    const assetsToFetch = ['bitcoin', 'ethereum', 'tether', 'binancecoin', 'solana', 
+      'usd-coin', 'ripple', 'dogecoin', 'cardano', 'shiba-inu', 'avalanche-2', 
+      'polkadot', 'tron', 'chainlink', 'matic-network', 'wrapped-bitcoin', 
+      'litecoin', 'near', 'uniswap', 'bitcoin-cash'];
+    
+    let currentPrices = {};
+    let btcPrice = 43000; // Default
+    
+    try {
+      const priceResponse = await axios.get(
+        `https://api.coingecko.com/api/v3/simple/price?ids=${assetsToFetch.join(',')}&vs_currencies=usd&include_24hr_change=true`,
+        { timeout: 5000 }
+      );
+      currentPrices = priceResponse.data;
+      btcPrice = currentPrices.bitcoin?.usd || 43000;
+    } catch (err) {
+      console.error('Failed to fetch crypto prices:', err);
+      // Fallback to Redis if available
+      try {
+        const cachedPrices = await redis.get('current_crypto_prices');
+        if (cachedPrices) {
+          currentPrices = JSON.parse(cachedPrices);
+          btcPrice = currentPrices.bitcoin?.usd || 43000;
+        }
+      } catch (redisErr) {
+        console.error('Redis fallback failed:', redisErr);
+      }
+    }
+
+    // Calculate MAIN wallet holdings (from UserAssetBalance)
+    let mainWalletValue = 0;
+    const mainWalletHoldings = [];
+    
+    if (userAssetBalance && userAssetBalance.balances) {
+      for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
+        if (balance > 0) {
+          const assetId = getAssetId(asset);
+          const price = currentPrices[assetId]?.usd || 0;
+          const valueInUSD = balance * price;
+          mainWalletValue += valueInUSD;
+          mainWalletHoldings.push({
+            asset: asset.toUpperCase(),
+            balance: balance,
+            price: price,
+            valueUSD: valueInUSD,
+            change24h: currentPrices[assetId]?.usd_24h_change || 0
+          });
+        }
+      }
+    }
+
+    // Calculate ACTIVE wallet (investments currently active)
+    let activeWalletValue = 0;
+    const activeWalletHoldings = [];
+    
+    for (const investment of activeInvestments) {
+      const plan = await Plan.findById(investment.plan);
+      if (plan) {
+        // Calculate current value based on original investment + accrued returns
+        const hoursElapsed = (Date.now() - new Date(investment.startDate).getTime()) / (1000 * 60 * 60);
+        const totalHours = investment.duration || plan.duration;
+        const progress = Math.min(1, hoursElapsed / totalHours);
+        const expectedReturn = investment.expectedReturn || (investment.amount * plan.percentage / 100);
+        const accruedReturn = expectedReturn * progress;
+        const currentValue = investment.amount + accruedReturn;
+        
+        activeWalletValue += currentValue;
+        activeWalletHoldings.push({
+          investmentId: investment._id,
+          planName: plan.name,
+          amount: investment.amount,
+          expectedReturn: expectedReturn,
+          currentValue: currentValue,
+          progress: progress,
+          remainingHours: Math.max(0, totalHours - hoursElapsed)
+        });
+      } else {
+        activeWalletValue += investment.amount;
+        activeWalletHoldings.push({
+          investmentId: investment._id,
+          planName: 'Unknown Plan',
+          amount: investment.amount,
+          currentValue: investment.amount,
+          progress: 0
+        });
+      }
+    }
+
+    // Calculate MATURED wallet (completed investments)
+    let maturedWalletValue = 0;
+    const maturedWalletHoldings = [];
+    
+    for (const investment of completedInvestments) {
+      const totalReturn = investment.amount + (investment.actualReturn || 0);
+      maturedWalletValue += totalReturn;
+      maturedWalletHoldings.push({
+        investmentId: investment._id,
+        planName: investment.plan ? (await Plan.findById(investment.plan))?.name : 'Completed Plan',
+        amount: investment.amount,
+        totalReturn: totalReturn,
+        profit: investment.actualReturn || 0,
+        completedAt: investment.completionDate
+      });
+    }
+
+    // Add any matured funds from user's matured balance
+    if (user.balances?.matured) {
+      maturedWalletValue += user.balances.matured;
+    }
+
+    // Calculate today's PnL for Main wallet
+    let mainTodayPnL = 0;
+    let mainTodayPnLPercent = 0;
+    
+    // Get yesterday's balances (from historical data or calculate)
+    const yesterdayMainValue = user.balances?.yesterdayMainValue || mainWalletValue;
+    mainTodayPnL = mainWalletValue - yesterdayMainValue;
+    mainTodayPnLPercent = yesterdayMainValue > 0 ? (mainTodayPnL / yesterdayMainValue) * 100 : 0;
+    
+    // Calculate today's PnL for Matured wallet
+    let maturedTodayPnL = 0;
+    let maturedTodayPnLPercent = 0;
+    const yesterdayMaturedValue = user.balances?.yesterdayMaturedValue || maturedWalletValue;
+    maturedTodayPnL = maturedWalletValue - yesterdayMaturedValue;
+    maturedTodayPnLPercent = yesterdayMaturedValue > 0 ? (maturedTodayPnL / yesterdayMaturedValue) * 100 : 0;
+    
+    // Calculate today's transactions impact
+    let todayDeposits = 0;
+    let todayWithdrawals = 0;
+    let todayProfit = 0;
+    
+    for (const tx of todayTransactions) {
+      if (tx.type === 'deposit' && tx.status === 'completed') {
+        todayDeposits += tx.amount;
+      } else if (tx.type === 'withdrawal' && tx.status === 'completed') {
+        todayWithdrawals += tx.amount;
+      } else if (tx.type === 'interest' && tx.status === 'completed') {
+        todayProfit += tx.amount;
+      }
+    }
+
+    // Store today's values for tomorrow's PnL calculation
+    await User.findByIdAndUpdate(req.user.id, {
+      'balances.yesterdayMainValue': mainWalletValue,
+      'balances.yesterdayMaturedValue': maturedWalletValue,
+      'balances.lastPnLUpdate': new Date()
+    });
+
+    // Prepare the response with all wallet data
+    const responseData = {
+      // Main wallet (crypto holdings from deposits and purchases)
+      main: {
+        totalUSD: mainWalletValue,
+        totalDisplay: mainWalletValue,
+        holdings: mainWalletHoldings,
+        todayPnL: mainTodayPnL,
+        todayPnLPercent: mainTodayPnLPercent
+      },
+      // Active wallet (ongoing cloud mining contracts)
+      active: {
+        totalUSD: activeWalletValue,
+        totalDisplay: activeWalletValue,
+        holdings: activeWalletHoldings,
+        todayPnL: 0, // Active investments don't have daily PnL until maturity
+        todayPnLPercent: 0
+      },
+      // Matured wallet (completed investments ready for withdrawal)
+      matured: {
+        totalUSD: maturedWalletValue,
+        totalDisplay: maturedWalletValue,
+        holdings: maturedWalletHoldings,
+        todayPnL: maturedTodayPnL,
+        todayPnLPercent: maturedTodayPnLPercent
+      },
+      // BTC values for each wallet (for secondary display)
+      btcValues: {
+        main: mainWalletValue / btcPrice,
+        active: activeWalletValue / btcPrice,
+        matured: maturedWalletValue / btcPrice
+      },
+      // Today's transaction summary
+      todayTransactions: {
+        deposits: todayDeposits,
+        withdrawals: todayWithdrawals,
+        profit: todayProfit,
+        netChange: todayDeposits + todayProfit - todayWithdrawals
+      },
+      // Current BTC price for reference
+      btcPrice: btcPrice,
+      // Timestamp for real-time updates
+      timestamp: new Date().toISOString()
+    };
+
+    res.status(200).json({
+      status: 'success',
+      data: responseData
+    });
+
+  } catch (err) {
+    console.error('Error fetching user balances:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch user balances'
+    });
+  }
+});
+
+// Helper function to map asset symbols to CoinGecko IDs
+function getAssetId(assetSymbol) {
+  const assetMap = {
+    'btc': 'bitcoin',
+    'eth': 'ethereum',
+    'usdt': 'tether',
+    'bnb': 'binancecoin',
+    'sol': 'solana',
+    'usdc': 'usd-coin',
+    'xrp': 'ripple',
+    'doge': 'dogecoin',
+    'ada': 'cardano',
+    'shib': 'shiba-inu',
+    'avax': 'avalanche-2',
+    'dot': 'polkadot',
+    'trx': 'tron',
+    'link': 'chainlink',
+    'matic': 'matic-network',
+    'wbtc': 'wrapped-bitcoin',
+    'ltc': 'litecoin',
+    'near': 'near',
+    'uni': 'uniswap',
+    'bch': 'bitcoin-cash',
+    'xlm': 'stellar',
+    'atom': 'cosmos',
+    'xmr': 'monero',
+    'vet': 'vechain',
+    'fil': 'filecoin',
+    'theta': 'theta-network',
+    'hbar': 'hedera-hashgraph',
+    'ftm': 'fantom',
+    'xtz': 'tezos'
+  };
+  return assetMap[assetSymbol.toLowerCase()] || assetSymbol.toLowerCase();
+}
+
+// WebSocket endpoint for real-time balance updates
+const setupBalanceWebSocket = (io) => {
+  const updateInterval = 30000; // Update every 30 seconds
+  
+  setInterval(async () => {
+    try {
+      // Get all active users
+      const users = await User.find({ status: 'active' }).select('_id');
+      
+      for (const user of users) {
+        // Recalculate balances with current prices
+        const userAssetBalance = await UserAssetBalance.findOne({ user: user._id });
+        const investments = await Investment.find({ user: user._id });
+        const activeInvestments = investments.filter(inv => inv.status === 'active');
+        const completedInvestments = investments.filter(inv => inv.status === 'completed');
+        
+        // Calculate current values (same logic as above)
+        let mainValue = 0;
+        if (userAssetBalance && userAssetBalance.balances) {
+          for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
+            if (balance > 0) {
+              const assetId = getAssetId(asset);
+              const price = await getCachedPrice(assetId);
+              mainValue += balance * price;
+            }
+          }
+        }
+        
+        let activeValue = 0;
+        for (const investment of activeInvestments) {
+          activeValue += investment.amount;
+        }
+        
+        let maturedValue = 0;
+        for (const investment of completedInvestments) {
+          maturedValue += investment.amount + (investment.actualReturn || 0);
+        }
+        if (user.balances?.matured) {
+          maturedValue += user.balances.matured;
+        }
+        
+        // Calculate PnL
+        const yesterdayMain = user.balances?.yesterdayMainValue || mainValue;
+        const mainPnL = mainValue - yesterdayMain;
+        const mainPnLPercent = yesterdayMain > 0 ? (mainPnL / yesterdayMain) * 100 : 0;
+        
+        const yesterdayMatured = user.balances?.yesterdayMaturedValue || maturedValue;
+        const maturedPnL = maturedValue - yesterdayMatured;
+        const maturedPnLPercent = yesterdayMatured > 0 ? (maturedPnL / yesterdayMatured) * 100 : 0;
+        
+        // Emit real-time updates to the specific user
+        io.to(`user_${user._id}`).emit('balance_update', {
+          main: mainValue,
+          active: activeValue,
+          matured: maturedValue,
+          timestamp: Date.now()
+        });
+        
+        io.to(`user_${user._id}`).emit('pnl_update', {
+          main: {
+            amount: mainPnL,
+            percentage: mainPnLPercent
+          },
+          matured: {
+            amount: maturedPnL,
+            percentage: maturedPnLPercent
+          }
+        });
+      }
+    } catch (err) {
+      console.error('Error in balance WebSocket update:', err);
+    }
+  }, updateInterval);
+};
+
+// Get user's asset holdings with real-time prices
+app.get('/api/users/assets', protect, async (req, res) => {
+  try {
+    const userAssetBalance = await UserAssetBalance.findOne({ user: req.user.id });
+    
+    if (!userAssetBalance) {
+      return res.status(200).json({
+        status: 'success',
+        data: []
+      });
+    }
+    
+    // Fetch current prices for all assets
+    const assetsWithBalance = [];
+    const pricePromises = [];
+    
+    for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
+      if (balance > 0) {
+        pricePromises.push(
+          getCryptoPriceWithHistory(asset).then(priceData => ({
+            asset,
+            balance,
+            ...priceData
+          }))
+        );
+      }
+    }
+    
+    const assetsData = await Promise.all(pricePromises);
+    
+    // Get transaction history for each asset to calculate average buy price
+    for (const assetData of assetsData) {
+      const buyTransactions = await Transaction.find({
+        user: req.user.id,
+        type: 'buy',
+        asset: assetData.asset,
+        status: 'completed'
+      }).sort({ createdAt: 1 });
+      
+      const sellTransactions = await Transaction.find({
+        user: req.user.id,
+        type: 'sell',
+        asset: assetData.asset,
+        status: 'completed'
+      }).sort({ createdAt: 1 });
+      
+      // Calculate average buy price (FIFO method)
+      let totalSpent = 0;
+      let totalBought = 0;
+      let remainingBalance = assetData.balance;
+      
+      for (const buy of buyTransactions) {
+        const buyAmount = buy.assetAmount || (buy.amount / buy.price);
+        if (remainingBalance <= 0) break;
+        
+        const amountToUse = Math.min(buyAmount, remainingBalance);
+        totalSpent += amountToUse * buy.price;
+        totalBought += amountToUse;
+        remainingBalance -= amountToUse;
+      }
+      
+      const avgBuyPrice = totalBought > 0 ? totalSpent / totalBought : 0;
+      const currentValue = assetData.balance * assetData.price;
+      const unrealizedPnL = currentValue - totalSpent;
+      const unrealizedPnLPercent = totalSpent > 0 ? (unrealizedPnL / totalSpent) * 100 : 0;
+      
+      // Get all transactions for this asset
+      const allTransactions = [...buyTransactions, ...sellTransactions].sort((a, b) => 
+        new Date(b.createdAt) - new Date(a.createdAt)
+      );
+      
+      assetsData.avgPrice = avgBuyPrice;
+      assetsData.unrealizedPnl = unrealizedPnL;
+      assetsData.unrealizedPnlPercent = unrealizedPnLPercent;
+      assetsData.totalSpent = totalSpent;
+      assetsData.transactions = allTransactions.slice(0, 50).map(t => ({
+        id: t._id,
+        type: t.type,
+        amount: t.assetAmount || (t.amount / t.price),
+        price: t.price,
+        totalUSD: t.amount,
+        date: t.createdAt,
+        profit: t.profitLoss || 0
+      }));
+    }
+    
+    res.status(200).json({
+      status: 'success',
+      data: assetsData
+    });
+    
+  } catch (err) {
+    console.error('Error fetching user assets:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch user assets'
+    });
+  }
+});
+
+// Helper function to get crypto price with 24h change
+async function getCryptoPriceWithHistory(assetSymbol) {
+  const assetId = getAssetId(assetSymbol);
+  
+  try {
+    const response = await axios.get(
+      `https://api.coingecko.com/api/v3/simple/price?ids=${assetId}&vs_currencies=usd&include_24hr_change=true&include_last_updated_at=true`,
+      { timeout: 5000 }
+    );
+    
+    return {
+      price: response.data[assetId]?.usd || 0,
+      change24h: response.data[assetId]?.usd_24h_change || 0,
+      lastUpdated: response.data[assetId]?.last_updated_at || Date.now()
+    };
+  } catch (err) {
+    // Fallback to cached price
+    const cachedPrice = await redis.get(`price:${assetSymbol}`);
+    if (cachedPrice) {
+      return JSON.parse(cachedPrice);
+    }
+    return { price: 0, change24h: 0, lastUpdated: Date.now() };
+  }
+}
+
+// Helper function to get cached price
+async function getCachedPrice(assetId) {
+  try {
+    const cached = await redis.get(`price:${assetId}`);
+    if (cached) {
+      return JSON.parse(cached).price;
+    }
+  } catch (err) {
+    console.error('Redis error:', err);
+  }
+  return 0;
+}
+
+// Get user's total portfolio value across all wallets
+app.get('/api/users/portfolio', protect, async (req, res) => {
+  try {
+    const userAssetBalance = await UserAssetBalance.findOne({ user: req.user.id });
+    const investments = await Investment.find({ user: req.user.id });
+    const activeInvestments = investments.filter(inv => inv.status === 'active');
+    const completedInvestments = investments.filter(inv => inv.status === 'completed');
+    
+    // Calculate crypto holdings value
+    let cryptoValue = 0;
+    const cryptoBreakdown = [];
+    
+    if (userAssetBalance && userAssetBalance.balances) {
+      for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
+        if (balance > 0) {
+          const assetId = getAssetId(asset);
+          const price = await getCachedPrice(assetId);
+          const value = balance * price;
+          cryptoValue += value;
+          cryptoBreakdown.push({
+            asset: asset.toUpperCase(),
+            balance: balance,
+            price: price,
+            valueUSD: value,
+            percentageOfPortfolio: 0 // Will calculate after total
+          });
+        }
+      }
+    }
+    
+    // Calculate active investments value
+    let activeValue = 0;
+    for (const investment of activeInvestments) {
+      activeValue += investment.amount;
+    }
+    
+    // Calculate matured value
+    let maturedValue = 0;
+    for (const investment of completedInvestments) {
+      maturedValue += investment.amount + (investment.actualReturn || 0);
+    }
+    
+    const totalPortfolio = cryptoValue + activeValue + maturedValue;
+    
+    // Update percentages
+    cryptoBreakdown.forEach(item => {
+      item.percentageOfPortfolio = totalPortfolio > 0 ? (item.valueUSD / totalPortfolio) * 100 : 0;
+    });
+    
+    res.status(200).json({
+      status: 'success',
+      data: {
+        totalValue: totalPortfolio,
+        cryptoHoldings: {
+          value: cryptoValue,
+          percentage: totalPortfolio > 0 ? (cryptoValue / totalPortfolio) * 100 : 0,
+          breakdown: cryptoBreakdown
+        },
+        activeInvestments: {
+          value: activeValue,
+          percentage: totalPortfolio > 0 ? (activeValue / totalPortfolio) * 100 : 0,
+          count: activeInvestments.length
+        },
+        maturedReturns: {
+          value: maturedValue,
+          percentage: totalPortfolio > 0 ? (maturedValue / totalPortfolio) * 100 : 0,
+          count: completedInvestments.length
+        },
+        timestamp: new Date().toISOString()
+      }
+    });
+    
+  } catch (err) {
+    console.error('Error fetching portfolio:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch portfolio data'
+    });
+  }
+});
+
+// Export the setup function for Socket.IO integration
+module.exports = {
+  setupBalanceWebSocket,
+  getAssetId,
+  getCachedPrice
+};
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // SNIPPET C - COMPLETE REWRITE
 
 // Error handling middleware
