@@ -88,7 +88,7 @@ app.use(hpp());
 
 const redis = new Redis({
   host: process.env.REDIS_HOST,
-  port: process.env.REDIS_PORT,
+  port: process.env.REDIS_PORT || 14450,
   password: process.env.REDIS_PASSWORD,
   retryStrategy: (times) => {
     const delay = Math.min(times * 50, 2000);
@@ -196,7 +196,7 @@ mongoose.connect(process.env.MONGODB_URI, {
   if (process.env.NODE_ENV !== 'production') console.log('MongoDB connected successfully');
 })
 .catch(err => {
-  console.error('MongoDB connection error:', err);
+  if (process.env.NODE_ENV !== 'production') console.error('MongoDB connection error:', err);
   process.exit(1);
 });
 
@@ -361,13 +361,7 @@ const UserSchema = new mongoose.Schema({
     detectedCountry: String
   },
   failedLoginAttempts: { type: Number, default: 0 },
-  suspendedUntil: { type: Date, default: null },
-  restrictionHistory: [{
-    reason: String,
-    restrictedAt: Date,
-    expiresAt: Date,
-    liftedAt: Date
-  }]
+  suspendedUntil: { type: Date, default: null }
 }, { 
   timestamps: true,
   toJSON: { virtuals: true },
@@ -2548,24 +2542,12 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-const kycUploadPath = process.env.KYC_UPLOAD_PATH || 'uploads/kyc/';
-const tempUploadPath = process.env.TEMP_UPLOAD_PATH || 'uploads/temp/';
-const kycIdentityPath = process.env.KYC_IDENTITY_PATH || 'uploads/kyc/identity/';
-const kycAddressPath = process.env.KYC_ADDRESS_PATH || 'uploads/kyc/address/';
-const kycFacialPath = process.env.KYC_FACIAL_PATH || 'uploads/kyc/facial/';
-const kycMaxFileSize = parseInt(process.env.KYC_MAX_FILE_SIZE) || 10 * 1024 * 1024;
-const kycMaxFiles = parseInt(process.env.KYC_MAX_FILES) || 5;
-const kycAllowedMimeTypes = process.env.KYC_ALLOWED_MIME_TYPES ? process.env.KYC_ALLOWED_MIME_TYPES.split(',') : ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf', 'video/mp4', 'video/webm'];
-const kycApprovedSubject = process.env.KYC_APPROVED_SUBJECT || 'KYC Verification Approved';
-const kycRejectedSubject = process.env.KYC_REJECTED_SUBJECT || 'KYC Verification Rejected';
-const kycRetentionDays = parseInt(process.env.KYC_RETENTION_DAYS) || 365;
-
 const ensureUploadDirectories = () => {
   const dirs = [
-    kycIdentityPath,
-    kycAddressPath,
-    kycFacialPath,
-    tempUploadPath
+    process.env.KYC_UPLOAD_PATH || 'uploads/kyc/identity',
+    process.env.KYC_ADDRESS_PATH || 'uploads/kyc/address',
+    process.env.KYC_FACIAL_PATH || 'uploads/kyc/facial',
+    process.env.TEMP_UPLOAD_PATH || 'uploads/temp'
   ];
   
   dirs.forEach(dir => {
@@ -2579,14 +2561,14 @@ ensureUploadDirectories();
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    let uploadPath = tempUploadPath;
+    let uploadPath = process.env.TEMP_UPLOAD_PATH || 'uploads/temp';
     
     if (file.fieldname.includes('identity')) {
-      uploadPath = kycIdentityPath;
+      uploadPath = process.env.KYC_IDENTITY_PATH || 'uploads/kyc/identity';
     } else if (file.fieldname.includes('address')) {
-      uploadPath = kycAddressPath;
+      uploadPath = process.env.KYC_ADDRESS_PATH || 'uploads/kyc/address';
     } else if (file.fieldname.includes('facial')) {
-      uploadPath = kycFacialPath;
+      uploadPath = process.env.KYC_FACIAL_PATH || 'uploads/kyc/facial';
     }
     
     cb(null, uploadPath);
@@ -2599,10 +2581,15 @@ const storage = multer.diskStorage({
 });
 
 const fileFilter = (req, file, cb) => {
-  const allowedMimes = {};
-  kycAllowedMimeTypes.forEach(mime => {
-    allowedMimes[mime] = true;
-  });
+  const allowedMimes = {
+    'image/jpeg': true,
+    'image/jpg': true,
+    'image/png': true,
+    'image/gif': true,
+    'application/pdf': true,
+    'video/mp4': true,
+    'video/webm': true
+  };
   
   if (allowedMimes[file.mimetype]) {
     cb(null, true);
@@ -2615,8 +2602,8 @@ const upload = multer({
   storage: storage,
   fileFilter: fileFilter,
   limits: {
-    fileSize: kycMaxFileSize,
-    files: kycMaxFiles
+    fileSize: parseInt(process.env.KYC_MAX_FILE_SIZE) || 10 * 1024 * 1024,
+    files: parseInt(process.env.KYC_MAX_FILES) || 5
   }
 });
 
@@ -3043,96 +3030,30 @@ const detectAndSetIPPreferences = async (userId, req) => {
   }
 };
 
-let binanceSupportedSymbols = [];
-
-const fetchBinanceSupportedCryptos = async () => {
-  try {
-    const response = await axios.get('https://api.binance.com/api/v3/exchangeInfo', { timeout: 10000 });
-    
-    if (response.data && response.data.symbols) {
-      const usdtPairs = response.data.symbols.filter(s => 
-        s.quoteAsset === 'USDT' && s.status === 'TRADING'
-      );
-      
-      const usdcPairs = response.data.symbols.filter(s => 
-        s.quoteAsset === 'USDC' && s.status === 'TRADING'
-      );
-      
-      const eurcPairs = response.data.symbols.filter(s => 
-        s.quoteAsset === 'EURC' && s.status === 'TRADING'
-      );
-      
-      const usdPairs = response.data.symbols.filter(s => 
-        s.quoteAsset === 'USD' && s.status === 'TRADING'
-      );
-      
-      const bnbPairs = response.data.symbols.filter(s => 
-        s.quoteAsset === 'BNB' && s.status === 'TRADING'
-      );
-      
-      const btcPairs = response.data.symbols.filter(s => 
-        s.quoteAsset === 'BTC' && s.status === 'TRADING'
-      );
-      
-      const allPairs = [...usdtPairs, ...usdcPairs, ...eurcPairs, ...usdPairs, ...bnbPairs, ...btcPairs];
-      
-      const uniqueBaseAssets = new Map();
-      
-      for (const pair of allPairs) {
-        const baseAsset = pair.baseAsset.toLowerCase();
-        if (!uniqueBaseAssets.has(baseAsset)) {
-          uniqueBaseAssets.set(baseAsset, {
-            symbol: baseAsset,
-            name: baseAsset.toUpperCase(),
-            logoUrl: getCryptoLogo(baseAsset.toUpperCase())
-          });
-        }
-      }
-      
-      binanceSupportedSymbols = Array.from(uniqueBaseAssets.values());
-      
-      if (process.env.NODE_ENV !== 'production') {
-        console.log(`✅ Fetched ${binanceSupportedSymbols.length} supported cryptos from Binance API`);
-      }
-      
-      return binanceSupportedSymbols;
-    }
-    
-    return binanceSupportedSymbols;
-  } catch (err) {
-    console.error('❌ Failed to fetch Binance supported cryptos:', err.message);
-    return binanceSupportedSymbols;
-  }
-};
-
-const getCryptoLogo = (symbol) => {
-  const logoMap = {
-    'BTC': 'https://cryptologos.cc/logos/bitcoin-btc-logo.png',
-    'ETH': 'https://cryptologos.cc/logos/ethereum-eth-logo.png',
-    'USDT': 'https://cryptologos.cc/logos/tether-usdt-logo.png',
-    'BNB': 'https://cryptologos.cc/logos/bnb-bnb-logo.png',
-    'SOL': 'https://cryptologos.cc/logos/solana-sol-logo.png',
-    'USDC': 'https://cryptologos.cc/logos/usd-coin-usdc-logo.png',
-    'XRP': 'https://cryptologos.cc/logos/xrp-xrp-logo.png',
-    'DOGE': 'https://cryptologos.cc/logos/dogecoin-doge-logo.png',
-    'ADA': 'https://cryptologos.cc/logos/cardano-ada-logo.png',
-    'SHIB': 'https://cryptologos.cc/logos/shiba-inu-shib-logo.png',
-    'AVAX': 'https://cryptologos.cc/logos/avalanche-avax-logo.png',
-    'DOT': 'https://cryptologos.cc/logos/polkadot-new-dot-logo.png',
-    'TRX': 'https://cryptologos.cc/logos/tron-trx-logo.png',
-    'LINK': 'https://cryptologos.cc/logos/chainlink-link-logo.png',
-    'MATIC': 'https://cryptologos.cc/logos/polygon-matic-logo.png',
-    'LTC': 'https://cryptologos.cc/logos/litecoin-ltc-logo.png'
-  };
-  return logoMap[symbol] || `https://cryptologos.cc/logos/${symbol.toLowerCase()}-${symbol.toLowerCase()}-logo.png`;
-};
-
-setInterval(fetchBinanceSupportedCryptos, 60000);
-
-fetchBinanceSupportedCryptos();
-
 const getCryptoPrice = async (asset) => {
   try {
+    const assetMap = {
+      'BTC': 'bitcoin',
+      'ETH': 'ethereum',
+      'USDT': 'tether',
+      'BNB': 'binancecoin',
+      'SOL': 'solana',
+      'USDC': 'usd-coin',
+      'XRP': 'ripple',
+      'DOGE': 'dogecoin',
+      'ADA': 'cardano',
+      'SHIB': 'shiba-inu',
+      'AVAX': 'avalanche-2',
+      'DOT': 'polkadot',
+      'TRX': 'tron',
+      'LINK': 'chainlink',
+      'MATIC': 'matic-network',
+      'LTC': 'litecoin'
+    };
+    
+    const coinId = assetMap[asset.toUpperCase()];
+    if (!coinId) return null;
+    
     const errors = [];
     
     try {
@@ -3204,6 +3125,22 @@ const getCryptoPrice = async (asset) => {
 
 const getExchangeRate = async (asset, fiat = 'usd') => {
   try {
+    const assetMap = {
+      'BTC': 'bitcoin',
+      'ETH': 'ethereum',
+      'USDT': 'tether',
+      'BNB': 'binancecoin',
+      'SOL': 'solana',
+      'USDC': 'usd-coin',
+      'XRP': 'ripple',
+      'DOGE': 'dogecoin',
+      'ADA': 'cardano',
+      'SHIB': 'shiba-inu'
+    };
+    
+    const coinId = assetMap[asset.toUpperCase()];
+    if (!coinId) return null;
+    
     const errors = [];
     
     try {
@@ -3289,10 +3226,10 @@ const getFiatExchangeRates = async () => {
       if (process.env.NODE_ENV !== 'production') console.warn('currency-api failed:', err.message);
     }
     
-    console.error('All fiat exchange rate APIs failed');
+    if (process.env.NODE_ENV !== 'production') console.error('All fiat exchange rate APIs failed');
     return null;
   } catch (err) {
-    console.error('Error fetching fiat exchange rates:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Error fetching fiat exchange rates:', err);
     return null;
   }
 };
@@ -3365,7 +3302,7 @@ const sendEmail = async (options) => {
     }
     
     const mailOptions = {
-      from: `₿itHash Capital <${mailTransporter === supportTransporter ? process.env.EMAIL_SUPPORT_USER : process.env.EMAIL_INFO_USER}>`,
+      from: `BitHash Capital <${mailTransporter === supportTransporter ? process.env.EMAIL_SUPPORT_USER : process.env.EMAIL_INFO_USER}>`,
       to: options.email,
       subject: options.subject,
       text: options.message,
@@ -3375,7 +3312,7 @@ const sendEmail = async (options) => {
     await mailTransporter.sendMail(mailOptions);
     if (process.env.NODE_ENV !== 'production') console.log('Email sent successfully using', mailTransporter === supportTransporter ? 'SUPPORT' : 'INFO', 'email');
   } catch (err) {
-    console.error('Error sending email:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Error sending email:', err);
     throw new Error('Failed to send email');
   }
 };
@@ -3383,8 +3320,6 @@ const sendEmail = async (options) => {
 const getUserDeviceInfo = async (req) => {
   try {
     let ip = getRealClientIP(req);
-    const userAgent = req.headers['user-agent'] || 'Unknown';
-    const accurateInfo = getAccurateDeviceInfo(userAgent);
 
     let location = 'Unknown Location';
     let exactLocation = false;
@@ -3558,12 +3493,11 @@ const getUserDeviceInfo = async (req) => {
 
     return {
       ip: ip || 'Unknown',
-      device: accurateInfo.fullUserAgent,
+      device: req.headers['user-agent'] || 'Unknown',
       location: location,
       isPublicIP: isPublicIP,
       exactLocation: exactLocation,
-      locationDetails: locationDetails,
-      accurateInfo: accurateInfo
+      locationDetails: locationDetails
     };
   } catch (err) {
     if (process.env.NODE_ENV !== 'production') console.error('Error getting device info:', err);
@@ -3582,109 +3516,9 @@ const getUserDeviceInfo = async (req) => {
         timezone: 'Unknown',
         latitude: null,
         longitude: null
-      },
-      accurateInfo: { device: 'Unknown', os: 'Unknown', browser: 'Unknown', model: 'Unknown', fullUserAgent: req.headers['user-agent'] || 'Unknown' }
+      }
     };
   }
-};
-
-const getAccurateDeviceInfo = (userAgent) => {
-  if (!userAgent) return { device: 'Unknown', os: 'Unknown', browser: 'Unknown', model: 'Unknown' };
-  
-  let device = 'Unknown';
-  let os = 'Unknown';
-  let browser = 'Unknown';
-  let model = 'Unknown';
-  
-  if (/Tecno|TECNO/i.test(userAgent)) {
-    device = 'Tecno';
-    if (/KH7/i.test(userAgent)) model = 'Tecno Spark 9 Pro (KH7)';
-    else if (/Spark/i.test(userAgent)) model = 'Tecno Spark Series';
-  } else if (/iPhone/i.test(userAgent)) {
-    device = 'iPhone';
-    model = userAgent.match(/iPhone ([\d,]+)/)?.[0] || 'iPhone';
-  } else if (/iPad/i.test(userAgent)) {
-    device = 'iPad';
-    model = 'iPad';
-  } else if (/Android/i.test(userAgent)) {
-    device = 'Android';
-    const match = userAgent.match(/Android ([\d.]+)/);
-    if (match) model = `Android ${match[1]}`;
-    else model = 'Android Device';
-  } else if (/Windows/i.test(userAgent)) {
-    device = 'Windows PC';
-    model = 'Windows Computer';
-  } else if (/Macintosh|Mac OS/i.test(userAgent)) {
-    device = 'Mac';
-    model = 'Apple Mac';
-  } else if (/Linux/i.test(userAgent)) {
-    device = 'Linux';
-    model = 'Linux Computer';
-  }
-  
-  if (/Windows NT 10.0/i.test(userAgent)) os = 'Windows 10/11';
-  else if (/Windows NT 6.1/i.test(userAgent)) os = 'Windows 7';
-  else if (/Mac OS X (\d+[._]\d+)/i.test(userAgent)) {
-    const match = userAgent.match(/Mac OS X (\d+[._]\d+)/);
-    if (match) os = `macOS ${match[1].replace('_', '.')}`;
-    else os = 'macOS';
-  } else if (/Android ([\d.]+)/i.test(userAgent)) {
-    const match = userAgent.match(/Android ([\d.]+)/);
-    if (match) os = `Android ${match[1]}`;
-    else os = 'Android';
-  } else if (/iOS ([\d_]+)/i.test(userAgent)) {
-    const match = userAgent.match(/iOS ([\d_]+)/);
-    if (match) os = `iOS ${match[1].replace('_', '.')}`;
-    else os = 'iOS';
-  } else if (/iPhone OS ([\d_]+)/i.test(userAgent)) {
-    const match = userAgent.match(/iPhone OS ([\d_]+)/);
-    if (match) os = `iOS ${match[1].replace('_', '.')}`;
-    else os = 'iOS';
-  }
-  
-  if (/Edg\//i.test(userAgent)) {
-    browser = 'Microsoft Edge';
-  } else if (/Chrome\//i.test(userAgent) && !/Edg\//i.test(userAgent)) {
-    browser = 'Google Chrome';
-  } else if (/Safari\//i.test(userAgent) && !/Chrome\//i.test(userAgent)) {
-    browser = 'Safari';
-  } else if (/Firefox\//i.test(userAgent)) {
-    browser = 'Mozilla Firefox';
-  } else if (/Opera|OPR\//i.test(userAgent)) {
-    browser = 'Opera';
-  } else if (/Brave\//i.test(userAgent)) {
-    browser = 'Brave';
-  }
-  
-  return { device, os, browser, model, fullUserAgent: userAgent };
-};
-
-const getDeviceType = (req) => {
-  const userAgent = req.headers['user-agent'] || '';
-  if (/mobile/i.test(userAgent)) return 'mobile';
-  if (/tablet/i.test(userAgent)) return 'tablet';
-  if (/iPad|Android|Touch/i.test(userAgent)) return 'tablet';
-  return 'desktop';
-};
-
-const getOSFromUserAgent = (userAgent) => {
-  if (!userAgent) return 'Unknown';
-  if (/windows/i.test(userAgent)) return 'Windows';
-  if (/macintosh|mac os x/i.test(userAgent)) return 'MacOS';
-  if (/linux/i.test(userAgent)) return 'Linux';
-  if (/android/i.test(userAgent)) return 'Android';
-  if (/iphone|ipad|ipod/i.test(userAgent)) return 'iOS';
-  return 'Unknown';
-};
-
-const getBrowserFromUserAgent = (userAgent) => {
-  if (!userAgent) return 'Unknown';
-  if (/edg/i.test(userAgent)) return 'Edge';
-  if (/chrome/i.test(userAgent)) return 'Chrome';
-  if (/safari/i.test(userAgent)) return 'Safari';
-  if (/firefox/i.test(userAgent)) return 'Firefox';
-  if (/opera|opr/i.test(userAgent)) return 'Opera';
-  return 'Unknown';
 };
 
 const logActivity = async (action, entity, entityId, performedBy, performedByModel, req, changes = {}) => {
@@ -3762,7 +3596,7 @@ const initializeAdmin = async () => {
       if (process.env.NODE_ENV !== 'production') console.log('Default admin created');
     }
   } catch (err) {
-    console.error('Error initializing admin:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Error initializing admin:', err);
   }
 };
 
@@ -3823,7 +3657,7 @@ const initializePlans = async () => {
       }
     }
   } catch (err) {
-    console.error('Error initializing plans:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Error initializing plans:', err);
   }
 };
 
@@ -3870,17 +3704,18 @@ const protect = async (req, res, next) => {
       });
     }
 
+    if (currentUser.suspendedUntil && currentUser.suspendedUntil > new Date()) {
+      const remainingHours = Math.ceil((currentUser.suspendedUntil - new Date()) / (1000 * 60 * 60));
+      return res.status(401).json({
+        status: 'fail',
+        message: `Your account is temporarily suspended for ${remainingHours} hours due to multiple failed login attempts.`
+      });
+    }
+
     if (currentUser.twoFactorAuth.enabled && !req.headers['x-2fa-verified']) {
       return res.status(401).json({
         status: 'fail',
         message: 'Two-factor authentication required'
-      });
-    }
-
-    if (currentUser.suspendedUntil && currentUser.suspendedUntil > new Date()) {
-      return res.status(401).json({
-        status: 'fail',
-        message: `Your account is temporarily suspended until ${currentUser.suspendedUntil.toLocaleString()} due to multiple failed login attempts. Please contact support if this is an error.`
       });
     }
 
@@ -4100,7 +3935,7 @@ const calculateReferralCommissions = async (investment) => {
     });
 
   } catch (err) {
-    console.error('Downline commission calculation error:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Downline commission calculation error:', err);
   }
 };
 
@@ -4108,11 +3943,12 @@ const recalculateAllUserBalances = async (io) => {
   try {
     if (process.env.NODE_ENV !== 'production') console.log('Recalculating ALL user balances based on current crypto prices...');
     
-    const users = await User.find({}).select('_id');
+    const users = await User.find({}).select('_id balances');
     let updatedCount = 0;
     
     for (const user of users) {
       let totalMainValue = 0;
+      let totalActiveValue = 0;
       let totalMaturedValue = 0;
       
       const userAssetBalance = await UserAssetBalance.findOne({ user: user._id });
@@ -4127,19 +3963,33 @@ const recalculateAllUserBalances = async (io) => {
         }
       }
       
+      const activeInvestments = await Investment.find({
+        user: user._id,
+        status: 'active'
+      }).populate('plan');
+      
+      for (const investment of activeInvestments) {
+        const currentBTCPrice = await getCryptoPrice('BTC');
+        if (currentBTCPrice && investment.originalAmount) {
+          const originalBTCAmount = investment.originalAmount / (investment.originalBTCPrice || 43000);
+          const currentUSDValue = originalBTCAmount * currentBTCPrice;
+          totalActiveValue += currentUSDValue;
+        } else {
+          totalActiveValue += investment.amount;
+        }
+      }
+      
       const maturedInvestments = await Investment.find({
         user: user._id,
         status: 'completed'
       }).populate('plan');
       
       for (const investment of maturedInvestments) {
-        if (investment.asset && investment.assetAmount) {
-          const currentPrice = await getCryptoPrice(investment.asset.toUpperCase());
-          if (currentPrice) {
-            totalMaturedValue += investment.assetAmount * currentPrice;
-          } else {
-            totalMaturedValue += investment.amount + (investment.actualReturn || 0);
-          }
+        const currentBTCPrice = await getCryptoPrice('BTC');
+        if (currentBTCPrice && investment.originalAmount) {
+          const originalBTCAmount = investment.originalAmount / (investment.originalBTCPrice || 43000);
+          const currentUSDValue = originalBTCAmount * currentBTCPrice;
+          totalMaturedValue += currentUSDValue;
         } else {
           totalMaturedValue += investment.amount + (investment.actualReturn || 0);
         }
@@ -4147,6 +3997,7 @@ const recalculateAllUserBalances = async (io) => {
       
       const updates = {};
       if (Math.abs(user.balances.main - totalMainValue) > 0.01) updates['balances.main'] = totalMainValue;
+      if (Math.abs(user.balances.active - totalActiveValue) > 0.01) updates['balances.active'] = totalActiveValue;
       if (Math.abs(user.balances.matured - totalMaturedValue) > 0.01) updates['balances.matured'] = totalMaturedValue;
       
       if (Object.keys(updates).length > 0) {
@@ -4156,7 +4007,7 @@ const recalculateAllUserBalances = async (io) => {
         if (io) {
           io.to(`user_${user._id}`).emit('balance_update', {
             main: totalMainValue,
-            active: user.balances.active,
+            active: totalActiveValue,
             matured: totalMaturedValue
           });
           
@@ -4178,16 +4029,12 @@ const recalculateAllUserBalances = async (io) => {
       }
     }
     
-    if (process.env.NODE_ENV !== 'production') console.log(`Recalculated balances for ${updatedCount} users`);
+    if (process.env.NODE_ENV !== 'production') console.log(`Recalculated balances for ${updatedCount} users (Main: fluctuates, Active: fluctuates, Matured: fluctuates)`);
     
   } catch (err) {
-    console.error('Error recalculating user balances:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Error recalculating user balances:', err);
   }
 };
-
-// =============================================
-// PRICE AGGREGATOR WORKER - SINGLE SOURCE OF TRUTH
-// =============================================
 
 let binanceWs = null;
 let wsReconnectAttempts = 0;
@@ -4278,7 +4125,7 @@ async function fetchAllTradingPairs() {
     
     return { pairs: allPairs, quoteAssets: Array.from(quoteAssetsSet) };
   } catch (err) {
-    console.error('Failed to fetch trading pairs:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Failed to fetch trading pairs:', err);
     const cached = await redis.get(REDIS_KEYS.ALL_PAIRS);
     if (cached) {
       const pairs = JSON.parse(cached);
@@ -4623,10 +4470,6 @@ async function getQuoteAssetsFromRedis() {
 
 initializePriceAggregator();
 
-// =============================================
-// ENHANCED EMAIL SERVICE WITH ENTERPRISE TEMPLATES
-// =============================================
-
 const sendProfessionalEmail = async ({ email, template, data, useSupportEmail = false }) => {
   try {
     let mailTransporter = infoTransporter;
@@ -4669,19 +4512,6 @@ const sendProfessionalEmail = async ({ email, template, data, useSupportEmail = 
       </div>
     `;
 
-    const formatTimestamp = () => {
-      const now = new Date();
-      return now.toLocaleString('en-US', {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        timeZoneName: 'short'
-      });
-    };
-
     switch (template) {
       case 'welcome':
         subject = 'Welcome to ₿itHash Capital';
@@ -4692,7 +4522,6 @@ const sendProfessionalEmail = async ({ email, template, data, useSupportEmail = 
               <h2 style="color: #0B0E11; margin-bottom: 20px;">Welcome to ₿itHash Capital, ${data.name}!</h2>
               <p style="color: #333333; line-height: 1.6;">Thank you for joining ₿itHash Capital. We're excited to have you on board as we work together to achieve your financial goals through institutional-grade Bitcoin mining.</p>
               <p style="color: #333333; line-height: 1.6;">Your account has been successfully created. You can now explore our investment plans and start your journey with us.</p>
-              <p style="color: #666666; font-size: 12px;">Timestamp: ${formatTimestamp()}</p>
               <div style="text-align: center; margin: 30px 0;">
                 <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Go to Dashboard</a>
               </div>
@@ -4713,7 +4542,6 @@ const sendProfessionalEmail = async ({ email, template, data, useSupportEmail = 
               <p style="color: #333333; line-height: 1.6;">Use the following verification code to complete your ${data.action}:</p>
               <div style="background: #F5F5F5; padding: 20px; text-align: center; font-size: 32px; letter-spacing: 8px; font-weight: bold; margin: 20px 0; border-radius: 8px;">${data.otp}</div>
               <p style="color: #333333; line-height: 1.6;">This code will expire in 5 minutes.</p>
-              <p style="color: #666666; font-size: 12px;">Timestamp: ${formatTimestamp()}</p>
               <p style="color: #666666; font-size: 12px;">If you didn't request this, please ignore this email or contact support.</p>
             </div>
             ${brandFooter}
@@ -4731,7 +4559,6 @@ const sendProfessionalEmail = async ({ email, template, data, useSupportEmail = 
               <p style="color: #333333; line-height: 1.6;">Dear ${data.name},</p>
               <p style="color: #333333; line-height: 1.6;">Congratulations! Your KYC verification has been approved. You now have full access to all features including increased withdrawal and investment limits.</p>
               <p style="color: #333333; line-height: 1.6;">Thank you for completing your verification with us.</p>
-              <p style="color: #666666; font-size: 12px;">Timestamp: ${formatTimestamp()}</p>
               <div style="text-align: center; margin: 30px 0;">
                 <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Go to Dashboard</a>
               </div>
@@ -4752,7 +4579,6 @@ const sendProfessionalEmail = async ({ email, template, data, useSupportEmail = 
               <p style="color: #333333; line-height: 1.6;">We regret to inform you that your KYC verification was not approved at this time.</p>
               <p style="color: #333333; line-height: 1.6;"><strong>Reason:</strong> ${data.reason}</p>
               <p style="color: #333333; line-height: 1.6;">Please log in to your account to resubmit your documents with the correct information.</p>
-              <p style="color: #666666; font-size: 12px;">Timestamp: ${formatTimestamp()}</p>
               <div style="text-align: center; margin: 30px 0;">
                 <a href="https://www.bithashcapital.live/kyc" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Resubmit KYC</a>
               </div>
@@ -4779,7 +4605,6 @@ const sendProfessionalEmail = async ({ email, template, data, useSupportEmail = 
                 <p style="margin: 5px 0;"><strong>New Balance:</strong> $${data.newBalance.toLocaleString()}</p>
                 <p style="margin: 5px 0;"><strong>Processed At:</strong> ${new Date(data.processedAt).toLocaleString()}</p>
               </div>
-              <p style="color: #666666; font-size: 12px;">Timestamp: ${formatTimestamp()}</p>
               <div style="text-align: center; margin: 30px 0;">
                 <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View Transaction</a>
               </div>
@@ -4803,7 +4628,6 @@ const sendProfessionalEmail = async ({ email, template, data, useSupportEmail = 
                 <p style="margin: 5px 0;"><strong>Method:</strong> ${data.method}</p>
                 <p style="margin: 5px 0;"><strong>Reason:</strong> ${data.reason}</p>
               </div>
-              <p style="color: #666666; font-size: 12px;">Timestamp: ${formatTimestamp()}</p>
               <p style="color: #333333; line-height: 1.6;">Please contact support if you believe this is an error.</p>
             </div>
             ${brandFooter}
@@ -4831,7 +4655,6 @@ const sendProfessionalEmail = async ({ email, template, data, useSupportEmail = 
                 <p style="margin: 5px 0;"><strong>Processed At:</strong> ${new Date(data.processedAt).toLocaleString()}</p>
                 ${data.txid ? `<p style="margin: 5px 0;"><strong>Transaction ID:</strong> ${data.txid}</p>` : ''}
               </div>
-              <p style="color: #666666; font-size: 12px;">Timestamp: ${formatTimestamp()}</p>
               <div style="text-align: center; margin: 30px 0;">
                 <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View Transaction</a>
               </div>
@@ -4854,7 +4677,6 @@ const sendProfessionalEmail = async ({ email, template, data, useSupportEmail = 
                 <p style="margin: 5px 0;"><strong>Amount:</strong> $${data.amount.toLocaleString()}</p>
                 <p style="margin: 5px 0;"><strong>Reason:</strong> ${data.reason}</p>
               </div>
-              <p style="color: #666666; font-size: 12px;">Timestamp: ${formatTimestamp()}</p>
               <p style="color: #333333; line-height: 1.6;">Please contact support if you believe this is an error.</p>
             </div>
             ${brandFooter}
@@ -4879,7 +4701,6 @@ const sendProfessionalEmail = async ({ email, template, data, useSupportEmail = 
                 <p style="margin: 5px 0;"><strong>Start Date:</strong> ${new Date(data.startDate).toLocaleString()}</p>
                 <p style="margin: 5px 0;"><strong>Expected Maturity:</strong> ${new Date(data.endDate).toLocaleString()}</p>
               </div>
-              <p style="color: #666666; font-size: 12px;">Timestamp: ${formatTimestamp()}</p>
             </div>
             ${brandFooter}
           </div>
@@ -4903,7 +4724,6 @@ const sendProfessionalEmail = async ({ email, template, data, useSupportEmail = 
                 <p style="margin: 5px 0;"><strong>Completion Date:</strong> ${new Date(data.completionDate).toLocaleString()}</p>
                 <p style="margin: 5px 0;"><strong>New Matured Balance:</strong> $${data.newMaturedBalance.toLocaleString()}</p>
               </div>
-              <p style="color: #666666; font-size: 12px;">Timestamp: ${formatTimestamp()}</p>
               <div style="text-align: center; margin: 30px 0;">
                 <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View Earnings</a>
               </div>
@@ -4932,7 +4752,6 @@ const sendProfessionalEmail = async ({ email, template, data, useSupportEmail = 
                 <p style="margin: 5px 0;"><strong>Requested At:</strong> ${new Date(data.timestamp).toLocaleString()}</p>
                 <p style="margin: 5px 0;"><strong>Network:</strong> ${data.network}</p>
               </div>
-              <p style="color: #666666; font-size: 12px;">Timestamp: ${formatTimestamp()}</p>
               <div style="text-align: center; margin: 30px 0;">
                 <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Track Request</a>
               </div>
@@ -4958,7 +4777,6 @@ const sendProfessionalEmail = async ({ email, template, data, useSupportEmail = 
                 <p style="margin: 5px 0;"><strong>Time:</strong> ${new Date(data.timestamp).toLocaleString()}</p>
               </div>
               <p style="color: #333333; line-height: 1.6;">If this wasn't you, please contact support immediately.</p>
-              <p style="color: #666666; font-size: 12px;">Timestamp: ${formatTimestamp()}</p>
             </div>
             ${brandFooter}
           </div>
@@ -4979,7 +4797,6 @@ const sendProfessionalEmail = async ({ email, template, data, useSupportEmail = 
                 <p style="margin: 5px 0;"><strong>IP Address:</strong> ${data.ip}</p>
               </div>
               <p style="color: #333333; line-height: 1.6;">If you did not make this change, please contact support immediately.</p>
-              <p style="color: #666666; font-size: 12px;">Timestamp: ${formatTimestamp()}</p>
             </div>
             ${brandFooter}
           </div>
@@ -4999,7 +4816,6 @@ const sendProfessionalEmail = async ({ email, template, data, useSupportEmail = 
                 <a href="${data.resetUrl}" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Reset Password</a>
               </div>
               <p style="color: #333333; line-height: 1.6;">This link will expire in 60 minutes. If you didn't request this, please ignore this email.</p>
-              <p style="color: #666666; font-size: 12px;">Timestamp: ${formatTimestamp()}</p>
             </div>
             ${brandFooter}
           </div>
@@ -5022,7 +4838,6 @@ const sendProfessionalEmail = async ({ email, template, data, useSupportEmail = 
                 <p style="margin: 5px 0;"><strong>Time:</strong> ${new Date(data.timestamp).toLocaleString()}</p>
               </div>
               <p style="color: #333333; line-height: 1.6;">If this was you, you can safely ignore this email. If not, please secure your account immediately.</p>
-              <p style="color: #666666; font-size: 12px;">Timestamp: ${formatTimestamp()}</p>
               <div style="text-align: center; margin: 30px 0;">
                 <a href="https://www.bithashcapital.live/security" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Secure Account</a>
               </div>
@@ -5039,7 +4854,6 @@ const sendProfessionalEmail = async ({ email, template, data, useSupportEmail = 
             ${brandHeader}
             <div style="padding: 30px; background: #FFFFFF;">
               <p style="color: #333333; line-height: 1.6;">${data.message || 'Important update from ₿itHash Capital.'}</p>
-              <p style="color: #666666; font-size: 12px;">Timestamp: ${formatTimestamp()}</p>
             </div>
             ${brandFooter}
           </div>
@@ -5054,10 +4868,10 @@ const sendProfessionalEmail = async ({ email, template, data, useSupportEmail = 
     };
 
     await mailTransporter.sendMail(mailOptions);
-    if (process.env.NODE_ENV !== 'production') console.log(`Email sent: ${template} to ${email}`);
+    if (process.env.NODE_ENV !== 'production') if (process.env.NODE_ENV !== 'production') console.log(`Email sent: ${template} to ${email}`);
     return true;
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error sending professional email:', err);
+    if (process.env.NODE_ENV !== 'production') if (process.env.NODE_ENV !== 'production') console.error('Error sending professional email:', err);
     return false;
   }
 };
@@ -5121,14 +4935,110 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
       data: templateData
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error sending automated email:', err);
+    if (process.env.NODE_ENV !== 'production') if (process.env.NODE_ENV !== 'production') console.error('Error sending automated email:', err);
     return false;
   }
 };
 
-// Routes
+const getAccurateDeviceInfo = (userAgent) => {
+  if (!userAgent) return { device: 'Unknown', os: 'Unknown', browser: 'Unknown', model: 'Unknown' };
+  
+  let device = 'Unknown';
+  let os = 'Unknown';
+  let browser = 'Unknown';
+  let model = 'Unknown';
+  
+  if (/Tecno|TECNO/i.test(userAgent)) {
+    device = 'Tecno';
+    if (/KH7/i.test(userAgent)) model = 'Tecno Spark 9 Pro (KH7)';
+    else if (/Spark/i.test(userAgent)) model = 'Tecno Spark Series';
+  } else if (/iPhone/i.test(userAgent)) {
+    device = 'iPhone';
+    model = userAgent.match(/iPhone ([\d,]+)/)?.[0] || 'iPhone';
+  } else if (/iPad/i.test(userAgent)) {
+    device = 'iPad';
+    model = 'iPad';
+  } else if (/Android/i.test(userAgent)) {
+    device = 'Android';
+    const match = userAgent.match(/Android ([\d.]+)/);
+    if (match) model = `Android ${match[1]}`;
+    else model = 'Android Device';
+  } else if (/Windows/i.test(userAgent)) {
+    device = 'Windows PC';
+    model = 'Windows Computer';
+  } else if (/Macintosh|Mac OS/i.test(userAgent)) {
+    device = 'Mac';
+    model = 'Apple Mac';
+  } else if (/Linux/i.test(userAgent)) {
+    device = 'Linux';
+    model = 'Linux Computer';
+  }
+  
+  if (/Windows NT 10.0/i.test(userAgent)) os = 'Windows 10/11';
+  else if (/Windows NT 6.1/i.test(userAgent)) os = 'Windows 7';
+  else if (/Mac OS X (\d+[._]\d+)/i.test(userAgent)) {
+    const match = userAgent.match(/Mac OS X (\d+[._]\d+)/);
+    if (match) os = `macOS ${match[1].replace('_', '.')}`;
+    else os = 'macOS';
+  } else if (/Android ([\d.]+)/i.test(userAgent)) {
+    const match = userAgent.match(/Android ([\d.]+)/);
+    if (match) os = `Android ${match[1]}`;
+    else os = 'Android';
+  } else if (/iOS ([\d_]+)/i.test(userAgent)) {
+    const match = userAgent.match(/iOS ([\d_]+)/);
+    if (match) os = `iOS ${match[1].replace('_', '.')}`;
+    else os = 'iOS';
+  } else if (/iPhone OS ([\d_]+)/i.test(userAgent)) {
+    const match = userAgent.match(/iPhone OS ([\d_]+)/);
+    if (match) os = `iOS ${match[1].replace('_', '.')}`;
+    else os = 'iOS';
+  }
+  
+  if (/Edg\//i.test(userAgent)) {
+    browser = 'Microsoft Edge';
+  } else if (/Chrome\//i.test(userAgent) && !/Edg\//i.test(userAgent)) {
+    browser = 'Google Chrome';
+  } else if (/Safari\//i.test(userAgent) && !/Chrome\//i.test(userAgent)) {
+    browser = 'Safari';
+  } else if (/Firefox\//i.test(userAgent)) {
+    browser = 'Mozilla Firefox';
+  } else if (/Opera|OPR\//i.test(userAgent)) {
+    browser = 'Opera';
+  } else if (/Brave\//i.test(userAgent)) {
+    browser = 'Brave';
+  }
+  
+  return { device, os, browser, model, fullUserAgent: userAgent };
+};
 
-// Enhanced Signup Endpoint with OTP
+const getDeviceType = (req) => {
+  const userAgent = req.headers['user-agent'] || '';
+  if (/mobile/i.test(userAgent)) return 'mobile';
+  if (/tablet/i.test(userAgent)) return 'tablet';
+  if (/iPad|Android|Touch/i.test(userAgent)) return 'tablet';
+  return 'desktop';
+};
+
+const getOSFromUserAgent = (userAgent) => {
+  if (!userAgent) return 'Unknown';
+  if (/windows/i.test(userAgent)) return 'Windows';
+  if (/macintosh|mac os x/i.test(userAgent)) return 'MacOS';
+  if (/linux/i.test(userAgent)) return 'Linux';
+  if (/android/i.test(userAgent)) return 'Android';
+  if (/iphone|ipad|ipod/i.test(userAgent)) return 'iOS';
+  return 'Unknown';
+};
+
+const getBrowserFromUserAgent = (userAgent) => {
+  if (!userAgent) return 'Unknown';
+  if (/edg/i.test(userAgent)) return 'Edge';
+  if (/chrome/i.test(userAgent)) return 'Chrome';
+  if (/safari/i.test(userAgent)) return 'Safari';
+  if (/firefox/i.test(userAgent)) return 'Firefox';
+  if (/opera|opr/i.test(userAgent)) return 'Opera';
+  return 'Unknown';
+};
+
 app.post('/api/auth/signup', [
   body('firstName').trim().notEmpty().withMessage('First name is required').escape(),
   body('lastName').trim().notEmpty().withMessage('Last name is required').escape(),
@@ -5246,7 +5156,7 @@ app.post('/api/auth/signup', [
     await logActivity('signup_initiated', 'user', newUser._id, newUser._id, 'User', req);
 
   } catch (err) {
-    console.error('Signup error:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Signup error:', err);
     res.status(500).json({
       status: 'error',
       message: 'An error occurred during signup'
@@ -5254,7 +5164,6 @@ app.post('/api/auth/signup', [
   }
 });
 
-// Validate referral code endpoint
 app.get('/api/referrals/validate/:code', async (req, res) => {
     try {
         const { code } = req.params;
@@ -5303,7 +5212,7 @@ app.get('/api/referrals/validate/:code', async (req, res) => {
         });
 
     } catch (err) {
-        console.error('Referral validation error:', err);
+        if (process.env.NODE_ENV !== 'production') console.error('Referral validation error:', err);
         res.status(500).json({
             status: 'error',
             message: 'Failed to validate referral code'
@@ -5311,7 +5220,6 @@ app.get('/api/referrals/validate/:code', async (req, res) => {
     }
 });
 
-// Enhanced Login Endpoint with OTP and 3 failed attempts suspension
 app.post('/api/auth/login', [
   body('email').isEmail().withMessage('Please provide a valid email'),
   body('password').notEmpty().withMessage('Password is required'),
@@ -5328,25 +5236,33 @@ app.post('/api/auth/login', [
   try {
     const { email, password, rememberMe } = req.body;
 
-    const user = await User.findOne({ email }).select('+password +twoFactorAuth.secret');
+    const user = await User.findOne({ email }).select('+password +twoFactorAuth.secret +failedLoginAttempts +suspendedUntil');
     if (!user || !(await bcrypt.compare(password, user.password))) {
       if (user) {
-        user.failedLoginAttempts = (user.failedLoginAttempts || 0) + 1;
+        const failedAttempts = (user.failedLoginAttempts || 0) + 1;
+        await User.findByIdAndUpdate(user._id, { failedLoginAttempts: failedAttempts });
         
-        if (user.failedLoginAttempts >= 3) {
-          const suspensionDuration = 48 * 60 * 60 * 1000;
-          user.suspendedUntil = new Date(Date.now() + suspensionDuration);
-          user.status = 'suspended';
-          user.restrictionHistory.push({
-            reason: 'Three consecutive failed login attempts',
-            restrictedAt: new Date(),
-            expiresAt: user.suspendedUntil
+        if (failedAttempts >= 3) {
+          const suspensionUntil = new Date();
+          suspensionUntil.setHours(suspensionUntil.getHours() + 48);
+          await User.findByIdAndUpdate(user._id, { 
+            suspendedUntil: suspensionUntil,
+            status: 'suspended'
           });
           
-          if (process.env.NODE_ENV !== 'production') console.log(`User ${user.email} suspended for 48 hours due to 3 failed login attempts`);
+          await sendAutomatedEmail(user, 'suspicious_login', {
+            name: user.firstName,
+            device: req.headers['user-agent'] || 'Unknown',
+            location: 'Unknown',
+            ip: getRealClientIP(req),
+            timestamp: new Date()
+          });
+          
+          return res.status(401).json({
+            status: 'fail',
+            message: 'Your account has been suspended for 48 hours due to multiple failed login attempts.'
+          });
         }
-        
-        await user.save();
       }
       
       await logUserActivity(req, 'login_attempt', 'failed', {
@@ -5356,25 +5272,9 @@ app.post('/api/auth/login', [
       
       return res.status(401).json({
         status: 'fail',
-        message: user && user.suspendedUntil && user.suspendedUntil > new Date() 
-          ? `Your account has been suspended for 48 hours due to multiple failed login attempts.`
-          : 'Incorrect email or password'
+        message: 'Incorrect email or password'
       });
     }
-
-    if (user.suspendedUntil && user.suspendedUntil > new Date()) {
-      return res.status(401).json({
-        status: 'fail',
-        message: `Your account is temporarily suspended until ${user.suspendedUntil.toLocaleString()} due to multiple failed login attempts.`
-      });
-    }
-
-    user.failedLoginAttempts = 0;
-    user.suspendedUntil = null;
-    if (user.status === 'suspended') {
-      user.status = 'active';
-    }
-    await user.save();
 
     if (user.status !== 'active') {
       await logUserActivity(req, 'login_attempt', 'failed', {
@@ -5388,6 +5288,16 @@ app.post('/api/auth/login', [
         message: 'Your account has been suspended. Please contact support.'
       });
     }
+
+    if (user.suspendedUntil && user.suspendedUntil > new Date()) {
+      const remainingHours = Math.ceil((user.suspendedUntil - new Date()) / (1000 * 60 * 60));
+      return res.status(401).json({
+        status: 'fail',
+        message: `Your account is temporarily suspended for ${remainingHours} hours due to multiple failed login attempts.`
+      });
+    }
+
+    await User.findByIdAndUpdate(user._id, { failedLoginAttempts: 0 });
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
@@ -5446,14 +5356,14 @@ app.post('/api/auth/login', [
     try {
       await sendAutomatedEmail(user, 'login_success', {
         name: user.firstName,
-        device: deviceInfo.accurateInfo.device || deviceInfo.device,
+        device: deviceInfo.device,
         location: deviceInfo.location,
         ip: deviceInfo.ip,
         timestamp: new Date()
       });
       if (process.env.NODE_ENV !== 'production') console.log(`📧 Login attempt email sent to ${user.email}`);
     } catch (emailError) {
-      console.error('Failed to send login attempt email:', emailError);
+      if (process.env.NODE_ENV !== 'production') console.error('Failed to send login attempt email:', emailError);
     }
 
     const tempToken = generateJWT(user._id);
@@ -5479,7 +5389,7 @@ app.post('/api/auth/login', [
     }, user);
 
   } catch (err) {
-    console.error('Login error:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Login error:', err);
     
     await logUserActivity(req, 'login_error', 'failed', {
       error: err.message,
@@ -5500,7 +5410,7 @@ app.post('/api/auth/google', async (req, res) => {
     const { credential, isSignup } = req.body;
     
     if (!credential) {
-      console.error('No credential provided');
+      if (process.env.NODE_ENV !== 'production') console.error('No credential provided');
       return res.status(400).json({
         status: 'fail',
         message: 'Google credential is required'
@@ -5518,7 +5428,7 @@ app.post('/api/auth/google', async (req, res) => {
       payload = ticket.getPayload();
       if (process.env.NODE_ENV !== 'production') console.log('Google token verified successfully');
     } catch (verifyError) {
-      console.error('Google token verification failed:', verifyError);
+      if (process.env.NODE_ENV !== 'production') console.error('Google token verification failed:', verifyError);
       return res.status(400).json({
         status: 'fail',
         message: 'Invalid Google token. Please try again.'
@@ -5526,7 +5436,7 @@ app.post('/api/auth/google', async (req, res) => {
     }
 
     if (!payload) {
-      console.error('No payload from Google token');
+      if (process.env.NODE_ENV !== 'production') console.error('No payload from Google token');
       return res.status(400).json({
         status: 'fail',
         message: 'Invalid token payload'
@@ -5536,7 +5446,7 @@ app.post('/api/auth/google', async (req, res) => {
     const { email, given_name, family_name, sub } = payload;
 
     if (!email) {
-      console.error('No email in Google payload');
+      if (process.env.NODE_ENV !== 'production') console.error('No email in Google payload');
       return res.status(400).json({
         status: 'fail',
         message: 'No email found in Google account'
@@ -5550,61 +5460,85 @@ app.post('/api/auth/google', async (req, res) => {
     let user;
     let isNewUser = false;
 
-    try {
-      user = await User.findOne({ email: originalEmail });
-      if (process.env.NODE_ENV !== 'production') console.log('User lookup result:', user ? 'Found' : 'Not found');
-    } catch (dbError) {
-      console.error('Database lookup error:', dbError);
-      return res.status(500).json({
-        status: 'error',
-        message: 'Database error during user lookup'
-      });
-    }
-
-    if (!user) {
-      if (isSignup === true) {
-        try {
-          const referralCode = generateReferralCode();
-          user = await User.create({
-            firstName: given_name || 'Google',
-            lastName: family_name || 'User',
-            email: originalEmail,
-            googleId: sub,
-            isVerified: true,
-            referralCode,
-            status: 'active'
-          });
-          isNewUser = true;
-          if (process.env.NODE_ENV !== 'production') console.log('New user created via Google:', originalEmail);
-
-          try {
-            await sendAutomatedEmail(user, 'welcome', {
-              firstName: given_name || 'Google User'
-            });
-          } catch (emailError) {
-            console.error('Welcome email failed:', emailError);
-          }
-        } catch (createError) {
-          console.error('User creation error:', createError);
-          return res.status(500).json({
-            status: 'error',
-            message: 'Failed to create user account'
+    if (isSignup === true) {
+      try {
+        const existingUser = await User.findOne({ email: originalEmail });
+        if (existingUser) {
+          return res.status(400).json({
+            status: 'fail',
+            message: 'An account with this email already exists. Please log in instead.'
           });
         }
-      } else {
-        return res.status(404).json({
-          status: 'fail',
-          message: 'Account not found. Please sign up first.'
+      } catch (dbError) {
+        if (process.env.NODE_ENV !== 'production') console.error('Database lookup error:', dbError);
+        return res.status(500).json({
+          status: 'error',
+          message: 'Database error during user lookup'
         });
       }
-    } else if (!user.googleId) {
-      user.googleId = sub;
-      user.isVerified = true;
-      await user.save();
-      if (process.env.NODE_ENV !== 'production') console.log('Existing user linked with Google:', originalEmail);
+    } else {
+      try {
+        user = await User.findOne({ email: originalEmail });
+        if (!user) {
+          return res.status(404).json({
+            status: 'fail',
+            message: 'No account found with this email. Please sign up first.'
+          });
+        }
+      } catch (dbError) {
+        if (process.env.NODE_ENV !== 'production') console.error('Database lookup error:', dbError);
+        return res.status(500).json({
+          status: 'error',
+          message: 'Database error during user lookup'
+        });
+      }
     }
 
-    if (user.status !== 'active') {
+    if (isSignup === true) {
+      try {
+        const referralCode = generateReferralCode();
+        user = await User.create({
+          firstName: given_name || 'Google',
+          lastName: family_name || 'User',
+          email: originalEmail,
+          googleId: sub,
+          isVerified: true,
+          referralCode,
+          status: 'active'
+        });
+        isNewUser = true;
+        if (process.env.NODE_ENV !== 'production') console.log('New user created via Google:', originalEmail);
+
+        try {
+          await sendAutomatedEmail(user, 'welcome', {
+            firstName: given_name || 'Google User'
+          });
+        } catch (emailError) {
+          if (process.env.NODE_ENV !== 'production') console.error('Welcome email failed:', emailError);
+        }
+      } catch (createError) {
+        if (process.env.NODE_ENV !== 'production') console.error('User creation error:', createError);
+        return res.status(500).json({
+          status: 'error',
+          message: 'Failed to create user account'
+        });
+      }
+    } else if (user && !user.googleId) {
+      try {
+        user.googleId = sub;
+        user.isVerified = true;
+        await user.save();
+        if (process.env.NODE_ENV !== 'production') console.log('Existing user linked with Google:', originalEmail);
+      } catch (updateError) {
+        if (process.env.NODE_ENV !== 'production') console.error('User update error:', updateError);
+        return res.status(500).json({
+          status: 'error',
+          message: 'Failed to link Google account'
+        });
+      }
+    }
+
+    if (user && user.status !== 'active') {
       return res.status(401).json({
         status: 'fail',
         message: 'Your account has been suspended. Please contact support.'
@@ -5628,71 +5562,77 @@ app.post('/api/auth/google', async (req, res) => {
         email: originalEmail,
         template: 'otp',
         data: {
-          name: user.firstName,
+          name: user ? user.firstName : given_name || 'User',
           otp: otp,
           action: 'Google sign-in verification'
         }
       });
       
       const deviceInfo = await getUserDeviceInfo(req);
-      await UserLog.create({
-        user: user._id,
-        username: user.email,
-        email: user.email,
-        userFullName: `${user.firstName} ${user.lastName}`,
-        action: 'login_attempt',
-        actionCategory: 'authentication',
-        ipAddress: deviceInfo.ip,
-        userAgent: deviceInfo.device,
-        deviceInfo: {
-          type: getDeviceType(req),
-          os: getOSFromUserAgent(req.headers['user-agent']),
-          browser: getBrowserFromUserAgent(req.headers['user-agent'])
-        },
-        location: {
-          ip: deviceInfo.ip,
-          country: deviceInfo.locationDetails?.country || 'Unknown',
-          city: deviceInfo.locationDetails?.city || 'Unknown',
-          region: deviceInfo.locationDetails?.region || 'Unknown',
-          exactLocation: deviceInfo.exactLocation,
-          latitude: deviceInfo.locationDetails?.latitude,
-          longitude: deviceInfo.locationDetails?.longitude
-        },
-        status: 'pending',
-        metadata: {
-          email: originalEmail,
-          loginMethod: 'google',
-          otpSent: true,
-          isNewUser: isNewUser
-        }
-      });
-      
-      try {
-        await sendAutomatedEmail(user, 'login_success', {
-          name: user.firstName,
-          device: deviceInfo.accurateInfo.device || deviceInfo.device,
-          location: deviceInfo.location,
-          ip: deviceInfo.ip,
-          timestamp: new Date()
+      if (user) {
+        await UserLog.create({
+          user: user._id,
+          username: user.email,
+          email: user.email,
+          userFullName: `${user.firstName} ${user.lastName}`,
+          action: 'login_attempt',
+          actionCategory: 'authentication',
+          ipAddress: deviceInfo.ip,
+          userAgent: deviceInfo.device,
+          deviceInfo: {
+            type: getDeviceType(req),
+            os: getOSFromUserAgent(req.headers['user-agent']),
+            browser: getBrowserFromUserAgent(req.headers['user-agent'])
+          },
+          location: {
+            ip: deviceInfo.ip,
+            country: deviceInfo.locationDetails?.country || 'Unknown',
+            city: deviceInfo.locationDetails?.city || 'Unknown',
+            region: deviceInfo.locationDetails?.region || 'Unknown',
+            exactLocation: deviceInfo.exactLocation,
+            latitude: deviceInfo.locationDetails?.latitude,
+            longitude: deviceInfo.locationDetails?.longitude
+          },
+          status: 'pending',
+          metadata: {
+            email: originalEmail,
+            loginMethod: 'google',
+            otpSent: true,
+            isNewUser: isNewUser
+          }
         });
-        if (process.env.NODE_ENV !== 'production') console.log(`📧 Google login attempt email sent to ${user.email}`);
-      } catch (emailError) {
-        console.error('Failed to send Google login attempt email:', emailError);
+      }
+      
+      if (user) {
+        try {
+          await sendAutomatedEmail(user, 'login_success', {
+            name: user.firstName,
+            device: deviceInfo.device,
+            location: deviceInfo.location,
+            ip: deviceInfo.ip,
+            timestamp: new Date()
+          });
+          if (process.env.NODE_ENV !== 'production') console.log(`📧 Google login attempt email sent to ${user.email}`);
+        } catch (emailError) {
+          if (process.env.NODE_ENV !== 'production') console.error('Failed to send Google login attempt email:', emailError);
+        }
       }
       
     } catch (otpError) {
-      console.error('OTP creation error:', otpError);
+      if (process.env.NODE_ENV !== 'production') console.error('OTP creation error:', otpError);
     }
 
-    const tempToken = generateJWT(user._id);
+    const tempToken = generateJWT(user ? user._id : 'temp');
 
-    try {
-      user.lastLogin = new Date();
-      const deviceInfo = await getUserDeviceInfo(req);
-      user.loginHistory.push(deviceInfo);
-      await user.save();
-    } catch (updateError) {
-      console.error('User update error:', updateError);
+    if (user) {
+      try {
+        user.lastLogin = new Date();
+        const deviceInfo = await getUserDeviceInfo(req);
+        user.loginHistory.push(deviceInfo);
+        await user.save();
+      } catch (updateError) {
+        if (process.env.NODE_ENV !== 'production') console.error('User update error:', updateError);
+      }
     }
 
     res.status(200).json({
@@ -5702,28 +5642,30 @@ app.post('/api/auth/google', async (req, res) => {
       needsOtp: true,
       isNewUser: isNewUser,
       data: {
-        user: {
+        user: user ? {
           id: user._id,
           firstName: user.firstName,
           lastName: user.lastName,
           email: user.email
-        }
+        } : null
       }
     });
 
-    try {
-      await logActivity('google_signin_otp_sent', 'user', user._id, user._id, 'User', req, {
-        isNewUser,
-        provider: 'google',
-        email: originalEmail
-      });
-    } catch (logError) {
-      console.error('Activity logging error:', logError);
+    if (user) {
+      try {
+        await logActivity('google_signin_otp_sent', 'user', user._id, user._id, 'User', req, {
+          isNewUser,
+          provider: 'google',
+          email: originalEmail
+        });
+      } catch (logError) {
+        if (process.env.NODE_ENV !== 'production') console.error('Activity logging error:', logError);
+      }
     }
 
   } catch (err) {
-    console.error('Google auth UNEXPECTED error:', err);
-    console.error('Error stack:', err.stack);
+    if (process.env.NODE_ENV !== 'production') console.error('Google auth UNEXPECTED error:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Error stack:', err.stack);
     
     res.status(500).json({
       status: 'error',
@@ -5774,7 +5716,7 @@ app.post('/api/auth/forgot-password', [
 
     await logActivity('forgot-password', 'user', user._id, user._id, 'User', req);
   } catch (err) {
-    console.error('Forgot password error:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Forgot password error:', err);
     res.status(500).json({
       status: 'error',
       message: 'An error occurred while sending the password reset email'
@@ -5833,7 +5775,7 @@ app.post('/api/auth/reset-password', [
     await sendAutomatedEmail(user, 'password_changed', {
       name: user.firstName,
       ip: deviceInfo.ip,
-      device: deviceInfo.accurateInfo.device || deviceInfo.device
+      device: deviceInfo.device
     });
 
     res.status(200).json({
@@ -5844,7 +5786,7 @@ app.post('/api/auth/reset-password', [
 
     await logActivity('reset-password', 'user', user._id, user._id, 'User', req);
   } catch (err) {
-    console.error('Reset password error:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Reset password error:', err);
     res.status(500).json({
       status: 'error',
       message: 'An error occurred while resetting the password'
@@ -5852,7 +5794,6 @@ app.post('/api/auth/reset-password', [
   }
 });
 
-// Investment routes - ENHANCED VERSION WITH RESTRICTION CHECKS
 app.post('/api/investments', protect, [
   body('planId').notEmpty().withMessage('Plan ID is required').isMongoId().withMessage('Invalid Plan ID'),
   body('amount').isFloat({ min: 1 }).withMessage('Amount must be a positive number'),
@@ -6195,7 +6136,7 @@ app.post('/api/investments', protect, [
       });
       if (process.env.NODE_ENV !== 'production') console.log(`📧 Investment creation email sent to ${user.email}`);
     } catch (emailError) {
-      console.error('Failed to send investment creation email:', emailError);
+      if (process.env.NODE_ENV !== 'production') console.error('Failed to send investment creation email:', emailError);
     }
 
     await logActivity('create_investment', 'investment', investment._id, userId, 'User', req);
@@ -6217,7 +6158,7 @@ app.post('/api/investments', protect, [
       }
     });
   } catch (err) {
-    console.error('Investment creation error:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Investment creation error:', err);
     
     res.status(200).json({
       status: 'success',
@@ -6359,7 +6300,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
         });
         if (process.env.NODE_ENV !== 'production') console.log(`📧 Investment completion email sent to ${user.email}`);
       } catch (emailError) {
-        console.error('Failed to send investment completion email:', emailError);
+        if (process.env.NODE_ENV !== 'production') console.error('Failed to send investment completion email:', emailError);
       }
 
       res.status(200).json({
@@ -6391,7 +6332,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
     }
 
   } catch (err) {
-    console.error('Complete investment error:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Complete investment error:', err);
     res.status(500).json({
       status: 'error',
       message: 'An error occurred while completing the investment'
@@ -6399,7 +6340,6 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
   }
 });
 
-// Admin Get Deposit Details Endpoint
 app.get('/api/admin/deposits/:id', adminProtect, async (req, res) => {
   try {
     const deposit = await Transaction.findById(req.params.id)
@@ -6418,7 +6358,7 @@ app.get('/api/admin/deposits/:id', adminProtect, async (req, res) => {
       data: { deposit }
     });
   } catch (err) {
-    console.error('Admin get deposit error:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Admin get deposit error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch deposit details'
@@ -6426,7 +6366,6 @@ app.get('/api/admin/deposits/:id', adminProtect, async (req, res) => {
   }
 });
 
-// Admin Get Withdrawal Details Endpoint
 app.get('/api/admin/withdrawals/:id', adminProtect, async (req, res) => {
   try {
     const withdrawal = await Transaction.findById(req.params.id)
@@ -6445,7 +6384,7 @@ app.get('/api/admin/withdrawals/:id', adminProtect, async (req, res) => {
       data: { withdrawal }
     });
   } catch (err) {
-    console.error('Admin get withdrawal error:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Admin get withdrawal error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch withdrawal details'
@@ -6453,7 +6392,6 @@ app.get('/api/admin/withdrawals/:id', adminProtect, async (req, res) => {
   }
 });
 
-// Admin Reject Deposit Endpoint - FIXED VERSION
 app.post('/api/admin/deposits/:id/reject', adminProtect, [
   body('reason').trim().notEmpty().withMessage('Rejection reason is required')
 ], async (req, res) => {
@@ -6554,7 +6492,7 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
       });
       if (process.env.NODE_ENV !== 'production') console.log(`📧 Deposit rejection email sent to ${deposit.user.email}`);
     } catch (emailError) {
-      console.error('Failed to send deposit rejection email:', emailError);
+      if (process.env.NODE_ENV !== 'production') console.error('Failed to send deposit rejection email:', emailError);
     }
     
     res.status(200).json({
@@ -6568,7 +6506,7 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
       userId: deposit.user._id
     });
   } catch (err) {
-    console.error('Admin reject deposit error:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Admin reject deposit error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to reject deposit',
@@ -6577,7 +6515,6 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
   }
 });
 
-// Admin Reject Withdrawal Endpoint - FIXED VERSION
 app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
   body('reason').trim().notEmpty().withMessage('Rejection reason is required')
 ], async (req, res) => {
@@ -6691,7 +6628,7 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
       });
       if (process.env.NODE_ENV !== 'production') console.log(`📧 Withdrawal rejection email sent to ${user.email}`);
     } catch (emailError) {
-      console.error('Failed to send withdrawal rejection email:', emailError);
+      if (process.env.NODE_ENV !== 'production') console.error('Failed to send withdrawal rejection email:', emailError);
     }
     
     res.status(200).json({
@@ -6705,7 +6642,7 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
       userId: user._id
     });
   } catch (err) {
-    console.error('Admin reject withdrawal error:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Admin reject withdrawal error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to reject withdrawal',
@@ -6713,8 +6650,6 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
     });
   }
 });
-
-// Downline Management Endpoints
 
 app.get('/api/admin/downline', adminProtect, restrictTo('super', 'support'), async (req, res) => {
   try {
@@ -6746,7 +6681,7 @@ app.get('/api/admin/downline', adminProtect, restrictTo('super', 'support'), asy
       }
     });
   } catch (err) {
-    console.error('Get downline relationships error:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Get downline relationships error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch downline relationships'
@@ -6835,7 +6770,7 @@ app.post('/api/admin/downline/assign', adminProtect, restrictTo('super', 'suppor
     });
 
   } catch (err) {
-    console.error('Assign downline error:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Assign downline error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to assign downline relationship'
@@ -6867,7 +6802,7 @@ app.delete('/api/admin/downline/:relationshipId', adminProtect, restrictTo('supe
     });
 
   } catch (err) {
-    console.error('Remove downline error:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Remove downline error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to remove downline relationship'
@@ -6894,7 +6829,7 @@ app.get('/api/admin/commission-settings', adminProtect, restrictTo('super', 'sup
       }
     });
   } catch (err) {
-    console.error('Get commission settings error:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Get commission settings error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch commission settings'
@@ -6950,7 +6885,7 @@ app.post('/api/admin/commission-settings', adminProtect, restrictTo('super'), [
     });
 
   } catch (err) {
-    console.error('Update commission settings error:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Update commission settings error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to update commission settings'
@@ -6988,7 +6923,7 @@ app.get('/api/admin/commission-history', adminProtect, restrictTo('super', 'supp
       }
     });
   } catch (err) {
-    console.error('Get commission history error:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Get commission history error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch commission history'
@@ -7020,17 +6955,13 @@ app.get('/api/users/downline', protect, async (req, res) => {
     });
 
   } catch (err) {
-    console.error('Get user downline error:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Get user downline error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch downline information'
     });
   }
 });
-
-// =============================================
-// ADMIN KYC MANAGEMENT ENDPOINTS
-// =============================================
 
 app.get('/api/admin/kyc/submissions', adminProtect, restrictTo('super', 'support'), async (req, res) => {
   try {
@@ -7101,7 +7032,7 @@ app.get('/api/admin/kyc/submissions', adminProtect, restrictTo('super', 'support
     });
 
   } catch (err) {
-    console.error('Get KYC submissions error:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Get KYC submissions error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch KYC submissions'
@@ -7135,7 +7066,7 @@ app.get('/api/admin/kyc/submissions/:submissionId', adminProtect, restrictTo('su
     });
 
   } catch (err) {
-    console.error('Get KYC submission details error:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Get KYC submission details error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch KYC submission details'
@@ -7244,7 +7175,7 @@ app.post('/api/admin/kyc/submissions/:submissionId/approve', adminProtect, restr
       });
       if (process.env.NODE_ENV !== 'production') console.log(`📧 KYC approval email sent to ${kycSubmission.user.email}`);
     } catch (emailError) {
-      console.error('Failed to send KYC approval email:', emailError);
+      if (process.env.NODE_ENV !== 'production') console.error('Failed to send KYC approval email:', emailError);
     }
 
     await AccountRestrictions.checkAndUpdateRestrictions(kycSubmission.user._id, 'kyc_approval');
@@ -7263,7 +7194,7 @@ app.post('/api/admin/kyc/submissions/:submissionId/approve', adminProtect, restr
     });
 
   } catch (err) {
-    console.error('Approve KYC error:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Approve KYC error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to approve KYC application',
@@ -7405,7 +7336,7 @@ app.post('/api/admin/kyc/submissions/:submissionId/reject', adminProtect, restri
       });
       if (process.env.NODE_ENV !== 'production') console.log(`📧 KYC rejection email sent to ${kycSubmission.user.email}`);
     } catch (emailError) {
-      console.error('Failed to send KYC rejection email:', emailError);
+      if (process.env.NODE_ENV !== 'production') console.error('Failed to send KYC rejection email:', emailError);
     }
 
     res.status(200).json({
@@ -7423,7 +7354,7 @@ app.post('/api/admin/kyc/submissions/:submissionId/reject', adminProtect, restri
     });
 
   } catch (err) {
-    console.error('Reject KYC error:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Reject KYC error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to reject KYC application',
@@ -7439,23 +7370,23 @@ app.get('/api/admin/kyc/files/:type/:filename', adminProtect, restrictTo('super'
     let filePath;
     switch (type) {
       case 'identity-front':
-        filePath = path.join(kycIdentityPath, filename);
+        filePath = path.join(process.env.KYC_IDENTITY_PATH || 'uploads/kyc/identity', filename);
         break;
       
       case 'identity-back':
-        filePath = path.join(kycIdentityPath, filename);
+        filePath = path.join(process.env.KYC_IDENTITY_PATH || 'uploads/kyc/identity', filename);
         break;
       
       case 'address':
-        filePath = path.join(kycAddressPath, filename);
+        filePath = path.join(process.env.KYC_ADDRESS_PATH || 'uploads/kyc/address', filename);
         break;
       
       case 'facial-video':
-        filePath = path.join(kycFacialPath, filename);
+        filePath = path.join(process.env.KYC_FACIAL_PATH || 'uploads/kyc/facial', filename);
         break;
       
       case 'facial-photo':
-        filePath = path.join(kycFacialPath, filename);
+        filePath = path.join(process.env.KYC_FACIAL_PATH || 'uploads/kyc/facial', filename);
         break;
       
       default:
@@ -7501,7 +7432,6 @@ app.get('/api/admin/kyc/files/:type/:filename', adminProtect, restrictTo('super'
 
     res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
     res.setHeader('Access-Control-Allow-Credentials', 'true');
-    
     res.setHeader('Content-Type', contentType);
     res.setHeader('Content-Disposition', 'inline; filename="' + filename + '"');
     res.setHeader('Cache-Control', 'private, max-age=3600');
@@ -7542,7 +7472,7 @@ app.get('/api/admin/kyc/files/:type/:filename', adminProtect, restrictTo('super'
     }
 
   } catch (err) {
-    console.error('Serve KYC file error:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Serve KYC file error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to serve file'
@@ -7573,7 +7503,7 @@ app.get('/api/admin/kyc/files/secure/:type/:filename', adminProtect, restrictTo(
     });
 
   } catch (err) {
-    console.error('Generate secure URL error:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Generate secure URL error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to generate secure URL'
@@ -7749,10 +7679,8 @@ app.get('/api/referrals', protect, async (req, res) => {
                 totalEarnings: totalEarnings,
                 pendingEarnings: pendingEarnings,
                 activeReferrals: activeReferrals,
-                
                 referrals: referrals,
                 earnings: earningsBreakdown,
-                
                 stats: {
                     directReferrals: totalReferrals,
                     totalCommission: totalEarnings,
@@ -7768,7 +7696,7 @@ app.get('/api/referrals', protect, async (req, res) => {
         await logActivity('view_referrals', 'referral', userId, userId, 'User', req);
 
     } catch (error) {
-        console.error('Error loading referral data:', error);
+        if (process.env.NODE_ENV !== 'production') console.error('Error loading referral data:', error);
         res.status(500).json({
             status: 'error',
             message: 'Failed to load referral data'
@@ -7829,7 +7757,7 @@ app.post('/api/admin/users', adminProtect, [
     
     await logActivity('create-user', 'user', user._id, req.admin._id, 'Admin', req);
   } catch (err) {
-    console.error('Admin add user error:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Admin add user error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to create user'
@@ -7890,7 +7818,7 @@ const logUserActivity = async (req, action, status = 'success', metadata = {}, r
     });
 
   } catch (err) {
-    console.error('Error logging user activity:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Error logging user activity:', err);
   }
 };
 
@@ -7946,7 +7874,7 @@ const trackUserActivity = (action, options = {}) => {
         await logUserActivity(req, action, 'success', metadata, relatedEntity);
       }
     } catch (err) {
-      console.error('Activity tracking middleware error:', err);
+      if (process.env.NODE_ENV !== 'production') console.error('Activity tracking middleware error:', err);
     }
   };
 };
@@ -7962,7 +7890,7 @@ const trackFailedLogin = async (req, res, next) => {
       });
     }
   } catch (err) {
-    console.error('Failed login tracking error:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Failed login tracking error:', err);
   }
 };
 
@@ -8019,22 +7947,6 @@ app.post('/api/auth/verify-otp', [
       location: deviceInfo.location,
       timestamp: new Date()
     });
-    
-    const ipAddress = getRealClientIP(req);
-    const isSuspiciousLocation = !deviceInfo.locationDetails?.country || 
-      (deviceInfo.locationDetails?.country !== user.ipPreferences?.detectedCountry);
-    
-    if (isSuspiciousLocation && user.ipPreferences?.detectedCountry) {
-      await sendAutomatedEmail(user, 'suspicious_login', {
-        name: user.firstName,
-        device: deviceInfo.accurateInfo.device || deviceInfo.device,
-        location: deviceInfo.location,
-        ip: deviceInfo.ip,
-        timestamp: new Date()
-      });
-      if (process.env.NODE_ENV !== 'production') console.log(`📧 Suspicious login email sent to ${user.email}`);
-    }
-    
     await user.save();
 
     await UserLog.findOneAndUpdate(
@@ -8058,10 +7970,9 @@ app.post('/api/auth/verify-otp', [
 
     await sendAutomatedEmail(user, 'login_success', {
       name: user.firstName,
-      device: deviceInfo.accurateInfo.device || deviceInfo.device,
+      device: deviceInfo.device,
       location: deviceInfo.location,
-      ip: deviceInfo.ip,
-      timestamp: new Date()
+      ip: deviceInfo.ip
     });
 
     const token = generateJWT(user._id);
@@ -8093,7 +8004,7 @@ app.post('/api/auth/verify-otp', [
     }, user);
 
   } catch (err) {
-    console.error('OTP verification error:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('OTP verification error:', err);
     res.status(500).json({
       status: 'error',
       message: 'An error occurred during verification'
@@ -8161,7 +8072,7 @@ app.post('/api/auth/send-otp', [
     });
 
   } catch (err) {
-    console.error('Send OTP error:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Send OTP error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to send OTP'
@@ -8219,94 +8130,6 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             return res.status(400).json({
                 status: 'error',
                 message: 'Insufficient balance'
-            });
-        }
-
-        const restrictions = await AccountRestrictions.getInstance();
-        const userRestrictionStatus = await UserRestrictionStatus.findOne({ user: userId });
-        
-        const kycStatus = await KYC.findOne({ user: userId });
-        const hasKYC = kycStatus && kycStatus.overallStatus === 'verified';
-        
-        const cutoff = new Date();
-        cutoff.setDate(cutoff.getDate() - (restrictions.inactivity_days || 30));
-        const hasRecentTx = await Transaction.findOne({
-            user: userId,
-            type: { $in: ['deposit', 'withdrawal'] },
-            status: 'completed',
-            createdAt: { $gte: cutoff }
-        });
-        
-        let withdrawalLimit = null;
-        
-        if (!hasKYC && restrictions.withdraw_limit_no_kyc !== null) {
-            if (amount > restrictions.withdraw_limit_no_kyc) {
-                return res.status(403).json({
-                    status: 'fail',
-                    message: restrictions.kyc_restriction_reason || `Please complete your KYC verification. Withdrawal limit without KYC: $${restrictions.withdraw_limit_no_kyc.toLocaleString()}`,
-                    restriction: {
-                        type: 'kyc',
-                        limit: restrictions.withdraw_limit_no_kyc,
-                        reason: restrictions.kyc_restriction_reason
-                    }
-                });
-            }
-            withdrawalLimit = restrictions.withdraw_limit_no_kyc;
-        }
-        
-        if (!hasRecentTx && restrictions.withdraw_limit_no_txn !== null) {
-            if (amount > restrictions.withdraw_limit_no_txn) {
-                return res.status(403).json({
-                    status: 'fail',
-                    message: restrictions.txn_restriction_reason || `Please complete at least one deposit or withdrawal. Withdrawal limit without transaction activity: $${restrictions.withdraw_limit_no_txn.toLocaleString()}`,
-                    restriction: {
-                        type: 'transaction',
-                        limit: restrictions.withdraw_limit_no_txn,
-                        reason: restrictions.txn_restriction_reason,
-                        daysRequired: restrictions.inactivity_days
-                    }
-                });
-            }
-            if (withdrawalLimit === null || (restrictions.withdraw_limit_no_txn !== null && restrictions.withdraw_limit_no_txn < withdrawalLimit)) {
-                withdrawalLimit = restrictions.withdraw_limit_no_txn;
-            }
-        }
-        
-        if (userRestrictionStatus) {
-            if (userRestrictionStatus.kyc_restricted && restrictions.withdraw_limit_no_kyc !== null && amount > restrictions.withdraw_limit_no_kyc) {
-                return res.status(403).json({
-                    status: 'fail',
-                    message: userRestrictionStatus.kyc_restriction_reason || restrictions.kyc_restriction_reason,
-                    restriction: {
-                        type: 'kyc',
-                        limit: restrictions.withdraw_limit_no_kyc,
-                        reason: userRestrictionStatus.kyc_restriction_reason
-                    }
-                });
-            }
-            
-            if (userRestrictionStatus.transaction_restricted && restrictions.withdraw_limit_no_txn !== null && amount > restrictions.withdraw_limit_no_txn) {
-                return res.status(403).json({
-                    status: 'fail',
-                    message: userRestrictionStatus.transaction_restriction_reason || restrictions.txn_restriction_reason,
-                    restriction: {
-                        type: 'transaction',
-                        limit: restrictions.withdraw_limit_no_txn,
-                        reason: userRestrictionStatus.transaction_restriction_reason,
-                        daysRequired: restrictions.inactivity_days
-                    }
-                });
-            }
-        }
-        
-        if (withdrawalLimit !== null && amount > withdrawalLimit) {
-            return res.status(403).json({
-                status: 'fail',
-                message: `Your withdrawal amount exceeds the current limit of $${withdrawalLimit.toLocaleString()}. Please complete KYC verification or make a deposit/withdrawal to increase your limit.`,
-                restriction: {
-                    type: withdrawalLimit === restrictions.withdraw_limit_no_kyc ? 'kyc' : 'transaction',
-                    limit: withdrawalLimit
-                }
             });
         }
 
@@ -8489,7 +8312,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             if (process.env.NODE_ENV !== 'production') console.log(`Gas fee calculation: BTC fee: ${btcGasFeeAmount} BTC, BTC price: $${btcPrice}, Gas fee in USD: $${gasFeeInUsd.toFixed(2)}, Gas fee in ${asset.toUpperCase()}: ${gasFeeInAsset.toFixed(8)}`);
             
         } catch (error) {
-            console.error('Price fetch error:', error);
+            if (process.env.NODE_ENV !== 'production') console.error('Price fetch error:', error);
             return res.status(503).json({
                 status: 'error',
                 message: error.message || 'Unable to fetch current cryptocurrency prices. Please try again.'
@@ -8669,7 +8492,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             });
             if (process.env.NODE_ENV !== 'production') console.log(`📧 Withdrawal request email sent to ${user.email}`);
         } catch (emailError) {
-            console.error('Failed to send withdrawal request email:', emailError);
+            if (process.env.NODE_ENV !== 'production') console.error('Failed to send withdrawal request email:', emailError);
         }
 
         await logActivity(
@@ -8719,7 +8542,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
         });
 
     } catch (err) {
-        console.error('Asset withdrawal error:', err);
+        if (process.env.NODE_ENV !== 'production') console.error('Asset withdrawal error:', err);
         
         if (err.code === 'ECONNABORTED' || err.message.includes('timeout')) {
             return res.status(503).json({
@@ -8858,7 +8681,7 @@ app.post('/api/users/location', protect, async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Location update error:', error);
+    if (process.env.NODE_ENV !== 'production') console.error('Location update error:', error);
     res.status(500).json({
       status: 'error',
       message: 'Failed to update location'
@@ -8882,7 +8705,7 @@ app.get('/api/admin/restrictions', adminProtect, restrictTo('super'), async (req
       }
     });
   } catch (err) {
-    console.error('GET restrictions error:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('GET restrictions error:', err);
     res.status(500).json({ status: 'error', message: 'Failed to fetch restriction settings' });
   }
 });
@@ -8924,7 +8747,7 @@ app.post('/api/admin/restrictions', adminProtect, restrictTo('super'), async (re
     
     res.json({ status: 'success', message: 'Restrictions saved successfully' });
   } catch (err) {
-    console.error('POST restrictions error:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('POST restrictions error:', err);
     res.status(500).json({ status: 'error', message: err.message || 'Failed to save restrictions' });
   }
 });
@@ -8985,14 +8808,11 @@ app.get('/api/user/restriction-status', protect, async (req, res) => {
       }
     });
   } catch (err) {
-    console.error('Get user restriction status error:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Get user restriction status error:', err);
     res.status(500).json({ status: 'error', message: 'Failed to fetch restriction status' });
   }
 });
 
-// =============================================
-// FIAT CURRENCIES ENDPOINT - Get ALL world currencies with REAL exchange rates
-// =============================================
 app.get('/api/fiat-currencies', async (req, res) => {
   try {
     if (process.env.NODE_ENV !== 'production') console.log('🌐 Fetching real-time fiat currencies from external APIs...');
@@ -9045,7 +8865,7 @@ app.get('/api/fiat-currencies', async (req, res) => {
     }
     
     if (!apiSuccess || !rates) {
-      console.error('❌ All exchange rate APIs failed');
+      if (process.env.NODE_ENV !== 'production') console.error('❌ All exchange rate APIs failed');
       return res.status(503).json({
         status: 'error',
         message: 'Unable to fetch exchange rates. Please try again later.',
@@ -9134,7 +8954,7 @@ app.get('/api/fiat-currencies', async (req, res) => {
     });
     
   } catch (err) {
-    console.error('❌ Error fetching fiat currencies:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('❌ Error fetching fiat currencies:', err);
     res.status(500).json({ 
       status: 'error', 
       message: 'Failed to fetch exchange rates. Please try again.'
@@ -9142,91 +8962,34 @@ app.get('/api/fiat-currencies', async (req, res) => {
   }
 });
 
-// =============================================
-// GET SUPPORTED CRYPTOS ENDPOINT - Import from Binance API in realtime
-// =============================================
-app.get('/api/supported-cryptos', async (req, res) => {
-  try {
-    if (process.env.NODE_ENV !== 'production') console.log('🪙 Fetching supported cryptos from Binance API in realtime...');
-    
-    const cryptos = await fetchBinanceSupportedCryptos();
-    
-    const enrichedCryptos = await Promise.all(cryptos.map(async (crypto) => {
-      let price = null;
-      let priceChangePercent = null;
-      
-      try {
-        const response = await axios.get(
-          `https://api.binance.com/api/v3/ticker/24hr?symbol=${crypto.symbol.toUpperCase()}USDT`,
-          { timeout: 5000 }
-        );
-        if (response.data) {
-          price = parseFloat(response.data.lastPrice);
-          priceChangePercent = parseFloat(response.data.priceChangePercent);
-        }
-      } catch (err) {
-        if (process.env.NODE_ENV !== 'production') console.log(`Could not fetch price for ${crypto.symbol}`);
-      }
-      
-      return {
-        ...crypto,
-        currentPrice: price,
-        priceChangePercent24h: priceChangePercent,
-        lastUpdated: new Date().toISOString()
-      };
-    }));
-    
-    res.status(200).json({
-      status: 'success',
-      cryptos: enrichedCryptos,
-      lastUpdated: new Date().toISOString(),
-      source: 'Binance API (realtime)'
-    });
-    
-  } catch (err) {
-    console.error('❌ Error fetching supported cryptos:', err);
-    
-    const cachedCryptos = binanceSupportedSymbols;
-    if (cachedCryptos.length > 0) {
-      res.status(200).json({
-        status: 'success',
-        cryptos: cachedCryptos,
-        lastUpdated: new Date().toISOString(),
-        source: 'cache',
-        message: 'Using cached data. Some prices may be delayed.'
-      });
-    } else {
-      res.status(503).json({
-        status: 'error',
-        message: 'Unable to fetch supported cryptocurrencies. Please try again later.'
-      });
-    }
-  }
-});
-
-// =============================================
-// CONVERT ASSETS ENDPOINT - Get available target cryptos for conversion
-// =============================================
 app.get('/api/convert/assets', protect, async (req, res) => {
   try {
-    const supportedCryptos = binanceSupportedSymbols;
-    
-    const availableAssets = supportedCryptos.map(crypto => ({
-      symbol: crypto.symbol,
-      name: crypto.name,
-      logo: crypto.logoUrl
-    }));
+    const availableAssets = [
+      { symbol: 'btc', name: 'Bitcoin', logo: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png' },
+      { symbol: 'eth', name: 'Ethereum', logo: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png' },
+      { symbol: 'usdt', name: 'Tether', logo: 'https://assets.coingecko.com/coins/images/325/large/Tether.png' },
+      { symbol: 'bnb', name: 'BNB', logo: 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png' },
+      { symbol: 'sol', name: 'Solana', logo: 'https://assets.coingecko.com/coins/images/4128/large/solana.png' },
+      { symbol: 'usdc', name: 'USDC', logo: 'https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png' },
+      { symbol: 'xrp', name: 'XRP', logo: 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png' },
+      { symbol: 'doge', name: 'Dogecoin', logo: 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png' },
+      { symbol: 'ada', name: 'Cardano', logo: 'https://assets.coingecko.com/coins/images/975/large/cardano.png' },
+      { symbol: 'shib', name: 'Shiba Inu', logo: 'https://assets.coingecko.com/coins/images/11939/large/shiba.png' },
+      { symbol: 'avax', name: 'Avalanche', logo: 'https://assets.coingecko.com/coins/images/12559/large/Avalanche_Circle_RedWhite.png' },
+      { symbol: 'dot', name: 'Polkadot', logo: 'https://assets.coingecko.com/coins/images/12171/large/polkadot.png' },
+      { symbol: 'trx', name: 'TRON', logo: 'https://assets.coingecko.com/coins/images/1094/large/tron-logo.png' },
+      { symbol: 'link', name: 'Chainlink', logo: 'https://assets.coingecko.com/coins/images/877/large/chainlink-new-logo.png' },
+      { symbol: 'matic', name: 'Polygon', logo: 'https://assets.coingecko.com/coins/images/4713/large/matic-token-icon.png' },
+      { symbol: 'ltc', name: 'Litecoin', logo: 'https://assets.coingecko.com/coins/images/2/large/litecoin.png' }
+    ];
     
     res.status(200).json({ assets: availableAssets });
   } catch (err) {
-    console.error('Error fetching convert assets:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Error fetching convert assets:', err);
     res.status(500).json({ status: 'error', message: 'Failed to fetch available assets' });
   }
 });
 
-// =============================================
-// CONVERT ENDPOINT - Execute crypto conversion (buy/sell pattern) WITH FEE
-// =============================================
 app.post('/api/convert', protect, async (req, res) => {
   try {
     const { fromAsset, toAsset, amount } = req.body;
@@ -9391,14 +9154,11 @@ app.post('/api/convert', protect, async (req, res) => {
       }
     });
   } catch (err) {
-    console.error('Conversion error:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Conversion error:', err);
     res.status(500).json({ status: 'error', message: 'Conversion failed' });
   }
 });
 
-// =============================================
-// ADMIN APPROVE DEPOSIT ENDPOINT - FIXED VERSION (with asset balance update)
-// =============================================
 app.post('/api/admin/deposits/:id/approve', adminProtect, [
   body('notes').optional().trim()
 ], async (req, res) => {
@@ -9576,7 +9336,7 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       });
       if (process.env.NODE_ENV !== 'production') console.log(`📧 Deposit approval email sent to ${user.email}`);
     } catch (emailError) {
-      console.error('Failed to send deposit approval email:', emailError);
+      if (process.env.NODE_ENV !== 'production') console.error('Failed to send deposit approval email:', emailError);
     }
     
     await AccountRestrictions.checkAndUpdateRestrictions(user._id, 'transaction_completion');
@@ -9620,7 +9380,7 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       assetAmount: assetAmount
     });
   } catch (err) {
-    console.error('Admin approve deposit error:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Admin approve deposit error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to approve deposit',
@@ -9629,9 +9389,6 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
   }
 });
 
-// =============================================
-// ADMIN APPROVE WITHDRAWAL ENDPOINT - FIXED VERSION (with asset balance removal)
-// =============================================
 app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
   body('notes').optional().trim(),
   body('txid').optional().trim()
@@ -9781,7 +9538,7 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
       });
       if (process.env.NODE_ENV !== 'production') console.log(`📧 Withdrawal approval email sent to ${withdrawal.user.email}`);
     } catch (emailError) {
-      console.error('Failed to send withdrawal approval email:', emailError);
+      if (process.env.NODE_ENV !== 'production') console.error('Failed to send withdrawal approval email:', emailError);
     }
     
     await AccountRestrictions.checkAndUpdateRestrictions(withdrawal.user._id, 'transaction_completion');
@@ -9836,7 +9593,7 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
       assetAmount: withdrawal.assetAmount
     });
   } catch (err) {
-    console.error('Admin approve withdrawal error:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Admin approve withdrawal error:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to approve withdrawal',
@@ -9845,9 +9602,6 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
   }
 });
 
-// =============================================
-// GET USER ASSETS BALANCES ENDPOINT
-// =============================================
 app.get('/api/users/assets', protect, async (req, res) => {
   try {
     const userId = req.user._id;
@@ -9889,37 +9643,30 @@ app.get('/api/users/assets', protect, async (req, res) => {
     
     res.status(200).json(assetData);
   } catch (err) {
-    console.error('Error fetching user assets:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Error fetching user assets:', err);
     res.status(500).json({ status: 'error', message: 'Failed to fetch assets' });
   }
 });
 
 let lastPrices = {};
-let isRecalculating = false;
 let priceUpdateInterval = null;
+let isRecalculating = false;
 
-const startRealTimePriceUpdates = (io) => {
+const startRealTimePriceUpdates = async (io) => {
   if (priceUpdateInterval) clearInterval(priceUpdateInterval);
   
   priceUpdateInterval = setInterval(async () => {
     try {
-      const cryptos = await fetchBinanceSupportedCryptos();
+      const assets = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'ADA', 'SHIB', 'AVAX', 'DOT', 'TRX', 'LINK', 'MATIC', 'LTC'];
       const priceUpdates = {};
       
-      const pricePromises = cryptos.map(async (crypto) => {
-        try {
-          const response = await axios.get(
-            `https://api.binance.com/api/v3/ticker/price?symbol=${crypto.symbol.toUpperCase()}USDT`,
-            { timeout: 5000 }
-          );
-          if (response.data && response.data.price) {
-            priceUpdates[crypto.symbol] = {
-              price: parseFloat(response.data.price),
-              timestamp: Date.now()
-            };
-          }
-        } catch (err) {
-          if (process.env.NODE_ENV !== 'production') console.log(`Could not fetch price for ${crypto.symbol}`);
+      const pricePromises = assets.map(async (asset) => {
+        const price = await getCryptoPrice(asset);
+        if (price) {
+          priceUpdates[asset.toLowerCase()] = {
+            price: price,
+            timestamp: Date.now()
+          };
         }
       });
       
@@ -9979,7 +9726,7 @@ const recalculateAllWalletValuesRealtime = async (io, currentPrices) => {
       if (userAssets && userAssets.balances) {
         for (const [assetSymbol, balance] of Object.entries(userAssets.balances)) {
           if (balance > 0) {
-            const priceData = currentPrices[assetSymbol];
+            const priceData = currentPrices[assetSymbol.toLowerCase()];
             const price = priceData ? priceData.price : await getCryptoPrice(assetSymbol.toUpperCase());
             if (price && price > 0) {
               totalMainValue += balance * price;
@@ -9991,7 +9738,7 @@ const recalculateAllWalletValuesRealtime = async (io, currentPrices) => {
       const maturedInvestments = maturedByUser.get(user._id.toString()) || [];
       for (const investment of maturedInvestments) {
         if (investment.asset && investment.assetAmount) {
-          const priceData = currentPrices[investment.asset];
+          const priceData = currentPrices[investment.asset.toLowerCase()];
           const currentPrice = priceData ? priceData.price : await getCryptoPrice(investment.asset.toUpperCase());
           if (currentPrice && currentPrice > 0) {
             totalMaturedValue += investment.assetAmount * currentPrice;
@@ -10042,7 +9789,7 @@ const recalculateAllWalletValuesRealtime = async (io, currentPrices) => {
     }
     
   } catch (err) {
-    console.error('Error in real-time wallet recalculation:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Error in real-time wallet recalculation:', err);
   } finally {
     isRecalculating = false;
   }
@@ -10076,9 +9823,9 @@ app.get('/api/withdrawals/asset', protect, async (req, res) => {
                 let usdValue = 0;
                 let currentPrice = 0;
                 try {
-                    const price = await getCryptoPrice(symbol);
-                    if (price) {
-                        currentPrice = price;
+                    const assetPrice = await AssetPrice.findOne({ symbol: symbol });
+                    if (assetPrice) {
+                        currentPrice = assetPrice.currentPrice;
                         usdValue = amount * currentPrice;
                     }
                 } catch (err) {
@@ -10104,7 +9851,7 @@ app.get('/api/withdrawals/asset', protect, async (req, res) => {
         });
 
     } catch (err) {
-        console.error('Error fetching assets:', err);
+        if (process.env.NODE_ENV !== 'production') console.error('Error fetching assets:', err);
         return res.status(500).json({
             status: 'error',
             message: 'Failed to fetch assets'
@@ -10145,17 +9892,13 @@ app.post('/api/withdrawals/confirm-gas-payment', protect, async (req, res) => {
         });
 
     } catch (err) {
-        console.error('Error confirming gas payment:', err);
+        if (process.env.NODE_ENV !== 'production') console.error('Error confirming gas payment:', err);
         return res.status(500).json({
             status: 'error',
             message: err.message || 'Failed to confirm gas payment'
         });
     }
 });
-
-// =============================================
-// MARKET DATA ENDPOINT - Prices by Market Cap
-// =============================================
 
 let marketDataCache = {
   data: null,
@@ -10164,55 +9907,51 @@ let marketDataCache = {
 
 async function fetchMarketData() {
   try {
-    const cryptos = await fetchBinanceSupportedCryptos();
-    
-    const enrichedCryptos = await Promise.all(cryptos.slice(0, 50).map(async (crypto) => {
-      let currentPrice = null;
-      let priceChangePercentage24h = null;
-      let marketCap = null;
-      let totalVolume = null;
-      
-      try {
-        const response = await axios.get(
-          `https://api.binance.com/api/v3/ticker/24hr?symbol=${crypto.symbol.toUpperCase()}USDT`,
-          { timeout: 5000 }
-        );
-        if (response.data) {
-          currentPrice = parseFloat(response.data.lastPrice);
-          priceChangePercentage24h = parseFloat(response.data.priceChangePercent);
-          totalVolume = parseFloat(response.data.quoteVolume);
-        }
-      } catch (err) {
-        if (process.env.NODE_ENV !== 'production') console.log(`Could not fetch 24hr data for ${crypto.symbol}`);
+    const response = await axios.get(
+      'https://api.coingecko.com/api/v3/coins/markets',
+      {
+        params: {
+          vs_currency: 'usd',
+          order: 'market_cap_desc',
+          per_page: 50,
+          page: 1,
+          sparkline: true,
+          price_change_percentage: '1h,24h,7d'
+        },
+        timeout: 10000
       }
-      
-      return {
-        id: crypto.symbol,
-        symbol: crypto.symbol,
-        name: crypto.name,
-        image: crypto.logoUrl,
-        current_price: currentPrice,
-        market_cap: marketCap,
-        market_cap_rank: 0,
-        total_volume: totalVolume,
-        price_change_percentage_24h: priceChangePercentage24h || 0,
-        price_change_percentage_1h_in_currency: 0,
-        price_change_percentage_7d_in_currency: 0,
-        sparkline_in_7d: {
-          price: []
-        }
-      };
-    }));
+    );
 
-    marketDataCache = {
-      data: enrichedCryptos,
-      lastUpdated: new Date()
-    };
+    if (response.data) {
+      const transformed = response.data.map(coin => ({
+        id: coin.id,
+        symbol: coin.symbol,
+        name: coin.name,
+        image: coin.image,
+        current_price: coin.current_price,
+        market_cap: coin.market_cap,
+        market_cap_rank: coin.market_cap_rank,
+        total_volume: coin.total_volume,
+        price_change_percentage_24h: coin.price_change_percentage_24h || 0,
+        price_change_percentage_1h_in_currency: coin.price_change_percentage_1h_in_currency || 0,
+        price_change_percentage_7d_in_currency: coin.price_change_percentage_7d_in_currency || 0,
+        sparkline_in_7d: {
+          price: coin.sparkline_in_7d?.price || []
+        }
+      }));
+
+      marketDataCache = {
+        data: transformed,
+        lastUpdated: new Date()
+      };
+      
+      return transformed;
+    }
     
-    return enrichedCryptos;
+    return marketDataCache.data || [];
     
   } catch (error) {
-    console.error('Market data fetch error:', error);
+    if (process.env.NODE_ENV !== 'production') console.error('Market data fetch error:', error);
     return marketDataCache.data || [];
   }
 }
@@ -10232,7 +9971,7 @@ app.get('/api/market/assets', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Market assets error:', error);
+    if (process.env.NODE_ENV !== 'production') console.error('Market assets error:', error);
     res.json({
       status: 'error',
       data: []
@@ -10386,7 +10125,7 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
         `
       });
     } catch (emailErr) {
-      console.error('Failed to send email notification:', emailErr);
+      if (process.env.NODE_ENV !== 'production') console.error('Failed to send email notification:', emailErr);
     }
     
     const io = req.app.get('io');
@@ -10415,7 +10154,7 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
     });
     
   } catch (err) {
-    console.error('Error adding crypto balance:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Error adding crypto balance:', err);
     res.status(500).json({
       status: 'error',
       message: err.message || 'Failed to add crypto balance'
@@ -10425,38 +10164,34 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
 
 app.get('/api/admin/supported-cryptos', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
   try {
-    const cryptos = await fetchBinanceSupportedCryptos();
+    const marketPairs = await MarketPair.find({ status: 'active' }).select('symbol baseAsset logo');
     
-    const cryptosWithBalances = await Promise.all(cryptos.map(async (crypto) => {
+    const cryptos = [];
+    for (const pair of marketPairs) {
       const totalBalance = await UserAssetBalance.aggregate([
-        { $group: { _id: null, total: { $sum: `$balances.${crypto.symbol}` } } }
+        { $group: { _id: null, total: { $sum: `$balances.${pair.baseAsset.toLowerCase()}` } } }
       ]);
       
-      return {
-        code: crypto.symbol.toUpperCase(),
-        name: crypto.name,
-        logoUrl: crypto.logoUrl,
+      cryptos.push({
+        code: pair.baseAsset.toUpperCase(),
+        name: pair.baseAsset.toUpperCase(),
+        logoUrl: pair.logo || `https://cryptologos.cc/logos/${pair.baseAsset.toLowerCase()}-${pair.baseAsset.toLowerCase()}-logo.png`,
         balance: totalBalance[0]?.total || 0
-      };
-    }));
+      });
+    }
     
     res.json({
       status: 'success',
-      data: { cryptos: cryptosWithBalances }
+      data: { cryptos }
     });
   } catch (err) {
-    console.error('Error fetching supported cryptos:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Error fetching supported cryptos:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch supported cryptocurrencies'
     });
   }
 });
-
-
-
-
-
 
 
 
@@ -21719,13 +21454,8 @@ function maskCardNumber(cardNumber) {
 
 
 
-
-
-
-
-// Error handling middleware
 app.use((err, req, res, next) => {
-  console.error('Global error handler:', err);
+  if (process.env.NODE_ENV !== 'production') console.error('Global error handler:', err);
   res.status(500).json({
     status: 'error',
     message: 'Something went wrong on the server'
@@ -21751,10 +21481,6 @@ const io = new Server(httpServer, {
 });
 
 app.set('io', io);
-
-// =============================================
-// REAL-TIME STATS WITH REDIS SINGLE SOURCE OF TRUTH
-// =============================================
 
 const REDIS_INVESTOR_KEY = process.env.REDIS_INVESTOR_KEY || 'cloud_miner_count';
 const INITIAL_INVESTOR_COUNT = parseInt(process.env.INITIAL_INVESTOR_COUNT) || 5104329;
@@ -21785,7 +21511,7 @@ const initializeInvestorCount = async () => {
     
     return currentCount;
   } catch (err) {
-    console.error('Error initializing investor count:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Error initializing investor count:', err);
     return INITIAL_INVESTOR_COUNT;
   }
 };
@@ -21807,7 +21533,7 @@ const checkAndResetDailyGrowth = async () => {
     
     return dailyGrowth;
   } catch (err) {
-    console.error('Error checking daily growth:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Error checking daily growth:', err);
     return 0;
   }
 };
@@ -21844,7 +21570,7 @@ const addInvestors = async () => {
     
     return { newCount, increment: actualIncrement };
   } catch (err) {
-    console.error('Error adding investors:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Error adding investors:', err);
     return false;
   }
 };
@@ -21863,7 +21589,7 @@ const broadcastStats = async () => {
     
     if (process.env.NODE_ENV !== 'production') console.log(`📡 Broadcasted stats to ${io.engine.clientsCount} clients: ${count.toLocaleString()} investors`);
   } catch (err) {
-    console.error('Error broadcasting stats:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Error broadcasting stats:', err);
   }
 };
 
@@ -21877,7 +21603,7 @@ const getCurrentStats = async () => {
       timestamp: Date.now()
     };
   } catch (err) {
-    console.error('Error getting current stats:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Error getting current stats:', err);
     return {
       totalInvestors: INITIAL_INVESTOR_COUNT,
       timestamp: Date.now()
@@ -21903,7 +21629,7 @@ const startInvestorGrowthJob = async () => {
         
         scheduleNextGrowth();
       } catch (err) {
-        console.error('Error in growth job:', err);
+        if (process.env.NODE_ENV !== 'production') console.error('Error in growth job:', err);
         scheduleNextGrowth();
       }
     }, interval);
@@ -21929,7 +21655,7 @@ app.get('/api/stats/investors', async (req, res) => {
       data: stats
     });
   } catch (err) {
-    console.error('Error fetching investor stats:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Error fetching investor stats:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch investor stats'
@@ -21954,7 +21680,7 @@ app.get('/api/stats/daily-progress', async (req, res) => {
       }
     });
   } catch (err) {
-    console.error('Error fetching daily progress:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Error fetching daily progress:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch daily progress'
@@ -21973,28 +21699,25 @@ const setupMarketWebSocket = (server) => {
 
   const broadcastPrices = async () => {
     try {
-      const cryptos = await fetchBinanceSupportedCryptos();
-      const updates = [];
-      
-      for (const crypto of cryptos.slice(0, 50)) {
-        try {
-          const response = await axios.get(
-            `https://api.binance.com/api/v3/ticker/24hr?symbol=${crypto.symbol.toUpperCase()}USDT`,
-            { timeout: 5000 }
-          );
-          if (response.data) {
-            updates.push({
-              assetId: crypto.symbol,
-              price: parseFloat(response.data.lastPrice),
-              price_change_percentage_24h: parseFloat(response.data.priceChangePercent) || 0
-            });
-          }
-        } catch (err) {
-          if (process.env.NODE_ENV !== 'production') console.log(`Could not fetch price for ${crypto.symbol}`);
+      const response = await axios.get(
+        'https://api.coingecko.com/api/v3/coins/markets',
+        {
+          params: {
+            vs_currency: 'usd',
+            per_page: 50,
+            price_change_percentage: '24h'
+          },
+          timeout: 5000
         }
-      }
+      );
 
-      if (updates.length > 0 && clients.size > 0) {
+      if (response.data && clients.size > 0) {
+        const updates = response.data.map(coin => ({
+          assetId: coin.id,
+          price: coin.current_price,
+          price_change_percentage_24h: coin.price_change_percentage_24h || 0
+        }));
+
         const message = JSON.stringify({
           type: 'batch_update',
           updates: updates,
@@ -22008,7 +21731,7 @@ const setupMarketWebSocket = (server) => {
         });
       }
     } catch (error) {
-      console.error('WebSocket price broadcast error:', error);
+      if (process.env.NODE_ENV !== 'production') console.error('WebSocket price broadcast error:', error);
     }
   };
 
@@ -22048,8 +21771,6 @@ const setupMarketWebSocket = (server) => {
       }
     });
   });
-  
-  return marketWss;
 };
 
 io.on('connection', async (socket) => {
@@ -22118,7 +21839,7 @@ io.on('connection', async (socket) => {
         }
       }
     } catch (err) {
-      console.error('Socket auth error:', err);
+      if (process.env.NODE_ENV !== 'production') console.error('Socket auth error:', err);
     }
   }
   
@@ -22161,7 +21882,7 @@ io.on('connection', async (socket) => {
             const currentPrice = await getCryptoPrice(asset.toUpperCase());
             if (currentPrice) {
               totalMainValue += balance * currentPrice;
-              const change24h = lastPrices[asset]?.priceChangePercent || 0;
+              const change24h = currentPrices[asset]?.usd_24h_change || 0;
               const previousPrice = currentPrice / (1 + change24h / 100);
               previousDayValue += balance * previousPrice;
             }
@@ -22241,11 +21962,11 @@ const processMaturedInvestments = async () => {
 
         if (process.env.NODE_ENV !== 'production') console.log(`Automatically completed investment ${investment._id} for user ${user.email}`);
       } catch (err) {
-        console.error(`Error processing investment ${investment._id}:`, err);
+        if (process.env.NODE_ENV !== 'production') console.error(`Error processing investment ${investment._id}:`, err);
       }
     }
   } catch (err) {
-    console.error('Error processing matured investments:', err);
+    if (process.env.NODE_ENV !== 'production') console.error('Error processing matured investments:', err);
   }
 };
 
@@ -22276,9 +21997,6 @@ const setupAllWebSockets = (server) => {
 
 process.on('SIGTERM', gracefulShutdown);
 process.on('SIGINT', gracefulShutdown);
-
-const marketWss = setupMarketWebSocket(httpServer);
-app.set('marketWss', marketWss);
 
 httpServer.listen(PORT, () => {
   if (process.env.NODE_ENV !== 'production') console.log(`Server running on port ${PORT}`);
