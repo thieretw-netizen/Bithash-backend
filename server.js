@@ -12862,59 +12862,6 @@ app.delete('/api/users/api-keys/:id', protect, async (req, res) => {
 
 
 
-
-
-// Add this to your server.js in the User Endpoints section
-app.get('/api/users/balances', protect, async (req, res) => {
-  try {
-    // Get current BTC price
-    let btcPrice = 50000; // Default value
-    try {
-      const response = await axios.get('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd');
-      btcPrice = response.data.bitcoin.usd;
-    } catch (err) {
-      console.error('Failed to fetch BTC price:', err);
-    }
-
-    const user = await User.findById(req.user.id).select('balances');
-    if (!user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found'
-      });
-    }
-
-    res.status(200).json({
-      status: 'success',
-      data: {
-        balances: user.balances,
-        btcPrice,
-        btcValues: {
-          main: user.balances.main / btcPrice,
-          active: user.balances.active / btcPrice,
-          matured: user.balances.matured / btcPrice,
-          savings: user.balances.savings / btcPrice,
-          loan: user.balances.loan / btcPrice
-        }
-      }
-    });
-  } catch (err) {
-    console.error('Get user balances error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'An error occurred while fetching user balances'
-    });
-  }
-});
-
-
-
-
-
-
-
-
-
 // Admin Authentication
 app.get('/api/admin/auth/verify', async (req, res) => {
   try {
@@ -14044,71 +13991,6 @@ app.get('/api/loans/limit', protect, async (req, res) => {
 
 
 
-// Get user balances
-app.get('/api/users/balances', protect, async (req, res) => {
-  try {
-    // Get current BTC price (using default if API fails)
-    let btcPrice = 50000; // Default value
-    try {
-      const response = await axios.get('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd');
-      btcPrice = response.data.bitcoin.usd;
-    } catch (err) {
-      console.error('Failed to fetch BTC price:', err);
-    }
-
-    // Find user and ensure balances exist
-    const user = await User.findById(req.user.id);
-    if (!user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found'
-      });
-    }
-
-    // Initialize balances if they don't exist
-    if (!user.balances) {
-      user.balances = {
-        main: 0,
-        active: 0,
-        matured: 0,
-        savings: 0,
-        loan: 0
-      };
-      await user.save();
-    }
-
-    // Prepare response
-    const responseData = {
-      balances: {
-        main: user.balances.main,
-        active: user.balances.active,
-        matured: user.balances.matured,
-        savings: user.balances.savings,
-        loan: user.balances.loan
-      },
-      btcPrice,
-      btcValues: {
-        main: user.balances.main / btcPrice,
-        active: user.balances.active / btcPrice,
-        matured: user.balances.matured / btcPrice,
-        savings: user.balances.savings / btcPrice,
-        loan: user.balances.loan / btcPrice
-      }
-    };
-
-    res.status(200).json({
-      status: 'success',
-      data: responseData
-    });
-
-  } catch (err) {
-    console.error('Error fetching user balances:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch user balances'
-    });
-  }
-});
 
 
 
@@ -21851,32 +21733,6 @@ app.post('/api/users/preferences', protect, async (req, res) => {
   }
 });
 
-// Get user balances
-app.get('/api/users/balances', protect, async (req, res) => {
-  try {
-    // Get main user data with balances
-    const user = await User.findById(req.user._id).select('balances');
-
-    // Get asset balances if they exist
-    const assetBalances = await UserAssetBalance.findOne({ user: req.user._id });
-
-    res.status(200).json({
-      status: 'success',
-      data: {
-        balances: user.balances || { main: 0, active: 0, matured: 0, savings: 0, loan: 0 },
-        assetBalances: assetBalances?.balances || {}
-      }
-    });
-
-  } catch (error) {
-    console.error('Error in /api/users/balances:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch balances',
-      error: error.message
-    });
-  }
-});
 
 // Get current user data
 app.get('/api/users/me', protect, async (req, res) => {
