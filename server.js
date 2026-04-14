@@ -1374,10 +1374,6 @@ const Plan = mongoose.model('Plan', PlanSchema);
 
 
 
-
-
-
-
 const UserAssetBalanceSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
@@ -1441,10 +1437,8 @@ const UserAssetBalanceSchema = new mongoose.Schema({
   }],
   lastUpdated: { type: Date, default: Date.now }
 }, { timestamps: true });
-
-// THIS WAS MISSING - Register the model
-const UserAssetBalance = mongoose.model('UserAssetBalance', UserAssetBalanceSchema);
-
+UserAssetBalanceSchema.index({ user: 1 });
+UserAssetBalanceSchema.index({ 'history.timestamp': -1 });
 
 
 
