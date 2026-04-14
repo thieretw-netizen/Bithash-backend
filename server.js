@@ -22451,6 +22451,18 @@ const processMaturedInvestments = async () => {
   }
 };
 
+
+// Real-time price update function
+let priceUpdateInterval = null;
+let lastPrices = {};
+let isRecalculating = false;
+
+const startRealTimePriceUpdates = async (io) => {
+  if (priceUpdateInterval) {
+    clearInterval(priceUpdateInterval);
+  }
+
+
 setInterval(processMaturedInvestments, 60 * 60 * 1000);
 
 processMaturedInvestments();
