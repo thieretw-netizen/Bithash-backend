@@ -1426,6 +1426,7 @@ UserAssetBalanceSchema.index({ 'history.timestamp': -1 });
 
 
 
+
 const UserPreferenceSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
@@ -10382,86 +10383,6 @@ fetchMarketData();
 
 
 
-
-
-
-
-
-
-
-// GET /api/admin/supported-cryptos
-app.get('/api/admin/supported-cryptos', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
-  try {
-    // Comprehensive list of supported cryptos with proper logos (CoinGecko CDN for better reliability)
-    const supportedCryptos = [
-      { code: 'BTC', name: 'Bitcoin', logoUrl: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png', symbol: '₿' },
-      { code: 'ETH', name: 'Ethereum', logoUrl: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png', symbol: 'Ξ' },
-      { code: 'USDT', name: 'Tether', logoUrl: 'https://assets.coingecko.com/coins/images/325/large/Tether.png', symbol: '₮' },
-      { code: 'BNB', name: 'Binance Coin', logoUrl: 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png', symbol: 'BNB' },
-      { code: 'SOL', name: 'Solana', logoUrl: 'https://assets.coingecko.com/coins/images/4128/large/solana.png', symbol: '◎' },
-      { code: 'USDC', name: 'USD Coin', logoUrl: 'https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png', symbol: 'USDC' },
-      { code: 'XRP', name: 'Ripple', logoUrl: 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png', symbol: 'XRP' },
-      { code: 'DOGE', name: 'Dogecoin', logoUrl: 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png', symbol: 'Ð' },
-      { code: 'ADA', name: 'Cardano', logoUrl: 'https://assets.coingecko.com/coins/images/975/large/cardano.png', symbol: '₳' },
-      { code: 'SHIB', name: 'Shiba Inu', logoUrl: 'https://assets.coingecko.com/coins/images/11939/large/shiba.png', symbol: 'SHIB' },
-      { code: 'AVAX', name: 'Avalanche', logoUrl: 'https://assets.coingecko.com/coins/images/12559/large/Avalanche_Circle_RedWhite.png', symbol: 'AVAX' },
-      { code: 'DOT', name: 'Polkadot', logoUrl: 'https://assets.coingecko.com/coins/images/12171/large/polkadot.png', symbol: 'DOT' },
-      { code: 'TRX', name: 'TRON', logoUrl: 'https://assets.coingecko.com/coins/images/1094/large/tron-logo.png', symbol: 'TRX' },
-      { code: 'LINK', name: 'Chainlink', logoUrl: 'https://assets.coingecko.com/coins/images/877/large/chainlink-new-logo.png', symbol: 'LINK' },
-      { code: 'MATIC', name: 'Polygon', logoUrl: 'https://assets.coingecko.com/coins/images/4713/large/matic-token-icon.png', symbol: 'MATIC' },
-      { code: 'LTC', name: 'Litecoin', logoUrl: 'https://assets.coingecko.com/coins/images/2/large/litecoin.png', symbol: 'Ł' }
-    ];
-    
-    // Calculate total balance for each crypto across all users from UserAssetBalance
-    const userAssetBalances = await UserAssetBalance.find({});
-    const totalBalances = {};
-    
-    for (const userBalance of userAssetBalances) {
-      if (userBalance.balances) {
-        for (const [crypto, balance] of Object.entries(userBalance.balances)) {
-          if (balance && balance > 0) {
-            totalBalances[crypto.toUpperCase()] = (totalBalances[crypto.toUpperCase()] || 0) + balance;
-          }
-        }
-      }
-    }
-    
-    const cryptos = supportedCryptos.map(crypto => ({
-      code: crypto.code,
-      name: crypto.name,
-      logoUrl: crypto.logoUrl,
-      symbol: crypto.symbol,
-      balance: totalBalances[crypto.code] || 0
-    }));
-    
-    res.json({
-      status: 'success',
-      data: { cryptos }
-    });
-  } catch (err) {
-    console.error('Error fetching supported cryptos:', err);
-    // Fallback: return default crypto list with working logos
-    const defaultCryptos = [
-      { code: 'BTC', name: 'Bitcoin', logoUrl: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png', balance: 0 },
-      { code: 'ETH', name: 'Ethereum', logoUrl: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png', balance: 0 },
-      { code: 'USDT', name: 'Tether', logoUrl: 'https://assets.coingecko.com/coins/images/325/large/Tether.png', balance: 0 },
-      { code: 'BNB', name: 'Binance Coin', logoUrl: 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png', balance: 0 }
-    ];
-    res.json({
-      status: 'success',
-      data: { cryptos: defaultCryptos }
-    });
-  }
-});
-
-
-
-
-
-
-
-
-
 // GET /api/admin/supported-cryptos - Fetch all supported cryptos with user-specific balances
 app.get('/api/admin/supported-cryptos', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
   try {
@@ -10484,41 +10405,70 @@ app.get('/api/admin/supported-cryptos', adminProtect, restrictTo('super', 'finan
       { code: 'TRX', name: 'TRON', logoUrl: 'https://assets.coingecko.com/coins/images/1094/large/tron-logo.png', symbol: 'TRX' },
       { code: 'LINK', name: 'Chainlink', logoUrl: 'https://assets.coingecko.com/coins/images/877/large/chainlink-new-logo.png', symbol: 'LINK' },
       { code: 'MATIC', name: 'Polygon', logoUrl: 'https://assets.coingecko.com/coins/images/4713/large/matic-token-icon.png', symbol: 'MATIC' },
-      { code: 'LTC', name: 'Litecoin', logoUrl: 'https://assets.coingecko.com/coins/images/2/large/litecoin.png', symbol: 'Ł' }
+      { code: 'LTC', name: 'Litecoin', logoUrl: 'https://assets.coingecko.com/coins/images/2/large/litecoin.png', symbol: 'Ł' },
+      { code: 'WBTC', name: 'Wrapped Bitcoin', logoUrl: 'https://assets.coingecko.com/coins/images/7598/large/wrapped-bitcoin.png', symbol: 'WBTC' },
+      { code: 'NEAR', name: 'NEAR Protocol', logoUrl: 'https://assets.coingecko.com/coins/images/10365/large/near.jpg', symbol: 'NEAR' },
+      { code: 'UNI', name: 'Uniswap', logoUrl: 'https://assets.coingecko.com/coins/images/12504/large/uniswap-uni.png', symbol: 'UNI' },
+      { code: 'BCH', name: 'Bitcoin Cash', logoUrl: 'https://assets.coingecko.com/coins/images/780/large/bitcoin-cash-circle.png', symbol: 'BCH' },
+      { code: 'XLM', name: 'Stellar', logoUrl: 'https://assets.coingecko.com/coins/images/100/large/Stellar_symbol_black_RGB.png', symbol: 'XLM' },
+      { code: 'ATOM', name: 'Cosmos', logoUrl: 'https://assets.coingecko.com/coins/images/1481/large/cosmos_hub.png', symbol: 'ATOM' },
+      { code: 'XMR', name: 'Monero', logoUrl: 'https://assets.coingecko.com/coins/images/69/large/monero_logo.png', symbol: 'XMR' },
+      { code: 'VET', name: 'VeChain', logoUrl: 'https://assets.coingecko.com/coins/images/1167/large/VET.png', symbol: 'VET' },
+      { code: 'FIL', name: 'Filecoin', logoUrl: 'https://assets.coingecko.com/coins/images/12817/large/filecoin.png', symbol: 'FIL' },
+      { code: 'THETA', name: 'Theta Network', logoUrl: 'https://assets.coingecko.com/coins/images/2538/large/theta-token-logo.png', symbol: 'THETA' },
+      { code: 'HBAR', name: 'Hedera', logoUrl: 'https://assets.coingecko.com/coins/images/3688/large/hbar.png', symbol: 'HBAR' },
+      { code: 'FTM', name: 'Fantom', logoUrl: 'https://assets.coingecko.com/coins/images/4001/large/Fantom.png', symbol: 'FTM' },
+      { code: 'XTZ', name: 'Tezos', logoUrl: 'https://assets.coingecko.com/coins/images/976/large/Tezos-logo.png', symbol: 'XTZ' }
     ];
     
     // If userId is provided, fetch that user's specific balances for each crypto
     let userBalances = {};
-    if (userId) {
+    if (userId && mongoose.Types.ObjectId.isValid(userId)) {
       const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
       if (userAssetBalance && userAssetBalance.balances) {
+        // Helper to extract balances from Map
+        const extractMapBalances = (balanceMap) => {
+          const result = {};
+          if (balanceMap && typeof balanceMap === 'object') {
+            // Handle both Map objects and plain objects
+            if (balanceMap instanceof Map) {
+              for (const [crypto, balance] of balanceMap) {
+                result[crypto.toUpperCase()] = balance;
+              }
+            } else {
+              for (const [crypto, balance] of Object.entries(balanceMap)) {
+                result[crypto.toUpperCase()] = balance;
+              }
+            }
+          }
+          return result;
+        };
+        
         // Extract main wallet balances
-        if (userAssetBalance.balances.main && userAssetBalance.balances.main instanceof Map) {
-          for (const [crypto, balance] of userAssetBalance.balances.main) {
-            userBalances[crypto.toUpperCase()] = {
-              main: balance,
-              matured: 0,
-              active: 0
-            };
+        const mainBalances = extractMapBalances(userAssetBalance.balances.main);
+        for (const [crypto, balance] of Object.entries(mainBalances)) {
+          if (!userBalances[crypto]) {
+            userBalances[crypto] = { main: 0, matured: 0, active: 0 };
           }
+          userBalances[crypto].main = balance;
         }
+        
         // Extract matured wallet balances
-        if (userAssetBalance.balances.matured && userAssetBalance.balances.matured instanceof Map) {
-          for (const [crypto, balance] of userAssetBalance.balances.matured) {
-            if (!userBalances[crypto.toUpperCase()]) {
-              userBalances[crypto.toUpperCase()] = { main: 0, matured: 0, active: 0 };
-            }
-            userBalances[crypto.toUpperCase()].matured = balance;
+        const maturedBalances = extractMapBalances(userAssetBalance.balances.matured);
+        for (const [crypto, balance] of Object.entries(maturedBalances)) {
+          if (!userBalances[crypto]) {
+            userBalances[crypto] = { main: 0, matured: 0, active: 0 };
           }
+          userBalances[crypto].matured = balance;
         }
+        
         // Extract active wallet balances
-        if (userAssetBalance.balances.active && userAssetBalance.balances.active instanceof Map) {
-          for (const [crypto, balance] of userAssetBalance.balances.active) {
-            if (!userBalances[crypto.toUpperCase()]) {
-              userBalances[crypto.toUpperCase()] = { main: 0, matured: 0, active: 0 };
-            }
-            userBalances[crypto.toUpperCase()].active = balance;
+        const activeBalances = extractMapBalances(userAssetBalance.balances.active);
+        for (const [crypto, balance] of Object.entries(activeBalances)) {
+          if (!userBalances[crypto]) {
+            userBalances[crypto] = { main: 0, matured: 0, active: 0 };
           }
+          userBalances[crypto].active = balance;
         }
       }
     }
@@ -10562,9 +10512,6 @@ app.get('/api/admin/supported-cryptos', adminProtect, restrictTo('super', 'finan
 
 
 
-
-
-
 // POST /api/admin/users/:userId/crypto-balance - Add crypto to specific wallet with email
 app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
   try {
@@ -10587,7 +10534,15 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
       });
     }
     
-    const user = await User.findById(userId).select('+email +firstName +lastName +balances');
+    // Validate userId
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid user ID'
+      });
+    }
+    
+    const user = await User.findById(userId).select('+email +firstName +lastName');
     if (!user) {
       return res.status(404).json({
         status: 'fail',
@@ -10610,15 +10565,25 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
     
     // Get crypto logo URL
     const getCryptoLogoUrl = async (cryptoCode) => {
-      try {
-        const response = await axios.get(`https://api.coingecko.com/api/v3/coins/${cryptoCode.toLowerCase()}`, { timeout: 3000 });
-        if (response.data && response.data.image && response.data.image.large) {
-          return response.data.image.large;
-        }
-      } catch (err) {
-        // Fall through
-      }
-      return `https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/icon/${cryptoCode.toLowerCase()}.png`;
+      const logoMap = {
+        'BTC': 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png',
+        'ETH': 'https://assets.coingecko.com/coins/images/279/large/ethereum.png',
+        'USDT': 'https://assets.coingecko.com/coins/images/325/large/Tether.png',
+        'BNB': 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png',
+        'SOL': 'https://assets.coingecko.com/coins/images/4128/large/solana.png',
+        'USDC': 'https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png',
+        'XRP': 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png',
+        'DOGE': 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png',
+        'ADA': 'https://assets.coingecko.com/coins/images/975/large/cardano.png',
+        'SHIB': 'https://assets.coingecko.com/coins/images/11939/large/shiba.png',
+        'AVAX': 'https://assets.coingecko.com/coins/images/12559/large/Avalanche_Circle_RedWhite.png',
+        'DOT': 'https://assets.coingecko.com/coins/images/12171/large/polkadot.png',
+        'TRX': 'https://assets.coingecko.com/coins/images/1094/large/tron-logo.png',
+        'LINK': 'https://assets.coingecko.com/coins/images/877/large/chainlink-new-logo.png',
+        'MATIC': 'https://assets.coingecko.com/coins/images/4713/large/matic-token-icon.png',
+        'LTC': 'https://assets.coingecko.com/coins/images/2/large/litecoin.png'
+      };
+      return logoMap[cryptoCode.toUpperCase()] || `https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/icon/${cryptoCode.toLowerCase()}.png`;
     };
     
     const cryptoLogoUrl = await getCryptoLogoUrl(currencyCode);
@@ -10657,10 +10622,10 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
     userAssetBalance.balances[walletType].set(currencyLower, newBalance);
     userAssetBalance.lastUpdated = new Date();
     
-    // Add to history with all required fields
+    // Add to history with all required fields (FIXED: walletType is now properly set)
     userAssetBalance.history.push({
       asset: currencyCode,
-      walletType: walletType,
+      walletType: walletType,  // ✅ Now properly set
       type: 'admin_add',
       amount: amount,
       balance: newBalance,
@@ -10736,6 +10701,7 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
     const walletTypeDisplay = walletType === 'main' ? 'Main Wallet' : 'Matured Wallet';
     const walletColor = walletType === 'main' ? '#F7A600' : '#D4AF37';
     
+    // Use sendProfessionalEmail function (ensure it's defined in your server.js)
     await sendProfessionalEmail({
       email: user.email,
       template: 'crypto_deposit',
@@ -10819,6 +10785,17 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
     });
   }
 });
+
+
+
+
+
+
+
+
+
+
+
 
 
 
