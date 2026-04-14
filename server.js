@@ -21092,9 +21092,7 @@ function maskCardNumber(cardNumber) {
 
 
 
-    
-
-// SNIPPET C - COMPLETE REWRITE
+  // SNIPPET C - COMPLETE REWRITE
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -21420,6 +21418,8 @@ const setupMarketWebSocket = (server) => {
       }
     });
   });
+  
+  return marketWss;
 };
 
 io.on('connection', async (socket) => {
