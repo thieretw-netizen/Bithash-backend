@@ -9440,11 +9440,12 @@ app.get('/api/users/assets', protect, async (req, res) => {
 
 
 
+// UPDATE PRICES EVERY 1 SECOND FOR TRUE REAL-TIME
+const startRealTimePriceUpdates = (io) => {
+  let priceUpdateInterval;
+  let lastPrices = {};
+  let isRecalculating = false;
 
-
-  
-  
-  // UPDATE PRICES EVERY 1 SECOND FOR TRUE REAL-TIME
   priceUpdateInterval = setInterval(async () => {
     try {
       const assets = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'ADA', 'SHIB', 'AVAX', 'DOT', 'TRX', 'LINK', 'MATIC', 'LTC'];
@@ -9468,19 +9469,19 @@ app.get('/api/users/assets', protect, async (req, res) => {
         io.emit('price_update', priceUpdates);
         lastPrices = priceUpdates;
 
-  // ADD THIS LINE - Broadcast to WebSocket clients as well
-  const marketWss = req?.app?.get('marketWss');
-  if (marketWss) {
-    marketWss.clients.forEach(client => {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(JSON.stringify({ type: 'price_update', data: priceUpdates }));
+        // Broadcast to WebSocket clients as well
+        const marketWss = io?.sockets?.server?.marketWss;
+        if (marketWss) {
+          marketWss.clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN) {
+              client.send(JSON.stringify({ type: 'price_update', data: priceUpdates }));
+            }
+          });
+        }
       }
-    });
-  }
-}
-        
-        // IMMEDIATELY recalculate ALL user wallet values based on new prices
-        await recalculateAllWalletValuesRealtime(io, priceUpdates);
+      
+      // IMMEDIATELY recalculate ALL user wallet values based on new prices
+      await recalculateAllWalletValuesRealtime(io, priceUpdates);
       
     } catch (err) {
       console.error('Error in price update interval:', err);
@@ -9488,6 +9489,8 @@ app.get('/api/users/assets', protect, async (req, res) => {
   }, 1000); // EVERY SECOND
 };
 
+  
+  
 // NEW FUNCTION: Recalculate wallet values in real-time based on current crypto prices
 const recalculateAllWalletValuesRealtime = async (io, currentPrices) => {
   if (isRecalculating) return;
