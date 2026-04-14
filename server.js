@@ -9647,6 +9647,13 @@ app.get('/api/users/assets', protect, async (req, res) => {
   
   
   // UPDATE PRICES EVERY 1 SECOND FOR TRUE REAL-TIME
+let priceUpdateInterval;
+let lastPrices = {};
+let isRecalculating = false;
+
+const startRealTimePriceUpdates = (io) => {
+  if (priceUpdateInterval) clearInterval(priceUpdateInterval);
+  
   priceUpdateInterval = setInterval(async () => {
     try {
       const assets = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'ADA', 'SHIB', 'AVAX', 'DOT', 'TRX', 'LINK', 'MATIC', 'LTC'];
@@ -9668,24 +9675,23 @@ app.get('/api/users/assets', protect, async (req, res) => {
         io.emit('price_update', priceUpdates);
         lastPrices = priceUpdates;
 
-  const marketWss = req?.app?.get('marketWss');
-  if (marketWss) {
-    marketWss.clients.forEach(client => {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(JSON.stringify({ type: 'price_update', data: priceUpdates }));
+        const marketWss = io?.sockets?.server?.marketWss;
+        if (marketWss) {
+          marketWss.clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN) {
+              client.send(JSON.stringify({ type: 'price_update', data: priceUpdates }));
+            }
+          });
+        }
       }
-    });
-  }
-}
-        
-        await recalculateAllWalletValuesRealtime(io, priceUpdates);
+      
+      await recalculateAllWalletValuesRealtime(io, priceUpdates);
       
     } catch (err) {
       if (process.env.NODE_ENV !== 'production') console.error('Error in price update interval:', err);
     }
   }, 1000);
 };
-
 const recalculateAllWalletValuesRealtime = async (io, currentPrices) => {
   if (isRecalculating) return;
   isRecalculating = true;
