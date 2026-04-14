@@ -7672,33 +7672,7 @@ const logUserActivity = async (req, action, status = 'success', metadata = {}, r
   }
 };
 
-const getDeviceType = (req) => {
-  const userAgent = req.headers['user-agent'];
-  if (/mobile/i.test(userAgent)) return 'mobile';
-  if (/tablet/i.test(userAgent)) return 'tablet';
-  if (/iPad|Android|Touch/i.test(userAgent)) return 'tablet';
-  return 'desktop';
-};
 
-const getOSFromUserAgent = (userAgent) => {
-  if (!userAgent) return 'Unknown';
-  if (/windows/i.test(userAgent)) return 'Windows';
-  if (/macintosh|mac os x/i.test(userAgent)) return 'MacOS';
-  if (/linux/i.test(userAgent)) return 'Linux';
-  if (/android/i.test(userAgent)) return 'Android';
-  if (/iphone|ipad|ipod/i.test(userAgent)) return 'iOS';
-  return 'Unknown';
-};
-
-const getBrowserFromUserAgent = (userAgent) => {
-  if (!userAgent) return 'Unknown';
-  if (/edg/i.test(userAgent)) return 'Edge';
-  if (/chrome/i.test(userAgent)) return 'Chrome';
-  if (/safari/i.test(userAgent)) return 'Safari';
-  if (/firefox/i.test(userAgent)) return 'Firefox';
-  if (/opera|opr/i.test(userAgent)) return 'Opera';
-  return 'Unknown';
-};
 
 const trackUserActivity = (action, options = {}) => {
   return async (req, res, next) => {
