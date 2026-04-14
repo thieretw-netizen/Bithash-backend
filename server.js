@@ -21507,8 +21507,6 @@ function maskCardNumber(cardNumber) {
 
 
 
-
-
 // =============================================
 // GET USER BALANCES - REAL TIME CRYPTO HOLDINGS WITH PNL
 // =============================================
@@ -21533,14 +21531,11 @@ app.get('/api/users/balances', protect, async (req, res) => {
       'btc': 'BTC', 'eth': 'ETH', 'usdt': 'USDT', 'bnb': 'BNB', 'sol': 'SOL',
       'usdc': 'USDC', 'xrp': 'XRP', 'doge': 'DOGE', 'ada': 'ADA', 'shib': 'SHIB',
       'avax': 'AVAX', 'dot': 'DOT', 'trx': 'TRX', 'link': 'LINK', 'matic': 'MATIC',
-      'wbtc': 'WBTC', 'ltc': 'LTC', 'near': 'NEAR', 'uni': 'UNI', 'bch': 'BCH',
-      'xlm': 'XLM', 'atom': 'ATOM', 'xmr': 'XMR', 'flow': 'FLOW', 'vet': 'VET',
-      'fil': 'FIL', 'theta': 'THETA', 'hbar': 'HBAR', 'ftm': 'FTM', 'xtz': 'XTZ'
+      'wbtc': 'WBTC', 'ltc': 'LTC', 'near': 'NEAR', 'uni': 'UNI', 'bch': 'BCH'
     };
     
     // Calculate total main balance from crypto holdings with real-time prices
     let totalMainUSD = 0;
-    const assetPrices = {};
     
     for (const [asset, balance] of Object.entries(userAssetBalance.balances || {})) {
       if (balance > 0 && balance !== 0) {
@@ -21554,62 +21549,52 @@ app.get('/api/users/balances', protect, async (req, res) => {
           const parsed = JSON.parse(cachedPrice);
           priceUSD = parsed.price;
         } else {
-          // Fallback to direct API call
+          // Fallback to Binance API
           try {
             const response = await axios.get(
               `https://api.binance.com/api/v3/ticker/price?symbol=${upperAsset}USDT`,
               { timeout: 3000 }
             );
             priceUSD = parseFloat(response.data.price);
-            // Cache for future requests
-            await redis.set(REDIS_KEYS.LAST_PRICE(`${upperAsset}USDT`), JSON.stringify({ price: priceUSD, timestamp: Date.now() }));
           } catch (err) {
-            // Use Coingecko as secondary fallback
-            try {
-              const coinId = asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset;
-              const cgResponse = await axios.get(`https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd`, { timeout: 3000 });
-              priceUSD = cgResponse.data[coinId]?.usd || 0;
-            } catch (cgErr) {
-              // Default fallback for stablecoins
-              if (asset === 'usdt' || asset === 'usdc') priceUSD = 1;
-              else if (asset === 'btc') priceUSD = 43000;
-              else if (asset === 'eth') priceUSD = 2200;
-              else priceUSD = 0;
-            }
+            // Default fallback for stablecoins
+            if (asset === 'usdt' || asset === 'usdc') priceUSD = 1;
+            else if (asset === 'btc') priceUSD = 43000;
+            else if (asset === 'eth') priceUSD = 2200;
+            else priceUSD = 0;
           }
         }
         
-        assetPrices[asset] = priceUSD;
         totalMainUSD += balance * priceUSD;
       }
     }
     
-    // Get active investments value (investments that are still running)
+    // Get active investments value
     const activeInvestments = await Investment.find({
       user: userId,
       status: 'active'
-    }).populate('plan');
+    });
     
     let totalActiveUSD = 0;
     for (const investment of activeInvestments) {
       totalActiveUSD += investment.amount;
     }
     
-    // Get matured investments value (completed investments)
+    // Get matured investments value
     const maturedInvestments = await Investment.find({
       user: userId,
       status: 'completed'
-    }).populate('plan');
+    });
     
     let totalMaturedUSD = 0;
     for (const investment of maturedInvestments) {
       totalMaturedUSD += investment.amount + (investment.actualReturn || 0);
     }
     
-    // Get previous day values for PnL calculation (stored in Redis)
+    // Get previous day values for PnL calculation
     const today = new Date().toDateString();
-    const pnlDateKey = `user:${userId}:pnl_date`;
     const previousBalancesKey = `user:${userId}:prev_balances`;
+    const pnlDateKey = `user:${userId}:pnl_date`;
     
     let previousMainUSD = 0;
     let previousMaturedUSD = 0;
@@ -21622,7 +21607,7 @@ app.get('/api/users/balances', protect, async (req, res) => {
       previousMainUSD = prev.mainUSD || 0;
       previousMaturedUSD = prev.maturedUSD || 0;
     } else if (lastDate !== today) {
-      // New day - store current values as previous for next day's PnL
+      // New day - store current values
       await redis.set(previousBalancesKey, JSON.stringify({
         mainUSD: totalMainUSD,
         maturedUSD: totalMaturedUSD,
@@ -21646,11 +21631,11 @@ app.get('/api/users/balances', protect, async (req, res) => {
       'balances.matured': totalMaturedUSD
     });
     
-    // Get user's fiat preference for display conversion
+    // Get user's fiat preference
     const userPref = await UserPreference.findOne({ user: userId });
     const preferredFiat = userPref?.currency || 'USD';
     
-    // Get fiat exchange rate if not USD
+    // Get fiat exchange rate
     let fiatRate = 1;
     if (preferredFiat !== 'USD') {
       try {
@@ -21661,27 +21646,13 @@ app.get('/api/users/balances', protect, async (req, res) => {
       }
     }
     
-    // Return in the format expected by HTML dashboard
+    // Return in format expected by HTML dashboard
     res.status(200).json({
       status: 'success',
       main: totalMainUSD * fiatRate,
       active: totalActiveUSD * fiatRate,
       matured: totalMaturedUSD * fiatRate
     });
-    
-    // Also emit real-time update via Socket.IO if available
-    if (req.app.get('io')) {
-      req.app.get('io').to(`user_${userId}`).emit('balance_update', {
-        main: totalMainUSD * fiatRate,
-        active: totalActiveUSD * fiatRate,
-        matured: totalMaturedUSD * fiatRate
-      });
-      
-      req.app.get('io').to(`user_${userId}`).emit('pnl_update', {
-        main: { amount: mainPnL * fiatRate, percentage: mainPnLPercent },
-        matured: { amount: maturedPnL * fiatRate, percentage: maturedPnLPercent }
-      });
-    }
     
   } catch (err) {
     console.error('Error fetching user balances:', err);
@@ -21699,7 +21670,6 @@ app.get('/api/users/assets', protect, async (req, res) => {
   try {
     const userId = req.user._id;
     
-    // Get user's crypto asset balances from UserAssetBalance model
     const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
     
     if (!userAssetBalance) {
@@ -21708,37 +21678,28 @@ app.get('/api/users/assets', protect, async (req, res) => {
     
     const assetSymbols = {
       'btc': 'BTC', 'eth': 'ETH', 'usdt': 'USDT', 'bnb': 'BNB', 'sol': 'SOL',
-      'usdc': 'USDC', 'xrp': 'XRP', 'doge': 'DOGE', 'ada': 'ADA', 'shib': 'SHIB',
-      'avax': 'AVAX', 'dot': 'DOT', 'trx': 'TRX', 'link': 'LINK', 'matic': 'MATIC',
-      'wbtc': 'WBTC', 'ltc': 'LTC', 'near': 'NEAR', 'uni': 'UNI', 'bch': 'BCH',
-      'xlm': 'XLM', 'atom': 'ATOM', 'xmr': 'XMR', 'flow': 'FLOW', 'vet': 'VET',
-      'fil': 'FIL', 'theta': 'THETA', 'hbar': 'HBAR', 'ftm': 'FTM', 'xtz': 'XTZ'
+      'usdc': 'USDC', 'xrp': 'XRP', 'doge': 'DOGE', 'ada': 'ADA', 'shib': 'SHIB'
     };
     
     const coinGeckoIds = {
       'btc': 'bitcoin', 'eth': 'ethereum', 'usdt': 'tether', 'bnb': 'binancecoin',
       'sol': 'solana', 'usdc': 'usd-coin', 'xrp': 'ripple', 'doge': 'dogecoin',
-      'ada': 'cardano', 'shib': 'shiba-inu', 'avax': 'avalanche-2', 'dot': 'polkadot',
-      'trx': 'tron', 'link': 'chainlink', 'matic': 'matic-network', 'wbtc': 'wrapped-bitcoin',
-      'ltc': 'litecoin', 'near': 'near', 'uni': 'uniswap', 'bch': 'bitcoin-cash'
+      'ada': 'cardano', 'shib': 'shiba-inu'
     };
     
     const assetData = [];
     
-    // Process each asset with balance > 0
     for (const [asset, balance] of Object.entries(userAssetBalance.balances || {})) {
       if (balance > 0 && balance !== 0) {
-        // Get current price from multiple sources
+        // Get current price
         let currentPrice = 0;
         const upperAsset = assetSymbols[asset] || asset.toUpperCase();
         
-        // Try Redis cache first
         const cachedPrice = await redis.get(REDIS_KEYS.LAST_PRICE(`${upperAsset}USDT`));
         if (cachedPrice) {
           const parsed = JSON.parse(cachedPrice);
           currentPrice = parsed.price;
         } else {
-          // Try Binance
           try {
             const response = await axios.get(
               `https://api.binance.com/api/v3/ticker/price?symbol=${upperAsset}USDT`,
@@ -21746,19 +21707,9 @@ app.get('/api/users/assets', protect, async (req, res) => {
             );
             currentPrice = parseFloat(response.data.price);
           } catch (err) {
-            // Try Coingecko
-            try {
-              const coinId = coinGeckoIds[asset] || asset;
-              const cgResponse = await axios.get(
-                `https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd`,
-                { timeout: 3000 }
-              );
-              currentPrice = cgResponse.data[coinId]?.usd || 0;
-            } catch (cgErr) {
-              if (asset === 'usdt' || asset === 'usdc') currentPrice = 1;
-              else if (asset === 'btc') currentPrice = 43000;
-              else if (asset === 'eth') currentPrice = 2200;
-            }
+            if (asset === 'usdt' || asset === 'usdc') currentPrice = 1;
+            else if (asset === 'btc') currentPrice = 43000;
+            else if (asset === 'eth') currentPrice = 2200;
           }
         }
         
@@ -21785,28 +21736,12 @@ app.get('/api/users/assets', protect, async (req, res) => {
         try {
           const changeResponse = await axios.get(
             `https://api.binance.com/api/v3/ticker/24hr?symbol=${upperAsset}USDT`,
-            { timeout: 3000 }
+            { timeout: 2000 }
           );
           change24h = parseFloat(changeResponse.data.priceChangePercent) || 0;
         } catch (err) {
-          // Fallback to Coingecko
-          try {
-            const coinId = coinGeckoIds[asset] || asset;
-            const cgResponse = await axios.get(
-              `https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd&include_24hr_change=true`,
-              { timeout: 3000 }
-            );
-            change24h = cgResponse.data[coinId]?.usd_24h_change || 0;
-          } catch (cgErr) {
-            change24h = 0;
-          }
+          change24h = 0;
         }
-        
-        // Get transaction history for this asset
-        const transactions = (userAssetBalance.history || [])
-          .filter(h => h.asset === asset)
-          .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
-          .slice(0, 50);
         
         assetData.push({
           symbol: asset,
@@ -21818,14 +21753,13 @@ app.get('/api/users/assets', protect, async (req, res) => {
           change24h: change24h,
           currentPrice: currentPrice,
           id: coinGeckoIds[asset] || asset,
-          transactions: transactions,
-          totalSpent: totalSpent,
-          totalBought: totalBought
+          transactions: (userAssetBalance.history || [])
+            .filter(h => h.asset === asset)
+            .slice(-20)
         });
       }
     }
     
-    // Sort by current value descending
     assetData.sort((a, b) => b.currentValue - a.currentValue);
     
     res.status(200).json(assetData);
@@ -21862,18 +21796,15 @@ app.get('/api/users/asset-balances', protect, async (req, res) => {
     
     const assetSymbols = {
       'btc': 'BTC', 'eth': 'ETH', 'usdt': 'USDT', 'bnb': 'BNB', 'sol': 'SOL',
-      'usdc': 'USDC', 'xrp': 'XRP', 'doge': 'DOGE', 'ada': 'ADA', 'shib': 'SHIB',
-      'avax': 'AVAX', 'dot': 'DOT', 'trx': 'TRX', 'link': 'LINK', 'matic': 'MATIC'
+      'usdc': 'USDC', 'xrp': 'XRP', 'doge': 'DOGE', 'ada': 'ADA', 'shib': 'SHIB'
     };
     
-    // Fetch current prices for all assets user holds
     const assetsWithBalance = Object.entries(userAssetBalance.balances || {})
       .filter(([_, amount]) => amount > 0)
       .map(([asset]) => asset);
     
     const prices = {};
     
-    // Batch fetch prices
     for (const asset of assetsWithBalance) {
       const upperAsset = assetSymbols[asset] || asset.toUpperCase();
       let priceUSD = 0;
@@ -21899,7 +21830,6 @@ app.get('/api/users/asset-balances', protect, async (req, res) => {
       prices[asset] = priceUSD;
     }
     
-    // Calculate total fiat value and build details
     let totalFiatValue = 0;
     const assetDetails = {};
     
@@ -21912,21 +21842,8 @@ app.get('/api/users/asset-balances', protect, async (req, res) => {
         assetDetails[asset] = {
           amount: amount,
           usdValue: usdValue,
-          price: price,
-          priceChange24h: 0
+          price: price
         };
-        
-        // Try to get 24h change
-        try {
-          const upperAsset = assetSymbols[asset] || asset.toUpperCase();
-          const changeResponse = await axios.get(
-            `https://api.binance.com/api/v3/ticker/24hr?symbol=${upperAsset}USDT`,
-            { timeout: 2000 }
-          );
-          assetDetails[asset].priceChange24h = parseFloat(changeResponse.data.priceChangePercent) || 0;
-        } catch (err) {
-          // Ignore 24h change errors
-        }
       }
     }
     
@@ -22043,7 +21960,6 @@ app.post('/api/withdrawals/confirm-gas-payment', protect, async (req, res) => {
       withdrawalData
     } = req.body;
     
-    // Validate required fields
     if (!asset || !amount || !address) {
       return res.status(400).json({
         status: 'error',
@@ -22051,7 +21967,6 @@ app.post('/api/withdrawals/confirm-gas-payment', protect, async (req, res) => {
       });
     }
     
-    // Get current price for USD calculation
     let currentPrice = 0;
     const assetSymbols = {
       'btc': 'BTC', 'eth': 'ETH', 'usdt': 'USDT', 'bnb': 'BNB', 'sol': 'SOL'
@@ -22072,7 +21987,6 @@ app.post('/api/withdrawals/confirm-gas-payment', protect, async (req, res) => {
     
     const usdValue = amount * currentPrice;
     
-    // Create a deposit record for the gas fee
     const gasFeeDeposit = await DepositAsset.create({
       user: userId,
       asset: asset,
@@ -22104,8 +22018,6 @@ app.post('/api/withdrawals/confirm-gas-payment', protect, async (req, res) => {
     });
   }
 });
-
-
 
 
 
