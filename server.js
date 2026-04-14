@@ -9887,7 +9887,6 @@ fetchMarketData();
 
 
 
-
 // POST /api/admin/users/:userId/crypto-balance
 app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
   try {
@@ -10006,7 +10005,7 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
       }
     );
     
-    // Send email notification to user
+    // Send email notification to user (preserving original HTML format)
     try {
       const userEmail = user.email;
       await sendEmail({
@@ -10077,21 +10076,27 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
 // GET /api/admin/supported-cryptos
 app.get('/api/admin/supported-cryptos', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
   try {
-    // Get all supported cryptos from MarketPair or AssetInfo
-    const marketPairs = await MarketPair.find({ status: 'active' }).select('symbol baseAsset logo');
+    // Get all supported cryptos from Binance API (real-time)
+    const supportedCryptos = await getSupportedCryptos();
     
     const cryptos = [];
-    for (const pair of marketPairs) {
-      // Get user balances for this crypto (optional - for display)
-      const totalBalance = await UserAssetBalance.aggregate([
-        { $group: { _id: null, total: { $sum: `$balances.${pair.baseAsset.toLowerCase()}` } } }
-      ]);
+    for (const crypto of supportedCryptos) {
+      // Get total balance across all users
+      let totalBalance = 0;
+      try {
+        const balanceAgg = await UserAssetBalance.aggregate([
+          { $group: { _id: null, total: { $sum: `$balances.${crypto.symbol.toLowerCase()}` } } }
+        ]);
+        totalBalance = balanceAgg[0]?.total || 0;
+      } catch (err) {
+        totalBalance = 0;
+      }
       
       cryptos.push({
-        code: pair.baseAsset.toUpperCase(),
-        name: pair.baseAsset.toUpperCase(),
-        logoUrl: pair.logo || `https://cryptologos.cc/logos/${pair.baseAsset.toLowerCase()}-${pair.baseAsset.toLowerCase()}-logo.png`,
-        balance: totalBalance[0]?.total || 0
+        code: crypto.symbol,
+        name: crypto.name || crypto.symbol,
+        logoUrl: getCryptoLogo(crypto.symbol),
+        balance: totalBalance
       });
     }
     
@@ -10107,8 +10112,6 @@ app.get('/api/admin/supported-cryptos', adminProtect, restrictTo('super', 'finan
     });
   }
 });
-
-
 
 
 
