@@ -1373,7 +1373,6 @@ const Plan = mongoose.model('Plan', PlanSchema);
 
 
 
-
 const UserAssetBalanceSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
@@ -1383,63 +1382,44 @@ const UserAssetBalanceSchema = new mongoose.Schema({
     index: true
   },
   balances: {
-    // Main wallet crypto balances
+    // Main wallet - stores ANY crypto as Map (dynamic)
     main: {
-      btc: { type: Number, default: 0, min: 0 },
-      eth: { type: Number, default: 0, min: 0 },
-      usdt: { type: Number, default: 0, min: 0 },
-      bnb: { type: Number, default: 0, min: 0 },
-      sol: { type: Number, default: 0, min: 0 },
-      usdc: { type: Number, default: 0, min: 0 },
-      xrp: { type: Number, default: 0, min: 0 },
-      doge: { type: Number, default: 0, min: 0 },
-      ada: { type: Number, default: 0, min: 0 },
-      shib: { type: Number, default: 0, min: 0 }
+      type: Map,
+      of: Number,
+      default: new Map()
     },
-    // Active wallet crypto balances (invested)
+    // Active wallet (invested) - dynamic Map structure
     active: {
-      btc: { type: Number, default: 0, min: 0 },
-      eth: { type: Number, default: 0, min: 0 },
-      usdt: { type: Number, default: 0, min: 0 },
-      bnb: { type: Number, default: 0, min: 0 },
-      sol: { type: Number, default: 0, min: 0 },
-      usdc: { type: Number, default: 0, min: 0 },
-      xrp: { type: Number, default: 0, min: 0 },
-      doge: { type: Number, default: 0, min: 0 },
-      ada: { type: Number, default: 0, min: 0 },
-      shib: { type: Number, default: 0, min: 0 }
+      type: Map,
+      of: Number,
+      default: new Map()
     },
-    // Matured wallet crypto balances (completed investments)
+    // Matured wallet (completed investments) - dynamic Map structure
     matured: {
-      btc: { type: Number, default: 0, min: 0 },
-      eth: { type: Number, default: 0, min: 0 },
-      usdt: { type: Number, default: 0, min: 0 },
-      bnb: { type: Number, default: 0, min: 0 },
-      sol: { type: Number, default: 0, min: 0 },
-      usdc: { type: Number, default: 0, min: 0 },
-      xrp: { type: Number, default: 0, min: 0 },
-      doge: { type: Number, default: 0, min: 0 },
-      ada: { type: Number, default: 0, min: 0 },
-      shib: { type: Number, default: 0, min: 0 }
+      type: Map,
+      of: Number,
+      default: new Map()
     }
   },
   history: [{
-    asset: { type: String, required: true },
+    asset: { type: String, required: true, uppercase: true },
     walletType: { type: String, enum: ['main', 'active', 'matured'], required: true },
-    type: { type: String, enum: ['deposit', 'withdrawal', 'investment', 'maturity'], required: true },
+    type: { type: String, enum: ['deposit', 'withdrawal', 'investment', 'maturity', 'admin_add'], required: true },
     amount: { type: Number, required: true },
     balance: { type: Number, required: true },
     usdValue: { type: Number, required: true },
     price: { type: Number, required: true },
     timestamp: { type: Date, default: Date.now },
     transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
-    description: String
+    description: String,
+    adminId: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
+    adminName: String
   }],
   lastUpdated: { type: Date, default: Date.now }
 }, { timestamps: true });
+
 UserAssetBalanceSchema.index({ user: 1 });
 UserAssetBalanceSchema.index({ 'history.timestamp': -1 });
-
 
 
 
@@ -10482,10 +10462,110 @@ app.get('/api/admin/supported-cryptos', adminProtect, restrictTo('super', 'finan
 
 
 
+// GET /api/admin/supported-cryptos - Fetch all supported cryptos with user-specific balances
+app.get('/api/admin/supported-cryptos', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+  try {
+    const { userId } = req.query;
+    
+    // Comprehensive list of supported cryptos with proper logos
+    const supportedCryptos = [
+      { code: 'BTC', name: 'Bitcoin', logoUrl: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png', symbol: '₿' },
+      { code: 'ETH', name: 'Ethereum', logoUrl: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png', symbol: 'Ξ' },
+      { code: 'USDT', name: 'Tether', logoUrl: 'https://assets.coingecko.com/coins/images/325/large/Tether.png', symbol: '₮' },
+      { code: 'BNB', name: 'Binance Coin', logoUrl: 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png', symbol: 'BNB' },
+      { code: 'SOL', name: 'Solana', logoUrl: 'https://assets.coingecko.com/coins/images/4128/large/solana.png', symbol: '◎' },
+      { code: 'USDC', name: 'USD Coin', logoUrl: 'https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png', symbol: 'USDC' },
+      { code: 'XRP', name: 'Ripple', logoUrl: 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png', symbol: 'XRP' },
+      { code: 'DOGE', name: 'Dogecoin', logoUrl: 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png', symbol: 'Ð' },
+      { code: 'ADA', name: 'Cardano', logoUrl: 'https://assets.coingecko.com/coins/images/975/large/cardano.png', symbol: '₳' },
+      { code: 'SHIB', name: 'Shiba Inu', logoUrl: 'https://assets.coingecko.com/coins/images/11939/large/shiba.png', symbol: 'SHIB' },
+      { code: 'AVAX', name: 'Avalanche', logoUrl: 'https://assets.coingecko.com/coins/images/12559/large/Avalanche_Circle_RedWhite.png', symbol: 'AVAX' },
+      { code: 'DOT', name: 'Polkadot', logoUrl: 'https://assets.coingecko.com/coins/images/12171/large/polkadot.png', symbol: 'DOT' },
+      { code: 'TRX', name: 'TRON', logoUrl: 'https://assets.coingecko.com/coins/images/1094/large/tron-logo.png', symbol: 'TRX' },
+      { code: 'LINK', name: 'Chainlink', logoUrl: 'https://assets.coingecko.com/coins/images/877/large/chainlink-new-logo.png', symbol: 'LINK' },
+      { code: 'MATIC', name: 'Polygon', logoUrl: 'https://assets.coingecko.com/coins/images/4713/large/matic-token-icon.png', symbol: 'MATIC' },
+      { code: 'LTC', name: 'Litecoin', logoUrl: 'https://assets.coingecko.com/coins/images/2/large/litecoin.png', symbol: 'Ł' }
+    ];
+    
+    // If userId is provided, fetch that user's specific balances for each crypto
+    let userBalances = {};
+    if (userId) {
+      const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
+      if (userAssetBalance && userAssetBalance.balances) {
+        // Extract main wallet balances
+        if (userAssetBalance.balances.main && userAssetBalance.balances.main instanceof Map) {
+          for (const [crypto, balance] of userAssetBalance.balances.main) {
+            userBalances[crypto.toUpperCase()] = {
+              main: balance,
+              matured: 0,
+              active: 0
+            };
+          }
+        }
+        // Extract matured wallet balances
+        if (userAssetBalance.balances.matured && userAssetBalance.balances.matured instanceof Map) {
+          for (const [crypto, balance] of userAssetBalance.balances.matured) {
+            if (!userBalances[crypto.toUpperCase()]) {
+              userBalances[crypto.toUpperCase()] = { main: 0, matured: 0, active: 0 };
+            }
+            userBalances[crypto.toUpperCase()].matured = balance;
+          }
+        }
+        // Extract active wallet balances
+        if (userAssetBalance.balances.active && userAssetBalance.balances.active instanceof Map) {
+          for (const [crypto, balance] of userAssetBalance.balances.active) {
+            if (!userBalances[crypto.toUpperCase()]) {
+              userBalances[crypto.toUpperCase()] = { main: 0, matured: 0, active: 0 };
+            }
+            userBalances[crypto.toUpperCase()].active = balance;
+          }
+        }
+      }
+    }
+    
+    // Build response with user-specific balances if userId provided
+    const cryptos = supportedCryptos.map(crypto => ({
+      code: crypto.code,
+      name: crypto.name,
+      logoUrl: crypto.logoUrl,
+      symbol: crypto.symbol,
+      balance: userBalances[crypto.code]?.main || 0,
+      maturedBalance: userBalances[crypto.code]?.matured || 0,
+      activeBalance: userBalances[crypto.code]?.active || 0,
+      totalBalance: (userBalances[crypto.code]?.main || 0) + 
+                    (userBalances[crypto.code]?.matured || 0) + 
+                    (userBalances[crypto.code]?.active || 0)
+    }));
+    
+    res.json({
+      status: 'success',
+      data: { 
+        cryptos,
+        userId: userId || null
+      }
+    });
+  } catch (err) {
+    console.error('Error fetching supported cryptos:', err);
+    // Fallback: return default crypto list
+    const defaultCryptos = [
+      { code: 'BTC', name: 'Bitcoin', logoUrl: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png', balance: 0, maturedBalance: 0, activeBalance: 0, totalBalance: 0 },
+      { code: 'ETH', name: 'Ethereum', logoUrl: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png', balance: 0, maturedBalance: 0, activeBalance: 0, totalBalance: 0 },
+      { code: 'USDT', name: 'Tether', logoUrl: 'https://assets.coingecko.com/coins/images/325/large/Tether.png', balance: 0, maturedBalance: 0, activeBalance: 0, totalBalance: 0 },
+      { code: 'BNB', name: 'Binance Coin', logoUrl: 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png', balance: 0, maturedBalance: 0, activeBalance: 0, totalBalance: 0 }
+    ];
+    res.json({
+      status: 'success',
+      data: { cryptos: defaultCryptos, userId: userId || null }
+    });
+  }
+});
 
 
 
-// POST /api/admin/users/:userId/crypto-balance (DYNAMIC - supports ANY crypto)
+
+
+
+// POST /api/admin/users/:userId/crypto-balance - Add crypto to specific wallet with email
 app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
   try {
     const { userId } = req.params;
@@ -10499,11 +10579,11 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
       });
     }
     
-    // Validate wallet type
-    if (!['main', 'active', 'matured'].includes(walletType)) {
+    // Validate wallet type - ONLY allow main or matured (active is for investments only)
+    if (!['main', 'matured'].includes(walletType)) {
       return res.status(400).json({
         status: 'fail',
-        message: 'Wallet type must be "main", "active", or "matured"'
+        message: 'Wallet type must be "main" or "matured". Active wallet is for investments only.'
       });
     }
     
@@ -10520,7 +10600,7 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
     if (!price) {
       return res.status(400).json({
         status: 'fail',
-        message: `Unable to fetch price for ${currency}`
+        message: `Unable to fetch price for ${currency}. Please try again.`
       });
     }
     
@@ -10528,24 +10608,22 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
     const currencyCode = currency.toUpperCase();
     const currencyLower = currency.toLowerCase();
     
-    // Get crypto logo URL (dynamic - works for any crypto)
+    // Get crypto logo URL
     const getCryptoLogoUrl = async (cryptoCode) => {
-      // Try CoinGecko first
       try {
         const response = await axios.get(`https://api.coingecko.com/api/v3/coins/${cryptoCode.toLowerCase()}`, { timeout: 3000 });
         if (response.data && response.data.image && response.data.image.large) {
           return response.data.image.large;
         }
       } catch (err) {
-        // Fallback to pattern
+        // Fall through
       }
-      // Fallback to pattern URL
       return `https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/icon/${cryptoCode.toLowerCase()}.png`;
     };
     
     const cryptoLogoUrl = await getCryptoLogoUrl(currencyCode);
     
-    // Find or create UserAssetBalance with dynamic structure
+    // Find or create UserAssetBalance with dynamic Map structure
     let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
     if (!userAssetBalance) {
       userAssetBalance = new UserAssetBalance({ 
@@ -10583,7 +10661,7 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
     userAssetBalance.history.push({
       asset: currencyCode,
       walletType: walletType,
-      type: 'deposit',
+      type: 'admin_add',
       amount: amount,
       balance: newBalance,
       usdValue: usdValue,
@@ -10597,16 +10675,11 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
     
     await userAssetBalance.save();
     
-    // Update user's USD balance
-    if (walletType === 'main') {
-      await User.findByIdAndUpdate(userId, {
-        $inc: { 'balances.main': usdValue }
-      });
-    } else if (walletType === 'matured') {
-      await User.findByIdAndUpdate(userId, {
-        $inc: { 'balances.matured': usdValue }
-      });
-    }
+    // Update user's USD balance (for UI display purposes)
+    const walletTypeField = `balances.${walletType}`;
+    await User.findByIdAndUpdate(userId, {
+      $inc: { [walletTypeField]: usdValue }
+    });
     
     // Get updated balances
     const updatedUser = await User.findById(userId);
@@ -10652,16 +10725,16 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
       req,
       {
         currency: currencyCode,
-        amount,
-        usdValue,
+        amount: amount,
+        usdValue: usdValue,
         walletType: walletType,
-        description
+        description: description
       }
     );
     
-    // Send professional email
-    const walletTypeDisplay = walletType === 'main' ? 'Main Wallet' : walletType === 'matured' ? 'Matured Wallet' : 'Active Wallet';
-    const walletColor = walletType === 'main' ? '#F7A600' : walletType === 'matured' ? '#D4AF37' : '#1A73E8';
+    // ✅ SEND AUTOMATIC EMAIL TO USER
+    const walletTypeDisplay = walletType === 'main' ? 'Main Wallet' : 'Matured Wallet';
+    const walletColor = walletType === 'main' ? '#F7A600' : '#D4AF37';
     
     await sendProfessionalEmail({
       email: user.email,
@@ -10688,6 +10761,8 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
         })
       }
     });
+    
+    console.log(`📧 Crypto deposit email sent to ${user.email} for ${amount} ${currencyCode} to ${walletTypeDisplay}`);
     
     // Emit real-time update via Socket.IO
     const io = req.app.get('io');
@@ -10726,11 +10801,13 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
     
     res.json({
       status: 'success',
-      message: `${amount} ${currencyCode} added to user's ${walletTypeDisplay} successfully`,
+      message: `${amount} ${currencyCode} added to user's ${walletTypeDisplay} successfully. An email notification has been sent to the user.`,
       data: {
         transaction: transaction,
         newCryptoBalance: newBalance,
-        usdValue: usdValue
+        usdValue: usdValue,
+        walletType: walletType,
+        emailSent: true
       }
     });
     
@@ -10742,6 +10819,8 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
     });
   }
 });
+
+
 
 
 
