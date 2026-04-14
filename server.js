@@ -9489,6 +9489,8 @@ const startRealTimePriceUpdates = (io) => {
   }, 1000); // EVERY SECOND
 };
 
+// Call the function to start price updates
+startRealTimePriceUpdates(io);
   
   
 // NEW FUNCTION: Recalculate wallet values in real-time based on current crypto prices
