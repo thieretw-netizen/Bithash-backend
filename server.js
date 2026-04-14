@@ -5055,25 +5055,7 @@ const getBrowserFromUserAgent = (userAgent) => {
   return 'Unknown';
 };
 
-const getUserDeviceInfo = async (req) => {
-  try {
-    let ip = getRealClientIP(req);
-    const userAgent = req.headers['user-agent'] || 'Unknown';
-    const accurateInfo = getAccurateDeviceInfo(userAgent);
 
-    let location = 'Unknown Location';
-    let exactLocation = false;
-    let isPublicIP = true;
-    let locationDetails = {
-      country: 'Unknown',
-      city: 'Unknown',
-      region: 'Unknown',
-      street: 'Unknown',
-      postalCode: 'Unknown',
-      timezone: 'Unknown',
-      latitude: null,
-      longitude: null
-    };
 
     const privateIPRanges = [
       /^10\./,
