@@ -10462,7 +10462,9 @@ app.get('/api/admin/supported-cryptos', adminProtect, restrictTo('super', 'finan
   }
 });
 
-// POST /api/admin/users/:userId/crypto-balance
+
+
+// POST /api/admin/users/:userId/crypto-balance (FIXED)
 app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
   try {
     const { userId } = req.params;
@@ -10476,8 +10478,7 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
       });
     }
     
-    // CRITICAL FIX: Ensure walletType correctly maps to 'main' or 'matured'
-    // The HTML expects 'main' and 'matured' - no other values
+    // Map wallet type to valid values
     let targetWalletType = walletType;
     if (walletType === 'main_wallet' || walletType === 'main-wallet') targetWalletType = 'main';
     if (walletType === 'matured_wallet' || walletType === 'matured-wallet' || walletType === 'matured_returns') targetWalletType = 'matured';
@@ -10509,7 +10510,7 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
     const usdValue = amount * price;
     const currencyLower = currency.toLowerCase();
     
-    // Get crypto logo URL - using CoinGecko URLs for consistency with HTML
+    // Get crypto logo URL
     const getCryptoLogoUrl = (cryptoCode) => {
       const logos = {
         btc: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png',
@@ -10521,21 +10522,14 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
         xrp: 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png',
         doge: 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png',
         ada: 'https://assets.coingecko.com/coins/images/975/large/cardano.png',
-        shib: 'https://assets.coingecko.com/coins/images/11939/large/shiba.png',
-        avax: 'https://assets.coingecko.com/coins/images/12559/large/Avalanche_Circle_RedWhite.png',
-        dot: 'https://assets.coingecko.com/coins/images/12171/large/polkadot.png',
-        trx: 'https://assets.coingecko.com/coins/images/1094/large/tron-logo.png',
-        link: 'https://assets.coingecko.com/coins/images/877/large/chainlink-new-logo.png',
-        matic: 'https://assets.coingecko.com/coins/images/4713/large/matic-token-icon.png',
-        ltc: 'https://assets.coingecko.com/coins/images/2/large/litecoin.png'
+        shib: 'https://assets.coingecko.com/coins/images/11939/large/shiba.png'
       };
-      return logos[cryptoCode] || `https://assets.coingecko.com/coins/images/1/large/bitcoin.png`;
+      return logos[cryptoCode] || 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png';
     };
     
     const cryptoLogoUrl = getCryptoLogoUrl(currencyLower);
     
-    // CRITICAL FIX: Update UserAssetBalance for the SPECIFIC wallet type
-    // The error was that admin adding to matured wallet was going to main
+    // CRITICAL FIX: Update UserAssetBalance with correct schema
     let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
     if (!userAssetBalance) {
       userAssetBalance = new UserAssetBalance({ 
@@ -10549,7 +10543,7 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
       });
     }
     
-    // Initialize balance structures if needed
+    // Initialize balance structures
     if (!userAssetBalance.balances) {
       userAssetBalance.balances = { main: {}, active: {}, matured: {} };
     }
@@ -10566,11 +10560,11 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
     userAssetBalance.balances[targetWalletType][currencyLower] += amount;
     userAssetBalance.lastUpdated = new Date();
     
-    // Add to history with wallet type tracking
+    // FIXED: Add to history with ALL required fields including walletType
     userAssetBalance.history.push({
       asset: currencyLower,
-      walletType: targetWalletType,
-      type: 'deposit',
+      walletType: targetWalletType,  // REQUIRED by schema
+      type: 'deposit',               // REQUIRED by schema
       amount: amount,
       balance: userAssetBalance.balances[targetWalletType][currencyLower],
       usdValue: usdValue,
@@ -10582,7 +10576,7 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
     
     await userAssetBalance.save();
     
-    // CRITICAL FIX: Update user's USD balance based on correct walletType
+    // Update user's USD balance based on correct walletType
     let newMainBalance = user.balances?.main || 0;
     let newMaturedBalance = user.balances?.matured || 0;
     let newActiveBalance = user.balances?.active || 0;
@@ -10644,11 +10638,11 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
       }
     );
     
-    // SEND PROFESSIONAL EMAIL with crypto logo
+    // Send professional email
     const walletTypeDisplay = targetWalletType === 'main' ? 'Main Wallet' : 'Matured Wallet';
     const walletColor = targetWalletType === 'main' ? '#F7A600' : '#D4AF37';
     
-    const emailSent = await sendProfessionalEmail({
+    await sendProfessionalEmail({
       email: user.email,
       template: 'crypto_deposit',
       data: {
@@ -10674,38 +10668,21 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
       }
     });
     
-    if (!emailSent) {
-      console.warn(`Failed to send crypto deposit email to ${user.email}`);
-    }
-    
-    // Emit real-time update via Socket.IO for immediate dashboard update
+    // Emit real-time update via Socket.IO
     const io = req.app.get('io');
     if (io) {
-      // Send USD balance update
       io.to(`user_${userId}`).emit('balance_update', {
         main: newMainBalance,
         matured: newMaturedBalance,
         active: newActiveBalance
       });
       
-      // Send crypto balance update for the specific wallet
       io.to(`user_${userId}`).emit('crypto_balance_update', {
         currency: currencyLower,
         walletType: targetWalletType,
         balance: userAssetBalance.balances[targetWalletType][currencyLower],
         usdValue: userAssetBalance.balances[targetWalletType][currencyLower] * price
       });
-      
-      // Send full asset balances update for portfolio refresh
-      io.to(`user_${userId}`).emit('asset_balances_update', [{
-        symbol: currencyLower,
-        balance: userAssetBalance.balances[targetWalletType][currencyLower],
-        id: currencyLower === 'btc' ? 'bitcoin' : currencyLower === 'eth' ? 'ethereum' : currencyLower,
-        avgPrice: price,
-        unrealizedPnl: 0,
-        unrealizedPnlPercent: 0,
-        transactions: []
-      }]);
     }
     
     res.json({
@@ -10714,8 +10691,7 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
       data: {
         transaction: transaction,
         newCryptoBalance: userAssetBalance.balances[targetWalletType][currencyLower],
-        usdValue: usdValue,
-        emailSent: emailSent
+        usdValue: usdValue
       }
     });
     
@@ -10727,7 +10703,6 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
     });
   }
 });
-
 
 
 
