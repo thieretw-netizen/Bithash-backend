@@ -9872,6 +9872,22 @@ setInterval(async () => {
 
 fetchMarketData();
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // POST /api/admin/users/:userId/crypto-balance
 app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
   try {
@@ -9900,6 +9916,7 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
       });
     }
     
+    // Get current crypto price
     const price = await getCryptoPrice(currency);
     if (!price) {
       return res.status(400).json({
@@ -9910,6 +9927,7 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
     
     const usdValue = amount * price;
     
+    // Update UserAssetBalance
     let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
     if (!userAssetBalance) {
       userAssetBalance = new UserAssetBalance({ user: userId, balances: {} });
@@ -9923,6 +9941,7 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
     userAssetBalance.balances[currencyLower] += amount;
     userAssetBalance.lastUpdated = new Date();
     
+    // Add to history
     userAssetBalance.history.push({
       asset: currencyLower,
       type: 'deposit',
@@ -9936,11 +9955,13 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
     
     await userAssetBalance.save();
     
+    // Update user's main or matured balance in USD
     const updateField = walletType === 'main' ? 'balances.main' : 'balances.matured';
     await User.findByIdAndUpdate(userId, {
       $inc: { [updateField]: usdValue }
     });
     
+    // Create transaction record
     const transaction = await Transaction.create({
       user: userId,
       type: 'deposit',
@@ -9968,6 +9989,7 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
       processedAt: new Date()
     });
     
+    // Log activity
     await logActivity(
       'admin_add_crypto_balance',
       'User',
@@ -9984,6 +10006,7 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
       }
     );
     
+    // Send email notification to user
     try {
       const userEmail = user.email;
       await sendEmail({
@@ -9992,7 +10015,7 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
             <div style="text-align: center; margin-bottom: 20px;">
-              <img src="${getCryptoLogo(currency)}" alt="${currency.toUpperCase()} logo" style="width: 60px; height: 60px;">
+              <img src="https://cryptologos.cc/logos/${currency.toLowerCase()}-${currency.toLowerCase()}-logo.png" alt="${currency.toUpperCase()} logo" style="width: 60px; height: 60px;">
             </div>
             <h2 style="color: #2563eb;">Deposit Received</h2>
             <p>Dear ${user.firstName} ${user.lastName},</p>
@@ -10013,9 +10036,10 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
         `
       });
     } catch (emailErr) {
-      if (process.env.NODE_ENV !== 'production') console.error('Failed to send email notification:', emailErr);
+      console.error('Failed to send email notification:', emailErr);
     }
     
+    // Emit real-time update via Socket.IO
     const io = req.app.get('io');
     if (io) {
       io.to(`user_${userId}`).emit('balance_update', {
@@ -10042,7 +10066,7 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
     });
     
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error adding crypto balance:', err);
+    console.error('Error adding crypto balance:', err);
     res.status(500).json({
       status: 'error',
       message: err.message || 'Failed to add crypto balance'
@@ -10050,53 +10074,39 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
   }
 });
 
+// GET /api/admin/supported-cryptos
 app.get('/api/admin/supported-cryptos', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
   try {
-    const cryptos = await getSupportedCryptos();
-    const cryptosWithLogos = await Promise.all(cryptos.map(async (crypto) => {
-      let totalBalance = 0;
-      const userAssetBalances = await UserAssetBalance.find({});
-      for (const ub of userAssetBalances) {
-        if (ub.balances[crypto.symbol.toLowerCase()]) {
-          totalBalance += ub.balances[crypto.symbol.toLowerCase()];
-        }
-      }
+    // Get all supported cryptos from MarketPair or AssetInfo
+    const marketPairs = await MarketPair.find({ status: 'active' }).select('symbol baseAsset logo');
+    
+    const cryptos = [];
+    for (const pair of marketPairs) {
+      // Get user balances for this crypto (optional - for display)
+      const totalBalance = await UserAssetBalance.aggregate([
+        { $group: { _id: null, total: { $sum: `$balances.${pair.baseAsset.toLowerCase()}` } } }
+      ]);
       
-      return {
-        code: crypto.symbol,
-        name: crypto.name,
-        logoUrl: getCryptoLogo(crypto.symbol),
-        balance: totalBalance
-      };
-    }));
+      cryptos.push({
+        code: pair.baseAsset.toUpperCase(),
+        name: pair.baseAsset.toUpperCase(),
+        logoUrl: pair.logo || `https://cryptologos.cc/logos/${pair.baseAsset.toLowerCase()}-${pair.baseAsset.toLowerCase()}-logo.png`,
+        balance: totalBalance[0]?.total || 0
+      });
+    }
     
     res.json({
       status: 'success',
-      data: { cryptos: cryptosWithLogos }
+      data: { cryptos }
     });
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') console.error('Error fetching supported cryptos:', err);
+    console.error('Error fetching supported cryptos:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch supported cryptocurrencies'
     });
   }
 });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
