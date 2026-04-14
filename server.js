@@ -9967,51 +9967,6 @@ app.get('/api/users/assets', protect, async (req, res) => {
 
   
   
-  // UPDATE PRICES EVERY 1 SECOND FOR TRUE REAL-TIME
-  priceUpdateInterval = setInterval(async () => {
-    try {
-      const cryptos = await fetchAllBinanceCryptos();
-      const assets = cryptos.map(c => c.symbol);
-      const priceUpdates = {};
-      
-      // Fetch all prices in parallel for speed
-      const pricePromises = assets.map(async (asset) => {
-        const price = await getCryptoPrice(asset);
-        if (price) {
-          priceUpdates[asset.toLowerCase()] = {
-            price: price,
-            timestamp: Date.now()
-          };
-        }
-      });
-      
-      await Promise.all(pricePromises);
-      
-      if (Object.keys(priceUpdates).length > 0 && io) {
-        // Broadcast price updates to all clients
-        io.emit('price_update', priceUpdates);
-        lastPrices = priceUpdates;
-
-  // ADD THIS LINE - Broadcast to WebSocket clients as well
-  const marketWss = req?.app?.get('marketWss');
-  if (marketWss) {
-    marketWss.clients.forEach(client => {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(JSON.stringify({ type: 'price_update', data: priceUpdates }));
-      }
-    });
-  }
-}
-        
-        // IMMEDIATELY recalculate ALL user wallet values based on new prices
-        await recalculateAllWalletValuesRealtime(io, priceUpdates);
-      
-    } catch (err) {
-      console.error('Error in price update interval:', err);
-    }
-  }, 1000); // EVERY SECOND
-};
-
 // NEW FUNCTION: Recalculate wallet values in real-time based on current crypto prices
 const recalculateAllWalletValuesRealtime = async (io, currentPrices) => {
   if (isRecalculating) return;
@@ -10060,7 +10015,6 @@ const recalculateAllWalletValuesRealtime = async (io, currentPrices) => {
       // Calculate MATURED wallet value (completed investments valued at current prices)
       const maturedInvestments = maturedByUser.get(user._id.toString()) || [];
       for (const investment of maturedInvestments) {
-        // If investment has specific crypto asset, value it at current price
         if (investment.asset && investment.assetAmount) {
           const priceData = currentPrices[investment.asset.toLowerCase()];
           const currentPrice = priceData ? priceData.price : await getCryptoPrice(investment.asset.toUpperCase());
@@ -10070,12 +10024,11 @@ const recalculateAllWalletValuesRealtime = async (io, currentPrices) => {
             totalMaturedValue += investment.amount + (investment.actualReturn || 0);
           }
         } else {
-          // Fallback: use original USD value
           totalMaturedValue += investment.amount + (investment.actualReturn || 0);
         }
       }
       
-      // Calculate PnL for main wallet (based on previous value)
+      // Calculate PnL for main wallet
       const previousMainValue = user.balances.main || totalMainValue;
       const mainPnL = totalMainValue - previousMainValue;
       const mainPnLPercentage = previousMainValue > 0 ? (mainPnL / previousMainValue) * 100 : 0;
@@ -10085,7 +10038,6 @@ const recalculateAllWalletValuesRealtime = async (io, currentPrices) => {
       const maturedPnL = totalMaturedValue - previousMaturedValue;
       const maturedPnLPercentage = previousMaturedValue > 0 ? (maturedPnL / previousMaturedValue) * 100 : 0;
       
-      // Prepare batch update
       batchUpdates.push({
         userId: user._id,
         main: totalMainValue,
@@ -10096,7 +10048,6 @@ const recalculateAllWalletValuesRealtime = async (io, currentPrices) => {
         maturedPnLPercent: maturedPnLPercentage
       });
       
-      // Send real-time updates via Socket.IO to each specific user
       if (io) {
         io.to(`user_${user._id}`).emit('wallet_realtime_update', {
           main: totalMainValue,
@@ -10110,7 +10061,6 @@ const recalculateAllWalletValuesRealtime = async (io, currentPrices) => {
       }
     }
     
-    // Batch update database (non-blocking)
     for (const update of batchUpdates) {
       await User.findByIdAndUpdate(update.userId, {
         'balances.main': update.main,
