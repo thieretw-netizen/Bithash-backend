@@ -21511,16 +21511,6 @@ function maskCardNumber(cardNumber) {
 
 
 
-// =============================================
-// REAL-TIME PRICE & BALANCE SYSTEM
-// =============================================
-
-// Redis keys for market data
-const REDIS_KEYS = {
-  LAST_PRICE: (symbol) => `price:${symbol}:last`,
-  TICKER: (symbol) => `ticker:${symbol}`,
-  ALL_PAIRS: 'market:all:pairs'
-};
 
 // Asset to symbol mapping
 const ASSET_TO_SYMBOL = {
