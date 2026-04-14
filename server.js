@@ -1375,95 +1375,39 @@ const Plan = mongoose.model('Plan', PlanSchema);
 
 
 
-
-// REPLACE the existing UserAssetBalanceSchema with this dynamic version
 const UserAssetBalanceSchema = new mongoose.Schema({
-  user: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true,
-    unique: true,
-    index: true
-  },
+  user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true, index: true },
   balances: {
-    // Dynamic structure for any crypto in any wallet type
-    // Example: { main: { btc: 1.5, eth: 2.0 }, matured: { btc: 0.5 }, active: { eth: 1.0 } }
-    type: Map,
-    of: {
+    main: {
       type: Map,
       of: Number,
-      default: {}
+      default: () => new Map()
     },
-    default: {
-      main: new Map(),
-      active: new Map(),
-      matured: new Map()
+    active: {
+      type: Map,
+      of: Number,
+      default: () => new Map()
+    },
+    matured: {
+      type: Map,
+      of: Number,
+      default: () => new Map()
     }
   },
   history: [{
-    asset: { type: String, required: true, uppercase: true },
+    asset: { type: String, required: true },
     walletType: { type: String, enum: ['main', 'active', 'matured'], required: true },
-    type: { type: String, enum: ['deposit', 'withdrawal', 'investment', 'maturity', 'conversion'], required: true },
+    type: { type: String, enum: ['deposit', 'withdrawal', 'investment', 'maturity'], required: true },
     amount: { type: Number, required: true },
     balance: { type: Number, required: true },
     usdValue: { type: Number, required: true },
     price: { type: Number, required: true },
     timestamp: { type: Date, default: Date.now },
     transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
-    description: String,
-    adminId: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
-    adminName: String
+    description: String
   }],
   lastUpdated: { type: Date, default: Date.now }
-}, { 
-  timestamps: true,
-  toJSON: { virtuals: true },
-  toObject: { virtuals: true }
-});
-
-// Add index for faster queries
-UserAssetBalanceSchema.index({ user: 1 });
-UserAssetBalanceSchema.index({ 'history.timestamp': -1 });
-
-// Helper method to get balance for specific crypto and wallet
-UserAssetBalanceSchema.methods.getBalance = function(crypto, walletType) {
-  if (!this.balances || !this.balances[walletType]) return 0;
-  return this.balances[walletType].get(crypto.toLowerCase()) || 0;
-};
-
-// Helper method to set balance for specific crypto and wallet
-UserAssetBalanceSchema.methods.setBalance = function(crypto, walletType, amount) {
-  if (!this.balances) this.balances = { main: new Map(), active: new Map(), matured: new Map() };
-  if (!this.balances[walletType]) this.balances[walletType] = new Map();
-  this.balances[walletType].set(crypto.toLowerCase(), amount);
-  this.lastUpdated = new Date();
-};
-
-// Helper method to add to balance
-UserAssetBalanceSchema.methods.addToBalance = function(crypto, walletType, amount) {
-  const current = this.getBalance(crypto, walletType);
-  this.setBalance(crypto, walletType, current + amount);
-};
-
-// Helper method to get all balances for a wallet
-UserAssetBalanceSchema.methods.getWalletBalances = function(walletType) {
-  if (!this.balances || !this.balances[walletType]) return {};
-  return Object.fromEntries(this.balances[walletType]);
-};
-
-// Helper method to get total USD value of all balances
-UserAssetBalanceSchema.methods.getTotalUSDValue = async function(prices) {
-  let total = 0;
-  for (const walletType of ['main', 'active', 'matured']) {
-    const balances = this.getWalletBalances(walletType);
-    for (const [crypto, amount] of Object.entries(balances)) {
-      const price = prices[crypto] || await getCryptoPrice(crypto);
-      total += amount * price;
-    }
-  }
-  return total;
-};
-
+}, { timestamps: true });
 const UserAssetBalance = mongoose.model('UserAssetBalance', UserAssetBalanceSchema);
 
 
