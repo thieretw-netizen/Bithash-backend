@@ -4555,6 +4555,86 @@ const sendProfessionalEmail = async ({ email, template, data, useSupportEmail = 
         `;
         break;
 
+
+
+case 'crypto_deposit':
+  subject = `Crypto Deposit Confirmed - ₿itHash Capital`;
+  html = `
+    <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+      <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+        <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+        <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+        <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+      </div>
+      <div style="padding: 30px; background: #FFFFFF;">
+        <div style="text-align: center; margin-bottom: 20px;">
+          <img src="${data.cryptoLogoUrl}" alt="${data.currency} logo" style="width: 64px; height: 64px; border-radius: 50%;">
+        </div>
+        <h2 style="color: #0B0E11; margin-bottom: 20px;">Crypto Deposit Received</h2>
+        <p style="color: #333333; line-height: 1.6;">Dear ${data.name},</p>
+        <p style="color: #333333; line-height: 1.6;">You have received a crypto deposit from ₿itHash Capital Secure Asset Fund (BCSAF).</p>
+        <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+          <table style="width: 100%; border-collapse: collapse;">
+            <tr>
+              <td style="padding: 8px 0;"><strong>Cryptocurrency:</strong></td>
+              <td style="padding: 8px 0; text-align: right;">
+                <img src="${data.cryptoLogoUrl}" alt="${data.currency}" style="width: 20px; height: 20px; vertical-align: middle; margin-right: 5px;">
+                ${data.currency}
+              </td>
+            </tr>
+            <tr style="border-top: 1px solid #E2E8F0;">
+              <td style="padding: 8px 0;"><strong>Amount:</strong></td>
+              <td style="padding: 8px 0; text-align: right; font-weight: bold;">${data.amount} ${data.currency}</td>
+            </tr>
+            <tr style="border-top: 1px solid #E2E8F0;">
+              <td style="padding: 8px 0;"><strong>USD Value:</strong></td>
+              <td style="padding: 8px 0; text-align: right;">$${data.usdValue} USD</td>
+            </tr>
+            <tr style="border-top: 1px solid #E2E8F0;">
+              <td style="padding: 8px 0;"><strong>Exchange Rate:</strong></td>
+              <td style="padding: 8px 0; text-align: right;">1 ${data.currency} = $${data.price}</td>
+            </tr>
+            <tr style="border-top: 1px solid #E2E8F0;">
+              <td style="padding: 8px 0;"><strong>Wallet Type:</strong></td>
+              <td style="padding: 8px 0; text-align: right;">
+                <span style="background: ${data.walletColor}; color: white; padding: 4px 12px; border-radius: 20px; font-size: 12px;">${data.walletType}</span>
+              </td>
+            </tr>
+            <tr style="border-top: 1px solid #E2E8F0;">
+              <td style="padding: 8px 0;"><strong>Date:</strong></td>
+              <td style="padding: 8px 0; text-align: right;">${data.timestamp}</td>
+            </tr>
+            <tr style="border-top: 1px solid #E2E8F0;">
+              <td style="padding: 8px 0;"><strong>Transaction ID:</strong></td>
+              <td style="padding: 8px 0; text-align: right; font-size: 11px;">${data.transactionId}</td>
+            </tr>
+            ${data.description ? `
+            <tr style="border-top: 1px solid #E2E8F0;">
+              <td style="padding: 8px 0;"><strong>Note:</strong></td>
+              <td style="padding: 8px 0; text-align: right;">${data.description}</td>
+            </tr>
+            ` : ''}
+          </table>
+        </div>
+        <div style="text-align: center; margin: 30px 0;">
+          <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Go to Dashboard</a>
+        </div>
+        <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${data.timestamp}</p>
+      </div>
+      <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
+          <a href="mailto:support@bithash.com" style="color: #F7A600; text-decoration: none;">support@bithash.com</a> | 
+          <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
+        </p>
+      </div>
+    </div>
+  `;
+  break;
+
+
+        
       case 'kyc_approved':
         subject = 'KYC Verification Approved - ₿itHash Capital';
         html = `
@@ -10313,561 +10393,298 @@ fetchMarketData();
 
 
 
-// =============================================
+
+
+
+
+
 // GET /api/admin/supported-cryptos
-// Fetches all supported cryptocurrencies with their logos
-// =============================================
 app.get('/api/admin/supported-cryptos', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
-    try {
-        // Complete mapping of symbols to CoinGecko API IDs
-        const coinGeckoIdMap = {
-            'BTC': 'bitcoin',
-            'ETH': 'ethereum',
-            'USDT': 'tether',
-            'BNB': 'binancecoin',
-            'SOL': 'solana',
-            'USDC': 'usd-coin',
-            'XRP': 'ripple',
-            'DOGE': 'dogecoin',
-            'ADA': 'cardano',
-            'SHIB': 'shiba-inu',
-            'AVAX': 'avalanche-2',
-            'DOT': 'polkadot',
-            'TRX': 'tron',
-            'LINK': 'chainlink',
-            'MATIC': 'matic-network',
-            'WBTC': 'wrapped-bitcoin',
-            'LTC': 'litecoin',
-            'NEAR': 'near',
-            'UNI': 'uniswap',
-            'BCH': 'bitcoin-cash',
-            'XLM': 'stellar',
-            'ATOM': 'cosmos',
-            'XMR': 'monero',
-            'FLOW': 'flow',
-            'VET': 'vechain',
-            'FIL': 'filecoin',
-            'THETA': 'theta-network',
-            'HBAR': 'hedera-hashgraph',
-            'FTM': 'fantom',
-            'XTZ': 'tezos'
-        };
-        
-        // All supported symbols (must match UserAssetBalance schema)
-        const supportedSymbols = [
-            'BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'ADA', 'SHIB',
-            'AVAX', 'DOT', 'TRX', 'LINK', 'MATIC', 'WBTC', 'LTC', 'NEAR', 'UNI', 'BCH',
-            'XLM', 'ATOM', 'XMR', 'FLOW', 'VET', 'FIL', 'THETA', 'HBAR', 'FTM', 'XTZ'
-        ];
-        
-        let cryptos = [];
-        let fallbackUsed = false;
-        
-        try {
-            // Build comma-separated list of CoinGecko IDs
-            const coinIds = supportedSymbols
-                .map(symbol => coinGeckoIdMap[symbol])
-                .filter(id => id)
-                .join(',');
-            
-            const response = await axios.get(
-                'https://api.coingecko.com/api/v3/coins/markets',
-                {
-                    params: {
-                        vs_currency: 'usd',
-                        ids: coinIds,
-                        order: 'market_cap_desc',
-                        per_page: 100,
-                        page: 1,
-                        sparkline: false,
-                        price_change_percentage: '24h'
-                    },
-                    timeout: 10000,
-                    headers: {
-                        'Accept': 'application/json',
-                        'User-Agent': 'BitHash-Admin/1.0'
-                    }
-                }
-            );
-
-            if (response.data && Array.isArray(response.data) && response.data.length > 0) {
-                // Create a map for quick lookup
-                const coinDataMap = {};
-                for (const coin of response.data) {
-                    let foundSymbol = null;
-                    for (const [symbol, id] of Object.entries(coinGeckoIdMap)) {
-                        if (id === coin.id) {
-                            foundSymbol = symbol;
-                            break;
-                        }
-                    }
-                    if (foundSymbol) {
-                        coinDataMap[foundSymbol] = coin;
-                    }
-                }
-                
-                // Build the cryptos array with proper logos
-                for (const symbol of supportedSymbols) {
-                    const coinData = coinDataMap[symbol];
-                    
-                    if (coinData && coinData.image) {
-                        let logoUrl = coinData.image;
-                        // Ensure URL is absolute
-                        if (logoUrl && !logoUrl.startsWith('http')) {
-                            logoUrl = `https://www.coingecko.com${logoUrl}`;
-                        }
-                        
-                        cryptos.push({
-                            code: symbol,
-                            name: coinData.name,
-                            logoUrl: logoUrl,
-                            price: coinData.current_price || 0,
-                            marketCap: coinData.market_cap || 0,
-                            priceChange24h: coinData.price_change_percentage_24h || 0,
-                            symbol: coinData.symbol.toUpperCase()
-                        });
-                    } else {
-                        // Fallback for missing coins
-                        cryptos.push({
-                            code: symbol,
-                            name: getFullCryptoName(symbol),
-                            logoUrl: getFallbackCryptoLogo(symbol),
-                            price: null,
-                            marketCap: null,
-                            priceChange24h: null
-                        });
-                    }
-                }
-                
-                console.log(`✅ Successfully fetched ${cryptos.length} cryptocurrencies from CoinGecko`);
-            } else {
-                throw new Error('No data received from CoinGecko API');
-            }
-        } catch (coingeckoError) {
-            console.error('⚠️ CoinGecko API error, using fallback data:', coingeckoError.message);
-            fallbackUsed = true;
-            
-            // Use fallback data with reliable CDN logos
-            for (const symbol of supportedSymbols) {
-                cryptos.push({
-                    code: symbol,
-                    name: getFullCryptoName(symbol),
-                    logoUrl: getFallbackCryptoLogo(symbol),
-                    price: null,
-                    marketCap: null,
-                    priceChange24h: null
-                });
-            }
-        }
-
-        // Get total platform balances for each crypto
-        try {
-            const userAssetBalances = await UserAssetBalance.find({});
-            const balanceMap = {};
-            
-            for (const userBalance of userAssetBalances) {
-                if (userBalance.balances) {
-                    for (const [key, value] of Object.entries(userBalance.balances)) {
-                        const upperKey = key.toUpperCase();
-                        balanceMap[upperKey] = (balanceMap[upperKey] || 0) + (value || 0);
-                    }
-                }
-            }
-            
-            // Attach balance to each crypto
-            for (const crypto of cryptos) {
-                crypto.balance = balanceMap[crypto.code] || 0;
-            }
-        } catch (balanceErr) {
-            console.error('Error fetching balances:', balanceErr);
-            for (const crypto of cryptos) {
-                crypto.balance = 0;
-            }
-        }
-        
-        // Sort by market cap (if available) or alphabetically
-        cryptos.sort((a, b) => {
-            if (a.marketCap && b.marketCap && a.marketCap > 0 && b.marketCap > 0) {
-                return b.marketCap - a.marketCap;
-            }
-            return a.code.localeCompare(b.code);
-        });
-        
-        res.json({
-            status: 'success',
-            data: { 
-                cryptos: cryptos,
-                fallbackUsed: fallbackUsed,
-                totalCount: cryptos.length,
-                message: fallbackUsed ? 'Using fallback crypto data. Live prices unavailable.' : null
-            }
-        });
-        
-    } catch (err) {
-        console.error('❌ Fatal error fetching supported cryptos:', err);
-        
-        // Return fallback data on fatal error
-        const fallbackCryptos = getFallbackCryptoList();
-        res.status(200).json({
-            status: 'success',
-            data: { 
-                cryptos: fallbackCryptos,
-                fallbackUsed: true,
-                totalCount: fallbackCryptos.length,
-                message: 'Using cached crypto data. Please refresh later.'
-            }
-        });
-    }
-});
-
-// =============================================
-// POST /api/admin/users/:userId/crypto-balance
-// Adds crypto balance to user's main or matured wallet
-// =============================================
-app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
-    try {
-        const { userId } = req.params;
-        const { currency, amount, walletType, description } = req.body;
-        
-        // Validate required fields
-        if (!currency) {
-            return res.status(400).json({
-                status: 'fail',
-                message: 'Currency is required'
-            });
-        }
-        
-        if (!amount || amount <= 0) {
-            return res.status(400).json({
-                status: 'fail',
-                message: 'Please provide a valid positive amount'
-            });
-        }
-        
-        // Validate wallet type
-        const validWalletTypes = ['main', 'matured'];
-        if (!validWalletTypes.includes(walletType)) {
-            return res.status(400).json({
-                status: 'fail',
-                message: 'Wallet type must be "main" or "matured"'
-            });
-        }
-        
-        // Find user
-        const user = await User.findById(userId);
-        if (!user) {
-            return res.status(404).json({
-                status: 'fail',
-                message: 'User not found'
-            });
-        }
-        
-        // Get current crypto price in USD
-        const priceUSD = await getCryptoPrice(currency);
-        if (!priceUSD || priceUSD <= 0) {
-            return res.status(400).json({
-                status: 'fail',
-                message: `Unable to fetch current price for ${currency.toUpperCase()}. Please try again.`
-            });
-        }
-        
-        const usdValue = amount * priceUSD;
-        const currencyLower = currency.toLowerCase();
-        
-        // Start a session for transaction atomicity
-        const session = await mongoose.startSession();
-        session.startTransaction();
-        
-        try {
-            // 1. Update or create UserAssetBalance (crypto holdings)
-            let userAssetBalance = await UserAssetBalance.findOne({ user: userId }).session(session);
-            if (!userAssetBalance) {
-                userAssetBalance = new UserAssetBalance({ 
-                    user: userId, 
-                    balances: {},
-                    history: []
-                });
-            }
-            
-            // Initialize balance if it doesn't exist
-            if (!userAssetBalance.balances[currencyLower]) {
-                userAssetBalance.balances[currencyLower] = 0;
-            }
-            
-            // Add the crypto amount
-            const oldCryptoBalance = userAssetBalance.balances[currencyLower];
-            userAssetBalance.balances[currencyLower] += amount;
-            userAssetBalance.lastUpdated = new Date();
-            
-            // Add to history
-            userAssetBalance.history.push({
-                asset: currencyLower,
-                type: 'deposit',
-                amount: amount,
-                balance: userAssetBalance.balances[currencyLower],
-                usdValue: usdValue,
-                price: priceUSD,
-                timestamp: new Date(),
-                transactionId: null
-            });
-            
-            await userAssetBalance.save({ session });
-            
-            // 2. Update user's USD balance (main OR matured - FIXED)
-            const updateField = `balances.${walletType}`;
-            const updatedUser = await User.findByIdAndUpdate(
-                userId,
-                { $inc: { [updateField]: usdValue } },
-                { new: true, session }
-            );
-            
-            // 3. Create transaction record
-            const transaction = await Transaction.create([{
-                user: userId,
-                type: 'deposit',
-                amount: usdValue,
-                asset: currency.toUpperCase(),
-                assetAmount: amount,
-                currency: 'USD',
-                status: 'completed',
-                method: currency.toUpperCase(),
-                reference: `ADMIN-CRYPTO-${Date.now()}-${Math.random().toString(36).substr(2, 10)}`,
-                details: {
-                    cryptoCurrency: currency.toUpperCase(),
-                    cryptoAmount: amount,
-                    usdValue: usdValue,
-                    price: priceUSD,
-                    walletType: walletType,
-                    adminId: req.admin._id,
-                    adminName: req.admin.name,
-                    description: description || `Crypto balance added by admin ${req.admin.name}`,
-                    timestamp: new Date().toISOString()
-                },
-                fee: 0,
-                netAmount: usdValue,
-                exchangeRateAtTime: priceUSD,
-                processedBy: req.admin._id,
-                processedAt: new Date()
-            }], { session });
-            
-            await session.commitTransaction();
-            
-            // 4. Log activity (outside transaction)
-            await logActivity(
-                'admin_add_crypto_balance',
-                'User',
-                userId,
-                req.admin._id,
-                'Admin',
-                req,
-                {
-                    currency: currency.toUpperCase(),
-                    amount: amount,
-                    usdValue: usdValue,
-                    walletType: walletType,
-                    description: description || 'Admin added crypto balance'
-                }
-            );
-            
-            // 5. Get crypto logo for email
-            let cryptoLogoUrl = getFallbackCryptoLogo(currency.toUpperCase());
-            try {
-                const coinId = coinGeckoIdMap[currency.toUpperCase()];
-                if (coinId) {
-                    const geckoResponse = await axios.get(
-                        `https://api.coingecko.com/api/v3/coins/${coinId}`,
-                        { timeout: 3000 }
-                    );
-                    if (geckoResponse.data && geckoResponse.data.image && geckoResponse.data.image.large) {
-                        cryptoLogoUrl = geckoResponse.data.image.large;
-                    }
-                }
-            } catch (logoErr) {
-                console.log(`Using fallback logo for ${currency}`);
-            }
-            
-            // 6. Send professional email using your existing sendProfessionalEmail function
-            try {
-                await sendProfessionalEmail({
-                    email: user.email,
-                    template: 'deposit_approved',
-                    data: {
-                        name: user.firstName,
-                        amount: usdValue,
-                        method: currency.toUpperCase(),
-                        reference: transaction[0].reference,
-                        newBalance: walletType === 'main' ? updatedUser.balances.main : updatedUser.balances.matured,
-                        processedAt: new Date().toISOString(),
-                        cryptoAmount: amount,
-                        cryptoCurrency: currency.toUpperCase(),
-                        cryptoLogoUrl: cryptoLogoUrl,
-                        walletType: walletType === 'main' ? 'Main Wallet' : 'Matured Wallet',
-                        note: description || `Deposit credited to your ${walletType === 'main' ? 'Main' : 'Matured'} Wallet`
-                    }
-                });
-                console.log(`📧 Crypto deposit confirmation email sent to ${user.email}`);
-            } catch (emailErr) {
-                console.error('Failed to send email notification:', emailErr);
-                // Don't fail the request if email fails
-            }
-            
-            // 7. Emit real-time updates via Socket.IO if available
-            const io = req.app.get('io');
-            if (io) {
-                io.to(`user_${userId}`).emit('balance_update', {
-                    main: updatedUser.balances.main,
-                    matured: updatedUser.balances.matured,
-                    active: updatedUser.balances.active
-                });
-                
-                io.to(`user_${userId}`).emit('crypto_balance_update', {
-                    currency: currencyLower,
-                    balance: userAssetBalance.balances[currencyLower],
-                    usdValue: userAssetBalance.balances[currencyLower] * priceUSD
-                });
-            }
-            
-            // Send success response
-            res.json({
-                status: 'success',
-                message: `${amount} ${currency.toUpperCase()} added to user's ${walletType === 'main' ? 'Main' : 'Matured'} Wallet successfully`,
-                data: {
-                    transaction: {
-                        id: transaction[0]._id,
-                        reference: transaction[0].reference,
-                        cryptoAmount: amount,
-                        cryptoCurrency: currency.toUpperCase(),
-                        usdValue: usdValue,
-                        walletType: walletType
-                    },
-                    newBalance: {
-                        crypto: userAssetBalance.balances[currencyLower],
-                        usd: walletType === 'main' ? updatedUser.balances.main : updatedUser.balances.matured
-                    }
-                }
-            });
-            
-        } catch (txError) {
-            await session.abortTransaction();
-            throw txError;
-        } finally {
-            session.endSession();
-        }
-        
-    } catch (err) {
-        console.error('❌ Error adding crypto balance:', err);
-        res.status(500).json({
-            status: 'error',
-            message: err.message || 'Failed to add crypto balance. Please try again.'
-        });
-    }
-});
-
-// =============================================
-// HELPER FUNCTIONS
-// =============================================
-
-// Helper function to get fallback crypto logo URL
-function getFallbackCryptoLogo(symbol) {
-    const logoMap = {
-        'BTC': 'https://cryptologos.cc/logos/bitcoin-btc-logo.png',
-        'ETH': 'https://cryptologos.cc/logos/ethereum-eth-logo.png',
-        'USDT': 'https://cryptologos.cc/logos/tether-usdt-logo.png',
-        'BNB': 'https://cryptologos.cc/logos/bnb-bnb-logo.png',
-        'SOL': 'https://cryptologos.cc/logos/solana-sol-logo.png',
-        'USDC': 'https://cryptologos.cc/logos/usd-coin-usdc-logo.png',
-        'XRP': 'https://cryptologos.cc/logos/xrp-xrp-logo.png',
-        'DOGE': 'https://cryptologos.cc/logos/dogecoin-doge-logo.png',
-        'ADA': 'https://cryptologos.cc/logos/cardano-ada-logo.png',
-        'SHIB': 'https://cryptologos.cc/logos/shiba-inu-shib-logo.png',
-        'AVAX': 'https://cryptologos.cc/logos/avalanche-avax-logo.png',
-        'DOT': 'https://cryptologos.cc/logos/polkadot-new-dot-logo.png',
-        'TRX': 'https://cryptologos.cc/logos/tron-trx-logo.png',
-        'LINK': 'https://cryptologos.cc/logos/chainlink-link-logo.png',
-        'MATIC': 'https://cryptologos.cc/logos/polygon-matic-logo.png',
-        'WBTC': 'https://cryptologos.cc/logos/wrapped-bitcoin-wbtc-logo.png',
-        'LTC': 'https://cryptologos.cc/logos/litecoin-ltc-logo.png',
-        'NEAR': 'https://cryptologos.cc/logos/near-protocol-near-logo.png',
-        'UNI': 'https://cryptologos.cc/logos/uniswap-uni-logo.png',
-        'BCH': 'https://cryptologos.cc/logos/bitcoin-cash-bch-logo.png',
-        'XLM': 'https://cryptologos.cc/logos/stellar-xlm-logo.png',
-        'ATOM': 'https://cryptologos.cc/logos/cosmos-atom-logo.png',
-        'XMR': 'https://cryptologos.cc/logos/monero-xmr-logo.png',
-        'FLOW': 'https://cryptologos.cc/logos/flow-flow-logo.png',
-        'VET': 'https://cryptologos.cc/logos/vechain-vet-logo.png',
-        'FIL': 'https://cryptologos.cc/logos/filecoin-fil-logo.png',
-        'THETA': 'https://cryptologos.cc/logos/theta-theta-logo.png',
-        'HBAR': 'https://cryptologos.cc/logos/hedera-hashgraph-hbar-logo.png',
-        'FTM': 'https://cryptologos.cc/logos/fantom-ftm-logo.png',
-        'XTZ': 'https://cryptologos.cc/logos/tezos-xtz-logo.png'
-    };
-    
-    return logoMap[symbol] || `https://cryptologos.cc/logos/${symbol.toLowerCase()}-${symbol.toLowerCase()}-logo.png`;
-}
-
-// Helper function to get full crypto name
-function getFullCryptoName(symbol) {
-    const nameMap = {
-        'BTC': 'Bitcoin',
-        'ETH': 'Ethereum',
-        'USDT': 'Tether',
-        'BNB': 'BNB',
-        'SOL': 'Solana',
-        'USDC': 'USD Coin',
-        'XRP': 'XRP',
-        'DOGE': 'Dogecoin',
-        'ADA': 'Cardano',
-        'SHIB': 'Shiba Inu',
-        'AVAX': 'Avalanche',
-        'DOT': 'Polkadot',
-        'TRX': 'TRON',
-        'LINK': 'Chainlink',
-        'MATIC': 'Polygon',
-        'WBTC': 'Wrapped Bitcoin',
-        'LTC': 'Litecoin',
-        'NEAR': 'NEAR Protocol',
-        'UNI': 'Uniswap',
-        'BCH': 'Bitcoin Cash',
-        'XLM': 'Stellar',
-        'ATOM': 'Cosmos',
-        'XMR': 'Monero',
-        'FLOW': 'Flow',
-        'VET': 'VeChain',
-        'FIL': 'Filecoin',
-        'THETA': 'Theta Network',
-        'HBAR': 'Hedera',
-        'FTM': 'Fantom',
-        'XTZ': 'Tezos'
-    };
-    
-    return nameMap[symbol] || symbol;
-}
-
-// Helper function to get fallback crypto list (used when API fails)
-function getFallbackCryptoList() {
-    const symbols = [
-        'BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'ADA', 'SHIB',
-        'AVAX', 'DOT', 'TRX', 'LINK', 'MATIC', 'WBTC', 'LTC', 'NEAR', 'UNI', 'BCH',
-        'XLM', 'ATOM', 'XMR', 'FLOW', 'VET', 'FIL', 'THETA', 'HBAR', 'FTM', 'XTZ'
+  try {
+    // Comprehensive list of supported cryptos with proper logos
+    const supportedCryptos = [
+      { code: 'BTC', name: 'Bitcoin', logoUrl: 'https://cryptologos.cc/logos/bitcoin-btc-logo.png', symbol: '₿' },
+      { code: 'ETH', name: 'Ethereum', logoUrl: 'https://cryptologos.cc/logos/ethereum-eth-logo.png', symbol: 'Ξ' },
+      { code: 'USDT', name: 'Tether', logoUrl: 'https://cryptologos.cc/logos/tether-usdt-logo.png', symbol: '₮' },
+      { code: 'BNB', name: 'Binance Coin', logoUrl: 'https://cryptologos.cc/logos/bnb-bnb-logo.png', symbol: 'BNB' },
+      { code: 'SOL', name: 'Solana', logoUrl: 'https://cryptologos.cc/logos/solana-sol-logo.png', symbol: '◎' },
+      { code: 'USDC', name: 'USD Coin', logoUrl: 'https://cryptologos.cc/logos/usd-coin-usdc-logo.png', symbol: 'USDC' },
+      { code: 'XRP', name: 'Ripple', logoUrl: 'https://cryptologos.cc/logos/xrp-xrp-logo.png', symbol: 'XRP' },
+      { code: 'DOGE', name: 'Dogecoin', logoUrl: 'https://cryptologos.cc/logos/dogecoin-doge-logo.png', symbol: 'Ð' },
+      { code: 'ADA', name: 'Cardano', logoUrl: 'https://cryptologos.cc/logos/cardano-ada-logo.png', symbol: '₳' },
+      { code: 'SHIB', name: 'Shiba Inu', logoUrl: 'https://cryptologos.cc/logos/shiba-inu-shib-logo.png', symbol: 'SHIB' },
+      { code: 'AVAX', name: 'Avalanche', logoUrl: 'https://cryptologos.cc/logos/avalanche-avax-logo.png', symbol: 'AVAX' },
+      { code: 'DOT', name: 'Polkadot', logoUrl: 'https://cryptologos.cc/logos/polkadot-new-dot-logo.png', symbol: 'DOT' },
+      { code: 'TRX', name: 'TRON', logoUrl: 'https://cryptologos.cc/logos/tron-trx-logo.png', symbol: 'TRX' },
+      { code: 'LINK', name: 'Chainlink', logoUrl: 'https://cryptologos.cc/logos/chainlink-link-logo.png', symbol: 'LINK' },
+      { code: 'MATIC', name: 'Polygon', logoUrl: 'https://cryptologos.cc/logos/polygon-matic-logo.png', symbol: 'MATIC' },
+      { code: 'LTC', name: 'Litecoin', logoUrl: 'https://cryptologos.cc/logos/litecoin-ltc-logo.png', symbol: 'Ł' }
     ];
     
-    return symbols.map(symbol => ({
-        code: symbol,
-        name: getFullCryptoName(symbol),
-        logoUrl: getFallbackCryptoLogo(symbol),
-        price: null,
-        marketCap: null,
-        priceChange24h: null,
-        balance: 0
+    // Get existing balances for each crypto from UserAssetBalance
+    const allBalances = await UserAssetBalance.aggregate([
+      { $unwind: '$balances' },
+      { $group: { _id: '$_id', balances: { $mergeObjects: '$balances' } } }
+    ]);
+    
+    // Calculate total balance for each crypto across all users
+    const totalBalances = {};
+    const userAssetBalances = await UserAssetBalance.find({});
+    
+    for (const userBalance of userAssetBalances) {
+      for (const [crypto, balance] of Object.entries(userBalance.balances)) {
+        if (balance > 0) {
+          totalBalances[crypto] = (totalBalances[crypto] || 0) + balance;
+        }
+      }
+    }
+    
+    const cryptos = supportedCryptos.map(crypto => ({
+      code: crypto.code,
+      name: crypto.name,
+      logoUrl: crypto.logoUrl,
+      symbol: crypto.symbol,
+      balance: totalBalances[crypto.code.toLowerCase()] || 0
     }));
-}
+    
+    res.json({
+      status: 'success',
+      data: { cryptos }
+    });
+  } catch (err) {
+    console.error('Error fetching supported cryptos:', err);
+    // Fallback: return default crypto list
+    const defaultCryptos = [
+      { code: 'BTC', name: 'Bitcoin', logoUrl: 'https://cryptologos.cc/logos/bitcoin-btc-logo.png', balance: 0 },
+      { code: 'ETH', name: 'Ethereum', logoUrl: 'https://cryptologos.cc/logos/ethereum-eth-logo.png', balance: 0 },
+      { code: 'USDT', name: 'Tether', logoUrl: 'https://cryptologos.cc/logos/tether-usdt-logo.png', balance: 0 },
+      { code: 'BNB', name: 'Binance Coin', logoUrl: 'https://cryptologos.cc/logos/bnb-bnb-logo.png', balance: 0 }
+    ];
+    res.json({
+      status: 'success',
+      data: { cryptos: defaultCryptos }
+    });
+  }
+});
 
-
-
-
-
-
-
+// POST /api/admin/users/:userId/crypto-balance
+app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { currency, amount, walletType, description } = req.body;
+    
+    if (!currency || !amount || amount <= 0) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Please provide a valid currency and amount'
+      });
+    }
+    
+    if (!['main', 'matured'].includes(walletType)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Wallet type must be "main" or "matured"'
+      });
+    }
+    
+    const user = await User.findById(userId).select('+email +firstName +lastName +balances');
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+    
+    // Get current crypto price
+    const price = await getCryptoPrice(currency);
+    if (!price) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Unable to fetch price for ${currency}`
+      });
+    }
+    
+    const usdValue = amount * price;
+    const currencyLower = currency.toLowerCase();
+    
+    // Get crypto logo URL
+    const getCryptoLogoUrl = (cryptoCode) => {
+      const logos = {
+        btc: 'https://cryptologos.cc/logos/bitcoin-btc-logo.png',
+        eth: 'https://cryptologos.cc/logos/ethereum-eth-logo.png',
+        usdt: 'https://cryptologos.cc/logos/tether-usdt-logo.png',
+        bnb: 'https://cryptologos.cc/logos/bnb-bnb-logo.png',
+        sol: 'https://cryptologos.cc/logos/solana-sol-logo.png',
+        usdc: 'https://cryptologos.cc/logos/usd-coin-usdc-logo.png',
+        xrp: 'https://cryptologos.cc/logos/xrp-xrp-logo.png',
+        doge: 'https://cryptologos.cc/logos/dogecoin-doge-logo.png',
+        ada: 'https://cryptologos.cc/logos/cardano-ada-logo.png',
+        shib: 'https://cryptologos.cc/logos/shiba-inu-shib-logo.png'
+      };
+      return logos[cryptoCode] || `https://cryptologos.cc/logos/${cryptoCode}-${cryptoCode}-logo.png`;
+    };
+    
+    const cryptoLogoUrl = getCryptoLogoUrl(currencyLower);
+    
+    // Update UserAssetBalance
+    let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
+    if (!userAssetBalance) {
+      userAssetBalance = new UserAssetBalance({ 
+        user: userId, 
+        balances: {},
+        history: []
+      });
+    }
+    
+    // Initialize balance if not exists
+    if (!userAssetBalance.balances[currencyLower]) {
+      userAssetBalance.balances[currencyLower] = 0;
+    }
+    
+    // Add to crypto balance
+    userAssetBalance.balances[currencyLower] += amount;
+    userAssetBalance.lastUpdated = new Date();
+    
+    // Add to history
+    userAssetBalance.history.push({
+      asset: currencyLower,
+      type: 'deposit',
+      amount: amount,
+      balance: userAssetBalance.balances[currencyLower],
+      usdValue: usdValue,
+      price: price,
+      timestamp: new Date(),
+      transactionId: null
+    });
+    
+    await userAssetBalance.save();
+    
+    // Update user's main or matured balance in USD based on walletType
+    let newMainBalance = user.balances?.main || 0;
+    let newMaturedBalance = user.balances?.matured || 0;
+    
+    if (walletType === 'main') {
+      newMainBalance += usdValue;
+      await User.findByIdAndUpdate(userId, {
+        $inc: { 'balances.main': usdValue }
+      });
+    } else if (walletType === 'matured') {
+      newMaturedBalance += usdValue;
+      await User.findByIdAndUpdate(userId, {
+        $inc: { 'balances.matured': usdValue }
+      });
+    }
+    
+    // Create transaction record
+    const transaction = await Transaction.create({
+      user: userId,
+      type: 'deposit',
+      amount: usdValue,
+      asset: currency,
+      assetAmount: amount,
+      currency: 'USD',
+      status: 'completed',
+      method: currency,
+      reference: `ADMIN-CRYPTO-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`,
+      details: {
+        cryptoCurrency: currency,
+        cryptoAmount: amount,
+        usdValue: usdValue,
+        price: price,
+        walletType: walletType,
+        adminId: req.admin._id,
+        adminName: req.admin.name,
+        description: description || `Crypto balance added by admin ${req.admin.name}`
+      },
+      fee: 0,
+      netAmount: usdValue,
+      exchangeRateAtTime: price,
+      processedBy: req.admin._id,
+      processedAt: new Date()
+    });
+    
+    // Log activity
+    await logActivity(
+      'admin_add_crypto_balance',
+      'User',
+      userId,
+      req.admin._id,
+      'Admin',
+      req,
+      {
+        currency,
+        amount,
+        usdValue,
+        walletType,
+        description
+      }
+    );
+    
+    // Send professional email notification to user with crypto logo
+    const walletTypeDisplay = walletType === 'main' ? 'Main Wallet' : 'Matured Wallet';
+    const walletColor = walletType === 'main' ? '#2563eb' : '#10b981';
+    
+    await sendProfessionalEmail({
+      email: user.email,
+      template: 'crypto_deposit',
+      data: {
+        name: user.firstName,
+        currency: currency.toUpperCase(),
+        currencyLower: currencyLower,
+        amount: amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 8 }),
+        usdValue: usdValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+        walletType: walletTypeDisplay,
+        walletColor: walletColor,
+        price: price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+        description: description || `Added by ${req.admin.name}`,
+        cryptoLogoUrl: cryptoLogoUrl,
+        transactionId: transaction._id,
+        timestamp: new Date().toLocaleString('en-US', {
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          timeZoneName: 'short'
+        })
+      }
+    });
+    
+    // Emit real-time update via Socket.IO
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${userId}`).emit('balance_update', {
+        main: newMainBalance,
+        matured: newMaturedBalance,
+        active: user.balances?.active || 0
+      });
+      
+      io.to(`user_${userId}`).emit('crypto_balance_update', {
+        currency: currencyLower,
+        balance: userAssetBalance.balances[currencyLower],
+        usdValue: userAssetBalance.balances[currencyLower] * price
+      });
+    }
+    
+    res.json({
+      status: 'success',
+      message: `${amount} ${currency.toUpperCase()} added to user's ${walletTypeDisplay} successfully`,
+      data: {
+        transaction: transaction,
+        newCryptoBalance: userAssetBalance.balances[currencyLower],
+        usdValue: usdValue
+      }
+    });
+    
+  } catch (err) {
+    console.error('Error adding crypto balance:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to add crypto balance'
+    });
+  }
+});
 
 
 
