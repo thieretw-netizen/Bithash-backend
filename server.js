@@ -5436,7 +5436,7 @@ app.post('/api/auth/login', [
         device: deviceInfo.device,
         location: deviceInfo.location,
         ip: deviceInfo.ip,
-        timestamp: new Date()
+        timestamp: new Date().toISOString()
       });
       console.log(`📧 Login attempt email sent to ${user.email}`);
     } catch (emailError) {
@@ -5683,7 +5683,7 @@ app.post('/api/auth/google', async (req, res) => {
           device: deviceInfo.device,
           location: deviceInfo.location,
           ip: deviceInfo.ip,
-          timestamp: new Date()
+          timestamp: new Date().toISOString()
         });
         console.log(`📧 Google login attempt email sent to ${user.email}`);
       } catch (emailError) {
