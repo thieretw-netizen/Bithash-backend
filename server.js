@@ -16905,70 +16905,7 @@ app.get('/api/users/assets', protect, async (req, res) => {
 
 
 
-// =============================================
-// GET /api/withdrawals/asset - Get available assets for withdrawal from User.balances
-// =============================================
-app.get('/api/withdrawals/asset', protect, async (req, res) => {
-    try {
-        const userId = req.user._id;
-        const user = await User.findById(userId);
-        
-        if (!user || !user.balances || !user.balances.main) {
-            return res.status(200).json({
-                status: 'success',
-                data: {
-                    assets: []
-                }
-            });
-        }
 
-        const balances = user.balances.main;
-        const assets = [];
-
-        for (const [symbol, amount] of balances.entries()) {
-            if (amount > 0) {
-                let usdValue = 0;
-                let currentPrice = 0;
-                try {
-                    const price = await getCryptoPrice(symbol.toUpperCase());
-                    if (price) {
-                        currentPrice = price;
-                        usdValue = amount * currentPrice;
-                    }
-                } catch (err) {
-                    console.warn(`Could not fetch price for ${symbol}`);
-                }
-
-                assets.push({
-                    symbol: symbol,
-                    amount: amount,
-                    usdValue: usdValue,
-                    currentPrice: currentPrice
-                });
-            }
-        }
-
-        // Sort by USD value descending
-        assets.sort((a, b) => b.usdValue - a.usdValue);
-
-        return res.status(200).json({
-            status: 'success',
-            data: {
-                assets: assets
-            }
-        });
-
-    } catch (err) {
-        console.error('Error fetching assets:', err);
-        return res.status(500).json({
-            status: 'error',
-            message: 'Failed to fetch assets'
-        });
-    }
-});
-
-// =============================================
-// POST /api/withdrawals/confirm-gas-payment - Confirm gas fee payment
 // FIXED: Added required transactionId field
 // =============================================
 app.post('/api/withdrawals/confirm-gas-payment', protect, async (req, res) => {
