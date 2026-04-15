@@ -21422,13 +21422,6 @@ function maskCardNumber(cardNumber) {
 
 
 
-
-
-
-
-
-
-
 // =============================================
 // GET USER BALANCES - REAL TIME CRYPTO HOLDINGS WITH PNL
 // =============================================
@@ -21436,8 +21429,15 @@ app.get('/api/users/balances', protect, async (req, res) => {
   try {
     const userId = req.user._id;
     
-    // Get user's crypto asset balances from User model's balances Map
+    // Get user with balances Map
     const user = await User.findById(userId);
+    
+    if (!user) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'User not found'
+      });
+    }
     
     // Get user's fiat preference for conversion
     const userPref = await UserPreference.findOne({ user: userId });
@@ -21452,75 +21452,45 @@ app.get('/api/users/balances', protect, async (req, res) => {
       console.warn('Failed to fetch fiat rates:', err.message);
     }
     
-    // Get current prices for all assets user holds
-    const assetPrices = {};
-    const mainBalances = user.balances?.main || new Map();
-    const mainBalancesObj = mainBalances instanceof Map ? Object.fromEntries(mainBalances) : mainBalances;
+    // Extract balances from Map (convert to object if needed)
+    let mainBalances = {};
+    let activeBalances = {};
+    let maturedBalances = {};
     
-    // Collect assets with positive balance
-    const assetsWithBalance = [];
-    for (const [asset, balance] of Object.entries(mainBalancesObj)) {
-      if (balance > 0) {
-        assetsWithBalance.push(asset);
+    // Handle main balances (Map or object)
+    if (user.balances) {
+      if (user.balances.main instanceof Map) {
+        mainBalances = Object.fromEntries(user.balances.main);
+      } else if (user.balances.main && typeof user.balances.main === 'object') {
+        mainBalances = user.balances.main;
+      }
+      
+      if (user.balances.active instanceof Map) {
+        activeBalances = Object.fromEntries(user.balances.active);
+      } else if (user.balances.active && typeof user.balances.active === 'object') {
+        activeBalances = user.balances.active;
+      }
+      
+      if (user.balances.matured instanceof Map) {
+        maturedBalances = Object.fromEntries(user.balances.matured);
+      } else if (user.balances.matured && typeof user.balances.matured === 'object') {
+        maturedBalances = user.balances.matured;
       }
     }
-    
-    // Fetch real-time prices for all assets in parallel
-    const pricePromises = assetsWithBalance.map(async (asset) => {
-      try {
-        let priceUSD = 0;
-        const symbol = asset.toUpperCase();
-        
-        // Try Redis cache first (from price aggregator)
-        const cachedPrice = await redis.get(REDIS_KEYS.LAST_PRICE(`${symbol}USDT`));
-        if (cachedPrice) {
-          const parsed = JSON.parse(cachedPrice);
-          priceUSD = parsed.price;
-        } else {
-          // Fallback to getCryptoPrice function
-          priceUSD = await getCryptoPrice(symbol);
-        }
-        
-        assetPrices[asset] = priceUSD;
-        return { asset, priceUSD };
-      } catch (err) {
-        console.warn(`Failed to fetch price for ${asset}:`, err.message);
-        const defaultPrice = (asset === 'usdt' || asset === 'usdc') ? 1.00 : 0;
-        assetPrices[asset] = defaultPrice;
-        return { asset, priceUSD: defaultPrice };
-      }
-    });
-    
-    await Promise.all(pricePromises);
     
     // Calculate total main wallet value in USD
     let totalMainUSD = 0;
-    for (const [asset, balance] of Object.entries(mainBalancesObj)) {
-      if (balance > 0) {
-        const price = assetPrices[asset] || 0;
-        totalMainUSD += balance * price;
-      }
-    }
     
-    // Calculate matured wallet value from completed investments (valued at current crypto prices)
-    const maturedInvestments = await Investment.find({
-      user: userId,
-      status: 'completed'
-    }).populate('plan');
-    
-    let totalMaturedUSD = 0;
-    for (const investment of maturedInvestments) {
-      // If investment has crypto asset in metadata, value it at current price
-      if (investment.asset && investment.assetAmount) {
-        const price = assetPrices[investment.asset.toLowerCase()] || await getCryptoPrice(investment.asset.toUpperCase());
-        if (price && price > 0) {
-          totalMaturedUSD += investment.assetAmount * price;
-        } else {
-          totalMaturedUSD += investment.amount + (investment.actualReturn || 0);
+    // Process main balances (crypto holdings)
+    for (const [asset, balance] of Object.entries(mainBalances)) {
+      if (balance && balance > 0) {
+        let price = 0;
+        try {
+          price = await getCryptoPrice(asset.toUpperCase());
+        } catch (err) {
+          console.warn(`Failed to fetch price for ${asset}:`, err.message);
         }
-      } else {
-        // Fallback: use original USD value
-        totalMaturedUSD += investment.amount + (investment.actualReturn || 0);
+        totalMainUSD += balance * (price || 0);
       }
     }
     
@@ -21535,16 +21505,46 @@ app.get('/api/users/balances', protect, async (req, res) => {
       totalActiveUSD += investment.amount + (investment.actualReturn || 0);
     }
     
+    // Calculate matured wallet value from completed investments and matured balances
+    let totalMaturedUSD = 0;
+    
+    // Add matured balances (if any)
+    for (const [asset, balance] of Object.entries(maturedBalances)) {
+      if (balance && balance > 0) {
+        let price = 0;
+        try {
+          price = await getCryptoPrice(asset.toUpperCase());
+        } catch (err) {
+          console.warn(`Failed to fetch price for ${asset}:`, err.message);
+        }
+        totalMaturedUSD += balance * (price || 0);
+      }
+    }
+    
+    // Add completed investments
+    const completedInvestments = await Investment.find({
+      user: userId,
+      status: 'completed'
+    }).populate('plan');
+    
+    for (const investment of completedInvestments) {
+      totalMaturedUSD += investment.amount + (investment.actualReturn || 0);
+    }
+    
     // Get previous day values for PnL calculation from Redis
     const previousDayKey = `user:${userId}:prev_balances`;
     let previousMainUSD = totalMainUSD;
     let previousMaturedUSD = totalMaturedUSD;
-    const cachedPrev = await redis.get(previousDayKey);
     
-    if (cachedPrev) {
-      const prev = JSON.parse(cachedPrev);
-      previousMainUSD = prev.mainUSD || totalMainUSD;
-      previousMaturedUSD = prev.maturedUSD || totalMaturedUSD;
+    try {
+      const cachedPrev = await redis.get(previousDayKey);
+      if (cachedPrev) {
+        const prev = JSON.parse(cachedPrev);
+        previousMainUSD = prev.mainUSD || totalMainUSD;
+        previousMaturedUSD = prev.maturedUSD || totalMaturedUSD;
+      }
+    } catch (err) {
+      console.warn('Redis read error:', err.message);
     }
     
     // Calculate PnL
@@ -21555,14 +21555,24 @@ app.get('/api/users/balances', protect, async (req, res) => {
     
     // Store today's values for tomorrow's PnL (if date changed)
     const today = new Date().toDateString();
-    const lastDate = await redis.get(`user:${userId}:pnl_date`);
+    let lastDate = null;
+    try {
+      lastDate = await redis.get(`user:${userId}:pnl_date`);
+    } catch (err) {
+      console.warn('Redis read error:', err.message);
+    }
+    
     if (lastDate !== today) {
-      await redis.set(previousDayKey, JSON.stringify({
-        mainUSD: totalMainUSD,
-        maturedUSD: totalMaturedUSD,
-        date: today
-      }));
-      await redis.set(`user:${userId}:pnl_date`, today);
+      try {
+        await redis.set(previousDayKey, JSON.stringify({
+          mainUSD: totalMainUSD,
+          maturedUSD: totalMaturedUSD,
+          date: today
+        }));
+        await redis.set(`user:${userId}:pnl_date`, today);
+      } catch (err) {
+        console.warn('Redis write error:', err.message);
+      }
     }
     
     // Update User model balances for consistency
@@ -21577,9 +21587,15 @@ app.get('/api/users/balances', protect, async (req, res) => {
     const activeFiat = totalActiveUSD * fiatRate;
     const maturedFiat = totalMaturedUSD * fiatRate;
     
-    // Emit real-time PnL update via Socket.IO
+    // Emit real-time update via Socket.IO if available
     const io = req.app.get('io');
     if (io) {
+      io.to(`user_${userId}`).emit('balance_update', {
+        main: mainFiat,
+        active: activeFiat,
+        matured: maturedFiat
+      });
+      
       io.to(`user_${userId}`).emit('pnl_update', {
         main: { amount: mainPnL * fiatRate, percentage: mainPnLPercent },
         matured: { amount: maturedPnL * fiatRate, percentage: maturedPnLPercent }
@@ -21598,13 +21614,13 @@ app.get('/api/users/balances', protect, async (req, res) => {
     console.error('Error fetching user balances:', err);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to fetch user balances'
+      message: err.message || 'Failed to fetch user balances'
     });
   }
 });
 
 // =============================================
-// GET USER ASSETS ENDPOINT - Detailed crypto holdings with real-time valuations
+// GET USER ASSETS ENDPOINT - Detailed crypto holdings
 // =============================================
 app.get('/api/users/assets', protect, async (req, res) => {
   try {
@@ -21612,8 +21628,23 @@ app.get('/api/users/assets', protect, async (req, res) => {
     
     // Get user with balances Map
     const user = await User.findById(userId);
-    const balancesMap = user.balances?.main instanceof Map ? user.balances.main : new Map();
-    const balances = balancesMap instanceof Map ? Object.fromEntries(balancesMap) : (balancesMap || {});
+    
+    if (!user) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'User not found'
+      });
+    }
+    
+    // Extract main balances from Map
+    let mainBalances = {};
+    if (user.balances) {
+      if (user.balances.main instanceof Map) {
+        mainBalances = Object.fromEntries(user.balances.main);
+      } else if (user.balances.main && typeof user.balances.main === 'object') {
+        mainBalances = user.balances.main;
+      }
+    }
     
     // Get user preferences for fiat conversion
     const userPref = await UserPreference.findOne({ user: userId });
@@ -21628,117 +21659,112 @@ app.get('/api/users/assets', protect, async (req, res) => {
       console.warn('Failed to fetch fiat rates:', err.message);
     }
     
-    // Get buy/sell history for each asset to calculate avg price and PnL
+    // Get buy/sell history for each asset
     const buyHistory = await Buy.find({ user: userId, status: 'completed' });
     const sellHistory = await Sell.find({ user: userId, status: 'completed' });
     
-    // Group by asset
-    const assetBuyMap = new Map();
-    const assetSellMap = new Map();
-    
-    for (const buy of buyHistory) {
-      const asset = buy.asset.toLowerCase();
-      if (!assetBuyMap.has(asset)) {
-        assetBuyMap.set(asset, { totalSpent: 0, totalAmount: 0 });
-      }
-      const record = assetBuyMap.get(asset);
-      record.totalSpent += buy.amountUSD;
-      record.totalAmount += buy.assetAmount;
-    }
-    
-    for (const sell of sellHistory) {
-      const asset = sell.asset.toLowerCase();
-      if (!assetSellMap.has(asset)) {
-        assetSellMap.set(asset, { totalReceived: 0, totalAmount: 0 });
-      }
-      const record = assetSellMap.get(asset);
-      record.totalReceived += sell.amountUSD;
-      record.totalAmount += sell.assetAmount;
-    }
-    
     // Build asset data array
     const assetData = [];
-    const assetsToProcess = Object.keys(balances);
+    const assetsToProcess = Object.keys(mainBalances).filter(asset => mainBalances[asset] > 0);
     
-    // Fetch all prices in parallel
     for (const asset of assetsToProcess) {
-      if (balances[asset] > 0) {
-        const price = await getCryptoPrice(asset.toUpperCase());
-        const currentValue = balances[asset] * (price || 0);
-        const currentValueFiat = currentValue * fiatRate;
-        
-        // Calculate average buying price
-        const buyRecord = assetBuyMap.get(asset);
-        const sellRecord = assetSellMap.get(asset);
-        
-        let totalSpent = buyRecord?.totalSpent || 0;
-        let totalBought = buyRecord?.totalAmount || 0;
-        let totalSoldAmount = sellRecord?.totalAmount || 0;
-        let totalReceived = sellRecord?.totalReceived || 0;
-        
-        // Adjust for sold amounts (FIFO approximation)
-        const remainingBoughtAmount = totalBought - totalSoldAmount;
-        const adjustedSpent = totalSpent * (remainingBoughtAmount / totalBought) || 0;
-        const avgPrice = remainingBoughtAmount > 0 ? adjustedSpent / remainingBoughtAmount : 0;
-        
-        // Calculate unrealized PnL
-        const unrealizedPnl = currentValue - adjustedSpent;
-        const unrealizedPercentage = adjustedSpent > 0 ? (unrealizedPnl / adjustedSpent) * 100 : 0;
-        
-        // Calculate realized PnL from sells
-        const realizedPnl = totalReceived - (totalSoldAmount * avgPrice);
-        
-        // Get transactions for this asset
-        const assetTransactions = [
-          ...buyHistory.filter(b => b.asset.toLowerCase() === asset).map(b => ({
-            type: 'buy',
-            amount: b.assetAmount,
-            price: b.buyingPrice,
-            usdValue: b.amountUSD,
-            date: b.createdAt,
-            profit: 0,
-            loss: 0
-          })),
-          ...sellHistory.filter(s => s.asset.toLowerCase() === asset).map(s => ({
-            type: 'sell',
-            amount: s.assetAmount,
-            price: s.sellingPrice,
-            usdValue: s.amountUSD,
-            date: s.createdAt,
-            profit: s.profitLoss > 0 ? s.profitLoss : 0,
-            loss: s.profitLoss < 0 ? Math.abs(s.profitLoss) : 0
-          }))
-        ].sort((a, b) => new Date(a.date) - new Date(b.date));
-        
-        // Get 24h change
-        const coinGeckoId = mapSymbolToCoinGeckoId(asset);
-        let change24h = 0;
-        try {
-          const response = await axios.get(`https://api.coingecko.com/api/v3/simple/price?ids=${coinGeckoId}&vs_currencies=usd&include_24hr_change=true`, { timeout: 3000 });
-          change24h = response.data[coinGeckoId]?.usd_24h_change || 0;
-        } catch (err) {
-          console.warn(`Failed to fetch 24h change for ${asset}`);
-        }
-        
-        assetData.push({
-          asset: asset,
-          symbol: asset.toUpperCase(),
-          balance: balances[asset],
-          currentValue: currentValueFiat,
-          currentPriceUSD: price || 0,
-          avgPrice: avgPrice,
-          avgPriceFiat: avgPrice * fiatRate,
-          totalSpent: adjustedSpent,
-          totalSpentFiat: adjustedSpent * fiatRate,
-          unrealizedProfitLoss: unrealizedPnl * fiatRate,
-          unrealizedPercentage: unrealizedPercentage,
-          realizedProfit: realizedPnl > 0 ? realizedPnl * fiatRate : 0,
-          realizedLoss: realizedPnl < 0 ? Math.abs(realizedPnl) * fiatRate : 0,
-          change24h: change24h,
-          transactions: assetTransactions.slice(-20),
-          id: coinGeckoId
-        });
+      const balance = mainBalances[asset];
+      if (!balance || balance <= 0) continue;
+      
+      // Get current price
+      let price = 0;
+      try {
+        price = await getCryptoPrice(asset.toUpperCase());
+      } catch (err) {
+        console.warn(`Failed to fetch price for ${asset}:`, err.message);
       }
+      
+      const currentValue = balance * (price || 0);
+      const currentValueFiat = currentValue * fiatRate;
+      
+      // Calculate average buying price from buy history
+      const assetBuys = buyHistory.filter(b => b.asset.toLowerCase() === asset.toLowerCase());
+      let totalSpent = 0;
+      let totalBought = 0;
+      
+      for (const buy of assetBuys) {
+        totalSpent += buy.amountUSD;
+        totalBought += buy.assetAmount;
+      }
+      
+      // Calculate total sold
+      const assetSells = sellHistory.filter(s => s.asset.toLowerCase() === asset.toLowerCase());
+      let totalSoldAmount = 0;
+      let totalReceived = 0;
+      
+      for (const sell of assetSells) {
+        totalSoldAmount += sell.assetAmount;
+        totalReceived += sell.amountUSD;
+      }
+      
+      // Adjust for sold amounts (FIFO approximation)
+      const remainingBoughtAmount = totalBought - totalSoldAmount;
+      const adjustedSpent = totalBought > 0 ? totalSpent * (remainingBoughtAmount / totalBought) : 0;
+      const avgPrice = remainingBoughtAmount > 0 ? adjustedSpent / remainingBoughtAmount : 0;
+      
+      // Calculate unrealized PnL
+      const unrealizedPnl = currentValue - adjustedSpent;
+      const unrealizedPercentage = adjustedSpent > 0 ? (unrealizedPnl / adjustedSpent) * 100 : 0;
+      
+      // Calculate realized PnL from sells
+      const avgBuyPriceForSells = totalBought > 0 ? totalSpent / totalBought : 0;
+      const realizedPnl = totalReceived - (totalSoldAmount * avgBuyPriceForSells);
+      
+      // Get transactions for this asset
+      const assetTransactions = [
+        ...assetBuys.map(b => ({
+          type: 'buy',
+          amount: b.assetAmount,
+          price: b.buyingPrice,
+          usdValue: b.amountUSD,
+          date: b.createdAt,
+          profit: 0,
+          loss: 0
+        })),
+        ...assetSells.map(s => ({
+          type: 'sell',
+          amount: s.assetAmount,
+          price: s.sellingPrice,
+          usdValue: s.amountUSD,
+          date: s.createdAt,
+          profit: s.profitLoss > 0 ? s.profitLoss : 0,
+          loss: s.profitLoss < 0 ? Math.abs(s.profitLoss) : 0
+        }))
+      ].sort((a, b) => new Date(a.date) - new Date(b.date));
+      
+      // Get 24h change
+      let change24h = 0;
+      try {
+        const coinGeckoId = mapSymbolToCoinGeckoId(asset);
+        const response = await axios.get(`https://api.coingecko.com/api/v3/simple/price?ids=${coinGeckoId}&vs_currencies=usd&include_24hr_change=true`, { timeout: 3000 });
+        change24h = response.data[coinGeckoId]?.usd_24h_change || 0;
+      } catch (err) {
+        console.warn(`Failed to fetch 24h change for ${asset}`);
+      }
+      
+      assetData.push({
+        asset: asset,
+        symbol: asset.toUpperCase(),
+        balance: balance,
+        currentValue: currentValueFiat,
+        currentPriceUSD: price || 0,
+        avgPrice: avgPrice,
+        avgPriceFiat: avgPrice * fiatRate,
+        totalSpent: adjustedSpent,
+        totalSpentFiat: adjustedSpent * fiatRate,
+        unrealizedProfitLoss: unrealizedPnl * fiatRate,
+        unrealizedPercentage: unrealizedPercentage,
+        realizedProfit: realizedPnl > 0 ? realizedPnl * fiatRate : 0,
+        realizedLoss: realizedPnl < 0 ? Math.abs(realizedPnl) * fiatRate : 0,
+        change24h: change24h,
+        transactions: assetTransactions.slice(-20),
+        id: mapSymbolToCoinGeckoId(asset)
+      });
     }
     
     // Sort by current value descending
@@ -21748,12 +21774,58 @@ app.get('/api/users/assets', protect, async (req, res) => {
     
   } catch (err) {
     console.error('Error fetching user assets:', err);
-    res.status(500).json({ 
-      status: 'error', 
-      message: 'Failed to fetch assets' 
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to fetch assets'
     });
   }
 });
+
+// Helper function to map symbols to CoinGecko IDs
+function mapSymbolToCoinGeckoId(symbol) {
+  const mapping = {
+    'btc': 'bitcoin',
+    'eth': 'ethereum',
+    'usdt': 'tether',
+    'bnb': 'binancecoin',
+    'sol': 'solana',
+    'usdc': 'usd-coin',
+    'xrp': 'ripple',
+    'doge': 'dogecoin',
+    'ada': 'cardano',
+    'shib': 'shiba-inu',
+    'avax': 'avalanche-2',
+    'dot': 'polkadot',
+    'trx': 'tron',
+    'link': 'chainlink',
+    'matic': 'matic-network',
+    'wbtc': 'wrapped-bitcoin',
+    'ltc': 'litecoin',
+    'near': 'near',
+    'uni': 'uniswap',
+    'bch': 'bitcoin-cash',
+    'xlm': 'stellar',
+    'atom': 'cosmos',
+    'xmr': 'monero',
+    'flow': 'flow',
+    'vet': 'vechain',
+    'fil': 'filecoin',
+    'theta': 'theta-token',
+    'hbar': 'hedera-hashgraph',
+    'ftm': 'fantom',
+    'xtz': 'tezos'
+  };
+  return mapping[symbol.toLowerCase()] || symbol.toLowerCase();
+}
+
+
+
+
+
+
+
+
+
 
 // =============================================
 // GET /api/withdrawals/asset - Get available assets for withdrawal
