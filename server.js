@@ -22296,75 +22296,43 @@ const recalculateAllWalletValuesRealtime = async (io, currentPrices) => {
   isRecalculating = true;
   
   try {
-    // Get all users with their balances
     const users = await User.find({}).select('_id balances');
-    
-    const batchUpdates = [];
     
     for (const user of users) {
       let totalMainValue = 0;
       let totalMaturedValue = 0;
-      let totalActiveValue = 0;
       
-      // Calculate MAIN wallet value (all crypto holdings at current prices)
+      // Active wallet value should NOT be recalculated - it's fixed!
+      // Just use stored value
+      let totalActiveValue = 0;
+      if (user.balances && user.balances.active) {
+        const activeBalances = user.balances.active;
+        for (const [asset, balance] of activeBalances.entries()) {
+          if (balance > 0) {
+            totalActiveValue += balance;
+          }
+        }
+      }
+      
+      // Recalculate MAIN wallet (fluctuates)
       if (user.balances && user.balances.main) {
         totalMainValue = await calculateWalletValueFromBalances(user.balances.main, currentPrices);
       }
       
-      // Calculate MATURED wallet value
+      // Recalculate MATURED wallet (fluctuates)
       if (user.balances && user.balances.matured) {
         totalMaturedValue = await calculateWalletValueFromBalances(user.balances.matured, currentPrices);
       }
-      
-      // Calculate ACTIVE wallet value
-      if (user.balances && user.balances.active) {
-        totalActiveValue = await calculateWalletValueFromBalances(user.balances.active, currentPrices);
-      }
-      
-      // Calculate PnL for main wallet (based on previous value)
-      const previousMainValue = user.balances.mainTotal || totalMainValue;
-      const mainPnL = totalMainValue - previousMainValue;
-      const mainPnLPercentage = previousMainValue > 0 ? (mainPnL / previousMainValue) * 100 : 0;
-      
-      // Calculate PnL for matured wallet
-      const previousMaturedValue = user.balances.maturedTotal || totalMaturedValue;
-      const maturedPnL = totalMaturedValue - previousMaturedValue;
-      const maturedPnLPercentage = previousMaturedValue > 0 ? (maturedPnL / previousMaturedValue) * 100 : 0;
-      
-      // Prepare batch update
-      batchUpdates.push({
-        userId: user._id,
-        main: totalMainValue,
-        active: totalActiveValue,
-        matured: totalMaturedValue,
-        mainPnL: mainPnL,
-        mainPnLPercent: mainPnLPercentage,
-        maturedPnL: maturedPnL,
-        maturedPnLPercent: maturedPnLPercentage
-      });
       
       // Send real-time updates via Socket.IO to each specific user
       if (io) {
         io.to(`user_${user._id}`).emit('wallet_realtime_update', {
           main: totalMainValue,
-          active: totalActiveValue,
+          active: totalActiveValue,  // FIXED: Use stored value, not recalculated
           matured: totalMaturedValue,
-          mainPnL: mainPnL,
-          mainPnLPercent: mainPnLPercentage,
-          maturedPnL: maturedPnL,
-          maturedPnLPercent: maturedPnLPercentage,
           timestamp: Date.now()
         });
       }
-    }
-    
-    // Batch update database (non-blocking) - store totals for PnL calculation
-    for (const update of batchUpdates) {
-      await User.findByIdAndUpdate(update.userId, {
-        'balances.mainTotal': update.main,
-        'balances.activeTotal': update.active,
-        'balances.maturedTotal': update.matured
-      });
     }
     
   } catch (err) {
