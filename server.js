@@ -21687,6 +21687,10 @@ function maskCardNumber(cardNumber) {
 
 
 
+
+
+
+
 // =============================================
 // GET USER BALANCES - REAL TIME CRYPTO HOLDINGS WITH PNL
 // =============================================
@@ -21718,17 +21722,10 @@ app.get('/api/users/balances', protect, async (req, res) => {
     }
     
     // =============================================
-    // CRITICAL FIX: Calculate MAIN wallet value from crypto holdings ONLY
-    // (This is the value shown in the "Main Balance" card)
+    // MAIN WALLET: Fluctuates with crypto prices
     // =============================================
     let totalMainUSD = 0;
-    let totalMaturedUSD = 0;
-    let totalActiveUSD = 0;
     
-    // Collect ALL crypto balances from ALL wallets for asset section
-    const allCryptoHoldings = new Map(); // asset -> total balance across all wallets
-    
-    // Calculate MAIN wallet value (crypto holdings at current prices)
     if (user.balances && user.balances.main) {
       const mainBalances = user.balances.main;
       
@@ -21736,18 +21733,17 @@ app.get('/api/users/balances', protect, async (req, res) => {
         if (balance > 0 && asset !== 'usd') {
           const price = await getCryptoPrice(asset.toUpperCase());
           if (price && price > 0) {
-            const usdValue = balance * price;
-            totalMainUSD += usdValue;
-            
-            // Track total crypto holdings across ALL wallets
-            const currentTotal = allCryptoHoldings.get(asset) || 0;
-            allCryptoHoldings.set(asset, currentTotal + balance);
+            totalMainUSD += balance * price;
           }
         }
       }
     }
     
-    // Calculate MATURED wallet value from user's balances.matured Map
+    // =============================================
+    // MATURED WALLET: Fluctuates with crypto prices
+    // =============================================
+    let totalMaturedUSD = 0;
+    
     if (user.balances && user.balances.matured) {
       const maturedBalances = user.balances.matured;
       
@@ -21755,30 +21751,31 @@ app.get('/api/users/balances', protect, async (req, res) => {
         if (balance > 0 && asset !== 'usd') {
           const price = await getCryptoPrice(asset.toUpperCase());
           if (price && price > 0) {
-            const usdValue = balance * price;
-            totalMaturedUSD += usdValue;
-            
-            // Track total crypto holdings across ALL wallets
-            const currentTotal = allCryptoHoldings.get(asset) || 0;
-            allCryptoHoldings.set(asset, currentTotal + balance);
+            totalMaturedUSD += balance * price;
           }
         }
       }
     }
     
-    // Calculate active wallet value from user's balances.active Map
+    // =============================================
+    // ACTIVE WALLET: FIXED - NO FLUCTUATION
+    // This represents active mining contracts
+    // The value is stored as USD and does NOT change with crypto prices
+    // =============================================
+    let totalActiveUSD = 0;
+    
     if (user.balances && user.balances.active) {
       const activeBalances = user.balances.active;
       
       for (const [asset, balance] of activeBalances.entries()) {
-        if (balance > 0 && asset !== 'usd') {
-          const price = await getCryptoPrice(asset.toUpperCase());
-          if (price && price > 0) {
-            totalActiveUSD += balance * price;
-            
-            // Track total crypto holdings across ALL wallets
-            const currentTotal = allCryptoHoldings.get(asset) || 0;
-            allCryptoHoldings.set(asset, currentTotal + balance);
+        if (balance > 0) {
+          // For USD, use balance directly (no price fluctuation)
+          if (asset === 'usd') {
+            totalActiveUSD += balance;
+          } 
+          // For crypto assets in active wallet, they are also fixed (representing contract value)
+          else {
+            totalActiveUSD += balance;
           }
         }
       }
@@ -21786,19 +21783,36 @@ app.get('/api/users/balances', protect, async (req, res) => {
     
     // =============================================
     // STORE TOTAL CRYPTO HOLDINGS FOR ASSET SECTION
-    // This is the key fix - store the combined holdings
-    // so the /api/users/assets endpoint can use them
+    // Combine Main + Matured ONLY (Active is separate and fixed)
     // =============================================
-    const totalCryptoHoldings = {};
-    for (const [asset, balance] of allCryptoHoldings.entries()) {
-      if (balance > 0) {
-        totalCryptoHoldings[asset] = balance;
+    const totalCryptoHoldings = new Map();
+    
+    // Collect from MAIN wallet (crypto only, fluctuates)
+    if (user.balances && user.balances.main) {
+      for (const [asset, balance] of user.balances.main.entries()) {
+        if (balance > 0 && asset !== 'usd') {
+          const currentTotal = totalCryptoHoldings.get(asset) || 0;
+          totalCryptoHoldings.set(asset, currentTotal + balance);
+        }
       }
     }
     
-    // Store in a temporary cache or attach to user object for asset endpoint
-    // We'll store in Redis with a short TTL so the assets endpoint can access it
-    await redis.setex(`user:${userId}:total_holdings`, 60, JSON.stringify(totalCryptoHoldings));
+    // Collect from MATURED wallet (crypto only, fluctuates)
+    if (user.balances && user.balances.matured) {
+      for (const [asset, balance] of user.balances.matured.entries()) {
+        if (balance > 0 && asset !== 'usd') {
+          const currentTotal = totalCryptoHoldings.get(asset) || 0;
+          totalCryptoHoldings.set(asset, currentTotal + balance);
+        }
+      }
+    }
+    
+    // Store combined holdings in Redis for asset endpoint
+    const holdingsObj = {};
+    for (const [asset, balance] of totalCryptoHoldings.entries()) {
+      holdingsObj[asset] = balance;
+    }
+    await redis.setex(`user:${userId}:total_holdings`, 60, JSON.stringify(holdingsObj));
     
     // Get previous day values for PnL calculation from Redis
     const previousDayKey = `user:${userId}:prev_balances`;
@@ -21812,7 +21826,7 @@ app.get('/api/users/balances', protect, async (req, res) => {
       previousMaturedUSD = prev.maturedUSD || totalMaturedUSD;
     }
     
-    // Calculate PnL
+    // Calculate PnL (only for Main and Matured since they fluctuate)
     const mainPnL = totalMainUSD - previousMainUSD;
     const maturedPnL = totalMaturedUSD - previousMaturedUSD;
     const mainPnLPercent = previousMainUSD > 0 ? (mainPnL / previousMainUSD) * 100 : 0;
@@ -21863,7 +21877,8 @@ app.get('/api/users/balances', protect, async (req, res) => {
 });
 
 // =============================================
-// GET USER ASSETS ENDPOINT - Detailed crypto holdings from BOTH wallets
+// GET USER ASSETS ENDPOINT - Shows crypto from Main + Matured ONLY
+// Active wallet is NOT included here (it's fixed mining contracts)
 // =============================================
 app.get('/api/users/assets', protect, async (req, res) => {
   try {
@@ -21875,12 +21890,12 @@ app.get('/api/users/assets', protect, async (req, res) => {
     }
     
     // =============================================
-    // CRITICAL FIX: Collect crypto holdings from BOTH main AND matured wallets
-    // This ensures the ASSET SECTION shows total holdings across all wallets
+    // CRITICAL: Collect crypto holdings from Main AND Matured wallets ONLY
+    // Active wallet is EXCLUDED because it represents fixed mining contracts
     // =============================================
-    const totalHoldings = new Map(); // asset -> total balance (main + matured + active)
+    const totalHoldings = new Map(); // asset -> total balance (main + matured only)
     
-    // Collect from MAIN wallet (exclude USD)
+    // Collect from MAIN wallet (crypto only, fluctuates)
     if (user.balances.main && user.balances.main instanceof Map) {
       for (const [asset, balance] of user.balances.main.entries()) {
         if (balance > 0 && asset !== 'usd') {
@@ -21890,7 +21905,7 @@ app.get('/api/users/assets', protect, async (req, res) => {
       }
     }
     
-    // Collect from MATURED wallet (exclude USD)
+    // Collect from MATURED wallet (crypto only, fluctuates)
     if (user.balances.matured && user.balances.matured instanceof Map) {
       for (const [asset, balance] of user.balances.matured.entries()) {
         if (balance > 0 && asset !== 'usd') {
@@ -21900,15 +21915,8 @@ app.get('/api/users/assets', protect, async (req, res) => {
       }
     }
     
-    // Collect from ACTIVE wallet (exclude USD) - active investments in crypto
-    if (user.balances.active && user.balances.active instanceof Map) {
-      for (const [asset, balance] of user.balances.active.entries()) {
-        if (balance > 0 && asset !== 'usd') {
-          const currentTotal = totalHoldings.get(asset) || 0;
-          totalHoldings.set(asset, currentTotal + balance);
-        }
-      }
-    }
+    // ACTIVE wallet is deliberately NOT included here
+    // Active wallet represents mining contracts with FIXED value
     
     if (totalHoldings.size === 0) {
       return res.status(200).json([]);
@@ -21967,7 +21975,7 @@ app.get('/api/users/assets', protect, async (req, res) => {
     
     for (const [asset, totalBalance] of totalHoldings.entries()) {
       if (totalBalance > 0) {
-        // Get current price from API
+        // Get current price from API (fluctuates in real-time)
         let price = 0;
         try {
           price = await getCryptoPrice(asset.toUpperCase());
@@ -22015,7 +22023,7 @@ app.get('/api/users/assets', protect, async (req, res) => {
         
         assetData.push({
           symbol: asset,
-          balance: totalBalance, // TOTAL across all wallets
+          balance: totalBalance, // TOTAL across Main + Matured wallets
           currentValue: currentValue,
           avgPrice: avgPrice,
           totalSpent: totalSpent,
@@ -22047,13 +22055,6 @@ app.get('/api/users/assets', protect, async (req, res) => {
     });
   }
 });
-
-
-
-
-
-
-
 
 
 
