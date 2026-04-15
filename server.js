@@ -6954,8 +6954,15 @@ app.post('/api/auth/send-otp', [
 
 
 
+
+
+
+
+
+
+
 /**
- * POST /api/withdrawals/asset - Process asset withdrawal (COMPLETE)
+ * POST /api/withdrawals/asset - Process asset withdrawal
  */
 app.post('/api/withdrawals/asset', protect, async (req, res) => {
     try {
@@ -6994,7 +7001,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             });
         }
 
-        // Get user
+        // Get user with current balances
         const user = await User.findById(userId);
         if (!user) {
             return res.status(404).json({
@@ -7010,7 +7017,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
         const maturedBalance = user.balances?.matured?.get(assetLower) || 0;
         const totalAvailable = mainBalance + maturedBalance;
 
-        // Check if user has enough of this crypto
+        // Check sufficient balance
         if (assetAmount > totalAvailable) {
             return res.status(400).json({
                 status: 'error',
@@ -7018,11 +7025,11 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             });
         }
 
-        // Check if user has enough main balance for gas fee (same asset)
+        // Check gas fee from main wallet
         if (mainBalance < gasFee) {
             return res.status(400).json({
                 status: 'error',
-                message: `Insufficient main balance for gas fee. Required: ${gasFee.toFixed(8)} ${asset.toUpperCase()} in main wallet.`
+                message: `Insufficient main balance for gas fee. Required: ${gasFee.toFixed(8)} ${asset.toUpperCase()}`
             });
         }
 
@@ -7033,10 +7040,8 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
 
         if (balanceSource === 'main') {
             mainDeducted = Math.min(mainBalance - gasFee, remainingToDeduct);
-            remainingToDeduct -= mainDeducted;
         } else if (balanceSource === 'matured') {
             maturedDeducted = Math.min(maturedBalance, remainingToDeduct);
-            remainingToDeduct -= maturedDeducted;
         } else if (balanceSource === 'both') {
             if (mainAmountUsed > 0) {
                 mainDeducted = Math.min(mainAmountUsed, mainBalance - gasFee);
@@ -7047,22 +7052,34 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             }
         }
 
-        // Prepare update operations for Map fields
+        // Prepare update operations for Map
         const updateOps = {};
-        
-        // Update main balance (gas fee + withdrawal amount)
         const newMainBalance = mainBalance - gasFee - mainDeducted;
-        updateOps[`balances.main.${assetLower}`] = newMainBalance < 0 ? 0 : newMainBalance;
-        
-        // Update matured balance
         const newMaturedBalance = maturedBalance - maturedDeducted;
-        updateOps[`balances.matured.${assetLower}`] = newMaturedBalance < 0 ? 0 : newMaturedBalance;
+        
+        updateOps[`balances.main.${assetLower}`] = newMainBalance;
+        updateOps[`balances.matured.${assetLower}`] = newMaturedBalance;
 
-        // Apply updates
+        // Update user balances
         await User.findByIdAndUpdate(userId, { $set: updateOps });
 
+        // Record gas fee as platform revenue
+        await PlatformRevenue.create({
+            source: 'withdrawal_fee',
+            amount: gasFee * exchangeRate,
+            currency: 'USD',
+            userId: userId,
+            description: `Gas fee for ${asset.toUpperCase()} withdrawal`,
+            metadata: {
+                asset: asset,
+                withdrawalAmount: amount,
+                gasFeeInAsset: gasFee,
+                exchangeRate: exchangeRate
+            }
+        });
+
         // Generate reference
-        const reference = `WD-${asset.toUpperCase()}-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+        const reference = `WD-${asset.toUpperCase()}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
         // Create transaction
         const transaction = await Transaction.create({
@@ -7117,7 +7134,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 city: deviceInfo.locationDetails?.city || 'Unknown',
                 latitude: deviceInfo.locationDetails?.latitude,
                 longitude: deviceInfo.locationDetails?.longitude,
-                exactLocation: deviceInfo.exactLocation
+                exactLocation: deviceInfo.exactLocation || false
             },
             status: 'pending',
             metadata: {
@@ -7134,7 +7151,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             relatedEntityModel: 'Transaction'
         });
 
-        // Log activity
+        // Log activity using existing function
         await logActivity(
             'withdrawal_created',
             'Transaction',
@@ -7147,36 +7164,28 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 asset: asset,
                 assetAmount: assetAmount,
                 reference: reference,
-                walletAddress: walletAddress,
+                walletAddress: walletAddress.substring(0, 10) + '...',
                 gasFee: gasFee,
                 exchangeRate: exchangeRate
             }
         );
 
-        // =============================================
-        // SEND EMAIL NOTIFICATION
-        // =============================================
-        try {
-            await sendAutomatedEmail(user, 'withdrawal_request', {
-                name: user.firstName,
-                amount: assetAmount.toFixed(8),
-                asset: asset.toUpperCase(),
-                usdValue: amount,
-                fee: gasFee.toFixed(8),
-                feeUsd: (gasFee * exchangeRate).toFixed(2),
-                netAmount: (assetAmount - gasFee).toFixed(8),
-                withdrawalAddress: walletAddress,
-                requestId: reference,
-                timestamp: new Date(),
-                network: asset === 'usdt' ? 'ERC-20' : asset === 'btc' ? 'Bitcoin' : 'Mainnet'
-            });
-            console.log(`Withdrawal request email sent to ${user.email}`);
-        } catch (emailError) {
-            console.error('Failed to send withdrawal email:', emailError);
-            // Don't fail the withdrawal if email fails
-        }
+        // Send email notification
+        await sendAutomatedEmail(user, 'withdrawal_request', {
+            name: user.firstName,
+            amount: assetAmount,
+            asset: asset,
+            usdValue: amount,
+            fee: gasFee,
+            feeUsd: gasFee * exchangeRate,
+            netAmount: assetAmount - gasFee,
+            withdrawalAddress: walletAddress,
+            requestId: reference,
+            timestamp: new Date().toISOString(),
+            network: asset === 'usdt' ? 'ERC-20' : asset === 'btc' ? 'Bitcoin' : 'Crypto'
+        });
 
-        // Return response matching HTML expected format
+        // Return response matching HTML expectations
         return res.status(201).json({
             status: 'success',
             data: {
@@ -7188,7 +7197,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 gasFee: gasFee,
                 gasFeeUsd: gasFee * exchangeRate
             },
-            message: `Withdrawal request submitted successfully. Gas fee of ${gasFee.toFixed(8)} ${asset.toUpperCase()} deducted from main wallet.`
+            message: `Withdrawal request submitted. Gas fee of ${gasFee.toFixed(8)} ${asset.toUpperCase()} deducted from main wallet.`
         });
 
     } catch (err) {
@@ -7199,17 +7208,6 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
         });
     }
 });
-
-
-
-
-
-
-
-
-
-
-
 
 
 
