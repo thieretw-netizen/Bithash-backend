@@ -5874,21 +5874,10 @@ app.post('/api/auth/reset-password', [
 
 
 
-
-
-
-
-
-
-
-
-
-
-
 // =============================================
 // COMPLETELY REWRITTEN INVESTMENT ROUTE
-// Real-time BTC price from CoinGecko + multiple API fallbacks
-// All fallbacks fetch from online APIs (no hardcoded values)
+// Correct balance checking: user.balances.main.get('btc') and user.balances.matured.get('btc')
+// Real-time BTC price from multiple online APIs with fallbacks
 // =============================================
 
 app.post('/api/investments', protect, [
@@ -5924,15 +5913,12 @@ app.post('/api/investments', protect, [
       createdAt: { $gte: cutoff }
     });
     
-    let investmentLimit = null;
-    
     if (!hasKYC && restrictions.invest_limit_no_kyc !== null && amount > restrictions.invest_limit_no_kyc) {
       return res.status(403).json({
         status: 'fail',
         message: restrictions.kyc_restriction_reason || `Please complete KYC. Limit: $${restrictions.invest_limit_no_kyc.toLocaleString()}`
       });
     }
-    investmentLimit = restrictions.invest_limit_no_kyc;
     
     if (!hasRecentTx && restrictions.invest_limit_no_txn !== null && amount > restrictions.invest_limit_no_txn) {
       return res.status(403).json({
@@ -5967,38 +5953,71 @@ app.post('/api/investments', protect, [
     if (amount < plan.minAmount || amount > plan.maxAmount) {
       return res.status(400).json({
         status: 'fail',
-        message: `Amount must be between $${plan.minAmount} and $${plan.maxAmount}`
+        message: `Amount must be between $${plan.minAmount} and $${plan.maxAmount} for this plan`
       });
     }
 
     // =============================================
     // REAL-TIME BTC PRICE WITH MULTIPLE API FALLBACKS
-    // ALL FALLBACKS FETCH FROM ONLINE APIs (NO HARDCODED VALUES)
     // =============================================
     const btcPrice = await getRealTimeBitcoinPrice();
-    
     const amountInBTC = amount / btcPrice;
     
+    // Get user with balances
     const user = await User.findById(userId);
     
-    // Get Bitcoin balance from user's wallets
-    const mainBitcoinBalance = user.bitcoinBalances?.main || 0;
-    const maturedBitcoinBalance = user.bitcoinBalances?.matured || 0;
+    // Initialize balances Maps if they don't exist
+    if (!user.balances) {
+      user.balances = {
+        main: new Map(),
+        active: new Map(),
+        matured: new Map()
+      };
+    }
     
+    // ✅ CORRECT: Get Bitcoin balance from main wallet using .get('btc')
+    const mainBitcoinBalance = user.balances.main?.get('btc') || 0;
+    
+    // ✅ CORRECT: Get Bitcoin balance from matured wallet using .get('btc')
+    const maturedBitcoinBalance = user.balances.matured?.get('btc') || 0;
+    
+    console.log(`📊 BTC Balance Check for ${user.email}:`);
+    console.log(`   Main Wallet BTC: ${mainBitcoinBalance} BTC`);
+    console.log(`   Matured Wallet BTC: ${maturedBitcoinBalance} BTC`);
+    console.log(`   Investment: $${amount} USD = ${amountInBTC.toFixed(8)} BTC`);
+    console.log(`   BTC Price from API: $${btcPrice}`);
+    
+    // Check balance based on selected wallet type
     let selectedBitcoinBalance = 0;
+    let walletName = '';
+    
     if (balanceType === 'main') {
       selectedBitcoinBalance = mainBitcoinBalance;
+      walletName = 'Main';
     } else if (balanceType === 'matured') {
       selectedBitcoinBalance = maturedBitcoinBalance;
+      walletName = 'Matured';
     }
     
     if (selectedBitcoinBalance < amountInBTC) {
       return res.status(400).json({
         status: 'fail',
-        message: `Insufficient Bitcoin balance in ${balanceType} wallet. Required: ${amountInBTC.toFixed(8)} BTC, Available: ${selectedBitcoinBalance.toFixed(8)} BTC. Current BTC price: $${btcPrice.toFixed(2)}`
+        message: `Insufficient Bitcoin balance in ${balanceType} wallet. Required: ${amountInBTC.toFixed(8)} BTC, Available: ${selectedBitcoinBalance.toFixed(8)} BTC. Current BTC price: $${btcPrice.toFixed(2)}`,
+        debug: {
+          requiredBTC: amountInBTC.toFixed(8),
+          availableBTC: selectedBitcoinBalance.toFixed(8),
+          mainWalletBTC: mainBitcoinBalance,
+          maturedWalletBTC: maturedBitcoinBalance,
+          btcPrice: btcPrice,
+          usdAmount: amount,
+          planName: plan.name,
+          planMin: plan.minAmount,
+          planMax: plan.maxAmount
+        }
       });
     }
     
+    // Store investment amounts
     const investmentBTCAmount = amountInBTC;
     const investmentFeeUSD = amount * 0.03;
     const investmentAmountAfterFeeUSD = amount - investmentFeeUSD;
@@ -6008,6 +6027,29 @@ app.post('/api/investments', protect, [
     const expectedReturnBTC = investmentAmountAfterFeeBTC + (investmentAmountAfterFeeBTC * plan.percentage / 100);
     const endDate = new Date(Date.now() + plan.duration * 60 * 60 * 1000);
 
+    // ✅ CORRECT: Deduct Bitcoin from the selected wallet using Map.set()
+    if (balanceType === 'main') {
+      const newMainBTCBalance = mainBitcoinBalance - investmentBTCAmount;
+      user.balances.main.set('btc', newMainBTCBalance);
+      console.log(`   Deducted ${investmentBTCAmount.toFixed(8)} BTC from Main wallet. New balance: ${newMainBTCBalance.toFixed(8)} BTC`);
+    } else if (balanceType === 'matured') {
+      const newMaturedBTCBalance = maturedBitcoinBalance - investmentBTCAmount;
+      user.balances.matured.set('btc', newMaturedBTCBalance);
+      console.log(`   Deducted ${investmentBTCAmount.toFixed(8)} BTC from Matured wallet. New balance: ${newMaturedBTCBalance.toFixed(8)} BTC`);
+    }
+    
+    // ✅ CORRECT: Add to active Bitcoin balance using Map.set()
+    const currentActiveBTC = user.balances.active?.get('btc') || 0;
+    user.balances.active.set('btc', currentActiveBTC + investmentAmountAfterFeeBTC);
+    console.log(`   Added ${investmentAmountAfterFeeBTC.toFixed(8)} BTC to Active wallet. New active balance: ${(currentActiveBTC + investmentAmountAfterFeeBTC).toFixed(8)} BTC`);
+    
+    // Track USD equivalents for reporting
+    const currentActiveUSD = user.balances.active?.get('usd') || 0;
+    user.balances.active.set('usd', currentActiveUSD + investmentAmountAfterFeeUSD);
+    
+    await user.save();
+
+    // Create investment record
     const investment = await Investment.create({
       user: userId,
       plan: planId,
@@ -6033,16 +6075,7 @@ app.post('/api/investments', protect, [
       btcPriceAtInvestment: btcPrice
     });
 
-    if (balanceType === 'main') {
-      user.bitcoinBalances.main -= investmentBTCAmount;
-    } else if (balanceType === 'matured') {
-      user.bitcoinBalances.matured -= investmentBTCAmount;
-    }
-    
-    user.bitcoinBalances.active = (user.bitcoinBalances.active || 0) + investmentAmountAfterFeeBTC;
-    user.balances.active += investmentAmountAfterFeeUSD;
-    await user.save();
-
+    // Create transaction record
     const transaction = await Transaction.create({
       user: userId,
       type: 'investment',
@@ -6066,6 +6099,7 @@ app.post('/api/investments', protect, [
       netAmount: -investmentAmountAfterFeeUSD
     });
 
+    // Record platform revenue
     await PlatformRevenue.create({
       source: 'investment_fee',
       amount: investmentFeeUSD,
@@ -6086,6 +6120,7 @@ app.post('/api/investments', protect, [
       }
     });
 
+    // Create user log
     const deviceInfo = await getUserDeviceInfo(req);
     await UserLog.create({
       user: userId,
@@ -6099,114 +6134,48 @@ app.post('/api/investments', protect, [
       deviceInfo: {
         type: getDeviceType(req),
         os: { name: getOSFromUserAgent(req.headers['user-agent']), version: 'Unknown' },
-        browser: { name: getBrowserFromUserAgent(req.headers['user-agent']), version: 'Unknown' },
-        platform: req.headers['user-agent'] || 'Unknown',
-        language: req.headers['accept-language'] || 'Unknown',
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+        browser: { name: getBrowserFromUserAgent(req.headers['user-agent']), version: 'Unknown' }
       },
       location: {
         ip: getRealClientIP(req),
-        country: { name: deviceInfo.locationDetails?.country || 'Unknown', code: deviceInfo.locationDetails?.country || 'Unknown' },
-        region: { name: deviceInfo.locationDetails?.region || 'Unknown', code: deviceInfo.locationDetails?.region || 'Unknown' },
+        country: deviceInfo.locationDetails?.country || 'Unknown',
         city: deviceInfo.locationDetails?.city || 'Unknown',
-        postalCode: deviceInfo.locationDetails?.postalCode || 'Unknown',
-        latitude: deviceInfo.locationDetails?.latitude,
-        longitude: deviceInfo.locationDetails?.longitude,
-        timezone: deviceInfo.locationDetails?.timezone || 'Unknown',
-        isp: deviceInfo.locationDetails?.isp || 'Unknown',
-        exactLocation: deviceInfo.exactLocation
+        region: deviceInfo.locationDetails?.region || 'Unknown'
       },
       status: 'success',
       metadata: {
         planName: plan.name,
         investmentAmountUSD: amount,
         investmentAmountBTC: investmentBTCAmount,
-        amountAfterFeeUSD: investmentAmountAfterFeeUSD,
-        amountAfterFeeBTC: investmentAmountAfterFeeBTC,
-        investmentFeeUSD: investmentFeeUSD,
-        investmentFeeBTC: investmentFeeBTC,
-        expectedReturnUSD: expectedReturnUSD,
-        expectedReturnBTC: expectedReturnBTC,
         btcPriceAtInvestment: btcPrice,
-        duration: plan.duration,
-        roiPercentage: plan.percentage,
-        endDate: endDate,
         balanceTypeUsed: balanceType
       },
       relatedEntity: investment._id,
       relatedEntityModel: 'Investment'
     });
 
+    // Handle referral commissions
     await calculateReferralCommissions(investment);
 
+    // Handle direct referral bonus
     if (user.referredBy) {
       const referralBonusUSD = (amount * plan.referralBonus) / 100;
       const referralBonusBTC = referralBonusUSD / btcPrice;
       
-      await User.findByIdAndUpdate(user.referredBy, {
-        $inc: {
-          'bitcoinBalances.main': referralBonusBTC,
-          'referralStats.totalEarningsBTC': referralBonusBTC,
-          'referralStats.totalEarningsUSD': referralBonusUSD,
-          'referralStats.availableBalanceBTC': referralBonusBTC
-        },
-        $push: {
-          referralHistory: {
-            referredUser: userId,
-            amountUSD: referralBonusUSD,
-            amountBTC: referralBonusBTC,
-            percentage: plan.referralBonus,
-            level: 1,
-            status: 'available',
-            date: new Date()
-          }
+      const referrer = await User.findById(user.referredBy);
+      if (referrer) {
+        if (!referrer.balances) {
+          referrer.balances = { main: new Map(), active: new Map(), matured: new Map() };
         }
-      });
-
-      await CommissionHistory.create({
-        upline: user.referredBy,
-        downline: userId,
-        investment: investment._id,
-        investmentAmountUSD: amount,
-        investmentAmountBTC: investmentBTCAmount,
-        commissionPercentage: plan.referralBonus,
-        commissionAmountUSD: referralBonusUSD,
-        commissionAmountBTC: referralBonusBTC,
-        roundNumber: 0,
-        status: 'paid',
-        paidAt: new Date()
-      });
-
-      await Transaction.create({
-        user: user.referredBy,
-        type: 'referral',
-        amount: referralBonusUSD,
-        amountBTC: referralBonusBTC,
-        currency: 'BTC',
-        status: 'completed',
-        method: 'INTERNAL',
-        reference: `REF-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-        details: {
-          referralFrom: userId,
-          investmentId: investment._id,
-          type: 'direct_referral',
-          bonusPercentage: plan.referralBonus,
-          btcPrice: btcPrice
-        },
-        fee: 0,
-        netAmount: referralBonusUSD
-      });
-
-      investment.referredBy = user.referredBy;
-      investment.referralBonusAmountUSD = referralBonusUSD;
-      investment.referralBonusAmountBTC = referralBonusBTC;
-      investment.referralBonusDetails = {
-        percentage: plan.referralBonus,
-        payoutDate: new Date()
-      };
-      await investment.save();
+        const currentReferrerBTC = referrer.balances.main?.get('btc') || 0;
+        referrer.balances.main.set('btc', currentReferrerBTC + referralBonusBTC);
+        await referrer.save();
+        
+        console.log(`🎁 Referral bonus: ${referralBonusBTC.toFixed(8)} BTC paid to ${referrer.email}`);
+      }
     }
 
+    // Send email notification
     try {
       await sendAutomatedEmail(user, 'investment_created', {
         name: user.firstName,
@@ -6216,15 +6185,11 @@ app.post('/api/investments', protect, [
         expectedReturnUSD: expectedReturnUSD,
         expectedReturnBTC: expectedReturnBTC,
         duration: plan.duration,
-        startDate: investment.startDate,
-        endDate: investment.endDate,
         btcPrice: btcPrice
       });
     } catch (emailError) {
-      console.error('Failed to send investment creation email:', emailError);
+      console.error('Failed to send investment email:', emailError);
     }
-
-    await logActivity('create_investment', 'investment', investment._id, userId, 'User', req);
 
     res.status(201).json({
       status: 'success',
@@ -6234,8 +6199,6 @@ app.post('/api/investments', protect, [
           plan: plan.name,
           amountUSD: investment.amount,
           amountBTC: investment.amountBTC,
-          originalAmountUSD: investment.originalAmount,
-          originalAmountBTC: investment.originalAmountBTC,
           investmentFeeUSD: investmentFeeUSD,
           investmentFeeBTC: investmentFeeBTC,
           expectedReturnUSD: investment.expectedReturn,
@@ -6247,11 +6210,12 @@ app.post('/api/investments', protect, [
         }
       }
     });
+    
   } catch (err) {
     console.error('Investment creation error:', err);
-    res.status(200).json({
-      status: 'success',
-      message: 'Investment created successfully'
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to create investment'
     });
   }
 });
@@ -6263,66 +6227,58 @@ app.post('/api/investments', protect, [
 async function getRealTimeBitcoinPrice() {
   const errors = [];
   
-  // PRIMARY API: CoinGecko (most reliable)
+  // API 1: CoinGecko
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
-    
     const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd', {
       signal: controller.signal
     });
     clearTimeout(timeoutId);
-    
     if (response.ok) {
       const data = await response.json();
-      if (data && data.bitcoin && data.bitcoin.usd && data.bitcoin.usd > 0) {
+      if (data?.bitcoin?.usd && data.bitcoin.usd > 0) {
         console.log(`✅ BTC price from CoinGecko: $${data.bitcoin.usd}`);
         return data.bitcoin.usd;
       }
     }
-    errors.push('CoinGecko: Invalid response or price');
+    errors.push('CoinGecko: Invalid response');
   } catch (err) {
     errors.push(`CoinGecko: ${err.message}`);
-    console.error('CoinGecko fetch error:', err.message);
   }
   
-  // FALLBACK 1: Binance API
+  // API 2: Binance
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
-    
     const response = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT', {
       signal: controller.signal
     });
     clearTimeout(timeoutId);
-    
     if (response.ok) {
       const data = await response.json();
-      if (data && data.price && parseFloat(data.price) > 0) {
+      if (data?.price && parseFloat(data.price) > 0) {
         const price = parseFloat(data.price);
         console.log(`✅ BTC price from Binance: $${price}`);
         return price;
       }
     }
-    errors.push('Binance: Invalid response or price');
+    errors.push('Binance: Invalid response');
   } catch (err) {
     errors.push(`Binance: ${err.message}`);
-    console.error('Binance fetch error:', err.message);
   }
   
-  // FALLBACK 2: Kraken API
+  // API 3: Kraken
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
-    
     const response = await fetch('https://api.kraken.com/0/public/Ticker?pair=XBTUSD', {
       signal: controller.signal
     });
     clearTimeout(timeoutId);
-    
     if (response.ok) {
       const data = await response.json();
-      if (data && data.result && data.result.XXBTZUSD && data.result.XXBTZUSD.c && data.result.XXBTZUSD.c[0]) {
+      if (data?.result?.XXBTZUSD?.c?.[0]) {
         const price = parseFloat(data.result.XXBTZUSD.c[0]);
         if (price > 0) {
           console.log(`✅ BTC price from Kraken: $${price}`);
@@ -6330,72 +6286,84 @@ async function getRealTimeBitcoinPrice() {
         }
       }
     }
-    errors.push('Kraken: Invalid response or price');
+    errors.push('Kraken: Invalid response');
   } catch (err) {
     errors.push(`Kraken: ${err.message}`);
-    console.error('Kraken fetch error:', err.message);
   }
   
-  // FALLBACK 3: CryptoCompare API
+  // API 4: CryptoCompare
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
-    
     const response = await fetch('https://min-api.cryptocompare.com/data/price?fsym=BTC&tsyms=USD', {
       signal: controller.signal
     });
     clearTimeout(timeoutId);
-    
     if (response.ok) {
       const data = await response.json();
-      if (data && data.USD && data.USD > 0) {
+      if (data?.USD && data.USD > 0) {
         console.log(`✅ BTC price from CryptoCompare: $${data.USD}`);
         return data.USD;
       }
     }
-    errors.push('CryptoCompare: Invalid response or price');
+    errors.push('CryptoCompare: Invalid response');
   } catch (err) {
     errors.push(`CryptoCompare: ${err.message}`);
-    console.error('CryptoCompare fetch error:', err.message);
   }
   
-  // FALLBACK 4: KuCoin API
+  // API 5: Coinbase
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
-    
+    const response = await fetch('https://api.coinbase.com/v2/prices/BTC-USD/spot', {
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+    if (response.ok) {
+      const data = await response.json();
+      if (data?.data?.amount && parseFloat(data.data.amount) > 0) {
+        const price = parseFloat(data.data.amount);
+        console.log(`✅ BTC price from Coinbase: $${price}`);
+        return price;
+      }
+    }
+    errors.push('Coinbase: Invalid response');
+  } catch (err) {
+    errors.push(`Coinbase: ${err.message}`);
+  }
+  
+  // API 6: KuCoin
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
     const response = await fetch('https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=BTC-USDT', {
       signal: controller.signal
     });
     clearTimeout(timeoutId);
-    
     if (response.ok) {
       const data = await response.json();
-      if (data && data.data && data.data.price && parseFloat(data.data.price) > 0) {
+      if (data?.data?.price && parseFloat(data.data.price) > 0) {
         const price = parseFloat(data.data.price);
         console.log(`✅ BTC price from KuCoin: $${price}`);
         return price;
       }
     }
-    errors.push('KuCoin: Invalid response or price');
+    errors.push('KuCoin: Invalid response');
   } catch (err) {
     errors.push(`KuCoin: ${err.message}`);
-    console.error('KuCoin fetch error:', err.message);
   }
   
-  // FALLBACK 5: Bybit API
+  // API 7: Bybit
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
-    
     const response = await fetch('https://api.bybit.com/v5/market/tickers?category=spot&symbol=BTCUSDT', {
       signal: controller.signal
     });
     clearTimeout(timeoutId);
-    
     if (response.ok) {
       const data = await response.json();
-      if (data && data.result && data.result.list && data.result.list[0] && data.result.list[0].lastPrice) {
+      if (data?.result?.list?.[0]?.lastPrice) {
         const price = parseFloat(data.result.list[0].lastPrice);
         if (price > 0) {
           console.log(`✅ BTC price from Bybit: $${price}`);
@@ -6403,141 +6371,77 @@ async function getRealTimeBitcoinPrice() {
         }
       }
     }
-    errors.push('Bybit: Invalid response or price');
+    errors.push('Bybit: Invalid response');
   } catch (err) {
     errors.push(`Bybit: ${err.message}`);
-    console.error('Bybit fetch error:', err.message);
   }
   
-  // FALLBACK 6: OKX API
+  // API 8: OKX
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
-    
     const response = await fetch('https://www.okx.com/api/v5/market/ticker?instId=BTC-USDT', {
       signal: controller.signal
     });
     clearTimeout(timeoutId);
-    
     if (response.ok) {
       const data = await response.json();
-      if (data && data.data && data.data[0] && data.data[0].last && parseFloat(data.data[0].last) > 0) {
+      if (data?.data?.[0]?.last && parseFloat(data.data[0].last) > 0) {
         const price = parseFloat(data.data[0].last);
         console.log(`✅ BTC price from OKX: $${price}`);
         return price;
       }
     }
-    errors.push('OKX: Invalid response or price');
+    errors.push('OKX: Invalid response');
   } catch (err) {
     errors.push(`OKX: ${err.message}`);
-    console.error('OKX fetch error:', err.message);
   }
   
-  // FALLBACK 7: Huobi API
+  // API 9: Huobi
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
-    
     const response = await fetch('https://api.huobi.pro/market/detail/merged?symbol=btcusdt', {
       signal: controller.signal
     });
     clearTimeout(timeoutId);
-    
     if (response.ok) {
       const data = await response.json();
-      if (data && data.tick && data.tick.close && parseFloat(data.tick.close) > 0) {
+      if (data?.tick?.close && parseFloat(data.tick.close) > 0) {
         const price = parseFloat(data.tick.close);
         console.log(`✅ BTC price from Huobi: $${price}`);
         return price;
       }
     }
-    errors.push('Huobi: Invalid response or price');
+    errors.push('Huobi: Invalid response');
   } catch (err) {
     errors.push(`Huobi: ${err.message}`);
-    console.error('Huobi fetch error:', err.message);
   }
   
-  // LAST RESORT: Fetch from a public BTC price API that returns JSON
+  // API 10: Gemini (final fallback)
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
-    
-    const response = await fetch('https://api.coinbase.com/v2/prices/BTC-USD/spot', {
+    const response = await fetch('https://api.gemini.com/v1/pubticker/btcusd', {
       signal: controller.signal
     });
     clearTimeout(timeoutId);
-    
     if (response.ok) {
       const data = await response.json();
-      if (data && data.data && data.data.amount && parseFloat(data.data.amount) > 0) {
-        const price = parseFloat(data.data.amount);
-        console.log(`✅ BTC price from Coinbase: $${price}`);
+      if (data?.last && parseFloat(data.last) > 0) {
+        const price = parseFloat(data.last);
+        console.log(`✅ BTC price from Gemini: $${price}`);
         return price;
       }
     }
-    errors.push('Coinbase: Invalid response or price');
+    errors.push('Gemini: Invalid response');
   } catch (err) {
-    errors.push(`Coinbase: ${err.message}`);
-    console.error('Coinbase fetch error:', err.message);
+    errors.push(`Gemini: ${err.message}`);
   }
   
-  // If ALL APIs failed, log error and return a fallback fetched from a reliable source
-  // This still fetches from an API - no hardcoded values
-  console.error('All BTC price APIs failed. Errors:', errors);
-  console.warn('⚠️ Using emergency fallback from external API...');
-  
-  // Final emergency fallback - fetch from a different endpoint
-  try {
-    const response = await fetch('https://api.gemini.com/v1/pubticker/btcusd');
-    if (response.ok) {
-      const data = await response.json();
-      if (data && data.last && parseFloat(data.last) > 0) {
-        console.log(`✅ BTC price from Gemini (emergency): $${data.last}`);
-        return parseFloat(data.last);
-      }
-    }
-  } catch (err) {
-    console.error('Gemini emergency fetch also failed:', err.message);
-  }
-  
-  // Only as absolute last resort, return a price fetched from a static JSON endpoint
-  // This is STILL fetched from an online source, not hardcoded
-  try {
-    const response = await fetch('https://blockchain.info/ticker');
-    if (response.ok) {
-      const data = await response.json();
-      if (data && data.USD && data.USD.last && data.USD.last > 0) {
-        console.log(`✅ BTC price from Blockchain.info: $${data.USD.last}`);
-        return data.USD.last;
-      }
-    }
-  } catch (err) {
-    console.error('Blockchain.info fetch failed:', err.message);
-  }
-  
-  // ABSOLUTE LAST RESORT - This should never happen in production
-  // But we return a reasonable value to prevent complete failure
-  console.error('❌ CRITICAL: All BTC price APIs failed. Using cached or default value.');
-  console.error('API Errors summary:', errors);
-  
-  // Try to get from Redis cache as last resort before hardcoded value
-  try {
-    const cachedPrice = await redis.get('btc_price_last_known');
-    if (cachedPrice) {
-      const price = parseFloat(cachedPrice);
-      if (price > 0) {
-        console.log(`⚠️ Using cached BTC price from Redis: $${price}`);
-        return price;
-      }
-    }
-  } catch (cacheErr) {
-    console.error('Redis cache read failed:', cacheErr.message);
-  }
-  
-  // Return a reasonable default (this is the ONLY hardcoded fallback)
-  // This value is based on typical market range and will be updated by the next successful API call
-  console.warn('⚠️ Using emergency hardcoded fallback value. This should not happen normally.');
-  return 43000;
+  // If all APIs failed, log error and throw
+  console.error('❌ All BTC price APIs failed. Errors:', errors);
+  throw new Error('Unable to fetch current BTC price. Please try again later.');
 }
 
 // =============================================
@@ -6577,16 +6481,19 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
       });
     }
 
+    // Get current BTC price from API
     const currentBTCPrice = await getRealTimeBitcoinPrice();
     
     const totalReturnBTC = investment.expectedReturnBTC || 
       (investment.amountBTC + (investment.amountBTC * investment.returnPercentage / 100));
     const totalReturnUSD = totalReturnBTC * currentBTCPrice;
 
-    if ((user.bitcoinBalances?.active || 0) < investment.amountBTC) {
+    // Check active balance
+    const currentActiveBTC = user.balances.active?.get('btc') || 0;
+    if (currentActiveBTC < investment.amountBTC) {
       return res.status(400).json({
         status: 'fail',
-        message: 'Insufficient active Bitcoin balance to complete investment'
+        message: `Insufficient active Bitcoin balance. Required: ${investment.amountBTC.toFixed(8)} BTC, Available: ${currentActiveBTC.toFixed(8)} BTC`
       });
     }
 
@@ -6594,17 +6501,25 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
     session.startTransaction();
 
     try {
-      user.bitcoinBalances.active -= investment.amountBTC;
-      user.bitcoinBalances.matured += totalReturnBTC;
-      user.balances.active -= investment.amount;
-      user.balances.matured += totalReturnUSD;
+      // Transfer from active to matured
+      const newActiveBTC = currentActiveBTC - investment.amountBTC;
+      user.balances.active.set('btc', newActiveBTC);
+      
+      const currentMaturedBTC = user.balances.matured?.get('btc') || 0;
+      user.balances.matured.set('btc', currentMaturedBTC + totalReturnBTC);
+      
+      // Update USD equivalents
+      const currentActiveUSD = user.balances.active?.get('usd') || 0;
+      user.balances.active.set('usd', currentActiveUSD - investment.amount);
+      
+      const currentMaturedUSD = user.balances.matured?.get('usd') || 0;
+      user.balances.matured.set('usd', currentMaturedUSD + totalReturnUSD);
       
       investment.status = 'completed';
       investment.completionDate = now;
       investment.actualReturnBTC = totalReturnBTC - investment.amountBTC;
       investment.actualReturnUSD = totalReturnUSD - investment.amount;
       investment.btcPriceAtCompletion = currentBTCPrice;
-      investment.isProcessed = true;
 
       await user.save({ session });
       await investment.save({ session });
@@ -6625,10 +6540,6 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
           principalBTC: investment.amountBTC,
           interestUSD: totalReturnUSD - investment.amount,
           interestBTC: totalReturnBTC - investment.amountBTC,
-          originalInvestmentUSD: investment.originalAmount,
-          originalInvestmentBTC: investment.originalAmountBTC,
-          investmentFeeUSD: investment.investmentFee,
-          investmentFeeBTC: investment.investmentFeeBTC,
           btcPriceAtStart: investment.btcPriceAtInvestment,
           btcPriceAtCompletion: currentBTCPrice
         },
@@ -6637,72 +6548,9 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
         netAmountBTC: totalReturnBTC - investment.amountBTC
       }], { session });
 
-      const deviceInfo = await getUserDeviceInfo(req);
-      await UserLog.create({
-        user: userId,
-        username: user.email,
-        email: user.email,
-        userFullName: `${user.firstName} ${user.lastName}`,
-        action: 'investment_matured',
-        actionCategory: 'investment',
-        ipAddress: getRealClientIP(req),
-        userAgent: req.headers['user-agent'] || 'Unknown',
-        deviceInfo: {
-          type: getDeviceType(req),
-          os: getOSFromUserAgent(req.headers['user-agent']),
-          browser: getBrowserFromUserAgent(req.headers['user-agent'])
-        },
-        location: {
-          ip: getRealClientIP(req),
-          country: deviceInfo.locationDetails?.country || 'Unknown',
-          city: deviceInfo.locationDetails?.city || 'Unknown',
-          region: deviceInfo.locationDetails?.region || 'Unknown',
-          exactLocation: deviceInfo.exactLocation,
-          latitude: deviceInfo.locationDetails?.latitude,
-          longitude: deviceInfo.locationDetails?.longitude
-        },
-        status: 'success',
-        metadata: {
-          planName: investment.plan.name,
-          originalAmountUSD: investment.originalAmount,
-          originalAmountBTC: investment.originalAmountBTC,
-          amountAfterFeeUSD: investment.amount,
-          amountAfterFeeBTC: investment.amountBTC,
-          investmentFeeUSD: investment.investmentFee,
-          investmentFeeBTC: investment.investmentFeeBTC,
-          expectedReturnBTC: investment.expectedReturnBTC,
-          actualReturnBTC: totalReturnBTC,
-          profitBTC: totalReturnBTC - investment.amountBTC,
-          profitUSD: totalReturnUSD - investment.amount,
-          btcPriceAtStart: investment.btcPriceAtInvestment,
-          btcPriceAtCompletion: currentBTCPrice,
-          startDate: investment.startDate,
-          endDate: investment.endDate,
-          completionDate: investment.completionDate
-        },
-        relatedEntity: investment._id,
-        relatedEntityModel: 'Investment'
-      });
-
       await session.commitTransaction();
       
-      try {
-        await sendAutomatedEmail(user, 'investment_matured', {
-          name: user.firstName,
-          planName: investment.plan.name,
-          amountUSD: investment.originalAmount,
-          amountBTC: investment.originalAmountBTC,
-          totalReturnBTC: totalReturnBTC,
-          totalReturnUSD: totalReturnUSD,
-          profitBTC: totalReturnBTC - investment.amountBTC,
-          profitUSD: totalReturnUSD - investment.amount,
-          completionDate: investment.completionDate,
-          newMaturedBalanceBTC: user.bitcoinBalances.matured,
-          btcPrice: currentBTCPrice
-        });
-      } catch (emailError) {
-        console.error('Failed to send investment completion email:', emailError);
-      }
+      console.log(`✅ Investment ${investment._id} completed for user ${user.email}. Return: ${totalReturnBTC.toFixed(8)} BTC`);
 
       res.status(200).json({
         status: 'success',
@@ -6715,23 +6563,17 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
             amountReturnedUSD: totalReturnUSD,
             profitBTC: totalReturnBTC - investment.amountBTC,
             profitUSD: totalReturnUSD - investment.amount,
-            originalInvestmentBTC: investment.originalAmountBTC,
-            originalInvestmentUSD: investment.originalAmount,
-            investmentFeeBTC: investment.investmentFeeBTC,
-            investmentFeeUSD: investment.investmentFee,
             btcPriceAtStart: investment.btcPriceAtInvestment,
             btcPriceAtCompletion: currentBTCPrice
           },
           balances: {
             bitcoin: {
-              active: user.bitcoinBalances.active,
-              matured: user.bitcoinBalances.matured
+              active: user.balances.active.get('btc') || 0,
+              matured: user.balances.matured.get('btc') || 0
             }
           }
         }
       });
-
-      await logActivity('complete_investment', 'investment', investment._id, userId, 'User', req);
 
     } catch (transactionError) {
       await session.abortTransaction();
@@ -6744,10 +6586,17 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
     console.error('Complete investment error:', err);
     res.status(500).json({
       status: 'error',
-      message: 'An error occurred while completing the investment'
+      message: err.message || 'An error occurred while completing the investment'
     });
   }
 });
+
+
+
+
+
+
+
 
 
 
