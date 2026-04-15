@@ -9449,6 +9449,7 @@ app.get('/api/fiat-currencies', async (req, res) => {
 
 
 
+
 // =============================================
 // CONVERT ASSETS ENDPOINT - Get available target cryptos for conversion
 // =============================================
@@ -9478,7 +9479,7 @@ app.get('/api/convert/assets', protect, async (req, res) => {
 });
 
 // =============================================
-// CONVERT ENDPOINT - Execute crypto conversion with wallet type selection
+// CONVERT ENDPOINT - Execute crypto conversion using balances object
 // =============================================
 app.post('/api/convert', protect, async (req, res) => {
   try {
@@ -9496,13 +9497,13 @@ app.post('/api/convert', protect, async (req, res) => {
       return res.status(400).json({ status: 'fail', message: 'Cannot convert to the same asset' });
     }
     
-    // Get user with real balances
+    // Get user with balances object
     const user = await User.findById(userId);
     if (!user) {
       return res.status(404).json({ status: 'fail', message: 'User not found' });
     }
     
-    // Initialize real balances object if not exists
+    // Initialize balances object if not exists
     if (!user.balances) {
       user.balances = {
         main: {},
@@ -9514,10 +9515,12 @@ app.post('/api/convert', protect, async (req, res) => {
     if (!user.balances.main) user.balances.main = {};
     if (!user.balances.matured) user.balances.matured = {};
     
-    // Get REAL current balance from user's actual wallets
+    // Check balance in main wallet (NOT in UserAssetBalance)
     const mainBalance = user.balances.main[fromAssetLower] || 0;
     const maturedBalance = user.balances.matured[fromAssetLower] || 0;
     const totalBalance = mainBalance + maturedBalance;
+    
+    console.log(`Balance check for ${fromAssetLower}: Main: ${mainBalance}, Matured: ${maturedBalance}, Total: ${totalBalance}, Requested: ${amount}`);
     
     if (amount > totalBalance) {
       return res.status(400).json({ 
@@ -9526,7 +9529,7 @@ app.post('/api/convert', protect, async (req, res) => {
       });
     }
     
-    // Get REAL current prices from CoinGecko
+    // Get real current prices from CoinGecko
     const fromPrice = await getRealCryptoPrice(fromAsset);
     const toPrice = await getRealCryptoPrice(toAsset);
     
@@ -9555,7 +9558,7 @@ app.post('/api/convert', protect, async (req, res) => {
       amountFromMatured = amountRemaining;
     }
     
-    // Perform REAL deduction from wallets
+    // Perform deduction from wallets
     if (amountFromMain > 0) {
       user.balances.main[fromAssetLower] = (user.balances.main[fromAssetLower] || 0) - amountFromMain;
       if (user.balances.main[fromAssetLower] <= 0) {
@@ -9589,7 +9592,7 @@ app.post('/api/convert', protect, async (req, res) => {
       user.balances.matured[toAssetLower] += toAmountForMatured;
     }
     
-    // Calculate REAL total main balance in USD
+    // Calculate total main balance in USD
     let totalMainBalanceUSD = 0;
     
     // Calculate from main wallet assets
@@ -9614,10 +9617,10 @@ app.post('/api/convert', protect, async (req, res) => {
     
     user.balances.main.totalUSD = totalMainBalanceUSD;
     
-    // Save REAL changes to database
+    // Save changes to database
     await user.save();
     
-    // Record REAL platform revenue for the fee
+    // Record platform revenue for the fee
     await PlatformRevenue.create({
       source: 'conversion_fee',
       amount: feeAmount,
@@ -9640,7 +9643,7 @@ app.post('/api/convert', protect, async (req, res) => {
     
     const reference = `CONV-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
     
-    // Create REAL transaction records
+    // Create transaction records
     await Transaction.create({
       user: userId,
       type: 'conversion',
@@ -9690,10 +9693,10 @@ app.post('/api/convert', protect, async (req, res) => {
       }
     });
     
-    // Send REAL real-time updates via socket
+    // Send real-time updates via socket
     const io = req.app.get('io');
     if (io) {
-      // Prepare real asset balances for the user
+      // Prepare asset balances for the user
       const assetBalances = [];
       const allAssets = new Set([...Object.keys(user.balances.main), ...Object.keys(user.balances.matured)]);
       
@@ -9771,33 +9774,11 @@ async function getRealCryptoPrice(assetSymbol) {
       'ltc': 'litecoin',
       'near': 'near',
       'uni': 'uniswap',
-      'bch': 'bitcoin-cash',
-      'algo': 'algorand',
-      'vet': 'vechain',
-      'theta': 'theta-token',
-      'ftm': 'fantom',
-      'egld': 'elrond-erd-2',
-      'sand': 'the-sandbox',
-      'mana': 'decentraland',
-      'gala': 'gala',
-      'axs': 'axie-infinity'
+      'bch': 'bitcoin-cash'
     };
     
     const coinId = coinIdMap[symbol];
     if (!coinId) {
-      // Try to search for the coin if not in map
-      const searchResponse = await fetch(`https://api.coingecko.com/api/v3/search?query=${symbol}`);
-      if (searchResponse.ok) {
-        const searchData = await searchResponse.json();
-        if (searchData.coins && searchData.coins.length > 0) {
-          const foundCoin = searchData.coins[0];
-          const priceResponse = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${foundCoin.id}&vs_currencies=usd`);
-          if (priceResponse.ok) {
-            const priceData = await priceResponse.json();
-            return priceData[foundCoin.id]?.usd || 0;
-          }
-        }
-      }
       return 0;
     }
     
@@ -9821,13 +9802,6 @@ async function getRealCryptoPrice(assetSymbol) {
     throw new Error(`Unable to fetch current price for ${assetSymbol}. Please try again.`);
   }
 }
-
-
-
-
-
-
-
 
 
 
