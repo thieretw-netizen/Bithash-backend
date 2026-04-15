@@ -22952,6 +22952,7 @@ const setupMarketWebSocket = (server) => {
   });
 };
 
+// In your io.on('connection') handler - update the balance emission
 io.on('connection', async (socket) => {
   console.log('New client connected:', socket.id);
   
@@ -22967,53 +22968,71 @@ io.on('connection', async (socket) => {
         console.log(`Socket authenticated for user: ${userId}`);
         
         const user = await User.findById(userId).select('balances');
-        if (user) {
-          socket.emit('balance_update', {
-            main: user.balances.main,
-            active: user.balances.active,
-            matured: user.balances.matured
-          });
-        }
-        
-        const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
-        if (userAssetBalance) {
-          const assetData = [];
-          for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
-            if (balance > 0) {
-              const price = await getCryptoPrice(asset.toUpperCase());
-              const buyTransactions = userAssetBalance.history.filter(h => h.asset === asset && h.type === 'buy');
-              let totalSpent = 0;
-              let totalBought = 0;
-              buyTransactions.forEach(t => {
-                totalSpent += t.usdValue;
-                totalBought += t.amount;
-              });
-              const avgPrice = totalBought > 0 ? totalSpent / totalBought : 0;
-              const currentValue = balance * (price || 0);
-              const unrealizedPnl = currentValue - totalSpent;
-              const unrealizedPercentage = totalSpent > 0 ? (unrealizedPnl / totalSpent) * 100 : 0;
-              
-              assetData.push({
-                symbol: asset,
-                balance: balance,
-                currentValue: currentValue,
-                avgPrice: avgPrice,
-                unrealizedPnl: unrealizedPnl,
-                unrealizedPnlPercent: unrealizedPercentage,
-                id: asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset,
-                transactions: userAssetBalance.history.filter(h => h.asset === asset).slice(-10)
-              });
+        if (user && user.balances) {
+          // Calculate main USD value from crypto holdings
+          let mainUSD = 0;
+          if (user.balances.main) {
+            const mainBalances = user.balances.main instanceof Map ? 
+              Object.fromEntries(user.balances.main) : 
+              user.balances.main;
+            
+            for (const [asset, balance] of Object.entries(mainBalances)) {
+              if (balance > 0 && asset !== 'usd') {
+                const price = await getCryptoPrice(asset.toUpperCase());
+                if (price) mainUSD += balance * price;
+              }
             }
           }
-          socket.emit('asset_balances_update', assetData);
-        }
-        
-        const userPref = await UserPreference.findOne({ user: userId });
-        if (userPref) {
-          socket.emit('preferences_update', {
-            displayAsset: userPref.displayAsset,
-            language: userPref.language,
-            currency: userPref.currency
+          
+          // CRITICAL FIX: Get active balance from stored USD value
+          let activeUSD = 0;
+          if (user.balances.active) {
+            const activeBalances = user.balances.active instanceof Map ? 
+              Object.fromEntries(user.balances.active) : 
+              user.balances.active;
+            
+            // Active wallet stores USD value directly
+            activeUSD = activeBalances.usd || 0;
+            
+            // Also check for any crypto amounts (as fallback)
+            for (const [asset, balance] of Object.entries(activeBalances)) {
+              if (balance > 0 && asset !== 'usd') {
+                // If there are crypto amounts, use them (but ideally active should be USD)
+                const price = await getCryptoPrice(asset.toUpperCase());
+                if (price) activeUSD += balance * price;
+              }
+            }
+          }
+          
+          // Calculate matured USD value from crypto holdings
+          let maturedUSD = 0;
+          if (user.balances.matured) {
+            const maturedBalances = user.balances.matured instanceof Map ? 
+              Object.fromEntries(user.balances.matured) : 
+              user.balances.matured;
+            
+            for (const [asset, balance] of Object.entries(maturedBalances)) {
+              if (balance > 0 && asset !== 'usd') {
+                const price = await getCryptoPrice(asset.toUpperCase());
+                if (price) maturedUSD += balance * price;
+              }
+            }
+          }
+          
+          // Send ALL THREE balances - NEVER omit active
+          socket.emit('balance_update', {
+            main: mainUSD,
+            active: activeUSD,  // ALWAYS include active balance
+            matured: maturedUSD
+          });
+          
+          console.log(`Sent balances to user ${userId}: main=${mainUSD}, active=${activeUSD}, matured=${maturedUSD}`);
+        } else {
+          // If user has no balances, send zeros for ALL THREE
+          socket.emit('balance_update', {
+            main: 0,
+            active: 0,
+            matured: 0
           });
         }
       }
@@ -23021,7 +23040,7 @@ io.on('connection', async (socket) => {
       console.error('Socket auth error:', err);
     }
   }
-  
+});
   const currentStats = await getCurrentStats();
   socket.emit('stats-update', currentStats);
   console.log(`📡 Sent initial stats to new client ${socket.id}: ${currentStats.totalInvestors.toLocaleString()} investors`);
