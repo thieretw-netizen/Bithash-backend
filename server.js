@@ -21986,8 +21986,91 @@ app.get('/api/admin/transactions/transfers', adminProtect, async (req, res) => {
   }
 });
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // =============================================
-// ADMIN APPROVED DEPOSITS ENDPOINT
+// ADMIN PENDING DEPOSITS ENDPOINT - ADD THIS
+// =============================================
+app.get('/api/admin/deposits/pending', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const deposits = await Transaction.find({
+      type: 'deposit',
+      status: 'pending'
+    })
+    .populate('user', 'firstName lastName email')
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
+
+    const totalCount = await Transaction.countDocuments({
+      type: 'deposit',
+      status: 'pending'
+    });
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        deposits: deposits.map(d => ({
+          _id: d._id,
+          user: d.user,
+          amount: parseFloat(d.amount),
+          method: d.method,
+          createdAt: d.createdAt,
+          proof: d.details?.proof || null
+        })),
+        totalCount,
+        totalPages: Math.ceil(totalCount / limit),
+        currentPage: page
+      }
+    });
+  } catch (err) {
+    console.error('Get pending deposits error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch pending deposits'
+    });
+  }
+});
+
+// =============================================
+// ADMIN APPROVED DEPOSITS ENDPOINT - ADD THIS
 // =============================================
 app.get('/api/admin/deposits/approved', adminProtect, async (req, res) => {
   try {
@@ -22015,8 +22098,12 @@ app.get('/api/admin/deposits/approved', adminProtect, async (req, res) => {
       status: 'success',
       data: {
         deposits: deposits.map(d => ({
-          ...d,
-          amount: parseFloat(d.amount)
+          _id: d._id,
+          user: d.user,
+          amount: parseFloat(d.amount),
+          method: d.method,
+          createdAt: d.createdAt,
+          approvedBy: d.processedBy
         })),
         totalCount,
         totalPages: Math.ceil(totalCount / limit),
@@ -22033,7 +22120,7 @@ app.get('/api/admin/deposits/approved', adminProtect, async (req, res) => {
 });
 
 // =============================================
-// ADMIN REJECTED DEPOSITS ENDPOINT
+// ADMIN REJECTED DEPOSITS ENDPOINT - ADD THIS
 // =============================================
 app.get('/api/admin/deposits/rejected', adminProtect, async (req, res) => {
   try {
@@ -22060,8 +22147,12 @@ app.get('/api/admin/deposits/rejected', adminProtect, async (req, res) => {
       status: 'success',
       data: {
         deposits: deposits.map(d => ({
-          ...d,
-          amount: parseFloat(d.amount)
+          _id: d._id,
+          user: d.user,
+          amount: parseFloat(d.amount),
+          method: d.method,
+          createdAt: d.createdAt,
+          reason: d.adminNotes || 'No reason provided'
         })),
         totalCount,
         totalPages: Math.ceil(totalCount / limit),
@@ -22078,7 +22169,56 @@ app.get('/api/admin/deposits/rejected', adminProtect, async (req, res) => {
 });
 
 // =============================================
-// ADMIN APPROVED WITHDRAWALS ENDPOINT
+// ADMIN PENDING WITHDRAWALS ENDPOINT - ADD THIS
+// =============================================
+app.get('/api/admin/withdrawals/pending', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const withdrawals = await Transaction.find({
+      type: 'withdrawal',
+      status: 'pending'
+    })
+    .populate('user', 'firstName lastName email')
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
+
+    const totalCount = await Transaction.countDocuments({
+      type: 'withdrawal',
+      status: 'pending'
+    });
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        withdrawals: withdrawals.map(w => ({
+          _id: w._id,
+          user: w.user,
+          amount: parseFloat(w.amount),
+          method: w.method,
+          createdAt: w.createdAt,
+          walletAddress: w.details?.withdrawalAddress || w.btcAddress || 'N/A'
+        })),
+        totalCount,
+        totalPages: Math.ceil(totalCount / limit),
+        currentPage: page
+      }
+    });
+  } catch (err) {
+    console.error('Get pending withdrawals error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch pending withdrawals'
+    });
+  }
+});
+
+// =============================================
+// ADMIN APPROVED WITHDRAWALS ENDPOINT - ADD THIS
 // =============================================
 app.get('/api/admin/withdrawals/approved', adminProtect, async (req, res) => {
   try {
@@ -22106,8 +22246,12 @@ app.get('/api/admin/withdrawals/approved', adminProtect, async (req, res) => {
       status: 'success',
       data: {
         withdrawals: withdrawals.map(w => ({
-          ...w,
-          amount: parseFloat(w.amount)
+          _id: w._id,
+          user: w.user,
+          amount: parseFloat(w.amount),
+          method: w.method,
+          createdAt: w.createdAt,
+          approvedBy: w.processedBy
         })),
         totalCount,
         totalPages: Math.ceil(totalCount / limit),
@@ -22124,7 +22268,7 @@ app.get('/api/admin/withdrawals/approved', adminProtect, async (req, res) => {
 });
 
 // =============================================
-// ADMIN REJECTED WITHDRAWALS ENDPOINT
+// ADMIN REJECTED WITHDRAWALS ENDPOINT - ADD THIS
 // =============================================
 app.get('/api/admin/withdrawals/rejected', adminProtect, async (req, res) => {
   try {
@@ -22151,8 +22295,12 @@ app.get('/api/admin/withdrawals/rejected', adminProtect, async (req, res) => {
       status: 'success',
       data: {
         withdrawals: withdrawals.map(w => ({
-          ...w,
-          amount: parseFloat(w.amount)
+          _id: w._id,
+          user: w.user,
+          amount: parseFloat(w.amount),
+          method: w.method,
+          createdAt: w.createdAt,
+          reason: w.adminNotes || 'No reason provided'
         })),
         totalCount,
         totalPages: Math.ceil(totalCount / limit),
@@ -22167,41 +22315,6 @@ app.get('/api/admin/withdrawals/rejected', adminProtect, async (req, res) => {
     });
   }
 });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
