@@ -22705,7 +22705,7 @@ processMaturedInvestments();
 
 startInvestorGrowthJob();
 
-startRealTimePriceUpdates(io);
+startRealTimeWalletUpdates(io);
 
 // Real-time updates already happen every second with price changes
 // This is just a fallback sync every 30 seconds for any missed updates
