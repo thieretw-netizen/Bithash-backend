@@ -18467,8 +18467,6 @@ app.get('/api/admin/stats', adminProtect, async (req, res) => {
 
 
 
-
-
 // GET /api/admin/restrictions - Get current account restrictions
 app.get('/api/admin/restrictions', adminProtect, restrictTo('super'), async (req, res) => {
   try {
@@ -18495,8 +18493,7 @@ app.get('/api/admin/restrictions', adminProtect, restrictTo('super'), async (req
   }
 });
 
-
-// GET /api/admin/users - Get all users with pagination
+// GET /api/admin/users - Get all users with real-time USD balance calculations
 app.get('/api/admin/users', adminProtect, async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -18505,7 +18502,6 @@ app.get('/api/admin/users', adminProtect, async (req, res) => {
 
     const users = await User.find({})
       .select('_id firstName lastName email balances status lastLogin createdAt')
-      .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
       .lean();
@@ -18513,19 +18509,62 @@ app.get('/api/admin/users', adminProtect, async (req, res) => {
     const totalUsers = await User.countDocuments({});
     const totalPages = Math.ceil(totalUsers / limit);
 
-    const formattedUsers = users.map(user => ({
-      _id: user._id,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      email: user.email,
-      balances: {
-        active: user.balances?.active || 0,
-        matured: user.balances?.matured || 0,
-        main: user.balances?.main || 0
-      },
-      status: user.status,
-      lastLogin: user.lastLogin,
-      createdAt: user.createdAt
+    // Process each user to calculate real-time USD balances
+    const formattedUsers = await Promise.all(users.map(async (user) => {
+      let mainUSD = 0;
+      let activeUSD = 0;
+      let maturedUSD = 0;
+
+      // Calculate MAIN wallet USD value
+      if (user.balances?.main) {
+        for (const [crypto, amount] of user.balances.main.entries()) {
+          if (amount > 0 && crypto !== 'usd') {
+            const price = await getCryptoPrice(crypto.toUpperCase());
+            if (price) {
+              mainUSD += amount * price;
+            }
+          }
+        }
+      }
+
+      // Calculate ACTIVE wallet USD value
+      if (user.balances?.active) {
+        for (const [crypto, amount] of user.balances.active.entries()) {
+          if (amount > 0 && crypto !== 'usd') {
+            const price = await getCryptoPrice(crypto.toUpperCase());
+            if (price) {
+              activeUSD += amount * price;
+            }
+          }
+        }
+      }
+
+      // Calculate MATURED wallet USD value
+      if (user.balances?.matured) {
+        for (const [crypto, amount] of user.balances.matured.entries()) {
+          if (amount > 0 && crypto !== 'usd') {
+            const price = await getCryptoPrice(crypto.toUpperCase());
+            if (price) {
+              maturedUSD += amount * price;
+            }
+          }
+        }
+      }
+
+      return {
+        _id: user._id,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        email: user.email,
+        balances: {
+          active: activeUSD,
+          matured: maturedUSD,
+          main: mainUSD
+        },
+        status: user.status,
+        lastLogin: user.lastLogin,
+        createdAt: user.createdAt
+      };
     }));
 
     res.status(200).json({
@@ -18546,7 +18585,6 @@ app.get('/api/admin/users', adminProtect, async (req, res) => {
     });
   }
 });
-
 
 
 
