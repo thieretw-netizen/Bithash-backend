@@ -359,6 +359,23 @@ const UserSchema = new mongoose.Schema({
     setFromIP: { type: Boolean, default: false },
     detectedAt: Date,
     detectedCountry: String
+  },
+  balances: {
+    main: {
+      type: Map,
+      of: Number,
+      default: new Map()
+    },
+    active: {
+      type: Map,
+      of: Number,
+      default: new Map()
+    },
+    matured: {
+      type: Map,
+      of: Number,
+      default: new Map()
+    }
   }
 }, { 
   timestamps: true,
@@ -769,7 +786,7 @@ const UserLogSchema = new mongoose.Schema({
     enum: [
       'User', 'Transaction', 'Investment', 'KYC', 'Plan', 'Loan', 
       'SupportTicket', 'Card', 'Referral', 'Notification', 'Admin',
-      'UserAssetBalance', 'Buy', 'Sell', 'DepositAsset'
+      'Buy', 'Sell', 'DepositAsset'
     ]
   },
   sessionId: {
@@ -1368,65 +1385,6 @@ PlanSchema.index({ isActive: 1 });
 
 const Plan = mongoose.model('Plan', PlanSchema);
 
-
-
-
-
-
-const UserAssetBalanceSchema = new mongoose.Schema({
-  user: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true,
-    unique: true,
-    index: true
-  },
-  balances: {
-    // Main wallet - stores ANY crypto as Map (dynamic)
-    main: {
-      type: Map,
-      of: Number,
-      default: new Map()
-    },
-    // Active wallet (invested) - dynamic Map structure
-    active: {
-      type: Map,
-      of: Number,
-      default: new Map()
-    },
-    // Matured wallet (completed investments) - dynamic Map structure
-    matured: {
-      type: Map,
-      of: Number,
-      default: new Map()
-    }
-  },
-  history: [{
-    asset: { type: String, required: true, uppercase: true },
-    walletType: { type: String, enum: ['main', 'active', 'matured'], required: true },
-    type: { type: String, enum: ['deposit', 'withdrawal', 'investment', 'maturity', 'admin_add'], required: true },
-    amount: { type: Number, required: true },
-    balance: { type: Number, required: true },
-    usdValue: { type: Number, required: true },
-    price: { type: Number, required: true },
-    timestamp: { type: Date, default: Date.now },
-    transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
-    description: String,
-    adminId: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
-    adminName: String
-  }],
-  lastUpdated: { type: Date, default: Date.now }
-}, { timestamps: true });
-
-UserAssetBalanceSchema.index({ user: 1 });
-UserAssetBalanceSchema.index({ 'history.timestamp': -1 });
-
-
-
-
-
-
-
 const UserPreferenceSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
@@ -1525,7 +1483,6 @@ const SellSchema = new mongoose.Schema({
 SellSchema.index({ user: 1, createdAt: -1 });
 SellSchema.index({ status: 1 });
 
-const UserAssetBalance = mongoose.model('UserAssetBalance', UserAssetBalanceSchema);
 const UserPreference = mongoose.model('UserPreference', UserPreferenceSchema);
 const DepositAsset = mongoose.model('DepositAsset', DepositAssetSchema);
 const Buy = mongoose.model('Buy', BuySchema);
@@ -2889,7 +2846,6 @@ module.exports = {
   CommissionHistory,
   CommissionSettings,
   Translation,
-  UserAssetBalance,
   UserPreference,
   DepositAsset,
   Buy,
@@ -4456,6 +4412,25 @@ async function getQuoteAssetsFromRedis() {
 }
 
 initializePriceAggregator();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // =============================================
 // ENHANCED EMAIL SERVICE WITH ENTERPRISE TEMPLATES
