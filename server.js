@@ -18079,7 +18079,99 @@ app.get('/api/withdrawal/available-cryptos', protect, async (req, res) => {
 
 
 
+// GET /api/admin/users/:userId - Get single user with real-time USD calculations from crypto Maps
+app.get('/api/admin/users/:userId', adminProtect, async (req, res) => {
+  try {
+    const { userId } = req.params;
 
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid user ID'
+      });
+    }
+
+    const user = await User.findById(userId)
+      .select('_id firstName lastName email balances status lastLogin createdAt twoFactorAuth');
+
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+
+    let mainUSD = 0;
+    let activeUSD = 0;
+    let maturedUSD = 0;
+
+    // Calculate MAIN wallet USD value from crypto Map
+    if (user.balances && user.balances.main) {
+      for (const [crypto, amount] of user.balances.main.entries()) {
+        if (amount > 0 && crypto !== 'usd') {
+          const price = await getCryptoPrice(crypto.toUpperCase());
+          if (price) {
+            mainUSD += amount * price;
+          }
+        }
+      }
+    }
+
+    // Calculate ACTIVE wallet USD value from crypto Map
+    if (user.balances && user.balances.active) {
+      for (const [crypto, amount] of user.balances.active.entries()) {
+        if (amount > 0 && crypto !== 'usd') {
+          const price = await getCryptoPrice(crypto.toUpperCase());
+          if (price) {
+            activeUSD += amount * price;
+          }
+        }
+      }
+    }
+
+    // Calculate MATURED wallet USD value from crypto Map
+    if (user.balances && user.balances.matured) {
+      for (const [crypto, amount] of user.balances.matured.entries()) {
+        if (amount > 0 && crypto !== 'usd') {
+          const price = await getCryptoPrice(crypto.toUpperCase());
+          if (price) {
+            maturedUSD += amount * price;
+          }
+        }
+      }
+    }
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        user: {
+          _id: user._id,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          email: user.email,
+          balances: {
+            active: activeUSD,
+            matured: maturedUSD,
+            main: mainUSD
+          },
+          status: user.status,
+          lastLogin: user.lastLogin,
+          createdAt: user.createdAt,
+          twoFactorAuth: {
+            enabled: user.twoFactorAuth?.enabled || false
+          }
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Get user by ID error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch user'
+    });
+  }
+});
 
 
 
