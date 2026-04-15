@@ -6955,7 +6955,7 @@ app.post('/api/auth/send-otp', [
 
 
 /**
- * POST /api/withdrawals/asset - Process asset withdrawal
+ * POST /api/withdrawals/asset - Process asset withdrawal (COMPLETE)
  */
 app.post('/api/withdrawals/asset', protect, async (req, res) => {
     try {
@@ -6963,7 +6963,9 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
         const {
             amount,
             asset,
+            assetAmount,
             walletAddress,
+            gasFee,
             exchangeRate,
             balanceSource,
             mainAmountUsed,
@@ -6992,7 +6994,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             });
         }
 
-        // Get user to check balances
+        // Get user
         const user = await User.findById(userId);
         if (!user) {
             return res.status(404).json({
@@ -7001,20 +7003,14 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             });
         }
 
-        // Get balances from Map structure
-        const mainBalanceMap = user.balances?.main || new Map();
-        const maturedBalanceMap = user.balances?.matured || new Map();
-        
         const assetLower = asset.toLowerCase();
-        
-        // Get asset-specific balances
-        const mainBalance = mainBalanceMap.get(assetLower) || 0;
-        const maturedBalance = maturedBalanceMap.get(assetLower) || 0;
+
+        // Get balances from Map structure
+        const mainBalance = user.balances?.main?.get(assetLower) || 0;
+        const maturedBalance = user.balances?.matured?.get(assetLower) || 0;
         const totalAvailable = mainBalance + maturedBalance;
 
-        // Calculate asset amount to withdraw
-        const assetAmount = amount / exchangeRate;
-
+        // Check if user has enough of this crypto
         if (assetAmount > totalAvailable) {
             return res.status(400).json({
                 status: 'error',
@@ -7022,207 +7018,53 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             });
         }
 
-        // =============================================
-        // GAS FEE CALCULATION
-        // Base gas fee in BTC: 0.0056 BTC for amounts <= $10,000, 0.0072 BTC for > $10,000
-        // Gas fee MUST come from main wallet in the SAME asset being withdrawn
-        // =============================================
-        const btcGasFeeAmount = amount < 10000 ? 0.0056 : 0.0072;
-        
-        let btcPrice = null;
-        let targetAssetPrice = null;
-        let gasFeeInAsset = 0;
-        let gasFeeInUsd = 0;
-        
-        // Asset mapping for API calls
-        const assetMap = {
-            'btc': { binance: 'BTCUSDT', cryptocompare: 'BTC', kraken: 'XBTUSD', kucoin: 'BTC-USDT' },
-            'eth': { binance: 'ETHUSDT', cryptocompare: 'ETH', kraken: 'ETHUSD', kucoin: 'ETH-USDT' },
-            'usdt': { binance: 'USDTUSDT', cryptocompare: 'USDT', kraken: 'USDTUSD', kucoin: 'USDT-USDT' },
-            'bnb': { binance: 'BNBUSDT', cryptocompare: 'BNB', kraken: 'BNBUSD', kucoin: 'BNB-USDT' },
-            'sol': { binance: 'SOLUSDT', cryptocompare: 'SOL', kraken: 'SOLUSD', kucoin: 'SOL-USDT' },
-            'usdc': { binance: 'USDCUSDT', cryptocompare: 'USDC', kraken: 'USDCUSD', kucoin: 'USDC-USDT' },
-            'xrp': { binance: 'XRPUSDT', cryptocompare: 'XRP', kraken: 'XRPUSD', kucoin: 'XRP-USDT' },
-            'doge': { binance: 'DOGEUSDT', cryptocompare: 'DOGE', kraken: 'DOGEUSD', kucoin: 'DOGE-USDT' },
-            'shib': { binance: 'SHIBUSDT', cryptocompare: 'SHIB', kraken: 'SHIBUSD', kucoin: 'SHIB-USDT' },
-            'trx': { binance: 'TRXUSDT', cryptocompare: 'TRX', kraken: 'TRXUSD', kucoin: 'TRX-USDT' },
-            'ltc': { binance: 'LTCUSDT', cryptocompare: 'LTC', kraken: 'LTCUSD', kucoin: 'LTC-USDT' },
-            'ada': { binance: 'ADAUSDT', cryptocompare: 'ADA', kraken: 'ADAUSD', kucoin: 'ADA-USDT' },
-            'avax': { binance: 'AVAXUSDT', cryptocompare: 'AVAX', kraken: 'AVAXUSD', kucoin: 'AVAX-USDT' },
-            'dot': { binance: 'DOTUSDT', cryptocompare: 'DOT', kraken: 'DOTUSD', kucoin: 'DOT-USDT' },
-            'matic': { binance: 'MATICUSDT', cryptocompare: 'MATIC', kraken: 'MATICUSD', kucoin: 'MATIC-USDT' },
-            'link': { binance: 'LINKUSDT', cryptocompare: 'LINK', kraken: 'LINKUSD', kucoin: 'LINK-USDT' }
-        };
-        
-        // Fetch BTC price
-        const fetchBTCPrice = async () => {
-            const errors = [];
-            
-            try {
-                const response = await axios.get('https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT', { timeout: 8000 });
-                if (response.data && response.data.price) {
-                    return parseFloat(response.data.price);
-                }
-                errors.push('Binance: Invalid response');
-            } catch (err) {
-                errors.push(`Binance: ${err.message}`);
-            }
-            
-            try {
-                const response = await axios.get('https://min-api.cryptocompare.com/data/price?fsym=BTC&tsyms=USD', { timeout: 8000 });
-                if (response.data && response.data.USD) {
-                    return response.data.USD;
-                }
-                errors.push('CryptoCompare: Invalid response');
-            } catch (err) {
-                errors.push(`CryptoCompare: ${err.message}`);
-            }
-            
-            try {
-                const response = await axios.get('https://api.kraken.com/0/public/Ticker?pair=XBTUSD', { timeout: 8000 });
-                if (response.data && response.data.result && response.data.result.XXBTZUSD) {
-                    return parseFloat(response.data.result.XXBTZUSD.c[0]);
-                }
-                errors.push('Kraken: Invalid response');
-            } catch (err) {
-                errors.push(`Kraken: ${err.message}`);
-            }
-            
-            throw new Error(`All price APIs failed for BTC: ${errors.join('; ')}`);
-        };
-        
-        // Fetch target asset price
-        const fetchAssetPrice = async (assetSymbol) => {
-            const errors = [];
-            const assetIds = assetMap[assetSymbol.toLowerCase()];
-            
-            if (!assetIds) {
-                throw new Error(`Unsupported asset: ${assetSymbol}`);
-            }
-            
-            try {
-                const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${assetIds.binance}`, { timeout: 8000 });
-                if (response.data && response.data.price) {
-                    return parseFloat(response.data.price);
-                }
-                errors.push('Binance: Invalid response');
-            } catch (err) {
-                errors.push(`Binance: ${err.message}`);
-            }
-            
-            try {
-                const response = await axios.get(`https://min-api.cryptocompare.com/data/price?fsym=${assetIds.cryptocompare}&tsyms=USD`, { timeout: 8000 });
-                if (response.data && response.data.USD) {
-                    return response.data.USD;
-                }
-                errors.push('CryptoCompare: Invalid response');
-            } catch (err) {
-                errors.push(`CryptoCompare: ${err.message}`);
-            }
-            
-            throw new Error(`All price APIs failed for ${assetSymbol}: ${errors.join('; ')}`);
-        };
-        
-        try {
-            btcPrice = await fetchBTCPrice();
-            
-            if (assetLower === 'btc') {
-                gasFeeInAsset = btcGasFeeAmount;
-                gasFeeInUsd = btcGasFeeAmount * btcPrice;
-            } else {
-                targetAssetPrice = await fetchAssetPrice(asset);
-                gasFeeInUsd = btcGasFeeAmount * btcPrice;
-                gasFeeInAsset = gasFeeInUsd / targetAssetPrice;
-            }
-        } catch (error) {
-            console.error('Price fetch error:', error);
-            return res.status(503).json({
-                status: 'error',
-                message: 'Unable to fetch current cryptocurrency prices. Please try again.'
-            });
-        }
-        
-        // Check if user has enough main balance for gas fee (in the same asset)
-        const mainBalanceForGas = mainBalanceMap.get(assetLower) || 0;
-        
-        if (mainBalanceForGas < gasFeeInAsset) {
+        // Check if user has enough main balance for gas fee (same asset)
+        if (mainBalance < gasFee) {
             return res.status(400).json({
                 status: 'error',
-                message: `Insufficient main balance for gas fee. Required: ${gasFeeInAsset.toFixed(8)} ${asset.toUpperCase()} in main wallet.`
+                message: `Insufficient main balance for gas fee. Required: ${gasFee.toFixed(8)} ${asset.toUpperCase()} in main wallet.`
             });
         }
-        
-        // =============================================
-        // DEDUCT FROM BALANCES (Map structure)
-        // =============================================
-        
-        // 1. Deduct gas fee from main wallet (same asset)
-        const newMainBalanceAfterGas = mainBalanceForGas - gasFeeInAsset;
-        
-        // 2. Deduct withdrawal amount from appropriate balances
+
+        // Calculate deductions
         let remainingToDeduct = assetAmount;
         let mainDeducted = 0;
         let maturedDeducted = 0;
-        
+
         if (balanceSource === 'main') {
-            mainDeducted = Math.min(mainBalanceForGas - gasFeeInAsset, remainingToDeduct);
+            mainDeducted = Math.min(mainBalance - gasFee, remainingToDeduct);
             remainingToDeduct -= mainDeducted;
         } else if (balanceSource === 'matured') {
             maturedDeducted = Math.min(maturedBalance, remainingToDeduct);
             remainingToDeduct -= maturedDeducted;
         } else if (balanceSource === 'both') {
             if (mainAmountUsed > 0) {
-                mainDeducted = Math.min(mainAmountUsed, mainBalanceForGas - gasFeeInAsset);
+                mainDeducted = Math.min(mainAmountUsed, mainBalance - gasFee);
                 remainingToDeduct -= mainDeducted;
             }
             if (remainingToDeduct > 0 && maturedAmountUsed > 0) {
                 maturedDeducted = Math.min(maturedAmountUsed, maturedBalance);
             }
         }
-        
-        // Update the Maps
-        const finalMainBalance = (mainBalanceForGas - gasFeeInAsset - mainDeducted);
-        const finalMaturedBalance = maturedBalance - maturedDeducted;
-        
+
         // Prepare update operations for Map fields
         const updateOps = {};
         
-        if (finalMainBalance <= 0) {
-            updateOps[`balances.main.${assetLower}`] = 0;
-        } else {
-            updateOps[`balances.main.${assetLower}`] = finalMainBalance;
-        }
+        // Update main balance (gas fee + withdrawal amount)
+        const newMainBalance = mainBalance - gasFee - mainDeducted;
+        updateOps[`balances.main.${assetLower}`] = newMainBalance < 0 ? 0 : newMainBalance;
         
-        if (finalMaturedBalance <= 0) {
-            updateOps[`balances.matured.${assetLower}`] = 0;
-        } else {
-            updateOps[`balances.matured.${assetLower}`] = finalMaturedBalance;
-        }
-        
+        // Update matured balance
+        const newMaturedBalance = maturedBalance - maturedDeducted;
+        updateOps[`balances.matured.${assetLower}`] = newMaturedBalance < 0 ? 0 : newMaturedBalance;
+
+        // Apply updates
         await User.findByIdAndUpdate(userId, { $set: updateOps });
-        
-        // Record gas fee as platform revenue
-        await PlatformRevenue.create({
-            source: 'withdrawal_fee',
-            amount: gasFeeInUsd,
-            currency: 'USD',
-            userId: userId,
-            description: `Gas fee for ${asset.toUpperCase()} withdrawal`,
-            metadata: {
-                asset: asset,
-                withdrawalAmount: amount,
-                gasFeeInAsset: gasFeeInAsset,
-                gasFeeInUsd: gasFeeInUsd,
-                btcGasFeeUsed: btcGasFeeAmount,
-                btcPriceAtTime: btcPrice,
-                assetPriceAtTime: targetAssetPrice
-            }
-        });
 
-        // Generate unique reference
-        const reference = `WDR-${asset.toUpperCase()}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+        // Generate reference
+        const reference = `WD-${asset.toUpperCase()}-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
 
-        // Create transaction record
+        // Create transaction
         const transaction = await Transaction.create({
             user: userId,
             type: 'withdrawal',
@@ -7236,20 +7078,18 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             details: {
                 walletAddress: walletAddress,
                 exchangeRate: exchangeRate,
-                gasFee: gasFeeInAsset,
-                gasFeeInUsd: gasFeeInUsd,
+                gasFee: gasFee,
                 balanceSource: balanceSource,
                 mainAmountUsed: mainDeducted,
-                maturedAmountUsed: maturedDeducted,
-                requestedAt: new Date()
+                maturedAmountUsed: maturedDeducted
             },
-            fee: gasFeeInUsd,
+            fee: gasFee * exchangeRate,
             netAmount: amount,
             btcAddress: walletAddress,
             exchangeRateAtTime: exchangeRate
         });
 
-        // Get device info
+        // Get device info for logging
         const deviceInfo = await getUserDeviceInfo(req);
 
         // Create user log
@@ -7287,50 +7127,68 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
                 reference: reference,
                 walletAddress: walletAddress,
                 balanceSource: balanceSource,
-                gasFee: gasFeeInAsset,
-                gasFeeInUsd: gasFeeInUsd,
+                gasFee: gasFee,
                 exchangeRate: exchangeRate
             },
             relatedEntity: transaction._id,
             relatedEntityModel: 'Transaction'
         });
 
-        // Send email notification
+        // Log activity
+        await logActivity(
+            'withdrawal_created',
+            'Transaction',
+            transaction._id,
+            userId,
+            'User',
+            req,
+            {
+                amount: amount,
+                asset: asset,
+                assetAmount: assetAmount,
+                reference: reference,
+                walletAddress: walletAddress,
+                gasFee: gasFee,
+                exchangeRate: exchangeRate
+            }
+        );
+
+        // =============================================
+        // SEND EMAIL NOTIFICATION
+        // =============================================
         try {
             await sendAutomatedEmail(user, 'withdrawal_request', {
                 name: user.firstName,
-                amount: assetAmount,
-                asset: asset,
+                amount: assetAmount.toFixed(8),
+                asset: asset.toUpperCase(),
                 usdValue: amount,
-                fee: gasFeeInAsset,
-                feeUsd: gasFeeInUsd,
-                netAmount: assetAmount - gasFeeInAsset,
+                fee: gasFee.toFixed(8),
+                feeUsd: (gasFee * exchangeRate).toFixed(2),
+                netAmount: (assetAmount - gasFee).toFixed(8),
                 withdrawalAddress: walletAddress,
                 requestId: reference,
-                timestamp: new Date()
+                timestamp: new Date(),
+                network: asset === 'usdt' ? 'ERC-20' : asset === 'btc' ? 'Bitcoin' : 'Mainnet'
             });
+            console.log(`Withdrawal request email sent to ${user.email}`);
         } catch (emailError) {
             console.error('Failed to send withdrawal email:', emailError);
+            // Don't fail the withdrawal if email fails
         }
 
+        // Return response matching HTML expected format
         return res.status(201).json({
             status: 'success',
             data: {
-                transaction: {
-                    id: transaction._id,
-                    reference: reference,
-                    amount: amount,
-                    asset: asset,
-                    assetAmount: assetAmount,
-                    status: 'pending',
-                    createdAt: transaction.createdAt,
-                    walletAddress: walletAddress,
-                    exchangeRate: exchangeRate,
-                    gasFee: gasFeeInAsset,
-                    gasFeeInUsd: gasFeeInUsd
-                }
+                reference: reference,
+                amount: amount,
+                assetAmount: assetAmount,
+                asset: asset,
+                status: 'pending',
+                gasFee: gasFee,
+                gasFeeUsd: gasFee * exchangeRate
             },
-            message: `Withdrawal request submitted. Gas fee of ${gasFeeInAsset.toFixed(8)} ${asset.toUpperCase()} deducted from main wallet.`
+            message: `Withdrawal request submitted successfully. Gas fee of ${gasFee.toFixed(8)} ${asset.toUpperCase()} deducted from main wallet.`
         });
 
     } catch (err) {
@@ -7341,6 +7199,15 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
         });
     }
 });
+
+
+
+
+
+
+
+
+
 
 
 
