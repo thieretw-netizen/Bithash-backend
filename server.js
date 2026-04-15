@@ -22493,28 +22493,193 @@ function calculateWalletTotalUSD(balanceMap, prices) {
   return parseFloat(totalUSD.toFixed(2));
 }
 
+
+
+
+
+
+
+
+
+
+
 // =============================================
-// MAIN ADMIN USERS ENDPOINT
+// ADMIN USERS ENDPOINT - REAL-TIME ACTUAL HOLDINGS
+// Shows EXACT crypto balances converted to USD with live prices
+// =============================================
+
+// Price cache with 30-second TTL
+let realTimePriceCache = {
+  prices: {},
+  lastUpdated: 0,
+  source: 'none'
+};
+
+// ALL SUPPORTED CRYPTOS from your database
+const ALL_CRYPTOS = [
+  'btc', 'eth', 'usdt', 'bnb', 'sol', 'usdc', 'xrp', 'doge', 'ada', 'shib',
+  'avax', 'dot', 'trx', 'link', 'matic', 'wbtc', 'ltc', 'near', 'uni', 'bch',
+  'xlm', 'atom', 'xmr', 'flow', 'vet', 'fil', 'theta', 'hbar', 'ftm', 'xtz'
+];
+
+// =============================================
+// FETCH REAL PRICES FROM MULTIPLE APIs
+// =============================================
+async function fetchRealPrices() {
+  const prices = {};
+  let successSource = '';
+  
+  // API 1: CoinGecko (Primary)
+  try {
+    const ids = ALL_CRYPTOS.map(crypto => {
+      const mapping = {
+        'btc': 'bitcoin', 'eth': 'ethereum', 'usdt': 'tether', 'bnb': 'binancecoin',
+        'sol': 'solana', 'usdc': 'usd-coin', 'xrp': 'ripple', 'doge': 'dogecoin',
+        'ada': 'cardano', 'shib': 'shiba-inu', 'avax': 'avalanche-2', 'dot': 'polkadot',
+        'trx': 'tron', 'link': 'chainlink', 'matic': 'polygon', 'wbtc': 'wrapped-bitcoin',
+        'ltc': 'litecoin', 'near': 'near', 'uni': 'uniswap', 'bch': 'bitcoin-cash',
+        'xlm': 'stellar', 'atom': 'cosmos', 'xmr': 'monero', 'flow': 'flow',
+        'vet': 'vechain', 'fil': 'filecoin', 'theta': 'theta-token', 'hbar': 'hedera-hashgraph',
+        'ftm': 'fantom', 'xtz': 'tezos'
+      };
+      return mapping[crypto];
+    }).filter(Boolean).join(',');
+    
+    const response = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`, {
+      signal: AbortSignal.timeout(5000)
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      for (const crypto of ALL_CRYPTOS) {
+        const geckoId = {
+          'btc': 'bitcoin', 'eth': 'ethereum', 'usdt': 'tether', 'bnb': 'binancecoin',
+          'sol': 'solana', 'usdc': 'usd-coin', 'xrp': 'ripple', 'doge': 'dogecoin',
+          'ada': 'cardano', 'shib': 'shiba-inu', 'avax': 'avalanche-2', 'dot': 'polkadot',
+          'trx': 'tron', 'link': 'chainlink', 'matic': 'polygon', 'wbtc': 'wrapped-bitcoin',
+          'ltc': 'litecoin', 'near': 'near', 'uni': 'uniswap', 'bch': 'bitcoin-cash',
+          'xlm': 'stellar', 'atom': 'cosmos', 'xmr': 'monero', 'flow': 'flow',
+          'vet': 'vechain', 'fil': 'filecoin', 'theta': 'theta-token', 'hbar': 'hedera-hashgraph',
+          'ftm': 'fantom', 'xtz': 'tezos'
+        }[crypto];
+        
+        if (data[geckoId]?.usd) {
+          prices[crypto] = data[geckoId].usd;
+        }
+      }
+      successSource = 'CoinGecko';
+      console.log(`✅ Got ${Object.keys(prices).length} prices from CoinGecko`);
+    }
+  } catch (err) {
+    console.warn('CoinGecko failed:', err.message);
+  }
+  
+  // API 2: Binance (Fallback for missing prices)
+  if (Object.keys(prices).length < 10) {
+    try {
+      for (const crypto of ALL_CRYPTOS) {
+        if (prices[crypto]) continue;
+        if (crypto === 'usdt' || crypto === 'usdc') {
+          prices[crypto] = 1;
+          continue;
+        }
+        
+        const response = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${crypto.toUpperCase()}USDT`, {
+          signal: AbortSignal.timeout(3000)
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          if (data.price) {
+            prices[crypto] = parseFloat(data.price);
+          }
+        }
+      }
+      if (!successSource) successSource = 'Binance';
+      console.log(`✅ Got additional prices from Binance, total: ${Object.keys(prices).length}`);
+    } catch (err) {
+      console.warn('Binance failed:', err.message);
+    }
+  }
+  
+  // API 3: Kraken (Final fallback for major coins)
+  if (Object.keys(prices).length < 5) {
+    try {
+      const krakenPairs = {
+        'btc': 'XBTUSD', 'eth': 'ETHUSD', 'xrp': 'XRPUSD', 'ltc': 'LTCUSD'
+      };
+      
+      for (const [crypto, pair] of Object.entries(krakenPairs)) {
+        if (prices[crypto]) continue;
+        
+        const response = await fetch(`https://api.kraken.com/0/public/Ticker?pair=${pair}`, {
+          signal: AbortSignal.timeout(3000)
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          const pairKey = Object.keys(data.result || {})[0];
+          if (pairKey && data.result[pairKey]?.c?.[0]) {
+            prices[crypto] = parseFloat(data.result[pairKey].c[0]);
+          }
+        }
+      }
+      console.log(`✅ Got prices from Kraken, total: ${Object.keys(prices).length}`);
+    } catch (err) {
+      console.warn('Kraken failed:', err.message);
+    }
+  }
+  
+  // Set defaults for stablecoins if still missing
+  if (!prices.usdt) prices.usdt = 1;
+  if (!prices.usdc) prices.usdc = 1;
+  
+  return { prices, source: successSource || 'partial' };
+}
+
+// =============================================
+// GET CACHED PRICES
+// =============================================
+async function getCachedPrices() {
+  const now = Date.now();
+  
+  if (realTimePriceCache.prices && (now - realTimePriceCache.lastUpdated) < 30000) {
+    return realTimePriceCache.prices;
+  }
+  
+  console.log('🔄 Fetching fresh prices from APIs...');
+  const { prices, source } = await fetchRealPrices();
+  
+  realTimePriceCache = {
+    prices,
+    lastUpdated: now,
+    source
+  };
+  
+  console.log(`💾 Cached ${Object.keys(prices).length} prices from ${source}`);
+  return prices;
+}
+
+// =============================================
+// MAIN ADMIN USERS ENDPOINT - SHOWS REAL HOLDINGS
 // =============================================
 app.get('/api/admin/users', adminProtect, async (req, res) => {
   try {
-    console.log('📊 Admin Users endpoint called');
+    console.log('=' .repeat(60));
+    console.log('📊 ADMIN USERS - FETCHING REAL USER HOLDINGS');
+    console.log('=' .repeat(60));
     
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
     
-    // Get real-time crypto prices from online APIs
-    let prices = {};
-    try {
-      prices = await getCurrentPrices();
-      console.log(`💰 Got ${Object.keys(prices).length} crypto prices for conversion`);
-    } catch (priceError) {
-      console.error('Price fetch error:', priceError);
-      // Continue with empty prices - USD balances will still work
-    }
+    // Get real-time prices
+    const prices = await getCachedPrices();
+    console.log(`💰 Current prices loaded:`, Object.keys(prices).slice(0, 10));
+    if (prices.btc) console.log(`   BTC: $${prices.btc.toLocaleString()}`);
+    if (prices.eth) console.log(`   ETH: $${prices.eth.toLocaleString()}`);
     
-    // Fetch users with their balance Maps
+    // Fetch users with their actual balance Maps
     const users = await User.find()
       .select('firstName lastName email balances status lastLogin createdAt')
       .sort({ createdAt: -1 })
@@ -22522,46 +22687,104 @@ app.get('/api/admin/users', adminProtect, async (req, res) => {
       .limit(limit)
       .lean();
     
-    console.log(`👥 Found ${users.length} users`);
+    console.log(`👥 Found ${users.length} users in database`);
     
-    // Convert Map balances to USD totals for frontend
-    const formattedUsers = users.map(user => {
-      // Safely access balances with defaults
-      const balances = user.balances || { main: {}, active: {}, matured: {} };
+    // Process each user to show REAL holdings
+    const formattedUsers = [];
+    
+    for (const user of users) {
+      // Get actual balances from Maps
+      const mainMap = user.balances?.main;
+      const activeMap = user.balances?.active;
+      const maturedMap = user.balances?.matured;
       
-      // Calculate USD totals for each wallet type
-      const mainTotalUSD = calculateWalletTotalUSD(balances.main, prices);
-      const activeTotalUSD = calculateWalletTotalUSD(balances.active, prices);
-      const maturedTotalUSD = calculateWalletTotalUSD(balances.matured, prices);
+      // Convert Maps to readable objects
+      const mainBalances = mainMap instanceof Map ? Object.fromEntries(mainMap) : (mainMap || {});
+      const activeBalances = activeMap instanceof Map ? Object.fromEntries(activeMap) : (activeMap || {});
+      const maturedBalances = maturedMap instanceof Map ? Object.fromEntries(maturedMap) : (maturedMap || {});
       
-      return {
+      // Calculate USD totals
+      let mainTotalUSD = 0;
+      let activeTotalUSD = 0;
+      let maturedTotalUSD = 0;
+      
+      // Detailed breakdown for logging
+      const mainBreakdown = [];
+      const activeBreakdown = [];
+      const maturedBreakdown = [];
+      
+      // Calculate MAIN wallet total
+      for (const [asset, amount] of Object.entries(mainBalances)) {
+        if (amount && amount > 0) {
+          const assetLower = asset.toLowerCase();
+          const price = prices[assetLower] || 0;
+          const usdValue = amount * price;
+          mainTotalUSD += usdValue;
+          mainBreakdown.push(`${amount} ${asset.toUpperCase()} = $${usdValue.toFixed(2)}`);
+        }
+      }
+      
+      // Calculate ACTIVE wallet total
+      for (const [asset, amount] of Object.entries(activeBalances)) {
+        if (amount && amount > 0) {
+          const assetLower = asset.toLowerCase();
+          const price = prices[assetLower] || 0;
+          const usdValue = amount * price;
+          activeTotalUSD += usdValue;
+          activeBreakdown.push(`${amount} ${asset.toUpperCase()} = $${usdValue.toFixed(2)}`);
+        }
+      }
+      
+      // Calculate MATURED wallet total
+      for (const [asset, amount] of Object.entries(maturedBalances)) {
+        if (amount && amount > 0) {
+          const assetLower = asset.toLowerCase();
+          const price = prices[assetLower] || 0;
+          const usdValue = amount * price;
+          maturedTotalUSD += usdValue;
+          maturedBreakdown.push(`${amount} ${asset.toUpperCase()} = $${usdValue.toFixed(2)}`);
+        }
+      }
+      
+      // Log user's actual holdings for debugging
+      if (mainTotalUSD > 0 || activeTotalUSD > 0 || maturedTotalUSD > 0) {
+        console.log(`\n👤 ${user.firstName} ${user.lastName} (${user.email}):`);
+        if (mainBreakdown.length) console.log(`   MAIN: ${mainBreakdown.join(', ')} = $${mainTotalUSD.toFixed(2)}`);
+        if (activeBreakdown.length) console.log(`   ACTIVE: ${activeBreakdown.join(', ')} = $${activeTotalUSD.toFixed(2)}`);
+        if (maturedBreakdown.length) console.log(`   MATURED: ${maturedBreakdown.join(', ')} = $${maturedTotalUSD.toFixed(2)}`);
+      }
+      
+      formattedUsers.push({
         _id: user._id,
         firstName: user.firstName || '',
         lastName: user.lastName || '',
         email: user.email || '',
-        // Frontend expects these as USD numbers
+        // Send USD totals to frontend (what HTML expects)
         balances: {
-          main: mainTotalUSD,
-          active: activeTotalUSD,
-          matured: maturedTotalUSD
+          main: parseFloat(mainTotalUSD.toFixed(2)),
+          active: parseFloat(activeTotalUSD.toFixed(2)),
+          matured: parseFloat(maturedTotalUSD.toFixed(2))
+        },
+        // Also send raw holdings for transparency (frontend can optionally display)
+        rawHoldings: {
+          main: mainBalances,
+          active: activeBalances,
+          matured: maturedBalances
         },
         status: user.status || 'active',
         lastLogin: user.lastLogin,
-        createdAt: user.createdAt,
-        // Optional: Include raw crypto balances for debugging (remove in production)
-        _rawBalances: process.env.NODE_ENV === 'development' ? {
-          main: balances.main instanceof Map ? Object.fromEntries(balances.main) : balances.main,
-          active: balances.active instanceof Map ? Object.fromEntries(balances.active) : balances.active,
-          matured: balances.matured instanceof Map ? Object.fromEntries(balances.matured) : balances.matured
-        } : undefined
-      };
-    });
+        createdAt: user.createdAt
+      });
+    }
     
     const totalCount = await User.countDocuments();
     const totalPages = Math.ceil(totalCount / limit);
     
-    console.log(`✅ Returning ${formattedUsers.length} users with USD-converted balances`);
-    console.log(`📈 Price cache age: ${Math.round((Date.now() - globalPriceCache.lastUpdated) / 1000)}s`);
+    console.log('\n' + '=' .repeat(60));
+    console.log(`✅ SUCCESS: Returning ${formattedUsers.length} users with REAL holdings`);
+    console.log(`💰 Price source: ${realTimePriceCache.source}`);
+    console.log(`🕐 Prices cached: ${Math.round((Date.now() - realTimePriceCache.lastUpdated) / 1000)}s ago`);
+    console.log('=' .repeat(60));
     
     res.status(200).json({
       status: 'success',
@@ -22571,56 +22794,28 @@ app.get('/api/admin/users', adminProtect, async (req, res) => {
         totalPages,
         currentPage: page,
         priceInfo: {
-          source: globalPriceCache.source || 'unknown',
-          cached: globalPriceCache.lastUpdated > 0,
-          ageSeconds: Math.round((Date.now() - globalPriceCache.lastUpdated) / 1000)
+          source: realTimePriceCache.source,
+          cachedSecondsAgo: Math.round((Date.now() - realTimePriceCache.lastUpdated) / 1000),
+          prices: {
+            btc: prices.btc,
+            eth: prices.eth,
+            // Add other major prices for transparency
+          }
         }
       }
     });
     
   } catch (err) {
-    console.error('❌ Admin users error:', err);
-    console.error('Error stack:', err.stack);
+    console.error('❌ ADMIN USERS ERROR:', err);
+    console.error('Stack:', err.stack);
     
     res.status(500).json({
       status: 'error',
-      message: 'Failed to fetch users',
+      message: 'Failed to fetch users with real-time holdings',
       error: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   }
 });
-
-// =============================================
-// OPTIONAL: Force refresh prices endpoint
-// =============================================
-app.post('/api/admin/prices/refresh', adminProtect, async (req, res) => {
-  try {
-    // Clear cache to force fresh fetch
-    globalPriceCache.lastUpdated = 0;
-    globalPriceCache.prices = {};
-    
-    const prices = await getCurrentPrices();
-    
-    res.status(200).json({
-      status: 'success',
-      message: 'Prices refreshed',
-      data: {
-        prices,
-        source: globalPriceCache.source,
-        count: Object.keys(prices).length
-      }
-    });
-  } catch (err) {
-    console.error('Price refresh error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to refresh prices'
-    });
-  }
-});
-
-
-
 
 
 
