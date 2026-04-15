@@ -18467,33 +18467,7 @@ app.get('/api/admin/stats', adminProtect, async (req, res) => {
 
 
 
-// GET /api/admin/restrictions - Get current account restrictions
-app.get('/api/admin/restrictions', adminProtect, restrictTo('super'), async (req, res) => {
-  try {
-    const restrictions = await AccountRestrictions.getInstance();
-    
-    res.status(200).json({
-      status: 'success',
-      data: {
-        withdraw_limit_no_kyc: restrictions.withdraw_limit_no_kyc,
-        invest_limit_no_kyc: restrictions.invest_limit_no_kyc,
-        withdraw_limit_no_txn: restrictions.withdraw_limit_no_txn,
-        invest_limit_no_txn: restrictions.invest_limit_no_txn,
-        kyc_restriction_reason: restrictions.kyc_restriction_reason,
-        txn_restriction_reason: restrictions.txn_restriction_reason
-      }
-    });
-    
-  } catch (err) {
-    console.error('Get restrictions error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch restrictions'
-    });
-  }
-});
-
-// GET /api/admin/users - Get all users with real-time USD balance calculations
+// GET /api/admin/users - Get all users with real-time USD balance calculations from crypto Maps
 app.get('/api/admin/users', adminProtect, async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -18509,44 +18483,37 @@ app.get('/api/admin/users', adminProtect, async (req, res) => {
     const totalUsers = await User.countDocuments({});
     const totalPages = Math.ceil(totalUsers / limit);
 
-    // Process each user to calculate real-time USD balances
     const formattedUsers = await Promise.all(users.map(async (user) => {
       let mainUSD = 0;
       let activeUSD = 0;
       let maturedUSD = 0;
 
-      // Calculate MAIN wallet USD value
-      if (user.balances?.main) {
+      // Calculate MAIN wallet USD value from crypto Map
+      if (user.balances?.main && user.balances.main instanceof Map) {
         for (const [crypto, amount] of user.balances.main.entries()) {
           if (amount > 0 && crypto !== 'usd') {
             const price = await getCryptoPrice(crypto.toUpperCase());
-            if (price) {
-              mainUSD += amount * price;
-            }
+            if (price) mainUSD += amount * price;
           }
         }
       }
 
-      // Calculate ACTIVE wallet USD value
-      if (user.balances?.active) {
+      // Calculate ACTIVE wallet USD value from crypto Map
+      if (user.balances?.active && user.balances.active instanceof Map) {
         for (const [crypto, amount] of user.balances.active.entries()) {
           if (amount > 0 && crypto !== 'usd') {
             const price = await getCryptoPrice(crypto.toUpperCase());
-            if (price) {
-              activeUSD += amount * price;
-            }
+            if (price) activeUSD += amount * price;
           }
         }
       }
 
-      // Calculate MATURED wallet USD value
-      if (user.balances?.matured) {
+      // Calculate MATURED wallet USD value from crypto Map
+      if (user.balances?.matured && user.balances.matured instanceof Map) {
         for (const [crypto, amount] of user.balances.matured.entries()) {
           if (amount > 0 && crypto !== 'usd') {
             const price = await getCryptoPrice(crypto.toUpperCase());
-            if (price) {
-              maturedUSD += amount * price;
-            }
+            if (price) maturedUSD += amount * price;
           }
         }
       }
@@ -18585,6 +18552,36 @@ app.get('/api/admin/users', adminProtect, async (req, res) => {
     });
   }
 });
+
+
+// GET /api/admin/restrictions - Get current account restrictions
+app.get('/api/admin/restrictions', adminProtect, restrictTo('super'), async (req, res) => {
+  try {
+    const restrictions = await AccountRestrictions.getInstance();
+    
+    res.status(200).json({
+      status: 'success',
+      data: {
+        withdraw_limit_no_kyc: restrictions.withdraw_limit_no_kyc,
+        invest_limit_no_kyc: restrictions.invest_limit_no_kyc,
+        trade_limit_no_txn: restrictions.invest_limit_no_txn,
+        withdraw_limit_no_txn: restrictions.withdraw_limit_no_txn,
+        kyc_restriction_reason: restrictions.kyc_restriction_reason,
+        txn_restriction_reason: restrictions.txn_restriction_reason
+      }
+    });
+    
+  } catch (err) {
+    console.error('Get restrictions error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch restrictions'
+    });
+  }
+});
+
+
+
 
 
 
