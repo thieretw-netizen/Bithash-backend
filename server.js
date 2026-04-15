@@ -19025,16 +19025,7 @@ app.get('/api/admin/users/:userId', adminProtect, async (req, res) => {
 
 
 
-
-
-
-
-
-
-
-
-
-// GET /api/admin/activity - Get user activity logs with location data
+// GET /api/admin/activity - Get user activity logs with pagination
 app.get('/api/admin/activity', adminProtect, async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -19052,42 +19043,74 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
     const totalPages = Math.ceil(totalItems / limit);
 
     const formattedActivities = activities.map(activity => {
+      // Determine activity type for badge styling
+      let activityType = 'other';
+      const actionLower = (activity.action || '').toLowerCase();
+      if (actionLower.includes('login')) activityType = 'login';
+      else if (actionLower.includes('signup') || actionLower.includes('register')) activityType = 'signup';
+      else if (actionLower.includes('deposit')) activityType = 'deposit';
+      else if (actionLower.includes('withdrawal')) activityType = 'withdrawal';
+      else if (actionLower.includes('investment') && actionLower.includes('create')) activityType = 'investment';
+      else if (actionLower.includes('matured') || actionLower.includes('complete')) activityType = 'matured';
+      else if (actionLower.includes('logout')) activityType = 'logout';
+
+      // Format action description for display
       let actionDescription = activity.action || 'Unknown activity';
-      
       if (activity.action === 'login') actionDescription = 'User logged in';
       else if (activity.action === 'signup') actionDescription = 'New account created';
       else if (activity.action === 'logout') actionDescription = 'User logged out';
-      else if (activity.action === 'deposit_created') actionDescription = `Deposit of $${activity.metadata?.amount?.toLocaleString() || '0'} created`;
-      else if (activity.action === 'withdrawal_created') actionDescription = `Withdrawal of $${activity.metadata?.amount?.toLocaleString() || '0'} requested`;
-      else if (activity.action === 'investment_created') actionDescription = `Investment of $${activity.metadata?.investmentAmountUSD?.toLocaleString() || '0'} created`;
-      
-      let locationData = {
-        city: 'Unknown',
-        region: 'Unknown',
-        country: 'Unknown',
-        latitude: null,
-        longitude: null
-      };
+      else if (activity.action === 'deposit_created') actionDescription = `Deposit request submitted`;
+      else if (activity.action === 'deposit_completed') actionDescription = `Deposit completed`;
+      else if (activity.action === 'withdrawal_created') actionDescription = `Withdrawal request submitted`;
+      else if (activity.action === 'investment_created') actionDescription = `New investment activated`;
+
+      // Get location display string
+      let locationDisplay = 'N/A';
+      let fullLocation = 'N/A';
+      let mapUrl = '#';
       
       if (activity.location) {
-        locationData = {
-          city: activity.location.city || 'Unknown',
-          region: activity.location.region || 'Unknown',
-          country: activity.location.country || 'Unknown',
-          latitude: activity.location.latitude || null,
-          longitude: activity.location.longitude || null
-        };
+        const parts = [];
+        if (activity.location.city) parts.push(activity.location.city);
+        if (activity.location.region?.name) parts.push(activity.location.region.name);
+        if (activity.location.country?.name) parts.push(activity.location.country.name);
+        
+        if (parts.length > 0) {
+          locationDisplay = parts.join(', ');
+          fullLocation = [
+            activity.location.city ? `City: ${activity.location.city}` : '',
+            activity.location.region?.name ? `Region: ${activity.location.region.name}` : '',
+            activity.location.country?.name ? `Country: ${activity.location.country.name}` : '',
+            activity.location.timezone ? `Timezone: ${activity.location.timezone}` : ''
+          ].filter(Boolean).join(' • ');
+          
+          if (activity.location.latitude && activity.location.longitude) {
+            mapUrl = `https://www.google.com/maps/search/?api=1&query=${activity.location.latitude},${activity.location.longitude}`;
+          } else if (activity.location.city && activity.location.country?.name) {
+            mapUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(locationDisplay)}`;
+          }
+        }
       }
 
       return {
         timestamp: activity.createdAt,
         user: {
-          name: activity.user ? `${activity.user.firstName || ''} ${activity.user.lastName || ''}`.trim() : activity.username || 'System',
-          email: activity.user?.email || activity.email || 'system@bithash.com'
+          name: activity.user ? `${activity.user.firstName || ''} ${activity.user.lastName || ''}`.trim() : activity.userFullName || activity.username,
+          email: activity.user?.email || activity.email
         },
         action: actionDescription,
+        activityType: activityType,
         status: activity.status || 'success',
-        location: locationData
+        location: {
+          city: activity.location?.city || 'Unknown',
+          region: activity.location?.region?.name || 'Unknown',
+          country: activity.location?.country?.name || 'Unknown',
+          latitude: activity.location?.latitude || null,
+          longitude: activity.location?.longitude || null
+        },
+        locationDisplay: locationDisplay,
+        fullLocation: fullLocation,
+        mapUrl: mapUrl
       };
     });
 
@@ -19112,8 +19135,6 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
   }
 });
 
-
-
 // GET /api/admin/activity/latest - Get latest activities for real-time polling
 app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
   try {
@@ -19126,22 +19147,32 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
       .lean();
 
     const formattedActivities = activities.map(activity => {
+      let activityType = 'other';
+      const actionLower = (activity.action || '').toLowerCase();
+      if (actionLower.includes('login')) activityType = 'login';
+      else if (actionLower.includes('signup')) activityType = 'signup';
+      else if (actionLower.includes('deposit')) activityType = 'deposit';
+      else if (actionLower.includes('withdrawal')) activityType = 'withdrawal';
+      else if (actionLower.includes('investment')) activityType = 'investment';
+      else if (actionLower.includes('matured')) activityType = 'matured';
+      else if (actionLower.includes('logout')) activityType = 'logout';
+
       let actionDescription = activity.action || 'Unknown activity';
-      
       if (activity.action === 'login') actionDescription = 'User logged in';
       else if (activity.action === 'signup') actionDescription = 'New account created';
       else if (activity.action === 'logout') actionDescription = 'User logged out';
-      else if (activity.action === 'deposit_created') actionDescription = `Deposit created`;
-      else if (activity.action === 'withdrawal_created') actionDescription = `Withdrawal requested`;
-      else if (activity.action === 'investment_created') actionDescription = `Investment created`;
+      else if (activity.action === 'deposit_created') actionDescription = 'Deposit request submitted';
+      else if (activity.action === 'withdrawal_created') actionDescription = 'Withdrawal request submitted';
+      else if (activity.action === 'investment_created') actionDescription = 'New investment activated';
 
       return {
         timestamp: activity.createdAt,
         user: {
-          name: activity.user ? `${activity.user.firstName || ''} ${activity.user.lastName || ''}`.trim() : activity.username || 'System',
+          name: activity.user ? `${activity.user.firstName || ''} ${activity.user.lastName || ''}`.trim() : activity.userFullName || activity.username,
           email: activity.user?.email || activity.email
         },
         action: actionDescription,
+        activityType: activityType,
         status: activity.status || 'success'
       };
     });
@@ -19162,6 +19193,12 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
     });
   }
 });
+
+
+
+
+
+
 
 
 
