@@ -10158,6 +10158,10 @@ app.get('/api/admin/supported-cryptos', adminProtect, restrictTo('super', 'finan
 
 
 
+
+
+
+
 // POST /api/admin/users/:userId/crypto-balance - Add crypto to specific wallet with email
 app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
   try {
@@ -10172,7 +10176,7 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
       });
     }
     
-    // Validate wallet type - ONLY allow main or matured
+    // Validate wallet type - ONLY allow main or matured (NOT active for crypto additions)
     if (!['main', 'matured'].includes(walletType)) {
       return res.status(400).json({
         status: 'fail',
@@ -10187,7 +10191,7 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
       });
     }
     
-    const user = await User.findById(userId).select('+email +firstName +lastName');
+    const user = await User.findById(userId).select('+email +firstName +lastName balances');
     if (!user) {
       return res.status(404).json({
         status: 'fail',
@@ -10220,50 +10224,26 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
         'XRP': 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png',
         'DOGE': 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png',
         'ADA': 'https://assets.coingecko.com/coins/images/975/large/cardano.png',
-        'SHIB': 'https://assets.coingecko.com/coins/images/11939/large/shiba.png'
+        'SHIB': 'https://assets.coingecko.com/coins/images/11939/large/shiba.png',
+        'AVAX': 'https://assets.coingecko.com/coins/images/12559/large/avalanche.png',
+        'DOT': 'https://assets.coingecko.com/coins/images/12171/large/polkadot.png',
+        'TRX': 'https://assets.coingecko.com/coins/images/1094/large/tron.png',
+        'LINK': 'https://assets.coingecko.com/coins/images/877/large/chainlink.png',
+        'MATIC': 'https://assets.coingecko.com/coins/images/4713/large/matic.png',
+        'LTC': 'https://assets.coingecko.com/coins/images/2/large/litecoin.png'
       };
       return logoMap[cryptoCode.toUpperCase()] || `https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/icon/${cryptoCode.toLowerCase()}.png`;
     };
     
     const cryptoLogoUrl = await getCryptoLogoUrl(currencyCode);
     
-    // Find existing UserAssetBalance
-    let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
+    // =============================================
+    // UPDATE THE USER'S BALANCES MAP DIRECTLY
+    // =============================================
     
-    if (!userAssetBalance) {
-      // Create new document if none exists
-      userAssetBalance = new UserAssetBalance({ 
-        user: userId,
-        balances: {
-          main: new Map(),
-          active: new Map(),
-          matured: new Map()
-        },
-        history: []
-      });
-    } else {
-      // CRITICAL FIX: Clean up existing history entries that might be missing walletType
-      // This fixes the validation error for existing documents
-      let needsSave = false;
-      
-      for (let i = 0; i < userAssetBalance.history.length; i++) {
-        const entry = userAssetBalance.history[i];
-        if (!entry.walletType) {
-          // Assign default walletType based on context or mark as 'main'
-          userAssetBalance.history[i].walletType = entry.type === 'maturity' ? 'matured' : 'main';
-          needsSave = true;
-        }
-      }
-      
-      if (needsSave) {
-        await userAssetBalance.save({ validateBeforeSave: false });
-        console.log(`✅ Fixed ${userAssetBalance.history.length} history entries missing walletType for user ${userId}`);
-      }
-    }
-    
-    // Ensure balances structure exists
-    if (!userAssetBalance.balances) {
-      userAssetBalance.balances = {
+    // Initialize balances if they don't exist
+    if (!user.balances) {
+      user.balances = {
         main: new Map(),
         active: new Map(),
         matured: new Map()
@@ -10271,46 +10251,28 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
     }
     
     // Ensure the specific wallet exists as a Map
-    if (!userAssetBalance.balances[walletType]) {
-      userAssetBalance.balances[walletType] = new Map();
+    if (!user.balances[walletType]) {
+      user.balances[walletType] = new Map();
     }
     
-    // Get current balance and add new amount
-    const currentBalance = userAssetBalance.balances[walletType].get(currencyLower) || 0;
-    const newBalance = currentBalance + amount;
-    userAssetBalance.balances[walletType].set(currencyLower, newBalance);
-    userAssetBalance.lastUpdated = new Date();
+    // Get current crypto balance and add new amount
+    const currentCryptoBalance = user.balances[walletType].get(currencyLower) || 0;
+    const newCryptoBalance = currentCryptoBalance + amount;
+    user.balances[walletType].set(currencyLower, newCryptoBalance);
     
-    // Add to history with ALL required fields
-    userAssetBalance.history.push({
-      asset: currencyCode,
-      walletType: walletType,
-      type: 'admin_add',
-      amount: amount,
-      balance: newBalance,
-      usdValue: usdValue,
-      price: price,
-      timestamp: new Date(),
-      transactionId: null,
-      description: description || `Crypto deposit added by admin ${req.admin.name}`,
-      adminId: req.admin._id,
-      adminName: req.admin.name
-    });
+    // Update USD balance for the wallet type
+    const currentUsdBalance = user.balances[walletType].get('usd') || 0;
+    const newUsdBalance = currentUsdBalance + usdValue;
+    user.balances[walletType].set('usd', newUsdBalance);
     
-    // Save with validation enabled for new entries
-    await userAssetBalance.save();
+    // Save the user with updated balances
+    await user.save();
     
-    // Update user's USD balance
-    const walletTypeField = `balances.${walletType}`;
-    await User.findByIdAndUpdate(userId, {
-      $inc: { [walletTypeField]: usdValue }
-    });
-    
-    // Get updated balances
+    // Get updated balances for response
     const updatedUser = await User.findById(userId);
-    const newMainBalance = updatedUser.balances?.main || 0;
-    const newMaturedBalance = updatedUser.balances?.matured || 0;
-    const newActiveBalance = updatedUser.balances?.active || 0;
+    const newMainBalance = updatedUser.balances?.main?.get('usd') || 0;
+    const newMaturedBalance = updatedUser.balances?.matured?.get('usd') || 0;
+    const newActiveBalance = updatedUser.balances?.active?.get('usd') || 0;
     
     // Create transaction record
     const transaction = await Transaction.create({
@@ -10331,7 +10293,9 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
         walletType: walletType,
         adminId: req.admin._id,
         adminName: req.admin.name,
-        description: description || `Crypto balance added by admin ${req.admin.name}`
+        description: description || `Crypto balance added by admin ${req.admin.name}`,
+        newCryptoBalance: newCryptoBalance,
+        previousCryptoBalance: currentCryptoBalance
       },
       fee: 0,
       netAmount: usdValue,
@@ -10353,7 +10317,8 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
         amount: amount,
         usdValue: usdValue,
         walletType: walletType,
-        description: description
+        description: description,
+        newCryptoBalance: newCryptoBalance
       }
     );
     
@@ -10389,7 +10354,7 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
     
     console.log(`📧 Crypto deposit email sent to ${user.email} for ${amount} ${currencyCode} to ${walletTypeDisplay}`);
     
-    // Emit real-time update via Socket.IO
+    // Emit real-time update via Socket.IO if available
     const io = req.app.get('io');
     if (io) {
       io.to(`user_${userId}`).emit('balance_update', {
@@ -10401,8 +10366,8 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
       io.to(`user_${userId}`).emit('crypto_balance_update', {
         currency: currencyLower,
         walletType: walletType,
-        balance: newBalance,
-        usdValue: newBalance * price
+        balance: newCryptoBalance,
+        usdValue: newCryptoBalance * price
       });
     }
     
@@ -10410,8 +10375,16 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
       status: 'success',
       message: `${amount} ${currencyCode} added to user's ${walletTypeDisplay} successfully. An email notification has been sent to the user.`,
       data: {
-        transaction: transaction,
-        newCryptoBalance: newBalance,
+        transaction: {
+          id: transaction._id,
+          reference: transaction.reference,
+          amount: usdValue,
+          asset: currencyCode,
+          assetAmount: amount,
+          price: price,
+          walletType: walletType
+        },
+        newCryptoBalance: newCryptoBalance,
         usdValue: usdValue,
         walletType: walletType,
         emailSent: true
@@ -10426,11 +10399,6 @@ app.post('/api/admin/users/:userId/crypto-balance', adminProtect, restrictTo('su
     });
   }
 });
-
-
-
-
-
 
 
 
