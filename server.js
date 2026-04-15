@@ -18067,7 +18067,62 @@ app.get('/api/withdrawal/available-cryptos', protect, async (req, res) => {
 
 
 
+// PUT /api/admin/users/:userId - Update user information
+app.put('/api/admin/users/:userId', adminProtect, async (req, res) => {
+  try {
+    const { userId } = req.params;
 
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid user ID'
+      });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+
+    const { first_name, last_name, email, status, two_factor_auth } = req.body;
+
+    if (first_name) user.firstName = first_name;
+    if (last_name) user.lastName = last_name;
+    if (email) user.email = email;
+    if (status) user.status = status;
+    if (two_factor_auth !== undefined) {
+      if (!user.twoFactorAuth) user.twoFactorAuth = { enabled: false };
+      user.twoFactorAuth.enabled = two_factor_auth === 'enabled';
+    }
+
+    await user.save();
+
+    res.status(200).json({
+      status: 'success',
+      message: 'User updated successfully',
+      data: {
+        user: {
+          _id: user._id,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          email: user.email,
+          status: user.status,
+          twoFactorAuth: user.twoFactorAuth
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Update user error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to update user'
+    });
+  }
+});
 
 
 
