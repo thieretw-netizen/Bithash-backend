@@ -4842,7 +4842,13 @@ case 'crypto_deposit':
                 <p style="margin: 5px 0;"><strong>Device:</strong> ${data.device}</p>
                 <p style="margin: 5px 0;"><strong>Location:</strong> ${data.location}</p>
                 <p style="margin: 5px 0;"><strong>IP Address:</strong> ${data.ip}</p>
-                <p style="margin: 5px 0;"><strong>Time:</strong> ${new Date(data.timestamp).toLocaleString()}</p>
+                <p style="margin: 5px 0;"><strong>Time:</strong> ${(() => {
+  let date = data.timestamp;
+  if (!date) return 'Unknown';
+  if (date instanceof Date) return date.toLocaleString();
+  const parsed = new Date(date);
+  return isNaN(parsed.getTime()) ? new Date().toLocaleString() : parsed.toLocaleString();
+})()}</p>
               </div>
               <p style="color: #333333; line-height: 1.6;">If this wasn't you, please contact support immediately.</p>
               <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${formattedTimestamp}</p>
@@ -4906,7 +4912,13 @@ case 'crypto_deposit':
                 <p style="margin: 5px 0;"><strong>Device:</strong> ${data.device}</p>
                 <p style="margin: 5px 0;"><strong>Location:</strong> ${data.location}</p>
                 <p style="margin: 5px 0;"><strong>IP Address:</strong> ${data.ip}</p>
-                <p style="margin: 5px 0;"><strong>Time:</strong> ${new Date(data.timestamp).toLocaleString()}</p>
+              <p style="margin: 5px 0;"><strong>Time:</strong> ${(() => {
+  let date = data.timestamp;
+  if (!date) return 'Unknown';
+  if (date instanceof Date) return date.toLocaleString();
+  const parsed = new Date(date);
+  return isNaN(parsed.getTime()) ? new Date().toLocaleString() : parsed.toLocaleString();
+})()}</p>
               </div>
               <p style="color: #333333; line-height: 1.6;">If this was you, you can safely ignore this email. If not, please secure your account immediately.</p>
               <div style="text-align: center; margin: 30px 0;">
