@@ -22117,68 +22117,451 @@ app.get('/api/admin/cards', adminProtect, async (req, res) => {
 
 
 
-// Admin Users Endpoint - PROPERLY CONNECTS DB MAPS TO FRONTEND
+
+
+
+
+
+// =============================================
+// ADMIN USERS ENDPOINT - REAL-TIME CRYPTO PRICES
+// Fetches from multiple online APIs with fallbacks
+// Converts all crypto balances to USD totals
+// =============================================
+
+// Global price cache with timestamps
+let globalPriceCache = {
+  prices: {},
+  lastUpdated: 0,
+  updating: false
+};
+
+// Cache TTL - 30 seconds for real-time but not overwhelming APIs
+const PRICE_CACHE_TTL = 30000;
+
+// Supported cryptocurrencies from your database schema
+const SUPPORTED_CRYPTOS = [
+  'btc', 'eth', 'usdt', 'bnb', 'sol', 'usdc', 'xrp', 'doge', 'ada', 'shib',
+  'avax', 'dot', 'trx', 'link', 'matic', 'wbtc', 'ltc', 'near', 'uni', 'bch',
+  'xlm', 'atom', 'xmr', 'flow', 'vet', 'fil', 'theta', 'hbar', 'ftm', 'xtz'
+];
+
+// CoinGecko ID mapping
+const COINGECKO_IDS = {
+  'btc': 'bitcoin', 'eth': 'ethereum', 'usdt': 'tether', 'bnb': 'binancecoin',
+  'sol': 'solana', 'usdc': 'usd-coin', 'xrp': 'ripple', 'doge': 'dogecoin',
+  'ada': 'cardano', 'shib': 'shiba-inu', 'avax': 'avalanche-2', 'dot': 'polkadot',
+  'trx': 'tron', 'link': 'chainlink', 'matic': 'matic-network', 'wbtc': 'wrapped-bitcoin',
+  'ltc': 'litecoin', 'near': 'near', 'uni': 'uniswap', 'bch': 'bitcoin-cash',
+  'xlm': 'stellar', 'atom': 'cosmos', 'xmr': 'monero', 'flow': 'flow',
+  'vet': 'vechain', 'fil': 'filecoin', 'theta': 'theta-token', 'hbar': 'hedera-hashgraph',
+  'ftm': 'fantom', 'xtz': 'tezos'
+};
+
+// =============================================
+// FETCH REAL-TIME PRICES FROM MULTIPLE ONLINE APIs
+// ALL FALLBACKS ARE ONLINE APIS - NO HARDCODED VALUES
+// =============================================
+async function fetchRealTimeCryptoPrices() {
+  const errors = [];
+  const prices = {};
+  
+  // API 1: CoinGecko (Primary - Most reliable for multiple assets)
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    
+    // Get IDs for all supported cryptos
+    const ids = Object.values(COINGECKO_IDS).join(',');
+    const response = await fetch(
+      `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`,
+      { signal: controller.signal }
+    );
+    clearTimeout(timeoutId);
+    
+    if (response.ok) {
+      const data = await response.json();
+      for (const [symbol, geckoId] of Object.entries(COINGECKO_IDS)) {
+        if (data[geckoId] && data[geckoId].usd) {
+          prices[symbol] = data[geckoId].usd;
+        }
+      }
+      console.log(`✅ Fetched ${Object.keys(prices).length} prices from CoinGecko`);
+      return { prices, source: 'CoinGecko' };
+    }
+    errors.push('CoinGecko: Request failed');
+  } catch (err) {
+    errors.push(`CoinGecko: ${err.message}`);
+  }
+  
+  // API 2: Binance (Fallback - Fast and reliable)
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    
+    const promises = SUPPORTED_CRYPTOS.map(async (crypto) => {
+      if (crypto === 'usdt' || crypto === 'usdc') {
+        prices[crypto] = 1;
+        return;
+      }
+      
+      const symbol = `${crypto.toUpperCase()}USDT`;
+      const response = await fetch(
+        `https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`,
+        { signal: controller.signal }
+      );
+      if (response.ok) {
+        const data = await response.json();
+        if (data.price) {
+          prices[crypto] = parseFloat(data.price);
+        }
+      }
+    });
+    
+    await Promise.all(promises);
+    clearTimeout(timeoutId);
+    
+    const successCount = Object.keys(prices).length;
+    if (successCount > 0) {
+      console.log(`✅ Fetched ${successCount} prices from Binance`);
+      return { prices, source: 'Binance' };
+    }
+    errors.push('Binance: No prices fetched');
+  } catch (err) {
+    errors.push(`Binance: ${err.message}`);
+  }
+  
+  // API 3: Kraken (Second fallback)
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    
+    const krakenPairs = {
+      'btc': 'XBTUSD', 'eth': 'ETHUSD', 'usdt': 'USDTUSD', 'xrp': 'XRPUSD',
+      'doge': 'DOGEUSD', 'ada': 'ADAUSD', 'ltc': 'LTCUSD', 'bch': 'BCHUSD',
+      'xlm': 'XLMUSD', 'atom': 'ATOMUSD', 'dot': 'DOTUSD', 'link': 'LINKUSD'
+    };
+    
+    for (const [crypto, pair] of Object.entries(krakenPairs)) {
+      if (prices[crypto]) continue; // Skip if we already have price
+      
+      const response = await fetch(
+        `https://api.kraken.com/0/public/Ticker?pair=${pair}`,
+        { signal: controller.signal }
+      );
+      if (response.ok) {
+        const data = await response.json();
+        const pairKey = Object.keys(data.result || {})[0];
+        if (pairKey && data.result[pairKey]?.c?.[0]) {
+          prices[crypto] = parseFloat(data.result[pairKey].c[0]);
+        }
+      }
+    }
+    clearTimeout(timeoutId);
+    
+    const successCount = Object.keys(prices).length;
+    if (successCount > 0) {
+      console.log(`✅ Fetched ${successCount} prices from Kraken`);
+      return { prices, source: 'Kraken' };
+    }
+    errors.push('Kraken: No prices fetched');
+  } catch (err) {
+    errors.push(`Kraken: ${err.message}`);
+  }
+  
+  // API 4: CryptoCompare (Third fallback)
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    
+    const promises = SUPPORTED_CRYPTOS.map(async (crypto) => {
+      if (prices[crypto]) return; // Skip if we already have price
+      if (crypto === 'usdt' || crypto === 'usdc') {
+        prices[crypto] = 1;
+        return;
+      }
+      
+      const response = await fetch(
+        `https://min-api.cryptocompare.com/data/price?fsym=${crypto.toUpperCase()}&tsyms=USD`,
+        { signal: controller.signal }
+      );
+      if (response.ok) {
+        const data = await response.json();
+        if (data.USD) {
+          prices[crypto] = data.USD;
+        }
+      }
+    });
+    
+    await Promise.all(promises);
+    clearTimeout(timeoutId);
+    
+    const successCount = Object.keys(prices).length;
+    if (successCount > 0) {
+      console.log(`✅ Fetched ${successCount} prices from CryptoCompare`);
+      return { prices, source: 'CryptoCompare' };
+    }
+    errors.push('CryptoCompare: No prices fetched');
+  } catch (err) {
+    errors.push(`CryptoCompare: ${err.message}`);
+  }
+  
+  // API 5: KuCoin (Fourth fallback)
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    
+    const promises = SUPPORTED_CRYPTOS.map(async (crypto) => {
+      if (prices[crypto]) return;
+      if (crypto === 'usdt' || crypto === 'usdc') {
+        prices[crypto] = 1;
+        return;
+      }
+      
+      const response = await fetch(
+        `https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=${crypto.toUpperCase()}-USDT`,
+        { signal: controller.signal }
+      );
+      if (response.ok) {
+        const data = await response.json();
+        if (data.data?.price) {
+          prices[crypto] = parseFloat(data.data.price);
+        }
+      }
+    });
+    
+    await Promise.all(promises);
+    clearTimeout(timeoutId);
+    
+    const successCount = Object.keys(prices).length;
+    if (successCount > 0) {
+      console.log(`✅ Fetched ${successCount} prices from KuCoin`);
+      return { prices, source: 'KuCoin' };
+    }
+    errors.push('KuCoin: No prices fetched');
+  } catch (err) {
+    errors.push(`KuCoin: ${err.message}`);
+  }
+  
+  // API 6: Bybit (Fifth fallback)
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    
+    const promises = SUPPORTED_CRYPTOS.map(async (crypto) => {
+      if (prices[crypto]) return;
+      if (crypto === 'usdt' || crypto === 'usdc') {
+        prices[crypto] = 1;
+        return;
+      }
+      
+      const response = await fetch(
+        `https://api.bybit.com/v5/market/tickers?category=spot&symbol=${crypto.toUpperCase()}USDT`,
+        { signal: controller.signal }
+      );
+      if (response.ok) {
+        const data = await response.json();
+        if (data.result?.list?.[0]?.lastPrice) {
+          prices[crypto] = parseFloat(data.result.list[0].lastPrice);
+        }
+      }
+    });
+    
+    await Promise.all(promises);
+    clearTimeout(timeoutId);
+    
+    const successCount = Object.keys(prices).length;
+    if (successCount > 0) {
+      console.log(`✅ Fetched ${successCount} prices from Bybit`);
+      return { prices, source: 'Bybit' };
+    }
+    errors.push('Bybit: No prices fetched');
+  } catch (err) {
+    errors.push(`Bybit: ${err.message}`);
+  }
+  
+  // API 7: OKX (Sixth fallback)
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    
+    const promises = SUPPORTED_CRYPTOS.map(async (crypto) => {
+      if (prices[crypto]) return;
+      if (crypto === 'usdt' || crypto === 'usdc') {
+        prices[crypto] = 1;
+        return;
+      }
+      
+      const response = await fetch(
+        `https://www.okx.com/api/v5/market/ticker?instId=${crypto.toUpperCase()}-USDT`,
+        { signal: controller.signal }
+      );
+      if (response.ok) {
+        const data = await response.json();
+        if (data.data?.[0]?.last) {
+          prices[crypto] = parseFloat(data.data[0].last);
+        }
+      }
+    });
+    
+    await Promise.all(promises);
+    clearTimeout(timeoutId);
+    
+    const successCount = Object.keys(prices).length;
+    if (successCount > 0) {
+      console.log(`✅ Fetched ${successCount} prices from OKX`);
+      return { prices, source: 'OKX' };
+    }
+    errors.push('OKX: No prices fetched');
+  } catch (err) {
+    errors.push(`OKX: ${err.message}`);
+  }
+  
+  console.error('❌ All price APIs failed. Errors:', errors);
+  throw new Error('Unable to fetch cryptocurrency prices from any API. Please try again later.');
+}
+
+// =============================================
+// GET PRICES WITH CACHING
+// =============================================
+async function getCurrentPrices() {
+  const now = Date.now();
+  
+  // Return cached prices if still valid
+  if (globalPriceCache.prices && (now - globalPriceCache.lastUpdated) < PRICE_CACHE_TTL) {
+    console.log('📦 Using cached prices from', globalPriceCache.source);
+    return globalPriceCache.prices;
+  }
+  
+  // Prevent multiple simultaneous updates
+  if (globalPriceCache.updating) {
+    console.log('⏳ Price update in progress, waiting...');
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    return globalPriceCache.prices;
+  }
+  
+  globalPriceCache.updating = true;
+  
+  try {
+    console.log('🔄 Fetching fresh prices from online APIs...');
+    const result = await fetchRealTimeCryptoPrices();
+    
+    globalPriceCache.prices = result.prices;
+    globalPriceCache.lastUpdated = now;
+    globalPriceCache.source = result.source;
+    
+    console.log(`💾 Cached ${Object.keys(result.prices).length} prices from ${result.source}`);
+    return result.prices;
+  } catch (err) {
+    console.error('Failed to fetch prices:', err);
+    // Return stale cache if available, otherwise throw
+    if (Object.keys(globalPriceCache.prices).length > 0) {
+      console.log('⚠️ Using stale cached prices');
+      return globalPriceCache.prices;
+    }
+    throw err;
+  } finally {
+    globalPriceCache.updating = false;
+  }
+}
+
+// =============================================
+// CALCULATE WALLET TOTAL IN USD
+// =============================================
+function calculateWalletTotalUSD(balanceMap, prices) {
+  if (!balanceMap) return 0;
+  
+  let totalUSD = 0;
+  
+  // Handle both Map and plain object
+  const balances = balanceMap instanceof Map 
+    ? Object.fromEntries(balanceMap) 
+    : balanceMap;
+  
+  for (const [asset, amount] of Object.entries(balances)) {
+    if (!amount || amount <= 0) continue;
+    
+    const assetLower = asset.toLowerCase();
+    
+    if (assetLower === 'usd') {
+      totalUSD += amount;
+    } else {
+      const price = prices[assetLower] || 0;
+      totalUSD += amount * price;
+    }
+  }
+  
+  return parseFloat(totalUSD.toFixed(2));
+}
+
+// =============================================
+// MAIN ADMIN USERS ENDPOINT
+// =============================================
 app.get('/api/admin/users', adminProtect, async (req, res) => {
   try {
+    console.log('📊 Admin Users endpoint called');
+    
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 5;
+    const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
     
-    // Get users
+    // Get real-time crypto prices from online APIs
+    let prices = {};
+    try {
+      prices = await getCurrentPrices();
+      console.log(`💰 Got ${Object.keys(prices).length} crypto prices for conversion`);
+    } catch (priceError) {
+      console.error('Price fetch error:', priceError);
+      // Continue with empty prices - USD balances will still work
+    }
+    
+    // Fetch users with their balance Maps
     const users = await User.find()
-      .select('firstName lastName email balances status lastLogin')
+      .select('firstName lastName email balances status lastLogin createdAt')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
       .lean();
     
-    // Helper function to convert asset Map to total USD value
-    const calculateTotalUSD = async (balanceMap) => {
-      if (!balanceMap) return 0;
-      
-      let totalUSD = 0;
-      
-      // Convert Map to object if needed
-      const balancesObj = balanceMap instanceof Map 
-        ? Object.fromEntries(balanceMap) 
-        : balanceMap;
-      
-      for (const [asset, amount] of Object.entries(balancesObj)) {
-        if (amount > 0) {
-          if (asset === 'usd') {
-            totalUSD += amount;
-          } else {
-            // Get current price for crypto assets
-            const price = await getCryptoPrice(asset);
-            totalUSD += amount * (price || 0);
-          }
-        }
-      }
-      
-      return totalUSD;
-    };
+    console.log(`👥 Found ${users.length} users`);
     
-    // Format users - convert Map balances to USD totals for frontend
-    const formattedUsers = [];
-    for (const user of users) {
-      formattedUsers.push({
+    // Convert Map balances to USD totals for frontend
+    const formattedUsers = users.map(user => {
+      // Safely access balances with defaults
+      const balances = user.balances || { main: {}, active: {}, matured: {} };
+      
+      // Calculate USD totals for each wallet type
+      const mainTotalUSD = calculateWalletTotalUSD(balances.main, prices);
+      const activeTotalUSD = calculateWalletTotalUSD(balances.active, prices);
+      const maturedTotalUSD = calculateWalletTotalUSD(balances.matured, prices);
+      
+      return {
         _id: user._id,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        email: user.email,
-        // Convert Maps to USD totals (what frontend expects)
+        firstName: user.firstName || '',
+        lastName: user.lastName || '',
+        email: user.email || '',
+        // Frontend expects these as USD numbers
         balances: {
-          active: await calculateTotalUSD(user.balances?.active),
-          matured: await calculateTotalUSD(user.balances?.matured),
-          main: await calculateTotalUSD(user.balances?.main)
+          main: mainTotalUSD,
+          active: activeTotalUSD,
+          matured: maturedTotalUSD
         },
-        status: user.status,
-        lastLogin: user.lastLogin
-      });
-    }
+        status: user.status || 'active',
+        lastLogin: user.lastLogin,
+        createdAt: user.createdAt,
+        // Optional: Include raw crypto balances for debugging (remove in production)
+        _rawBalances: process.env.NODE_ENV === 'development' ? {
+          main: balances.main instanceof Map ? Object.fromEntries(balances.main) : balances.main,
+          active: balances.active instanceof Map ? Object.fromEntries(balances.active) : balances.active,
+          matured: balances.matured instanceof Map ? Object.fromEntries(balances.matured) : balances.matured
+        } : undefined
+      };
+    });
     
     const totalCount = await User.countDocuments();
     const totalPages = Math.ceil(totalCount / limit);
+    
+    console.log(`✅ Returning ${formattedUsers.length} users with USD-converted balances`);
+    console.log(`📈 Price cache age: ${Math.round((Date.now() - globalPriceCache.lastUpdated) / 1000)}s`);
     
     res.status(200).json({
       status: 'success',
@@ -22186,12 +22569,19 @@ app.get('/api/admin/users', adminProtect, async (req, res) => {
         users: formattedUsers,
         totalCount,
         totalPages,
-        currentPage: page
+        currentPage: page,
+        priceInfo: {
+          source: globalPriceCache.source || 'unknown',
+          cached: globalPriceCache.lastUpdated > 0,
+          ageSeconds: Math.round((Date.now() - globalPriceCache.lastUpdated) / 1000)
+        }
       }
     });
     
   } catch (err) {
-    console.error('Admin users error:', err);
+    console.error('❌ Admin users error:', err);
+    console.error('Error stack:', err.stack);
+    
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch users',
@@ -22199,6 +22589,40 @@ app.get('/api/admin/users', adminProtect, async (req, res) => {
     });
   }
 });
+
+// =============================================
+// OPTIONAL: Force refresh prices endpoint
+// =============================================
+app.post('/api/admin/prices/refresh', adminProtect, async (req, res) => {
+  try {
+    // Clear cache to force fresh fetch
+    globalPriceCache.lastUpdated = 0;
+    globalPriceCache.prices = {};
+    
+    const prices = await getCurrentPrices();
+    
+    res.status(200).json({
+      status: 'success',
+      message: 'Prices refreshed',
+      data: {
+        prices,
+        source: globalPriceCache.source,
+        count: Object.keys(prices).length
+      }
+    });
+  } catch (err) {
+    console.error('Price refresh error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to refresh prices'
+    });
+  }
+});
+
+
+
+
+
 
 
 // Admin All Transactions Endpoint
