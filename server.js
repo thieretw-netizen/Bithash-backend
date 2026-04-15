@@ -17883,42 +17883,6 @@ app.get('/api/withdrawal/available-cryptos', protect, async (req, res) => {
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 // =============================================
 // ADMIN GET DEPOSIT DETAILS ENDPOINT
 // =============================================
@@ -17978,7 +17942,7 @@ app.get('/api/admin/withdrawals/:id', adminProtect, async (req, res) => {
 });
 
 // =============================================
-// ADMIN REJECT DEPOSIT ENDPOINT - FIXED VERSION
+// ADMIN REJECT DEPOSIT ENDPOINT - FIXED
 // =============================================
 app.post('/api/admin/deposits/:id/reject', adminProtect, [
   body('reason').trim().notEmpty().withMessage('Rejection reason is required')
@@ -18078,7 +18042,6 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
         method: deposit.method,
         reason: reason
       });
-      console.log(`Deposit rejection email sent to ${deposit.user.email}`);
     } catch (emailError) {
       console.error('Failed to send deposit rejection email:', emailError);
     }
@@ -18097,13 +18060,14 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, [
     console.error('Admin reject deposit error:', err);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to reject deposit'
+      message: 'Failed to reject deposit',
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   }
 });
 
 // =============================================
-// ADMIN REJECT WITHDRAWAL ENDPOINT - FIXED VERSION
+// ADMIN REJECT WITHDRAWAL ENDPOINT - FIXED
 // =============================================
 app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
   body('reason').trim().notEmpty().withMessage('Rejection reason is required')
@@ -18144,55 +18108,10 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
       });
     }
     
-    let mainBalanceUSD = 0;
-    if (user.balances && user.balances.main) {
-      if (user.balances.main instanceof Map) {
-        for (const [asset, amount] of user.balances.main) {
-          if (amount && amount > 0) {
-            const price = await getCryptoPrice(asset.toUpperCase());
-            if (price) {
-              mainBalanceUSD += amount * price;
-            }
-          }
-        }
-      } else if (typeof user.balances.main === 'object') {
-        for (const [asset, amount] of Object.entries(user.balances.main)) {
-          if (amount && amount > 0) {
-            const price = await getCryptoPrice(asset.toUpperCase());
-            if (price) {
-              mainBalanceUSD += amount * price;
-            }
-          }
-        }
-      }
-    }
-    
-    let maturedBalanceUSD = 0;
-    if (user.balances && user.balances.matured) {
-      if (user.balances.matured instanceof Map) {
-        for (const [asset, amount] of user.balances.matured) {
-          if (amount && amount > 0) {
-            const price = await getCryptoPrice(asset.toUpperCase());
-            if (price) {
-              maturedBalanceUSD += amount * price;
-            }
-          }
-        }
-      } else if (typeof user.balances.matured === 'object') {
-        for (const [asset, amount] of Object.entries(user.balances.matured)) {
-          if (amount && amount > 0) {
-            const price = await getCryptoPrice(asset.toUpperCase());
-            if (price) {
-              maturedBalanceUSD += amount * price;
-            }
-          }
-        }
-      }
-    }
-    
-    maturedBalanceUSD += withdrawal.amount;
-    user.balances.matured = new Map();
-    user.balances.matured.set('usd', maturedBalanceUSD);
+    // Return funds to user's MATURED wallet (as per schema)
+    if (!user.balances.matured) user.balances.matured = new Map();
+    const currentMatured = user.balances.matured.get('usd') || 0;
+    user.balances.matured.set('usd', currentMatured + withdrawal.amount);
     await user.save();
     
     withdrawal.status = 'failed';
@@ -18264,7 +18183,6 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
         method: withdrawal.method,
         asset: withdrawal.asset || 'USD'
       });
-      console.log(`Withdrawal rejection email sent to ${user.email}`);
     } catch (emailError) {
       console.error('Failed to send withdrawal rejection email:', emailError);
     }
@@ -18283,7 +18201,8 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, [
     console.error('Admin reject withdrawal error:', err);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to reject withdrawal'
+      message: 'Failed to reject withdrawal',
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   }
 });
@@ -18814,7 +18733,6 @@ app.post('/api/admin/kyc/submissions/:submissionId/approve', adminProtect, restr
       await sendAutomatedEmail(kycSubmission.user, 'kyc_approved', {
         name: kycSubmission.user.firstName
       });
-      console.log(`KYC approval email sent to ${kycSubmission.user.email}`);
     } catch (emailError) {
       console.error('Failed to send KYC approval email:', emailError);
     }
@@ -18838,7 +18756,8 @@ app.post('/api/admin/kyc/submissions/:submissionId/approve', adminProtect, restr
     console.error('Approve KYC error:', err);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to approve KYC application'
+      message: 'Failed to approve KYC application',
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   }
 });
@@ -18974,7 +18893,6 @@ app.post('/api/admin/kyc/submissions/:submissionId/reject', adminProtect, restri
         name: kycSubmission.user.firstName,
         reason: reason
       });
-      console.log(`KYC rejection email sent to ${kycSubmission.user.email}`);
     } catch (emailError) {
       console.error('Failed to send KYC rejection email:', emailError);
     }
@@ -18997,7 +18915,8 @@ app.post('/api/admin/kyc/submissions/:submissionId/reject', adminProtect, restri
     console.error('Reject KYC error:', err);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to reject KYC application'
+      message: 'Failed to reject KYC application',
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   }
 });
@@ -19009,25 +18928,16 @@ app.get('/api/admin/kyc/files/:type/:filename', adminProtect, restrictTo('super'
     let filePath;
     switch (type) {
       case 'identity-front':
-        filePath = path.join(process.env.KYC_IDENTITY_PATH || 'uploads/kyc/identity', filename);
-        break;
-      
       case 'identity-back':
         filePath = path.join(process.env.KYC_IDENTITY_PATH || 'uploads/kyc/identity', filename);
         break;
-      
       case 'address':
         filePath = path.join(process.env.KYC_ADDRESS_PATH || 'uploads/kyc/address', filename);
         break;
-      
       case 'facial-video':
-        filePath = path.join(process.env.KYC_FACIAL_PATH || 'uploads/kyc/facial', filename);
-        break;
-      
       case 'facial-photo':
         filePath = path.join(process.env.KYC_FACIAL_PATH || 'uploads/kyc/facial', filename);
         break;
-      
       default:
         return res.status(404).json({
           status: 'fail',
@@ -19045,36 +18955,15 @@ app.get('/api/admin/kyc/files/:type/:filename', adminProtect, restrictTo('super'
     const ext = path.extname(filename).toLowerCase();
     let contentType = 'application/octet-stream';
     
-    if (['.jpg', '.jpeg'].includes(ext)) {
-      contentType = 'image/jpeg';
-    } else if (ext === '.png') {
-      contentType = 'image/png';
-    } else if (ext === '.gif') {
-      contentType = 'image/gif';
-    } else if (ext === '.bmp') {
-      contentType = 'image/bmp';
-    } else if (ext === '.webp') {
-      contentType = 'image/webp';
-    } else if (['.mp4'].includes(ext)) {
-      contentType = 'video/mp4';
-    } else if (ext === '.avi') {
-      contentType = 'video/x-msvideo';
-    } else if (ext === '.mov') {
-      contentType = 'video/quicktime';
-    } else if (ext === '.wmv') {
-      contentType = 'video/x-ms-wmv';
-    } else if (ext === '.webm') {
-      contentType = 'video/webm';
-    } else if (ext === '.pdf') {
-      contentType = 'application/pdf';
-    }
+    if (['.jpg', '.jpeg'].includes(ext)) contentType = 'image/jpeg';
+    else if (ext === '.png') contentType = 'image/png';
+    else if (ext === '.gif') contentType = 'image/gif';
+    else if (['.mp4'].includes(ext)) contentType = 'video/mp4';
+    else if (ext === '.pdf') contentType = 'application/pdf';
 
-    res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Content-Type', contentType);
     res.setHeader('Content-Disposition', 'inline; filename="' + filename + '"');
     res.setHeader('Cache-Control', 'private, max-age=3600');
-    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     
     if (contentType.startsWith('video/')) {
       const stat = fs.statSync(filePath);
@@ -19385,12 +19274,7 @@ app.post('/api/admin/users', adminProtect, [
       city,
       country,
       referralCode,
-      isVerified: true,
-      balances: {
-        main: new Map(),
-        active: new Map(),
-        matured: new Map()
-      }
+      isVerified: true
     });
     
     res.status(201).json({
@@ -19414,6 +19298,135 @@ app.post('/api/admin/users', adminProtect, [
     });
   }
 });
+
+// =============================================
+// ACTIVITY LOGGING HELPERS
+// =============================================
+const logUserActivity = async (req, action, status = 'success', metadata = {}, relatedEntity = null) => {
+  try {
+    if (!req.user && !(action === 'signup' || action === 'login' || action === 'password_reset_request')) {
+      return;
+    }
+
+    const deviceInfo = await getUserDeviceInfo(req);
+    
+    const logData = {
+      user: req.user?._id || null,
+      username: req.user?.email || (action === 'signup' ? req.body.email : 'unknown'),
+      email: req.user?.email || (action === 'signup' ? req.body.email : null),
+      action,
+      ipAddress: deviceInfo.ip,
+      userAgent: deviceInfo.device,
+      deviceInfo: {
+        type: getDeviceType(req),
+        os: getOSFromUserAgent(req.headers['user-agent']),
+        browser: getBrowserFromUserAgent(req.headers['user-agent'])
+      },
+      location: {
+        ip: deviceInfo.ip,
+        country: deviceInfo.locationDetails?.country || 'Unknown',
+        region: deviceInfo.locationDetails?.region || 'Unknown',
+        city: deviceInfo.locationDetails?.city || 'Unknown',
+        exactLocation: deviceInfo.exactLocation,
+        latitude: deviceInfo.locationDetails?.latitude,
+        longitude: deviceInfo.locationDetails?.longitude,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+      },
+      status,
+      metadata,
+      ...(relatedEntity && {
+        relatedEntity: relatedEntity._id || relatedEntity,
+        relatedEntityModel: relatedEntity.constructor.modelName
+      })
+    };
+
+    await UserLog.create(logData);
+
+    await SystemLog.create({
+      action,
+      entity: 'User',
+      entityId: req.user?._id || null,
+      performedBy: req.user?._id || null,
+      performedByModel: req.user ? 'User' : 'System',
+      ip: deviceInfo.ip,
+      device: deviceInfo.device,
+      location: deviceInfo.location,
+      changes: metadata
+    });
+
+  } catch (err) {
+    console.error('Error logging user activity:', err);
+  }
+};
+
+const trackUserActivity = (action, options = {}) => {
+  return async (req, res, next) => {
+    try {
+      await next();
+      
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        let metadata = {};
+        let relatedEntity = null;
+        
+        switch (action) {
+          case 'profile_update':
+            metadata = {
+              fields: Object.keys(req.body).filter(key => 
+                !key.toLowerCase().includes('password')
+              )
+            };
+            break;
+          case 'deposit':
+          case 'withdrawal':
+          case 'transfer':
+            relatedEntity = res.locals.transaction || req.body;
+            metadata = {
+              amount: req.body.amount,
+              currency: req.body.currency || 'USD',
+              method: req.body.method
+            };
+            break;
+          case 'investment':
+            relatedEntity = res.locals.investment || req.body;
+            metadata = {
+              plan: req.body.planId,
+              amount: req.body.amount
+            };
+            break;
+          case 'kyc_submission':
+            metadata = {
+              type: req.body.type,
+              status: 'pending'
+            };
+            break;
+        }
+        
+        if (options.metadata) {
+          metadata = { ...metadata, ...options.metadata };
+        }
+        
+        await logUserActivity(req, action, 'success', metadata, relatedEntity);
+      }
+    } catch (err) {
+      console.error('Activity tracking middleware error:', err);
+    }
+  };
+};
+
+const trackFailedLogin = async (req, res, next) => {
+  try {
+    await next();
+    
+    if (res.statusCode === 401) {
+      await logUserActivity(req, 'failed_login', 'failed', {
+        email: req.body.email,
+        reason: res.locals.failReason || 'Invalid credentials'
+      });
+    }
+  } catch (err) {
+    console.error('Failed login tracking error:', err);
+  }
+};
 
 // =============================================
 // ADMIN RESTRICTIONS ENDPOINTS
@@ -19507,7 +19520,7 @@ const scheduleDailyRestrictionChecks = () => {
 setTimeout(scheduleDailyRestrictionChecks, 60000);
 
 // =============================================
-// ADMIN APPROVE DEPOSIT ENDPOINT - FIXED VERSION
+// ADMIN APPROVE DEPOSIT ENDPOINT - FIXED (Map support)
 // =============================================
 app.post('/api/admin/deposits/:id/approve', adminProtect, [
   body('notes').optional().trim()
@@ -19558,32 +19571,16 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
       }
     }
     
-    let mainBalanceUSD = 0;
-    if (user.balances && user.balances.main) {
-      if (user.balances.main instanceof Map) {
-        for (const [asset, amount] of user.balances.main) {
-          if (amount && amount > 0) {
-            const price = await getCryptoPrice(asset.toUpperCase());
-            if (price) {
-              mainBalanceUSD += amount * price;
-            }
-          }
-        }
-      } else if (typeof user.balances.main === 'object') {
-        for (const [asset, amount] of Object.entries(user.balances.main)) {
-          if (amount && amount > 0) {
-            const price = await getCryptoPrice(asset.toUpperCase());
-            if (price) {
-              mainBalanceUSD += amount * price;
-            }
-          }
-        }
-      }
+    // Update MAIN wallet (USD)
+    if (!user.balances.main) user.balances.main = new Map();
+    const currentMainUsd = user.balances.main.get('usd') || 0;
+    user.balances.main.set('usd', currentMainUsd + deposit.amount);
+    
+    if (isCryptoDeposit && assetSymbol) {
+      const currentAssetBalance = user.balances.main.get(assetSymbol) || 0;
+      user.balances.main.set(assetSymbol, currentAssetBalance + assetAmount);
     }
     
-    mainBalanceUSD += deposit.amount;
-    user.balances.main = new Map();
-    user.balances.main.set('usd', mainBalanceUSD);
     await user.save();
     
     deposit.status = 'completed';
@@ -19656,39 +19653,15 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
     });
 
     try {
-      let newBalance = 0;
-      if (user.balances && user.balances.main) {
-        if (user.balances.main instanceof Map) {
-          for (const [asset, amount] of user.balances.main) {
-            if (amount && amount > 0) {
-              const price = await getCryptoPrice(asset.toUpperCase());
-              if (price) {
-                newBalance += amount * price;
-              }
-            }
-          }
-        } else if (typeof user.balances.main === 'object') {
-          for (const [asset, amount] of Object.entries(user.balances.main)) {
-            if (amount && amount > 0) {
-              const price = await getCryptoPrice(asset.toUpperCase());
-              if (price) {
-                newBalance += amount * price;
-              }
-            }
-          }
-        }
-      }
-      
       await sendAutomatedEmail(user, 'deposit_approved', {
         name: user.firstName,
         amount: deposit.amount,
         method: deposit.method,
         reference: deposit.reference,
-        newBalance: newBalance,
+        newBalance: user.balances.main.get('usd') || 0,
         processedAt: deposit.processedAt,
         asset: deposit.method !== 'BANK' && deposit.method !== 'CARD' ? deposit.method : 'USD'
       });
-      console.log(`Deposit approval email sent to ${user.email}`);
     } catch (emailError) {
       console.error('Failed to send deposit approval email:', emailError);
     }
@@ -19697,29 +19670,7 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
     
     const io = req.app.get('io');
     if (io) {
-      let mainBalanceValue = 0;
-      if (user.balances && user.balances.main) {
-        if (user.balances.main instanceof Map) {
-          for (const [asset, amount] of user.balances.main) {
-            if (amount && amount > 0) {
-              const price = await getCryptoPrice(asset.toUpperCase());
-              if (price) {
-                mainBalanceValue += amount * price;
-              }
-            }
-          }
-        } else if (typeof user.balances.main === 'object') {
-          for (const [asset, amount] of Object.entries(user.balances.main)) {
-            if (amount && amount > 0) {
-              const price = await getCryptoPrice(asset.toUpperCase());
-              if (price) {
-                mainBalanceValue += amount * price;
-              }
-            }
-          }
-        }
-      }
-      io.to(`user_${user._id}`).emit('balance_update', { main: mainBalanceValue });
+      io.to(`user_${user._id}`).emit('balance_update', { main: user.balances.main.get('usd') || 0 });
     }
     
     res.status(200).json({
@@ -19737,13 +19688,14 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, [
     console.error('Admin approve deposit error:', err);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to approve deposit'
+      message: 'Failed to approve deposit',
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   }
 });
 
 // =============================================
-// ADMIN APPROVE WITHDRAWAL ENDPOINT - FIXED VERSION
+// ADMIN APPROVE WITHDRAWAL ENDPOINT - FIXED (Map support)
 // =============================================
 app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
   body('notes').optional().trim(),
@@ -19769,18 +19721,15 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
       });
     }
     
-    let cryptoPrice = null;
     let usdValue = withdrawal.amount;
     let feeUsd = withdrawal.fee || 0;
     const isCryptoWithdrawal = withdrawal.method !== 'BANK' && withdrawal.method !== 'CARD';
     const assetSymbol = isCryptoWithdrawal ? withdrawal.method.toLowerCase() : null;
     
-    if (isCryptoWithdrawal && assetSymbol) {
-      cryptoPrice = await getCryptoPrice(assetSymbol.toUpperCase());
+    if (isCryptoWithdrawal && assetSymbol && withdrawal.assetAmount) {
+      const cryptoPrice = await getCryptoPrice(assetSymbol.toUpperCase());
       if (cryptoPrice) {
-        if (withdrawal.assetAmount) {
-          usdValue = withdrawal.assetAmount * cryptoPrice;
-        }
+        usdValue = withdrawal.assetAmount * cryptoPrice;
         feeUsd = (withdrawal.fee || 0) * cryptoPrice;
       }
     }
@@ -19868,35 +19817,26 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
         txid: txid || withdrawal.details?.txid,
         method: withdrawal.method
       });
-      console.log(`Withdrawal approval email sent to ${withdrawal.user.email}`);
     } catch (emailError) {
       console.error('Failed to send withdrawal approval email:', emailError);
     }
     
     await AccountRestrictions.checkAndUpdateRestrictions(withdrawal.user._id, 'transaction_completion');
     
+    // Recalculate MAIN USD balance from asset Maps
     let totalMainBalance = 0;
-    if (withdrawal.user.balances && withdrawal.user.balances.main) {
-      if (withdrawal.user.balances.main instanceof Map) {
-        for (const [asset, amount] of withdrawal.user.balances.main) {
-          if (amount && amount > 0) {
-            const price = await getCryptoPrice(asset.toUpperCase());
-            if (price) {
-              totalMainBalance += amount * price;
-            }
-          }
-        }
-      } else if (typeof withdrawal.user.balances.main === 'object') {
-        for (const [asset, amount] of Object.entries(withdrawal.user.balances.main)) {
-          if (amount && amount > 0) {
-            const price = await getCryptoPrice(asset.toUpperCase());
-            if (price) {
-              totalMainBalance += amount * price;
-            }
-          }
+    const userAssets = await User.findById(withdrawal.user._id).select('balances.main');
+    if (userAssets && userAssets.balances.main) {
+      for (const [asset, balance] of userAssets.balances.main) {
+        if (balance > 0 && asset !== 'usd') {
+          const price = await getCryptoPrice(asset.toUpperCase());
+          if (price) totalMainBalance += balance * price;
+        } else if (asset === 'usd') {
+          totalMainBalance += balance;
         }
       }
     }
+    await User.findByIdAndUpdate(withdrawal.user._id, { 'balances.main.usd': totalMainBalance });
     
     const io = req.app.get('io');
     if (io) {
@@ -19918,13 +19858,14 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, [
     console.error('Admin approve withdrawal error:', err);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to approve withdrawal'
+      message: 'Failed to approve withdrawal',
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   }
 });
 
 // =============================================
-// ADMIN ACTIVITY ENDPOINT - FIXED VERSION
+// ADMIN ACTIVITY ENDPOINT - FIXED
 // =============================================
 app.get('/api/admin/activity', adminProtect, async (req, res) => {
   try {
@@ -19974,33 +19915,21 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
         const ipinfoToken = process.env.IPINFO_TOKEN || 'b56ce6e91d732d';
         
         try {
-          const response = await axios.get(`https://ipinfo.io/${cleanIp}?token=${ipinfoToken}`, {
-            timeout: 5000
-          });
-          
+          const response = await axios.get(`https://ipinfo.io/${cleanIp}?token=${ipinfoToken}`, { timeout: 5000 });
           if (response.data) {
             const { city, region, country, loc, org, timezone, postal } = response.data;
-            
-            let latitude = null;
-            let longitude = null;
-            let exactLocation = false;
+            let latitude = null, longitude = null, exactLocation = false;
             if (loc && loc.includes(',')) {
               const coords = loc.split(',');
               latitude = parseFloat(coords[0]);
               longitude = parseFloat(coords[1]);
               exactLocation = true;
             }
-            
-            let street = 'Unknown';
-            if (response.data.street) {
-              street = response.data.street;
-            }
-            
             return {
               country: country || 'Unknown',
               city: city || 'Unknown',
               region: region || 'Unknown',
-              street: street,
+              street: response.data.street || 'Unknown',
               fullLocation: `${city || 'Unknown'}, ${region || 'Unknown'}, ${country || 'Unknown'}`,
               latitude: latitude,
               longitude: longitude,
@@ -20010,22 +19939,13 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
               exactLocation: exactLocation
             };
           }
-        } catch (ipinfoError) {
-        }
+        } catch (ipinfoError) {}
         
         try {
-          const response = await axios.get(`https://ipapi.co/${cleanIp}/json/`, {
-            timeout: 5000
-          });
-          
+          const response = await axios.get(`https://ipapi.co/${cleanIp}/json/`, { timeout: 5000 });
           if (response.data && !response.data.error) {
             const { city, region, country_name, country_code, latitude, longitude, org, timezone, postal } = response.data;
-            
-            let exactLocation = false;
-            if (latitude && longitude) {
-              exactLocation = true;
-            }
-            
+            let exactLocation = !!(latitude && longitude);
             return {
               country: country_name || country_code || 'Unknown',
               city: city || 'Unknown',
@@ -20040,8 +19960,49 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
               exactLocation: exactLocation
             };
           }
-        } catch (ipapiError) {
-        }
+        } catch (ipapiError) {}
+        
+        try {
+          const response = await axios.get(`https://freeipapi.com/api/json/${cleanIp}`, { timeout: 5000 });
+          if (response.data) {
+            const { cityName, regionName, countryName, latitude, longitude, isp, timeZone } = response.data;
+            let exactLocation = !!(latitude && longitude);
+            return {
+              country: countryName || 'Unknown',
+              city: cityName || 'Unknown',
+              region: regionName || 'Unknown',
+              street: 'Unknown',
+              fullLocation: `${cityName || 'Unknown'}, ${regionName || 'Unknown'}, ${countryName || 'Unknown'}`,
+              latitude: latitude || null,
+              longitude: longitude || null,
+              isp: isp || null,
+              timezone: timeZone || null,
+              postalCode: null,
+              exactLocation: exactLocation
+            };
+          }
+        } catch (freeipapiError) {}
+        
+        try {
+          const response = await axios.get(`http://ip-api.com/json/${cleanIp}`, { timeout: 5000 });
+          if (response.data && response.data.status === 'success') {
+            const { city, regionName, country, lat, lon, isp, timezone, zip } = response.data;
+            let exactLocation = !!(lat && lon);
+            return {
+              country: country || 'Unknown',
+              city: city || 'Unknown',
+              region: regionName || 'Unknown',
+              street: 'Unknown',
+              fullLocation: `${city || 'Unknown'}, ${regionName || 'Unknown'}, ${country || 'Unknown'}`,
+              latitude: lat || null,
+              longitude: lon || null,
+              isp: isp || null,
+              timezone: timezone || null,
+              postalCode: zip || null,
+              exactLocation: exactLocation
+            };
+          }
+        } catch (ipapiComError) {}
         
         return {
           country: 'Unknown',
@@ -20056,7 +20017,6 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
           postalCode: null,
           exactLocation: false
         };
-        
       } catch (err) {
         return {
           country: 'Unknown',
@@ -20076,13 +20036,7 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
 
     const activities = await Promise.all(allActivities.map(async (activity) => {
       const isUserLog = activity.user !== undefined;
-      
-      let userData = {
-        id: 'system',
-        name: 'System',
-        email: 'system'
-      };
-      
+      let userData = { id: 'system', name: 'System', email: 'system' };
       let action = activity.action;
       let ipAddress = 'Unknown';
       let timestamp = activity.createdAt || activity.timestamp;
@@ -20102,9 +20056,7 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
             email: activity.email || 'Unknown Email'
           };
         }
-        
         ipAddress = activity.ipAddress || 'Unknown';
-        
       } else {
         if (activity.performedBy && typeof activity.performedBy === 'object') {
           if (activity.performedByModel === 'User') {
@@ -20121,7 +20073,6 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
             };
           }
         }
-        
         ipAddress = activity.ip || 'Unknown';
       }
 
@@ -20372,7 +20323,6 @@ app.get('/api/admin/stats', adminProtect, async (req, res) => {
       : 100;
     
     const totalRevenueResult = await PlatformRevenue.aggregate([
-      { $match: { status: { $ne: 'rejected' } } },
       { $group: { _id: null, total: { $sum: '$amount' } } }
     ]);
     const platformRevenue = totalRevenueResult[0]?.total || 0;
@@ -20380,7 +20330,6 @@ app.get('/api/admin/stats', adminProtect, async (req, res) => {
     const yesterdayRevenueResult = await PlatformRevenue.aggregate([
       { 
         $match: { 
-          status: { $ne: 'rejected' },
           recordedAt: { $lt: yesterday }
         } 
       },
@@ -20391,7 +20340,6 @@ app.get('/api/admin/stats', adminProtect, async (req, res) => {
     const todayRevenueResult = await PlatformRevenue.aggregate([
       { 
         $match: { 
-          status: { $ne: 'rejected' },
           recordedAt: { $gte: yesterday }
         } 
       },
@@ -20404,7 +20352,6 @@ app.get('/api/admin/stats', adminProtect, async (req, res) => {
       : 100;
     
     const revenueBySource = await PlatformRevenue.aggregate([
-      { $match: { status: { $ne: 'rejected' } } },
       { 
         $group: { 
           _id: '$source',
@@ -20421,7 +20368,6 @@ app.get('/api/admin/stats', adminProtect, async (req, res) => {
     const recentRevenue = await PlatformRevenue.aggregate([
       { 
         $match: { 
-          status: { $ne: 'rejected' },
           recordedAt: { $gte: sevenDaysAgo }
         } 
       },
@@ -20438,7 +20384,6 @@ app.get('/api/admin/stats', adminProtect, async (req, res) => {
     ]);
     
     const revenueStats = await PlatformRevenue.aggregate([
-      { $match: { status: { $ne: 'rejected' } } },
       {
         $group: {
           _id: null,
@@ -20476,19 +20421,6 @@ app.get('/api/admin/stats', adminProtect, async (req, res) => {
     
     const serverUptime = (95 + Math.random() * 5).toFixed(2);
     
-    const mainWalletTotal = await calculateTotalWalletUSD('main');
-    const activeWalletTotal = await calculateTotalWalletUSD('active');
-    const maturedWalletTotal = await calculateTotalWalletUSD('matured');
-    
-    const totalAssetValue = mainWalletTotal + activeWalletTotal + maturedWalletTotal;
-    
-    const realtimeDistribution = {
-      'Main Wallet': mainWalletTotal,
-      'Active Wallet': activeWalletTotal,
-      'Matured Wallet': maturedWalletTotal,
-      'Platform Revenue': platformRevenue
-    };
-    
     res.status(200).json({
       status: 'success',
       data: {
@@ -20516,7 +20448,6 @@ app.get('/api/admin/stats', adminProtect, async (req, res) => {
         lastRevenueTime,
         serverUptime: parseFloat(serverUptime),
         pendingKycCount: pendingKycCount,
-        realtimeDistribution: realtimeDistribution,
         lastUpdated: new Date().toISOString()
       }
     });
@@ -20528,51 +20459,6 @@ app.get('/api/admin/stats', adminProtect, async (req, res) => {
     });
   }
 });
-
-async function calculateTotalWalletUSD(walletType) {
-  try {
-    const users = await User.find({}).select(`balances.${walletType}`).lean();
-    let totalUSD = 0;
-    
-    for (const user of users) {
-      const wallet = user.balances?.[walletType];
-      if (wallet) {
-        if (wallet instanceof Map) {
-          for (const [asset, amount] of wallet) {
-            if (amount && amount > 0) {
-              if (asset === 'usd') {
-                totalUSD += amount;
-              } else {
-                const price = await getCryptoPrice(asset.toUpperCase());
-                if (price) {
-                  totalUSD += amount * price;
-                }
-              }
-            }
-          }
-        } else if (typeof wallet === 'object') {
-          for (const [asset, amount] of Object.entries(wallet)) {
-            if (amount && amount > 0) {
-              if (asset === 'usd') {
-                totalUSD += amount;
-              } else {
-                const price = await getCryptoPrice(asset.toUpperCase());
-                if (price) {
-                  totalUSD += amount * price;
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-    
-    return parseFloat(totalUSD.toFixed(2));
-  } catch (err) {
-    console.error(`Error calculating ${walletType} wallet total:`, err);
-    return 0;
-  }
-}
 
 // =============================================
 // ADMIN COMPLETED INVESTMENTS ENDPOINT
@@ -20989,12 +20875,12 @@ app.post('/api/admin/settings/payments', adminProtect, [
 });
 
 // =============================================
-// ADMIN ADD BALANCE TO USER ENDPOINT
+// ADMIN ADD BALANCE ENDPOINT - FIXED (Map support)
 // =============================================
 app.post('/api/admin/users/:userId/balance', adminProtect, async (req, res) => {
     try {
         const { userId } = req.params;
-        const { amount, balanceType, description } = req.body;
+        const { amount, asset = 'usd', walletType, description } = req.body;
 
         if (!amount || amount <= 0) {
             return res.status(400).json({
@@ -21003,10 +20889,10 @@ app.post('/api/admin/users/:userId/balance', adminProtect, async (req, res) => {
             });
         }
 
-        if (!balanceType || !['active', 'matured', 'main'].includes(balanceType)) {
+        if (!walletType || !['main', 'matured', 'active'].includes(walletType)) {
             return res.status(400).json({
                 status: 'error',
-                message: 'Invalid balance type'
+                message: 'Invalid wallet type. Must be "main", "matured", or "active"'
             });
         }
 
@@ -21020,65 +20906,45 @@ app.post('/api/admin/users/:userId/balance', adminProtect, async (req, res) => {
 
         if (!user.balances) {
             user.balances = {
+                main: new Map(),
                 active: new Map(),
-                matured: new Map(),
-                main: new Map()
+                matured: new Map()
             };
         }
 
-        let currentUSDValue = 0;
-        const wallet = user.balances[balanceType];
-        
-        if (wallet) {
-          if (wallet instanceof Map) {
-            for (const [asset, amt] of wallet) {
-              if (amt && amt > 0) {
-                if (asset === 'usd') {
-                  currentUSDValue += amt;
-                } else {
-                  const price = await getCryptoPrice(asset.toUpperCase());
-                  if (price) {
-                    currentUSDValue += amt * price;
-                  }
-                }
-              }
-            }
-          } else if (typeof wallet === 'object') {
-            for (const [asset, amt] of Object.entries(wallet)) {
-              if (amt && amt > 0) {
-                if (asset === 'usd') {
-                  currentUSDValue += amt;
-                } else {
-                  const price = await getCryptoPrice(asset.toUpperCase());
-                  if (price) {
-                    currentUSDValue += amt * price;
-                  }
-                }
-              }
-            }
-          }
+        if (!user.balances[walletType]) {
+            user.balances[walletType] = new Map();
         }
-        
-        const newUSDValue = currentUSDValue + parseFloat(amount);
-        user.balances[balanceType] = new Map();
-        user.balances[balanceType].set('usd', newUSDValue);
 
-        const transaction = new Transaction({
+        const assetKey = asset.toLowerCase();
+        const currentBalance = user.balances[walletType].get(assetKey) || 0;
+        user.balances[walletType].set(assetKey, currentBalance + parseFloat(amount));
+
+        await user.save();
+
+        const transaction = await Transaction.create({
             user: userId,
             type: 'admin_adjustment',
             amount: parseFloat(amount),
+            asset: asset.toUpperCase(),
+            assetAmount: parseFloat(amount),
             description: description || `Balance added by admin`,
             status: 'completed',
-            balanceType: balanceType,
-            adminNote: `Admin balance adjustment - ${balanceType} balance`
+            method: 'ADMIN',
+            reference: `ADMIN-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`,
+            details: {
+                walletType: walletType,
+                adminId: req.admin._id,
+                adminName: req.admin.name,
+                description: description || `Balance added to ${walletType} wallet`
+            },
+            fee: 0,
+            netAmount: parseFloat(amount)
         });
-
-        await user.save();
-        await transaction.save();
 
         res.json({
             status: 'success',
-            message: 'Balance added successfully',
+            message: `Balance added successfully to ${walletType} wallet`,
             data: {
                 user: {
                     _id: user._id,
@@ -21086,14 +20952,15 @@ app.post('/api/admin/users/:userId/balance', adminProtect, async (req, res) => {
                     firstName: user.firstName,
                     lastName: user.lastName,
                     balances: {
-                        main: user.balances.main instanceof Map ? Object.fromEntries(user.balances.main) : user.balances.main,
-                        active: user.balances.active instanceof Map ? Object.fromEntries(user.balances.active) : user.balances.active,
-                        matured: user.balances.matured instanceof Map ? Object.fromEntries(user.balances.matured) : user.balances.matured
+                        main: user.balances.main ? Object.fromEntries(user.balances.main) : {},
+                        active: user.balances.active ? Object.fromEntries(user.balances.active) : {},
+                        matured: user.balances.matured ? Object.fromEntries(user.balances.matured) : {}
                     }
                 },
                 transaction: {
                     _id: transaction._id,
                     amount: transaction.amount,
+                    asset: transaction.asset,
                     type: transaction.type,
                     description: transaction.description
                 }
@@ -21110,7 +20977,7 @@ app.post('/api/admin/users/:userId/balance', adminProtect, async (req, res) => {
 });
 
 // =============================================
-// ADMIN DELETE USER ENDPOINT
+// ADMIN DELETE USER ENDPOINT - COMPLETE
 // =============================================
 app.delete('/api/admin/users/:userId', adminProtect, async (req, res) => {
   try {
@@ -21148,65 +21015,33 @@ app.delete('/api/admin/users/:userId', adminProtect, async (req, res) => {
     
     console.log(`Admin ${req.admin.email} is deleting user: ${userInfo.email}`);
     
-    const userLogsDeleted = await UserLog.deleteMany({ user: userId });
-    console.log(`Deleted ${userLogsDeleted.deletedCount} user logs`);
-    
-    const investmentsDeleted = await Investment.deleteMany({ user: userId });
-    console.log(`Deleted ${investmentsDeleted.deletedCount} investments`);
-    
-    const transactionsDeleted = await Transaction.deleteMany({ user: userId });
-    console.log(`Deleted ${transactionsDeleted.deletedCount} transactions`);
-    
-    const depositAssetsDeleted = await DepositAsset.deleteMany({ user: userId });
-    console.log(`Deleted ${depositAssetsDeleted.deletedCount} deposit assets`);
-    
-    const buysDeleted = await Buy.deleteMany({ user: userId });
-    console.log(`Deleted ${buysDeleted.deletedCount} buy records`);
-    
-    const sellsDeleted = await Sell.deleteMany({ user: userId });
-    console.log(`Deleted ${sellsDeleted.deletedCount} sell records`);
-    
-    const userPreferenceDeleted = await UserPreference.deleteOne({ user: userId });
-    console.log(`Deleted user preferences: ${userPreferenceDeleted.deletedCount > 0 ? 'Yes' : 'No'}`);
-    
-    const kycDeleted = await KYC.deleteOne({ user: userId });
-    console.log(`Deleted KYC record: ${kycDeleted.deletedCount > 0 ? 'Yes' : 'No'}`);
-    
-    const cardsDeleted = await CardPayment.deleteMany({ user: userId });
-    console.log(`Deleted ${cardsDeleted.deletedCount} saved cards`);
-    
-    const loansDeleted = await Loan.deleteMany({ user: userId });
-    console.log(`Deleted ${loansDeleted.deletedCount} loans`);
-    
-    const otpsDeleted = await OTP.deleteMany({ email: userToDelete.email });
-    console.log(`Deleted ${otpsDeleted.deletedCount} OTP records`);
-    
-    const downlineRelationshipsDeleted = await DownlineRelationship.deleteMany({ downline: userId });
-    console.log(`Deleted ${downlineRelationshipsDeleted.deletedCount} downline relationships (as downline)`);
-    
-    const uplineRelationshipsDeleted = await DownlineRelationship.deleteMany({ upline: userId });
-    console.log(`Deleted ${uplineRelationshipsDeleted.deletedCount} downline relationships (as upline)`);
-    
-    const commissionHistoryDeleted = await CommissionHistory.deleteMany({ upline: userId });
-    console.log(`Deleted ${commissionHistoryDeleted.deletedCount} commission history records (as upline)`);
-    
-    const downlineCommissionDeleted = await CommissionHistory.deleteMany({ downline: userId });
-    console.log(`Deleted ${downlineCommissionDeleted.deletedCount} commission history records (as downline)`);
+    await UserLog.deleteMany({ user: userId });
+    await Investment.deleteMany({ user: userId });
+    await Transaction.deleteMany({ user: userId });
+    await DepositAsset.deleteMany({ user: userId });
+    await Buy.deleteMany({ user: userId });
+    await Sell.deleteMany({ user: userId });
+    await UserPreference.deleteOne({ user: userId });
+    await KYC.deleteOne({ user: userId });
+    await CardPayment.deleteMany({ user: userId });
+    await Loan.deleteMany({ user: userId });
+    await OTP.deleteMany({ email: userToDelete.email });
+    await DownlineRelationship.deleteMany({ downline: userId });
+    await DownlineRelationship.deleteMany({ upline: userId });
+    await CommissionHistory.deleteMany({ upline: userId });
+    await CommissionHistory.deleteMany({ downline: userId });
     
     await User.updateMany(
       { 'referralHistory.referredUser': userId },
       { $pull: { referralHistory: { referredUser: userId } } }
     );
-    console.log('Removed referral history references');
     
     await User.updateMany(
       { referredBy: userId },
       { $unset: { referredBy: '' } }
     );
-    console.log('Removed referredBy references');
     
     await Notification.deleteMany({ specificUserId: userId });
-    console.log('Deleted user-specific notifications');
     
     const deletedUser = await User.findByIdAndDelete(userId);
     
@@ -21224,21 +21059,7 @@ app.delete('/api/admin/users/:userId', adminProtect, async (req, res) => {
       req.admin._id,
       'Admin',
       req,
-      {
-        deletedUser: userInfo,
-        deletedCounts: {
-          userLogs: userLogsDeleted.deletedCount,
-          investments: investmentsDeleted.deletedCount,
-          transactions: transactionsDeleted.deletedCount,
-          depositAssets: depositAssetsDeleted.deletedCount,
-          buys: buysDeleted.deletedCount,
-          sells: sellsDeleted.deletedCount,
-          cards: cardsDeleted.deletedCount,
-          loans: loansDeleted.deletedCount,
-          downlineRelationships: downlineRelationshipsDeleted.deletedCount,
-          commissionHistory: commissionHistoryDeleted.deletedCount
-        }
-      }
+      { deletedUser: userInfo }
     );
     
     console.log(`User ${userInfo.email} successfully deleted by admin ${req.admin.email}`);
@@ -21246,47 +21067,30 @@ app.delete('/api/admin/users/:userId', adminProtect, async (req, res) => {
     res.status(200).json({
       status: 'success',
       message: `User ${userInfo.name} (${userInfo.email}) has been permanently deleted`,
-      data: {
-        deletedUser: {
-          id: userInfo.id,
-          name: userInfo.name,
-          email: userInfo.email
-        },
-        deletedRecords: {
-          userLogs: userLogsDeleted.deletedCount,
-          investments: investmentsDeleted.deletedCount,
-          transactions: transactionsDeleted.deletedCount,
-          depositAssets: depositAssetsDeleted.deletedCount,
-          buys: buysDeleted.deletedCount,
-          sells: sellsDeleted.deletedCount,
-          cards: cardsDeleted.deletedCount,
-          loans: loansDeleted.deletedCount,
-          downlineRelationships: downlineRelationshipsDeleted.deletedCount,
-          commissionHistory: commissionHistoryDeleted.deletedCount
-        }
-      }
+      data: { deletedUser: { id: userInfo.id, name: userInfo.name, email: userInfo.email } }
     });
     
   } catch (err) {
     console.error('Admin delete user error:', err);
     res.status(500).json({
       status: 'error',
-      message: 'An error occurred while deleting the user'
+      message: 'An error occurred while deleting the user',
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   }
 });
 
 // =============================================
-// ADMIN GET USER DETAILS ENDPOINT - BULLETPROOF
+// ADMIN GET USER DETAILS ENDPOINT - BULLETPROOF (Map to USD)
 // =============================================
 app.get('/api/admin/users/:id', adminProtect, async (req, res) => {
   try {
     const { id } = req.params;
     
-    console.log(`Fetching user details for ID: ${id}`);
+    console.log(`🔍 Fetching user details for ID: ${id}`);
     
     if (!id || id.length !== 24 || !/^[0-9a-fA-F]{24}$/.test(id)) {
-      console.log(`Invalid user ID format: ${id}`);
+      console.log(`❌ Invalid user ID format: ${id}`);
       return res.status(400).json({
         status: 'fail',
         message: 'Invalid user ID format. Must be a 24-character hex string.'
@@ -21297,94 +21101,36 @@ app.get('/api/admin/users/:id', adminProtect, async (req, res) => {
       .select('-password -passwordChangedAt -passwordResetToken -passwordResetExpires');
     
     if (!user) {
-      console.log(`User not found: ${id}`);
+      console.log(`❌ User not found: ${id}`);
       return res.status(404).json({
         status: 'fail',
         message: 'User not found'
       });
     }
     
-    console.log(`User found: ${user.email}`);
+    console.log(`✅ User found: ${user.email}`);
     
-    let mainBalances = {};
-    let activeBalances = {};
-    let maturedBalances = {};
+    // Helper to convert Map to USD total for frontend
+    const convertMapToUsdTotal = async (balanceMap) => {
+      if (!balanceMap) return 0;
+      let total = 0;
+      for (const [asset, amount] of balanceMap) {
+        if (amount > 0) {
+          if (asset === 'usd') {
+            total += amount;
+          } else {
+            const price = await getCryptoPrice(asset.toUpperCase());
+            if (price) total += amount * price;
+          }
+        }
+      }
+      return parseFloat(total.toFixed(2));
+    };
     
-    if (user.balances) {
-      if (user.balances.main) {
-        if (user.balances.main instanceof Map) {
-          for (const [key, value] of user.balances.main) {
-            mainBalances[key] = value;
-          }
-        } else if (typeof user.balances.main === 'object') {
-          mainBalances = { ...user.balances.main };
-        } else {
-          console.log(`Unexpected type for balances.main: ${typeof user.balances.main}`);
-        }
-      }
-      
-      if (user.balances.active) {
-        if (user.balances.active instanceof Map) {
-          for (const [key, value] of user.balances.active) {
-            activeBalances[key] = value;
-          }
-        } else if (typeof user.balances.active === 'object') {
-          activeBalances = { ...user.balances.active };
-        }
-      }
-      
-      if (user.balances.matured) {
-        if (user.balances.matured instanceof Map) {
-          for (const [key, value] of user.balances.matured) {
-            maturedBalances[key] = value;
-          }
-        } else if (typeof user.balances.matured === 'object') {
-          maturedBalances = { ...user.balances.matured };
-        }
-      }
-    }
-    
-    let mainUSDTotal = 0;
-    for (const [asset, amount] of Object.entries(mainBalances)) {
-      if (amount && amount > 0) {
-        if (asset === 'usd') {
-          mainUSDTotal += amount;
-        } else {
-          const price = await getCryptoPrice(asset.toUpperCase());
-          if (price) {
-            mainUSDTotal += amount * price;
-          }
-        }
-      }
-    }
-    
-    let activeUSDTotal = 0;
-    for (const [asset, amount] of Object.entries(activeBalances)) {
-      if (amount && amount > 0) {
-        if (asset === 'usd') {
-          activeUSDTotal += amount;
-        } else {
-          const price = await getCryptoPrice(asset.toUpperCase());
-          if (price) {
-            activeUSDTotal += amount * price;
-          }
-        }
-      }
-    }
-    
-    let maturedUSDTotal = 0;
-    for (const [asset, amount] of Object.entries(maturedBalances)) {
-      if (amount && amount > 0) {
-        if (asset === 'usd') {
-          maturedUSDTotal += amount;
-        } else {
-          const price = await getCryptoPrice(asset.toUpperCase());
-          if (price) {
-            maturedUSDTotal += amount * price;
-          }
-        }
-      }
-    }
+    // Also return raw holdings for potential future use
+    const mainBalancesRaw = user.balances.main instanceof Map ? Object.fromEntries(user.balances.main) : (user.balances.main || {});
+    const activeBalancesRaw = user.balances.active instanceof Map ? Object.fromEntries(user.balances.active) : (user.balances.active || {});
+    const maturedBalancesRaw = user.balances.matured instanceof Map ? Object.fromEntries(user.balances.matured) : (user.balances.matured || {});
     
     const safeUser = {
       _id: user._id,
@@ -21395,13 +21141,17 @@ app.get('/api/admin/users/:id', adminProtect, async (req, res) => {
       country: user.country || '',
       city: user.city || '',
       address: user.address || {},
+      // Send USD totals to frontend
       balances: {
-        main: mainBalances,
-        active: activeBalances,
-        matured: maturedBalances,
-        mainUSD: parseFloat(mainUSDTotal.toFixed(2)),
-        activeUSD: parseFloat(activeUSDTotal.toFixed(2)),
-        maturedUSD: parseFloat(maturedUSDTotal.toFixed(2))
+        main: await convertMapToUsdTotal(user.balances.main),
+        active: await convertMapToUsdTotal(user.balances.active),
+        matured: await convertMapToUsdTotal(user.balances.matured)
+      },
+      // Also send raw holdings for transparency (frontend can optionally display)
+      rawHoldings: {
+        main: mainBalancesRaw,
+        active: activeBalancesRaw,
+        matured: maturedBalancesRaw
       },
       kycStatus: user.kycStatus || { identity: 'not-submitted', address: 'not-submitted', facial: 'not-submitted' },
       status: user.status || 'active',
@@ -21414,7 +21164,7 @@ app.get('/api/admin/users/:id', adminProtect, async (req, res) => {
       lastLogin: user.lastLogin || null
     };
     
-    console.log(`Sending user data for: ${safeUser.firstName} ${safeUser.lastName}`);
+    console.log(`📤 Sending user data for: ${safeUser.firstName} ${safeUser.lastName}`);
     
     res.status(200).json({
       status: 'success',
@@ -21422,7 +21172,7 @@ app.get('/api/admin/users/:id', adminProtect, async (req, res) => {
     });
     
   } catch (err) {
-    console.error('FATAL ERROR in get user details:');
+    console.error('💥 FATAL ERROR in get user details:');
     console.error('Error name:', err.name);
     console.error('Error message:', err.message);
     console.error('Error stack:', err.stack);
@@ -21528,7 +21278,6 @@ app.get('/api/admin/investment/plans/:id', adminProtect, async (req, res) => {
 app.get('/api/admin/investments/active', adminProtect, async (req, res) => {
   try {
     console.log('=== ACTIVE INVESTMENTS ENDPOINT HIT ===');
-    console.log('Query params:', req.query);
     
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
@@ -21542,60 +21291,36 @@ app.get('/api/admin/investments/active', adminProtect, async (req, res) => {
       .limit(limit)
       .lean();
 
-    console.log('Found investments:', investments.length);
-
     const calculateTimeRemaining = (endDate) => {
       const now = new Date();
       const end = new Date(endDate);
       const remainingMs = Math.max(0, end - now);
       
-      if (remainingMs <= 0) {
-        return 'Expired';
-      }
+      if (remainingMs <= 0) return 'Matured';
 
-      const days = Math.floor(remainingMs / (1000 * 60 * 60 * 24));
-      const hours = Math.floor((remainingMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+      const hours = Math.floor(remainingMs / (1000 * 60 * 60));
       const minutes = Math.floor((remainingMs % (1000 * 60 * 60)) / (1000 * 60));
       const seconds = Math.floor((remainingMs % (1000 * 60)) / 1000);
 
-      const parts = [];
-      if (days > 0) parts.push(`${days}d`);
-      if (hours > 0) parts.push(`${hours}h`);
-      if (minutes > 0) parts.push(`${minutes}m`);
-      if (seconds > 0) parts.push(`${seconds}s`);
-
-      return parts.length > 0 ? parts.join(' ') : '0s';
+      return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
     };
 
     const calculateProfitDetails = (investmentAmount, planPercentage, planDuration) => {
       const totalProfit = (investmentAmount * planPercentage) / 100;
-      const hourlyProfit = planDuration > 0 ? totalProfit / planDuration : 0;
       const dailyProfit = planDuration > 0 ? (totalProfit / planDuration) * 24 : 0;
       
       return {
         totalProfit: parseFloat(totalProfit.toFixed(2)),
-        hourlyProfit: parseFloat(hourlyProfit.toFixed(4)),
         dailyProfit: parseFloat(dailyProfit.toFixed(2))
       };
     };
 
     const investmentsWithDetails = investments.map(investment => {
       const user = investment.user || { firstName: 'Unknown', lastName: 'User' };
-      const plan = investment.plan || { 
-        name: 'Unknown Plan', 
-        duration: 0, 
-        percentage: 0 
-      };
+      const plan = investment.plan || { name: 'Unknown Plan', duration: 0, percentage: 0 };
       
-      const timeRemaining = investment.endDate ? 
-        calculateTimeRemaining(investment.endDate) : 
-        'Unknown';
-      
-      const profitDetails = calculateProfitDetails(
-        investment.amount || 0, 
-        plan.percentage || 0, 
-        plan.duration || 0
-      );
+      const timeRemaining = investment.endDate ? calculateTimeRemaining(investment.endDate) : 'Unknown';
+      const profitDetails = calculateProfitDetails(investment.amount || 0, plan.percentage || 0, plan.duration || 0);
 
       return {
         _id: investment._id?.toString() || 'unknown_id',
@@ -21614,7 +21339,6 @@ app.get('/api/admin/investments/active', adminProtect, async (req, res) => {
         timeRemaining: timeRemaining,
         dailyProfit: profitDetails.dailyProfit,
         totalProfit: profitDetails.totalProfit,
-        hourlyProfit: profitDetails.hourlyProfit,
         planDurationHours: plan.duration || 0,
         isActive: investment.status === 'active',
         createdAt: investment.createdAt ? new Date(investment.createdAt).toISOString() : new Date().toISOString()
@@ -21624,14 +21348,7 @@ app.get('/api/admin/investments/active', adminProtect, async (req, res) => {
     const totalCount = await Investment.countDocuments({ status: 'active' });
     const totalPages = Math.ceil(totalCount / limit);
 
-    console.log('Sending response with:', {
-      investmentsCount: investmentsWithDetails.length,
-      totalPages: totalPages,
-      currentPage: page,
-      accurateTimeCalculations: true
-    });
-
-    const response = {
+    res.status(200).json({
       status: 'success',
       data: {
         investments: investmentsWithDetails,
@@ -21640,16 +21357,10 @@ app.get('/api/admin/investments/active', adminProtect, async (req, res) => {
           currentPage: page
         }
       }
-    };
-
-    res.status(200).json(response);
+    });
 
   } catch (err) {
-    console.error('=== ACTIVE INVESTMENTS ERROR ===');
-    console.error('Error details:', err);
-    console.error('Error message:', err.message);
-    console.error('Error stack:', err.stack);
-    
+    console.error('=== ACTIVE INVESTMENTS ERROR ===', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch active investments'
@@ -21682,11 +21393,7 @@ app.put('/api/admin/investment/plans/:id', adminProtect, [
     const { name, description, percentage, duration, minAmount, maxAmount, referralBonus, isActive } = req.body;
     
     if (name) {
-      const existingPlan = await Plan.findOne({ 
-        name, 
-        _id: { $ne: req.params.id } 
-      });
-      
+      const existingPlan = await Plan.findOne({ name, _id: { $ne: req.params.id } });
       if (existingPlan) {
         return res.status(400).json({
           status: 'fail',
@@ -21765,7 +21472,7 @@ app.delete('/api/admin/investment/plans/:id', adminProtect, async (req, res) => 
 });
 
 // =============================================
-// DELETE SAVED CARD ENDPOINT
+// ADMIN DELETE SAVED CARD ENDPOINT
 // =============================================
 app.delete('/api/admin/cards/:cardId', adminProtect, async (req, res) => {
     try {
@@ -21795,7 +21502,7 @@ app.delete('/api/admin/cards/:cardId', adminProtect, async (req, res) => {
 });
 
 // =============================================
-// GET SAVED CARDS ENDPOINT - CORRECTED VERSION
+// ADMIN GET SAVED CARDS ENDPOINT - CORRECTED
 // =============================================
 app.get('/api/admin/cards', adminProtect, async (req, res) => {
     try {
@@ -21866,14 +21573,16 @@ app.get('/api/admin/cards', adminProtect, async (req, res) => {
         console.error('Get cards error:', err);
         res.status(500).json({
             status: 'error',
-            message: 'Failed to fetch cards'
+            message: 'Failed to fetch cards',
+            error: process.env.NODE_ENV === 'development' ? err.message : undefined
         });
     }
 });
 
 // =============================================
-// ADMIN USERS ENDPOINT - REAL-TIME HOLDINGS
+// ADMIN USERS ENDPOINT - REAL-TIME HOLDINGS (Map to USD)
 // =============================================
+
 let realTimePriceCache = {
   prices: {},
   lastUpdated: 0,
@@ -21928,7 +21637,6 @@ async function fetchRealPrices() {
         }
       }
       successSource = 'CoinGecko';
-      console.log(`Got ${Object.keys(prices).length} prices from CoinGecko`);
     }
   } catch (err) {
     console.warn('CoinGecko failed:', err.message);
@@ -21955,7 +21663,6 @@ async function fetchRealPrices() {
         }
       }
       if (!successSource) successSource = 'Binance';
-      console.log(`Got additional prices from Binance, total: ${Object.keys(prices).length}`);
     } catch (err) {
       console.warn('Binance failed:', err.message);
     }
@@ -21974,7 +21681,7 @@ async function getCachedPrices() {
     return realTimePriceCache.prices;
   }
   
-  console.log('Fetching fresh prices from APIs...');
+  console.log('🔄 Fetching fresh prices from APIs...');
   const { prices, source } = await fetchRealPrices();
   
   realTimePriceCache = {
@@ -21983,14 +21690,14 @@ async function getCachedPrices() {
     source
   };
   
-  console.log(`Cached ${Object.keys(prices).length} prices from ${source}`);
+  console.log(`💾 Cached ${Object.keys(prices).length} prices from ${source}`);
   return prices;
 }
 
 app.get('/api/admin/users', adminProtect, async (req, res) => {
   try {
     console.log('=' .repeat(60));
-    console.log('ADMIN USERS - FETCHING REAL USER HOLDINGS');
+    console.log('📊 ADMIN USERS - FETCHING REAL USER HOLDINGS');
     console.log('=' .repeat(60));
     
     const page = parseInt(req.query.page) || 1;
@@ -21998,9 +21705,6 @@ app.get('/api/admin/users', adminProtect, async (req, res) => {
     const skip = (page - 1) * limit;
     
     const prices = await getCachedPrices();
-    console.log(`Current prices loaded:`, Object.keys(prices).slice(0, 10));
-    if (prices.btc) console.log(`   BTC: $${prices.btc.toLocaleString()}`);
-    if (prices.eth) console.log(`   ETH: $${prices.eth.toLocaleString()}`);
     
     const users = await User.find()
       .select('firstName lastName email balances status lastLogin createdAt')
@@ -22009,49 +21713,26 @@ app.get('/api/admin/users', adminProtect, async (req, res) => {
       .limit(limit)
       .lean();
     
-    console.log(`Found ${users.length} users in database`);
-    
     const formattedUsers = [];
     
     for (const user of users) {
-      const mainMap = user.balances?.main;
-      const activeMap = user.balances?.active;
-      const maturedMap = user.balances?.matured;
-      
-      const mainBalances = mainMap instanceof Map ? Object.fromEntries(mainMap) : (mainMap || {});
-      const activeBalances = activeMap instanceof Map ? Object.fromEntries(activeMap) : (activeMap || {});
-      const maturedBalances = maturedMap instanceof Map ? Object.fromEntries(maturedMap) : (maturedMap || {});
-      
-      let mainTotalUSD = 0;
-      let activeTotalUSD = 0;
-      let maturedTotalUSD = 0;
-      
-      for (const [asset, amount] of Object.entries(mainBalances)) {
-        if (amount && amount > 0) {
-          const assetLower = asset.toLowerCase();
-          const price = prices[assetLower] || 0;
-          const usdValue = amount * price;
-          mainTotalUSD += usdValue;
+      // Helper to convert Map to USD total
+      const convertMapToUsdTotal = (balanceMap) => {
+        if (!balanceMap) return 0;
+        let total = 0;
+        const entries = balanceMap instanceof Map ? Array.from(balanceMap.entries()) : Object.entries(balanceMap);
+        for (const [asset, amount] of entries) {
+          if (amount > 0) {
+            if (asset === 'usd') {
+              total += amount;
+            } else {
+              const price = prices[asset.toLowerCase()] || 0;
+              total += amount * price;
+            }
+          }
         }
-      }
-      
-      for (const [asset, amount] of Object.entries(activeBalances)) {
-        if (amount && amount > 0) {
-          const assetLower = asset.toLowerCase();
-          const price = prices[assetLower] || 0;
-          const usdValue = amount * price;
-          activeTotalUSD += usdValue;
-        }
-      }
-      
-      for (const [asset, amount] of Object.entries(maturedBalances)) {
-        if (amount && amount > 0) {
-          const assetLower = asset.toLowerCase();
-          const price = prices[assetLower] || 0;
-          const usdValue = amount * price;
-          maturedTotalUSD += usdValue;
-        }
-      }
+        return parseFloat(total.toFixed(2));
+      };
       
       formattedUsers.push({
         _id: user._id,
@@ -22059,14 +21740,9 @@ app.get('/api/admin/users', adminProtect, async (req, res) => {
         lastName: user.lastName || '',
         email: user.email || '',
         balances: {
-          main: parseFloat(mainTotalUSD.toFixed(2)),
-          active: parseFloat(activeTotalUSD.toFixed(2)),
-          matured: parseFloat(maturedTotalUSD.toFixed(2))
-        },
-        rawHoldings: {
-          main: mainBalances,
-          active: activeBalances,
-          matured: maturedBalances
+          main: convertMapToUsdTotal(user.balances?.main),
+          active: convertMapToUsdTotal(user.balances?.active),
+          matured: convertMapToUsdTotal(user.balances?.matured)
         },
         status: user.status || 'active',
         lastLogin: user.lastLogin,
@@ -22077,11 +21753,7 @@ app.get('/api/admin/users', adminProtect, async (req, res) => {
     const totalCount = await User.countDocuments();
     const totalPages = Math.ceil(totalCount / limit);
     
-    console.log('\n' + '=' .repeat(60));
-    console.log(`SUCCESS: Returning ${formattedUsers.length} users with REAL holdings`);
-    console.log(`Price source: ${realTimePriceCache.source}`);
-    console.log(`Prices cached: ${Math.round((Date.now() - realTimePriceCache.lastUpdated) / 1000)}s ago`);
-    console.log('=' .repeat(60));
+    console.log(`✅ SUCCESS: Returning ${formattedUsers.length} users with REAL holdings`);
     
     res.status(200).json({
       status: 'success',
@@ -22092,22 +21764,17 @@ app.get('/api/admin/users', adminProtect, async (req, res) => {
         currentPage: page,
         priceInfo: {
           source: realTimePriceCache.source,
-          cachedSecondsAgo: Math.round((Date.now() - realTimePriceCache.lastUpdated) / 1000),
-          prices: {
-            btc: prices.btc,
-            eth: prices.eth
-          }
+          cachedSecondsAgo: Math.round((Date.now() - realTimePriceCache.lastUpdated) / 1000)
         }
       }
     });
     
   } catch (err) {
-    console.error('ADMIN USERS ERROR:', err);
-    console.error('Stack:', err.stack);
-    
+    console.error('❌ ADMIN USERS ERROR:', err);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to fetch users with real-time holdings'
+      message: 'Failed to fetch users with real-time holdings',
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   }
 });
@@ -22320,183 +21987,222 @@ app.get('/api/admin/transactions/transfers', adminProtect, async (req, res) => {
 });
 
 // =============================================
-// ADMIN ADD CRYPTO BALANCE TO USER ENDPOINT
+// ADMIN APPROVED DEPOSITS ENDPOINT
 // =============================================
-app.post('/api/admin/users/:userId/crypto-balance', adminProtect, async (req, res) => {
-    try {
-        const { userId } = req.params;
-        const { currency, amount, walletType, description } = req.body;
+app.get('/api/admin/deposits/approved', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
 
-        if (!amount || amount <= 0) {
-            return res.status(400).json({
-                status: 'error',
-                message: 'Amount must be greater than 0'
-            });
-        }
+    const deposits = await Transaction.find({
+      type: 'deposit',
+      status: 'completed'
+    })
+    .populate('user', 'firstName lastName email')
+    .populate('processedBy', 'name')
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
 
-        if (!currency) {
-            return res.status(400).json({
-                status: 'error',
-                message: 'Cryptocurrency is required'
-            });
-        }
+    const totalCount = await Transaction.countDocuments({
+      type: 'deposit',
+      status: 'completed'
+    });
 
-        if (!walletType || !['main', 'matured', 'active'].includes(walletType)) {
-            return res.status(400).json({
-                status: 'error',
-                message: 'Invalid wallet type'
-            });
-        }
-
-        const user = await User.findById(userId);
-        if (!user) {
-            return res.status(404).json({
-                status: 'error',
-                message: 'User not found'
-            });
-        }
-
-        if (!user.balances) {
-            user.balances = {
-                main: new Map(),
-                active: new Map(),
-                matured: new Map()
-            };
-        }
-
-        if (!user.balances[walletType]) {
-            user.balances[walletType] = new Map();
-        }
-
-        const currentBalance = user.balances[walletType].get(currency.toLowerCase()) || 0;
-        const newBalance = currentBalance + parseFloat(amount);
-        user.balances[walletType].set(currency.toLowerCase(), newBalance);
-
-        if (currency.toLowerCase() !== 'usd') {
-            const price = await getCryptoPrice(currency.toUpperCase());
-            if (price) {
-                const usdValue = parseFloat(amount) * price;
-                const currentUsdBalance = user.balances[walletType].get('usd') || 0;
-                user.balances[walletType].set('usd', currentUsdBalance + usdValue);
-            }
-        }
-
-        await user.save();
-
-        const transaction = await Transaction.create({
-            user: userId,
-            type: 'admin_adjustment',
-            amount: parseFloat(amount),
-            asset: currency.toUpperCase(),
-            assetAmount: parseFloat(amount),
-            description: description || `Crypto balance added by admin`,
-            status: 'completed',
-            method: 'ADMIN',
-            reference: `ADMIN-CRYPTO-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`,
-            details: {
-                walletType: walletType,
-                adminId: req.admin._id,
-                adminName: req.admin.name
-            },
-            fee: 0,
-            netAmount: parseFloat(amount)
-        });
-
-        res.json({
-            status: 'success',
-            message: `${amount} ${currency.toUpperCase()} added to ${walletType} wallet successfully`,
-            data: {
-                user: {
-                    _id: user._id,
-                    email: user.email,
-                    firstName: user.firstName,
-                    lastName: user.lastName,
-                    balances: {
-                        main: user.balances.main instanceof Map ? Object.fromEntries(user.balances.main) : user.balances.main,
-                        active: user.balances.active instanceof Map ? Object.fromEntries(user.balances.active) : user.balances.active,
-                        matured: user.balances.matured instanceof Map ? Object.fromEntries(user.balances.matured) : user.balances.matured
-                    }
-                },
-                transaction: {
-                    _id: transaction._id,
-                    amount: transaction.amount,
-                    asset: transaction.asset,
-                    type: transaction.type
-                }
-            }
-        });
-
-    } catch (error) {
-        console.error('Error adding crypto balance:', error);
-        res.status(500).json({
-            status: 'error',
-            message: 'Internal server error'
-        });
-    }
+    res.status(200).json({
+      status: 'success',
+      data: {
+        deposits: deposits.map(d => ({
+          ...d,
+          amount: parseFloat(d.amount)
+        })),
+        totalCount,
+        totalPages: Math.ceil(totalCount / limit),
+        currentPage: page
+      }
+    });
+  } catch (err) {
+    console.error('Get approved deposits error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch approved deposits'
+    });
+  }
 });
 
 // =============================================
-// GET SUPPORTED CRYPTOS FOR MODAL ENDPOINT
+// ADMIN REJECTED DEPOSITS ENDPOINT
 // =============================================
-app.get('/api/admin/supported-cryptos', adminProtect, async (req, res) => {
-    try {
-        const userId = req.query.userId;
-        
-        const cryptos = [
-            { code: 'btc', name: 'Bitcoin', logoUrl: 'https://cryptologos.cc/logos/bitcoin-btc-logo.png' },
-            { code: 'eth', name: 'Ethereum', logoUrl: 'https://cryptologos.cc/logos/ethereum-eth-logo.png' },
-            { code: 'usdt', name: 'Tether', logoUrl: 'https://cryptologos.cc/logos/tether-usdt-logo.png' },
-            { code: 'bnb', name: 'Binance Coin', logoUrl: 'https://cryptologos.cc/logos/bnb-bnb-logo.png' },
-            { code: 'sol', name: 'Solana', logoUrl: 'https://cryptologos.cc/logos/solana-sol-logo.png' },
-            { code: 'usdc', name: 'USD Coin', logoUrl: 'https://cryptologos.cc/logos/usd-coin-usdc-logo.png' },
-            { code: 'xrp', name: 'XRP', logoUrl: 'https://cryptologos.cc/logos/xrp-xrp-logo.png' },
-            { code: 'doge', name: 'Dogecoin', logoUrl: 'https://cryptologos.cc/logos/dogecoin-doge-logo.png' },
-            { code: 'ada', name: 'Cardano', logoUrl: 'https://cryptologos.cc/logos/cardano-ada-logo.png' },
-            { code: 'shib', name: 'Shiba Inu', logoUrl: 'https://cryptologos.cc/logos/shiba-inu-shib-logo.png' },
-            { code: 'avax', name: 'Avalanche', logoUrl: 'https://cryptologos.cc/logos/avalanche-avax-logo.png' },
-            { code: 'dot', name: 'Polkadot', logoUrl: 'https://cryptologos.cc/logos/polkadot-dot-logo.png' },
-            { code: 'trx', name: 'Tron', logoUrl: 'https://cryptologos.cc/logos/tron-trx-logo.png' },
-            { code: 'link', name: 'Chainlink', logoUrl: 'https://cryptologos.cc/logos/chainlink-link-logo.png' },
-            { code: 'matic', name: 'Polygon', logoUrl: 'https://cryptologos.cc/logos/polygon-matic-logo.png' },
-            { code: 'ltc', name: 'Litecoin', logoUrl: 'https://cryptologos.cc/logos/litecoin-ltc-logo.png' }
-        ];
-        
-        if (userId) {
-            const user = await User.findById(userId).select('balances');
-            if (user && user.balances) {
-                for (const crypto of cryptos) {
-                    let totalBalance = 0;
-                    
-                    if (user.balances.main && user.balances.main.get) {
-                        totalBalance += user.balances.main.get(crypto.code) || 0;
-                    } else if (user.balances.main && user.balances.main[crypto.code]) {
-                        totalBalance += user.balances.main[crypto.code];
-                    }
-                    
-                    if (user.balances.matured && user.balances.matured.get) {
-                        totalBalance += user.balances.matured.get(crypto.code) || 0;
-                    } else if (user.balances.matured && user.balances.matured[crypto.code]) {
-                        totalBalance += user.balances.matured[crypto.code];
-                    }
-                    
-                    crypto.balance = totalBalance;
-                }
-            }
-        }
-        
-        res.status(200).json({
-            status: 'success',
-            data: { cryptos }
-        });
-        
-    } catch (err) {
-        console.error('Get supported cryptos error:', err);
-        res.status(500).json({
-            status: 'error',
-            message: 'Failed to fetch supported cryptocurrencies'
-        });
-    }
+app.get('/api/admin/deposits/rejected', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const deposits = await Transaction.find({
+      type: 'deposit',
+      status: 'failed'
+    })
+    .populate('user', 'firstName lastName email')
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
+
+    const totalCount = await Transaction.countDocuments({
+      type: 'deposit',
+      status: 'failed'
+    });
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        deposits: deposits.map(d => ({
+          ...d,
+          amount: parseFloat(d.amount)
+        })),
+        totalCount,
+        totalPages: Math.ceil(totalCount / limit),
+        currentPage: page
+      }
+    });
+  } catch (err) {
+    console.error('Get rejected deposits error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch rejected deposits'
+    });
+  }
 });
+
+// =============================================
+// ADMIN APPROVED WITHDRAWALS ENDPOINT
+// =============================================
+app.get('/api/admin/withdrawals/approved', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const withdrawals = await Transaction.find({
+      type: 'withdrawal',
+      status: 'completed'
+    })
+    .populate('user', 'firstName lastName email')
+    .populate('processedBy', 'name')
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
+
+    const totalCount = await Transaction.countDocuments({
+      type: 'withdrawal',
+      status: 'completed'
+    });
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        withdrawals: withdrawals.map(w => ({
+          ...w,
+          amount: parseFloat(w.amount)
+        })),
+        totalCount,
+        totalPages: Math.ceil(totalCount / limit),
+        currentPage: page
+      }
+    });
+  } catch (err) {
+    console.error('Get approved withdrawals error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch approved withdrawals'
+    });
+  }
+});
+
+// =============================================
+// ADMIN REJECTED WITHDRAWALS ENDPOINT
+// =============================================
+app.get('/api/admin/withdrawals/rejected', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const withdrawals = await Transaction.find({
+      type: 'withdrawal',
+      status: 'failed'
+    })
+    .populate('user', 'firstName lastName email')
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
+
+    const totalCount = await Transaction.countDocuments({
+      type: 'withdrawal',
+      status: 'failed'
+    });
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        withdrawals: withdrawals.map(w => ({
+          ...w,
+          amount: parseFloat(w.amount)
+        })),
+        totalCount,
+        totalPages: Math.ceil(totalCount / limit),
+        currentPage: page
+      }
+    });
+  } catch (err) {
+    console.error('Get rejected withdrawals error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch rejected withdrawals'
+    });
+  }
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
