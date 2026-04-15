@@ -9443,13 +9443,6 @@ app.get('/api/fiat-currencies', async (req, res) => {
 
 
 
-
-
-
-
-
-
-
 // =============================================
 // CONVERT ASSETS ENDPOINT - Get available target cryptos for conversion
 // =============================================
@@ -9483,10 +9476,17 @@ app.get('/api/convert/assets', protect, async (req, res) => {
 // =============================================
 app.post('/api/convert', protect, async (req, res) => {
   try {
+    console.log('=== CONVERSION REQUEST RECEIVED ===');
+    console.log('Request body:', req.body);
+    
     const { fromAsset, toAsset, amount } = req.body;
     const userId = req.user._id;
     
+    console.log(`User ID: ${userId}`);
+    console.log(`From Asset: ${fromAsset}, To Asset: ${toAsset}, Amount: ${amount}`);
+    
     if (!fromAsset || !toAsset || !amount || amount <= 0) {
+      console.log('Validation failed: missing parameters');
       return res.status(400).json({ status: 'fail', message: 'Invalid conversion parameters' });
     }
     
@@ -9503,6 +9503,8 @@ app.post('/api/convert', protect, async (req, res) => {
       return res.status(404).json({ status: 'fail', message: 'User not found' });
     }
     
+    console.log('User balances structure:', JSON.stringify(user.balances, null, 2));
+    
     // Initialize balances object if not exists
     if (!user.balances) {
       user.balances = {
@@ -9515,12 +9517,16 @@ app.post('/api/convert', protect, async (req, res) => {
     if (!user.balances.main) user.balances.main = {};
     if (!user.balances.matured) user.balances.matured = {};
     
-    // Check balance in main wallet (NOT in UserAssetBalance)
+    // Check balance in main and matured wallets
     const mainBalance = user.balances.main[fromAssetLower] || 0;
     const maturedBalance = user.balances.matured[fromAssetLower] || 0;
     const totalBalance = mainBalance + maturedBalance;
     
-    console.log(`Balance check for ${fromAssetLower}: Main: ${mainBalance}, Matured: ${maturedBalance}, Total: ${totalBalance}, Requested: ${amount}`);
+    console.log(`Balance check for ${fromAssetLower}:`);
+    console.log(`  Main balance: ${mainBalance}`);
+    console.log(`  Matured balance: ${maturedBalance}`);
+    console.log(`  Total balance: ${totalBalance}`);
+    console.log(`  Requested amount: ${amount}`);
     
     if (amount > totalBalance) {
       return res.status(400).json({ 
@@ -9533,6 +9539,8 @@ app.post('/api/convert', protect, async (req, res) => {
     const fromPrice = await getRealCryptoPrice(fromAsset);
     const toPrice = await getRealCryptoPrice(toAsset);
     
+    console.log(`Prices - ${fromAsset}: $${fromPrice}, ${toAsset}: $${toPrice}`);
+    
     if (!fromPrice || !toPrice) {
       return res.status(503).json({ status: 'fail', message: 'Unable to fetch current prices. Please try again.' });
     }
@@ -9544,7 +9552,13 @@ app.post('/api/convert', protect, async (req, res) => {
     const usdValueAfterFee = usdValue - feeAmount;
     const toAmount = usdValueAfterFee / toPrice;
     
-    // Determine which wallet to deduct from based on available balance
+    console.log(`Conversion calculation:`);
+    console.log(`  USD Value: $${usdValue}`);
+    console.log(`  Fee (0.5%): $${feeAmount}`);
+    console.log(`  After fee: $${usdValueAfterFee}`);
+    console.log(`  You will receive: ${toAmount} ${toAsset.toUpperCase()}`);
+    
+    // Determine which wallet to deduct from
     let amountRemaining = amount;
     let amountFromMain = 0;
     let amountFromMatured = 0;
@@ -9557,6 +9571,10 @@ app.post('/api/convert', protect, async (req, res) => {
       amountRemaining -= mainBalance;
       amountFromMatured = amountRemaining;
     }
+    
+    console.log(`Deduction breakdown:`);
+    console.log(`  From main wallet: ${amountFromMain}`);
+    console.log(`  From matured wallet: ${amountFromMatured}`);
     
     // Perform deduction from wallets
     if (amountFromMain > 0) {
@@ -9573,7 +9591,7 @@ app.post('/api/convert', protect, async (req, res) => {
       }
     }
     
-    // Add the converted amount to the SAME wallet type proportionally
+    // Add converted amount to same wallet types
     if (amountFromMain > 0) {
       const proportionFromMain = amountFromMain / amount;
       const toAmountForMain = toAmount * proportionFromMain;
@@ -9581,6 +9599,7 @@ app.post('/api/convert', protect, async (req, res) => {
         user.balances.main[toAssetLower] = 0;
       }
       user.balances.main[toAssetLower] += toAmountForMain;
+      console.log(`Added ${toAmountForMain} ${toAsset} to main wallet`);
     }
     
     if (amountFromMatured > 0) {
@@ -9590,12 +9609,12 @@ app.post('/api/convert', protect, async (req, res) => {
         user.balances.matured[toAssetLower] = 0;
       }
       user.balances.matured[toAssetLower] += toAmountForMatured;
+      console.log(`Added ${toAmountForMatured} ${toAsset} to matured wallet`);
     }
     
     // Calculate total main balance in USD
     let totalMainBalanceUSD = 0;
     
-    // Calculate from main wallet assets
     for (const [asset, balance] of Object.entries(user.balances.main)) {
       if (balance > 0 && asset !== 'active' && asset !== 'totalUSD') {
         const assetPrice = await getRealCryptoPrice(asset);
@@ -9605,7 +9624,6 @@ app.post('/api/convert', protect, async (req, res) => {
       }
     }
     
-    // Calculate from matured wallet assets
     for (const [asset, balance] of Object.entries(user.balances.matured)) {
       if (balance > 0 && asset !== 'active' && asset !== 'totalUSD') {
         const assetPrice = await getRealCryptoPrice(asset);
@@ -9619,6 +9637,7 @@ app.post('/api/convert', protect, async (req, res) => {
     
     // Save changes to database
     await user.save();
+    console.log('User balances updated and saved successfully');
     
     // Record platform revenue for the fee
     await PlatformRevenue.create({
@@ -9646,16 +9665,16 @@ app.post('/api/convert', protect, async (req, res) => {
     // Create transaction records
     await Transaction.create({
       user: userId,
-      type: 'conversion',
-      amount: -usdValue,
+      type: 'sell',
+      amount: usdValue,
       asset: fromAsset.toUpperCase(),
       assetAmount: amount,
       currency: 'USD',
       status: 'completed',
-      method: 'CONVERSION',
-      reference: reference,
+      method: fromAsset.toUpperCase(),
+      reference: `${reference}-SELL`,
       fee: feeAmount,
-      netAmount: -usdValueAfterFee,
+      netAmount: usdValueAfterFee,
       details: {
         conversion: true,
         fromAsset: fromAssetLower,
@@ -9666,19 +9685,28 @@ app.post('/api/convert', protect, async (req, res) => {
         feePercentage: CONVERSION_FEE_PERCENT,
         fromPrice: fromPrice,
         toPrice: toPrice
+      },
+      sellDetails: {
+        asset: fromAsset.toUpperCase(),
+        amountUSD: usdValue,
+        assetAmount: amount,
+        sellingPrice: fromPrice,
+        buyingPrice: fromPrice,
+        profitLoss: 0,
+        profitLossPercentage: 0
       }
     });
     
     await Transaction.create({
       user: userId,
-      type: 'conversion_received',
+      type: 'buy',
       amount: usdValueAfterFee,
       asset: toAsset.toUpperCase(),
       assetAmount: toAmount,
       currency: 'USD',
       status: 'completed',
-      method: 'CONVERSION',
-      reference: `${reference}-RECEIVED`,
+      method: toAsset.toUpperCase(),
+      reference: `${reference}-BUY`,
       fee: 0,
       netAmount: usdValueAfterFee,
       details: {
@@ -9690,8 +9718,19 @@ app.post('/api/convert', protect, async (req, res) => {
         feePercentage: CONVERSION_FEE_PERCENT,
         fromPrice: fromPrice,
         toPrice: toPrice
+      },
+      buyDetails: {
+        asset: toAsset.toUpperCase(),
+        amountUSD: usdValueAfterFee,
+        assetAmount: toAmount,
+        buyingPrice: toPrice,
+        currentPrice: toPrice,
+        profitLoss: 0,
+        profitLossPercentage: 0
       }
     });
+    
+    console.log('Transactions created successfully');
     
     // Send real-time updates via socket
     const io = req.app.get('io');
@@ -9707,11 +9746,11 @@ app.post('/api/convert', protect, async (req, res) => {
           const totalBal = mainBal + maturedBal;
           if (totalBal > 0) {
             const currentPrice = await getRealCryptoPrice(asset);
-            const usdValue = totalBal * (currentPrice || 0);
+            const usdValueAsset = totalBal * (currentPrice || 0);
             assetBalances.push({
               symbol: asset,
               balance: totalBal,
-              usdValue: usdValue,
+              usdValue: usdValueAsset,
               id: asset === 'btc' ? 'bitcoin' : asset,
               avgPrice: 0,
               unrealizedPnl: 0,
@@ -9725,6 +9764,8 @@ app.post('/api/convert', protect, async (req, res) => {
       io.to(`user_${userId}`).emit('asset_balances_update', assetBalances);
       io.to(`user_${userId}`).emit('balance_update', { main: totalMainBalanceUSD });
     }
+    
+    console.log('=== CONVERSION COMPLETED SUCCESSFULLY ===');
     
     res.status(200).json({
       status: 'success',
@@ -9743,6 +9784,7 @@ app.post('/api/convert', protect, async (req, res) => {
     });
   } catch (err) {
     console.error('Conversion error:', err);
+    console.error('Error stack:', err.stack);
     res.status(500).json({ status: 'error', message: err.message || 'Conversion failed' });
   }
 });
@@ -9779,6 +9821,7 @@ async function getRealCryptoPrice(assetSymbol) {
     
     const coinId = coinIdMap[symbol];
     if (!coinId) {
+      console.log(`No CoinGecko ID found for ${symbol}, returning 0`);
       return 0;
     }
     
@@ -9799,9 +9842,24 @@ async function getRealCryptoPrice(assetSymbol) {
     return price;
   } catch (error) {
     console.error(`Error fetching real price for ${assetSymbol}:`, error);
-    throw new Error(`Unable to fetch current price for ${assetSymbol}. Please try again.`);
+    // Return a fallback price based on common assets
+    const fallbackPrices = {
+      'btc': 43000,
+      'eth': 2200,
+      'usdt': 1,
+      'bnb': 300,
+      'sol': 80,
+      'usdc': 1
+    };
+    return fallbackPrices[assetSymbol.toLowerCase()] || 0;
   }
 }
+
+
+
+
+
+
 
 
 
