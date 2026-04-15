@@ -9443,6 +9443,7 @@ app.get('/api/fiat-currencies', async (req, res) => {
 
 
 
+
 // =============================================
 // CONVERT ASSETS ENDPOINT - Get available target cryptos for conversion
 // =============================================
@@ -9472,7 +9473,7 @@ app.get('/api/convert/assets', protect, async (req, res) => {
 });
 
 // =============================================
-// CONVERT ENDPOINT - Execute crypto conversion using balances object
+// CONVERT ENDPOINT - Execute crypto conversion using Map balances
 // =============================================
 app.post('/api/convert', protect, async (req, res) => {
   try {
@@ -9497,29 +9498,28 @@ app.post('/api/convert', protect, async (req, res) => {
       return res.status(400).json({ status: 'fail', message: 'Cannot convert to the same asset' });
     }
     
-    // Get user with balances object
+    // Get user with balances object (which contains Maps)
     const user = await User.findById(userId);
     if (!user) {
       return res.status(404).json({ status: 'fail', message: 'User not found' });
     }
     
-    console.log('User balances structure:', JSON.stringify(user.balances, null, 2));
-    
-    // Initialize balances object if not exists
+    // Initialize balances Maps if they don't exist
     if (!user.balances) {
       user.balances = {
-        main: {},
-        matured: {},
-        active: 0
+        main: new Map(),
+        active: new Map(),
+        matured: new Map()
       };
     }
     
-    if (!user.balances.main) user.balances.main = {};
-    if (!user.balances.matured) user.balances.matured = {};
+    if (!user.balances.main) user.balances.main = new Map();
+    if (!user.balances.matured) user.balances.matured = new Map();
+    if (!user.balances.active) user.balances.active = new Map();
     
-    // Check balance in main and matured wallets
-    const mainBalance = user.balances.main[fromAssetLower] || 0;
-    const maturedBalance = user.balances.matured[fromAssetLower] || 0;
+    // Check balance in main and matured wallets using Map.get()
+    const mainBalance = user.balances.main.get(fromAssetLower) || 0;
+    const maturedBalance = user.balances.matured.get(fromAssetLower) || 0;
     const totalBalance = mainBalance + maturedBalance;
     
     console.log(`Balance check for ${fromAssetLower}:`);
@@ -9576,47 +9576,48 @@ app.post('/api/convert', protect, async (req, res) => {
     console.log(`  From main wallet: ${amountFromMain}`);
     console.log(`  From matured wallet: ${amountFromMatured}`);
     
-    // Perform deduction from wallets
+    // Perform deduction from wallets using Map.set()
     if (amountFromMain > 0) {
-      user.balances.main[fromAssetLower] = (user.balances.main[fromAssetLower] || 0) - amountFromMain;
-      if (user.balances.main[fromAssetLower] <= 0) {
-        delete user.balances.main[fromAssetLower];
+      const newMainBalance = (user.balances.main.get(fromAssetLower) || 0) - amountFromMain;
+      if (newMainBalance <= 0) {
+        user.balances.main.delete(fromAssetLower);
+      } else {
+        user.balances.main.set(fromAssetLower, newMainBalance);
       }
     }
     
     if (amountFromMatured > 0) {
-      user.balances.matured[fromAssetLower] = (user.balances.matured[fromAssetLower] || 0) - amountFromMatured;
-      if (user.balances.matured[fromAssetLower] <= 0) {
-        delete user.balances.matured[fromAssetLower];
+      const newMaturedBalance = (user.balances.matured.get(fromAssetLower) || 0) - amountFromMatured;
+      if (newMaturedBalance <= 0) {
+        user.balances.matured.delete(fromAssetLower);
+      } else {
+        user.balances.matured.set(fromAssetLower, newMaturedBalance);
       }
     }
     
-    // Add converted amount to same wallet types
+    // Add converted amount to SAME wallet types using Map.set()
     if (amountFromMain > 0) {
       const proportionFromMain = amountFromMain / amount;
       const toAmountForMain = toAmount * proportionFromMain;
-      if (!user.balances.main[toAssetLower]) {
-        user.balances.main[toAssetLower] = 0;
-      }
-      user.balances.main[toAssetLower] += toAmountForMain;
+      const currentToMainBalance = user.balances.main.get(toAssetLower) || 0;
+      user.balances.main.set(toAssetLower, currentToMainBalance + toAmountForMain);
       console.log(`Added ${toAmountForMain} ${toAsset} to main wallet`);
     }
     
     if (amountFromMatured > 0) {
       const proportionFromMatured = amountFromMatured / amount;
       const toAmountForMatured = toAmount * proportionFromMatured;
-      if (!user.balances.matured[toAssetLower]) {
-        user.balances.matured[toAssetLower] = 0;
-      }
-      user.balances.matured[toAssetLower] += toAmountForMatured;
+      const currentToMaturedBalance = user.balances.matured.get(toAssetLower) || 0;
+      user.balances.matured.set(toAssetLower, currentToMaturedBalance + toAmountForMatured);
       console.log(`Added ${toAmountForMatured} ${toAsset} to matured wallet`);
     }
     
-    // Calculate total main balance in USD
+    // Calculate total main balance in USD (sum of all assets in main wallet)
     let totalMainBalanceUSD = 0;
     
-    for (const [asset, balance] of Object.entries(user.balances.main)) {
-      if (balance > 0 && asset !== 'active' && asset !== 'totalUSD') {
+    // Iterate over main wallet Map
+    for (const [asset, balance] of user.balances.main) {
+      if (balance > 0) {
         const assetPrice = await getRealCryptoPrice(asset);
         if (assetPrice) {
           totalMainBalanceUSD += balance * assetPrice;
@@ -9624,20 +9625,23 @@ app.post('/api/convert', protect, async (req, res) => {
       }
     }
     
-    for (const [asset, balance] of Object.entries(user.balances.matured)) {
-      if (balance > 0 && asset !== 'active' && asset !== 'totalUSD') {
+    // Also include matured wallet assets in total
+    for (const [asset, balance] of user.balances.matured) {
+      if (balance > 0) {
         const assetPrice = await getRealCryptoPrice(asset);
         if (assetPrice) {
           totalMainBalanceUSD += balance * assetPrice;
         }
       }
     }
-    
-    user.balances.main.totalUSD = totalMainBalanceUSD;
     
     // Save changes to database
     await user.save();
     console.log('User balances updated and saved successfully');
+    console.log('Updated balances:', {
+      main: Array.from(user.balances.main.entries()),
+      matured: Array.from(user.balances.matured.entries())
+    });
     
     // Record platform revenue for the fee
     await PlatformRevenue.create({
@@ -9737,27 +9741,29 @@ app.post('/api/convert', protect, async (req, res) => {
     if (io) {
       // Prepare asset balances for the user
       const assetBalances = [];
-      const allAssets = new Set([...Object.keys(user.balances.main), ...Object.keys(user.balances.matured)]);
+      
+      // Combine all assets from main and matured Maps
+      const allAssets = new Set();
+      for (const asset of user.balances.main.keys()) allAssets.add(asset);
+      for (const asset of user.balances.matured.keys()) allAssets.add(asset);
       
       for (const asset of allAssets) {
-        if (asset !== 'active' && asset !== 'totalUSD') {
-          const mainBal = user.balances.main[asset] || 0;
-          const maturedBal = user.balances.matured[asset] || 0;
-          const totalBal = mainBal + maturedBal;
-          if (totalBal > 0) {
-            const currentPrice = await getRealCryptoPrice(asset);
-            const usdValueAsset = totalBal * (currentPrice || 0);
-            assetBalances.push({
-              symbol: asset,
-              balance: totalBal,
-              usdValue: usdValueAsset,
-              id: asset === 'btc' ? 'bitcoin' : asset,
-              avgPrice: 0,
-              unrealizedPnl: 0,
-              unrealizedPnlPercent: 0,
-              transactions: []
-            });
-          }
+        const mainBal = user.balances.main.get(asset) || 0;
+        const maturedBal = user.balances.matured.get(asset) || 0;
+        const totalBal = mainBal + maturedBal;
+        if (totalBal > 0) {
+          const currentPrice = await getRealCryptoPrice(asset);
+          const usdValueAsset = totalBal * (currentPrice || 0);
+          assetBalances.push({
+            symbol: asset,
+            balance: totalBal,
+            usdValue: usdValueAsset,
+            id: asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset,
+            avgPrice: 0,
+            unrealizedPnl: 0,
+            unrealizedPnlPercent: 0,
+            transactions: []
+          });
         }
       }
       
@@ -9821,8 +9827,17 @@ async function getRealCryptoPrice(assetSymbol) {
     
     const coinId = coinIdMap[symbol];
     if (!coinId) {
-      console.log(`No CoinGecko ID found for ${symbol}, returning 0`);
-      return 0;
+      console.log(`No CoinGecko ID found for ${symbol}, using fallback`);
+      // Fallback prices
+      const fallbackPrices = {
+        'btc': 43000,
+        'eth': 2200,
+        'usdt': 1,
+        'bnb': 300,
+        'sol': 80,
+        'usdc': 1
+      };
+      return fallbackPrices[symbol] || 0;
     }
     
     // Fetch real-time price from CoinGecko
@@ -9842,7 +9857,7 @@ async function getRealCryptoPrice(assetSymbol) {
     return price;
   } catch (error) {
     console.error(`Error fetching real price for ${assetSymbol}:`, error);
-    // Return a fallback price based on common assets
+    // Return fallback price
     const fallbackPrices = {
       'btc': 43000,
       'eth': 2200,
@@ -9854,9 +9869,6 @@ async function getRealCryptoPrice(assetSymbol) {
     return fallbackPrices[assetSymbol.toLowerCase()] || 0;
   }
 }
-
-
-
 
 
 
