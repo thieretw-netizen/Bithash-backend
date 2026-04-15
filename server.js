@@ -21587,11 +21587,12 @@ app.get('/api/admin/users/:id', adminProtect, async (req, res) => {
   }
 });
 
-// Admin Update User Endpoint
+// Admin Update User Endpoint - FIXED for USD number values from frontend
 app.put('/api/admin/users/:id', adminProtect, [
   body('firstName').optional().trim().notEmpty().withMessage('First name cannot be empty'),
   body('lastName').optional().trim().notEmpty().withMessage('Last name cannot be empty'),
-  body('email').optional().isEmail().withMessage('Please provide a valid email')
+  body('email').optional().isEmail().withMessage('Please provide a valid email'),
+  body('status').optional().isIn(['active', 'suspended', 'banned']).withMessage('Invalid status')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -21602,16 +21603,34 @@ app.put('/api/admin/users/:id', adminProtect, [
       });
     }
     
+    const { id } = req.params;
     const { firstName, lastName, email, status, balances } = req.body;
     
+    // Validate ObjectId
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid user ID format'
+      });
+    }
+    
+    // Get existing user
+    const existingUser = await User.findById(id);
+    if (!existingUser) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+    
     // Check if email is already taken by another user
-    if (email) {
-      const existingUser = await User.findOne({ 
+    if (email && email !== existingUser.email) {
+      const emailTaken = await User.findOne({ 
         email, 
-        _id: { $ne: req.params.id } 
+        _id: { $ne: id } 
       });
       
-      if (existingUser) {
+      if (emailTaken) {
         return res.status(400).json({
           status: 'fail',
           message: 'Email is already taken by another user'
@@ -21626,36 +21645,74 @@ app.put('/api/admin/users/:id', adminProtect, [
     if (email) updateData.email = email;
     if (status) updateData.status = status;
     
-    // Handle balances update - convert object to Map if provided
+    // Handle balances update - frontend sends USD numbers
+    // We need to store these as USD in the existing Maps
     if (balances) {
-      updateData.balances = {};
-      if (balances.main) updateData.balances.main = new Map(Object.entries(balances.main));
-      if (balances.active) updateData.balances.active = new Map(Object.entries(balances.active));
-      if (balances.matured) updateData.balances.matured = new Map(Object.entries(balances.matured));
+      // Initialize balances if they don't exist
+      if (!existingUser.balances) {
+        existingUser.balances = {
+          main: new Map(),
+          active: new Map(),
+          matured: new Map()
+        };
+      }
+      
+      // Ensure each wallet is a Map
+      if (!(existingUser.balances.main instanceof Map)) existingUser.balances.main = new Map();
+      if (!(existingUser.balances.active instanceof Map)) existingUser.balances.active = new Map();
+      if (!(existingUser.balances.matured instanceof Map)) existingUser.balances.matured = new Map();
+      
+      // Update USD balances (frontend sends USD numbers)
+      if (balances.main !== undefined) {
+        existingUser.balances.main.set('usd', parseFloat(balances.main));
+      }
+      if (balances.active !== undefined) {
+        existingUser.balances.active.set('usd', parseFloat(balances.active));
+      }
+      if (balances.matured !== undefined) {
+        existingUser.balances.matured.set('usd', parseFloat(balances.matured));
+      }
+      
+      // Save the updated balances
+      updateData.balances = existingUser.balances;
     }
     
     // Update user
-    const user = await User.findByIdAndUpdate(
-      req.params.id,
+    const updatedUser = await User.findByIdAndUpdate(
+      id,
       updateData,
       { new: true, runValidators: true }
     ).select('-password -passwordChangedAt -passwordResetToken -passwordResetExpires');
     
-    if (!user) {
+    if (!updatedUser) {
       return res.status(404).json({
         status: 'fail',
-        message: 'User not found'
+        message: 'User not found after update'
       });
     }
     
-    // Format response with balances as objects
-    const formattedUser = {
-      ...user.toObject(),
-      balances: {
-        main: user.balances?.main ? Object.fromEntries(user.balances.main) : {},
-        active: user.balances?.active ? Object.fromEntries(user.balances.active) : {},
-        matured: user.balances?.matured ? Object.fromEntries(user.balances.matured) : {}
+    // Format response - convert Maps to objects for frontend
+    const formatBalanceMap = (balanceMap) => {
+      if (!balanceMap) return {};
+      if (balanceMap instanceof Map) {
+        return Object.fromEntries(balanceMap);
       }
+      return balanceMap;
+    };
+    
+    const formattedUser = {
+      _id: updatedUser._id,
+      firstName: updatedUser.firstName,
+      lastName: updatedUser.lastName,
+      email: updatedUser.email,
+      balances: {
+        main: formatBalanceMap(updatedUser.balances?.main),
+        active: formatBalanceMap(updatedUser.balances?.active),
+        matured: formatBalanceMap(updatedUser.balances?.matured)
+      },
+      status: updatedUser.status,
+      lastLogin: updatedUser.lastLogin,
+      createdAt: updatedUser.createdAt
     };
     
     res.status(200).json({
@@ -21663,12 +21720,16 @@ app.put('/api/admin/users/:id', adminProtect, [
       data: { user: formattedUser }
     });
     
-    await logActivity('update-user', 'user', user._id, req.admin._id, 'Admin', req, updateData);
+    await logActivity('update-user', 'user', updatedUser._id, req.admin._id, 'Admin', req, updateData);
+    
   } catch (err) {
     console.error('Admin update user error:', err);
+    console.error('Error stack:', err.stack);
+    
     res.status(500).json({
       status: 'error',
-      message: 'Failed to update user'
+      message: 'Failed to update user',
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   }
 });
