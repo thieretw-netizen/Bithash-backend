@@ -18078,8 +18078,7 @@ app.get('/api/withdrawal/available-cryptos', protect, async (req, res) => {
 
 
 
-
-// GET /api/admin/users/:userId - Get single user with real-time USD calculations from crypto Maps
+// GET /api/admin/users/:userId - Get single user with real-time USD balances from crypto Maps
 app.get('/api/admin/users/:userId', adminProtect, async (req, res) => {
   try {
     const { userId } = req.params;
@@ -18092,7 +18091,8 @@ app.get('/api/admin/users/:userId', adminProtect, async (req, res) => {
     }
 
     const user = await User.findById(userId)
-      .select('_id firstName lastName email balances status lastLogin createdAt twoFactorAuth');
+      .select('_id firstName lastName email balances status lastLogin createdAt twoFactorAuth')
+      .lean();
 
     if (!user) {
       return res.status(404).json({
@@ -18105,9 +18105,12 @@ app.get('/api/admin/users/:userId', adminProtect, async (req, res) => {
     let activeUSD = 0;
     let maturedUSD = 0;
 
-    // Calculate MAIN wallet USD value from crypto Map
+    // Calculate MAIN wallet USD value from crypto Map (SAME logic as admin/users)
     if (user.balances && user.balances.main) {
-      for (const [crypto, amount] of user.balances.main.entries()) {
+      const mainMap = user.balances.main;
+      const entries = mainMap instanceof Map ? mainMap.entries() : Object.entries(mainMap);
+      
+      for (const [crypto, amount] of entries) {
         if (amount > 0 && crypto !== 'usd') {
           const price = await getCryptoPrice(crypto.toUpperCase());
           if (price) {
@@ -18117,9 +18120,12 @@ app.get('/api/admin/users/:userId', adminProtect, async (req, res) => {
       }
     }
 
-    // Calculate ACTIVE wallet USD value from crypto Map
+    // Calculate ACTIVE wallet USD value from crypto Map (SAME logic as admin/users)
     if (user.balances && user.balances.active) {
-      for (const [crypto, amount] of user.balances.active.entries()) {
+      const activeMap = user.balances.active;
+      const entries = activeMap instanceof Map ? activeMap.entries() : Object.entries(activeMap);
+      
+      for (const [crypto, amount] of entries) {
         if (amount > 0 && crypto !== 'usd') {
           const price = await getCryptoPrice(crypto.toUpperCase());
           if (price) {
@@ -18129,9 +18135,12 @@ app.get('/api/admin/users/:userId', adminProtect, async (req, res) => {
       }
     }
 
-    // Calculate MATURED wallet USD value from crypto Map
+    // Calculate MATURED wallet USD value from crypto Map (SAME logic as admin/users)
     if (user.balances && user.balances.matured) {
-      for (const [crypto, amount] of user.balances.matured.entries()) {
+      const maturedMap = user.balances.matured;
+      const entries = maturedMap instanceof Map ? maturedMap.entries() : Object.entries(maturedMap);
+      
+      for (const [crypto, amount] of entries) {
         if (amount > 0 && crypto !== 'usd') {
           const price = await getCryptoPrice(crypto.toUpperCase());
           if (price) {
@@ -18172,8 +18181,6 @@ app.get('/api/admin/users/:userId', adminProtect, async (req, res) => {
     });
   }
 });
-
-
 
 
 
