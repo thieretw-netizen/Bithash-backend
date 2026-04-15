@@ -22971,10 +22971,6 @@ io.on('connection', async (socket) => {
         
         const user = await User.findById(userId).select('balances');
         if (user && user.balances) {
-          // =============================================
-          // CRITICAL FIX: Calculate numeric values from Maps
-          // =============================================
-          
           // Calculate MAIN balance (USD value from crypto holdings)
           let mainUSD = 0;
           if (user.balances.main) {
@@ -22987,22 +22983,11 @@ io.on('connection', async (socket) => {
             }
           }
           
-          // =============================================
-          // FIX ACTIVE BALANCE: Extract USD value from the Map
-          // =============================================
+          // Calculate ACTIVE balance (USD value from Map)
           let activeUSD = 0;
           if (user.balances.active) {
             const activeMap = user.balances.active instanceof Map ? user.balances.active : new Map();
-            // Active wallet stores USD value under 'usd' key
             activeUSD = activeMap.get('usd') || 0;
-            
-            // Also check for any other values as fallback
-            for (const [asset, balance] of activeMap.entries()) {
-              if (balance > 0 && asset !== 'usd') {
-                const price = await getCryptoPrice(asset.toUpperCase());
-                if (price) activeUSD += balance * price;
-              }
-            }
           }
           
           // Calculate MATURED balance (USD value from crypto holdings)
@@ -23019,18 +23004,10 @@ io.on('connection', async (socket) => {
           
           console.log(`Emitting balances to user ${userId}: main=${mainUSD}, active=${activeUSD}, matured=${maturedUSD}`);
           
-          // Send NUMERIC values (not Maps)
           socket.emit('balance_update', {
             main: mainUSD,
-            active: activeUSD,  // <-- This is now a number, not a Map
+            active: activeUSD,
             matured: maturedUSD
-          });
-        } else {
-          // Send zeros if no balances found
-          socket.emit('balance_update', {
-            main: 0,
-            active: 0,
-            matured: 0
           });
         }
       }
@@ -23038,6 +23015,47 @@ io.on('connection', async (socket) => {
       console.error('Socket auth error:', err);
     }
   }
+  
+  // ✅ This is now inside the async function - it will work correctly
+  try {
+    const currentStats = await getCurrentStats();
+    socket.emit('stats-update', currentStats);
+    console.log(`📡 Sent initial stats to new client ${socket.id}: ${currentStats.totalInvestors.toLocaleString()} investors`);
+  } catch (err) {
+    console.error('Error sending stats update:', err);
+  }
+  
+  socket.on('authenticate', async (token) => {
+    try {
+      const decoded = verifyJWT(token);
+      if (!decoded.isAdmin) {
+        socket.disconnect();
+        return;
+      }
+
+      const admin = await Admin.findById(decoded.id);
+      if (!admin) {
+        socket.disconnect();
+        return;
+      }
+
+      socket.adminId = admin._id;
+      console.log(`Admin ${admin.email} connected`);
+    } catch (err) {
+      socket.disconnect();
+    }
+  });
+  
+  socket.on('refresh_pnl', async () => {
+    if (userId) {
+      const user = await User.findById(userId).select('balances');
+      // ... PnL calculation logic ...
+    }
+  });
+
+  socket.on('disconnect', () => {
+    console.log('Client disconnected:', socket.id);
+  });
 });
 
 
