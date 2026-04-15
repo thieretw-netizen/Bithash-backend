@@ -22282,6 +22282,7 @@ const startRealTimePriceUpdates = (io) => {
 };
 
 // Helper function to recalculate wallet values in real-time using User.balances
+// In your recalculateAllWalletValuesRealtime function
 const recalculateAllWalletValuesRealtime = async (io, currentPrices) => {
   if (isRecalculating) return;
   isRecalculating = true;
@@ -22292,51 +22293,52 @@ const recalculateAllWalletValuesRealtime = async (io, currentPrices) => {
     for (const user of users) {
       let totalMainValue = 0;
       let totalMaturedValue = 0;
-      
-      // Active wallet value should NOT be recalculated - it's fixed!
-      // Just use stored value
       let totalActiveValue = 0;
-      if (user.balances && user.balances.active) {
-        const activeBalances = user.balances.active;
-        for (const [asset, balance] of activeBalances.entries()) {
-          if (balance > 0) {
-            totalActiveValue += balance;
+      
+      // Calculate MAIN value
+      if (user.balances && user.balances.main) {
+        const mainMap = user.balances.main instanceof Map ? user.balances.main : new Map();
+        for (const [asset, balance] of mainMap.entries()) {
+          if (balance > 0 && asset !== 'usd') {
+            let price = currentPrices?.[asset]?.price || await getCryptoPrice(asset.toUpperCase());
+            if (price) totalMainValue += balance * price;
           }
         }
       }
       
-      // Recalculate MAIN wallet (fluctuates)
-      if (user.balances && user.balances.main) {
-        totalMainValue = await calculateWalletValueFromBalances(user.balances.main, currentPrices);
+      // FIX ACTIVE: Get USD value from Map
+      if (user.balances && user.balances.active) {
+        const activeMap = user.balances.active instanceof Map ? user.balances.active : new Map();
+        // Active wallet stores USD directly
+        totalActiveValue = activeMap.get('usd') || 0;
       }
       
-      // Recalculate MATURED wallet (fluctuates)
+      // Calculate MATURED value
       if (user.balances && user.balances.matured) {
-        totalMaturedValue = await calculateWalletValueFromBalances(user.balances.matured, currentPrices);
+        const maturedMap = user.balances.matured instanceof Map ? user.balances.matured : new Map();
+        for (const [asset, balance] of maturedMap.entries()) {
+          if (balance > 0 && asset !== 'usd') {
+            let price = currentPrices?.[asset]?.price || await getCryptoPrice(asset.toUpperCase());
+            if (price) totalMaturedValue += balance * price;
+          }
+        }
       }
       
-      // Send real-time updates via Socket.IO to each specific user
+      // Send NUMERIC values
       if (io) {
         io.to(`user_${user._id}`).emit('wallet_realtime_update', {
           main: totalMainValue,
-          active: totalActiveValue,  // FIXED: Use stored value, not recalculated
+          active: totalActiveValue,  // <-- Now a number
           matured: totalMaturedValue,
           timestamp: Date.now()
         });
       }
     }
-    
   } catch (err) {
     console.error('Error in real-time wallet recalculation:', err);
   } finally {
     isRecalculating = false;
   }
-};
-
-// Initialize real-time updates
-const startRealTimeWalletUpdates = (io) => {
-  startRealTimePriceUpdates(io);
-  console.log('💰 Real-time wallet value updates started (every 1 second)');
 };
 
 
@@ -22969,14 +22971,15 @@ io.on('connection', async (socket) => {
         
         const user = await User.findById(userId).select('balances');
         if (user && user.balances) {
-          // Calculate main USD value from crypto holdings
+          // =============================================
+          // CRITICAL FIX: Calculate numeric values from Maps
+          // =============================================
+          
+          // Calculate MAIN balance (USD value from crypto holdings)
           let mainUSD = 0;
           if (user.balances.main) {
-            const mainBalances = user.balances.main instanceof Map ? 
-              Object.fromEntries(user.balances.main) : 
-              user.balances.main;
-            
-            for (const [asset, balance] of Object.entries(mainBalances)) {
+            const mainMap = user.balances.main instanceof Map ? user.balances.main : new Map();
+            for (const [asset, balance] of mainMap.entries()) {
               if (balance > 0 && asset !== 'usd') {
                 const price = await getCryptoPrice(asset.toUpperCase());
                 if (price) mainUSD += balance * price;
@@ -22984,34 +22987,29 @@ io.on('connection', async (socket) => {
             }
           }
           
-          // CRITICAL FIX: Get active balance from stored USD value
+          // =============================================
+          // FIX ACTIVE BALANCE: Extract USD value from the Map
+          // =============================================
           let activeUSD = 0;
           if (user.balances.active) {
-            const activeBalances = user.balances.active instanceof Map ? 
-              Object.fromEntries(user.balances.active) : 
-              user.balances.active;
+            const activeMap = user.balances.active instanceof Map ? user.balances.active : new Map();
+            // Active wallet stores USD value under 'usd' key
+            activeUSD = activeMap.get('usd') || 0;
             
-            // Active wallet stores USD value directly
-            activeUSD = activeBalances.usd || 0;
-            
-            // Also check for any crypto amounts (as fallback)
-            for (const [asset, balance] of Object.entries(activeBalances)) {
+            // Also check for any other values as fallback
+            for (const [asset, balance] of activeMap.entries()) {
               if (balance > 0 && asset !== 'usd') {
-                // If there are crypto amounts, use them (but ideally active should be USD)
                 const price = await getCryptoPrice(asset.toUpperCase());
                 if (price) activeUSD += balance * price;
               }
             }
           }
           
-          // Calculate matured USD value from crypto holdings
+          // Calculate MATURED balance (USD value from crypto holdings)
           let maturedUSD = 0;
           if (user.balances.matured) {
-            const maturedBalances = user.balances.matured instanceof Map ? 
-              Object.fromEntries(user.balances.matured) : 
-              user.balances.matured;
-            
-            for (const [asset, balance] of Object.entries(maturedBalances)) {
+            const maturedMap = user.balances.matured instanceof Map ? user.balances.matured : new Map();
+            for (const [asset, balance] of maturedMap.entries()) {
               if (balance > 0 && asset !== 'usd') {
                 const price = await getCryptoPrice(asset.toUpperCase());
                 if (price) maturedUSD += balance * price;
@@ -23019,16 +23017,16 @@ io.on('connection', async (socket) => {
             }
           }
           
-          // Send ALL THREE balances - NEVER omit active
+          console.log(`Emitting balances to user ${userId}: main=${mainUSD}, active=${activeUSD}, matured=${maturedUSD}`);
+          
+          // Send NUMERIC values (not Maps)
           socket.emit('balance_update', {
             main: mainUSD,
-            active: activeUSD,  // ALWAYS include active balance
+            active: activeUSD,  // <-- This is now a number, not a Map
             matured: maturedUSD
           });
-          
-          console.log(`Sent balances to user ${userId}: main=${mainUSD}, active=${activeUSD}, matured=${maturedUSD}`);
         } else {
-          // If user has no balances, send zeros for ALL THREE
+          // Send zeros if no balances found
           socket.emit('balance_update', {
             main: 0,
             active: 0,
@@ -23041,6 +23039,8 @@ io.on('connection', async (socket) => {
     }
   }
 });
+
+
   const currentStats = await getCurrentStats();
   socket.emit('stats-update', currentStats);
   console.log(`📡 Sent initial stats to new client ${socket.id}: ${currentStats.totalInvestors.toLocaleString()} investors`);
