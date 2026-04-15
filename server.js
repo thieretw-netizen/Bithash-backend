@@ -5883,13 +5883,12 @@ app.post('/api/auth/reset-password', [
 
 
 
-
-
 // =============================================
-// COMPLETELY REWRITTEN INVESTMENT ROUTE
+// COMPLETELY REWRITTEN INVESTMENT ROUTE - ZERO ERRORS VERSION
 // Correct balance checking: user.balances.main.get('btc') and user.balances.matured.get('btc')
 // Real-time BTC price from multiple online APIs with fallbacks
-// FIXED: Transaction amounts are POSITIVE (not negative) to pass schema validation
+// FIXED: UserLog location structure (object with name/code)
+// FIXED: Transaction amounts are POSITIVE (not negative)
 // =============================================
 
 app.post('/api/investments', protect, [
@@ -6088,13 +6087,11 @@ app.post('/api/investments', protect, [
     });
 
     // ✅ FIXED: Create transaction record with POSITIVE numbers (not negative)
-    // The Transaction schema requires amount >= 0, so we record the investment as a positive amount
-    // with details indicating it's a debit (money leaving the account)
     const transaction = await Transaction.create({
       user: userId,
       type: 'investment',
-      amount: amount,  // ✅ POSITIVE - amount invested
-      amountBTC: investmentBTCAmount,  // ✅ POSITIVE - BTC amount invested
+      amount: amount,
+      amountBTC: investmentBTCAmount,
       currency: 'BTC',
       status: 'completed',
       method: 'INTERNAL',
@@ -6108,10 +6105,10 @@ app.post('/api/investments', protect, [
         amountAfterFeeUSD: investmentAmountAfterFeeUSD,
         amountAfterFeeBTC: investmentAmountAfterFeeBTC,
         btcPrice: btcPrice,
-        transactionType: 'debit'  // Indicates this is a debit (money leaving)
+        transactionType: 'debit'
       },
       fee: investmentFeeUSD,
-      netAmount: investmentAmountAfterFeeUSD  // ✅ POSITIVE - net amount after fee
+      netAmount: investmentAmountAfterFeeUSD
     });
 
     // Record platform revenue
@@ -6135,7 +6132,7 @@ app.post('/api/investments', protect, [
       }
     });
 
-    // Create user log
+    // ✅ FIXED: Create user log with correct location object structure
     const deviceInfo = await getUserDeviceInfo(req);
     await UserLog.create({
       user: userId,
@@ -6148,21 +6145,51 @@ app.post('/api/investments', protect, [
       userAgent: req.headers['user-agent'] || 'Unknown',
       deviceInfo: {
         type: getDeviceType(req),
-        os: { name: getOSFromUserAgent(req.headers['user-agent']), version: 'Unknown' },
-        browser: { name: getBrowserFromUserAgent(req.headers['user-agent']), version: 'Unknown' }
+        os: { 
+          name: getOSFromUserAgent(req.headers['user-agent']), 
+          version: 'Unknown' 
+        },
+        browser: { 
+          name: getBrowserFromUserAgent(req.headers['user-agent']), 
+          version: 'Unknown' 
+        },
+        platform: req.headers['user-agent'] || 'Unknown',
+        language: req.headers['accept-language'] || 'Unknown',
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
       },
       location: {
         ip: getRealClientIP(req),
-        country: deviceInfo.locationDetails?.country || 'Unknown',
+        country: {
+          name: deviceInfo.locationDetails?.country || 'Unknown',
+          code: (deviceInfo.locationDetails?.country_code || deviceInfo.locationDetails?.country || 'Unknown').substring(0, 2)
+        },
+        region: {
+          name: deviceInfo.locationDetails?.region || 'Unknown',
+          code: deviceInfo.locationDetails?.region_code || deviceInfo.locationDetails?.region || 'Unknown'
+        },
         city: deviceInfo.locationDetails?.city || 'Unknown',
-        region: deviceInfo.locationDetails?.region || 'Unknown'
+        postalCode: deviceInfo.locationDetails?.postalCode || 'Unknown',
+        latitude: deviceInfo.locationDetails?.latitude || null,
+        longitude: deviceInfo.locationDetails?.longitude || null,
+        timezone: deviceInfo.locationDetails?.timezone || 'Unknown',
+        isp: deviceInfo.locationDetails?.isp || 'Unknown',
+        exactLocation: deviceInfo.exactLocation || false
       },
       status: 'success',
       metadata: {
         planName: plan.name,
         investmentAmountUSD: amount,
         investmentAmountBTC: investmentBTCAmount,
+        amountAfterFeeUSD: investmentAmountAfterFeeUSD,
+        amountAfterFeeBTC: investmentAmountAfterFeeBTC,
+        investmentFeeUSD: investmentFeeUSD,
+        investmentFeeBTC: investmentFeeBTC,
+        expectedReturnUSD: expectedReturnUSD,
+        expectedReturnBTC: expectedReturnBTC,
         btcPriceAtInvestment: btcPrice,
+        duration: plan.duration,
+        roiPercentage: plan.percentage,
+        endDate: endDate,
         balanceTypeUsed: balanceType
       },
       relatedEntity: investment._id,
@@ -6433,7 +6460,7 @@ async function getRealTimeBitcoinPrice() {
     errors.push(`Huobi: ${err.message}`);
   }
   
-  // API 10: Gemini (final fallback)
+  // API 10: Gemini
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -6539,12 +6566,12 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
       await user.save({ session });
       await investment.save({ session });
 
-      // ✅ FIXED: Create transaction with POSITIVE numbers (profit earned)
+      // ✅ FIXED: Create transaction with POSITIVE numbers
       await Transaction.create([{
         user: userId,
         type: 'interest',
-        amount: totalReturnUSD - investment.amount,  // ✅ POSITIVE profit amount
-        amountBTC: totalReturnBTC - investment.amountBTC,  // ✅ POSITIVE profit in BTC
+        amount: totalReturnUSD - investment.amount,
+        amountBTC: totalReturnBTC - investment.amountBTC,
         currency: 'BTC',
         status: 'completed',
         method: 'INTERNAL',
@@ -6558,12 +6585,72 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
           interestBTC: totalReturnBTC - investment.amountBTC,
           btcPriceAtStart: investment.btcPriceAtInvestment,
           btcPriceAtCompletion: currentBTCPrice,
-          transactionType: 'credit'  // Indicates this is a credit (money coming in)
+          transactionType: 'credit'
         },
         fee: 0,
-        netAmountUSD: totalReturnUSD - investment.amount,  // ✅ POSITIVE
-        netAmountBTC: totalReturnBTC - investment.amountBTC  // ✅ POSITIVE
+        netAmountUSD: totalReturnUSD - investment.amount,
+        netAmountBTC: totalReturnBTC - investment.amountBTC
       }], { session });
+
+      // ✅ FIXED: Create user log with correct location object structure
+      const deviceInfo = await getUserDeviceInfo(req);
+      await UserLog.create({
+        user: userId,
+        username: user.email,
+        email: user.email,
+        userFullName: `${user.firstName} ${user.lastName}`,
+        action: 'investment_matured',
+        actionCategory: 'investment',
+        ipAddress: getRealClientIP(req),
+        userAgent: req.headers['user-agent'] || 'Unknown',
+        deviceInfo: {
+          type: getDeviceType(req),
+          os: { name: getOSFromUserAgent(req.headers['user-agent']), version: 'Unknown' },
+          browser: { name: getBrowserFromUserAgent(req.headers['user-agent']), version: 'Unknown' },
+          platform: req.headers['user-agent'] || 'Unknown',
+          language: req.headers['accept-language'] || 'Unknown',
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+        },
+        location: {
+          ip: getRealClientIP(req),
+          country: {
+            name: deviceInfo.locationDetails?.country || 'Unknown',
+            code: (deviceInfo.locationDetails?.country_code || deviceInfo.locationDetails?.country || 'Unknown').substring(0, 2)
+          },
+          region: {
+            name: deviceInfo.locationDetails?.region || 'Unknown',
+            code: deviceInfo.locationDetails?.region_code || deviceInfo.locationDetails?.region || 'Unknown'
+          },
+          city: deviceInfo.locationDetails?.city || 'Unknown',
+          postalCode: deviceInfo.locationDetails?.postalCode || 'Unknown',
+          latitude: deviceInfo.locationDetails?.latitude || null,
+          longitude: deviceInfo.locationDetails?.longitude || null,
+          timezone: deviceInfo.locationDetails?.timezone || 'Unknown',
+          isp: deviceInfo.locationDetails?.isp || 'Unknown',
+          exactLocation: deviceInfo.exactLocation || false
+        },
+        status: 'success',
+        metadata: {
+          planName: investment.plan.name,
+          originalAmountUSD: investment.originalAmount,
+          originalAmountBTC: investment.originalAmountBTC,
+          amountAfterFeeUSD: investment.amount,
+          amountAfterFeeBTC: investment.amountBTC,
+          investmentFeeUSD: investment.investmentFee,
+          investmentFeeBTC: investment.investmentFeeBTC,
+          expectedReturnBTC: investment.expectedReturnBTC,
+          actualReturnBTC: totalReturnBTC,
+          profitBTC: totalReturnBTC - investment.amountBTC,
+          profitUSD: totalReturnUSD - investment.amount,
+          btcPriceAtStart: investment.btcPriceAtInvestment,
+          btcPriceAtCompletion: currentBTCPrice,
+          startDate: investment.startDate,
+          endDate: investment.endDate,
+          completionDate: investment.completionDate
+        },
+        relatedEntity: investment._id,
+        relatedEntityModel: 'Investment'
+      });
 
       await session.commitTransaction();
       
@@ -6607,11 +6694,6 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
     });
   }
 });
-
-
-
-
-
 
 
 
