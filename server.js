@@ -10022,9 +10022,6 @@ fetchMarketData();
 
 
 
-
-
-
 // GET /api/admin/supported-cryptos - Fetch all supported cryptos with user-specific balances
 app.get('/api/admin/supported-cryptos', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
   try {
@@ -10047,87 +10044,58 @@ app.get('/api/admin/supported-cryptos', adminProtect, restrictTo('super', 'finan
       { code: 'TRX', name: 'TRON', logoUrl: 'https://assets.coingecko.com/coins/images/1094/large/tron-logo.png', symbol: 'TRX' },
       { code: 'LINK', name: 'Chainlink', logoUrl: 'https://assets.coingecko.com/coins/images/877/large/chainlink-new-logo.png', symbol: 'LINK' },
       { code: 'MATIC', name: 'Polygon', logoUrl: 'https://assets.coingecko.com/coins/images/4713/large/matic-token-icon.png', symbol: 'MATIC' },
-      { code: 'LTC', name: 'Litecoin', logoUrl: 'https://assets.coingecko.com/coins/images/2/large/litecoin.png', symbol: 'Ł' },
-      { code: 'WBTC', name: 'Wrapped Bitcoin', logoUrl: 'https://assets.coingecko.com/coins/images/7598/large/wrapped-bitcoin.png', symbol: 'WBTC' },
-      { code: 'NEAR', name: 'NEAR Protocol', logoUrl: 'https://assets.coingecko.com/coins/images/10365/large/near.jpg', symbol: 'NEAR' },
-      { code: 'UNI', name: 'Uniswap', logoUrl: 'https://assets.coingecko.com/coins/images/12504/large/uniswap-uni.png', symbol: 'UNI' },
-      { code: 'BCH', name: 'Bitcoin Cash', logoUrl: 'https://assets.coingecko.com/coins/images/780/large/bitcoin-cash-circle.png', symbol: 'BCH' },
-      { code: 'XLM', name: 'Stellar', logoUrl: 'https://assets.coingecko.com/coins/images/100/large/Stellar_symbol_black_RGB.png', symbol: 'XLM' },
-      { code: 'ATOM', name: 'Cosmos', logoUrl: 'https://assets.coingecko.com/coins/images/1481/large/cosmos_hub.png', symbol: 'ATOM' },
-      { code: 'XMR', name: 'Monero', logoUrl: 'https://assets.coingecko.com/coins/images/69/large/monero_logo.png', symbol: 'XMR' },
-      { code: 'VET', name: 'VeChain', logoUrl: 'https://assets.coingecko.com/coins/images/1167/large/VET.png', symbol: 'VET' },
-      { code: 'FIL', name: 'Filecoin', logoUrl: 'https://assets.coingecko.com/coins/images/12817/large/filecoin.png', symbol: 'FIL' },
-      { code: 'THETA', name: 'Theta Network', logoUrl: 'https://assets.coingecko.com/coins/images/2538/large/theta-token-logo.png', symbol: 'THETA' },
-      { code: 'HBAR', name: 'Hedera', logoUrl: 'https://assets.coingecko.com/coins/images/3688/large/hbar.png', symbol: 'HBAR' },
-      { code: 'FTM', name: 'Fantom', logoUrl: 'https://assets.coingecko.com/coins/images/4001/large/Fantom.png', symbol: 'FTM' },
-      { code: 'XTZ', name: 'Tezos', logoUrl: 'https://assets.coingecko.com/coins/images/976/large/Tezos-logo.png', symbol: 'XTZ' }
+      { code: 'LTC', name: 'Litecoin', logoUrl: 'https://assets.coingecko.com/coins/images/2/large/litecoin.png', symbol: 'Ł' }
     ];
     
-    // If userId is provided, fetch that user's specific balances for each crypto
+    // If userId is provided, fetch that user's specific balances from the User model
     let userBalances = {};
     if (userId && mongoose.Types.ObjectId.isValid(userId)) {
-      const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
-      if (userAssetBalance && userAssetBalance.balances) {
-        // Helper to extract balances from Map
-        const extractMapBalances = (balanceMap) => {
-          const result = {};
-          if (balanceMap && typeof balanceMap === 'object') {
-            // Handle both Map objects and plain objects
-            if (balanceMap instanceof Map) {
-              for (const [crypto, balance] of balanceMap) {
-                result[crypto.toUpperCase()] = balance;
-              }
-            } else {
-              for (const [crypto, balance] of Object.entries(balanceMap)) {
-                result[crypto.toUpperCase()] = balance;
-              }
-            }
+      const user = await User.findById(userId).select('balances');
+      
+      if (user && user.balances) {
+        // Helper function to extract balances from Map
+        const getBalanceFromMap = (balanceMap, cryptoCode) => {
+          if (!balanceMap) return 0;
+          // Handle both Map objects and plain objects
+          if (balanceMap instanceof Map) {
+            return balanceMap.get(cryptoCode.toLowerCase()) || 0;
           }
-          return result;
+          // Handle plain object
+          return balanceMap[cryptoCode.toLowerCase()] || 0;
         };
         
-        // Extract main wallet balances
-        const mainBalances = extractMapBalances(userAssetBalance.balances.main);
-        for (const [crypto, balance] of Object.entries(mainBalances)) {
-          if (!userBalances[crypto]) {
-            userBalances[crypto] = { main: 0, matured: 0, active: 0 };
-          }
-          userBalances[crypto].main = balance;
-        }
-        
-        // Extract matured wallet balances
-        const maturedBalances = extractMapBalances(userAssetBalance.balances.matured);
-        for (const [crypto, balance] of Object.entries(maturedBalances)) {
-          if (!userBalances[crypto]) {
-            userBalances[crypto] = { main: 0, matured: 0, active: 0 };
-          }
-          userBalances[crypto].matured = balance;
-        }
-        
-        // Extract active wallet balances
-        const activeBalances = extractMapBalances(userAssetBalance.balances.active);
-        for (const [crypto, balance] of Object.entries(activeBalances)) {
-          if (!userBalances[crypto]) {
-            userBalances[crypto] = { main: 0, matured: 0, active: 0 };
-          }
-          userBalances[crypto].active = balance;
+        // Extract balances for each crypto from the user's balances object
+        for (const crypto of supportedCryptos) {
+          const cryptoLower = crypto.code.toLowerCase();
+          
+          const mainBalance = getBalanceFromMap(user.balances.main, cryptoLower);
+          const maturedBalance = getBalanceFromMap(user.balances.matured, cryptoLower);
+          const activeBalance = getBalanceFromMap(user.balances.active, cryptoLower);
+          
+          userBalances[crypto.code] = {
+            main: mainBalance,
+            matured: maturedBalance,
+            active: activeBalance,
+            total: mainBalance + maturedBalance + activeBalance
+          };
         }
       }
     }
     
     // Build response with user-specific balances if userId provided
-    const cryptos = supportedCryptos.map(crypto => ({
-      code: crypto.code,
-      name: crypto.name,
-      logoUrl: crypto.logoUrl,
-      symbol: crypto.symbol,
-      balance: userBalances[crypto.code]?.main || 0,
-      maturedBalance: userBalances[crypto.code]?.matured || 0,
-      activeBalance: userBalances[crypto.code]?.active || 0,
-      totalBalance: (userBalances[crypto.code]?.main || 0) + 
-                    (userBalances[crypto.code]?.matured || 0) + 
-                    (userBalances[crypto.code]?.active || 0)
-    }));
+    const cryptos = supportedCryptos.map(crypto => {
+      const balance = userBalances[crypto.code] || { main: 0, matured: 0, active: 0, total: 0 };
+      return {
+        code: crypto.code,
+        name: crypto.name,
+        logoUrl: crypto.logoUrl,
+        symbol: crypto.symbol,
+        balance: balance.main,           // Main wallet balance
+        maturedBalance: balance.matured, // Matured wallet balance  
+        activeBalance: balance.active,   // Active wallet balance
+        totalBalance: balance.total      // Total across all wallets
+      };
+    });
     
     res.json({
       status: 'success',
@@ -10136,15 +10104,20 @@ app.get('/api/admin/supported-cryptos', adminProtect, restrictTo('super', 'finan
         userId: userId || null
       }
     });
+    
   } catch (err) {
     console.error('Error fetching supported cryptos:', err);
-    // Fallback: return default crypto list
+    
+    // Fallback: return default crypto list with zero balances
     const defaultCryptos = [
       { code: 'BTC', name: 'Bitcoin', logoUrl: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png', balance: 0, maturedBalance: 0, activeBalance: 0, totalBalance: 0 },
       { code: 'ETH', name: 'Ethereum', logoUrl: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png', balance: 0, maturedBalance: 0, activeBalance: 0, totalBalance: 0 },
       { code: 'USDT', name: 'Tether', logoUrl: 'https://assets.coingecko.com/coins/images/325/large/Tether.png', balance: 0, maturedBalance: 0, activeBalance: 0, totalBalance: 0 },
-      { code: 'BNB', name: 'Binance Coin', logoUrl: 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png', balance: 0, maturedBalance: 0, activeBalance: 0, totalBalance: 0 }
+      { code: 'BNB', name: 'Binance Coin', logoUrl: 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png', balance: 0, maturedBalance: 0, activeBalance: 0, totalBalance: 0 },
+      { code: 'SOL', name: 'Solana', logoUrl: 'https://assets.coingecko.com/coins/images/4128/large/solana.png', balance: 0, maturedBalance: 0, activeBalance: 0, totalBalance: 0 },
+      { code: 'USDC', name: 'USD Coin', logoUrl: 'https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png', balance: 0, maturedBalance: 0, activeBalance: 0, totalBalance: 0 }
     ];
+    
     res.json({
       status: 'success',
       data: { cryptos: defaultCryptos, userId: userId || null }
