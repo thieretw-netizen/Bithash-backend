@@ -21587,152 +21587,158 @@ app.get('/api/admin/users/:id', adminProtect, async (req, res) => {
   }
 });
 
-// Admin Update User Endpoint - FIXED for USD number values from frontend
-app.put('/api/admin/users/:id', adminProtect, [
-  body('firstName').optional().trim().notEmpty().withMessage('First name cannot be empty'),
-  body('lastName').optional().trim().notEmpty().withMessage('Last name cannot be empty'),
-  body('email').optional().isEmail().withMessage('Please provide a valid email'),
-  body('status').optional().isIn(['active', 'suspended', 'banned']).withMessage('Invalid status')
-], async (req, res) => {
+
+
+
+// Admin Get User Details Endpoint - ABSOLUTELY BULLETPROOF
+app.get('/api/admin/users/:id', adminProtect, async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        status: 'fail',
-        errors: errors.array()
-      });
-    }
-    
     const { id } = req.params;
-    const { firstName, lastName, email, status, balances } = req.body;
     
-    // Validate ObjectId
-    if (!mongoose.Types.ObjectId.isValid(id)) {
+    console.log(`🔍 Fetching user details for ID: ${id}`);
+    
+    // Validate ObjectId format
+    if (!id || id.length !== 24 || !/^[0-9a-fA-F]{24}$/.test(id)) {
+      console.log(`❌ Invalid user ID format: ${id}`);
       return res.status(400).json({
         status: 'fail',
-        message: 'Invalid user ID format'
+        message: 'Invalid user ID format. Must be a 24-character hex string.'
       });
     }
     
-    // Get existing user
-    const existingUser = await User.findById(id);
-    if (!existingUser) {
+    // Find user - WITHOUT lean() so we can check types
+    const user = await User.findById(id)
+      .select('-password -passwordChangedAt -passwordResetToken -passwordResetExpires');
+    
+    if (!user) {
+      console.log(`❌ User not found: ${id}`);
       return res.status(404).json({
         status: 'fail',
         message: 'User not found'
       });
     }
     
-    // Check if email is already taken by another user
-    if (email && email !== existingUser.email) {
-      const emailTaken = await User.findOne({ 
-        email, 
-        _id: { $ne: id } 
-      });
+    console.log(`✅ User found: ${user.email}`);
+    
+    // SAFELY extract balances - handle EVERY possible data type
+    let mainBalances = {};
+    let activeBalances = {};
+    let maturedBalances = {};
+    
+    // Process MAIN balances
+    if (user.balances) {
+      // Handle MAIN wallet
+      if (user.balances.main) {
+        if (user.balances.main instanceof Map) {
+          // Convert Map to object
+          for (const [key, value] of user.balances.main) {
+            mainBalances[key] = value;
+          }
+        } else if (typeof user.balances.main === 'object') {
+          // Already an object
+          mainBalances = { ...user.balances.main };
+        } else {
+          console.log(`⚠️ Unexpected type for balances.main: ${typeof user.balances.main}`);
+        }
+      }
       
-      if (emailTaken) {
-        return res.status(400).json({
-          status: 'fail',
-          message: 'Email is already taken by another user'
-        });
+      // Handle ACTIVE wallet
+      if (user.balances.active) {
+        if (user.balances.active instanceof Map) {
+          for (const [key, value] of user.balances.active) {
+            activeBalances[key] = value;
+          }
+        } else if (typeof user.balances.active === 'object') {
+          activeBalances = { ...user.balances.active };
+        }
+      }
+      
+      // Handle MATURED wallet
+      if (user.balances.matured) {
+        if (user.balances.matured instanceof Map) {
+          for (const [key, value] of user.balances.matured) {
+            maturedBalances[key] = value;
+          }
+        } else if (typeof user.balances.matured === 'object') {
+          maturedBalances = { ...user.balances.matured };
+        }
       }
     }
     
-    // Prepare update data
-    const updateData = {};
-    if (firstName) updateData.firstName = firstName;
-    if (lastName) updateData.lastName = lastName;
-    if (email) updateData.email = email;
-    if (status) updateData.status = status;
-    
-    // Handle balances update - frontend sends USD numbers
-    // We need to store these as USD in the existing Maps
-    if (balances) {
-      // Initialize balances if they don't exist
-      if (!existingUser.balances) {
-        existingUser.balances = {
-          main: new Map(),
-          active: new Map(),
-          matured: new Map()
-        };
-      }
-      
-      // Ensure each wallet is a Map
-      if (!(existingUser.balances.main instanceof Map)) existingUser.balances.main = new Map();
-      if (!(existingUser.balances.active instanceof Map)) existingUser.balances.active = new Map();
-      if (!(existingUser.balances.matured instanceof Map)) existingUser.balances.matured = new Map();
-      
-      // Update USD balances (frontend sends USD numbers)
-      if (balances.main !== undefined) {
-        existingUser.balances.main.set('usd', parseFloat(balances.main));
-      }
-      if (balances.active !== undefined) {
-        existingUser.balances.active.set('usd', parseFloat(balances.active));
-      }
-      if (balances.matured !== undefined) {
-        existingUser.balances.matured.set('usd', parseFloat(balances.matured));
-      }
-      
-      // Save the updated balances
-      updateData.balances = existingUser.balances;
-    }
-    
-    // Update user
-    const updatedUser = await User.findByIdAndUpdate(
-      id,
-      updateData,
-      { new: true, runValidators: true }
-    ).select('-password -passwordChangedAt -passwordResetToken -passwordResetExpires');
-    
-    if (!updatedUser) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found after update'
-      });
-    }
-    
-    // Format response - convert Maps to objects for frontend
-    const formatBalanceMap = (balanceMap) => {
-      if (!balanceMap) return {};
-      if (balanceMap instanceof Map) {
-        return Object.fromEntries(balanceMap);
-      }
-      return balanceMap;
+    // Calculate USD totals if needed (for display)
+    const getUsdTotal = (balanceObj) => {
+      if (!balanceObj) return 0;
+      // If there's a direct 'usd' field, use it
+      if (balanceObj.usd) return balanceObj.usd;
+      // Otherwise calculate from crypto (but keep it simple)
+      return 0;
     };
     
-    const formattedUser = {
-      _id: updatedUser._id,
-      firstName: updatedUser.firstName,
-      lastName: updatedUser.lastName,
-      email: updatedUser.email,
+    // Create safe response object
+    const safeUser = {
+      _id: user._id,
+      firstName: user.firstName || '',
+      lastName: user.lastName || '',
+      email: user.email || '',
+      phone: user.phone || '',
+      country: user.country || '',
+      city: user.city || '',
+      address: user.address || {},
       balances: {
-        main: formatBalanceMap(updatedUser.balances?.main),
-        active: formatBalanceMap(updatedUser.balances?.active),
-        matured: formatBalanceMap(updatedUser.balances?.matured)
+        main: mainBalances,
+        active: activeBalances,
+        matured: maturedBalances
       },
-      status: updatedUser.status,
-      lastLogin: updatedUser.lastLogin,
-      createdAt: updatedUser.createdAt
+      kycStatus: user.kycStatus || { identity: 'not-submitted', address: 'not-submitted', facial: 'not-submitted' },
+      status: user.status || 'active',
+      isVerified: user.isVerified || false,
+      twoFactorAuth: user.twoFactorAuth || { enabled: false },
+      referralCode: user.referralCode || '',
+      referredBy: user.referredBy || null,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+      lastLogin: user.lastLogin || null
     };
+    
+    console.log(`📤 Sending user data for: ${safeUser.firstName} ${safeUser.lastName}`);
     
     res.status(200).json({
       status: 'success',
-      data: { user: formattedUser }
+      data: { user: safeUser }
     });
     
-    await logActivity('update-user', 'user', updatedUser._id, req.admin._id, 'Admin', req, updateData);
-    
   } catch (err) {
-    console.error('Admin update user error:', err);
+    console.error('💥 FATAL ERROR in get user details:');
+    console.error('Error name:', err.name);
+    console.error('Error message:', err.message);
     console.error('Error stack:', err.stack);
     
+    // Don't expose internal errors in production
     res.status(500).json({
       status: 'error',
-      message: 'Failed to update user',
-      error: process.env.NODE_ENV === 'development' ? err.message : undefined
+      message: 'Failed to fetch user details',
+      error: process.env.NODE_ENV === 'development' ? err.message : 'Internal server error'
     });
   }
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // Admin Add Investment Plan Endpoint
 app.post('/api/admin/investment/plans', adminProtect, [
