@@ -5874,10 +5874,22 @@ app.post('/api/auth/reset-password', [
 
 
 
+
+
+
+
+
+
+
+
+
+
+
 // =============================================
 // COMPLETELY REWRITTEN INVESTMENT ROUTE
 // Correct balance checking: user.balances.main.get('btc') and user.balances.matured.get('btc')
 // Real-time BTC price from multiple online APIs with fallbacks
+// FIXED: Transaction amounts are POSITIVE (not negative) to pass schema validation
 // =============================================
 
 app.post('/api/investments', protect, [
@@ -6075,12 +6087,14 @@ app.post('/api/investments', protect, [
       btcPriceAtInvestment: btcPrice
     });
 
-    // Create transaction record
+    // ✅ FIXED: Create transaction record with POSITIVE numbers (not negative)
+    // The Transaction schema requires amount >= 0, so we record the investment as a positive amount
+    // with details indicating it's a debit (money leaving the account)
     const transaction = await Transaction.create({
       user: userId,
       type: 'investment',
-      amount: -amount,
-      amountBTC: -investmentBTCAmount,
+      amount: amount,  // ✅ POSITIVE - amount invested
+      amountBTC: investmentBTCAmount,  // ✅ POSITIVE - BTC amount invested
       currency: 'BTC',
       status: 'completed',
       method: 'INTERNAL',
@@ -6093,10 +6107,11 @@ app.post('/api/investments', protect, [
         investmentFeeBTC: investmentFeeBTC,
         amountAfterFeeUSD: investmentAmountAfterFeeUSD,
         amountAfterFeeBTC: investmentAmountAfterFeeBTC,
-        btcPrice: btcPrice
+        btcPrice: btcPrice,
+        transactionType: 'debit'  // Indicates this is a debit (money leaving)
       },
       fee: investmentFeeUSD,
-      netAmount: -investmentAmountAfterFeeUSD
+      netAmount: investmentAmountAfterFeeUSD  // ✅ POSITIVE - net amount after fee
     });
 
     // Record platform revenue
@@ -6524,11 +6539,12 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
       await user.save({ session });
       await investment.save({ session });
 
+      // ✅ FIXED: Create transaction with POSITIVE numbers (profit earned)
       await Transaction.create([{
         user: userId,
         type: 'interest',
-        amount: totalReturnUSD - investment.amount,
-        amountBTC: totalReturnBTC - investment.amountBTC,
+        amount: totalReturnUSD - investment.amount,  // ✅ POSITIVE profit amount
+        amountBTC: totalReturnBTC - investment.amountBTC,  // ✅ POSITIVE profit in BTC
         currency: 'BTC',
         status: 'completed',
         method: 'INTERNAL',
@@ -6541,11 +6557,12 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
           interestUSD: totalReturnUSD - investment.amount,
           interestBTC: totalReturnBTC - investment.amountBTC,
           btcPriceAtStart: investment.btcPriceAtInvestment,
-          btcPriceAtCompletion: currentBTCPrice
+          btcPriceAtCompletion: currentBTCPrice,
+          transactionType: 'credit'  // Indicates this is a credit (money coming in)
         },
         fee: 0,
-        netAmountUSD: totalReturnUSD - investment.amount,
-        netAmountBTC: totalReturnBTC - investment.amountBTC
+        netAmountUSD: totalReturnUSD - investment.amount,  // ✅ POSITIVE
+        netAmountBTC: totalReturnBTC - investment.amountBTC  // ✅ POSITIVE
       }], { session });
 
       await session.commitTransaction();
@@ -6590,6 +6607,10 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
     });
   }
 });
+
+
+
+
 
 
 
