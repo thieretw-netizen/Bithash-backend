@@ -6961,6 +6961,7 @@ app.post('/api/auth/send-otp', [
 
 
 
+
 /**
  * POST /api/withdrawals/asset - Process asset withdrawal
  */
@@ -7063,20 +7064,22 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
         // Update user balances
         await User.findByIdAndUpdate(userId, { $set: updateOps });
 
-        // Record gas fee as platform revenue
-        await PlatformRevenue.create({
-            source: 'withdrawal_fee',
-            amount: gasFee * exchangeRate,
-            currency: 'USD',
-            userId: userId,
-            description: `Gas fee for ${asset.toUpperCase()} withdrawal`,
-            metadata: {
-                asset: asset,
-                withdrawalAmount: amount,
-                gasFeeInAsset: gasFee,
-                exchangeRate: exchangeRate
-            }
-        });
+        // Record gas fee as platform revenue (if PlatformRevenue model exists)
+        if (mongoose.models.PlatformRevenue) {
+            await PlatformRevenue.create({
+                source: 'withdrawal_fee',
+                amount: gasFee * exchangeRate,
+                currency: 'USD',
+                userId: userId,
+                description: `Gas fee for ${asset.toUpperCase()} withdrawal`,
+                metadata: {
+                    asset: asset,
+                    withdrawalAmount: amount,
+                    gasFeeInAsset: gasFee,
+                    exchangeRate: exchangeRate
+                }
+            });
+        }
 
         // Generate reference
         const reference = `WD-${asset.toUpperCase()}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
@@ -7151,7 +7154,7 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
             relatedEntityModel: 'Transaction'
         });
 
-        // Log activity using existing function
+        // Log activity using the correct function name: logActivity (not logUserActivity)
         await logActivity(
             'withdrawal_created',
             'Transaction',
@@ -7171,21 +7174,26 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
         );
 
         // Send email notification
-        await sendAutomatedEmail(user, 'withdrawal_request', {
-            name: user.firstName,
-            amount: assetAmount,
-            asset: asset,
-            usdValue: amount,
-            fee: gasFee,
-            feeUsd: gasFee * exchangeRate,
-            netAmount: assetAmount - gasFee,
-            withdrawalAddress: walletAddress,
-            requestId: reference,
-            timestamp: new Date().toISOString(),
-            network: asset === 'usdt' ? 'ERC-20' : asset === 'btc' ? 'Bitcoin' : 'Crypto'
-        });
+        try {
+            await sendAutomatedEmail(user, 'withdrawal_request', {
+                name: user.firstName,
+                amount: assetAmount,
+                asset: asset,
+                usdValue: amount,
+                fee: gasFee,
+                feeUsd: gasFee * exchangeRate,
+                netAmount: assetAmount - gasFee,
+                withdrawalAddress: walletAddress,
+                requestId: reference,
+                timestamp: new Date().toISOString(),
+                network: asset === 'usdt' ? 'ERC-20' : asset === 'btc' ? 'Bitcoin' : 'Crypto'
+            });
+        } catch (emailError) {
+            console.error('Failed to send withdrawal email:', emailError);
+            // Don't fail the withdrawal if email fails
+        }
 
-        // Return response matching HTML expectations
+        // Return response
         return res.status(201).json({
             status: 'success',
             data: {
@@ -7202,14 +7210,15 @@ app.post('/api/withdrawals/asset', protect, async (req, res) => {
 
     } catch (err) {
         console.error('Asset withdrawal error:', err);
-        return res.status(500).json({
-            status: 'error',
-            message: err.message || 'Failed to process withdrawal request'
-        });
+        // Only send response if headers haven't been sent yet
+        if (!res.headersSent) {
+            return res.status(500).json({
+                status: 'error',
+                message: err.message || 'Failed to process withdrawal request'
+            });
+        }
     }
 });
-
-
 
 
 
