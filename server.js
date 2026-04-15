@@ -18467,7 +18467,17 @@ app.get('/api/admin/stats', adminProtect, async (req, res) => {
 
 
 
-// GET /api/admin/users - Get all users with real-time USD balance calculations from crypto Maps
+
+
+
+
+
+
+
+
+
+
+// GET /api/admin/users - Get all users with real-time USD balances from crypto Maps
 app.get('/api/admin/users', adminProtect, async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -18483,42 +18493,53 @@ app.get('/api/admin/users', adminProtect, async (req, res) => {
     const totalUsers = await User.countDocuments({});
     const totalPages = Math.ceil(totalUsers / limit);
 
-    const formattedUsers = await Promise.all(users.map(async (user) => {
+    const formattedUsers = [];
+
+    for (const user of users) {
       let mainUSD = 0;
       let activeUSD = 0;
       let maturedUSD = 0;
 
-      // Calculate MAIN wallet USD value from crypto Map
-      if (user.balances?.main && user.balances.main instanceof Map) {
-        for (const [crypto, amount] of user.balances.main.entries()) {
+      // Calculate MAIN wallet USD value from real crypto Map
+      if (user.balances && user.balances.main) {
+        const mainMap = user.balances.main;
+        for (const [crypto, amount] of Object.entries(mainMap)) {
           if (amount > 0 && crypto !== 'usd') {
             const price = await getCryptoPrice(crypto.toUpperCase());
-            if (price) mainUSD += amount * price;
+            if (price) {
+              mainUSD += amount * price;
+            }
           }
         }
       }
 
-      // Calculate ACTIVE wallet USD value from crypto Map
-      if (user.balances?.active && user.balances.active instanceof Map) {
-        for (const [crypto, amount] of user.balances.active.entries()) {
+      // Calculate ACTIVE wallet USD value from real crypto Map
+      if (user.balances && user.balances.active) {
+        const activeMap = user.balances.active;
+        for (const [crypto, amount] of Object.entries(activeMap)) {
           if (amount > 0 && crypto !== 'usd') {
             const price = await getCryptoPrice(crypto.toUpperCase());
-            if (price) activeUSD += amount * price;
+            if (price) {
+              activeUSD += amount * price;
+            }
           }
         }
       }
 
-      // Calculate MATURED wallet USD value from crypto Map
-      if (user.balances?.matured && user.balances.matured instanceof Map) {
-        for (const [crypto, amount] of user.balances.matured.entries()) {
+      // Calculate MATURED wallet USD value from real crypto Map
+      if (user.balances && user.balances.matured) {
+        const maturedMap = user.balances.matured;
+        for (const [crypto, amount] of Object.entries(maturedMap)) {
           if (amount > 0 && crypto !== 'usd') {
             const price = await getCryptoPrice(crypto.toUpperCase());
-            if (price) maturedUSD += amount * price;
+            if (price) {
+              maturedUSD += amount * price;
+            }
           }
         }
       }
 
-      return {
+      formattedUsers.push({
         _id: user._id,
         firstName: user.firstName,
         lastName: user.lastName,
@@ -18531,8 +18552,8 @@ app.get('/api/admin/users', adminProtect, async (req, res) => {
         status: user.status,
         lastLogin: user.lastLogin,
         createdAt: user.createdAt
-      };
-    }));
+      });
+    }
 
     res.status(200).json({
       status: 'success',
@@ -18579,6 +18600,7 @@ app.get('/api/admin/restrictions', adminProtect, restrictTo('super'), async (req
     });
   }
 });
+
 
 
 
