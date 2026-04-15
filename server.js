@@ -4829,34 +4829,32 @@ case 'crypto_deposit':
         `;
         break;
 
-      case 'login_success':
-        subject = 'New Login Detected - ₿itHash Capital';
-        html = `
-          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-            ${brandHeader}
-            <div style="padding: 30px; background: #FFFFFF;">
-              <h2 style="color: #0B0E11; margin-bottom: 20px;">New Login Detected</h2>
-              <p style="color: #333333; line-height: 1.6;">Hello ${data.name},</p>
-              <p style="color: #333333; line-height: 1.6;">A new login was detected on your account.</p>
-              <div style="background: #F5F5F5; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                <p style="margin: 5px 0;"><strong>Device:</strong> ${data.device}</p>
-                <p style="margin: 5px 0;"><strong>Location:</strong> ${data.location}</p>
-                <p style="margin: 5px 0;"><strong>IP Address:</strong> ${data.ip}</p>
-                <p style="margin: 5px 0;"><strong>Time:</strong> ${(() => {
-  let date = data.timestamp;
-  if (!date) return 'Unknown';
-  if (date instanceof Date) return date.toLocaleString();
-  const parsed = new Date(date);
-  return isNaN(parsed.getTime()) ? new Date().toLocaleString() : parsed.toLocaleString();
-})()}</p>
-              </div>
-              <p style="color: #333333; line-height: 1.6;">If this wasn't you, please contact support immediately.</p>
-              <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${formattedTimestamp}</p>
-            </div>
-            ${brandFooter}
-          </div>
-        `;
-        break;
+case 'login_success':
+  // Use a fallback if timestamp is missing
+  const loginTime = data.timestamp ? new Date(data.timestamp) : new Date();
+  const isValidTime = !isNaN(loginTime.getTime());
+  
+  subject = 'New Login Detected - ₿itHash Capital';
+  html = `
+    <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+      ${brandHeader}
+      <div style="padding: 30px; background: #FFFFFF;">
+        <h2 style="color: #0B0E11; margin-bottom: 20px;">New Login Detected</h2>
+        <p style="color: #333333; line-height: 1.6;">Hello ${data.name},</p>
+        <p style="color: #333333; line-height: 1.6;">A new login was detected on your account.</p>
+        <div style="background: #F5F5F5; padding: 20px; border-radius: 8px; margin: 20px 0;">
+          <p style="margin: 5px 0;"><strong>Device:</strong> ${data.device || 'Unknown'}</p>
+          <p style="margin: 5px 0;"><strong>Location:</strong> ${data.location || 'Unknown'}</p>
+          <p style="margin: 5px 0;"><strong>IP Address:</strong> ${data.ip || 'Unknown'}</p>
+          <p style="margin: 5px 0;"><strong>Time:</strong> ${isValidTime ? loginTime.toLocaleString() : formattedTimestamp}</p>
+        </div>
+        <p style="color: #333333; line-height: 1.6;">If this wasn't you, please contact support immediately.</p>
+        <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${formattedTimestamp}</p>
+      </div>
+      ${brandFooter}
+    </div>
+  `;
+  break;
 
       case 'password_changed':
         subject = 'Password Changed - ₿itHash Capital';
