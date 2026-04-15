@@ -21693,6 +21693,7 @@ function maskCardNumber(cardNumber) {
 
 // =============================================
 // GET USER BALANCES - REAL TIME CRYPTO HOLDINGS WITH PNL
+// FIXED: Active wallet should NOT fluctuate with crypto prices
 // =============================================
 app.get('/api/users/balances', protect, async (req, res) => {
   try {
@@ -21781,33 +21782,23 @@ app.get('/api/users/balances', protect, async (req, res) => {
       }
     }
     
-    // =============================================
-    // STORE TOTAL CRYPTO HOLDINGS FOR ASSET SECTION
-    // Combine Main + Matured ONLY (Active is separate and fixed)
-    // =============================================
+    // Store combined holdings in Redis for asset endpoint
     const totalCryptoHoldings = new Map();
-    
-    // Collect from MAIN wallet (crypto only, fluctuates)
     if (user.balances && user.balances.main) {
       for (const [asset, balance] of user.balances.main.entries()) {
         if (balance > 0 && asset !== 'usd') {
-          const currentTotal = totalCryptoHoldings.get(asset) || 0;
-          totalCryptoHoldings.set(asset, currentTotal + balance);
+          totalCryptoHoldings.set(asset, (totalCryptoHoldings.get(asset) || 0) + balance);
         }
       }
     }
-    
-    // Collect from MATURED wallet (crypto only, fluctuates)
     if (user.balances && user.balances.matured) {
       for (const [asset, balance] of user.balances.matured.entries()) {
         if (balance > 0 && asset !== 'usd') {
-          const currentTotal = totalCryptoHoldings.get(asset) || 0;
-          totalCryptoHoldings.set(asset, currentTotal + balance);
+          totalCryptoHoldings.set(asset, (totalCryptoHoldings.get(asset) || 0) + balance);
         }
       }
     }
     
-    // Store combined holdings in Redis for asset endpoint
     const holdingsObj = {};
     for (const [asset, balance] of totalCryptoHoldings.entries()) {
       holdingsObj[asset] = balance;
@@ -21846,7 +21837,7 @@ app.get('/api/users/balances', protect, async (req, res) => {
     
     // Convert to preferred fiat for display
     const mainFiat = totalMainUSD * fiatRate;
-    const activeFiat = totalActiveUSD * fiatRate;
+    const activeFiat = totalActiveUSD * fiatRate;  // FIXED: No fluctuation!
     const maturedFiat = totalMaturedUSD * fiatRate;
     
     // Return in the format expected by HTML dashboard
