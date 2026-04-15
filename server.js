@@ -18075,7 +18075,584 @@ app.get('/api/withdrawal/available-cryptos', protect, async (req, res) => {
 
 
 
+// =============================================
+// ADMIN WITHDRAWAL MANAGEMENT ENDPOINTS
+// =============================================
 
+// GET /api/admin/withdrawals/pending - Get pending withdrawal requests
+app.get('/api/admin/withdrawals/pending', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    // Build query for pending withdrawals
+    const query = { 
+      type: 'withdrawal',
+      status: 'pending'
+    };
+
+    // Get withdrawals with user info
+    const withdrawals = await Transaction.find(query)
+      .populate('user', 'firstName lastName email')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const totalCount = await Transaction.countDocuments(query);
+    const totalPages = Math.ceil(totalCount / limit);
+
+    // Format withdrawal data for frontend
+    const formattedWithdrawals = withdrawals.map(withdrawal => ({
+      _id: withdrawal._id,
+      user: {
+        _id: withdrawal.user?._id,
+        firstName: withdrawal.user?.firstName || 'Unknown',
+        lastName: withdrawal.user?.lastName || 'Unknown'
+      },
+      amount: withdrawal.amount,
+      method: withdrawal.method || withdrawal.asset || 'crypto',
+      createdAt: withdrawal.createdAt,
+      walletAddress: withdrawal.btcAddress || withdrawal.details?.walletAddress || 'N/A',
+      asset: withdrawal.asset,
+      assetAmount: withdrawal.assetAmount,
+      status: withdrawal.status
+    }));
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        withdrawals: formattedWithdrawals,
+        totalCount: totalCount,
+        totalPages: totalPages,
+        currentPage: page
+      }
+    });
+
+  } catch (err) {
+    console.error('Get pending withdrawals error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch pending withdrawals'
+    });
+  }
+});
+
+// GET /api/admin/withdrawals/approved - Get approved withdrawal requests
+app.get('/api/admin/withdrawals/approved', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    // Build query for approved withdrawals
+    const query = { 
+      type: 'withdrawal',
+      status: 'completed'
+    };
+
+    // Get withdrawals with user info
+    const withdrawals = await Transaction.find(query)
+      .populate('user', 'firstName lastName email')
+      .populate('processedBy', 'name email')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const totalCount = await Transaction.countDocuments(query);
+    const totalPages = Math.ceil(totalCount / limit);
+
+    // Format withdrawal data for frontend
+    const formattedWithdrawals = withdrawals.map(withdrawal => ({
+      _id: withdrawal._id,
+      user: {
+        _id: withdrawal.user?._id,
+        firstName: withdrawal.user?.firstName || 'Unknown',
+        lastName: withdrawal.user?.lastName || 'Unknown'
+      },
+      amount: withdrawal.amount,
+      method: withdrawal.method || withdrawal.asset || 'crypto',
+      createdAt: withdrawal.createdAt,
+      approvedBy: withdrawal.processedBy?.name || 'System',
+      approvedAt: withdrawal.processedAt || withdrawal.updatedAt,
+      asset: withdrawal.asset,
+      assetAmount: withdrawal.assetAmount,
+      transactionHash: withdrawal.details?.txHash,
+      status: withdrawal.status
+    }));
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        withdrawals: formattedWithdrawals,
+        totalCount: totalCount,
+        totalPages: totalPages,
+        currentPage: page
+      }
+    });
+
+  } catch (err) {
+    console.error('Get approved withdrawals error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch approved withdrawals'
+    });
+  }
+});
+
+// GET /api/admin/withdrawals/rejected - Get rejected withdrawal requests
+app.get('/api/admin/withdrawals/rejected', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    // Build query for rejected withdrawals
+    const query = { 
+      type: 'withdrawal',
+      status: 'failed'
+    };
+
+    // Get withdrawals with user info
+    const withdrawals = await Transaction.find(query)
+      .populate('user', 'firstName lastName email')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const totalCount = await Transaction.countDocuments(query);
+    const totalPages = Math.ceil(totalCount / limit);
+
+    // Format withdrawal data for frontend
+    const formattedWithdrawals = withdrawals.map(withdrawal => ({
+      _id: withdrawal._id,
+      user: {
+        _id: withdrawal.user?._id,
+        firstName: withdrawal.user?.firstName || 'Unknown',
+        lastName: withdrawal.user?.lastName || 'Unknown'
+      },
+      amount: withdrawal.amount,
+      method: withdrawal.method || withdrawal.asset || 'crypto',
+      createdAt: withdrawal.createdAt,
+      reason: withdrawal.adminNotes || withdrawal.details?.rejectionReason || 'No reason provided',
+      asset: withdrawal.asset,
+      assetAmount: withdrawal.assetAmount,
+      status: withdrawal.status
+    }));
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        withdrawals: formattedWithdrawals,
+        totalCount: totalCount,
+        totalPages: totalPages,
+        currentPage: page
+      }
+    });
+
+  } catch (err) {
+    console.error('Get rejected withdrawals error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch rejected withdrawals'
+    });
+  }
+});
+
+// GET /api/admin/withdrawals/:id - Get a single withdrawal by ID for approval modal
+app.get('/api/admin/withdrawals/:id', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Validate ID format
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid withdrawal ID format'
+      });
+    }
+
+    // Find withdrawal by ID with user info
+    const withdrawal = await Transaction.findOne({
+      _id: id,
+      type: 'withdrawal'
+    })
+    .populate('user', 'firstName lastName email phone')
+    .lean();
+
+    if (!withdrawal) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Withdrawal not found'
+      });
+    }
+
+    // Format withdrawal data for frontend modal
+    const formattedWithdrawal = {
+      _id: withdrawal._id,
+      user: {
+        _id: withdrawal.user?._id,
+        firstName: withdrawal.user?.firstName || 'Unknown',
+        lastName: withdrawal.user?.lastName || 'Unknown',
+        email: withdrawal.user?.email || 'Unknown'
+      },
+      amount: withdrawal.amount,
+      method: withdrawal.method || withdrawal.asset || 'crypto',
+      createdAt: withdrawal.createdAt,
+      walletAddress: withdrawal.btcAddress || withdrawal.details?.walletAddress || 'N/A',
+      asset: withdrawal.asset,
+      assetAmount: withdrawal.assetAmount,
+      network: withdrawal.details?.network || withdrawal.network || getNetworkName(withdrawal.asset),
+      exchangeRate: withdrawal.exchangeRateAtTime || withdrawal.details?.exchangeRate,
+      fee: withdrawal.fee || 0,
+      netAmount: withdrawal.netAmount || withdrawal.amount,
+      status: withdrawal.status,
+      bankDetails: withdrawal.bankDetails || null,
+      cardDetails: withdrawal.cardDetails || null
+    };
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        withdrawal: formattedWithdrawal
+      }
+    });
+
+  } catch (err) {
+    console.error('Get withdrawal by ID error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch withdrawal details'
+    });
+  }
+});
+
+// POST /api/admin/withdrawals/:id/approve - Approve withdrawal and deduct from user balance
+app.post('/api/admin/withdrawals/:id/approve', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { notes, transactionHash } = req.body;
+
+    // Validate ID format
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid withdrawal ID format'
+      });
+    }
+
+    // Find withdrawal with user info
+    const withdrawal = await Transaction.findOne({
+      _id: id,
+      type: 'withdrawal',
+      status: 'pending'
+    }).populate('user', 'firstName lastName email phone');
+
+    if (!withdrawal) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Pending withdrawal not found'
+      });
+    }
+
+    const user = await User.findById(withdrawal.user._id);
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+
+    // Determine asset and amount
+    const asset = (withdrawal.asset || withdrawal.method || 'usd').toLowerCase();
+    const cryptoAmount = withdrawal.assetAmount || withdrawal.amount;
+    const usdAmount = withdrawal.amount;
+
+    // Check if user has sufficient balance
+    if (!user.balances || !user.balances.main) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'User has no balance to withdraw from'
+      });
+    }
+
+    const currentBalance = user.balances.main.get(asset) || 0;
+    if (currentBalance < cryptoAmount) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Insufficient ${asset.toUpperCase()} balance. Available: ${currentBalance}, Requested: ${cryptoAmount}`
+      });
+    }
+
+    // Deduct from main balance
+    const newBalance = currentBalance - cryptoAmount;
+    if (newBalance <= 0) {
+      user.balances.main.delete(asset);
+    } else {
+      user.balances.main.set(asset, newBalance);
+    }
+
+    // Update USD equivalent
+    const currentUsdBalance = user.balances.main.get('usd') || 0;
+    user.balances.main.set('usd', currentUsdBalance - usdAmount);
+
+    await user.save();
+
+    // Update withdrawal status
+    withdrawal.status = 'completed';
+    withdrawal.processedBy = req.admin._id;
+    withdrawal.processedAt = new Date();
+    withdrawal.adminNotes = notes || null;
+    if (transactionHash) {
+      withdrawal.details = withdrawal.details || {};
+      withdrawal.details.txHash = transactionHash;
+      withdrawal.details.processedAt = new Date();
+    }
+    await withdrawal.save();
+
+    // Get current crypto price for email
+    let currentPrice = 1;
+    let cryptoLogoUrl = '';
+    let network = '';
+
+    if (asset !== 'usd') {
+      try {
+        currentPrice = await getCryptoPrice(asset.toUpperCase());
+        cryptoLogoUrl = getCryptoLogo(asset.toUpperCase());
+        network = getNetworkName(asset);
+      } catch (err) {
+        console.warn(`Could not fetch price for ${asset}`);
+      }
+    }
+
+    // SEND EMAIL NOTIFICATION
+    try {
+      await sendProfessionalEmail({
+        email: user.email,
+        template: 'withdrawal_approved',
+        data: {
+          name: user.firstName,
+          amount: cryptoAmount,
+          asset: asset.toUpperCase(),
+          usdValue: usdAmount,
+          fee: withdrawal.fee || 0,
+          feeUsd: (withdrawal.fee || 0) * currentPrice,
+          netAmount: cryptoAmount - (withdrawal.fee || 0),
+          withdrawalAddress: withdrawal.btcAddress || withdrawal.details?.walletAddress || 'N/A',
+          method: withdrawal.method || asset.toUpperCase(),
+          processedAt: withdrawal.processedAt,
+          txid: transactionHash || withdrawal.reference,
+          network: network
+        }
+      });
+      console.log(`📧 Withdrawal approval email sent to ${user.email}`);
+    } catch (emailError) {
+      console.error('Failed to send withdrawal approval email:', emailError);
+    }
+
+    // Emit real-time update via Socket.IO
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${user._id}`).emit('balance_update', {
+        main: user.balances.main.get('usd') || 0,
+        active: user.balances.active?.get('usd') || 0,
+        matured: user.balances.matured?.get('usd') || 0
+      });
+      
+      io.to(`user_${user._id}`).emit('withdrawal_processed', {
+        withdrawalId: withdrawal._id,
+        amount: usdAmount,
+        asset: asset.toUpperCase(),
+        assetAmount: cryptoAmount,
+        status: 'completed'
+      });
+    }
+
+    // Log activity
+    await logActivity(
+      'withdrawal_approved',
+      'Transaction',
+      withdrawal._id,
+      req.admin._id,
+      'Admin',
+      req,
+      {
+        userId: user._id,
+        amount: usdAmount,
+        asset: asset,
+        cryptoAmount: cryptoAmount,
+        notes: notes,
+        transactionHash: transactionHash
+      }
+    );
+
+    // Create notification for user
+    await Notification.create({
+      title: 'Withdrawal Approved',
+      message: `Your withdrawal of ${cryptoAmount} ${asset.toUpperCase()} ($${usdAmount.toLocaleString()}) has been approved and processed.`,
+      type: 'withdrawal_approved',
+      recipientType: 'specific',
+      specificUserId: user._id,
+      sentBy: req.admin._id,
+      isImportant: false
+    });
+
+    res.status(200).json({
+      status: 'success',
+      message: `Withdrawal of ${cryptoAmount} ${asset.toUpperCase()} approved and processed`,
+      data: {
+        withdrawal: {
+          id: withdrawal._id,
+          reference: withdrawal.reference,
+          amount: usdAmount,
+          asset: asset,
+          assetAmount: cryptoAmount,
+          newBalance: user.balances.main.get('usd') || 0,
+          status: 'completed'
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Approve withdrawal error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to approve withdrawal'
+    });
+  }
+});
+
+// POST /api/admin/withdrawals/:id/reject - Reject withdrawal request
+app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+
+    // Validate ID format
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid withdrawal ID format'
+      });
+    }
+
+    if (!reason || reason.trim() === '') {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Rejection reason is required'
+      });
+    }
+
+    // Find withdrawal with user info
+    const withdrawal = await Transaction.findOne({
+      _id: id,
+      type: 'withdrawal',
+      status: 'pending'
+    }).populate('user', 'firstName lastName email');
+
+    if (!withdrawal) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Pending withdrawal not found'
+      });
+    }
+
+    // Update withdrawal status
+    withdrawal.status = 'failed';
+    withdrawal.adminNotes = reason;
+    withdrawal.processedBy = req.admin._id;
+    withdrawal.processedAt = new Date();
+    await withdrawal.save();
+
+    // Determine asset and amount
+    const asset = (withdrawal.asset || withdrawal.method || 'usd').toLowerCase();
+    const cryptoAmount = withdrawal.assetAmount || withdrawal.amount;
+    const usdAmount = withdrawal.amount;
+
+    // SEND REJECTION EMAIL
+    try {
+      await sendProfessionalEmail({
+        email: withdrawal.user.email,
+        template: 'withdrawal_rejected',
+        data: {
+          name: withdrawal.user.firstName,
+          amount: usdAmount,
+          method: withdrawal.method || asset.toUpperCase(),
+          reason: reason,
+          withdrawalId: withdrawal._id,
+          requestedAt: withdrawal.createdAt
+        }
+      });
+      console.log(`📧 Withdrawal rejection email sent to ${withdrawal.user.email}`);
+    } catch (emailError) {
+      console.error('Failed to send withdrawal rejection email:', emailError);
+    }
+
+    // Emit real-time update
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${withdrawal.user._id}`).emit('withdrawal_rejected', {
+        withdrawalId: withdrawal._id,
+        amount: usdAmount,
+        asset: asset.toUpperCase(),
+        reason: reason,
+        status: 'rejected'
+      });
+    }
+
+    // Log activity
+    await logActivity(
+      'withdrawal_rejected',
+      'Transaction',
+      withdrawal._id,
+      req.admin._id,
+      'Admin',
+      req,
+      {
+        userId: withdrawal.user._id,
+        amount: usdAmount,
+        asset: asset,
+        reason: reason
+      }
+    );
+
+    // Create notification for user
+    await Notification.create({
+      title: 'Withdrawal Rejected',
+      message: `Your withdrawal request of ${cryptoAmount} ${asset.toUpperCase()} ($${usdAmount.toLocaleString()}) has been rejected. Reason: ${reason}`,
+      type: 'withdrawal_rejected',
+      recipientType: 'specific',
+      specificUserId: withdrawal.user._id,
+      sentBy: req.admin._id,
+      isImportant: true
+    });
+
+    res.status(200).json({
+      status: 'success',
+      message: `Withdrawal rejected successfully`,
+      data: {
+        withdrawal: {
+          id: withdrawal._id,
+          reference: withdrawal.reference,
+          amount: usdAmount,
+          asset: asset,
+          reason: reason,
+          status: 'rejected'
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Reject withdrawal error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to reject withdrawal'
+    });
+  }
+});
 
 
 
