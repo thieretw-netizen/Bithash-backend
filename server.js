@@ -22121,6 +22121,7 @@ app.get('/api/withdrawals/asset', protect, async (req, res) => {
 
 // =============================================
 // POST /api/withdrawals/confirm-gas-payment - Confirm gas fee payment
+// FIXED: Added required transactionId field
 // =============================================
 app.post('/api/withdrawals/confirm-gas-payment', protect, async (req, res) => {
     try {
@@ -22132,33 +22133,75 @@ app.post('/api/withdrawals/confirm-gas-payment', protect, async (req, res) => {
             withdrawalData
         } = req.body;
 
+        console.log('Confirm gas payment request:', { userId, asset, amount, address });
+
         // Get current price for USD value calculation
         let price = 0;
         try {
             price = await getCryptoPrice(asset.toUpperCase());
         } catch (err) {
             console.warn(`Could not fetch price for ${asset}`);
+            price = withdrawalData?.exchangeRate || 1;
         }
 
-        // Create a deposit record for the gas fee
+        const usdValue = amount * price;
+
+        // FIRST: Create a transaction record (required for DepositAsset)
+        const transaction = await Transaction.create({
+            user: userId,
+            type: 'deposit',
+            amount: usdValue,
+            asset: asset.toLowerCase(),
+            assetAmount: amount,
+            currency: 'USD',
+            status: 'pending',
+            method: asset.toUpperCase(),
+            reference: `GAS-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+            details: {
+                type: 'gas_fee',
+                withdrawalReference: withdrawalData?.reference,
+                destinationAddress: address,
+                asset: asset,
+                amount: amount,
+                usdValue: usdValue,
+                price: price
+            },
+            fee: 0,
+            netAmount: usdValue
+        });
+
+        console.log('Created gas fee transaction:', transaction._id);
+
+        // THEN: Create the deposit asset record with the transactionId
         const gasFeeDeposit = await DepositAsset.create({
             user: userId,
-            asset: asset,
+            asset: asset.toLowerCase(),
             amount: amount,
-            usdValue: amount * (price || withdrawalData?.exchangeRate || 1),
+            usdValue: usdValue,
+            transactionId: transaction._id,  // ✅ REQUIRED FIELD - FIXED
             status: 'pending',
             metadata: {
                 type: 'gas_fee',
                 withdrawalReference: withdrawalData?.reference,
                 destinationAddress: address,
-                submittedAt: new Date()
+                submittedAt: new Date(),
+                price: price,
+                transactionId: transaction._id
             }
+        });
+
+        console.log('Created gas fee deposit record:', gasFeeDeposit._id);
+
+        // Update the transaction with the deposit ID
+        await Transaction.findByIdAndUpdate(transaction._id, {
+            'details.depositId': gasFeeDeposit._id
         });
 
         return res.status(200).json({
             status: 'success',
             data: {
                 depositId: gasFeeDeposit._id,
+                transactionId: transaction._id,
                 message: 'Gas fee payment recorded, awaiting confirmation'
             }
         });
