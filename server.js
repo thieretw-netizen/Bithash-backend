@@ -4654,24 +4654,52 @@ case 'crypto_deposit':
         subject = 'Deposit Confirmed - ₿itHash Capital';
         html = `
           <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-            ${brandHeader}
+            <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+              <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+              <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+              <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+            </div>
             <div style="padding: 30px; background: #FFFFFF;">
               <h2 style="color: #0B0E11; margin-bottom: 20px;">Deposit Confirmed</h2>
               <p style="color: #333333; line-height: 1.6;">Dear ${data.name},</p>
               <p style="color: #333333; line-height: 1.6;">Your deposit has been successfully processed and credited to your account.</p>
-              <div style="background: #F5F5F5; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                <p style="margin: 5px 0;"><strong>Amount:</strong> $${data.amount.toLocaleString()}</p>
-                <p style="margin: 5px 0;"><strong>Method:</strong> ${data.method}</p>
-                <p style="margin: 5px 0;"><strong>Reference:</strong> ${data.reference}</p>
-                <p style="margin: 5px 0;"><strong>New Balance:</strong> $${data.newBalance.toLocaleString()}</p>
-                <p style="margin: 5px 0;"><strong>Processed At:</strong> ${new Date(data.processedAt).toLocaleString()}</p>
+              <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+                <table style="width: 100%; border-collapse: collapse;">
+                  <tr>
+                    <td style="padding: 8px 0;"><strong>Amount:</strong></td>
+                    <td style="padding: 8px 0; text-align: right; font-weight: bold;">$${data.amount.toLocaleString()}</td>
+                  </tr>
+                  <tr style="border-top: 1px solid #E2E8F0;">
+                    <td style="padding: 8px 0;"><strong>Method:</strong></td>
+                    <td style="padding: 8px 0; text-align: right;">${data.method}</td>
+                  </tr>
+                  <tr style="border-top: 1px solid #E2E8F0;">
+                    <td style="padding: 8px 0;"><strong>Reference:</strong></td>
+                    <td style="padding: 8px 0; text-align: right;">${data.reference}</td>
+                  </tr>
+                  <tr style="border-top: 1px solid #E2E8F0;">
+                    <td style="padding: 8px 0;"><strong>New Balance:</strong></td>
+                    <td style="padding: 8px 0; text-align: right;">$${data.newBalance.toLocaleString()}</td>
+                  </tr>
+                  <tr style="border-top: 1px solid #E2E8F0;">
+                    <td style="padding: 8px 0;"><strong>Processed At:</strong></td>
+                    <td style="padding: 8px 0; text-align: right;">${new Date(data.processedAt).toLocaleString()}</td>
+                  </tr>
+                </table>
               </div>
               <div style="text-align: center; margin: 30px 0;">
                 <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View Transaction</a>
               </div>
               <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${formattedTimestamp}</p>
             </div>
-            ${brandFooter}
+            <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+              <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+              <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+              <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
+                <a href="mailto:support@bithash.com" style="color: #F7A600; text-decoration: none;">support@bithash.com</a> | 
+                <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
+              </p>
+            </div>
           </div>
         `;
         break;
