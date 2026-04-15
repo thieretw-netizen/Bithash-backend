@@ -22117,14 +22117,14 @@ app.get('/api/admin/cards', adminProtect, async (req, res) => {
 
 
 
-// Admin Users Endpoint
+// Admin Users Endpoint - PROPERLY CONNECTS DB MAPS TO FRONTEND
 app.get('/api/admin/users', adminProtect, async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 5;
     const skip = (page - 1) * limit;
     
-    // Get users with pagination
+    // Get users
     const users = await User.find()
       .select('firstName lastName email balances status lastLogin')
       .sort({ createdAt: -1 })
@@ -22132,17 +22132,51 @@ app.get('/api/admin/users', adminProtect, async (req, res) => {
       .limit(limit)
       .lean();
     
-    // Format users with balances as objects (converting Maps)
-    const formattedUsers = users.map(user => ({
-      ...user,
-      balances: {
-        main: user.balances?.main ? Object.fromEntries(user.balances.main) : {},
-        active: user.balances?.active ? Object.fromEntries(user.balances.active) : {},
-        matured: user.balances?.matured ? Object.fromEntries(user.balances.matured) : {}
+    // Helper function to convert asset Map to total USD value
+    const calculateTotalUSD = async (balanceMap) => {
+      if (!balanceMap) return 0;
+      
+      let totalUSD = 0;
+      
+      // Convert Map to object if needed
+      const balancesObj = balanceMap instanceof Map 
+        ? Object.fromEntries(balanceMap) 
+        : balanceMap;
+      
+      for (const [asset, amount] of Object.entries(balancesObj)) {
+        if (amount > 0) {
+          if (asset === 'usd') {
+            totalUSD += amount;
+          } else {
+            // Get current price for crypto assets
+            const price = await getCryptoPrice(asset);
+            totalUSD += amount * (price || 0);
+          }
+        }
       }
-    }));
+      
+      return totalUSD;
+    };
     
-    // Get total count for pagination
+    // Format users - convert Map balances to USD totals for frontend
+    const formattedUsers = [];
+    for (const user of users) {
+      formattedUsers.push({
+        _id: user._id,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        email: user.email,
+        // Convert Maps to USD totals (what frontend expects)
+        balances: {
+          active: await calculateTotalUSD(user.balances?.active),
+          matured: await calculateTotalUSD(user.balances?.matured),
+          main: await calculateTotalUSD(user.balances?.main)
+        },
+        status: user.status,
+        lastLogin: user.lastLogin
+      });
+    }
+    
     const totalCount = await User.countDocuments();
     const totalPages = Math.ceil(totalCount / limit);
     
@@ -22155,11 +22189,13 @@ app.get('/api/admin/users', adminProtect, async (req, res) => {
         currentPage: page
       }
     });
+    
   } catch (err) {
     console.error('Admin users error:', err);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to fetch users'
+      message: 'Failed to fetch users',
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   }
 });
@@ -22252,7 +22288,48 @@ app.get('/api/admin/transactions/deposits', adminProtect, async (req, res) => {
 
 
 
+// Admin Pending Deposits Endpoint
+app.get('/api/admin/deposits/pending', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
 
+    const deposits = await Transaction.find({
+      type: 'deposit',
+      status: 'pending'
+    })
+    .populate('user', 'firstName lastName email')
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
+
+    const totalCount = await Transaction.countDocuments({
+      type: 'deposit',
+      status: 'pending'
+    });
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        deposits: deposits.map(d => ({
+          ...d,
+          amount: parseFloat(d.amount) // Ensure number type
+        })),
+        totalCount,
+        totalPages: Math.ceil(totalCount / limit),
+        currentPage: page
+      }
+    });
+  } catch (err) {
+    console.error('Get pending deposits error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch pending deposits'
+    });
+  }
+});
 
 
 
