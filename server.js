@@ -12076,6 +12076,9 @@ app.put('/api/admin/users/:userId/reactivate', adminProtect, async (req, res) =>
 
 
 
+// =============================================
+// ADMIN DEPOSITS ENDPOINTS - FIXED VERSION
+// =============================================
 
 // Admin Pending Deposits Endpoint
 app.get('/api/admin/deposits/pending', adminProtect, async (req, res) => {
@@ -12095,6 +12098,25 @@ app.get('/api/admin/deposits/pending', adminProtect, async (req, res) => {
     .limit(limit)
     .lean();
     
+    // Format deposits for frontend
+    const formattedDeposits = deposits.map(deposit => ({
+      _id: deposit._id,
+      user: {
+        _id: deposit.user?._id,
+        firstName: deposit.user?.firstName || 'Unknown',
+        lastName: deposit.user?.lastName || 'User',
+        email: deposit.user?.email || 'N/A'
+      },
+      amount: parseFloat(deposit.amount) || 0,
+      method: deposit.method || 'crypto',
+      asset: deposit.asset || deposit.method?.toLowerCase() || 'btc',
+      assetAmount: parseFloat(deposit.assetAmount) || 0,
+      createdAt: deposit.createdAt,
+      reference: deposit.reference,
+      proof: deposit.details?.txHash || deposit.details?.proof || null,
+      status: deposit.status
+    }));
+    
     // Get total count for pagination
     const totalCount = await Transaction.countDocuments({
       type: 'deposit',
@@ -12105,7 +12127,7 @@ app.get('/api/admin/deposits/pending', adminProtect, async (req, res) => {
     res.status(200).json({
       status: 'success',
       data: {
-        deposits,
+        deposits: formattedDeposits,
         totalCount,
         totalPages,
         currentPage: page
@@ -12127,7 +12149,7 @@ app.get('/api/admin/deposits/approved', adminProtect, async (req, res) => {
     const limit = parseInt(req.query.limit) || 5;
     const skip = (page - 1) * limit;
     
-    // Get approved deposits with user info
+    // Get approved/completed deposits with user info
     const deposits = await Transaction.find({
       type: 'deposit',
       status: 'completed'
@@ -12139,6 +12161,29 @@ app.get('/api/admin/deposits/approved', adminProtect, async (req, res) => {
     .limit(limit)
     .lean();
     
+    // Format deposits for frontend
+    const formattedDeposits = deposits.map(deposit => ({
+      _id: deposit._id,
+      user: {
+        _id: deposit.user?._id,
+        firstName: deposit.user?.firstName || 'Unknown',
+        lastName: deposit.user?.lastName || 'User',
+        email: deposit.user?.email || 'N/A'
+      },
+      amount: parseFloat(deposit.amount) || 0,
+      method: deposit.method || 'crypto',
+      asset: deposit.asset || deposit.method?.toLowerCase() || 'btc',
+      assetAmount: parseFloat(deposit.assetAmount) || 0,
+      createdAt: deposit.createdAt,
+      processedAt: deposit.processedAt,
+      processedBy: deposit.processedBy ? {
+        _id: deposit.processedBy._id,
+        name: deposit.processedBy.name
+      } : null,
+      reference: deposit.reference,
+      status: deposit.status
+    }));
+    
     // Get total count for pagination
     const totalCount = await Transaction.countDocuments({
       type: 'deposit',
@@ -12149,7 +12194,7 @@ app.get('/api/admin/deposits/approved', adminProtect, async (req, res) => {
     res.status(200).json({
       status: 'success',
       data: {
-        deposits,
+        deposits: formattedDeposits,
         totalCount,
         totalPages,
         currentPage: page
@@ -12171,7 +12216,7 @@ app.get('/api/admin/deposits/rejected', adminProtect, async (req, res) => {
     const limit = parseInt(req.query.limit) || 5;
     const skip = (page - 1) * limit;
     
-    // Get rejected deposits with user info
+    // Get rejected/failed deposits with user info
     const deposits = await Transaction.find({
       type: 'deposit',
       status: 'failed'
@@ -12181,6 +12226,25 @@ app.get('/api/admin/deposits/rejected', adminProtect, async (req, res) => {
     .skip(skip)
     .limit(limit)
     .lean();
+    
+    // Format deposits for frontend
+    const formattedDeposits = deposits.map(deposit => ({
+      _id: deposit._id,
+      user: {
+        _id: deposit.user?._id,
+        firstName: deposit.user?.firstName || 'Unknown',
+        lastName: deposit.user?.lastName || 'User',
+        email: deposit.user?.email || 'N/A'
+      },
+      amount: parseFloat(deposit.amount) || 0,
+      method: deposit.method || 'crypto',
+      asset: deposit.asset || deposit.method?.toLowerCase() || 'btc',
+      assetAmount: parseFloat(deposit.assetAmount) || 0,
+      createdAt: deposit.createdAt,
+      rejectionReason: deposit.adminNotes || deposit.details?.reason || 'No reason provided',
+      reference: deposit.reference,
+      status: deposit.status
+    }));
     
     // Get total count for pagination
     const totalCount = await Transaction.countDocuments({
@@ -12192,7 +12256,7 @@ app.get('/api/admin/deposits/rejected', adminProtect, async (req, res) => {
     res.status(200).json({
       status: 'success',
       data: {
-        deposits,
+        deposits: formattedDeposits,
         totalCount,
         totalPages,
         currentPage: page
@@ -12206,6 +12270,10 @@ app.get('/api/admin/deposits/rejected', adminProtect, async (req, res) => {
     });
   }
 });
+
+// =============================================
+// ADMIN WITHDRAWALS ENDPOINTS - FIXED VERSION
+// =============================================
 
 // Admin Pending Withdrawals Endpoint
 app.get('/api/admin/withdrawals/pending', adminProtect, async (req, res) => {
@@ -12225,6 +12293,31 @@ app.get('/api/admin/withdrawals/pending', adminProtect, async (req, res) => {
     .limit(limit)
     .lean();
     
+    // Format withdrawals for frontend
+    const formattedWithdrawals = withdrawals.map(withdrawal => ({
+      _id: withdrawal._id,
+      user: {
+        _id: withdrawal.user?._id,
+        firstName: withdrawal.user?.firstName || 'Unknown',
+        lastName: withdrawal.user?.lastName || 'User',
+        email: withdrawal.user?.email || 'N/A'
+      },
+      amount: parseFloat(withdrawal.amount) || 0,
+      method: withdrawal.method || 'crypto',
+      asset: withdrawal.asset || withdrawal.method?.toLowerCase() || 'btc',
+      assetAmount: parseFloat(withdrawal.assetAmount) || 0,
+      createdAt: withdrawal.createdAt,
+      walletAddress: withdrawal.btcAddress || withdrawal.details?.walletAddress || 'N/A',
+      network: withdrawal.network || withdrawal.details?.network || getNetworkName(withdrawal.asset || withdrawal.method),
+      fee: parseFloat(withdrawal.fee) || 0,
+      netAmount: parseFloat(withdrawal.netAmount) || withdrawal.amount,
+      reference: withdrawal.reference,
+      status: withdrawal.status,
+      balanceSource: withdrawal.balanceSource || withdrawal.details?.balanceSource || 'main',
+      mainAmountUsed: parseFloat(withdrawal.mainAmountUsed) || 0,
+      maturedAmountUsed: parseFloat(withdrawal.maturedAmountUsed) || 0
+    }));
+    
     // Get total count for pagination
     const totalCount = await Transaction.countDocuments({
       type: 'withdrawal',
@@ -12235,7 +12328,7 @@ app.get('/api/admin/withdrawals/pending', adminProtect, async (req, res) => {
     res.status(200).json({
       status: 'success',
       data: {
-        withdrawals,
+        withdrawals: formattedWithdrawals,
         totalCount,
         totalPages,
         currentPage: page
@@ -12257,7 +12350,7 @@ app.get('/api/admin/withdrawals/approved', adminProtect, async (req, res) => {
     const limit = parseInt(req.query.limit) || 5;
     const skip = (page - 1) * limit;
     
-    // Get approved withdrawals with user info
+    // Get approved/completed withdrawals with user info
     const withdrawals = await Transaction.find({
       type: 'withdrawal',
       status: 'completed'
@@ -12269,6 +12362,31 @@ app.get('/api/admin/withdrawals/approved', adminProtect, async (req, res) => {
     .limit(limit)
     .lean();
     
+    // Format withdrawals for frontend
+    const formattedWithdrawals = withdrawals.map(withdrawal => ({
+      _id: withdrawal._id,
+      user: {
+        _id: withdrawal.user?._id,
+        firstName: withdrawal.user?.firstName || 'Unknown',
+        lastName: withdrawal.user?.lastName || 'User',
+        email: withdrawal.user?.email || 'N/A'
+      },
+      amount: parseFloat(withdrawal.amount) || 0,
+      method: withdrawal.method || 'crypto',
+      asset: withdrawal.asset || withdrawal.method?.toLowerCase() || 'btc',
+      assetAmount: parseFloat(withdrawal.assetAmount) || 0,
+      createdAt: withdrawal.createdAt,
+      processedAt: withdrawal.processedAt,
+      processedBy: withdrawal.processedBy ? {
+        _id: withdrawal.processedBy._id,
+        name: withdrawal.processedBy.name
+      } : null,
+      walletAddress: withdrawal.btcAddress || withdrawal.details?.walletAddress || 'N/A',
+      txid: withdrawal.details?.txid || withdrawal.reference,
+      reference: withdrawal.reference,
+      status: withdrawal.status
+    }));
+    
     // Get total count for pagination
     const totalCount = await Transaction.countDocuments({
       type: 'withdrawal',
@@ -12279,7 +12397,7 @@ app.get('/api/admin/withdrawals/approved', adminProtect, async (req, res) => {
     res.status(200).json({
       status: 'success',
       data: {
-        withdrawals,
+        withdrawals: formattedWithdrawals,
         totalCount,
         totalPages,
         currentPage: page
@@ -12301,7 +12419,7 @@ app.get('/api/admin/withdrawals/rejected', adminProtect, async (req, res) => {
     const limit = parseInt(req.query.limit) || 5;
     const skip = (page - 1) * limit;
     
-    // Get rejected withdrawals with user info
+    // Get rejected/failed withdrawals with user info
     const withdrawals = await Transaction.find({
       type: 'withdrawal',
       status: 'failed'
@@ -12311,6 +12429,25 @@ app.get('/api/admin/withdrawals/rejected', adminProtect, async (req, res) => {
     .skip(skip)
     .limit(limit)
     .lean();
+    
+    // Format withdrawals for frontend
+    const formattedWithdrawals = withdrawals.map(withdrawal => ({
+      _id: withdrawal._id,
+      user: {
+        _id: withdrawal.user?._id,
+        firstName: withdrawal.user?.firstName || 'Unknown',
+        lastName: withdrawal.user?.lastName || 'User',
+        email: withdrawal.user?.email || 'N/A'
+      },
+      amount: parseFloat(withdrawal.amount) || 0,
+      method: withdrawal.method || 'crypto',
+      asset: withdrawal.asset || withdrawal.method?.toLowerCase() || 'btc',
+      assetAmount: parseFloat(withdrawal.assetAmount) || 0,
+      createdAt: withdrawal.createdAt,
+      rejectionReason: withdrawal.adminNotes || withdrawal.details?.reason || 'No reason provided',
+      reference: withdrawal.reference,
+      status: withdrawal.status
+    }));
     
     // Get total count for pagination
     const totalCount = await Transaction.countDocuments({
@@ -12322,7 +12459,7 @@ app.get('/api/admin/withdrawals/rejected', adminProtect, async (req, res) => {
     res.status(200).json({
       status: 'success',
       data: {
-        withdrawals,
+        withdrawals: formattedWithdrawals,
         totalCount,
         totalPages,
         currentPage: page
@@ -12337,9 +12474,28 @@ app.get('/api/admin/withdrawals/rejected', adminProtect, async (req, res) => {
   }
 });
 
-
-
-
+// Helper function to get network name for an asset
+function getNetworkName(asset) {
+  const networks = {
+    'btc': 'Bitcoin',
+    'eth': 'Ethereum (ERC20)',
+    'usdt': 'Ethereum (ERC20)',
+    'bnb': 'BSC (BEP20)',
+    'sol': 'Solana',
+    'usdc': 'Ethereum (ERC20)',
+    'xrp': 'Ripple',
+    'doge': 'Dogecoin',
+    'shib': 'Ethereum (ERC20)',
+    'ltc': 'Litecoin',
+    'trx': 'TRON (TRC20)',
+    'matic': 'Polygon',
+    'avax': 'Avalanche C-Chain',
+    'dot': 'Polkadot',
+    'link': 'Ethereum (ERC20)',
+    'ada': 'Cardano'
+  };
+  return networks[asset?.toLowerCase()] || 'Blockchain';
+}
 
 
 
