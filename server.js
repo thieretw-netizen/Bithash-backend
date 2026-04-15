@@ -20109,43 +20109,92 @@ const processMaturedInvestments = async () => {
         const user = await User.findById(investment.user._id);
         if (!user) continue;
 
-        const totalReturn = investment.amount + (investment.amount * investment.plan.percentage / 100);
+        // Initialize balances Maps if they don't exist
+        if (!user.balances) {
+          user.balances = {
+            main: new Map(),
+            active: new Map(),
+            matured: new Map()
+          };
+        }
+        if (!user.balances.active) user.balances.active = new Map();
+        if (!user.balances.matured) user.balances.matured = new Map();
 
-        user.balances.active -= investment.amount;
-        user.balances.matured += totalReturn;
+        // Get current BTC balance from ACTIVE wallet (using Map.get)
+        const currentActiveBTC = user.balances.active.get('btc') || 0;
+        const investmentBTCAmount = investment.amountBTC || (investment.amount / (investment.btcPriceAtInvestment || 43000));
+        
+        // Check if user has enough active balance
+        if (currentActiveBTC < investmentBTCAmount) {
+          console.log(`Insufficient active balance for user ${user.email}. Required: ${investmentBTCAmount} BTC, Available: ${currentActiveBTC} BTC`);
+          continue;
+        }
 
+        // Calculate total return (original investment + profit)
+        const totalReturnBTC = investment.expectedReturnBTC || 
+          (investmentBTCAmount + (investmentBTCAmount * investment.plan.percentage / 100));
+        const totalReturnUSD = totalReturnBTC * (investment.btcPriceAtCompletion || investment.btcPriceAtInvestment || 43000);
+
+        // ✅ CORRECT: Use Map.set() to update balances
+        // 1. Remove from active wallet
+        const newActiveBTC = currentActiveBTC - investmentBTCAmount;
+        if (newActiveBTC <= 0) {
+          user.balances.active.delete('btc');
+        } else {
+          user.balances.active.set('btc', newActiveBTC);
+        }
+
+        // 2. Add to matured wallet
+        const currentMaturedBTC = user.balances.matured.get('btc') || 0;
+        user.balances.matured.set('btc', currentMaturedBTC + totalReturnBTC);
+
+        // 3. Update USD equivalents (optional, for display)
+        const currentActiveUSD = user.balances.active.get('usd') || 0;
+        user.balances.active.set('usd', currentActiveUSD - investment.amount);
+
+        const currentMaturedUSD = user.balances.matured.get('usd') || 0;
+        user.balances.matured.set('usd', currentMaturedUSD + totalReturnUSD);
+
+        // Update investment record
         investment.status = 'completed';
         investment.completionDate = now;
-        investment.actualReturn = totalReturn - investment.amount;
+        investment.actualReturnBTC = totalReturnBTC - investmentBTCAmount;
+        investment.actualReturnUSD = totalReturnUSD - investment.amount;
 
         await user.save();
         await investment.save();
 
+        // Create transaction record
         await Transaction.create({
           user: investment.user._id,
           type: 'interest',
-          amount: totalReturn - investment.amount,
-          currency: 'USD',
+          amount: totalReturnUSD - investment.amount,
+          amountBTC: totalReturnBTC - investmentBTCAmount,
+          currency: 'BTC',
           status: 'completed',
-          method: 'internal',
+          method: 'INTERNAL',
           reference: `AUTO-RET-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
           details: {
             investmentId: investment._id,
             planName: investment.plan.name,
-            principal: investment.amount,
-            interest: totalReturn - investment.amount
+            principalUSD: investment.amount,
+            principalBTC: investmentBTCAmount,
+            interestUSD: totalReturnUSD - investment.amount,
+            interestBTC: totalReturnBTC - investmentBTCAmount
           },
           fee: 0,
-          netAmount: totalReturn - investment.amount
-        });
-        
-        io.to(`user_${user._id}`).emit('balance_update', {
-          main: user.balances.main,
-          active: user.balances.active,
-          matured: user.balances.matured
+          netAmount: totalReturnUSD - investment.amount
         });
 
-        console.log(`Automatically completed investment ${investment._id} for user ${user.email}`);
+        // Emit real-time update
+        io.to(`user_${user._id}`).emit('balance_update', {
+          main: user.balances.main?.get('usd') || 0,
+          active: user.balances.active?.get('usd') || 0,
+          matured: user.balances.matured?.get('usd') || 0
+        });
+
+        console.log(`✅ Automatically completed investment ${investment._id} for user ${user.email}. Returned: ${totalReturnBTC.toFixed(8)} BTC`);
+
       } catch (err) {
         console.error(`Error processing investment ${investment._id}:`, err);
       }
