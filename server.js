@@ -17716,7 +17716,185 @@ const startRealTimeWalletUpdates = (io) => {
 
 
 
+// =============================================
+// MISSING ADMIN DEPOSIT ENDPOINTS
+// =============================================
 
+// GET /api/admin/deposits/pending - Get pending deposit requests
+app.get('/api/admin/deposits/pending', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    // Build query for pending deposits
+    const query = { 
+      type: 'deposit',
+      status: 'pending'
+    };
+
+    // Get deposits with user info
+    const deposits = await Transaction.find(query)
+      .populate('user', 'firstName lastName email')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const totalCount = await Transaction.countDocuments(query);
+    const totalPages = Math.ceil(totalCount / limit);
+
+    // Format deposit data for frontend
+    const formattedDeposits = deposits.map(deposit => ({
+      _id: deposit._id,
+      user: {
+        _id: deposit.user?._id,
+        firstName: deposit.user?.firstName || 'Unknown',
+        lastName: deposit.user?.lastName || 'Unknown'
+      },
+      amount: deposit.amount,
+      method: deposit.method || deposit.asset || 'crypto',
+      createdAt: deposit.createdAt,
+      proof: deposit.details?.proofUrl || deposit.details?.txHash || null,
+      status: deposit.status
+    }));
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        deposits: formattedDeposits,
+        totalCount: totalCount,
+        totalPages: totalPages,
+        currentPage: page
+      }
+    });
+
+  } catch (err) {
+    console.error('Get pending deposits error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch pending deposits'
+    });
+  }
+});
+
+// GET /api/admin/deposits/approved - Get approved deposit requests
+app.get('/api/admin/deposits/approved', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    // Build query for approved deposits
+    const query = { 
+      type: 'deposit',
+      status: 'completed'
+    };
+
+    // Get deposits with user info
+    const deposits = await Transaction.find(query)
+      .populate('user', 'firstName lastName email')
+      .populate('processedBy', 'name email')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const totalCount = await Transaction.countDocuments(query);
+    const totalPages = Math.ceil(totalCount / limit);
+
+    // Format deposit data for frontend
+    const formattedDeposits = deposits.map(deposit => ({
+      _id: deposit._id,
+      user: {
+        _id: deposit.user?._id,
+        firstName: deposit.user?.firstName || 'Unknown',
+        lastName: deposit.user?.lastName || 'Unknown'
+      },
+      amount: deposit.amount,
+      method: deposit.method || deposit.asset || 'crypto',
+      createdAt: deposit.createdAt,
+      approvedBy: deposit.processedBy?.name || 'System',
+      approvedAt: deposit.processedAt || deposit.updatedAt,
+      status: deposit.status
+    }));
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        deposits: formattedDeposits,
+        totalCount: totalCount,
+        totalPages: totalPages,
+        currentPage: page
+      }
+    });
+
+  } catch (err) {
+    console.error('Get approved deposits error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch approved deposits'
+    });
+  }
+});
+
+// GET /api/admin/deposits/rejected - Get rejected deposit requests
+app.get('/api/admin/deposits/rejected', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    // Build query for rejected deposits
+    const query = { 
+      type: 'deposit',
+      status: 'failed'
+    };
+
+    // Get deposits with user info
+    const deposits = await Transaction.find(query)
+      .populate('user', 'firstName lastName email')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const totalCount = await Transaction.countDocuments(query);
+    const totalPages = Math.ceil(totalCount / limit);
+
+    // Format deposit data for frontend
+    const formattedDeposits = deposits.map(deposit => ({
+      _id: deposit._id,
+      user: {
+        _id: deposit.user?._id,
+        firstName: deposit.user?.firstName || 'Unknown',
+        lastName: deposit.user?.lastName || 'Unknown'
+      },
+      amount: deposit.amount,
+      method: deposit.method || deposit.asset || 'crypto',
+      createdAt: deposit.createdAt,
+      reason: deposit.adminNotes || deposit.details?.rejectionReason || 'No reason provided',
+      status: deposit.status
+    }));
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        deposits: formattedDeposits,
+        totalCount: totalCount,
+        totalPages: totalPages,
+        currentPage: page
+      }
+    });
+
+  } catch (err) {
+    console.error('Get rejected deposits error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch rejected deposits'
+    });
+  }
+});
 
 
 
