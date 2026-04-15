@@ -18476,7 +18476,6 @@ app.get('/api/admin/stats', adminProtect, async (req, res) => {
 
 
 
-
 // GET /api/admin/users - Get all users with real-time USD balances from crypto Maps
 app.get('/api/admin/users', adminProtect, async (req, res) => {
   try {
@@ -18484,6 +18483,7 @@ app.get('/api/admin/users', adminProtect, async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
+    // Use .lean() but we need to handle Maps properly
     const users = await User.find({})
       .select('_id firstName lastName email balances status lastLogin createdAt')
       .skip(skip)
@@ -18500,23 +18500,32 @@ app.get('/api/admin/users', adminProtect, async (req, res) => {
       let activeUSD = 0;
       let maturedUSD = 0;
 
-      // Calculate MAIN wallet USD value from real crypto Map
+      // Debug: Log the actual balances structure
+      console.log('User balances:', user.email, JSON.stringify(user.balances));
+
+      // Calculate MAIN wallet USD value from crypto Map
       if (user.balances && user.balances.main) {
         const mainMap = user.balances.main;
-        for (const [crypto, amount] of Object.entries(mainMap)) {
+        // Check if it's an object (from lean()) or a Map
+        const entries = mainMap instanceof Map ? mainMap.entries() : Object.entries(mainMap);
+        
+        for (const [crypto, amount] of entries) {
           if (amount > 0 && crypto !== 'usd') {
             const price = await getCryptoPrice(crypto.toUpperCase());
             if (price) {
               mainUSD += amount * price;
+              console.log(`${crypto}: ${amount} * $${price} = $${amount * price}`);
             }
           }
         }
       }
 
-      // Calculate ACTIVE wallet USD value from real crypto Map
+      // Calculate ACTIVE wallet USD value from crypto Map
       if (user.balances && user.balances.active) {
         const activeMap = user.balances.active;
-        for (const [crypto, amount] of Object.entries(activeMap)) {
+        const entries = activeMap instanceof Map ? activeMap.entries() : Object.entries(activeMap);
+        
+        for (const [crypto, amount] of entries) {
           if (amount > 0 && crypto !== 'usd') {
             const price = await getCryptoPrice(crypto.toUpperCase());
             if (price) {
@@ -18526,10 +18535,12 @@ app.get('/api/admin/users', adminProtect, async (req, res) => {
         }
       }
 
-      // Calculate MATURED wallet USD value from real crypto Map
+      // Calculate MATURED wallet USD value from crypto Map
       if (user.balances && user.balances.matured) {
         const maturedMap = user.balances.matured;
-        for (const [crypto, amount] of Object.entries(maturedMap)) {
+        const entries = maturedMap instanceof Map ? maturedMap.entries() : Object.entries(maturedMap);
+        
+        for (const [crypto, amount] of entries) {
           if (amount > 0 && crypto !== 'usd') {
             const price = await getCryptoPrice(crypto.toUpperCase());
             if (price) {
