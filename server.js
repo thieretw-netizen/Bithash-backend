@@ -9444,6 +9444,16 @@ app.get('/api/fiat-currencies', async (req, res) => {
 
 
 
+
+
+
+
+
+
+
+
+
+
 // =============================================
 // CONVERT ASSETS ENDPOINT - Get available target cryptos for conversion
 // =============================================
@@ -9643,14 +9653,17 @@ app.post('/api/convert', protect, async (req, res) => {
       matured: Array.from(user.balances.matured.entries())
     });
     
-    // Record platform revenue for the fee
+    // FIXED: Use valid enum value 'sell_fee' for conversion fee (allowed values: 'investment_fee', 'withdrawal_fee', 'buy_fee', 'sell_fee', 'other')
     await PlatformRevenue.create({
-      source: 'conversion_fee',
+      source: 'sell_fee',  // Valid enum value
       amount: feeAmount,
       currency: 'USD',
+      transactionId: null,
+      investmentId: null,
       userId: userId,
       description: `Conversion fee from ${fromAssetLower} to ${toAssetLower}`,
       metadata: {
+        type: 'conversion',
         fromAsset: fromAssetLower,
         toAsset: toAssetLower,
         amount: amount,
@@ -9828,7 +9841,6 @@ async function getRealCryptoPrice(assetSymbol) {
     const coinId = coinIdMap[symbol];
     if (!coinId) {
       console.log(`No CoinGecko ID found for ${symbol}, using fallback`);
-      // Fallback prices
       const fallbackPrices = {
         'btc': 43000,
         'eth': 2200,
@@ -9840,7 +9852,6 @@ async function getRealCryptoPrice(assetSymbol) {
       return fallbackPrices[symbol] || 0;
     }
     
-    // Fetch real-time price from CoinGecko
     const response = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd`);
     
     if (!response.ok) {
@@ -9857,7 +9868,6 @@ async function getRealCryptoPrice(assetSymbol) {
     return price;
   } catch (error) {
     console.error(`Error fetching real price for ${assetSymbol}:`, error);
-    // Return fallback price
     const fallbackPrices = {
       'btc': 43000,
       'eth': 2200,
