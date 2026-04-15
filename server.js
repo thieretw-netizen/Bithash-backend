@@ -44,29 +44,39 @@ app.use(helmet({
   },
   crossOriginOpenerPolicy: { policy: "unsafe-none" }
 }));
-
 app.use(cors({
-  origin: [
-    'https://www.bithashcapital.live', 
-  ],
+  origin: function(origin, callback) {
+    const allowedOrigins = [
+      'https://www.bithashcapital.live',
+      'https://bithashcapital.live',
+      'http://localhost:3000',
+      'http://localhost:5500'
+    ];
+    // Allow requests with no origin (like mobile apps or curl)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) === -1) {
+      const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+      return callback(new Error(msg), false);
+    }
+    return callback(null, true);
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: [
     'Content-Type', 
     'Authorization', 
     'X-CSRF-Token',
-    'X-Rate-Limit',
     'X-Requested-With',
     'Accept',
-    'Origin',
-    'X-2FA-Verified'
+    'Origin'
   ],
-  exposedHeaders: [
-    'X-Rate-Limit-Limit',
-    'X-Rate-Limit-Remaining',
-    'X-Rate-Limit-Reset'
-  ]
+  exposedHeaders: ['X-Rate-Limit-Limit', 'X-Rate-Limit-Remaining'],
+  preflightContinue: false,
+  optionsSuccessStatus: 204
 }));
+
+// Handle preflight requests explicitly
+app.options('*', cors());
 
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
