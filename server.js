@@ -18465,6 +18465,98 @@ app.get('/api/admin/stats', adminProtect, async (req, res) => {
 
 
 
+
+
+
+
+// GET /api/admin/restrictions - Get current account restrictions
+app.get('/api/admin/restrictions', adminProtect, restrictTo('super'), async (req, res) => {
+  try {
+    const restrictions = await AccountRestrictions.getInstance();
+    
+    res.status(200).json({
+      status: 'success',
+      data: {
+        withdraw_limit_no_kyc: restrictions.withdraw_limit_no_kyc,
+        invest_limit_no_kyc: restrictions.invest_limit_no_kyc,
+        withdraw_limit_no_txn: restrictions.withdraw_limit_no_txn,
+        invest_limit_no_txn: restrictions.invest_limit_no_txn,
+        kyc_restriction_reason: restrictions.kyc_restriction_reason,
+        txn_restriction_reason: restrictions.txn_restriction_reason
+      }
+    });
+    
+  } catch (err) {
+    console.error('Get restrictions error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch restrictions'
+    });
+  }
+});
+
+
+// GET /api/admin/users - Get all users with pagination
+app.get('/api/admin/users', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const users = await User.find({})
+      .select('_id firstName lastName email balances status lastLogin createdAt')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const totalUsers = await User.countDocuments({});
+    const totalPages = Math.ceil(totalUsers / limit);
+
+    const formattedUsers = users.map(user => ({
+      _id: user._id,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
+      balances: {
+        active: user.balances?.active || 0,
+        matured: user.balances?.matured || 0,
+        main: user.balances?.main || 0
+      },
+      status: user.status,
+      lastLogin: user.lastLogin,
+      createdAt: user.createdAt
+    }));
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        users: formattedUsers,
+        totalPages,
+        currentPage: page,
+        totalCount: totalUsers
+      }
+    });
+
+  } catch (err) {
+    console.error('Get users error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch users'
+    });
+  }
+});
+
+
+
+
+
+
+
+
+
+
+
 // SNIPPET C - COMPLETE REWRITE
 
 // Error handling middleware
