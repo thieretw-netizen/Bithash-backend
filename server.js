@@ -5859,7 +5859,20 @@ app.post('/api/auth/reset-password', [
   }
 });
 
-// Investment routes - ENHANCED VERSION WITH RESTRICTION CHECKS
+
+
+
+
+
+
+
+
+
+
+
+
+
+// Investment routes - ENHANCED VERSION WITH BITCOIN BALANCE REQUIREMENT
 app.post('/api/investments', protect, [
   body('planId').notEmpty().withMessage('Plan ID is required').isMongoId().withMessage('Invalid Plan ID'),
   body('amount').isFloat({ min: 1 }).withMessage('Amount must be a positive number'),
@@ -5998,34 +6011,66 @@ app.post('/api/investments', protect, [
       });
     }
 
-    // Verify user has sufficient balance in the selected balance type
-    const user = await User.findById(userId);
-    const selectedBalance = user.balances[balanceType];
+    // Get current Bitcoin price in USD
+    const btcPrice = await getCurrentBitcoinPrice();
     
-    if (selectedBalance < amount) {
+    // Calculate the amount in Bitcoin
+    const amountInBTC = amount / btcPrice;
+    
+    // Get user with all balances
+    const user = await User.findById(userId);
+    
+    // ✅ CRITICAL: User must have Bitcoin balance in either main or matured wallet
+    // Check Bitcoin balance in both main and matured wallets
+    const mainBitcoinBalance = user.bitcoinBalances?.main || 0;
+    const maturedBitcoinBalance = user.bitcoinBalances?.matured || 0;
+    const totalBitcoinBalance = mainBitcoinBalance + maturedBitcoinBalance;
+    
+    // Check if user has enough Bitcoin balance in the selected wallet
+    let selectedBitcoinBalance = 0;
+    if (balanceType === 'main') {
+      selectedBitcoinBalance = mainBitcoinBalance;
+    } else if (balanceType === 'matured') {
+      selectedBitcoinBalance = maturedBitcoinBalance;
+    }
+    
+    if (selectedBitcoinBalance < amountInBTC) {
       return res.status(400).json({
         status: 'fail',
-        message: `Insufficient ${balanceType} balance`
+        message: `Insufficient Bitcoin balance in ${balanceType} wallet. Required: ${amountInBTC.toFixed(8)} BTC, Available: ${selectedBitcoinBalance.toFixed(8)} BTC`
       });
     }
+    
+    // Store the Bitcoin amount for record keeping
+    const investmentBTCAmount = amountInBTC;
+    
+    // Calculate investment amount after 3% fee (in USD)
+    const investmentFeeUSD = amount * 0.03;
+    const investmentAmountAfterFeeUSD = amount - investmentFeeUSD;
+    
+    // Calculate fee and after-fee amount in BTC
+    const investmentFeeBTC = investmentBTCAmount * 0.03;
+    const investmentAmountAfterFeeBTC = investmentBTCAmount - investmentFeeBTC;
 
-    // Calculate investment amount after 3% fee
-    const investmentFee = amount * 0.03;
-    const investmentAmountAfterFee = amount - investmentFee;
-
-    // Calculate expected return based on the amount after fee
-    const expectedReturn = investmentAmountAfterFee + (investmentAmountAfterFee * plan.percentage / 100);
+    // Calculate expected return (in USD based on after-fee amount)
+    const expectedReturnUSD = investmentAmountAfterFeeUSD + (investmentAmountAfterFeeUSD * plan.percentage / 100);
+    // Calculate expected return in BTC
+    const expectedReturnBTC = investmentAmountAfterFeeBTC + (investmentAmountAfterFeeBTC * plan.percentage / 100);
+    
     const endDate = new Date(Date.now() + plan.duration * 60 * 60 * 1000);
 
-    // Create investment
+    // Create investment record
     const investment = await Investment.create({
       user: userId,
       plan: planId,
-      amount: investmentAmountAfterFee, // Store the amount after fee
-      originalAmount: amount, // Store original amount before fee
+      amount: investmentAmountAfterFeeUSD, // Store USD amount after fee
+      amountBTC: investmentAmountAfterFeeBTC, // Store BTC amount after fee
+      originalAmount: amount, // Original USD amount before fee
+      originalAmountBTC: investmentBTCAmount, // Original BTC amount before fee
       originalCurrency: 'USD',
-      currency: 'USD',
-      expectedReturn,
+      currency: 'BTC', // Investment is in Bitcoin
+      expectedReturn: expectedReturnUSD, // Expected return in USD
+      expectedReturnBTC: expectedReturnBTC, // Expected return in BTC
       returnPercentage: plan.percentage,
       endDate,
       payoutSchedule: 'end_term',
@@ -6034,21 +6079,34 @@ app.post('/api/investments', protect, [
       userAgent: req.headers['user-agent'],
       deviceInfo: getDeviceType(req),
       termsAccepted: true,
-      investmentFee: investmentFee, // Store the fee for record keeping
-      balanceType: balanceType // Store which balance was used
+      investmentFee: investmentFeeUSD, // Fee in USD
+      investmentFeeBTC: investmentFeeBTC, // Fee in BTC
+      balanceType: balanceType, // Which wallet was used
+      btcPriceAtInvestment: btcPrice // Store BTC price at time of investment
     });
 
-    // Deduct from user's selected balance (only the original amount)
-    user.balances[balanceType] -= amount;
-    user.balances.active += investmentAmountAfterFee; // Add the amount after fee to active balance
+    // ✅ DEDUCT BITCOIN FROM USER'S SELECTED BITCOIN WALLET
+    if (balanceType === 'main') {
+      user.bitcoinBalances.main -= investmentBTCAmount;
+    } else if (balanceType === 'matured') {
+      user.bitcoinBalances.matured -= investmentBTCAmount;
+    }
+    
+    // Add to active Bitcoin balance (investment is active in BTC)
+    user.bitcoinBalances.active = (user.bitcoinBalances.active || 0) + investmentAmountAfterFeeBTC;
+    
+    // Also track USD equivalents for reporting
+    user.balances.active += investmentAmountAfterFeeUSD;
+    
     await user.save();
 
-    // Create transaction record for the investment with fee
+    // Create transaction record for the investment
     const transaction = await Transaction.create({
       user: userId,
       type: 'investment',
-      amount: -amount,
-      currency: 'USD',
+      amount: -amount, // Negative USD amount
+      amountBTC: -investmentBTCAmount, // Negative BTC amount
+      currency: 'BTC',
       status: 'completed',
       method: 'INTERNAL',
       reference: `INV-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
@@ -6056,27 +6114,34 @@ app.post('/api/investments', protect, [
         investmentId: investment._id,
         planName: plan.name,
         balanceType: balanceType,
-        investmentFee: investmentFee,
-        amountAfterFee: investmentAmountAfterFee
+        investmentFeeUSD: investmentFeeUSD,
+        investmentFeeBTC: investmentFeeBTC,
+        amountAfterFeeUSD: investmentAmountAfterFeeUSD,
+        amountAfterFeeBTC: investmentAmountAfterFeeBTC,
+        btcPrice: btcPrice
       },
-      fee: investmentFee,
-      netAmount: -investmentAmountAfterFee
+      fee: investmentFeeUSD,
+      netAmount: -investmentAmountAfterFeeUSD
     });
 
     // RECORD PLATFORM REVENUE
     await PlatformRevenue.create({
       source: 'investment_fee',
-      amount: investmentFee,
-      currency: 'USD',
+      amount: investmentFeeUSD,
+      amountBTC: investmentFeeBTC,
+      currency: 'BTC',
       transactionId: transaction._id,
       investmentId: investment._id,
       userId: userId,
       description: `3% investment fee for ${plan.name} investment`,
       metadata: {
         planName: plan.name,
-        originalAmount: amount,
-        amountAfterFee: investmentAmountAfterFee,
-        feePercentage: 3
+        originalAmountUSD: amount,
+        originalAmountBTC: investmentBTCAmount,
+        amountAfterFeeUSD: investmentAmountAfterFeeUSD,
+        amountAfterFeeBTC: investmentAmountAfterFeeBTC,
+        feePercentage: 3,
+        btcPrice: btcPrice
       }
     });
 
@@ -6126,13 +6191,19 @@ app.post('/api/investments', protect, [
       status: 'success',
       metadata: {
         planName: plan.name,
-        investmentAmount: amount,
-        amountAfterFee: investmentAmountAfterFee,
-        investmentFee: investmentFee,
-        expectedReturn: expectedReturn,
+        investmentAmountUSD: amount,
+        investmentAmountBTC: investmentBTCAmount,
+        amountAfterFeeUSD: investmentAmountAfterFeeUSD,
+        amountAfterFeeBTC: investmentAmountAfterFeeBTC,
+        investmentFeeUSD: investmentFeeUSD,
+        investmentFeeBTC: investmentFeeBTC,
+        expectedReturnUSD: expectedReturnUSD,
+        expectedReturnBTC: expectedReturnBTC,
+        btcPriceAtInvestment: btcPrice,
         duration: plan.duration,
         roiPercentage: plan.percentage,
         endDate: endDate,
+        balanceTypeUsed: balanceType,
         restrictionStatusAtTime: {
           kyc_restricted: userRestrictionStatus?.kyc_restricted || false,
           transaction_restricted: userRestrictionStatus?.transaction_restricted || false,
@@ -6147,21 +6218,24 @@ app.post('/api/investments', protect, [
     // ✅ CHECK FOR DOWNLINE COMMISSIONS
     await calculateReferralCommissions(investment);
 
-    // ✅ HANDLE DIRECT REFERRAL BONUS
+    // ✅ HANDLE DIRECT REFERRAL BONUS (paid in BTC)
     if (user.referredBy) {
-      const referralBonus = (amount * plan.referralBonus) / 100;
+      const referralBonusUSD = (amount * plan.referralBonus) / 100;
+      const referralBonusBTC = referralBonusUSD / btcPrice;
       
-      // Update referring user's balance for direct referral bonus
+      // Update referring user's Bitcoin balance for direct referral bonus
       await User.findByIdAndUpdate(user.referredBy, {
         $inc: {
-          'balances.main': referralBonus,
-          'referralStats.totalEarnings': referralBonus,
-          'referralStats.availableBalance': referralBonus
+          'bitcoinBalances.main': referralBonusBTC,
+          'referralStats.totalEarningsBTC': referralBonusBTC,
+          'referralStats.totalEarningsUSD': referralBonusUSD,
+          'referralStats.availableBalanceBTC': referralBonusBTC
         },
         $push: {
           referralHistory: {
             referredUser: userId,
-            amount: referralBonus,
+            amountUSD: referralBonusUSD,
+            amountBTC: referralBonusBTC,
             percentage: plan.referralBonus,
             level: 1,
             status: 'available',
@@ -6175,9 +6249,11 @@ app.post('/api/investments', protect, [
         upline: user.referredBy,
         downline: userId,
         investment: investment._id,
-        investmentAmount: amount,
+        investmentAmountUSD: amount,
+        investmentAmountBTC: investmentBTCAmount,
         commissionPercentage: plan.referralBonus,
-        commissionAmount: referralBonus,
+        commissionAmountUSD: referralBonusUSD,
+        commissionAmountBTC: referralBonusBTC,
         roundNumber: 0,
         status: 'paid',
         paidAt: new Date()
@@ -6187,8 +6263,9 @@ app.post('/api/investments', protect, [
       await Transaction.create({
         user: user.referredBy,
         type: 'referral',
-        amount: referralBonus,
-        currency: 'USD',
+        amount: referralBonusUSD,
+        amountBTC: referralBonusBTC,
+        currency: 'BTC',
         status: 'completed',
         method: 'INTERNAL',
         reference: `REF-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
@@ -6196,22 +6273,24 @@ app.post('/api/investments', protect, [
           referralFrom: userId,
           investmentId: investment._id,
           type: 'direct_referral',
-          bonusPercentage: plan.referralBonus
+          bonusPercentage: plan.referralBonus,
+          btcPrice: btcPrice
         },
         fee: 0,
-        netAmount: referralBonus
+        netAmount: referralBonusUSD
       });
 
       // Mark investment with referral info
       investment.referredBy = user.referredBy;
-      investment.referralBonusAmount = referralBonus;
+      investment.referralBonusAmountUSD = referralBonusUSD;
+      investment.referralBonusAmountBTC = referralBonusBTC;
       investment.referralBonusDetails = {
         percentage: plan.referralBonus,
         payoutDate: new Date()
       };
       await investment.save();
 
-      console.log(`🎁 Direct referral bonus of $${referralBonus} paid to ${user.referredBy}`);
+      console.log(`🎁 Direct referral bonus of ${referralBonusBTC.toFixed(8)} BTC ($${referralBonusUSD}) paid to ${user.referredBy}`);
     }
 
     // ✅ SEND INVESTMENT CREATION EMAIL
@@ -6219,11 +6298,14 @@ app.post('/api/investments', protect, [
       await sendAutomatedEmail(user, 'investment_created', {
         name: user.firstName,
         planName: plan.name,
-        amount: amount,
-        expectedReturn: expectedReturn,
+        amountUSD: amount,
+        amountBTC: investmentBTCAmount,
+        expectedReturnUSD: expectedReturnUSD,
+        expectedReturnBTC: expectedReturnBTC,
         duration: plan.duration,
         startDate: investment.startDate,
-        endDate: investment.endDate
+        endDate: investment.endDate,
+        btcPrice: btcPrice
       });
       console.log(`📧 Investment creation email sent to ${user.email}`);
     } catch (emailError) {
@@ -6240,13 +6322,18 @@ app.post('/api/investments', protect, [
         investment: {
           id: investment._id,
           plan: plan.name,
-          amount: investment.amount,
-          originalAmount: investment.originalAmount,
-          investmentFee: investmentFee,
-          expectedReturn: investment.expectedReturn,
+          amountUSD: investment.amount,
+          amountBTC: investment.amountBTC,
+          originalAmountUSD: investment.originalAmount,
+          originalAmountBTC: investment.originalAmountBTC,
+          investmentFeeUSD: investmentFeeUSD,
+          investmentFeeBTC: investmentFeeBTC,
+          expectedReturnUSD: investment.expectedReturn,
+          expectedReturnBTC: investment.expectedReturnBTC,
           endDate: investment.endDate,
           status: investment.status,
-          balanceType: balanceType
+          balanceType: balanceType,
+          btcPriceAtInvestment: btcPrice
         }
       }
     });
@@ -6261,6 +6348,9 @@ app.post('/api/investments', protect, [
   }
 });
 
+// =============================================
+// COMPLETE INVESTMENT - PROCEEDS ADDED TO MATURED BITCOIN WALLET
+// =============================================
 app.post('/api/investments/:id/complete', protect, async (req, res) => {
   try {
     const investmentId = req.params.id;
@@ -6298,14 +6388,22 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
       });
     }
 
-    // Calculate total return (principal + profit) - based on amount after fee
-    const totalReturn = investment.expectedReturn;
+    // Get current Bitcoin price for conversion
+    const currentBTCPrice = await getCurrentBitcoinPrice();
+    
+    // Calculate total return in BTC (based on the expected return in BTC)
+    // The investment.expectedReturnBTC should contain the total BTC return
+    const totalReturnBTC = investment.expectedReturnBTC || 
+      (investment.amountBTC + (investment.amountBTC * investment.returnPercentage / 100));
+    
+    // Also calculate USD equivalent for reference
+    const totalReturnUSD = totalReturnBTC * currentBTCPrice;
 
-    // Enhanced balance transfer with validation
-    if (user.balances.active < investment.amount) {
+    // Enhanced balance transfer with validation - CHECK ACTIVE BITCOIN BALANCE
+    if ((user.bitcoinBalances?.active || 0) < investment.amountBTC) {
       return res.status(400).json({
         status: 'fail',
-        message: 'Insufficient active balance to complete investment'
+        message: 'Insufficient active Bitcoin balance to complete investment'
       });
     }
 
@@ -6314,39 +6412,53 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
     session.startTransaction();
 
     try {
-      // Transfer from active to matured balance
+      // ✅ Transfer from active Bitcoin balance to matured Bitcoin balance
+      user.bitcoinBalances.active -= investment.amountBTC;
+      user.bitcoinBalances.matured += totalReturnBTC;
+      
+      // Also track USD equivalents for reporting (but main balance is in BTC)
       user.balances.active -= investment.amount;
-      user.balances.matured += totalReturn;
+      user.balances.matured += totalReturnUSD;
       
       // Update investment status with completion details
       investment.status = 'completed';
       investment.completionDate = now;
-      investment.actualReturn = totalReturn - investment.amount;
+      investment.actualReturnBTC = totalReturnBTC - investment.amountBTC;
+      investment.actualReturnUSD = totalReturnUSD - investment.amount;
+      investment.btcPriceAtCompletion = currentBTCPrice;
       investment.isProcessed = true;
 
       // Save changes with session
       await user.save({ session });
       await investment.save({ session });
 
-      // Create transaction record for the return
+      // Create transaction record for the return (in BTC)
       await Transaction.create([{
         user: userId,
         type: 'interest',
-        amount: totalReturn - investment.amount,
-        currency: 'USD',
+        amount: totalReturnUSD - investment.amount,
+        amountBTC: totalReturnBTC - investment.amountBTC,
+        currency: 'BTC',
         status: 'completed',
         method: 'INTERNAL',
         reference: `RET-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
         details: {
           investmentId: investment._id,
           planName: investment.plan.name,
-          principal: investment.amount,
-          interest: totalReturn - investment.amount,
-          originalInvestment: investment.originalAmount,
-          investmentFee: investment.investmentFee
+          principalUSD: investment.amount,
+          principalBTC: investment.amountBTC,
+          interestUSD: totalReturnUSD - investment.amount,
+          interestBTC: totalReturnBTC - investment.amountBTC,
+          originalInvestmentUSD: investment.originalAmount,
+          originalInvestmentBTC: investment.originalAmountBTC,
+          investmentFeeUSD: investment.investmentFee,
+          investmentFeeBTC: investment.investmentFeeBTC,
+          btcPriceAtStart: investment.btcPriceAtInvestment,
+          btcPriceAtCompletion: currentBTCPrice
         },
         fee: 0,
-        netAmount: totalReturn - investment.amount
+        netAmountUSD: totalReturnUSD - investment.amount,
+        netAmountBTC: totalReturnBTC - investment.amountBTC
       }], { session });
 
       // ✅ CREATE LOG IN DATABASE FOR INVESTMENT MATURITY
@@ -6377,12 +6489,18 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
         status: 'success',
         metadata: {
           planName: investment.plan.name,
-          originalAmount: investment.originalAmount,
-          amountAfterFee: investment.amount,
-          investmentFee: investment.investmentFee,
-          expectedReturn: investment.expectedReturn,
-          actualReturn: totalReturn,
-          profit: totalReturn - investment.amount,
+          originalAmountUSD: investment.originalAmount,
+          originalAmountBTC: investment.originalAmountBTC,
+          amountAfterFeeUSD: investment.amount,
+          amountAfterFeeBTC: investment.amountBTC,
+          investmentFeeUSD: investment.investmentFee,
+          investmentFeeBTC: investment.investmentFeeBTC,
+          expectedReturnBTC: investment.expectedReturnBTC,
+          actualReturnBTC: totalReturnBTC,
+          profitBTC: totalReturnBTC - investment.amountBTC,
+          profitUSD: totalReturnUSD - investment.amount,
+          btcPriceAtStart: investment.btcPriceAtInvestment,
+          btcPriceAtCompletion: currentBTCPrice,
           startDate: investment.startDate,
           endDate: investment.endDate,
           completionDate: investment.completionDate
@@ -6399,11 +6517,15 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
         await sendAutomatedEmail(user, 'investment_matured', {
           name: user.firstName,
           planName: investment.plan.name,
-          amount: investment.originalAmount,
-          totalReturn: totalReturn,
-          profit: totalReturn - investment.amount,
+          amountUSD: investment.originalAmount,
+          amountBTC: investment.originalAmountBTC,
+          totalReturnBTC: totalReturnBTC,
+          totalReturnUSD: totalReturnUSD,
+          profitBTC: totalReturnBTC - investment.amountBTC,
+          profitUSD: totalReturnUSD - investment.amount,
           completionDate: investment.completionDate,
-          newMaturedBalance: user.balances.matured
+          newMaturedBalanceBTC: user.bitcoinBalances.matured,
+          btcPrice: currentBTCPrice
         });
         console.log(`📧 Investment completion email sent to ${user.email}`);
       } catch (emailError) {
@@ -6418,14 +6540,22 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
             id: investment._id,
             status: investment.status,
             completionDate: investment.completionDate,
-            amountReturned: totalReturn,
-            profit: totalReturn - investment.amount,
-            originalInvestment: investment.originalAmount,
-            investmentFee: investment.investmentFee
+            amountReturnedBTC: totalReturnBTC,
+            amountReturnedUSD: totalReturnUSD,
+            profitBTC: totalReturnBTC - investment.amountBTC,
+            profitUSD: totalReturnUSD - investment.amount,
+            originalInvestmentBTC: investment.originalAmountBTC,
+            originalInvestmentUSD: investment.originalAmount,
+            investmentFeeBTC: investment.investmentFeeBTC,
+            investmentFeeUSD: investment.investmentFee,
+            btcPriceAtStart: investment.btcPriceAtInvestment,
+            btcPriceAtCompletion: currentBTCPrice
           },
           balances: {
-            active: user.balances.active,
-            matured: user.balances.matured
+            bitcoin: {
+              active: user.bitcoinBalances.active,
+              matured: user.bitcoinBalances.matured
+            }
           }
         }
       });
@@ -6448,6 +6578,40 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
     });
   }
 });
+
+// =============================================
+// HELPER FUNCTION: GET CURRENT BITCOIN PRICE
+// =============================================
+async function getCurrentBitcoinPrice() {
+  try {
+    const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd');
+    if (response.ok) {
+      const data = await response.json();
+      return data.bitcoin.usd;
+    }
+  } catch (error) {
+    console.error('Error fetching BTC price:', error);
+  }
+  // Fallback price
+  return 43000;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // Admin Get Deposit Details Endpoint
 app.get('/api/admin/deposits/:id', adminProtect, async (req, res) => {
