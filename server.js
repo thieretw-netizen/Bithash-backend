@@ -9434,31 +9434,43 @@ app.get('/api/fiat-currencies', async (req, res) => {
   }
 });
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // =============================================
 // CONVERT ASSETS ENDPOINT - Get available target cryptos for conversion
 // =============================================
 app.get('/api/convert/assets', protect, async (req, res) => {
   try {
-    const availableAssets = [
-      { symbol: 'btc', name: 'Bitcoin', logo: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png' },
-      { symbol: 'eth', name: 'Ethereum', logo: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png' },
-      { symbol: 'usdt', name: 'Tether', logo: 'https://assets.coingecko.com/coins/images/325/large/Tether.png' },
-      { symbol: 'bnb', name: 'BNB', logo: 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png' },
-      { symbol: 'sol', name: 'Solana', logo: 'https://assets.coingecko.com/coins/images/4128/large/solana.png' },
-      { symbol: 'usdc', name: 'USDC', logo: 'https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png' },
-      { symbol: 'xrp', name: 'XRP', logo: 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png' },
-      { symbol: 'doge', name: 'Dogecoin', logo: 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png' },
-      { symbol: 'ada', name: 'Cardano', logo: 'https://assets.coingecko.com/coins/images/975/large/cardano.png' },
-      { symbol: 'shib', name: 'Shiba Inu', logo: 'https://assets.coingecko.com/coins/images/11939/large/shiba.png' },
-      { symbol: 'avax', name: 'Avalanche', logo: 'https://assets.coingecko.com/coins/images/12559/large/Avalanche_Circle_RedWhite.png' },
-      { symbol: 'dot', name: 'Polkadot', logo: 'https://assets.coingecko.com/coins/images/12171/large/polkadot.png' },
-      { symbol: 'trx', name: 'TRON', logo: 'https://assets.coingecko.com/coins/images/1094/large/tron-logo.png' },
-      { symbol: 'link', name: 'Chainlink', logo: 'https://assets.coingecko.com/coins/images/877/large/chainlink-new-logo.png' },
-      { symbol: 'matic', name: 'Polygon', logo: 'https://assets.coingecko.com/coins/images/4713/large/matic-token-icon.png' },
-      { symbol: 'ltc', name: 'Litecoin', logo: 'https://assets.coingecko.com/coins/images/2/large/litecoin.png' }
-    ];
+    // Fetch real-time cryptocurrency list from CoinGecko API
+    const response = await fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=50&page=1&sparkline=false');
     
-    res.status(200).json({ assets: availableAssets });
+    if (!response.ok) {
+      throw new Error('Failed to fetch cryptocurrency data');
+    }
+    
+    const coins = await response.json();
+    
+    // Transform real data into the format expected by frontend
+    const availableAssets = coins.map(coin => ({
+      symbol: coin.symbol,
+      name: coin.name,
+      logo: coin.image
+    }));
+    
+    res.status(200).json(availableAssets);
   } catch (err) {
     console.error('Error fetching convert assets:', err);
     res.status(500).json({ status: 'error', message: 'Failed to fetch available assets' });
@@ -9466,7 +9478,7 @@ app.get('/api/convert/assets', protect, async (req, res) => {
 });
 
 // =============================================
-// CONVERT ENDPOINT - Execute crypto conversion (buy/sell pattern) WITH FEE
+// CONVERT ENDPOINT - Execute crypto conversion with wallet type selection
 // =============================================
 app.post('/api/convert', protect, async (req, res) => {
   try {
@@ -9484,43 +9496,130 @@ app.post('/api/convert', protect, async (req, res) => {
       return res.status(400).json({ status: 'fail', message: 'Cannot convert to the same asset' });
     }
     
-    let userAssetBalance = await UserAssetBalance.findOne({ user: userId });
-    if (!userAssetBalance) {
-      userAssetBalance = new UserAssetBalance({ user: userId, balances: {} });
-      await userAssetBalance.save();
+    // Get user with real balances
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ status: 'fail', message: 'User not found' });
     }
     
-    const fromBalance = userAssetBalance.balances[fromAssetLower] || 0;
-    
-    if (amount > fromBalance) {
-      return res.status(400).json({ status: 'fail', message: 'Insufficient balance for conversion' });
+    // Initialize real balances object if not exists
+    if (!user.balances) {
+      user.balances = {
+        main: {},
+        matured: {},
+        active: 0
+      };
     }
     
-    const fromPrice = await getCryptoPrice(fromAsset);
-    const toPrice = await getCryptoPrice(toAsset);
+    if (!user.balances.main) user.balances.main = {};
+    if (!user.balances.matured) user.balances.matured = {};
+    
+    // Get REAL current balance from user's actual wallets
+    const mainBalance = user.balances.main[fromAssetLower] || 0;
+    const maturedBalance = user.balances.matured[fromAssetLower] || 0;
+    const totalBalance = mainBalance + maturedBalance;
+    
+    if (amount > totalBalance) {
+      return res.status(400).json({ 
+        status: 'fail', 
+        message: `Insufficient ${fromAsset.toUpperCase()} balance. Available: ${totalBalance} ${fromAsset.toUpperCase()}`
+      });
+    }
+    
+    // Get REAL current prices from CoinGecko
+    const fromPrice = await getRealCryptoPrice(fromAsset);
+    const toPrice = await getRealCryptoPrice(toAsset);
     
     if (!fromPrice || !toPrice) {
       return res.status(503).json({ status: 'fail', message: 'Unable to fetch current prices. Please try again.' });
     }
     
+    // Calculate conversion with 0.5% fee
     const usdValue = amount * fromPrice;
     const CONVERSION_FEE_PERCENT = 0.5;
     const feeAmount = usdValue * (CONVERSION_FEE_PERCENT / 100);
     const usdValueAfterFee = usdValue - feeAmount;
     const toAmount = usdValueAfterFee / toPrice;
     
-    userAssetBalance.balances[fromAssetLower] -= amount;
+    // Determine which wallet to deduct from based on available balance
+    let amountRemaining = amount;
+    let amountFromMain = 0;
+    let amountFromMatured = 0;
     
-    if (!userAssetBalance.balances[toAssetLower]) {
-      userAssetBalance.balances[toAssetLower] = 0;
+    if (amountRemaining <= mainBalance) {
+      amountFromMain = amountRemaining;
+      amountFromMatured = 0;
+    } else {
+      amountFromMain = mainBalance;
+      amountRemaining -= mainBalance;
+      amountFromMatured = amountRemaining;
     }
-    userAssetBalance.balances[toAssetLower] += toAmount;
     
-    userAssetBalance.lastUpdated = new Date();
-    await userAssetBalance.save();
+    // Perform REAL deduction from wallets
+    if (amountFromMain > 0) {
+      user.balances.main[fromAssetLower] = (user.balances.main[fromAssetLower] || 0) - amountFromMain;
+      if (user.balances.main[fromAssetLower] <= 0) {
+        delete user.balances.main[fromAssetLower];
+      }
+    }
     
+    if (amountFromMatured > 0) {
+      user.balances.matured[fromAssetLower] = (user.balances.matured[fromAssetLower] || 0) - amountFromMatured;
+      if (user.balances.matured[fromAssetLower] <= 0) {
+        delete user.balances.matured[fromAssetLower];
+      }
+    }
+    
+    // Add the converted amount to the SAME wallet type proportionally
+    if (amountFromMain > 0) {
+      const proportionFromMain = amountFromMain / amount;
+      const toAmountForMain = toAmount * proportionFromMain;
+      if (!user.balances.main[toAssetLower]) {
+        user.balances.main[toAssetLower] = 0;
+      }
+      user.balances.main[toAssetLower] += toAmountForMain;
+    }
+    
+    if (amountFromMatured > 0) {
+      const proportionFromMatured = amountFromMatured / amount;
+      const toAmountForMatured = toAmount * proportionFromMatured;
+      if (!user.balances.matured[toAssetLower]) {
+        user.balances.matured[toAssetLower] = 0;
+      }
+      user.balances.matured[toAssetLower] += toAmountForMatured;
+    }
+    
+    // Calculate REAL total main balance in USD
+    let totalMainBalanceUSD = 0;
+    
+    // Calculate from main wallet assets
+    for (const [asset, balance] of Object.entries(user.balances.main)) {
+      if (balance > 0 && asset !== 'active' && asset !== 'totalUSD') {
+        const assetPrice = await getRealCryptoPrice(asset);
+        if (assetPrice) {
+          totalMainBalanceUSD += balance * assetPrice;
+        }
+      }
+    }
+    
+    // Calculate from matured wallet assets
+    for (const [asset, balance] of Object.entries(user.balances.matured)) {
+      if (balance > 0 && asset !== 'active' && asset !== 'totalUSD') {
+        const assetPrice = await getRealCryptoPrice(asset);
+        if (assetPrice) {
+          totalMainBalanceUSD += balance * assetPrice;
+        }
+      }
+    }
+    
+    user.balances.main.totalUSD = totalMainBalanceUSD;
+    
+    // Save REAL changes to database
+    await user.save();
+    
+    // Record REAL platform revenue for the fee
     await PlatformRevenue.create({
-      source: 'buy_fee',
+      source: 'conversion_fee',
       amount: feeAmount,
       currency: 'USD',
       userId: userId,
@@ -9531,89 +9630,97 @@ app.post('/api/convert', protect, async (req, res) => {
         amount: amount,
         toAmount: toAmount,
         usdValue: usdValue,
-        feePercentage: CONVERSION_FEE_PERCENT
+        feePercentage: CONVERSION_FEE_PERCENT,
+        amountFromMain: amountFromMain,
+        amountFromMatured: amountFromMatured,
+        fromPrice: fromPrice,
+        toPrice: toPrice
       }
     });
     
-    let totalMainBalance = 0;
-    for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
-      if (balance > 0) {
-        const price = await getCryptoPrice(asset.toUpperCase());
-        if (price) {
-          totalMainBalance += balance * price;
-        }
-      }
-    }
-    
-    await User.findByIdAndUpdate(userId, { 'balances.main': totalMainBalance });
-    
     const reference = `CONV-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
     
+    // Create REAL transaction records
     await Transaction.create({
       user: userId,
-      type: 'sell',
-      amount: usdValue,
+      type: 'conversion',
+      amount: -usdValue,
       asset: fromAsset.toUpperCase(),
       assetAmount: amount,
       currency: 'USD',
       status: 'completed',
-      method: fromAsset.toUpperCase(),
-      reference: `${reference}-SELL`,
+      method: 'CONVERSION',
+      reference: reference,
       fee: feeAmount,
-      netAmount: usdValueAfterFee,
-      sellDetails: {
-        asset: fromAsset.toUpperCase(),
-        amountUSD: usdValue,
-        assetAmount: amount,
-        sellingPrice: fromPrice,
-        buyingPrice: fromPrice,
-        profitLoss: 0,
-        profitLossPercentage: 0
+      netAmount: -usdValueAfterFee,
+      details: {
+        conversion: true,
+        fromAsset: fromAssetLower,
+        toAsset: toAssetLower,
+        toAmount: toAmount,
+        amountFromMain: amountFromMain,
+        amountFromMatured: amountFromMatured,
+        feePercentage: CONVERSION_FEE_PERCENT,
+        fromPrice: fromPrice,
+        toPrice: toPrice
       }
     });
     
     await Transaction.create({
       user: userId,
-      type: 'buy',
+      type: 'conversion_received',
       amount: usdValueAfterFee,
       asset: toAsset.toUpperCase(),
       assetAmount: toAmount,
       currency: 'USD',
       status: 'completed',
-      method: toAsset.toUpperCase(),
-      reference: `${reference}-BUY`,
+      method: 'CONVERSION',
+      reference: `${reference}-RECEIVED`,
       fee: 0,
       netAmount: usdValueAfterFee,
-      buyDetails: {
-        asset: toAsset.toUpperCase(),
-        amountUSD: usdValueAfterFee,
-        assetAmount: toAmount,
-        buyingPrice: toPrice,
-        currentPrice: toPrice,
-        profitLoss: 0,
-        profitLossPercentage: 0
+      details: {
+        conversion: true,
+        fromAsset: fromAssetLower,
+        toAsset: toAssetLower,
+        fromAmount: amount,
+        feeAmount: feeAmount,
+        feePercentage: CONVERSION_FEE_PERCENT,
+        fromPrice: fromPrice,
+        toPrice: toPrice
       }
     });
     
+    // Send REAL real-time updates via socket
     const io = req.app.get('io');
     if (io) {
-      const updatedBalances = {};
-      for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
-        if (balance > 0) {
-          const price = await getCryptoPrice(asset.toUpperCase());
-          updatedBalances[asset] = {
-            balance: balance,
-            usdValue: balance * (price || 0),
-            id: asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset,
-            avgPrice: 0,
-            unrealizedPnl: 0,
-            unrealizedPnlPercent: 0,
-            transactions: []
-          };
+      // Prepare real asset balances for the user
+      const assetBalances = [];
+      const allAssets = new Set([...Object.keys(user.balances.main), ...Object.keys(user.balances.matured)]);
+      
+      for (const asset of allAssets) {
+        if (asset !== 'active' && asset !== 'totalUSD') {
+          const mainBal = user.balances.main[asset] || 0;
+          const maturedBal = user.balances.matured[asset] || 0;
+          const totalBal = mainBal + maturedBal;
+          if (totalBal > 0) {
+            const currentPrice = await getRealCryptoPrice(asset);
+            const usdValue = totalBal * (currentPrice || 0);
+            assetBalances.push({
+              symbol: asset,
+              balance: totalBal,
+              usdValue: usdValue,
+              id: asset === 'btc' ? 'bitcoin' : asset,
+              avgPrice: 0,
+              unrealizedPnl: 0,
+              unrealizedPnlPercent: 0,
+              transactions: []
+            });
+          }
         }
       }
-      io.to(`user_${userId}`).emit('asset_balances_update', Object.values(updatedBalances));
-      io.to(`user_${userId}`).emit('balance_update', { main: totalMainBalance });
+      
+      io.to(`user_${userId}`).emit('asset_balances_update', assetBalances);
+      io.to(`user_${userId}`).emit('balance_update', { main: totalMainBalanceUSD });
     }
     
     res.status(200).json({
@@ -9633,9 +9740,104 @@ app.post('/api/convert', protect, async (req, res) => {
     });
   } catch (err) {
     console.error('Conversion error:', err);
-    res.status(500).json({ status: 'error', message: 'Conversion failed' });
+    res.status(500).json({ status: 'error', message: err.message || 'Conversion failed' });
   }
 });
+
+// =============================================
+// HELPER: Get REAL cryptocurrency price from CoinGecko
+// =============================================
+async function getRealCryptoPrice(assetSymbol) {
+  try {
+    const symbol = assetSymbol.toLowerCase();
+    
+    // Real-time mapping to CoinGecko IDs
+    const coinIdMap = {
+      'btc': 'bitcoin',
+      'eth': 'ethereum',
+      'usdt': 'tether',
+      'bnb': 'binancecoin',
+      'sol': 'solana',
+      'usdc': 'usd-coin',
+      'xrp': 'xrp',
+      'doge': 'dogecoin',
+      'ada': 'cardano',
+      'shib': 'shiba-inu',
+      'avax': 'avalanche-2',
+      'dot': 'polkadot',
+      'trx': 'tron',
+      'link': 'chainlink',
+      'matic': 'polygon',
+      'ltc': 'litecoin',
+      'near': 'near',
+      'uni': 'uniswap',
+      'bch': 'bitcoin-cash',
+      'algo': 'algorand',
+      'vet': 'vechain',
+      'theta': 'theta-token',
+      'ftm': 'fantom',
+      'egld': 'elrond-erd-2',
+      'sand': 'the-sandbox',
+      'mana': 'decentraland',
+      'gala': 'gala',
+      'axs': 'axie-infinity'
+    };
+    
+    const coinId = coinIdMap[symbol];
+    if (!coinId) {
+      // Try to search for the coin if not in map
+      const searchResponse = await fetch(`https://api.coingecko.com/api/v3/search?query=${symbol}`);
+      if (searchResponse.ok) {
+        const searchData = await searchResponse.json();
+        if (searchData.coins && searchData.coins.length > 0) {
+          const foundCoin = searchData.coins[0];
+          const priceResponse = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${foundCoin.id}&vs_currencies=usd`);
+          if (priceResponse.ok) {
+            const priceData = await priceResponse.json();
+            return priceData[foundCoin.id]?.usd || 0;
+          }
+        }
+      }
+      return 0;
+    }
+    
+    // Fetch real-time price from CoinGecko
+    const response = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd`);
+    
+    if (!response.ok) {
+      throw new Error(`CoinGecko API error: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    const price = data[coinId]?.usd;
+    
+    if (!price || price <= 0) {
+      throw new Error(`Invalid price received for ${assetSymbol}`);
+    }
+    
+    return price;
+  } catch (error) {
+    console.error(`Error fetching real price for ${assetSymbol}:`, error);
+    throw new Error(`Unable to fetch current price for ${assetSymbol}. Please try again.`);
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // =============================================
 // ADMIN APPROVE DEPOSIT ENDPOINT - FIXED VERSION (with asset balance update)
