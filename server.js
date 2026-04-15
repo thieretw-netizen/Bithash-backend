@@ -12079,43 +12079,63 @@ app.put('/api/admin/users/:userId/reactivate', adminProtect, async (req, res) =>
 
 
 
+
+
+
+
+
+
 // =============================================
-// ADMIN DEPOSITS ENDPOINTS - FIXED FOR YOUR SCHEMA
+// FIXED: Admin Deposit Endpoints
 // =============================================
 
-// Admin Pending Deposits Endpoint
+// Admin Pending Deposits Endpoint - FIXED
 app.get('/api/admin/deposits/pending', adminProtect, async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 5;
+    const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
     
-    // Get pending deposits - use correct field names from YOUR schema
+    console.log('Fetching pending deposits...');
+    
+    // SIMPLE QUERY - NO COMPLEX POPULATE
     const deposits = await Transaction.find({
       type: 'deposit',
       status: 'pending'
     })
-    .populate('user', 'firstName lastName email')
+    .select('_id amount method createdAt user status')
     .sort({ createdAt: -1 })
     .skip(skip)
     .limit(limit)
     .lean();
     
-    // Format deposits for frontend - match HTML expectations
-    const formattedDeposits = deposits.map(deposit => ({
-      _id: deposit._id,
-      user: {
-        _id: deposit.user?._id,
-        firstName: deposit.user?.firstName || 'Unknown',
-        lastName: deposit.user?.lastName || 'User',
-        email: deposit.user?.email || 'N/A'
-      },
-      amount: deposit.amount || 0,
-      method: deposit.method || 'crypto',
-      createdAt: deposit.createdAt,
-      proof: deposit.details?.txHash || deposit.details?.proof || null,
-      status: deposit.status
-    }));
+    console.log(`Found ${deposits.length} pending deposits`);
+    
+    // Manually fetch user data to avoid populate issues
+    const depositsWithUsers = [];
+    for (const deposit of deposits) {
+      let userData = { firstName: 'Unknown', lastName: 'User', email: 'N/A' };
+      if (deposit.user) {
+        const user = await User.findById(deposit.user).select('firstName lastName email').lean();
+        if (user) {
+          userData = user;
+        }
+      }
+      depositsWithUsers.push({
+        _id: deposit._id,
+        user: {
+          _id: deposit.user,
+          firstName: userData.firstName,
+          lastName: userData.lastName,
+          email: userData.email
+        },
+        amount: deposit.amount,
+        method: deposit.method,
+        createdAt: deposit.createdAt,
+        proof: null,
+        status: deposit.status
+      });
+    }
     
     const totalCount = await Transaction.countDocuments({
       type: 'deposit',
@@ -12126,7 +12146,7 @@ app.get('/api/admin/deposits/pending', adminProtect, async (req, res) => {
     res.status(200).json({
       status: 'success',
       data: {
-        deposits: formattedDeposits,
+        deposits: depositsWithUsers,
         totalCount,
         totalPages,
         currentPage: page
@@ -12141,38 +12161,61 @@ app.get('/api/admin/deposits/pending', adminProtect, async (req, res) => {
   }
 });
 
-// Admin Approved Deposits Endpoint
+// Admin Approved Deposits Endpoint - FIXED
 app.get('/api/admin/deposits/approved', adminProtect, async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 5;
+    const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
+    
+    console.log('Fetching approved deposits...');
     
     const deposits = await Transaction.find({
       type: 'deposit',
       status: 'completed'
     })
-    .populate('user', 'firstName lastName email')
+    .select('_id amount method createdAt user processedAt processedBy status')
     .sort({ createdAt: -1 })
     .skip(skip)
     .limit(limit)
     .lean();
     
-    const formattedDeposits = deposits.map(deposit => ({
-      _id: deposit._id,
-      user: {
-        _id: deposit.user?._id,
-        firstName: deposit.user?.firstName || 'Unknown',
-        lastName: deposit.user?.lastName || 'User',
-        email: deposit.user?.email || 'N/A'
-      },
-      amount: deposit.amount || 0,
-      method: deposit.method || 'crypto',
-      createdAt: deposit.createdAt,
-      processedAt: deposit.processedAt,
-      processedBy: deposit.processedBy ? 'Admin' : 'System',
-      status: deposit.status
-    }));
+    console.log(`Found ${deposits.length} approved deposits`);
+    
+    const depositsWithUsers = [];
+    for (const deposit of deposits) {
+      let userData = { firstName: 'Unknown', lastName: 'User', email: 'N/A' };
+      if (deposit.user) {
+        const user = await User.findById(deposit.user).select('firstName lastName email').lean();
+        if (user) {
+          userData = user;
+        }
+      }
+      
+      let processedByName = 'System';
+      if (deposit.processedBy) {
+        const admin = await Admin.findById(deposit.processedBy).select('name').lean();
+        if (admin) {
+          processedByName = admin.name;
+        }
+      }
+      
+      depositsWithUsers.push({
+        _id: deposit._id,
+        user: {
+          _id: deposit.user,
+          firstName: userData.firstName,
+          lastName: userData.lastName,
+          email: userData.email
+        },
+        amount: deposit.amount,
+        method: deposit.method,
+        createdAt: deposit.createdAt,
+        processedAt: deposit.processedAt,
+        processedBy: processedByName,
+        status: deposit.status
+      });
+    }
     
     const totalCount = await Transaction.countDocuments({
       type: 'deposit',
@@ -12183,7 +12226,7 @@ app.get('/api/admin/deposits/approved', adminProtect, async (req, res) => {
     res.status(200).json({
       status: 'success',
       data: {
-        deposits: formattedDeposits,
+        deposits: depositsWithUsers,
         totalCount,
         totalPages,
         currentPage: page
@@ -12198,37 +12241,52 @@ app.get('/api/admin/deposits/approved', adminProtect, async (req, res) => {
   }
 });
 
-// Admin Rejected Deposits Endpoint
+// Admin Rejected Deposits Endpoint - FIXED
 app.get('/api/admin/deposits/rejected', adminProtect, async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 5;
+    const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
+    
+    console.log('Fetching rejected deposits...');
     
     const deposits = await Transaction.find({
       type: 'deposit',
       status: 'failed'
     })
-    .populate('user', 'firstName lastName email')
+    .select('_id amount method createdAt user adminNotes status')
     .sort({ createdAt: -1 })
     .skip(skip)
     .limit(limit)
     .lean();
     
-    const formattedDeposits = deposits.map(deposit => ({
-      _id: deposit._id,
-      user: {
-        _id: deposit.user?._id,
-        firstName: deposit.user?.firstName || 'Unknown',
-        lastName: deposit.user?.lastName || 'User',
-        email: deposit.user?.email || 'N/A'
-      },
-      amount: deposit.amount || 0,
-      method: deposit.method || 'crypto',
-      createdAt: deposit.createdAt,
-      rejectionReason: deposit.adminNotes || 'No reason provided',
-      status: deposit.status
-    }));
+    console.log(`Found ${deposits.length} rejected deposits`);
+    
+    const depositsWithUsers = [];
+    for (const deposit of deposits) {
+      let userData = { firstName: 'Unknown', lastName: 'User', email: 'N/A' };
+      if (deposit.user) {
+        const user = await User.findById(deposit.user).select('firstName lastName email').lean();
+        if (user) {
+          userData = user;
+        }
+      }
+      
+      depositsWithUsers.push({
+        _id: deposit._id,
+        user: {
+          _id: deposit.user,
+          firstName: userData.firstName,
+          lastName: userData.lastName,
+          email: userData.email
+        },
+        amount: deposit.amount,
+        method: deposit.method,
+        createdAt: deposit.createdAt,
+        rejectionReason: deposit.adminNotes || 'No reason provided',
+        status: deposit.status
+      });
+    }
     
     const totalCount = await Transaction.countDocuments({
       type: 'deposit',
@@ -12239,7 +12297,7 @@ app.get('/api/admin/deposits/rejected', adminProtect, async (req, res) => {
     res.status(200).json({
       status: 'success',
       data: {
-        deposits: formattedDeposits,
+        deposits: depositsWithUsers,
         totalCount,
         totalPages,
         currentPage: page
@@ -12254,41 +12312,58 @@ app.get('/api/admin/deposits/rejected', adminProtect, async (req, res) => {
   }
 });
 
+
+
 // =============================================
-// ADMIN WITHDRAWALS ENDPOINTS - FIXED
+// FIXED: Admin Withdrawal Endpoints
 // =============================================
 
-// Admin Pending Withdrawals Endpoint
+// Admin Pending Withdrawals Endpoint - FIXED
 app.get('/api/admin/withdrawals/pending', adminProtect, async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 5;
+    const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
+    
+    console.log('Fetching pending withdrawals...');
     
     const withdrawals = await Transaction.find({
       type: 'withdrawal',
       status: 'pending'
     })
-    .populate('user', 'firstName lastName email')
+    .select('_id amount method createdAt user btcAddress status')
     .sort({ createdAt: -1 })
     .skip(skip)
     .limit(limit)
     .lean();
     
-    const formattedWithdrawals = withdrawals.map(withdrawal => ({
-      _id: withdrawal._id,
-      user: {
-        _id: withdrawal.user?._id,
-        firstName: withdrawal.user?.firstName || 'Unknown',
-        lastName: withdrawal.user?.lastName || 'User',
-        email: withdrawal.user?.email || 'N/A'
-      },
-      amount: withdrawal.amount || 0,
-      method: withdrawal.method || 'crypto',
-      createdAt: withdrawal.createdAt,
-      walletAddress: withdrawal.btcAddress || withdrawal.details?.walletAddress || 'N/A',
-      status: withdrawal.status
-    }));
+    console.log(`Found ${withdrawals.length} pending withdrawals`);
+    
+    const withdrawalsWithUsers = [];
+    for (const withdrawal of withdrawals) {
+      let userData = { firstName: 'Unknown', lastName: 'User', email: 'N/A' };
+      if (withdrawal.user) {
+        const user = await User.findById(withdrawal.user).select('firstName lastName email').lean();
+        if (user) {
+          userData = user;
+        }
+      }
+      
+      withdrawalsWithUsers.push({
+        _id: withdrawal._id,
+        user: {
+          _id: withdrawal.user,
+          firstName: userData.firstName,
+          lastName: userData.lastName,
+          email: userData.email
+        },
+        amount: withdrawal.amount,
+        method: withdrawal.method,
+        createdAt: withdrawal.createdAt,
+        walletAddress: withdrawal.btcAddress || 'N/A',
+        status: withdrawal.status
+      });
+    }
     
     const totalCount = await Transaction.countDocuments({
       type: 'withdrawal',
@@ -12299,7 +12374,7 @@ app.get('/api/admin/withdrawals/pending', adminProtect, async (req, res) => {
     res.status(200).json({
       status: 'success',
       data: {
-        withdrawals: formattedWithdrawals,
+        withdrawals: withdrawalsWithUsers,
         totalCount,
         totalPages,
         currentPage: page
@@ -12314,38 +12389,61 @@ app.get('/api/admin/withdrawals/pending', adminProtect, async (req, res) => {
   }
 });
 
-// Admin Approved Withdrawals Endpoint
+// Admin Approved Withdrawals Endpoint - FIXED
 app.get('/api/admin/withdrawals/approved', adminProtect, async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 5;
+    const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
+    
+    console.log('Fetching approved withdrawals...');
     
     const withdrawals = await Transaction.find({
       type: 'withdrawal',
       status: 'completed'
     })
-    .populate('user', 'firstName lastName email')
+    .select('_id amount method createdAt user processedAt processedBy status')
     .sort({ createdAt: -1 })
     .skip(skip)
     .limit(limit)
     .lean();
     
-    const formattedWithdrawals = withdrawals.map(withdrawal => ({
-      _id: withdrawal._id,
-      user: {
-        _id: withdrawal.user?._id,
-        firstName: withdrawal.user?.firstName || 'Unknown',
-        lastName: withdrawal.user?.lastName || 'User',
-        email: withdrawal.user?.email || 'N/A'
-      },
-      amount: withdrawal.amount || 0,
-      method: withdrawal.method || 'crypto',
-      createdAt: withdrawal.createdAt,
-      processedAt: withdrawal.processedAt,
-      processedBy: withdrawal.processedBy ? 'Admin' : 'System',
-      status: withdrawal.status
-    }));
+    console.log(`Found ${withdrawals.length} approved withdrawals`);
+    
+    const withdrawalsWithUsers = [];
+    for (const withdrawal of withdrawals) {
+      let userData = { firstName: 'Unknown', lastName: 'User', email: 'N/A' };
+      if (withdrawal.user) {
+        const user = await User.findById(withdrawal.user).select('firstName lastName email').lean();
+        if (user) {
+          userData = user;
+        }
+      }
+      
+      let processedByName = 'System';
+      if (withdrawal.processedBy) {
+        const admin = await Admin.findById(withdrawal.processedBy).select('name').lean();
+        if (admin) {
+          processedByName = admin.name;
+        }
+      }
+      
+      withdrawalsWithUsers.push({
+        _id: withdrawal._id,
+        user: {
+          _id: withdrawal.user,
+          firstName: userData.firstName,
+          lastName: userData.lastName,
+          email: userData.email
+        },
+        amount: withdrawal.amount,
+        method: withdrawal.method,
+        createdAt: withdrawal.createdAt,
+        processedAt: withdrawal.processedAt,
+        processedBy: processedByName,
+        status: withdrawal.status
+      });
+    }
     
     const totalCount = await Transaction.countDocuments({
       type: 'withdrawal',
@@ -12356,7 +12454,7 @@ app.get('/api/admin/withdrawals/approved', adminProtect, async (req, res) => {
     res.status(200).json({
       status: 'success',
       data: {
-        withdrawals: formattedWithdrawals,
+        withdrawals: withdrawalsWithUsers,
         totalCount,
         totalPages,
         currentPage: page
@@ -12371,37 +12469,52 @@ app.get('/api/admin/withdrawals/approved', adminProtect, async (req, res) => {
   }
 });
 
-// Admin Rejected Withdrawals Endpoint
+// Admin Rejected Withdrawals Endpoint - FIXED
 app.get('/api/admin/withdrawals/rejected', adminProtect, async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 5;
+    const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
+    
+    console.log('Fetching rejected withdrawals...');
     
     const withdrawals = await Transaction.find({
       type: 'withdrawal',
       status: 'failed'
     })
-    .populate('user', 'firstName lastName email')
+    .select('_id amount method createdAt user adminNotes status')
     .sort({ createdAt: -1 })
     .skip(skip)
     .limit(limit)
     .lean();
     
-    const formattedWithdrawals = withdrawals.map(withdrawal => ({
-      _id: withdrawal._id,
-      user: {
-        _id: withdrawal.user?._id,
-        firstName: withdrawal.user?.firstName || 'Unknown',
-        lastName: withdrawal.user?.lastName || 'User',
-        email: withdrawal.user?.email || 'N/A'
-      },
-      amount: withdrawal.amount || 0,
-      method: withdrawal.method || 'crypto',
-      createdAt: withdrawal.createdAt,
-      rejectionReason: withdrawal.adminNotes || 'No reason provided',
-      status: withdrawal.status
-    }));
+    console.log(`Found ${withdrawals.length} rejected withdrawals`);
+    
+    const withdrawalsWithUsers = [];
+    for (const withdrawal of withdrawals) {
+      let userData = { firstName: 'Unknown', lastName: 'User', email: 'N/A' };
+      if (withdrawal.user) {
+        const user = await User.findById(withdrawal.user).select('firstName lastName email').lean();
+        if (user) {
+          userData = user;
+        }
+      }
+      
+      withdrawalsWithUsers.push({
+        _id: withdrawal._id,
+        user: {
+          _id: withdrawal.user,
+          firstName: userData.firstName,
+          lastName: userData.lastName,
+          email: userData.email
+        },
+        amount: withdrawal.amount,
+        method: withdrawal.method,
+        createdAt: withdrawal.createdAt,
+        rejectionReason: withdrawal.adminNotes || 'No reason provided',
+        status: withdrawal.status
+      });
+    }
     
     const totalCount = await Transaction.countDocuments({
       type: 'withdrawal',
@@ -12412,7 +12525,7 @@ app.get('/api/admin/withdrawals/rejected', adminProtect, async (req, res) => {
     res.status(200).json({
       status: 'success',
       data: {
-        withdrawals: formattedWithdrawals,
+        withdrawals: withdrawalsWithUsers,
         totalCount,
         totalPages,
         currentPage: page
@@ -12426,6 +12539,17 @@ app.get('/api/admin/withdrawals/rejected', adminProtect, async (req, res) => {
     });
   }
 });
+
+
+
+
+
+
+
+
+
+
+
 
 
 
