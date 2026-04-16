@@ -19162,308 +19162,401 @@ app.get('/api/admin/deposits/:id', adminProtect, restrictTo('super', 'finance'),
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // =============================================
-// ADMIN DEPOSIT MANAGEMENT ENDPOINTS
+// MISSING ADMIN DEPOSIT ENDPOINTS
 // =============================================
 
 /**
+ * APPROVE DEPOSIT ENDPOINT
  * POST /api/admin/deposits/:id/approve
- * Approve a pending deposit and credit user's balance
  */
-app.post('/api/admin/deposits/:id/approve', adminProtect, async (req, res) => {
+app.post('/api/admin/deposits/:id/approve', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
   try {
-    const depositId = req.params.id;
+    const { id } = req.params;
     const { notes } = req.body;
-    const adminId = req.admin._id;
-    const adminName = req.admin.name;
-
-    // Find the deposit
-    const deposit = await DepositAsset.findById(depositId).populate('user', 'firstName lastName email balances');
+    
+    // Find the deposit - check both DepositAsset and Transaction models
+    let deposit = await DepositAsset.findById(id).populate('user', 'firstName lastName email balances');
     
     if (!deposit) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Deposit not found'
-      });
+      // Try finding in Transaction model
+      const transaction = await Transaction.findOne({ 
+        _id: id, 
+        type: 'deposit', 
+        status: 'pending' 
+      }).populate('user', 'firstName lastName email balances');
+      
+      if (!transaction) {
+        return res.status(404).json({
+          status: 'fail',
+          message: 'Deposit not found'
+        });
+      }
+      deposit = transaction;
     }
-
+    
+    // Check if deposit is already processed
     if (deposit.status !== 'pending') {
       return res.status(400).json({
         status: 'fail',
         message: `Deposit is already ${deposit.status}`
       });
     }
-
-    const user = deposit.user;
-    const asset = deposit.asset.toUpperCase();
-    const cryptoAmount = deposit.amount;
-    const usdValue = deposit.usdValue;
-
-    // Get current crypto price for exchange rate
-    let exchangeRate = usdValue / cryptoAmount;
-    let currentPrice = await getCryptoPrice(asset);
-    if (currentPrice) {
-      exchangeRate = currentPrice;
-    }
-
-    // Get crypto logo URL
-    const cryptoLogoUrl = getCryptoLogo(asset);
-
-    // Update user's main balance
-    const currentMainBalance = user.balances.main.get(asset) || 0;
-    const newMainBalance = currentMainBalance + cryptoAmount;
     
-    await User.findByIdAndUpdate(user._id, {
-      $set: {
-        [`balances.main.${asset}`]: newMainBalance
-      }
-    });
-
+    const user = deposit.user;
+    const cryptoAsset = (deposit.asset || deposit.method || 'USDT').toUpperCase();
+    const cryptoAmount = deposit.assetAmount || deposit.amount;
+    const usdAmount = deposit.amount;
+    
+    // Get current crypto price for exchange rate
+    const currentPrice = await getCryptoPrice(cryptoAsset);
+    const exchangeRate = currentPrice || 1;
+    
+    // Add crypto to user's main balance
+    if (!user.balances) {
+      user.balances = { main: new Map(), active: new Map(), matured: new Map() };
+    }
+    
+    const currentMainBalance = user.balances.main.get(cryptoAsset) || 0;
+    const newMainBalance = currentMainBalance + cryptoAmount;
+    user.balances.main.set(cryptoAsset, newMainBalance);
+    
     // Update deposit status
-    deposit.status = 'confirmed';
-    deposit.confirmedAt = new Date();
-    deposit.metadata.exchangeRate = exchangeRate;
-    deposit.metadata.assetPriceAtTime = currentPrice;
-    await deposit.save();
-
-    // Create transaction record
-    const transaction = new Transaction({
-      user: user._id,
-      type: 'deposit',
-      amount: usdValue,
-      asset: asset,
-      assetAmount: cryptoAmount,
-      currency: 'USD',
-      status: 'completed',
-      method: asset,
-      reference: `DEP-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
-      details: {
-        depositId: deposit._id,
-        cryptoAmount: cryptoAmount,
-        exchangeRate: exchangeRate,
-        notes: notes || null,
-        approvedBy: adminName
-      },
-      fee: 0,
-      netAmount: usdValue,
-      processedBy: adminId,
-      processedAt: new Date(),
-      exchangeRateAtTime: exchangeRate,
-      network: deposit.metadata.network || 'MAINNET'
-    });
-    await transaction.save();
-
-    // Send approval email
+    deposit.status = 'completed';
+    deposit.completedAt = new Date();
+    deposit.processedBy = req.admin._id;
+    deposit.processedAt = new Date();
+    deposit.adminNotes = notes;
+    deposit.exchangeRateAtTime = exchangeRate;
+    
+    await Promise.all([
+      deposit.save(),
+      user.save()
+    ]);
+    
+    // Create transaction record if not already exists
+    let transactionRecord = deposit;
+    if (deposit._id.toString() !== id || deposit.constructor.modelName !== 'Transaction') {
+      transactionRecord = await Transaction.create({
+        user: user._id,
+        type: 'deposit',
+        amount: usdAmount,
+        asset: cryptoAsset,
+        assetAmount: cryptoAmount,
+        currency: 'USD',
+        status: 'completed',
+        method: cryptoAsset,
+        reference: `DEP-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+        details: {
+          depositId: deposit._id,
+          adminApprovedBy: req.admin.name,
+          adminNotes: notes,
+          exchangeRate: exchangeRate
+        },
+        fee: 0,
+        netAmount: usdAmount,
+        processedBy: req.admin._id,
+        processedAt: new Date(),
+        exchangeRateAtTime: exchangeRate
+      });
+    }
+    
+    // Send email notification using deposit_approved template
+    const cryptoLogoUrl = getCryptoLogo(cryptoAsset);
+    
     await sendProfessionalEmail({
       email: user.email,
       template: 'deposit_approved',
       data: {
         name: user.firstName,
-        amount: usdValue,
-        method: asset,
-        reference: transaction.reference,
-        processedAt: new Date(),
-        newBalance: newMainBalance,
-        cryptoAsset: asset,
-        cryptoAmount: cryptoAmount,
-        exchangeRate: exchangeRate,
-        cryptoLogoUrl: cryptoLogoUrl
+        amount: usdAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+        cryptoAmount: cryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 }),
+        cryptoAsset: cryptoAsset,
+        cryptoLogoUrl: cryptoLogoUrl,
+        method: cryptoAsset,
+        reference: transactionRecord.reference,
+        newBalance: newMainBalance.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 }),
+        processedAt: new Date().toISOString(),
+        exchangeRate: exchangeRate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+        walletType: 'Main Wallet',
+        walletColor: '#10B981'
       }
     });
-
-    // Log activity
+    
+    // Log the activity
     await logActivity(
       'deposit_approved',
-      'DepositAsset',
+      'deposit',
       deposit._id,
-      adminId,
+      req.admin._id,
       'Admin',
       req,
-      {
-        amount: usdValue,
-        cryptoAmount: cryptoAmount,
-        asset: asset,
-        userId: user._id,
-        adminName: adminName
-      }
+      { amount: usdAmount, asset: cryptoAsset, userId: user._id }
     );
-
+    
+    // Create notification for user
+    await Notification.create({
+      title: 'Deposit Approved',
+      message: `Your deposit of ${cryptoAmount} ${cryptoAsset} ($${usdAmount.toLocaleString()}) has been approved and credited to your main wallet.`,
+      type: 'deposit_approved',
+      recipientType: 'specific',
+      specificUserId: user._id,
+      isImportant: false,
+      sentBy: req.admin._id,
+      metadata: {
+        depositId: deposit._id,
+        amount: usdAmount,
+        cryptoAmount: cryptoAmount,
+        asset: cryptoAsset
+      }
+    });
+    
     res.status(200).json({
       status: 'success',
       message: 'Deposit approved successfully',
       data: {
         deposit: {
-          _id: deposit._id,
+          id: deposit._id,
           status: deposit.status,
-          confirmedAt: deposit.confirmedAt
-        },
-        transaction: {
-          _id: transaction._id,
-          reference: transaction.reference,
-          amount: usdValue
-        },
-        newBalance: {
-          [asset]: newMainBalance
+          amount: usdAmount,
+          cryptoAmount: cryptoAmount,
+          asset: cryptoAsset,
+          processedAt: deposit.processedAt
         }
       }
     });
-
+    
   } catch (err) {
     console.error('Error approving deposit:', err);
     res.status(500).json({
-      status: 'error',
+      status: 'fail',
       message: err.message || 'Failed to approve deposit'
     });
   }
 });
 
 /**
+ * REJECT DEPOSIT ENDPOINT
  * POST /api/admin/deposits/:id/reject
- * Reject a pending deposit
  */
-app.post('/api/admin/deposits/:id/reject', adminProtect, async (req, res) => {
+app.post('/api/admin/deposits/:id/reject', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
   try {
-    const depositId = req.params.id;
-    const { reason } = req.body;
-    const adminId = req.admin._id;
-    const adminName = req.admin.name;
-
-    if (!reason || reason.trim() === '') {
+    const { id } = req.params;
+    const { reason, notes } = req.body;
+    
+    if (!reason && !notes) {
       return res.status(400).json({
         status: 'fail',
-        message: 'Rejection reason is required'
+        message: 'Please provide a reason for rejection'
       });
     }
-
+    
+    const rejectionReason = reason || notes;
+    
     // Find the deposit
-    const deposit = await DepositAsset.findById(depositId).populate('user', 'firstName lastName email');
+    let deposit = await DepositAsset.findById(id).populate('user', 'firstName lastName email balances');
     
     if (!deposit) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Deposit not found'
-      });
+      const transaction = await Transaction.findOne({ 
+        _id: id, 
+        type: 'deposit', 
+        status: 'pending' 
+      }).populate('user', 'firstName lastName email balances');
+      
+      if (!transaction) {
+        return res.status(404).json({
+          status: 'fail',
+          message: 'Deposit not found'
+        });
+      }
+      deposit = transaction;
     }
-
+    
+    // Check if deposit is already processed
     if (deposit.status !== 'pending') {
       return res.status(400).json({
         status: 'fail',
         message: `Deposit is already ${deposit.status}`
       });
     }
-
+    
     const user = deposit.user;
-    const asset = deposit.asset.toUpperCase();
-    const cryptoAmount = deposit.amount;
-    const usdValue = deposit.usdValue;
-
-    // Get exchange rate for email
-    let exchangeRate = usdValue / cryptoAmount;
-    let currentPrice = await getCryptoPrice(asset);
-    if (currentPrice) {
-      exchangeRate = currentPrice;
-    }
-
-    // Get crypto logo URL
-    const cryptoLogoUrl = getCryptoLogo(asset);
-
+    const cryptoAsset = (deposit.asset || deposit.method || 'USDT').toUpperCase();
+    const cryptoAmount = deposit.assetAmount || deposit.amount;
+    const usdAmount = deposit.amount;
+    
+    // Get current crypto price for exchange rate (for email)
+    const currentPrice = await getCryptoPrice(cryptoAsset);
+    const exchangeRate = currentPrice || 1;
+    
     // Update deposit status
     deposit.status = 'failed';
-    deposit.metadata.rejectionReason = reason;
-    deposit.metadata.rejectedBy = adminName;
-    deposit.metadata.rejectedAt = new Date();
+    deposit.adminNotes = rejectionReason;
+    deposit.processedBy = req.admin._id;
+    deposit.processedAt = new Date();
+    deposit.metadata = {
+      ...deposit.metadata,
+      rejectionReason: rejectionReason,
+      rejectedBy: req.admin._id,
+      rejectedAt: new Date()
+    };
+    
     await deposit.save();
-
-    // Create transaction record for failed deposit
-    const transaction = new Transaction({
+    
+    // Create transaction record for rejected deposit
+    const transactionRecord = await Transaction.create({
       user: user._id,
       type: 'deposit',
-      amount: usdValue,
-      asset: asset,
+      amount: usdAmount,
+      asset: cryptoAsset,
       assetAmount: cryptoAmount,
       currency: 'USD',
       status: 'failed',
-      method: asset,
-      reference: `DEP-FAILED-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+      method: cryptoAsset,
+      reference: `DEP-REJ-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
       details: {
         depositId: deposit._id,
-        cryptoAmount: cryptoAmount,
-        exchangeRate: exchangeRate,
-        rejectionReason: reason,
-        rejectedBy: adminName
+        rejectionReason: rejectionReason,
+        rejectedBy: req.admin.name
       },
       fee: 0,
       netAmount: 0,
-      processedBy: adminId,
+      processedBy: req.admin._id,
       processedAt: new Date(),
-      adminNotes: reason,
+      adminNotes: rejectionReason,
       exchangeRateAtTime: exchangeRate
     });
-    await transaction.save();
-
-    // Send rejection email
+    
+    // Send email notification using deposit_rejected template
+    const cryptoLogoUrl = getCryptoLogo(cryptoAsset);
+    
     await sendProfessionalEmail({
       email: user.email,
       template: 'deposit_rejected',
       data: {
         name: user.firstName,
-        amount: usdValue,
-        method: asset,
-        reason: reason,
-        reference: deposit._id.toString(),
-        cryptoAsset: asset,
-        cryptoAmount: cryptoAmount,
-        exchangeRate: exchangeRate,
-        cryptoLogoUrl: cryptoLogoUrl
+        amount: usdAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+        cryptoAmount: cryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 }),
+        cryptoAsset: cryptoAsset,
+        cryptoLogoUrl: cryptoLogoUrl,
+        method: cryptoAsset,
+        reference: transactionRecord.reference,
+        reason: rejectionReason,
+        exchangeRate: exchangeRate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
       }
     });
-
-    // Log activity
+    
+    // Log the activity
     await logActivity(
       'deposit_rejected',
-      'DepositAsset',
+      'deposit',
       deposit._id,
-      adminId,
+      req.admin._id,
       'Admin',
       req,
-      {
-        amount: usdValue,
-        cryptoAmount: cryptoAmount,
-        asset: asset,
-        userId: user._id,
-        adminName: adminName,
-        reason: reason
-      }
+      { amount: usdAmount, asset: cryptoAsset, userId: user._id, reason: rejectionReason }
     );
-
+    
+    // Create notification for user
+    await Notification.create({
+      title: 'Deposit Declined',
+      message: `Your deposit request of ${cryptoAmount} ${cryptoAsset} ($${usdAmount.toLocaleString()}) has been declined. Reason: ${rejectionReason}`,
+      type: 'deposit_rejected',
+      recipientType: 'specific',
+      specificUserId: user._id,
+      isImportant: true,
+      sentBy: req.admin._id,
+      metadata: {
+        depositId: deposit._id,
+        amount: usdAmount,
+        cryptoAmount: cryptoAmount,
+        asset: cryptoAsset,
+        reason: rejectionReason
+      }
+    });
+    
     res.status(200).json({
       status: 'success',
       message: 'Deposit rejected successfully',
       data: {
         deposit: {
-          _id: deposit._id,
+          id: deposit._id,
           status: deposit.status,
-          rejectionReason: reason
-        },
-        transaction: {
-          _id: transaction._id,
-          reference: transaction.reference
+          amount: usdAmount,
+          cryptoAmount: cryptoAmount,
+          asset: cryptoAsset,
+          rejectionReason: rejectionReason
         }
       }
     });
-
+    
   } catch (err) {
     console.error('Error rejecting deposit:', err);
     res.status(500).json({
-      status: 'error',
+      status: 'fail',
       message: err.message || 'Failed to reject deposit'
     });
   }
 });
 
-// Helper function to get crypto logo URL
+/**
+ * Helper function to get crypto logo URL
+ */
 function getCryptoLogo(asset) {
-  const logos = {
+  const logoMap = {
     'BTC': 'https://cryptologos.cc/logos/bitcoin-btc-logo.png',
     'ETH': 'https://cryptologos.cc/logos/ethereum-eth-logo.png',
     'USDT': 'https://cryptologos.cc/logos/tether-usdt-logo.png',
@@ -19473,10 +19566,24 @@ function getCryptoLogo(asset) {
     'XRP': 'https://cryptologos.cc/logos/xrp-xrp-logo.png',
     'DOGE': 'https://cryptologos.cc/logos/dogecoin-doge-logo.png',
     'ADA': 'https://cryptologos.cc/logos/cardano-ada-logo.png',
-    'SHIB': 'https://cryptologos.cc/logos/shiba-inu-shib-logo.png'
+    'SHIB': 'https://cryptologos.cc/logos/shiba-inu-shib-logo.png',
+    'AVAX': 'https://cryptologos.cc/logos/avalanche-avax-logo.png',
+    'DOT': 'https://cryptologos.cc/logos/polkadot-new-dot-logo.png',
+    'TRX': 'https://cryptologos.cc/logos/tron-trx-logo.png',
+    'LINK': 'https://cryptologos.cc/logos/chainlink-link-logo.png',
+    'MATIC': 'https://cryptologos.cc/logos/polygon-matic-logo.png',
+    'LTC': 'https://cryptologos.cc/logos/litecoin-ltc-logo.png'
   };
-  return logos[asset] || 'https://cryptologos.cc/logos/bitcoin-btc-logo.png';
+  
+  return logoMap[asset.toUpperCase()] || 'https://cryptologos.cc/logos/bitcoin-btc-logo.png';
 }
+
+
+
+
+
+
+
 
 
 
