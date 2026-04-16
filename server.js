@@ -17322,42 +17322,7 @@ function mapSymbolToCoinGeckoId(symbol) {
   return mapping[symbol.toLowerCase()] || symbol.toLowerCase();
 }
 
-const startRealTimePriceUpdates = (io) => {
-  if (priceUpdateInterval) clearInterval(priceUpdateInterval);
-  
-  // UPDATE PRICES EVERY 2 SECONDS (less aggressive than 1 second)
-  priceUpdateInterval = setInterval(async () => {
-    try {
-      const assets = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'ADA', 'SHIB', 'AVAX', 'DOT', 'TRX', 'LINK', 'MATIC', 'LTC'];
-      const priceUpdates = {};
-      
-      // Fetch all prices in parallel
-      const pricePromises = assets.map(async (asset) => {
-        const price = await getCryptoPrice(asset);
-        if (price) {
-          priceUpdates[asset.toLowerCase()] = {
-            price: price,
-            timestamp: Date.now()
-          };
-        }
-      });
-      
-      await Promise.all(pricePromises);
-      
-      if (Object.keys(priceUpdates).length > 0 && io) {
-        // Broadcast price updates to all clients
-        io.emit('price_update', priceUpdates);
-        lastPrices = priceUpdates;
-      }
-      
-      // Use the CORRECT function to update wallet values
-      await recalculateAllUserBalances(io);
-      
-    } catch (err) {
-      console.error('Error in price update interval:', err);
-    }
-  }, 2000); // Update every 2 seconds (reduced from 1 second)
-};
+
 
 const startRealTimePriceUpdates = (io) => {
   if (priceUpdateInterval) clearInterval(priceUpdateInterval);
