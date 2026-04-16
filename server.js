@@ -4704,7 +4704,7 @@ case 'crypto_deposit':
         `;
         break;
 
-      case 'deposit_rejected':
+     case 'deposit_rejected':
   const cryptoLogoUrl = getCryptoLogo(data.cryptoAsset);
   const formattedAmount = data.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const formattedCryptoAmount = data.cryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
@@ -4712,87 +4712,81 @@ case 'crypto_deposit':
   
   subject = '⛔ Deposit Declined - ₿itHash Capital';
   html = `
-    <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF; border-radius: 20px; overflow: hidden; box-shadow: 0 20px 35px -10px rgba(0,0,0,0.15);">
-      
-      <!-- Header with Red Alert Banner -->
-      <div style="background: linear-gradient(135deg, #7F1D1D 0%, #991B1B 100%); padding: 35px 30px; text-align: center;">
-        <div style="background: rgba(255,255,255,0.15); width: 70px; height: 70px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; margin-bottom: 20px;">
-          <svg width="38" height="38" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M12 8V12M12 16H12.01M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round"/>
-            <path d="M12 12V16" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round"/>
-          </svg>
-        </div>
-        <h1 style="color: #FFFFFF; font-size: 26px; margin: 0 0 8px 0; font-weight: 700;">Deposit Declined</h1>
-        <p style="color: #FCA5A5; font-size: 14px; margin: 0;">Your deposit request could not be approved</p>
+    <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+      <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+        <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+        <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+        <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
       </div>
       
-      <!-- Body -->
-      <div style="padding: 30px;">
+      <div style="padding: 30px; background: #FFFFFF;">
+        <div style="background: #FEF2F2; border-radius: 12px; padding: 20px; text-align: center; margin-bottom: 25px;">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin-bottom: 12px;">
+            <circle cx="12" cy="12" r="10" stroke="#DC2626" stroke-width="2"/>
+            <path d="M12 8V12M12 16H12.01" stroke="#DC2626" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <h2 style="color: #DC2626; font-size: 22px; margin: 0 0 8px 0; font-weight: 700;">DEPOSIT DECLINED</h2>
+          <p style="color: #991B1B; font-size: 14px; margin: 0;">Your deposit request could not be approved</p>
+        </div>
         
-        <!-- Greeting -->
-        <p style="color: #1E293B; font-size: 16px; margin: 0 0 20px 0; line-height: 1.5;">Dear <strong>${data.name}</strong>,</p>
-        <p style="color: #475569; font-size: 14px; margin: 0 0 25px 0; line-height: 1.6;">We regret to inform you that your deposit request has been reviewed and <strong style="color: #DC2626;">could not be approved</strong> at this time.</p>
+        <p style="color: #333333; line-height: 1.6; margin-bottom: 20px;">Dear <strong>${data.name}</strong>,</p>
+        <p style="color: #333333; line-height: 1.6; margin-bottom: 25px;">We regret to inform you that your deposit request has been reviewed and <strong style="color: #DC2626;">could not be approved</strong> at this time.</p>
         
-        <!-- Rejection Reason Box -->
-        <div style="background: #FEF2F2; border-left: 4px solid #DC2626; padding: 16px 18px; border-radius: 12px; margin-bottom: 25px;">
-          <p style="color: #991B1B; font-size: 13px; margin: 0 0 6px 0; font-weight: 600;">ⓘ REASON FOR DECLINE</p>
+        <div style="background: #FEF2F2; border-left: 4px solid #DC2626; padding: 16px 20px; border-radius: 8px; margin-bottom: 25px;">
+          <p style="color: #991B1B; font-size: 13px; margin: 0 0 6px 0; font-weight: 600;">ⓘ REASON</p>
           <p style="color: #7F1D1D; font-size: 14px; margin: 0; line-height: 1.5;">${data.reason}</p>
         </div>
         
-        <!-- Deposit Details Card -->
-        <div style="background: #F8FAFC; border-radius: 16px; padding: 20px; margin-bottom: 25px; border: 1px solid #E2E8F0;">
-          <h3 style="color: #0F172A; font-size: 15px; margin: 0 0 16px 0; font-weight: 600;">📋 Deposit Details</h3>
-          
-          <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #E2E8F0;">
-            <span style="color: #475569; font-size: 14px;">Cryptocurrency</span>
-            <div style="display: flex; align-items: center; gap: 8px;">
-              ${cryptoLogoUrl ? `<img src="${cryptoLogoUrl}" width="24" height="24" style="border-radius: 50%;" alt="${data.cryptoAsset}">` : ''}
-              <span style="color: #0F172A; font-weight: 600;">${data.cryptoAsset}</span>
-            </div>
-          </div>
-          
-          <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #E2E8F0;">
-            <span style="color: #475569; font-size: 14px;">Amount Requested</span>
-            <span style="color: #0F172A; font-weight: 600;">${formattedCryptoAmount} ${data.cryptoAsset}</span>
-          </div>
-          
-          <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #E2E8F0;">
-            <span style="color: #475569; font-size: 14px;">USD Value</span>
-            <span style="color: #0F172A; font-weight: 600;">$${formattedAmount} USD</span>
-          </div>
-          
-          <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #E2E8F0;">
-            <span style="color: #475569; font-size: 14px;">Exchange Rate</span>
-            <span style="color: #0F172A; font-weight: 600;">1 ${data.cryptoAsset} = $${formattedRate}</span>
-          </div>
-          
-          <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 0;">
-            <span style="color: #475569; font-size: 14px;">Payment Method</span>
-            <span style="color: #0F172A; font-weight: 600;">${data.method}</span>
-          </div>
+        <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+          <table style="width: 100%; border-collapse: collapse;">
+            <tr>
+              <td style="padding: 8px 0;"><strong>Cryptocurrency:</strong></td>
+              <td style="padding: 8px 0; text-align: right;">
+                ${cryptoLogoUrl ? `<img src="${cryptoLogoUrl}" width="20" height="20" style="vertical-align: middle; margin-right: 5px;">` : ''}
+                ${data.cryptoAsset}
+              </td>
+            </tr>
+            <tr style="border-top: 1px solid #E2E8F0;">
+              <td style="padding: 8px 0;"><strong>Amount Requested:</strong></td>
+              <td style="padding: 8px 0; text-align: right; font-weight: bold;">${formattedCryptoAmount} ${data.cryptoAsset}</td>
+            </tr>
+            <tr style="border-top: 1px solid #E2E8F0;">
+              <td style="padding: 8px 0;"><strong>USD Value:</strong></td>
+              <td style="padding: 8px 0; text-align: right;">$${formattedAmount} USD</td>
+            </tr>
+            <tr style="border-top: 1px solid #E2E8F0;">
+              <td style="padding: 8px 0;"><strong>Exchange Rate:</strong></td>
+              <td style="padding: 8px 0; text-align: right;">1 ${data.cryptoAsset} = $${formattedRate}</td>
+            </tr>
+            <tr style="border-top: 1px solid #E2E8F0;">
+              <td style="padding: 8px 0;"><strong>Payment Method:</strong></td>
+              <td style="padding: 8px 0; text-align: right;">${data.method}</td>
+            </tr>
+            <tr style="border-top: 1px solid #E2E8F0;">
+              <td style="padding: 8px 0;"><strong>Request ID:</strong></td>
+              <td style="padding: 8px 0; text-align: right; font-size: 11px;">${data.reference}</td>
+            </tr>
+          </table>
         </div>
         
-        <!-- Next Steps -->
-        <div style="background: #F1F5F9; border-radius: 14px; padding: 20px; text-align: center; margin-bottom: 25px;">
-          <p style="color: #1E293B; font-size: 14px; margin: 0 0 8px 0; font-weight: 600;">📌 What you can do next</p>
-          <p style="color: #475569; font-size: 13px; margin: 0 0 16px 0;">Please contact our support team for assistance or to resolve this issue.</p>
-          <a href="https://www.bithashcapital.live/support" style="display: inline-block; background: #3B82F6; color: #FFFFFF; padding: 12px 28px; text-decoration: none; border-radius: 999px; font-weight: 600; font-size: 14px;">Contact Support</a>
+        <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; text-align: center; margin: 20px 0;">
+          <p style="color: #333333; line-height: 1.6; margin: 0 0 10px 0;">❓ Have questions about this decision?</p>
+          <p style="color: #666666; font-size: 13px; margin: 0;">Our support team is available 24/7 to assist you.</p>
         </div>
         
-        <!-- Footer Note -->
-        <p style="color: #94A3B8; font-size: 11px; text-align: center; margin: 20px 0 0 0;">Reference ID: ${data.reference} • ${data.date}</p>
-        <p style="color: #94A3B8; font-size: 11px; text-align: center; margin: 5px 0 0 0;">If you believe this is an error, please reply to this email.</p>
+        <div style="text-align: center; margin: 30px 0;">
+          <a href="https://www.bithashcapital.live/support" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Contact Support</a>
+        </div>
         
+        <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${new Date().toLocaleString()}</p>
       </div>
       
-      <!-- Brand Footer -->
-      <div style="text-align: center; padding: 20px; background: #F8FAFC; border-top: 1px solid #E2E8F0;">
-        <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 35px; height: 35px; margin-bottom: 10px;">
-        <p style="color: #94A3B8; font-size: 11px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-        <p style="color: #94A3B8; font-size: 11px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-        <p style="color: #94A3B8; font-size: 11px; margin: 5px 0;">
-          <a href="mailto:support@bithash.com" style="color: #3B82F6; text-decoration: none;">support@bithash.com</a> | 
-          <a href="https://www.bithashcapital.live" style="color: #3B82F6; text-decoration: none;">www.bithashcapital.live</a>
+      <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
+          <a href="mailto:support@bithash.com" style="color: #F7A600; text-decoration: none;">support@bithash.com</a> | 
+          <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
         </p>
       </div>
     </div>
