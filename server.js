@@ -17322,31 +17322,41 @@ function mapSymbolToCoinGeckoId(symbol) {
   return mapping[symbol.toLowerCase()] || symbol.toLowerCase();
 }
 
-// Helper function to get total wallet value from User.balances Map
-const calculateWalletValueFromBalances = async (balancesMap, currentPrices) => {
-  let totalValue = 0;
+const startRealTimePriceUpdates = (io) => {
+  if (priceUpdateInterval) clearInterval(priceUpdateInterval);
   
-  if (balancesMap) {
-    for (const [asset, balance] of balancesMap.entries()) {
-      if (balance > 0) {
-        let price = 0;
-        
-        // Try to get price from currentPrices first
-        if (currentPrices && currentPrices[asset.toLowerCase()]) {
-          price = currentPrices[asset.toLowerCase()].price;
-        } else {
-          // Fallback to API
-          price = await getCryptoPrice(asset.toUpperCase());
+  // UPDATE PRICES EVERY 2 SECONDS (less aggressive than 1 second)
+  priceUpdateInterval = setInterval(async () => {
+    try {
+      const assets = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'ADA', 'SHIB', 'AVAX', 'DOT', 'TRX', 'LINK', 'MATIC', 'LTC'];
+      const priceUpdates = {};
+      
+      // Fetch all prices in parallel
+      const pricePromises = assets.map(async (asset) => {
+        const price = await getCryptoPrice(asset);
+        if (price) {
+          priceUpdates[asset.toLowerCase()] = {
+            price: price,
+            timestamp: Date.now()
+          };
         }
-        
-        if (price && price > 0) {
-          totalValue += balance * price;
-        }
+      });
+      
+      await Promise.all(pricePromises);
+      
+      if (Object.keys(priceUpdates).length > 0 && io) {
+        // Broadcast price updates to all clients
+        io.emit('price_update', priceUpdates);
+        lastPrices = priceUpdates;
       }
+      
+      // Use the CORRECT function to update wallet values
+      await recalculateAllUserBalances(io);
+      
+    } catch (err) {
+      console.error('Error in price update interval:', err);
     }
-  }
-  
-  return totalValue;
+  }, 2000); // Update every 2 seconds (reduced from 1 second)
 };
 
 const startRealTimePriceUpdates = (io) => {
@@ -17386,100 +17396,145 @@ const startRealTimePriceUpdates = (io) => {
   }, 1000); // EVERY SECOND
 };
 
-const recalculateAllWalletValuesRealtime = async (io, currentPrices) => {
-  if (isRecalculating) return;
-  isRecalculating = true;
-  
+const recalculateAllUserBalances = async (io) => {
   try {
+    console.log('Recalculating ALL user balances based on current crypto prices...');
+    
     const users = await User.find({}).select('_id balances');
+    let updatedCount = 0;
     
     for (const user of users) {
       let totalMainValue = 0;
+      let totalActiveValue = 0;
       let totalMaturedValue = 0;
       
-      // =============================================
-      // ACTIVE WALLET FIX: Active wallet stores USD values directly
-      // Do NOT multiply by crypto prices - it's already in USD
-      // =============================================
-      let totalActiveValue = 0;
+      // ✅ MAIN wallet: Crypto assets fluctuate with price
+      if (user.balances && user.balances.main) {
+        const mainBalances = user.balances.main;
+        const entries = mainBalances instanceof Map ? mainBalances.entries() : Object.entries(mainBalances);
+        
+        for (const [asset, balance] of entries) {
+          if (balance > 0 && asset !== 'usd') {
+            const price = await getCryptoPrice(asset.toUpperCase());
+            if (price && price > 0) {
+              totalMainValue += balance * price;
+            }
+          }
+        }
+      }
+      
+      // ✅ ACTIVE wallet: FIXED USD value - NO PRICE FLUCTUATION
+      // This represents active mining contracts - value is locked in USD
       if (user.balances && user.balances.active) {
         const activeBalances = user.balances.active;
-        for (const [asset, balance] of activeBalances.entries()) {
+        const entries = activeBalances instanceof Map ? activeBalances.entries() : Object.entries(activeBalances);
+        
+        for (const [asset, balance] of entries) {
           if (balance > 0) {
+            // Active wallet stores USD value directly - add as-is
             if (asset === 'usd') {
               totalActiveValue += balance;
             } else {
-              // For crypto in active wallet, it's stored as the USD value of the mining contract
-              // This value is FIXED and does NOT fluctuate with crypto prices
+              // For any crypto in active wallet, it's already stored as USD value
               totalActiveValue += balance;
             }
           }
         }
       }
       
-      // Recalculate MAIN wallet (fluctuates with crypto prices)
-      if (user.balances && user.balances.main) {
-        totalMainValue = await calculateWalletValueFromBalances(user.balances.main, currentPrices);
-      }
-      
-      // Recalculate MATURED wallet (fluctuates with crypto prices)
+      // ✅ MATURED wallet: Crypto assets fluctuate with price
       if (user.balances && user.balances.matured) {
-        totalMaturedValue = await calculateWalletValueFromBalances(user.balances.matured, currentPrices);
-      }
-      
-      // Calculate PnL for main wallet using previous day's value from Redis
-      const previousDayKey = `user:${user._id}:prev_main_value`;
-      const cachedPrev = await redis.get(previousDayKey);
-      let mainPnL = 0;
-      let mainPnLPercent = 0;
-      
-      if (cachedPrev) {
-        const prevValue = parseFloat(cachedPrev);
-        mainPnL = totalMainValue - prevValue;
-        mainPnLPercent = prevValue > 0 ? (mainPnL / prevValue) * 100 : 0;
-      }
-      
-      // Send real-time updates via Socket.IO to each specific user
-      if (io) {
-        io.to(`user_${user._id}`).emit('wallet_realtime_update', {
-          main: totalMainValue,
-          active: totalActiveValue,
-          matured: totalMaturedValue,
-          mainPnL: mainPnL,
-          mainPnLPercent: mainPnLPercent,
-          timestamp: Date.now()
-        });
+        const maturedBalances = user.balances.matured;
+        const entries = maturedBalances instanceof Map ? maturedBalances.entries() : Object.entries(maturedBalances);
         
-        // Also send separate balance update for main dashboard
-        io.to(`user_${user._id}`).emit('balance_update', {
-          main: totalMainValue,
-          active: totalActiveValue,
-          matured: totalMaturedValue
-        });
+        for (const [asset, balance] of entries) {
+          if (balance > 0 && asset !== 'usd') {
+            const price = await getCryptoPrice(asset.toUpperCase());
+            if (price && price > 0) {
+              totalMaturedValue += balance * price;
+            }
+          }
+        }
       }
       
-      // Store today's main value for tomorrow's PnL calculation
-      const today = new Date().toDateString();
-      const lastDate = await redis.get(`user:${user._id}:pnl_date`);
-      if (lastDate !== today) {
-        await redis.set(previousDayKey, totalMainValue);
-        await redis.set(`user:${user._id}:pnl_date`, today);
+      // Check if we need to update (avoid unnecessary writes)
+      const currentMainUSD = user.balances?.main?.get?.('usd') || user.balances?.main?.usd || 0;
+      const currentActiveUSD = user.balances?.active?.get?.('usd') || user.balances?.active?.usd || 0;
+      const currentMaturedUSD = user.balances?.matured?.get?.('usd') || user.balances?.matured?.usd || 0;
+      
+      const needsMainUpdate = Math.abs(currentMainUSD - totalMainValue) > 0.01;
+      const needsActiveUpdate = Math.abs(currentActiveUSD - totalActiveValue) > 0.01;
+      const needsMaturedUpdate = Math.abs(currentMaturedUSD - totalMaturedValue) > 0.01;
+      
+      if (needsMainUpdate || needsActiveUpdate || needsMaturedUpdate) {
+        if (!user.balances) user.balances = { main: new Map(), active: new Map(), matured: new Map() };
+        if (!user.balances.main) user.balances.main = new Map();
+        if (!user.balances.active) user.balances.active = new Map();
+        if (!user.balances.matured) user.balances.matured = new Map();
+        
+        user.balances.main.set('usd', totalMainValue);
+        user.balances.active.set('usd', totalActiveValue);
+        user.balances.matured.set('usd', totalMaturedValue);
+        
+        await User.findByIdAndUpdate(user._id, { balances: user.balances });
+        updatedCount++;
+        
+        // Emit real-time updates via Socket.IO
+        if (io) {
+          io.to(`user_${user._id}`).emit('balance_update', {
+            main: totalMainValue,
+            active: totalActiveValue,
+            matured: totalMaturedValue
+          });
+          
+          // Calculate daily PnL for main wallet
+          const previousDayKey = `user:${user._id}:prev_main_value`;
+          const cachedPrev = await redis.get(previousDayKey);
+          let dailyPnL = 0;
+          let dailyPnLPercentage = 0;
+          
+          if (cachedPrev) {
+            const prevValue = parseFloat(cachedPrev);
+            dailyPnL = totalMainValue - prevValue;
+            dailyPnLPercentage = prevValue > 0 ? (dailyPnL / prevValue) * 100 : 0;
+          }
+          
+          io.to(`user_${user._id}`).emit('pnl_update', {
+            main: {
+              amount: dailyPnL,
+              percentage: dailyPnLPercentage
+            },
+            matured: {
+              amount: 0,
+              percentage: 0
+            }
+          });
+          
+          // Store today's value for tomorrow's PnL
+          const today = new Date().toDateString();
+          const lastDate = await redis.get(`user:${user._id}:pnl_date`);
+          if (lastDate !== today) {
+            await redis.set(previousDayKey, totalMainValue);
+            await redis.set(`user:${user._id}:pnl_date`, today);
+          }
+        }
       }
     }
     
+    console.log(`Recalculated balances for ${updatedCount} users (Main: fluctuates, Active: FIXED, Matured: fluctuates)`);
+    
   } catch (err) {
-    console.error('Error in real-time wallet recalculation:', err);
-  } finally {
-    isRecalculating = false;
+    console.error('Error recalculating user balances:', err);
   }
 };
 
-// Initialize real-time updates
+
 const startRealTimeWalletUpdates = (io) => {
   startRealTimePriceUpdates(io);
-  console.log('💰 Real-time wallet value updates started (every 1 second)');
+  console.log('💰 Real-time wallet value updates started (every 2 seconds)');
+  console.log('✅ Active wallet is FIXED - does NOT fluctuate with crypto prices');
+  console.log('✅ Main and Matured wallets fluctuate with crypto prices');
 };
-
 
 
 
@@ -20663,11 +20718,7 @@ startInvestorGrowthJob();
 
 startRealTimeWalletUpdates(io);
 
-// Real-time updates already happen every second with price changes
-// This is just a fallback sync every 30 seconds for any missed updates
-setInterval(async () => {
-  await recalculateAllUserBalances(io);
-}, 30000);
+
 
 const gracefulShutdown = () => {
   console.log('Received shutdown signal. Cleaning up...');
