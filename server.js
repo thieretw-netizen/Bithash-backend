@@ -19150,8 +19150,190 @@ app.get('/api/admin/deposits/:id', adminProtect, restrictTo('super', 'finance'),
 
 
 
+// Reject Deposit
+app.post('/api/admin/deposits/:id/reject', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+  try {
+    const depositId = req.params.id;
+    const { reason } = req.body;
+    
+    if (!reason) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Rejection reason is required'
+      });
+    }
+    
+    // Find the deposit
+    const deposit = await DepositAsset.findById(depositId).populate('user');
+    
+    if (!deposit) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Deposit not found'
+      });
+    }
+    
+    if (deposit.status !== 'pending') {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Deposit is already ${deposit.status}`
+      });
+    }
+    
+    // Update deposit status
+    deposit.status = 'failed';
+    deposit.metadata.rejectionReason = reason;
+    deposit.metadata.rejectedBy = req.admin._id;
+    deposit.metadata.rejectedAt = new Date();
+    await deposit.save();
+    
+    // Send email notification
+    await sendAutomatedEmail(deposit.user, 'deposit_rejected', {
+      amount: deposit.usdValue,
+      cryptoAsset: deposit.asset.toUpperCase(),
+      cryptoAmount: deposit.amount,
+      exchangeRate: deposit.metadata.exchangeRate,
+      method: deposit.asset.toUpperCase(),
+      reference: deposit.transactionId,
+      reason: reason
+    });
+    
+    // Log activity
+    await logActivity('deposit_rejected', 'DepositAsset', deposit._id, req.admin._id, 'Admin', req, {
+      amount: deposit.usdValue,
+      user: deposit.user.email,
+      reason: reason,
+      rejectedBy: req.admin.email
+    });
+    
+    res.status(200).json({
+      status: 'success',
+      message: 'Deposit rejected successfully',
+      data: { deposit }
+    });
+    
+  } catch (err) {
+    console.error('Error rejecting deposit:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to reject deposit'
+    });
+  }
+});
 
 
+
+// Approve Deposit
+app.post('/api/admin/deposits/:id/approve', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+  try {
+    const depositId = req.params.id;
+    const { notes } = req.body;
+    
+    // Find the deposit
+    const deposit = await DepositAsset.findById(depositId).populate('user');
+    
+    if (!deposit) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Deposit not found'
+      });
+    }
+    
+    if (deposit.status !== 'pending') {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Deposit is already ${deposit.status}`
+      });
+    }
+    
+    // Update deposit status
+    deposit.status = 'confirmed';
+    deposit.confirmedAt = new Date();
+    deposit.metadata.adminNotes = notes;
+    deposit.metadata.approvedBy = req.admin._id;
+    deposit.metadata.approvedAt = new Date();
+    await deposit.save();
+    
+    // Update user's main balance (add the deposit amount in USD)
+    const user = await User.findById(deposit.user._id);
+    if (!user.balances.main) user.balances.main = new Map();
+    const currentMain = user.balances.main.get('USD') || 0;
+    user.balances.main.set('USD', currentMain + deposit.usdValue);
+    await user.save();
+    
+    // Create transaction record
+    const transaction = new Transaction({
+      user: deposit.user._id,
+      type: 'deposit',
+      amount: deposit.usdValue,
+      currency: 'USD',
+      status: 'completed',
+      method: deposit.asset.toUpperCase(),
+      reference: `DEP-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`,
+      details: {
+        asset: deposit.asset,
+        assetAmount: deposit.amount,
+        exchangeRate: deposit.metadata.exchangeRate,
+        txHash: deposit.metadata.txHash,
+        adminNotes: notes
+      },
+      fee: 0,
+      netAmount: deposit.usdValue,
+      processedBy: req.admin._id,
+      processedAt: new Date()
+    });
+    await transaction.save();
+    
+    // Send email notification
+    await sendAutomatedEmail(deposit.user, 'deposit_approved', {
+      amount: deposit.usdValue,
+      cryptoAsset: deposit.asset.toUpperCase(),
+      cryptoAmount: deposit.amount,
+      exchangeRate: deposit.metadata.exchangeRate,
+      method: deposit.asset.toUpperCase(),
+      reference: transaction.reference,
+      newBalance: currentMain + deposit.usdValue,
+      processedAt: new Date()
+    });
+    
+    // Log activity
+    await logActivity('deposit_approved', 'DepositAsset', deposit._id, req.admin._id, 'Admin', req, {
+      amount: deposit.usdValue,
+      user: deposit.user.email,
+      approvedBy: req.admin.email
+    });
+    
+    res.status(200).json({
+      status: 'success',
+      message: 'Deposit approved successfully',
+      data: { deposit, transaction }
+    });
+    
+  } catch (err) {
+    console.error('Error approving deposit:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to approve deposit'
+    });
+  }
+});
+
+
+
+// Helper function to get crypto logo URL
+const getCryptoLogo = (asset) => {
+  const logos = {
+    'BTC': 'https://cryptologos.cc/logos/bitcoin-btc-logo.png',
+    'ETH': 'https://cryptologos.cc/logos/ethereum-eth-logo.png',
+    'USDT': 'https://cryptologos.cc/logos/tether-usdt-logo.png',
+    'BNB': 'https://cryptologos.cc/logos/bnb-bnb-logo.png',
+    'SOL': 'https://cryptologos.cc/logos/solana-sol-logo.png',
+    'XRP': 'https://cryptologos.cc/logos/xrp-xrp-logo.png',
+    'DOGE': 'https://cryptologos.cc/logos/dogecoin-doge-logo.png',
+    'ADA': 'https://cryptologos.cc/logos/cardano-ada-logo.png'
+  };
+  return logos[asset.toUpperCase()] || 'https://cryptologos.cc/logos/bitcoin-btc-logo.png';
+};
 
 
 
