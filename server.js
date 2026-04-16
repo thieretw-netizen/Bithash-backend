@@ -4649,60 +4649,96 @@ case 'crypto_deposit':
         `;
         break;
 
-      case 'deposit_approved':
-        const depositRate = await getCurrentExchangeRate('bitcoin');
-        subject = 'Deposit Confirmed - ₿itHash Capital';
-        html = `
-          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-            <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-              <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-              <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
-              <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
-            </div>
-            <div style="padding: 30px; background: #FFFFFF;">
-              <h2 style="color: #0B0E11; margin-bottom: 20px;">Deposit Confirmed</h2>
-              <p style="color: #333333; line-height: 1.6;">Dear ${data.name},</p>
-              <p style="color: #333333; line-height: 1.6;">Your deposit has been successfully processed and credited to your account.</p>
-              <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-                <table style="width: 100%; border-collapse: collapse;">
-                  <tr>
-                    <td style="padding: 8px 0;"><strong>Amount:</strong></td>
-                    <td style="padding: 8px 0; text-align: right; font-weight: bold;">$${data.amount.toLocaleString()}</td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Method:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;">${data.method}</td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Reference:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;">${data.reference}</td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>New Balance:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;">$${data.newBalance.toLocaleString()}</td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Processed At:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;">${new Date(data.processedAt).toLocaleString()}</td>
-                  </tr>
-                </table>
-              </div>
-              <div style="text-align: center; margin: 30px 0;">
-                <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View Transaction</a>
-              </div>
-              <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${formattedTimestamp}</p>
-            </div>
-            <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-              <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-              <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-              <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
-                <a href="mailto:support@bithash.com" style="color: #F7A600; text-decoration: none;">support@bithash.com</a> | 
-                <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
-              </p>
+    case 'deposit_approved':
+  const cryptoLogoUrl = getCryptoLogo(data.cryptoAsset);
+  const formattedAmount = data.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const formattedCryptoAmount = data.cryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
+  const formattedRate = data.exchangeRate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  
+  subject = '✅ Deposit Confirmed - ₿itHash Capital';
+  html = `
+    <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+      <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+        <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+        <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+        <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+      </div>
+      
+      <div style="padding: 30px; background: #FFFFFF;">
+        <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
+          <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
+            ${cryptoLogoUrl ? `<img src="${cryptoLogoUrl}" width="32" height="32" style="border-radius: 50%;">` : ''}
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="12" cy="12" r="10" stroke="#10B981" stroke-width="2"/>
+              <path d="M8 12L11 15L16 9" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+          <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">DEPOSIT CONFIRMED!</h2>
+          <p style="color: #065F46; font-size: 13px; margin: 0;">Your funds have been successfully credited</p>
+        </div>
+        
+        <p style="color: #333333; line-height: 1.6;">Dear <strong>${data.name}</strong>,</p>
+        <p style="color: #333333; line-height: 1.6;">Great news! Your deposit has been successfully processed and credited to your <strong style="color: #10B981;">Main Wallet</strong>.</p>
+        
+        <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+          <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
+            ${cryptoLogoUrl ? `<img src="${cryptoLogoUrl}" width="32" height="32" style="border-radius: 50%;">` : ''}
+            <div>
+              <div style="font-weight: bold; font-size: 18px;">+ ${formattedCryptoAmount} ${data.cryptoAsset}</div>
+              <div style="color: #64748B; font-size: 12px;">≈ $${formattedAmount} USD</div>
             </div>
           </div>
-        `;
-        break;
+          
+          <table style="width: 100%; border-collapse: collapse;">
+            <tr>
+              <td style="padding: 8px 0;"><strong>Exchange Rate (Live):</strong></td>
+              <td style="padding: 8px 0; text-align: right;">1 ${data.cryptoAsset} = $${formattedRate}</td>
+            </tr>
+            <tr style="border-top: 1px solid #E2E8F0;">
+              <td style="padding: 8px 0;"><strong>Wallet Credited:</strong></td>
+              <td style="padding: 8px 0; text-align: right;"><span style="background: #10B981; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Main Wallet</span></td>
+            </tr>
+            <tr style="border-top: 1px solid #E2E8F0;">
+              <td style="padding: 8px 0;"><strong>Payment Method:</strong></td>
+              <td style="padding: 8px 0; text-align: right;">${data.method}</td>
+            </tr>
+            <tr style="border-top: 1px solid #E2E8F0;">
+              <td style="padding: 8px 0;"><strong>Transaction ID:</strong></td>
+              <td style="padding: 8px 0; text-align: right; font-size: 11px;">${data.reference}</td>
+            </tr>
+            <tr style="border-top: 1px solid #E2E8F0;">
+              <td style="padding: 8px 0;"><strong>New Main Wallet Balance:</strong></td>
+              <td style="padding: 8px 0; text-align: right; font-weight: bold; color: #10B981;">$${data.newBalance.toLocaleString()}</td>
+            </tr>
+            <tr style="border-top: 1px solid #E2E8F0;">
+              <td style="padding: 8px 0;"><strong>Processed At:</strong></td>
+              <td style="padding: 8px 0; text-align: right;">${new Date(data.processedAt).toLocaleString()}</td>
+            </tr>
+          </table>
+        </div>
+        
+        <div style="background: #F1F5F9; border-radius: 12px; padding: 12px 16px; text-align: center; margin: 20px 0;">
+          <p style="color: #1E293B; font-size: 13px; margin: 0;">💡 <strong>What's next?</strong> You can now withdraw your funds or invest in our mining plans.</p>
+        </div>
+        
+        <div style="text-align: center; margin: 30px 0;">
+          <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View Transaction</a>
+        </div>
+        
+        <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${new Date().toLocaleString()}</p>
+      </div>
+      
+      <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
+          <a href="mailto:support@bithash.com" style="color: #F7A600; text-decoration: none;">support@bithash.com</a> | 
+          <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
+        </p>
+      </div>
+    </div>
+  `;
+  break;
 
      case 'deposit_rejected':
   const cryptoLogoUrl = getCryptoLogo(data.cryptoAsset);
@@ -19129,7 +19165,139 @@ app.get('/api/admin/deposits/:id', adminProtect, restrictTo('super', 'finance'),
 
 
 
+// POST /api/admin/deposits/:id/approve - Approve a deposit request
+app.post('/api/admin/deposits/:id/approve', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { notes } = req.body;
 
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid deposit ID format'
+      });
+    }
+
+    const deposit = await Transaction.findOne({
+      _id: id,
+      type: 'deposit',
+      status: 'pending'
+    }).populate('user', 'firstName lastName email');
+
+    if (!deposit) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Pending deposit not found'
+      });
+    }
+
+    const user = await User.findById(deposit.user._id);
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+
+    // Get real-time crypto price using aggregator
+    const asset = (deposit.asset || deposit.method || 'usd').toLowerCase();
+    let currentPrice = 1;
+    
+    if (asset !== 'usd') {
+      try {
+        currentPrice = await getCryptoPrice(asset.toUpperCase());
+      } catch (err) {
+        console.warn(`Could not fetch price for ${asset}`);
+      }
+    }
+    
+    const cryptoAmount = deposit.assetAmount || deposit.amount;
+    const usdValue = cryptoAmount * currentPrice;
+
+    // Initialize balances Maps if they don't exist
+    if (!user.balances) {
+      user.balances = {
+        main: new Map(),
+        active: new Map(),
+        matured: new Map()
+      };
+    }
+    if (!user.balances.main) user.balances.main = new Map();
+
+    // Add to main balance
+    const currentBalance = user.balances.main.get(asset) || 0;
+    user.balances.main.set(asset, currentBalance + cryptoAmount);
+
+    // Track USD equivalent
+    const currentUsdBalance = user.balances.main.get('usd') || 0;
+    user.balances.main.set('usd', currentUsdBalance + usdValue);
+
+    await user.save();
+
+    deposit.status = 'completed';
+    deposit.processedBy = req.admin._id;
+    deposit.processedAt = new Date();
+    deposit.adminNotes = notes || null;
+    await deposit.save();
+
+    // Send approval email
+    await sendProfessionalEmail({
+      email: deposit.user.email,
+      template: 'deposit_approved',
+      data: {
+        name: deposit.user.firstName,
+        amount: usdValue,
+        cryptoAmount: cryptoAmount,
+        cryptoAsset: asset.toUpperCase(),
+        method: deposit.method || asset.toUpperCase(),
+        reference: deposit.reference || deposit._id.toString().slice(-8),
+        newBalance: user.balances.main.get('usd') || 0,
+        processedAt: deposit.processedAt,
+        exchangeRate: currentPrice,
+        walletType: 'main'
+      }
+    });
+
+    // Log activity
+    await logActivity(
+      'deposit_approved',
+      'Transaction',
+      deposit._id,
+      req.admin._id,
+      'Admin',
+      req,
+      {
+        userId: deposit.user._id,
+        amount: usdValue,
+        cryptoAmount: cryptoAmount,
+        asset: asset,
+        notes: notes
+      }
+    );
+
+    // Create notification for user
+    await Notification.create({
+      title: 'Deposit Approved',
+      message: `Your deposit of ${cryptoAmount.toFixed(8)} ${asset.toUpperCase()} ($${usdValue.toLocaleString()}) has been approved and credited to your main wallet.`,
+      type: 'deposit_approved',
+      recipientType: 'specific',
+      specificUserId: deposit.user._id,
+      sentBy: req.admin._id,
+      isImportant: false
+    });
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Deposit approved successfully'
+    });
+  } catch (err) {
+    console.error('Approve deposit error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to approve deposit'
+    });
+  }
+});
 
 
 
