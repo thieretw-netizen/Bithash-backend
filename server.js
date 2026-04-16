@@ -17386,7 +17386,6 @@ const startRealTimePriceUpdates = (io) => {
   }, 1000); // EVERY SECOND
 };
 
-// Helper function to recalculate wallet values in real-time using User.balances
 const recalculateAllWalletValuesRealtime = async (io, currentPrices) => {
   if (isRecalculating) return;
   isRecalculating = true;
@@ -17398,36 +17397,73 @@ const recalculateAllWalletValuesRealtime = async (io, currentPrices) => {
       let totalMainValue = 0;
       let totalMaturedValue = 0;
       
-      // Active wallet value should NOT be recalculated - it's fixed!
-      // Just use stored value
+      // =============================================
+      // ACTIVE WALLET FIX: Active wallet stores USD values directly
+      // Do NOT multiply by crypto prices - it's already in USD
+      // =============================================
       let totalActiveValue = 0;
       if (user.balances && user.balances.active) {
         const activeBalances = user.balances.active;
         for (const [asset, balance] of activeBalances.entries()) {
           if (balance > 0) {
-            totalActiveValue += balance;
+            if (asset === 'usd') {
+              totalActiveValue += balance;
+            } else {
+              // For crypto in active wallet, it's stored as the USD value of the mining contract
+              // This value is FIXED and does NOT fluctuate with crypto prices
+              totalActiveValue += balance;
+            }
           }
         }
       }
       
-      // Recalculate MAIN wallet (fluctuates)
+      // Recalculate MAIN wallet (fluctuates with crypto prices)
       if (user.balances && user.balances.main) {
         totalMainValue = await calculateWalletValueFromBalances(user.balances.main, currentPrices);
       }
       
-      // Recalculate MATURED wallet (fluctuates)
+      // Recalculate MATURED wallet (fluctuates with crypto prices)
       if (user.balances && user.balances.matured) {
         totalMaturedValue = await calculateWalletValueFromBalances(user.balances.matured, currentPrices);
+      }
+      
+      // Calculate PnL for main wallet using previous day's value from Redis
+      const previousDayKey = `user:${user._id}:prev_main_value`;
+      const cachedPrev = await redis.get(previousDayKey);
+      let mainPnL = 0;
+      let mainPnLPercent = 0;
+      
+      if (cachedPrev) {
+        const prevValue = parseFloat(cachedPrev);
+        mainPnL = totalMainValue - prevValue;
+        mainPnLPercent = prevValue > 0 ? (mainPnL / prevValue) * 100 : 0;
       }
       
       // Send real-time updates via Socket.IO to each specific user
       if (io) {
         io.to(`user_${user._id}`).emit('wallet_realtime_update', {
           main: totalMainValue,
-          active: totalActiveValue,  // FIXED: Use stored value, not recalculated
+          active: totalActiveValue,
           matured: totalMaturedValue,
+          mainPnL: mainPnL,
+          mainPnLPercent: mainPnLPercent,
           timestamp: Date.now()
         });
+        
+        // Also send separate balance update for main dashboard
+        io.to(`user_${user._id}`).emit('balance_update', {
+          main: totalMainValue,
+          active: totalActiveValue,
+          matured: totalMaturedValue
+        });
+      }
+      
+      // Store today's main value for tomorrow's PnL calculation
+      const today = new Date().toDateString();
+      const lastDate = await redis.get(`user:${user._id}:pnl_date`);
+      if (lastDate !== today) {
+        await redis.set(previousDayKey, totalMainValue);
+        await redis.set(`user:${user._id}:pnl_date`, today);
       }
     }
     
