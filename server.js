@@ -19309,6 +19309,7 @@ function getCryptoLogo(assetCode) {
 
 
 
+
 // POST /api/admin/deposits/:id/reject - Reject a deposit request
 app.post('/api/admin/deposits/:id/reject', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
   try {
@@ -19341,44 +19342,56 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, restrictTo('super', 'fi
     deposit.processedAt = new Date();
     await deposit.save();
 
-    // Send rejection email to user
-    await sendProfessionalEmail({
-      email: deposit.user.email,
-      template: 'deposit_rejected',
-      data: {
-        name: deposit.user.firstName,
-        amount: deposit.amount,
-        method: deposit.method || deposit.asset || 'crypto',
-        reason: reason || 'No reason provided'
-      }
-    });
+    // Send rejection email to user (with error handling)
+    try {
+      await sendProfessionalEmail({
+        email: deposit.user.email,
+        template: 'deposit_rejected',
+        data: {
+          name: deposit.user.firstName,
+          amount: deposit.amount,
+          method: deposit.method || deposit.asset || 'crypto',
+          reason: reason || 'No reason provided'
+        }
+      });
+    } catch (emailErr) {
+      console.error('Failed to send rejection email:', emailErr);
+    }
 
     // Log activity
-    await logActivity(
-      'deposit_rejected',
-      'Transaction',
-      deposit._id,
-      req.admin._id,
-      'Admin',
-      req,
-      {
-        userId: deposit.user._id,
-        amount: deposit.amount,
-        reason: reason,
-        depositId: deposit._id
-      }
-    );
+    try {
+      await logActivity(
+        'deposit_rejected',
+        'Transaction',
+        deposit._id,
+        req.admin._id,
+        'Admin',
+        req,
+        {
+          userId: deposit.user._id,
+          amount: deposit.amount,
+          reason: reason,
+          depositId: deposit._id
+        }
+      );
+    } catch (logErr) {
+      console.error('Failed to log activity:', logErr);
+    }
 
     // Create notification for user
-    await Notification.create({
-      title: 'Deposit Rejected',
-      message: `Your deposit of $${deposit.amount.toLocaleString()} has been rejected. Reason: ${reason || 'No reason provided'}`,
-      type: 'deposit_rejected',
-      recipientType: 'specific',
-      specificUserId: deposit.user._id,
-      sentBy: req.admin._id,
-      isImportant: true
-    });
+    try {
+      await Notification.create({
+        title: 'Deposit Rejected',
+        message: `Your deposit of $${deposit.amount.toLocaleString()} has been rejected. Reason: ${reason || 'No reason provided'}`,
+        type: 'deposit_rejected',
+        recipientType: 'specific',
+        specificUserId: deposit.user._id,
+        sentBy: req.admin._id,
+        isImportant: true
+      });
+    } catch (notifErr) {
+      console.error('Failed to create notification:', notifErr);
+    }
 
     res.status(200).json({
       status: 'success',
@@ -19388,14 +19401,10 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, restrictTo('super', 'fi
     console.error('Reject deposit error:', err);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to reject deposit'
+      message: err.message || 'Failed to reject deposit'
     });
   }
 });
-
-
-
-
 
 
 
