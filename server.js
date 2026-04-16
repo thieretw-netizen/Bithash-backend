@@ -5786,11 +5786,13 @@ app.post('/api/auth/login', [
     // Use exact email for lookup - no normalization
     const user = await User.findOne({ email }).select('+password +twoFactorAuth.secret');
     if (!user || !(await bcrypt.compare(password, user.password))) {
-      // Log failed attempt
-      await logUserActivity(req, 'login_attempt', 'failed', {
-        error: 'Invalid credentials',
-        email: email // Log exact email used
-      });
+      
+     // ✅ CORRECT - Use the existing logActivity function
+await logActivity('login_attempt', 'authentication', null, null, null, req, {
+    error: 'Invalid credentials',
+    email: email,
+    status: 'failed'
+});
       
       return res.status(401).json({
         status: 'fail',
@@ -5799,11 +5801,12 @@ app.post('/api/auth/login', [
     }
 
     if (user.status !== 'active') {
-      await logUserActivity(req, 'login_attempt', 'failed', {
-        error: 'Account suspended',
-        userId: user._id,
-        status: user.status
-      });
+     // ✅ CORRECT - Use the existing logActivity function
+await logActivity('login_attempt', 'authentication', null, null, null, req, {
+    error: 'Invalid credentials',
+    email: email,
+    status: 'failed'
+});
       
       return res.status(401).json({
         status: 'fail',
