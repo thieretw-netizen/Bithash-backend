@@ -4649,11 +4649,11 @@ case 'crypto_deposit':
         `;
         break;
 
-    case 'deposit_approved':
-  const cryptoLogoUrl = getCryptoLogo(data.cryptoAsset);
-  const formattedAmount = data.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const formattedCryptoAmount = data.cryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
-  const formattedRate = data.exchangeRate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+   case 'deposit_approved':
+  cryptoLogoUrl = getCryptoLogo(data.cryptoAsset);
+  formattedAmount = data.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  formattedCryptoAmount = data.cryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
+  formattedRate = data.exchangeRate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   
   subject = '✅ Deposit Confirmed - ₿itHash Capital';
   html = `
