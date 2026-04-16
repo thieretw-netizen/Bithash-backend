@@ -44,29 +44,39 @@ app.use(helmet({
   },
   crossOriginOpenerPolicy: { policy: "unsafe-none" }
 }));
-
 app.use(cors({
-  origin: [
-    'https://www.bithashcapital.live', 
-  ],
+  origin: function(origin, callback) {
+    const allowedOrigins = [
+      'https://www.bithashcapital.live',
+      'https://bithashcapital.live',
+      'http://localhost:3000',
+      'http://localhost:5500'
+    ];
+    // Allow requests with no origin (like mobile apps or curl)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) === -1) {
+      const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+      return callback(new Error(msg), false);
+    }
+    return callback(null, true);
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: [
     'Content-Type', 
     'Authorization', 
     'X-CSRF-Token',
-    'X-Rate-Limit',
     'X-Requested-With',
     'Accept',
-    'Origin',
-    'X-2FA-Verified'
+    'Origin'
   ],
-  exposedHeaders: [
-    'X-Rate-Limit-Limit',
-    'X-Rate-Limit-Remaining',
-    'X-Rate-Limit-Reset'
-  ]
+  exposedHeaders: ['X-Rate-Limit-Limit', 'X-Rate-Limit-Remaining'],
+  preflightContinue: false,
+  optionsSuccessStatus: 204
 }));
+
+// Handle preflight requests explicitly
+app.options('*', cors());
 
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -19310,101 +19320,393 @@ function getCryptoLogo(assetCode) {
 
 
 
-// POST /api/admin/deposits/:id/reject - Reject a deposit request
-app.post('/api/admin/deposits/:id/reject', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+
+
+
+
+
+
+
+
+// =============================================
+// SPOT/ASSET WITHDRAWAL ENDPOINT
+// =============================================
+app.post('/api/withdrawals/spot', protect, async (req, res) => {
   try {
-    const { id } = req.params;
-    const { reason } = req.body;
+    const userId = req.user._id;
+    const {
+      amount,
+      asset,
+      assetAmount,
+      walletAddress,
+      gasFee,
+      exchangeRate,
+      balanceSource,
+      mainAmountUsed,
+      maturedAmountUsed,
+      timestamp
+    } = req.body;
 
-    if (!mongoose.Types.ObjectId.isValid(id)) {
+    // Validate required fields
+    if (!amount || amount < 100) {
       return res.status(400).json({
-        status: 'fail',
-        message: 'Invalid deposit ID format'
+        status: 'error',
+        message: 'Minimum withdrawal amount is $100'
       });
     }
 
-    const deposit = await Transaction.findOne({
-      _id: id,
-      type: 'deposit',
-      status: 'pending'
-    }).populate('user', 'firstName lastName email');
+    if (!asset) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Asset type is required'
+      });
+    }
 
-    if (!deposit) {
+    if (!walletAddress || walletAddress.length < 20) {
+      return res.status(400).json({
+        status: 'error',
+        message: `Valid ${asset.toUpperCase()} wallet address is required`
+      });
+    }
+
+    // Get user with balances
+    const user = await User.findById(userId);
+    if (!user) {
       return res.status(404).json({
-        status: 'fail',
-        message: 'Pending deposit not found'
+        status: 'error',
+        message: 'User not found'
       });
     }
 
-    deposit.status = 'failed';
-    deposit.adminNotes = reason || 'No reason provided';
-    deposit.processedBy = req.admin._id;
-    deposit.processedAt = new Date();
-    await deposit.save();
+    // Initialize balances Maps if they don't exist
+    if (!user.balances) {
+      user.balances = {
+        main: new Map(),
+        active: new Map(),
+        matured: new Map()
+      };
+    }
+    if (!user.balances.main) user.balances.main = new Map();
+    if (!user.balances.matured) user.balances.matured = new Map();
 
-    // Send rejection email to user (with error handling)
+    const assetLower = asset.toLowerCase();
+    
+    // Get current balances
+    const mainBalance = user.balances.main.get(assetLower) || 0;
+    const maturedBalance = user.balances.matured.get(assetLower) || 0;
+    const totalBalance = mainBalance + maturedBalance;
+
+    console.log(`Withdrawal request for user ${user.email}:`, {
+      asset: assetLower,
+      requestedAmount: assetAmount,
+      mainBalance,
+      maturedBalance,
+      totalBalance,
+      gasFee
+    });
+
+    // Check sufficient balance
+    if (assetAmount > totalBalance) {
+      return res.status(400).json({
+        status: 'error',
+        message: `Insufficient ${asset.toUpperCase()} balance. Available: ${totalBalance.toFixed(8)} ${asset.toUpperCase()}, Requested: ${assetAmount.toFixed(8)} ${asset.toUpperCase()}`
+      });
+    }
+
+    // Check if user has enough for gas fee in MAIN wallet only
+    const mainGasBalance = user.balances.main.get(assetLower) || 0;
+    if (gasFee > 0 && mainGasBalance < gasFee) {
+      return res.status(400).json({
+        status: 'error',
+        message: `Insufficient ${asset.toUpperCase()} in MAIN wallet for gas fee. Required: ${gasFee.toFixed(8)} ${asset.toUpperCase()}, Available in MAIN: ${mainGasBalance.toFixed(8)} ${asset.toUpperCase()}`
+      });
+    }
+
+    // Calculate deduction amounts
+    let actualMainAmountUsed = 0;
+    let actualMaturedAmountUsed = 0;
+    let actualBalanceSource = '';
+
+    // First deduct gas fee from MAIN wallet
+    if (gasFee > 0) {
+      const newMainBalance = mainBalance - gasFee;
+      if (newMainBalance <= 0) {
+        user.balances.main.delete(assetLower);
+      } else {
+        user.balances.main.set(assetLower, newMainBalance);
+      }
+      console.log(`Deducted gas fee: ${gasFee} ${asset.toUpperCase()} from MAIN wallet`);
+    }
+
+    // Then deduct withdrawal amount from appropriate wallet(s)
+    const remainingMainBalance = (user.balances.main.get(assetLower) || 0);
+    const remainingMaturedBalance = maturedBalance;
+
+    if (balanceSource === 'main' && remainingMainBalance >= assetAmount) {
+      actualMainAmountUsed = assetAmount;
+      actualBalanceSource = 'main';
+    } else if (balanceSource === 'matured' && remainingMaturedBalance >= assetAmount) {
+      actualMaturedAmountUsed = assetAmount;
+      actualBalanceSource = 'matured';
+    } else if (remainingMainBalance >= assetAmount) {
+      actualMainAmountUsed = assetAmount;
+      actualBalanceSource = 'main';
+    } else if (remainingMaturedBalance >= assetAmount) {
+      actualMaturedAmountUsed = assetAmount;
+      actualBalanceSource = 'matured';
+    } else {
+      // Take from both wallets
+      actualMainAmountUsed = remainingMainBalance;
+      actualMaturedAmountUsed = assetAmount - remainingMainBalance;
+      actualBalanceSource = 'both';
+    }
+
+    // Deduct withdrawal amount
+    if (actualMainAmountUsed > 0) {
+      const newMainBalance = (user.balances.main.get(assetLower) || 0) - actualMainAmountUsed;
+      if (newMainBalance <= 0) {
+        user.balances.main.delete(assetLower);
+        console.log(`Removed ${assetLower} from MAIN wallet (balance became 0)`);
+      } else {
+        user.balances.main.set(assetLower, newMainBalance);
+      }
+    }
+
+    if (actualMaturedAmountUsed > 0) {
+      const newMaturedBalance = (user.balances.matured.get(assetLower) || 0) - actualMaturedAmountUsed;
+      if (newMaturedBalance <= 0) {
+        user.balances.matured.delete(assetLower);
+        console.log(`Removed ${assetLower} from MATURED wallet (balance became 0)`);
+      } else {
+        user.balances.matured.set(assetLower, newMaturedBalance);
+      }
+    }
+
+    // Update USD equivalent in main wallet
+    const usdAmount = amount;
+    const currentUsdBalance = user.balances.main.get('usd') || 0;
+    user.balances.main.set('usd', currentUsdBalance - usdAmount);
+
+    await user.save();
+
+    // Generate unique reference
+    const reference = `WDR-${asset.toUpperCase()}-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+
+    // Create transaction record
+    const transaction = await Transaction.create({
+      user: userId,
+      type: 'withdrawal',
+      amount: usdAmount,
+      asset: assetLower,
+      assetAmount: assetAmount,
+      currency: 'USD',
+      status: 'pending',
+      method: asset.toUpperCase(),
+      reference: reference,
+      btcAddress: walletAddress,
+      details: {
+        walletAddress: walletAddress,
+        gasFee: gasFee,
+        exchangeRate: exchangeRate,
+        balanceSource: actualBalanceSource,
+        mainAmountUsed: actualMainAmountUsed,
+        maturedAmountUsed: actualMaturedAmountUsed,
+        asset: asset,
+        timestamp: timestamp || new Date(),
+        network: getNetworkName(asset)
+      },
+      fee: gasFee,
+      netAmount: assetAmount,
+      exchangeRateAtTime: exchangeRate
+    });
+
+    // Get crypto logo URL for email
+    const cryptoLogoUrl = getCryptoLogo(asset.toUpperCase());
+    const networkName = getNetworkName(asset);
+    
+    // Calculate gas fee in USD for email
+    const gasFeeUSD = gasFee * (exchangeRate || 1);
+
+    // Send withdrawal initiation email with all transaction details
     try {
       await sendProfessionalEmail({
-        email: deposit.user.email,
-        template: 'deposit_rejected',
+        email: user.email,
+        template: 'withdrawal_request',
         data: {
-          name: deposit.user.firstName,
-          amount: deposit.amount,
-          method: deposit.method || deposit.asset || 'crypto',
-          reason: reason || 'No reason provided'
+          name: user.firstName,
+          amount: assetAmount.toFixed(8),
+          asset: asset.toUpperCase(),
+          usdValue: usdAmount.toFixed(2),
+          fee: gasFee.toFixed(8),
+          feeUsd: gasFeeUSD.toFixed(2),
+          netAmount: assetAmount.toFixed(8),
+          withdrawalAddress: walletAddress,
+          requestId: reference,
+          timestamp: new Date().toLocaleString(),
+          network: networkName,
+          cryptoLogoUrl: cryptoLogoUrl,
+          balanceSource: actualBalanceSource,
+          mainAmountUsed: actualMainAmountUsed.toFixed(8),
+          maturedAmountUsed: actualMaturedAmountUsed.toFixed(8),
+          remainingMainBalance: (user.balances.main.get(assetLower) || 0).toFixed(8),
+          remainingMaturedBalance: (user.balances.matured.get(assetLower) || 0).toFixed(8),
+          exchangeRate: exchangeRate.toFixed(2),
+          status: 'Pending Admin Approval'
         }
       });
-    } catch (emailErr) {
-      console.error('Failed to send rejection email:', emailErr);
+      console.log(`📧 Withdrawal initiation email sent to ${user.email} for ${assetAmount} ${asset.toUpperCase()}`);
+    } catch (emailError) {
+      console.error('Failed to send withdrawal email:', emailError);
     }
 
-    // Log activity
-    try {
-      await logActivity(
-        'deposit_rejected',
-        'Transaction',
-        deposit._id,
-        req.admin._id,
-        'Admin',
-        req,
-        {
-          userId: deposit.user._id,
-          amount: deposit.amount,
-          reason: reason,
-          depositId: deposit._id
-        }
-      );
-    } catch (logErr) {
-      console.error('Failed to log activity:', logErr);
-    }
+    // CREATE USER LOG ENTRY
+    const deviceInfo = await getUserDeviceInfo(req);
+    await UserLog.create({
+      user: userId,
+      username: user.email,
+      email: user.email,
+      userFullName: `${user.firstName} ${user.lastName}`,
+      action: 'withdrawal_created',
+      actionCategory: 'financial',
+      ipAddress: getRealClientIP(req),
+      userAgent: req.headers['user-agent'] || 'Unknown',
+      deviceInfo: {
+        type: getDeviceType(req),
+        os: { name: getOSFromUserAgent(req.headers['user-agent']), version: 'Unknown' },
+        browser: { name: getBrowserFromUserAgent(req.headers['user-agent']), version: 'Unknown' },
+        platform: req.headers['user-agent'] || 'Unknown',
+        language: req.headers['accept-language'] || 'Unknown',
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+      },
+      location: {
+        ip: getRealClientIP(req),
+        country: {
+          name: deviceInfo.locationDetails?.country || 'Unknown',
+          code: (deviceInfo.locationDetails?.country_code || deviceInfo.locationDetails?.country || 'Unknown').substring(0, 2)
+        },
+        region: {
+          name: deviceInfo.locationDetails?.region || 'Unknown',
+          code: deviceInfo.locationDetails?.region_code || deviceInfo.locationDetails?.region || 'Unknown'
+        },
+        city: deviceInfo.locationDetails?.city || 'Unknown',
+        postalCode: deviceInfo.locationDetails?.postalCode || 'Unknown',
+        latitude: deviceInfo.locationDetails?.latitude || null,
+        longitude: deviceInfo.locationDetails?.longitude || null,
+        timezone: deviceInfo.locationDetails?.timezone || 'Unknown',
+        isp: deviceInfo.locationDetails?.isp || 'Unknown',
+        exactLocation: deviceInfo.exactLocation || false
+      },
+      status: 'pending',
+      metadata: {
+        amount: usdAmount,
+        asset: asset.toUpperCase(),
+        assetAmount: assetAmount,
+        walletAddress: walletAddress,
+        gasFee: gasFee,
+        gasFeeUSD: gasFeeUSD,
+        exchangeRate: exchangeRate,
+        balanceSource: actualBalanceSource,
+        mainAmountUsed: actualMainAmountUsed,
+        maturedAmountUsed: actualMaturedAmountUsed,
+        reference: reference,
+        network: networkName,
+        remainingMainBalance: user.balances.main.get(assetLower) || 0,
+        remainingMaturedBalance: user.balances.matured.get(assetLower) || 0
+      },
+      relatedEntity: transaction._id,
+      relatedEntityModel: 'Transaction'
+    });
 
     // Create notification for user
-    try {
-      await Notification.create({
-        title: 'Deposit Rejected',
-        message: `Your deposit of $${deposit.amount.toLocaleString()} has been rejected. Reason: ${reason || 'No reason provided'}`,
-        type: 'deposit_rejected',
-        recipientType: 'specific',
-        specificUserId: deposit.user._id,
-        sentBy: req.admin._id,
-        isImportant: true
+    await Notification.create({
+      title: `Withdrawal Request Submitted - ${asset.toUpperCase()}`,
+      message: `Your withdrawal request of ${assetAmount.toFixed(8)} ${asset.toUpperCase()} (≈$${usdAmount.toFixed(2)}) has been submitted and is pending admin approval. Reference: ${reference}`,
+      type: 'withdrawal_request',
+      recipientType: 'specific',
+      specificUserId: userId,
+      sentBy: userId,
+      isImportant: false,
+      metadata: {
+        withdrawalId: transaction._id,
+        amount: assetAmount,
+        asset: asset.toUpperCase(),
+        reference: reference
+      }
+    });
+
+    // Log activity
+    await logActivity(
+      'withdrawal_created',
+      'Transaction',
+      transaction._id,
+      userId,
+      'User',
+      req,
+      {
+        amount: usdAmount,
+        asset: asset.toUpperCase(),
+        cryptoAmount: assetAmount,
+        walletAddress: walletAddress,
+        gasFee: gasFee,
+        balanceSource: actualBalanceSource,
+        mainAmountUsed: actualMainAmountUsed,
+        maturedAmountUsed: actualMaturedAmountUsed,
+        reference: reference
+      }
+    );
+
+    // Send real-time update via Socket.IO
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${userId}`).emit('balance_update', {
+        main: user.balances.main.get('usd') || 0,
+        active: user.balances.active?.get('usd') || 0,
+        matured: user.balances.matured?.get('usd') || 0
       });
-    } catch (notifErr) {
-      console.error('Failed to create notification:', notifErr);
+      
+      io.to(`user_${userId}`).emit('withdrawal_submitted', {
+        withdrawalId: transaction._id,
+        amount: usdAmount,
+        asset: asset.toUpperCase(),
+        assetAmount: assetAmount,
+        reference: reference,
+        status: 'pending'
+      });
     }
 
-    res.status(200).json({
+    res.status(201).json({
       status: 'success',
-      message: 'Deposit rejected successfully'
+      message: `Withdrawal request for ${assetAmount.toFixed(8)} ${asset.toUpperCase()} submitted successfully`,
+      data: {
+        transaction: {
+          id: transaction._id,
+          reference: reference,
+          amount: usdAmount,
+          asset: asset.toUpperCase(),
+          assetAmount: assetAmount,
+          gasFee: gasFee,
+          status: 'pending',
+          createdAt: transaction.createdAt
+        }
+      }
     });
+
   } catch (err) {
-    console.error('Reject deposit error:', err);
+    console.error('Spot withdrawal error:', err);
     res.status(500).json({
       status: 'error',
-      message: err.message || 'Failed to reject deposit'
+      message: err.message || 'Failed to process withdrawal request'
     });
   }
 });
+
+
+
+
+
+
+
+
 
 
 
