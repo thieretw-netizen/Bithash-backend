@@ -19422,7 +19422,7 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, restrictTo('super', 'fi
     deposit.processedAt = new Date();
     await deposit.save();
 
-    // Send rejection email using enhanced template
+    // Send rejection email
     await sendProfessionalEmail({
       email: deposit.user.email,
       template: 'deposit_rejected',
@@ -19457,11 +19457,11 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, restrictTo('super', 'fi
       }
     );
 
-    // Create notification for user
+    // Create notification for user - using valid enum value 'error'
     await Notification.create({
       title: 'Deposit Rejected',
       message: `Your deposit of ${cryptoAmount.toFixed(8)} ${asset.toUpperCase()} ($${usdValue.toLocaleString()}) has been rejected. Reason: ${reason || 'No reason provided'}`,
-      type: 'deposit_rejected',
+      type: 'error',
       recipientType: 'specific',
       specificUserId: deposit.user._id,
       sentBy: req.admin._id,
@@ -19480,7 +19480,6 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, restrictTo('super', 'fi
     });
   }
 });
-
 
 
 
