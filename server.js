@@ -7157,7 +7157,6 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
 
 
 
-
 // OTP Verification Endpoint
 app.post('/api/auth/verify-otp', [
   body('email').isEmail().withMessage('Please provide a valid email'),
@@ -7219,25 +7218,12 @@ app.post('/api/auth/verify-otp', [
     });
     await user.save();
 
-    // ✅ UPDATE LOGIN ATTEMPT LOG TO SUCCESS
-    await UserLog.findOneAndUpdate(
-      { 
-        user: user._id, 
-        action: 'login_attempt',
-        status: 'pending'
-      },
-      { 
-        $set: { 
-          status: 'success',
-          metadata: { 
-            ...(await UserLog.findOne({ user: user._id, action: 'login_attempt' }))?.metadata,
-            otpVerified: true,
-            verificationTime: new Date()
-          }
-        }
-      },
-      { sort: { createdAt: -1 } }
-    );
+    // ✅ FIXED: Use logActivity instead of logUserActivity
+    await logActivity('login', 'user', user._id, user._id, 'User', req, {
+      method: 'otp',
+      deviceInfo: deviceInfo,
+      status: 'success'
+    });
 
     // Send login success email with device and location
     await sendAutomatedEmail(user, 'login_success', {
@@ -7272,11 +7258,6 @@ app.post('/api/auth/verify-otp', [
       }
     });
 
-    await logUserActivity(req, 'login', 'success', {
-      method: 'otp',
-      deviceInfo: deviceInfo
-    }, user);
-
   } catch (err) {
     console.error('OTP verification error:', err);
     res.status(500).json({
@@ -7285,6 +7266,7 @@ app.post('/api/auth/verify-otp', [
     });
   }
 });
+
 
 // Send OTP Endpoint (for resend)
 app.post('/api/auth/send-otp', [
