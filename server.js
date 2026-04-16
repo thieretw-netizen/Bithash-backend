@@ -19323,149 +19323,55 @@ function getCryptoLogo(assetCode) {
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-// =============================================
-// ADMIN DEPOSIT ENDPOINTS
-// =============================================
-
-/**
- * POST /api/admin/deposits/:depositId/reject - Reject a deposit (Admin only)
- */
-app.post('/api/admin/deposits/:depositId/reject', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
-    try {
-        const { depositId } = req.params;
-        const { reason } = req.body;
-        const admin = req.admin;
-
-        // Find the deposit transaction
-        const deposit = await Transaction.findById(depositId);
-        
-        if (!deposit) {
-            return res.status(404).json({
-                status: 'error',
-                message: 'Deposit not found'
-            });
-        }
-
-        // Check if deposit is already processed
-        if (deposit.status !== 'pending') {
-            return res.status(400).json({
-                status: 'error',
-                message: `Deposit is already ${deposit.status}. Cannot reject.`
-            });
-        }
-
-        // Update deposit status to failed
-        deposit.status = 'failed';
-        deposit.adminNotes = reason || 'Rejected by admin';
-        deposit.processedBy = admin._id;
-        deposit.processedAt = new Date();
-        await deposit.save();
-
-        // Get user details for email notification
-        const user = await User.findById(deposit.user);
-        
-        if (user) {
-            // Send rejection email
-            try {
-                await sendAutomatedEmail(user, 'deposit_rejected', {
-                    name: user.firstName,
-                    amount: deposit.amount,
-                    method: deposit.method,
-                    reason: reason || 'Your deposit did not meet our verification requirements.'
-                });
-                console.log(`Deposit rejection email sent to ${user.email}`);
-            } catch (emailError) {
-                console.error('Failed to send rejection email:', emailError);
-            }
-
-            // Create user log
-            await UserLog.create({
-                user: user._id,
-                username: user.email,
-                email: user.email,
-                userFullName: `${user.firstName} ${user.lastName}`,
-                action: 'deposit_rejected',
-                actionCategory: 'financial',
-                ipAddress: getRealClientIP(req),
-                userAgent: req.headers['user-agent'] || 'Admin',
-                deviceInfo: {
-                    type: 'desktop',
-                    os: { name: 'Admin Panel', version: '1.0' },
-                    browser: { name: 'Admin', version: '1.0' },
-                    platform: 'Admin Panel',
-                    language: 'en',
-                    timezone: 'UTC'
-                },
-                location: {
-                    ip: getRealClientIP(req),
-                    country: { name: 'Unknown', code: 'Unknown' },
-                    region: { name: 'Unknown', code: 'Unknown' },
-                    city: 'Unknown',
-                    exactLocation: false
-                },
-                status: 'success',
-                metadata: {
-                    amount: deposit.amount,
-                    method: deposit.method,
-                    reference: deposit.reference,
-                    reason: reason,
-                    rejectedBy: admin.email
-                },
-                relatedEntity: deposit._id,
-                relatedEntityModel: 'Transaction'
-            });
-        }
-
-        // Log admin activity
-        await logActivity(
-            'deposit_rejected',
-            'Transaction',
-            deposit._id,
-            admin._id,
-            'Admin',
-            req,
-            {
-                amount: deposit.amount,
-                method: deposit.method,
-                reference: deposit.reference,
-                reason: reason,
-                userEmail: user?.email
-            }
-        );
-
-        res.status(200).json({
-            status: 'success',
-            message: 'Deposit rejected successfully',
-            data: {
-                depositId: deposit._id,
-                reference: deposit.reference,
-                status: deposit.status,
-                processedBy: admin.email,
-                processedAt: deposit.processedAt
-            }
-        });
-
-    } catch (err) {
-        console.error('Error rejecting deposit:', err);
-        res.status(500).json({
-            status: 'error',
-            message: err.message || 'Failed to reject deposit'
-        });
+// PATCH /api/admin/deposits/:id/reject
+app.patch('/api/admin/deposits/:id/reject', adminProtect, restrictTo('finance', 'super'), async (req, res) => {
+  try {
+    const depositId = req.params.id;
+    const { reason } = req.body;
+    
+    const deposit = await DepositAsset.findById(depositId);
+    if (!deposit) {
+      return res.status(404).json({ status: 'fail', message: 'Deposit not found' });
     }
+    
+    deposit.status = 'failed';
+    deposit.adminNotes = reason || 'Rejected by admin';
+    deposit.processedAt = new Date();
+    deposit.processedBy = req.admin._id;
+    await deposit.save();
+    
+    // Update transaction status
+    await Transaction.findByIdAndUpdate(deposit.transactionId, { 
+      status: 'failed',
+      adminNotes: reason
+    });
+    
+    // Send rejection email to user
+    const user = await User.findById(deposit.user);
+    if (user) {
+      await sendAutomatedEmail(user, 'deposit_rejected', {
+        amount: deposit.amount,
+        method: deposit.asset.toUpperCase(),
+        reason: reason || 'Admin rejection'
+      });
+    }
+    
+    await logActivity('deposit_rejected', 'DepositAsset', depositId, req.admin._id, 'Admin', req, { reason });
+    
+    res.status(200).json({ status: 'success', message: 'Deposit rejected successfully' });
+  } catch (err) {
+    console.error('Error rejecting deposit:', err);
+    res.status(500).json({ status: 'error', message: err.message });
+  }
 });
+
+
+
+
+
+
+
+
 
 
 
