@@ -19135,7 +19135,6 @@ app.get('/api/admin/deposits/:id', adminProtect, restrictTo('super', 'finance'),
 
 
 
-
 // POST /api/admin/deposits/:id/reject - Reject a deposit request
 app.post('/api/admin/deposits/:id/reject', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
   try {
@@ -19162,13 +19161,15 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, restrictTo('super', 'fi
       });
     }
 
-    // Get real-time crypto price
+    // Get real-time crypto price using aggregator
     const asset = (deposit.asset || deposit.method || 'usd').toLowerCase();
     let currentPrice = 1;
+    let cryptoLogoUrl = '';
     
     if (asset !== 'usd') {
       try {
         currentPrice = await getCryptoPrice(asset.toUpperCase());
+        cryptoLogoUrl = getCryptoLogo(asset.toUpperCase());
       } catch (err) {
         console.warn(`Could not fetch price for ${asset}`);
       }
@@ -19183,66 +19184,22 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, restrictTo('super', 'fi
     deposit.processedAt = new Date();
     await deposit.save();
 
-    // Send rejection email - with detailed logging
-    let emailSent = false;
-    try {
-      console.log(`Attempting to send deposit rejection email to: ${deposit.user.email}`);
-      emailSent = await sendProfessionalEmail({
-        email: deposit.user.email,
-        template: 'deposit_rejected',
-        data: {
-          name: deposit.user.firstName,
-          amount: usdValue,
-          method: deposit.method || asset.toUpperCase(),
-          reason: reason || 'Unable to verify deposit details'
-        }
-      });
-      console.log(`sendProfessionalEmail returned: ${emailSent}`);
-    } catch (emailErr) {
-      console.error('sendProfessionalEmail threw error:', emailErr);
-      emailSent = false;
-    }
-
-    // If email failed, try direct sendEmail as fallback
-    if (!emailSent) {
-      try {
-        console.log('Attempting fallback email via sendEmail');
-        const fallbackHtml = `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #FFFFFF;">
-            <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-              <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px;">
-              <h1 style="color: #FFFFFF;">₿itHash</h1>
-            </div>
-            <div style="padding: 30px;">
-              <h2 style="color: #DC2626;">Deposit Declined</h2>
-              <p>Dear ${deposit.user.firstName},</p>
-              <p>Your deposit request could not be processed.</p>
-              <div style="background: #F5F5F5; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                <p><strong>Amount:</strong> $${usdValue.toLocaleString()}</p>
-                <p><strong>Method:</strong> ${deposit.method || asset.toUpperCase()}</p>
-                <p><strong>Reason:</strong> ${reason || 'Unable to verify deposit details'}</p>
-              </div>
-              <p>Please contact support if you believe this is an error.</p>
-              <div style="text-align: center; margin: 30px 0;">
-                <a href="https://www.bithashcapital.live/support" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px;">Contact Support</a>
-              </div>
-            </div>
-            <div style="text-align: center; padding: 20px; background: #0B0E11;">
-              <p style="color: #6C7480;">&copy; ${new Date().getFullYear()} ₿itHash Capital</p>
-            </div>
-          </div>
-        `;
-        await sendEmail({
-          email: deposit.user.email,
-          subject: 'Deposit Declined - ₿itHash Capital',
-          html: fallbackHtml
-        });
-        emailSent = true;
-        console.log('Fallback email sent successfully');
-      } catch (fallbackErr) {
-        console.error('Fallback email failed:', fallbackErr);
+    // Send rejection email using sendProfessionalEmail with all required data fields
+    const emailSent = await sendProfessionalEmail({
+      email: deposit.user.email,
+      template: 'deposit_rejected',
+      data: {
+        name: deposit.user.firstName,
+        amount: usdValue,
+        cryptoAmount: cryptoAmount,
+        cryptoAsset: asset.toUpperCase(),
+        method: deposit.method || asset.toUpperCase(),
+        reason: reason || 'Unable to verify deposit details',
+        exchangeRate: currentPrice,
+        reference: deposit.reference || deposit._id.toString().slice(-8),
+        cryptoLogoUrl: cryptoLogoUrl
       }
-    }
+    });
 
     // Log activity
     await logActivity(
@@ -19266,7 +19223,7 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, restrictTo('super', 'fi
     // Create notification for user
     await Notification.create({
       title: 'Deposit Rejected',
-      message: `Your deposit of $${deposit.amount.toLocaleString()} has been rejected. Reason: ${reason || 'No reason provided'}`,
+      message: `Your deposit of ${cryptoAmount.toFixed(8)} ${asset.toUpperCase()} ($${usdValue.toLocaleString()}) has been rejected. Reason: ${reason || 'No reason provided'}`,
       type: 'error',
       recipientType: 'specific',
       specificUserId: deposit.user._id,
@@ -19287,8 +19244,6 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, restrictTo('super', 'fi
     });
   }
 });
-
-
 
 
 
