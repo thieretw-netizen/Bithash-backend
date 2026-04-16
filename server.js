@@ -19315,45 +19315,50 @@ function getCryptoLogo(assetCode) {
 
 
 
-
-
-
-
-// POST /api/admin/deposits/:id/reject
-app.post('/api/admin/deposits/:id/reject', adminProtect, restrictTo('finance', 'super'), async (req, res) => {
+// POST /api/admin/deposits/:id/reject - Reject a deposit request
+app.post('/api/admin/deposits/:id/reject', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
   try {
-    const depositId = req.params.id;
+    const { id } = req.params;
     const { reason } = req.body;
-    
-    const deposit = await DepositAsset.findById(depositId);
-    if (!deposit) {
-      return res.status(404).json({ status: 'fail', message: 'Deposit not found' });
-    }
-    
-    deposit.status = 'failed';
-    deposit.metadata = {
-      ...deposit.metadata,
-      rejectionReason: reason,
-      rejectedBy: req.admin._id,
-      rejectedAt: new Date()
-    };
-    await deposit.save();
-    
-    if (deposit.transactionId) {
-      await Transaction.findByIdAndUpdate(deposit.transactionId, {
-        status: 'failed',
-        adminNotes: reason,
-        processedBy: req.admin._id,
-        processedAt: new Date()
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid deposit ID format'
       });
     }
-    
-    res.status(200).json({ status: 'success', message: 'Deposit rejected successfully' });
+
+    const deposit = await Transaction.findOne({
+      _id: id,
+      type: 'deposit',
+      status: 'pending'
+    }).populate('user', 'firstName lastName email');
+
+    if (!deposit) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Pending deposit not found'
+      });
+    }
+
+    deposit.status = 'failed';
+    deposit.adminNotes = reason || 'No reason provided';
+    deposit.processedBy = req.admin._id;
+    deposit.processedAt = new Date();
+    await deposit.save();
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Deposit rejected successfully'
+    });
   } catch (err) {
-    res.status(500).json({ status: 'error', message: err.message });
+    console.error('Reject deposit error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to reject deposit'
+    });
   }
 });
-
 
 
 
