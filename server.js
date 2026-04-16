@@ -4705,26 +4705,99 @@ case 'crypto_deposit':
         break;
 
       case 'deposit_rejected':
-        subject = 'Deposit Update - ₿itHash Capital';
-        html = `
-          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-            ${brandHeader}
-            <div style="padding: 30px; background: #FFFFFF;">
-              <h2 style="color: #0B0E11; margin-bottom: 20px;">Deposit Status Update</h2>
-              <p style="color: #333333; line-height: 1.6;">Dear ${data.name},</p>
-              <p style="color: #333333; line-height: 1.6;">Your deposit request could not be processed.</p>
-              <div style="background: #F5F5F5; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                <p style="margin: 5px 0;"><strong>Amount:</strong> $${data.amount.toLocaleString()}</p>
-                <p style="margin: 5px 0;"><strong>Method:</strong> ${data.method}</p>
-                <p style="margin: 5px 0;"><strong>Reason:</strong> ${data.reason}</p>
-              </div>
-              <p style="color: #333333; line-height: 1.6;">Please contact support if you believe this is an error.</p>
-              <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${formattedTimestamp}</p>
+  const cryptoLogoUrl = getCryptoLogo(data.cryptoAsset);
+  const formattedAmount = data.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const formattedCryptoAmount = data.cryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
+  const formattedRate = data.exchangeRate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  
+  subject = '⛔ Deposit Declined - ₿itHash Capital';
+  html = `
+    <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF; border-radius: 20px; overflow: hidden; box-shadow: 0 20px 35px -10px rgba(0,0,0,0.15);">
+      
+      <!-- Header with Red Alert Banner -->
+      <div style="background: linear-gradient(135deg, #7F1D1D 0%, #991B1B 100%); padding: 35px 30px; text-align: center;">
+        <div style="background: rgba(255,255,255,0.15); width: 70px; height: 70px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; margin-bottom: 20px;">
+          <svg width="38" height="38" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 8V12M12 16H12.01M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round"/>
+            <path d="M12 12V16" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <h1 style="color: #FFFFFF; font-size: 26px; margin: 0 0 8px 0; font-weight: 700;">Deposit Declined</h1>
+        <p style="color: #FCA5A5; font-size: 14px; margin: 0;">Your deposit request could not be approved</p>
+      </div>
+      
+      <!-- Body -->
+      <div style="padding: 30px;">
+        
+        <!-- Greeting -->
+        <p style="color: #1E293B; font-size: 16px; margin: 0 0 20px 0; line-height: 1.5;">Dear <strong>${data.name}</strong>,</p>
+        <p style="color: #475569; font-size: 14px; margin: 0 0 25px 0; line-height: 1.6;">We regret to inform you that your deposit request has been reviewed and <strong style="color: #DC2626;">could not be approved</strong> at this time.</p>
+        
+        <!-- Rejection Reason Box -->
+        <div style="background: #FEF2F2; border-left: 4px solid #DC2626; padding: 16px 18px; border-radius: 12px; margin-bottom: 25px;">
+          <p style="color: #991B1B; font-size: 13px; margin: 0 0 6px 0; font-weight: 600;">ⓘ REASON FOR DECLINE</p>
+          <p style="color: #7F1D1D; font-size: 14px; margin: 0; line-height: 1.5;">${data.reason}</p>
+        </div>
+        
+        <!-- Deposit Details Card -->
+        <div style="background: #F8FAFC; border-radius: 16px; padding: 20px; margin-bottom: 25px; border: 1px solid #E2E8F0;">
+          <h3 style="color: #0F172A; font-size: 15px; margin: 0 0 16px 0; font-weight: 600;">📋 Deposit Details</h3>
+          
+          <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #E2E8F0;">
+            <span style="color: #475569; font-size: 14px;">Cryptocurrency</span>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              ${cryptoLogoUrl ? `<img src="${cryptoLogoUrl}" width="24" height="24" style="border-radius: 50%;" alt="${data.cryptoAsset}">` : ''}
+              <span style="color: #0F172A; font-weight: 600;">${data.cryptoAsset}</span>
             </div>
-            ${brandFooter}
           </div>
-        `;
-        break;
+          
+          <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #E2E8F0;">
+            <span style="color: #475569; font-size: 14px;">Amount Requested</span>
+            <span style="color: #0F172A; font-weight: 600;">${formattedCryptoAmount} ${data.cryptoAsset}</span>
+          </div>
+          
+          <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #E2E8F0;">
+            <span style="color: #475569; font-size: 14px;">USD Value</span>
+            <span style="color: #0F172A; font-weight: 600;">$${formattedAmount} USD</span>
+          </div>
+          
+          <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #E2E8F0;">
+            <span style="color: #475569; font-size: 14px;">Exchange Rate</span>
+            <span style="color: #0F172A; font-weight: 600;">1 ${data.cryptoAsset} = $${formattedRate}</span>
+          </div>
+          
+          <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 0;">
+            <span style="color: #475569; font-size: 14px;">Payment Method</span>
+            <span style="color: #0F172A; font-weight: 600;">${data.method}</span>
+          </div>
+        </div>
+        
+        <!-- Next Steps -->
+        <div style="background: #F1F5F9; border-radius: 14px; padding: 20px; text-align: center; margin-bottom: 25px;">
+          <p style="color: #1E293B; font-size: 14px; margin: 0 0 8px 0; font-weight: 600;">📌 What you can do next</p>
+          <p style="color: #475569; font-size: 13px; margin: 0 0 16px 0;">Please contact our support team for assistance or to resolve this issue.</p>
+          <a href="https://www.bithashcapital.live/support" style="display: inline-block; background: #3B82F6; color: #FFFFFF; padding: 12px 28px; text-decoration: none; border-radius: 999px; font-weight: 600; font-size: 14px;">Contact Support</a>
+        </div>
+        
+        <!-- Footer Note -->
+        <p style="color: #94A3B8; font-size: 11px; text-align: center; margin: 20px 0 0 0;">Reference ID: ${data.reference} • ${data.date}</p>
+        <p style="color: #94A3B8; font-size: 11px; text-align: center; margin: 5px 0 0 0;">If you believe this is an error, please reply to this email.</p>
+        
+      </div>
+      
+      <!-- Brand Footer -->
+      <div style="text-align: center; padding: 20px; background: #F8FAFC; border-top: 1px solid #E2E8F0;">
+        <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 35px; height: 35px; margin-bottom: 10px;">
+        <p style="color: #94A3B8; font-size: 11px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+        <p style="color: #94A3B8; font-size: 11px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+        <p style="color: #94A3B8; font-size: 11px; margin: 5px 0;">
+          <a href="mailto:support@bithash.com" style="color: #3B82F6; text-decoration: none;">support@bithash.com</a> | 
+          <a href="https://www.bithashcapital.live" style="color: #3B82F6; text-decoration: none;">www.bithashcapital.live</a>
+        </p>
+      </div>
+    </div>
+  `;
+  break;
 
       case 'withdrawal_approved':
         const withdrawalRate = await getCurrentExchangeRate('bitcoin');
@@ -19308,8 +19381,6 @@ function getCryptoLogo(assetCode) {
 
 
 
-
-
 // POST /api/admin/deposits/:id/reject - Reject a deposit request
 app.post('/api/admin/deposits/:id/reject', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
   try {
@@ -19336,62 +19407,72 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, restrictTo('super', 'fi
       });
     }
 
+    // Get real-time crypto price using aggregator
+    const asset = (deposit.asset || deposit.method || 'usd').toLowerCase();
+    let currentPrice = 1;
+    
+    if (asset !== 'usd') {
+      try {
+        currentPrice = await getCryptoPrice(asset.toUpperCase());
+      } catch (err) {
+        console.warn(`Could not fetch price for ${asset}`);
+      }
+    }
+    
+    const cryptoAmount = deposit.assetAmount || deposit.amount;
+    const usdValue = cryptoAmount * currentPrice;
+
     deposit.status = 'failed';
     deposit.adminNotes = reason || 'No reason provided';
     deposit.processedBy = req.admin._id;
     deposit.processedAt = new Date();
     await deposit.save();
 
-    // Send rejection email to user (with error handling)
-    try {
-      await sendProfessionalEmail({
-        email: deposit.user.email,
-        template: 'deposit_rejected',
-        data: {
-          name: deposit.user.firstName,
-          amount: deposit.amount,
-          method: deposit.method || deposit.asset || 'crypto',
-          reason: reason || 'No reason provided'
-        }
-      });
-    } catch (emailErr) {
-      console.error('Failed to send rejection email:', emailErr);
-    }
+    // Send rejection email using enhanced template
+    await sendProfessionalEmail({
+      email: deposit.user.email,
+      template: 'deposit_rejected',
+      data: {
+        name: deposit.user.firstName,
+        amount: usdValue,
+        cryptoAmount: cryptoAmount,
+        cryptoAsset: asset.toUpperCase(),
+        method: deposit.method || asset.toUpperCase(),
+        reason: reason || 'Unable to verify deposit details',
+        exchangeRate: currentPrice,
+        reference: deposit.reference || deposit._id.toString().slice(-8),
+        date: new Date().toLocaleString()
+      }
+    });
 
     // Log activity
-    try {
-      await logActivity(
-        'deposit_rejected',
-        'Transaction',
-        deposit._id,
-        req.admin._id,
-        'Admin',
-        req,
-        {
-          userId: deposit.user._id,
-          amount: deposit.amount,
-          reason: reason,
-          depositId: deposit._id
-        }
-      );
-    } catch (logErr) {
-      console.error('Failed to log activity:', logErr);
-    }
+    await logActivity(
+      'deposit_rejected',
+      'Transaction',
+      deposit._id,
+      req.admin._id,
+      'Admin',
+      req,
+      {
+        userId: deposit.user._id,
+        amount: deposit.amount,
+        cryptoAmount: cryptoAmount,
+        asset: asset,
+        usdValue: usdValue,
+        reason: reason
+      }
+    );
 
     // Create notification for user
-    try {
-      await Notification.create({
-        title: 'Deposit Rejected',
-        message: `Your deposit of $${deposit.amount.toLocaleString()} has been rejected. Reason: ${reason || 'No reason provided'}`,
-        type: 'deposit_rejected',
-        recipientType: 'specific',
-        specificUserId: deposit.user._id,
-        sentBy: req.admin._id,
-        isImportant: true
-      });
-    } catch (notifErr) {
-      console.error('Failed to create notification:', notifErr);
-    }
+    await Notification.create({
+      title: 'Deposit Rejected',
+      message: `Your deposit of ${cryptoAmount.toFixed(8)} ${asset.toUpperCase()} ($${usdValue.toLocaleString()}) has been rejected. Reason: ${reason || 'No reason provided'}`,
+      type: 'deposit_rejected',
+      recipientType: 'specific',
+      specificUserId: deposit.user._id,
+      sentBy: req.admin._id,
+      isImportant: true
+    });
 
     res.status(200).json({
       status: 'success',
