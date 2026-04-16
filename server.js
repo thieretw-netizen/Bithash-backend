@@ -19128,9 +19128,6 @@ app.get('/api/admin/deposits/:id', adminProtect, restrictTo('super', 'finance'),
 
 
 
-
-
-
 // POST /api/admin/deposits/:id/reject - Reject a deposit request
 app.post('/api/admin/deposits/:id/reject', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
   try {
@@ -19178,8 +19175,8 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, restrictTo('super', 'fi
     deposit.processedAt = new Date();
     await deposit.save();
 
-    // Send rejection email using sendProfessionalEmail with deposit_rejected template
-    await sendProfessionalEmail({
+    // Send rejection email
+    const emailSent = await sendProfessionalEmail({
       email: deposit.user.email,
       template: 'deposit_rejected',
       data: {
@@ -19189,6 +19186,10 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, restrictTo('super', 'fi
         reason: reason || 'Unable to verify deposit details'
       }
     });
+
+    if (!emailSent) {
+      console.error('Email failed to send via sendProfessionalEmail');
+    }
 
     // Log activity
     await logActivity(
@@ -19204,11 +19205,12 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, restrictTo('super', 'fi
         cryptoAmount: cryptoAmount,
         asset: asset,
         usdValue: usdValue,
-        reason: reason
+        reason: reason,
+        emailSent: emailSent
       }
     );
 
-    // Create notification for user
+    // Create notification for user - using valid enum value 'error'
     await Notification.create({
       title: 'Deposit Rejected',
       message: `Your deposit of $${deposit.amount.toLocaleString()} has been rejected. Reason: ${reason || 'No reason provided'}`,
@@ -19221,7 +19223,8 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, restrictTo('super', 'fi
 
     res.status(200).json({
       status: 'success',
-      message: 'Deposit rejected successfully'
+      message: 'Deposit rejected successfully',
+      emailSent: emailSent
     });
   } catch (err) {
     console.error('Reject deposit error:', err);
@@ -19231,6 +19234,9 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, restrictTo('super', 'fi
     });
   }
 });
+
+
+
 
 
 
