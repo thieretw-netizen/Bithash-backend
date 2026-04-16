@@ -20481,43 +20481,121 @@ io.on('connection', async (socket) => {
         
         const user = await User.findById(userId).select('balances');
         if (user) {
+          // Send USD balances
+          let mainUSD = 0;
+          let activeUSD = 0;
+          let maturedUSD = 0;
+          
+          // Calculate MAIN wallet USD from crypto balances
+          if (user.balances && user.balances.main) {
+            for (const [asset, balance] of user.balances.main.entries()) {
+              if (balance > 0 && asset !== 'usd') {
+                const price = await getCryptoPrice(asset.toUpperCase());
+                if (price) mainUSD += balance * price;
+              }
+            }
+          }
+          
+          // Calculate ACTIVE wallet USD (FIXED - doesn't fluctuate)
+          if (user.balances && user.balances.active) {
+            for (const [asset, balance] of user.balances.active.entries()) {
+              if (balance > 0 && asset === 'usd') {
+                activeUSD = balance;
+              }
+            }
+          }
+          
+          // Calculate MATURED wallet USD from crypto balances
+          if (user.balances && user.balances.matured) {
+            for (const [asset, balance] of user.balances.matured.entries()) {
+              if (balance > 0 && asset !== 'usd') {
+                const price = await getCryptoPrice(asset.toUpperCase());
+                if (price) maturedUSD += balance * price;
+              }
+            }
+          }
+          
           socket.emit('balance_update', {
-            main: user.balances.main,
-            active: user.balances.active,
-            matured: user.balances.matured
+            main: mainUSD,
+            active: activeUSD,
+            matured: maturedUSD
           });
-        }
-        
-        const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
-        if (userAssetBalance) {
+          
+          // Build asset data from MAIN + MATURED wallets (exclude ACTIVE)
           const assetData = [];
-          for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
-            if (balance > 0) {
+          const allBalances = new Map();
+          
+          // Collect from MAIN wallet
+          if (user.balances && user.balances.main) {
+            for (const [asset, balance] of user.balances.main.entries()) {
+              if (balance > 0 && asset !== 'usd') {
+                allBalances.set(asset, (allBalances.get(asset) || 0) + balance);
+              }
+            }
+          }
+          
+          // Collect from MATURED wallet
+          if (user.balances && user.balances.matured) {
+            for (const [asset, balance] of user.balances.matured.entries()) {
+              if (balance > 0 && asset !== 'usd') {
+                allBalances.set(asset, (allBalances.get(asset) || 0) + balance);
+              }
+            }
+          }
+          
+          // Get buy transaction history for each asset
+          const buyTransactions = await Transaction.find({
+            user: userId,
+            type: 'buy',
+            status: 'completed'
+          }).sort({ createdAt: -1 });
+          
+          const buyHistoryByAsset = {};
+          buyTransactions.forEach(tx => {
+            const asset = (tx.asset || tx.buyDetails?.asset || '').toLowerCase();
+            if (asset && asset !== 'usd') {
+              if (!buyHistoryByAsset[asset]) buyHistoryByAsset[asset] = [];
+              buyHistoryByAsset[asset].push({
+                amount: tx.assetAmount || tx.buyDetails?.assetAmount || 0,
+                usdValue: tx.amount || tx.buyDetails?.amountUSD || 0,
+                price: tx.buyDetails?.buyingPrice || tx.exchangeRateAtTime || 0,
+                date: tx.createdAt
+              });
+            }
+          });
+          
+          for (const [asset, totalBalance] of allBalances.entries()) {
+            if (totalBalance > 0) {
               const price = await getCryptoPrice(asset.toUpperCase());
-              const buyTransactions = userAssetBalance.history.filter(h => h.asset === asset && h.type === 'buy');
+              const currentValue = totalBalance * (price || 0);
+              
+              const assetBuys = buyHistoryByAsset[asset] || [];
               let totalSpent = 0;
               let totalBought = 0;
-              buyTransactions.forEach(t => {
-                totalSpent += t.usdValue;
-                totalBought += t.amount;
+              assetBuys.forEach(b => {
+                totalSpent += b.usdValue;
+                totalBought += b.amount;
               });
+              
               const avgPrice = totalBought > 0 ? totalSpent / totalBought : 0;
-              const currentValue = balance * (price || 0);
               const unrealizedPnl = currentValue - totalSpent;
               const unrealizedPercentage = totalSpent > 0 ? (unrealizedPnl / totalSpent) * 100 : 0;
               
               assetData.push({
                 symbol: asset,
-                balance: balance,
+                balance: totalBalance,
                 currentValue: currentValue,
                 avgPrice: avgPrice,
+                totalSpent: totalSpent,
                 unrealizedPnl: unrealizedPnl,
                 unrealizedPnlPercent: unrealizedPercentage,
                 id: asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset,
-                transactions: userAssetBalance.history.filter(h => h.asset === asset).slice(-10)
+                currentPrice: price || 0,
+                transactions: assetBuys.slice(-10)
               });
             }
           }
+          
           socket.emit('asset_balances_update', assetData);
         }
         
@@ -20534,7 +20612,6 @@ io.on('connection', async (socket) => {
       console.error('Socket auth error:', err);
     }
   }
-  
   const currentStats = await getCurrentStats();
   socket.emit('stats-update', currentStats);
   console.log(`📡 Sent initial stats to new client ${socket.id}: ${currentStats.totalInvestors.toLocaleString()} investors`);
