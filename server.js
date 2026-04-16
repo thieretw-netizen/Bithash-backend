@@ -5150,7 +5150,7 @@ case 'login_success':
     </div>
   `;
   break;
-
+  } 
 
 
 
@@ -5231,18 +5231,6 @@ const sendAdminActionNotification = async (user, action, details, actionRequired
     return false;
   }
 };
-
-// Example usage in admin endpoints:
-// await sendAdminActionNotification(user, 'account_suspended', {
-//   description: 'Multiple failed login attempts detected from unrecognized devices.',
-//   reason: 'Security policy violation - Section 3.2'
-// }, 'Please contact support to resolve this issue', 'https://www.bithashcapital.live/support');
-
-
-
-
-
-
 
 
         
