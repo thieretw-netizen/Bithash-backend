@@ -1983,7 +1983,7 @@ const NotificationSchema = new mongoose.Schema({
   },
   type: {
     type: String,
-    enum: ['info', 'warning', 'success', 'error', 'deposit_rejected', 'kyc_approved', 'kyc_rejected', 'withdrawal_approved', 'withdrawal_rejected', 'deposit_approved', 'system_update', 'maintenance'],
+    enum: ['info', 'warning', 'success', 'error', 'kyc_approved', 'kyc_rejected', 'withdrawal_approved', 'withdrawal_rejected', 'deposit_approved', 'system_update', 'maintenance'],
     default: 'info'
   },
   recipientType: {
@@ -2979,20 +2979,13 @@ const detectAndSetIPPreferences = async (userId, req) => {
 
 const getCryptoPrice = async (asset) => {
   try {
-    const assetUpper = asset.toUpperCase();
-    
-    // Handle stablecoins - they are always $1 (this is factual, not a fallback)
-    const stablecoins = ['USDT', 'USDC', 'DAI', 'BUSD', 'TUSD', 'USDP'];
-    if (stablecoins.includes(assetUpper)) {
-      console.log(`${assetUpper} is a stablecoin, price is $1`);
-      return 1;
-    }
-    
     const assetMap = {
       'BTC': 'bitcoin',
       'ETH': 'ethereum',
+      'USDT': 'tether',
       'BNB': 'binancecoin',
       'SOL': 'solana',
+      'USDC': 'usd-coin',
       'XRP': 'ripple',
       'DOGE': 'dogecoin',
       'ADA': 'cardano',
@@ -3002,220 +2995,77 @@ const getCryptoPrice = async (asset) => {
       'TRX': 'tron',
       'LINK': 'chainlink',
       'MATIC': 'matic-network',
-      'LTC': 'litecoin',
-      'NEAR': 'near',
-      'UNI': 'uniswap',
-      'BCH': 'bitcoin-cash',
-      'XLM': 'stellar',
-      'ATOM': 'cosmos',
-      'XMR': 'monero',
-      'VET': 'vechain',
-      'FIL': 'filecoin',
-      'THETA': 'theta-token',
-      'HBAR': 'hedera-hashgraph',
-      'FTM': 'fantom',
-      'XTZ': 'tezos'
+      'LTC': 'litecoin'
     };
     
-    const coinId = assetMap[assetUpper];
-    if (!coinId) {
-      console.error(`No mapping found for ${assetUpper}`);
-      return null;
-    }
+    const coinId = assetMap[asset.toUpperCase()];
+    if (!coinId) return null;
     
-    // Try CoinGecko first
+    const errors = [];
+    
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
-      const response = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd`, {
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
-      
-      if (response.ok) {
-        const data = await response.json();
-        if (data && data[coinId] && data[coinId].usd && data[coinId].usd > 0) {
-          const price = data[coinId].usd;
-          console.log(`✅ ${asset} price from CoinGecko: $${price}`);
-          return price;
-        }
+      const binancePair = asset.toUpperCase() === 'USDT' ? 'USDTUSDT' : `${asset.toUpperCase()}USDT`;
+      const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${binancePair}`, { timeout: 5000 });
+      if (response.data && response.data.price) {
+        console.log(`Fetched ${asset} price from Binance: $${response.data.price}`);
+        return parseFloat(response.data.price);
       }
+      errors.push('Binance: Invalid response');
     } catch (err) {
-      console.log(`CoinGecko failed for ${asset}:`, err.message);
+      errors.push(`Binance: ${err.message}`);
     }
     
-    // Try Binance
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
-      const response = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${assetUpper}USDT`, {
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
-      
-      if (response.ok) {
-        const data = await response.json();
-        if (data && data.price && parseFloat(data.price) > 0) {
-          const price = parseFloat(data.price);
-          console.log(`✅ ${asset} price from Binance: $${price}`);
-          return price;
-        }
+      const response = await axios.get(`https://min-api.cryptocompare.com/data/price?fsym=${asset.toUpperCase()}&tsyms=USD`, { timeout: 5000 });
+      if (response.data && response.data.USD) {
+        console.log(`Fetched ${asset} price from CryptoCompare: $${response.data.USD}`);
+        return response.data.USD;
       }
+      errors.push('CryptoCompare: Invalid response');
     } catch (err) {
-      console.log(`Binance failed for ${asset}:`, err.message);
+      errors.push(`CryptoCompare: ${err.message}`);
     }
     
-    // Try CryptoCompare
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
-      const response = await fetch(`https://min-api.cryptocompare.com/data/price?fsym=${assetUpper}&tsyms=USD`, {
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
-      
-      if (response.ok) {
-        const data = await response.json();
-        if (data && data.USD && data.USD > 0) {
-          const price = data.USD;
-          console.log(`✅ ${asset} price from CryptoCompare: $${price}`);
-          return price;
-        }
-      }
-    } catch (err) {
-      console.log(`CryptoCompare failed for ${asset}:`, err.message);
-    }
-    
-    // Try Kraken
     try {
       const krakenMap = {
         'BTC': 'XBTUSD',
         'ETH': 'ETHUSD',
+        'USDT': 'USDTUSD',
         'SOL': 'SOLUSD',
         'XRP': 'XRPUSD',
         'DOGE': 'DOGEUSD',
         'ADA': 'ADAUSD',
-        'LTC': 'LTCUSD',
-        'DOT': 'DOTUSD',
-        'LINK': 'LINKUSD',
-        'MATIC': 'MATICUSD'
+        'LTC': 'LTCUSD'
       };
-      const pair = krakenMap[assetUpper];
+      const pair = krakenMap[asset.toUpperCase()];
       if (pair) {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000);
-        const response = await fetch(`https://api.kraken.com/0/public/Ticker?pair=${pair}`, {
-          signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-        
-        if (response.ok) {
-          const data = await response.json();
-          if (data && data.result && data.result[pair] && data.result[pair].c && data.result[pair].c[0]) {
-            const price = parseFloat(data.result[pair].c[0]);
-            if (price > 0) {
-              console.log(`✅ ${asset} price from Kraken: $${price}`);
-              return price;
-            }
-          }
-        }
-      }
-    } catch (err) {
-      console.log(`Kraken failed for ${asset}:`, err.message);
-    }
-    
-    // Try KuCoin
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
-      const response = await fetch(`https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=${assetUpper}-USDT`, {
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
-      
-      if (response.ok) {
-        const data = await response.json();
-        if (data && data.data && data.data.price && parseFloat(data.data.price) > 0) {
-          const price = parseFloat(data.data.price);
-          console.log(`✅ ${asset} price from KuCoin: $${price}`);
+        const response = await axios.get(`https://api.kraken.com/0/public/Ticker?pair=${pair}`, { timeout: 5000 });
+        if (response.data && response.data.result && response.data.result[pair]) {
+          const price = parseFloat(response.data.result[pair].c[0]);
+          console.log(`Fetched ${asset} price from Kraken: $${price}`);
           return price;
         }
       }
+      errors.push('Kraken: No data or unsupported pair');
     } catch (err) {
-      console.log(`KuCoin failed for ${asset}:`, err.message);
+      errors.push(`Kraken: ${err.message}`);
     }
     
-    // Try Bybit
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
-      const response = await fetch(`https://api.bybit.com/v5/market/tickers?category=spot&symbol=${assetUpper}USDT`, {
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
-      
-      if (response.ok) {
-        const data = await response.json();
-        if (data && data.result && data.result.list && data.result.list[0] && data.result.list[0].lastPrice) {
-          const price = parseFloat(data.result.list[0].lastPrice);
-          if (price > 0) {
-            console.log(`✅ ${asset} price from Bybit: $${price}`);
-            return price;
-          }
-        }
+      const response = await axios.get(`https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=${asset.toUpperCase()}-USDT`, { timeout: 5000 });
+      if (response.data && response.data.data && response.data.data.price) {
+        console.log(`Fetched ${asset} price from KuCoin: $${response.data.data.price}`);
+        return parseFloat(response.data.data.price);
       }
+      errors.push('KuCoin: Invalid response');
     } catch (err) {
-      console.log(`Bybit failed for ${asset}:`, err.message);
+      errors.push(`KuCoin: ${err.message}`);
     }
     
-    // Try OKX
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
-      const response = await fetch(`https://www.okx.com/api/v5/market/ticker?instId=${assetUpper}-USDT`, {
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
-      
-      if (response.ok) {
-        const data = await response.json();
-        if (data && data.data && data.data[0] && data.data[0].last && parseFloat(data.data[0].last) > 0) {
-          const price = parseFloat(data.data[0].last);
-          console.log(`✅ ${asset} price from OKX: $${price}`);
-          return price;
-        }
-      }
-    } catch (err) {
-      console.log(`OKX failed for ${asset}:`, err.message);
-    }
-    
-    // Try Gate.io
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
-      const response = await fetch(`https://api.gateio.ws/api/v4/spot/tickers?currency_pair=${assetUpper}_USDT`, {
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
-      
-      if (response.ok) {
-        const data = await response.json();
-        if (data && data[0] && data[0].last && parseFloat(data[0].last) > 0) {
-          const price = parseFloat(data[0].last);
-          console.log(`✅ ${asset} price from Gate.io: $${price}`);
-          return price;
-        }
-      }
-    } catch (err) {
-      console.log(`Gate.io failed for ${asset}:`, err.message);
-    }
-    
-    // If all APIs failed, return null (no fake fallback)
-    console.error(`❌ All APIs failed to fetch price for ${asset}`);
+    console.error(`All price APIs failed for ${asset}:`, errors);
     return null;
-    
   } catch (err) {
-    console.error(`Error fetching price for ${asset}:`, err);
+    console.error('Error fetching crypto price:', err);
     return null;
   }
 };
@@ -4032,7 +3882,7 @@ const recalculateAllUserBalances = async (io) => {
   try {
     console.log('Recalculating ALL user balances based on current crypto prices...');
     
-    const users = await User.find({}).select('_id balances');
+    const users = await User.find({}).select('_id');
     let updatedCount = 0;
     
     for (const user of users) {
@@ -4040,80 +3890,59 @@ const recalculateAllUserBalances = async (io) => {
       let totalActiveValue = 0;
       let totalMaturedValue = 0;
       
-      // ✅ FIXED: Use user.balances directly instead of UserAssetBalance
-      // Calculate MAIN wallet value (crypto assets only - fluctuates with price)
-      if (user.balances && user.balances.main) {
-        const mainBalances = user.balances.main;
-        // Handle both Map and plain object formats
-        const entries = mainBalances instanceof Map ? mainBalances.entries() : Object.entries(mainBalances);
-        
-        for (const [asset, balance] of entries) {
-          if (balance > 0 && asset !== 'usd') {
+      const userAssetBalance = await UserAssetBalance.findOne({ user: user._id });
+      if (userAssetBalance) {
+        for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
+          if (balance > 0) {
             const price = await getCryptoPrice(asset.toUpperCase());
-            if (price && price > 0) {
+            if (price) {
               totalMainValue += balance * price;
             }
           }
         }
       }
       
-      // Calculate ACTIVE wallet value (mining contracts - FIXED, does NOT fluctuate)
-      if (user.balances && user.balances.active) {
-        const activeBalances = user.balances.active;
-        const entries = activeBalances instanceof Map ? activeBalances.entries() : Object.entries(activeBalances);
-        
-        for (const [asset, balance] of entries) {
-          if (balance > 0) {
-            // Active wallet stores USD value directly - no price fluctuation
-            if (asset === 'usd') {
-              totalActiveValue += balance;
-            } else {
-              // For crypto in active wallet, use stored value (not recalculated with current price)
-              totalActiveValue += balance;
-            }
-          }
+      const activeInvestments = await Investment.find({
+        user: user._id,
+        status: 'active'
+      }).populate('plan');
+      
+      for (const investment of activeInvestments) {
+        const currentBTCPrice = await getCryptoPrice('BTC');
+        if (currentBTCPrice && investment.originalAmount) {
+          const originalBTCAmount = investment.originalAmount / (investment.originalBTCPrice || 43000);
+          const currentUSDValue = originalBTCAmount * currentBTCPrice;
+          totalActiveValue += currentUSDValue;
+        } else {
+          totalActiveValue += investment.amount;
         }
       }
       
-      // Calculate MATURED wallet value (crypto assets only - fluctuates with price)
-      if (user.balances && user.balances.matured) {
-        const maturedBalances = user.balances.matured;
-        const entries = maturedBalances instanceof Map ? maturedBalances.entries() : Object.entries(maturedBalances);
-        
-        for (const [asset, balance] of entries) {
-          if (balance > 0 && asset !== 'usd') {
-            const price = await getCryptoPrice(asset.toUpperCase());
-            if (price && price > 0) {
-              totalMaturedValue += balance * price;
-            }
-          }
+      const maturedInvestments = await Investment.find({
+        user: user._id,
+        status: 'completed'
+      }).populate('plan');
+      
+      for (const investment of maturedInvestments) {
+        const currentBTCPrice = await getCryptoPrice('BTC');
+        if (currentBTCPrice && investment.originalAmount) {
+          const originalBTCAmount = investment.originalAmount / (investment.originalBTCPrice || 43000);
+          const currentUSDValue = originalBTCAmount * currentBTCPrice;
+          totalMaturedValue += currentUSDValue;
+        } else {
+          totalMaturedValue += investment.amount + (investment.actualReturn || 0);
         }
       }
       
-      // Check if we need to update (avoid unnecessary writes)
-      const currentMainUSD = user.balances?.main?.get?.('usd') || user.balances?.main?.usd || 0;
-      const currentActiveUSD = user.balances?.active?.get?.('usd') || user.balances?.active?.usd || 0;
-      const currentMaturedUSD = user.balances?.matured?.get?.('usd') || user.balances?.matured?.usd || 0;
+      const updates = {};
+      if (Math.abs(user.balances.main - totalMainValue) > 0.01) updates['balances.main'] = totalMainValue;
+      if (Math.abs(user.balances.active - totalActiveValue) > 0.01) updates['balances.active'] = totalActiveValue;
+      if (Math.abs(user.balances.matured - totalMaturedValue) > 0.01) updates['balances.matured'] = totalMaturedValue;
       
-      const needsMainUpdate = Math.abs(currentMainUSD - totalMainValue) > 0.01;
-      const needsActiveUpdate = Math.abs(currentActiveUSD - totalActiveValue) > 0.01;
-      const needsMaturedUpdate = Math.abs(currentMaturedUSD - totalMaturedValue) > 0.01;
-      
-      if (needsMainUpdate || needsActiveUpdate || needsMaturedUpdate) {
-        // Update USD values in the balances Maps
-        if (!user.balances) user.balances = { main: new Map(), active: new Map(), matured: new Map() };
-        if (!user.balances.main) user.balances.main = new Map();
-        if (!user.balances.active) user.balances.active = new Map();
-        if (!user.balances.matured) user.balances.matured = new Map();
-        
-        user.balances.main.set('usd', totalMainValue);
-        user.balances.active.set('usd', totalActiveValue);
-        user.balances.matured.set('usd', totalMaturedValue);
-        
-        await User.findByIdAndUpdate(user._id, { balances: user.balances });
+      if (Object.keys(updates).length > 0) {
+        await User.findByIdAndUpdate(user._id, updates);
         updatedCount++;
         
-        // Emit real-time updates via Socket.IO
         if (io) {
           io.to(`user_${user._id}`).emit('balance_update', {
             main: totalMainValue,
@@ -4121,17 +3950,9 @@ const recalculateAllUserBalances = async (io) => {
             matured: totalMaturedValue
           });
           
-          // Calculate daily PnL for main wallet (if we have previous day's value)
-          const previousDayKey = `user:${user._id}:prev_main_value`;
-          const cachedPrev = await redis.get(previousDayKey);
-          let dailyPnL = 0;
-          let dailyPnLPercentage = 0;
-          
-          if (cachedPrev) {
-            const prevValue = parseFloat(cachedPrev);
-            dailyPnL = totalMainValue - prevValue;
-            dailyPnLPercentage = prevValue > 0 ? (dailyPnL / prevValue) * 100 : 0;
-          }
+          const previousDayValue = user.balances.main || totalMainValue;
+          const dailyPnL = totalMainValue - previousDayValue;
+          const dailyPnLPercentage = previousDayValue > 0 ? (dailyPnL / previousDayValue) * 100 : 0;
           
           io.to(`user_${user._id}`).emit('pnl_update', {
             main: {
@@ -4143,19 +3964,11 @@ const recalculateAllUserBalances = async (io) => {
               percentage: 0
             }
           });
-          
-          // Store today's value for tomorrow's PnL
-          const today = new Date().toDateString();
-          const lastDate = await redis.get(`user:${user._id}:pnl_date`);
-          if (lastDate !== today) {
-            await redis.set(previousDayKey, totalMainValue);
-            await redis.set(`user:${user._id}:pnl_date`, today);
-          }
         }
       }
     }
     
-    console.log(`Recalculated balances for ${updatedCount} users (Main: fluctuates, Active: fixed, Matured: fluctuates)`);
+    console.log(`Recalculated balances for ${updatedCount} users (Main: fluctuates, Active: fluctuates, Matured: fluctuates)`);
     
   } catch (err) {
     console.error('Error recalculating user balances:', err);
@@ -4835,171 +4648,83 @@ case 'crypto_deposit':
           </div>
         `;
         break;
-case 'deposit_approved':
-  cryptoLogoUrl = getCryptoLogo(data.cryptoAsset);
-  formattedAmount = data.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  formattedCryptoAmount = data.cryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
-  formattedRate = (data.exchangeRate || 1).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  
-  subject = '✅ Deposit Confirmed - ₿itHash Capital';
-  html = `
-    <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-      <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-        <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-        <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
-        <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
-      </div>
-      
-      <div style="padding: 30px; background: #FFFFFF;">
-        <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-          <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
-            ${cryptoLogoUrl ? `<img src="${cryptoLogoUrl}" width="32" height="32" style="border-radius: 50%;">` : ''}
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <circle cx="12" cy="12" r="10" stroke="#10B981" stroke-width="2"/>
-              <path d="M8 12L11 15L16 9" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </div>
-          <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">DEPOSIT CONFIRMED!</h2>
-          <p style="color: #065F46; font-size: 13px; margin: 0;">Your funds have been successfully credited</p>
-        </div>
-        
-        <p style="color: #333333; line-height: 1.6;">Dear <strong>${data.name}</strong>,</p>
-        <p style="color: #333333; line-height: 1.6;">Great news! Your deposit has been successfully processed and credited to your <strong style="color: #10B981;">Main Wallet</strong>.</p>
-        
-        <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-          <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
-            ${cryptoLogoUrl ? `<img src="${cryptoLogoUrl}" width="32" height="32" style="border-radius: 50%;">` : ''}
-            <div>
-              <div style="font-weight: bold; font-size: 18px;">+ ${formattedCryptoAmount} ${data.cryptoAsset}</div>
-              <div style="color: #64748B; font-size: 12px;">≈ $${formattedAmount} USD</div>
+
+      case 'deposit_approved':
+        const depositRate = await getCurrentExchangeRate('bitcoin');
+        subject = 'Deposit Confirmed - ₿itHash Capital';
+        html = `
+          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+            <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+              <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+              <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+              <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+            </div>
+            <div style="padding: 30px; background: #FFFFFF;">
+              <h2 style="color: #0B0E11; margin-bottom: 20px;">Deposit Confirmed</h2>
+              <p style="color: #333333; line-height: 1.6;">Dear ${data.name},</p>
+              <p style="color: #333333; line-height: 1.6;">Your deposit has been successfully processed and credited to your account.</p>
+              <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+                <table style="width: 100%; border-collapse: collapse;">
+                  <tr>
+                    <td style="padding: 8px 0;"><strong>Amount:</strong></td>
+                    <td style="padding: 8px 0; text-align: right; font-weight: bold;">$${data.amount.toLocaleString()}</td>
+                  </tr>
+                  <tr style="border-top: 1px solid #E2E8F0;">
+                    <td style="padding: 8px 0;"><strong>Method:</strong></td>
+                    <td style="padding: 8px 0; text-align: right;">${data.method}</td>
+                  </tr>
+                  <tr style="border-top: 1px solid #E2E8F0;">
+                    <td style="padding: 8px 0;"><strong>Reference:</strong></td>
+                    <td style="padding: 8px 0; text-align: right;">${data.reference}</td>
+                  </tr>
+                  <tr style="border-top: 1px solid #E2E8F0;">
+                    <td style="padding: 8px 0;"><strong>New Balance:</strong></td>
+                    <td style="padding: 8px 0; text-align: right;">$${data.newBalance.toLocaleString()}</td>
+                  </tr>
+                  <tr style="border-top: 1px solid #E2E8F0;">
+                    <td style="padding: 8px 0;"><strong>Processed At:</strong></td>
+                    <td style="padding: 8px 0; text-align: right;">${new Date(data.processedAt).toLocaleString()}</td>
+                  </tr>
+                </table>
+              </div>
+              <div style="text-align: center; margin: 30px 0;">
+                <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View Transaction</a>
+              </div>
+              <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${formattedTimestamp}</p>
+            </div>
+            <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+              <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+              <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+              <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
+                <a href="mailto:support@bithash.com" style="color: #F7A600; text-decoration: none;">support@bithash.com</a> | 
+                <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
+              </p>
             </div>
           </div>
-          
-          <table style="width: 100%; border-collapse: collapse;">
-            <tr>
-              <td style="padding: 8px 0;"><strong>Exchange Rate (Live):</strong></td>
-              <td style="padding: 8px 0; text-align: right;">1 ${data.cryptoAsset} = $${formattedRate}</td>
-            </tr>
-            <tr style="border-top: 1px solid #E2E8F0;">
-              <td style="padding: 8px 0;"><strong>Wallet Credited:</strong></td>
-              <td style="padding: 8px 0; text-align: right;"><span style="background: #10B981; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Main Wallet</span></td>
-            </tr>
-            <tr style="border-top: 1px solid #E2E8F0;">
-              <td style="padding: 8px 0;"><strong>Payment Method:</strong></td>
-              <td style="padding: 8px 0; text-align: right;">${data.method}</td>
-            </tr>
-            <tr style="border-top: 1px solid #E2E8F0;">
-              <td style="padding: 8px 0;"><strong>Transaction ID:</strong></td>
-              <td style="padding: 8px 0; text-align: right; font-size: 11px;">${data.reference}</td>
-            </tr>
-            <tr style="border-top: 1px solid #E2E8F0;">
-              <td style="padding: 8px 0;"><strong>New Main Wallet Balance:</strong></td>
-              <td style="padding: 8px 0; text-align: right; font-weight: bold; color: #10B981;">$${data.newBalance.toLocaleString()}</td>
-            </tr>
-            <tr style="border-top: 1px solid #E2E8F0;">
-              <td style="padding: 8px 0;"><strong>Processed At:</strong></td>
-              <td style="padding: 8px 0; text-align: right;">${new Date(data.processedAt).toLocaleString()}</td>
-            </tr>
-          </table>
-        </div>
-        
-        <div style="text-align: center; margin: 30px 0;">
-          <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View Transaction</a>
-        </div>
-        
-        <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${new Date().toLocaleString()}</p>
-      </div>
-      
-      <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
-          <a href="mailto:support@bithash.com" style="color: #F7A600; text-decoration: none;">support@bithash.com</a> | 
-          <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
-        </p>
-      </div>
-    </div>
-  `;
-  break;
+        `;
+        break;
 
-
-        
- case 'deposit_rejected':
-  cryptoLogoUrl = getCryptoLogo(data.cryptoAsset);
-  formattedAmount = data.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  formattedCryptoAmount = data.cryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
-  formattedRate = (data.exchangeRate || 1).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  
-  subject = '⛔ Deposit Declined - ₿itHash Capital';
-  html = `
-    <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-      <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-        <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-        <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
-        <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
-      </div>
-      
-      <div style="padding: 30px; background: #FFFFFF;">
-        <div style="background: #FEF2F2; border-radius: 12px; padding: 20px; text-align: center; margin-bottom: 25px;">
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin-bottom: 12px;">
-            <circle cx="12" cy="12" r="10" stroke="#DC2626" stroke-width="2"/>
-            <path d="M12 8V12M12 16H12.01" stroke="#DC2626" stroke-width="2" stroke-linecap="round"/>
-          </svg>
-          <h2 style="color: #DC2626; font-size: 22px; margin: 0 0 8px 0; font-weight: 700;">DEPOSIT DECLINED</h2>
-          <p style="color: #991B1B; font-size: 14px; margin: 0;">Your deposit request could not be approved</p>
-        </div>
-        
-        <p style="color: #333333; line-height: 1.6; margin-bottom: 20px;">Dear <strong>${data.name}</strong>,</p>
-        <p style="color: #333333; line-height: 1.6; margin-bottom: 25px;">We regret to inform you that your deposit request has been reviewed and <strong style="color: #DC2626;">could not be approved</strong> at this time.</p>
-        
-        <div style="background: #FEF2F2; border-left: 4px solid #DC2626; padding: 16px 20px; border-radius: 8px; margin-bottom: 25px;">
-          <p style="color: #991B1B; font-size: 13px; margin: 0 0 6px 0; font-weight: 600;">ⓘ REASON</p>
-          <p style="color: #7F1D1D; font-size: 14px; margin: 0; line-height: 1.5;">${data.reason}</p>
-        </div>
-        
-        <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-          <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
-            ${cryptoLogoUrl ? `<img src="${cryptoLogoUrl}" width="32" height="32" style="border-radius: 50%;">` : ''}
-            <div>
-              <div style="font-weight: bold; font-size: 18px;">${formattedCryptoAmount} ${data.cryptoAsset}</div>
-              <div style="color: #64748B; font-size: 12px;">≈ $${formattedAmount} USD</div>
+      case 'deposit_rejected':
+        subject = 'Deposit Update - ₿itHash Capital';
+        html = `
+          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+            ${brandHeader}
+            <div style="padding: 30px; background: #FFFFFF;">
+              <h2 style="color: #0B0E11; margin-bottom: 20px;">Deposit Status Update</h2>
+              <p style="color: #333333; line-height: 1.6;">Dear ${data.name},</p>
+              <p style="color: #333333; line-height: 1.6;">Your deposit request could not be processed.</p>
+              <div style="background: #F5F5F5; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                <p style="margin: 5px 0;"><strong>Amount:</strong> $${data.amount.toLocaleString()}</p>
+                <p style="margin: 5px 0;"><strong>Method:</strong> ${data.method}</p>
+                <p style="margin: 5px 0;"><strong>Reason:</strong> ${data.reason}</p>
+              </div>
+              <p style="color: #333333; line-height: 1.6;">Please contact support if you believe this is an error.</p>
+              <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${formattedTimestamp}</p>
             </div>
+            ${brandFooter}
           </div>
-          
-          <table style="width: 100%; border-collapse: collapse;">
-            <tr>
-              <td style="padding: 8px 0;"><strong>Exchange Rate:</strong></td>
-              <td style="padding: 8px 0; text-align: right;">1 ${data.cryptoAsset} = $${formattedRate}</td>
-            </tr>
-            <tr style="border-top: 1px solid #E2E8F0;">
-              <td style="padding: 8px 0;"><strong>Payment Method:</strong></td>
-              <td style="padding: 8px 0; text-align: right;">${data.method}</td>
-            </tr>
-            <tr style="border-top: 1px solid #E2E8F0;">
-              <td style="padding: 8px 0;"><strong>Request ID:</strong></td>
-              <td style="padding: 8px 0; text-align: right; font-size: 11px;">${data.reference}</td>
-            </tr>
-          </table>
-        </div>
-        
-        <div style="text-align: center; margin: 30px 0;">
-          <a href="https://www.bithashcapital.live/support" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Contact Support</a>
-        </div>
-        
-        <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${new Date().toLocaleString()}</p>
-      </div>
-      
-      <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
-          <a href="mailto:support@bithash.com" style="color: #F7A600; text-decoration: none;">support@bithash.com</a> | 
-          <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
-        </p>
-      </div>
-    </div>
-  `;
-  break;
+        `;
+        break;
 
       case 'withdrawal_approved':
         const withdrawalRate = await getCurrentExchangeRate('bitcoin');
@@ -5232,158 +4957,19 @@ case 'login_success':
         `;
         break;
 
-    default:
-  subject = 'Important Account Update - ₿itHash Capital';
-  html = `
-    <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-      ${brandHeader}
-      <div style="padding: 30px; background: #FFFFFF;">
-        <div style="background: #F3F4F6; border-radius: 12px; padding: 20px; margin-bottom: 25px; text-align: center;">
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin: 0 auto 12px auto;">
-            <path d="M12 8V12M12 16H12.01M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="#F7A600" stroke-width="2" stroke-linecap="round"/>
-          </svg>
-          <h2 style="color: #0B0E11; font-size: 20px; margin: 0 0 8px 0;">Account Update Notification</h2>
-          <p style="color: #6C7480; font-size: 14px; margin: 0;">Action Required / Information</p>
-        </div>
-        
-        <p style="color: #333333; line-height: 1.6;">Dear <strong>${data.name || 'Valued Customer'}</strong>,</p>
-        
-        <p style="color: #333333; line-height: 1.6;">${data.message || 'We have an important update regarding your account that requires your attention.'}</p>
-        
-        ${data.details ? `
-        <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-          <h3 style="color: #0B0E11; margin: 0 0 12px 0; font-size: 16px;">Update Details:</h3>
-          <p style="color: #4B5563; margin: 0; line-height: 1.5;">${data.details}</p>
-        </div>
-        ` : ''}
-        
-        ${data.actionRequired ? `
-        <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
-          <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">⚠️ Action Required</p>
-          <p style="color: #78350F; margin: 0; font-size: 14px;">${data.actionRequired}</p>
-        </div>
-        ` : ''}
-        
-        ${data.actionLink ? `
-        <div style="text-align: center; margin: 30px 0;">
-          <a href="${data.actionLink}" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">${data.buttonText || 'View Details'}</a>
-        </div>
-        ` : ''}
-        
-        <div style="margin-top: 25px; padding-top: 20px; border-top: 1px solid #E5E7EB;">
-          <p style="color: #6C7480; font-size: 13px; line-height: 1.5; margin: 0 0 10px 0;">
-            <strong>What this means for you:</strong>
-          </p>
-          <ul style="color: #6C7480; font-size: 13px; margin: 0; padding-left: 20px;">
-            <li style="margin: 5px 0;">Your account security is our top priority</li>
-            <li style="margin: 5px 0;">Review the information above for any necessary actions</li>
-            <li style="margin: 5px 0;">Contact support if you have any questions</li>
-          </ul>
-        </div>
-        
-        <p style="color: #666666; font-size: 12px; margin-top: 30px;">
-          <strong>Reference ID:</strong> ${data.referenceId || 'N/A'}<br>
-          <strong>Email sent:</strong> ${formattedTimestamp}
-        </p>
-        
-        <div style="background: #F9FAFB; padding: 15px; border-radius: 8px; margin-top: 20px;">
-          <p style="color: #6C7480; font-size: 12px; margin: 0 0 5px 0;">
-            <strong>Need help?</strong> Contact our support team:
-          </p>
-          <p style="color: #6C7480; font-size: 12px; margin: 0;">
-            📧 <a href="mailto:support@bithashcapital.live" style="color: #F7A600;">support@bithashcapital.live</a><br>
-            🌐 <a href="https://www.bithashcapital.live/support" style="color: #F7A600;">www.bithashcapital.live/support</a>
-          </p>
-        </div>
-      </div>
-      ${brandFooter}
-    </div>
-  `;
-  break;
-  } 
-
-
-
-
-
-
-
-
-
-// Helper function for sending admin action notifications
-const sendAdminActionNotification = async (user, action, details, actionRequired = null, actionLink = null) => {
-  try {
-    // Map admin actions to appropriate messages
-    const actionMessages = {
-      'account_suspended': {
-        message: 'Your account has been temporarily suspended due to unusual activity.',
-        subject: 'Account Temporarily Suspended - Action Required'
-      },
-      'account_restricted': {
-        message: 'Your account has been restricted. Please review the details below.',
-        subject: 'Account Restrictions Applied'
-      },
-      'kyc_review': {
-        message: 'Your KYC documents are under review. We will notify you once completed.',
-        subject: 'KYC Document Review Status'
-      },
-      'deposit_manual': {
-        message: 'Your deposit has been manually processed by our finance team.',
-        subject: 'Manual Deposit Processed'
-      },
-      'withdrawal_manual': {
-        message: 'Your withdrawal request has been manually reviewed and processed.',
-        subject: 'Manual Withdrawal Processed'
-      },
-      'balance_adjustment': {
-        message: 'Your account balance has been adjusted by our administration team.',
-        subject: 'Account Balance Adjustment'
-      },
-      'security_alert': {
-        message: 'Security alert: Unusual activity detected on your account.',
-        subject: '⚠️ Security Alert - Action Required'
-      },
-      'compliance_update': {
-        message: 'Important update regarding your account compliance status.',
-        subject: 'Compliance Status Update'
-      },
-      'investment_update': {
-        message: 'Your investment portfolio has been updated by our management team.',
-        subject: 'Investment Portfolio Update'
-      }
-    };
-
-    const actionConfig = actionMessages[action] || {
-      message: details?.message || 'An important update has been made to your account.',
-      subject: 'Important Account Update - ₿itHash Capital'
-    };
-
-    // Send the email using the professional email service
-    await sendProfessionalEmail({
-      email: user.email,
-      template: 'default',
-      data: {
-        name: user.firstName || 'Valued Customer',
-        message: actionConfig.message,
-        details: details?.description || details?.reason || JSON.stringify(details, null, 2),
-        actionRequired: actionRequired,
-        actionLink: actionLink,
-        buttonText: details?.buttonText || 'View Details',
-        referenceId: `${action.toUpperCase()}-${Date.now()}-${Math.floor(Math.random() * 10000)}`
-      }
-    });
-
-    console.log(`📧 Admin action notification sent to ${user.email} for action: ${action}`);
-    return true;
-
-  } catch (err) {
-    console.error('Failed to send admin action notification:', err);
-    return false;
-  }
-};
-
-
-        
+      default:
+        subject = 'Update from ₿itHash Capital';
+        html = `
+          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+            ${brandHeader}
+            <div style="padding: 30px; background: #FFFFFF;">
+              <p style="color: #333333; line-height: 1.6;">${data.message || 'Important update from ₿itHash Capital.'}</p>
+              <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${formattedTimestamp}</p>
+            </div>
+            ${brandFooter}
+          </div>
+        `;
+    }
 
     const mailOptions = {
       from: `₿itHash Capital <${mailTransporter === supportTransporter ? process.env.EMAIL_SUPPORT_USER : process.env.EMAIL_INFO_USER}>`,
@@ -5786,13 +5372,11 @@ app.post('/api/auth/login', [
     // Use exact email for lookup - no normalization
     const user = await User.findOne({ email }).select('+password +twoFactorAuth.secret');
     if (!user || !(await bcrypt.compare(password, user.password))) {
-      
-     // ✅ CORRECT - Use the existing logActivity function
-await logActivity('login_attempt', 'authentication', null, null, null, req, {
-    error: 'Invalid credentials',
-    email: email,
-    status: 'failed'
-});
+      // Log failed attempt
+      await logUserActivity(req, 'login_attempt', 'failed', {
+        error: 'Invalid credentials',
+        email: email // Log exact email used
+      });
       
       return res.status(401).json({
         status: 'fail',
@@ -5801,12 +5385,11 @@ await logActivity('login_attempt', 'authentication', null, null, null, req, {
     }
 
     if (user.status !== 'active') {
-     // ✅ CORRECT - Use the existing logActivity function
-await logActivity('login_attempt', 'authentication', null, null, null, req, {
-    error: 'Invalid credentials',
-    email: email,
-    status: 'failed'
-});
+      await logUserActivity(req, 'login_attempt', 'failed', {
+        error: 'Account suspended',
+        userId: user._id,
+        status: user.status
+      });
       
       return res.status(401).json({
         status: 'fail',
@@ -5905,19 +5488,18 @@ await logActivity('login_attempt', 'authentication', null, null, null, req, {
       }
     });
 
-    await logActivity('login_otp_sent', 'authentication', user._id, user._id, 'User', req, {
-  email: email,
-  status: 'pending'
-});
+    await logUserActivity(req, 'login_otp_sent', 'pending', {
+      email: email, // Log exact email used
+      userId: user._id
+    }, user);
 
   } catch (err) {
     console.error('Login error:', err);
     
-  await logActivity('login_error', 'authentication', null, null, null, req, {
-  error: err.message,
-  email: req.body.email,
-  status: 'failed'
-});
+    await logUserActivity(req, 'login_error', 'failed', {
+      error: err.message,
+      email: req.body.email // Log exact email used
+    });
 
     res.status(500).json({
       status: 'error',
@@ -7157,6 +6739,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
 
 
 
+
 // OTP Verification Endpoint
 app.post('/api/auth/verify-otp', [
   body('email').isEmail().withMessage('Please provide a valid email'),
@@ -7218,12 +6801,25 @@ app.post('/api/auth/verify-otp', [
     });
     await user.save();
 
-    // ✅ FIXED: Use logActivity instead of logUserActivity
-    await logActivity('login', 'user', user._id, user._id, 'User', req, {
-      method: 'otp',
-      deviceInfo: deviceInfo,
-      status: 'success'
-    });
+    // ✅ UPDATE LOGIN ATTEMPT LOG TO SUCCESS
+    await UserLog.findOneAndUpdate(
+      { 
+        user: user._id, 
+        action: 'login_attempt',
+        status: 'pending'
+      },
+      { 
+        $set: { 
+          status: 'success',
+          metadata: { 
+            ...(await UserLog.findOne({ user: user._id, action: 'login_attempt' }))?.metadata,
+            otpVerified: true,
+            verificationTime: new Date()
+          }
+        }
+      },
+      { sort: { createdAt: -1 } }
+    );
 
     // Send login success email with device and location
     await sendAutomatedEmail(user, 'login_success', {
@@ -7258,6 +6854,11 @@ app.post('/api/auth/verify-otp', [
       }
     });
 
+    await logUserActivity(req, 'login', 'success', {
+      method: 'otp',
+      deviceInfo: deviceInfo
+    }, user);
+
   } catch (err) {
     console.error('OTP verification error:', err);
     res.status(500).json({
@@ -7266,7 +6867,6 @@ app.post('/api/auth/verify-otp', [
     });
   }
 });
-
 
 // Send OTP Endpoint (for resend)
 app.post('/api/auth/send-otp', [
@@ -15438,261 +15038,6 @@ app.post('/api/users/deposit-asset', protect, async (req, res) => {
 
 
 
-
-// =============================================
-// GET /api/withdrawals/available-assets - Get assets available for withdrawal (Real-time from DB)
-// =============================================
-app.get('/api/withdrawals/available-assets', protect, async (req, res) => {
-  try {
-    const userId = req.user._id;
-
-    // Get user's complete data with real-time balances from User schema
-    const user = await User.findById(userId).select('balances');
-    
-    // Get user's transaction history for this session to ensure latest data
-    const recentTransactions = await Transaction.find({
-      user: userId,
-      createdAt: { $gte: new Date(Date.now() - 5 * 60 * 1000) } // Last 5 minutes
-    }).sort({ createdAt: -1 });
-
-    // Log recent transactions for debugging
-    if (recentTransactions.length > 0) {
-      console.log(`User ${userId} has ${recentTransactions.length} recent transactions that might affect balances`);
-    }
-
-    // Prepare available assets array
-    const availableAssets = [];
-
-    // Add USD balance from user's wallets (real-time from Maps)
-    if (user && user.balances) {
-      const mainBalance = (user.balances.main && user.balances.main.get('usd')) || 0;
-      const activeBalance = (user.balances.active && user.balances.active.get('usd')) || 0;
-      const maturedBalance = (user.balances.matured && user.balances.matured.get('usd')) || 0;
-      
-      // Only add USD if there's any balance in any wallet
-      if (mainBalance > 0 || activeBalance > 0 || maturedBalance > 0) {
-        availableAssets.push({
-          asset: 'usd',
-          symbol: 'USD',
-          name: 'US Dollar',
-          balance: {
-            main: mainBalance,
-            active: activeBalance,
-            matured: maturedBalance,
-            total: mainBalance + activeBalance + maturedBalance
-          },
-          network: 'Bank Transfer / Card',
-          logo: 'https://cdn.jsdelivr.net/npm/cryptocurrency-icons@0.18.1/svg/color/usd.svg',
-          minWithdrawal: 50,
-          withdrawalFee: 2.99,
-          estimatedValue: mainBalance + activeBalance + maturedBalance,
-          canWithdraw: true
-        });
-      }
-    }
-
-    // Add crypto assets from MAIN and MATURED wallets (exclude ACTIVE)
-    const cryptoBalances = {};
-    
-    // Get from MAIN wallet
-    if (user && user.balances && user.balances.main && user.balances.main instanceof Map) {
-      for (const [asset, balance] of user.balances.main.entries()) {
-        if (balance > 0 && asset !== 'usd') {
-          cryptoBalances[asset] = (cryptoBalances[asset] || 0) + balance;
-        }
-      }
-    }
-    
-    // Get from MATURED wallet
-    if (user && user.balances && user.balances.matured && user.balances.matured instanceof Map) {
-      for (const [asset, balance] of user.balances.matured.entries()) {
-        if (balance > 0 && asset !== 'usd') {
-          cryptoBalances[asset] = (cryptoBalances[asset] || 0) + balance;
-        }
-      }
-    }
-
-    // Add crypto assets from combined balances
-    for (const [asset, totalBalance] of Object.entries(cryptoBalances)) {
-      if (totalBalance > 0) {
-        const assetInfo = getAssetInfo(asset);
-        const numericBalance = parseFloat(totalBalance) || 0;
-        
-        // Get individual wallet balances
-        const mainBalance = (user.balances.main && user.balances.main.get(asset)) || 0;
-        const maturedBalance = (user.balances.matured && user.balances.matured.get(asset)) || 0;
-        
-        availableAssets.push({
-          asset: asset,
-          symbol: asset.toUpperCase(),
-          name: assetInfo.name,
-          balance: {
-            main: mainBalance,
-            active: 0,
-            matured: maturedBalance,
-            total: numericBalance,
-            available: numericBalance
-          },
-          network: assetInfo.network,
-          logo: assetInfo.logo,
-          minWithdrawal: getMinWithdrawal(asset),
-          withdrawalFee: getWithdrawalFee(asset),
-          estimatedValue: 0,
-          canWithdraw: true,
-          lastUpdated: new Date()
-        });
-      }
-    }
-
-    // Fetch real-time prices for estimation (optional but recommended)
-    if (availableAssets.length > 0) {
-      try {
-        // Get unique asset symbols (excluding USD)
-        const cryptoAssets = availableAssets.filter(a => a.asset !== 'usd').map(a => a.asset);
-        
-        if (cryptoAssets.length > 0) {
-          const coinGeckoIds = cryptoAssets.map(symbol => {
-            const mapping = {
-              btc: 'bitcoin',
-              eth: 'ethereum',
-              usdt: 'tether',
-              bnb: 'binancecoin',
-              sol: 'solana',
-              usdc: 'usd-coin',
-              xrp: 'xrp',
-              doge: 'dogecoin',
-              ada: 'cardano',
-              shib: 'shiba-inu',
-              avax: 'avalanche-2',
-              dot: 'polkadot',
-              trx: 'tron',
-              link: 'chainlink',
-              matic: 'polygon',
-              wbtc: 'wrapped-bitcoin',
-              ltc: 'litecoin',
-              near: 'near',
-              uni: 'uniswap',
-              bch: 'bitcoin-cash',
-              xlm: 'stellar',
-              atom: 'cosmos',
-              xmr: 'monero',
-              flow: 'flow',
-              vet: 'vechain',
-              fil: 'filecoin',
-              theta: 'theta-token',
-              hbar: 'hedera-hashgraph',
-              ftm: 'fantom',
-              xtz: 'tezos'
-            };
-            return mapping[symbol];
-          }).filter(Boolean);
-
-          if (coinGeckoIds.length > 0) {
-            const priceResponse = await axios.get(
-              `https://api.coingecko.com/api/v3/simple/price?ids=${coinGeckoIds.join(',')}&vs_currencies=usd`,
-              { timeout: 5000 }
-            );
-
-            if (priceResponse.data) {
-              // Update estimated values with real-time prices
-              availableAssets.forEach(asset => {
-                if (asset.asset !== 'usd') {
-                  const coinGeckoId = getCoinGeckoId(asset.asset);
-                  const price = priceResponse.data[coinGeckoId]?.usd || 0;
-                  const totalBalance = asset.balance.total || 0;
-                  asset.estimatedValue = totalBalance * price;
-                  asset.currentPrice = price;
-                  asset.priceTimestamp = new Date();
-                }
-              });
-            }
-          }
-        }
-      } catch (priceError) {
-        console.warn('Could not fetch real-time prices:', priceError.message);
-        // Continue without real-time prices, estimatedValue will remain 0
-      }
-    }
-
-    // Sort by estimated value (highest first)
-    availableAssets.sort((a, b) => (b.estimatedValue || 0) - (a.estimatedValue || 0));
-
-    // Add metadata about when this data was fetched
-    const responseData = {
-      availableAssets,
-      totalWithdrawable: availableAssets.length,
-      fetchedAt: new Date(),
-      hasRealTimePrices: availableAssets.some(a => a.currentPrice !== undefined)
-    };
-
-    // Log the response for debugging
-    console.log(`Returning ${availableAssets.length} available assets for user ${userId} (Real-time from DB)`);
-
-    res.status(200).json({
-      status: 'success',
-      data: responseData
-    });
-
-  } catch (err) {
-    console.error('Available assets error:', err);
-    
-    // Try to fetch basic data even on error
-    try {
-      const userId = req.user._id;
-      const user = await User.findById(userId).select('balances');
-      
-      // Return at least USD balance if available
-      if (user && user.balances) {
-        const mainBalance = (user.balances.main && user.balances.main.get('usd')) || 0;
-        const activeBalance = (user.balances.active && user.balances.active.get('usd')) || 0;
-        const maturedBalance = (user.balances.matured && user.balances.matured.get('usd')) || 0;
-        
-        if (mainBalance > 0 || activeBalance > 0 || maturedBalance > 0) {
-          return res.status(200).json({
-            status: 'success',
-            data: {
-              availableAssets: [{
-                asset: 'usd',
-                symbol: 'USD',
-                name: 'US Dollar',
-                balance: {
-                  main: mainBalance,
-                  active: activeBalance,
-                  matured: maturedBalance,
-                  total: mainBalance + activeBalance + maturedBalance
-                },
-                network: 'Bank Transfer / Card',
-                logo: 'https://cdn.jsdelivr.net/npm/cryptocurrency-icons@0.18.1/svg/color/usd.svg',
-                minWithdrawal: 50,
-                withdrawalFee: 2.99,
-                estimatedValue: mainBalance + activeBalance + maturedBalance,
-                canWithdraw: true
-              }],
-              totalWithdrawable: 1,
-              fetchedAt: new Date(),
-              partialData: true
-            }
-          });
-        }
-      }
-    } catch (fallbackErr) {
-      console.error('Even fallback failed:', fallbackErr);
-    }
-
-    // Return empty array as last resort
-    res.status(200).json({
-      status: 'success',
-      data: {
-        availableAssets: [],
-        totalWithdrawable: 0,
-        fetchedAt: new Date()
-      }
-    });
-  }
-});
-
-
-
 // =============================================
 // GET /api/assets/portfolio - User Asset Portfolio with Profit/Loss Tracking
 // =============================================
@@ -15700,10 +15045,10 @@ app.get('/api/assets/portfolio', protect, async (req, res) => {
   try {
     const userId = req.user._id;
 
-    // Get user's balances from User schema
-    const user = await User.findById(userId);
+    // Get user's asset balances
+    const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
     
-    if (!user || !user.balances) {
+    if (!userAssetBalance) {
       return res.status(200).json({
         status: 'success',
         data: {
@@ -15718,34 +15063,10 @@ app.get('/api/assets/portfolio', protect, async (req, res) => {
       });
     }
 
-    // Collect assets from MAIN and MATURED wallets only (crypto, exclude USD)
-    const assets = [];
-    const assetBalances = {};
-    
-    // Get from MAIN wallet
-    if (user.balances.main && user.balances.main instanceof Map) {
-      for (const [asset, balance] of user.balances.main.entries()) {
-        if (balance > 0 && asset !== 'usd') {
-          assetBalances[asset] = (assetBalances[asset] || 0) + balance;
-        }
-      }
-    }
-    
-    // Get from MATURED wallet
-    if (user.balances.matured && user.balances.matured instanceof Map) {
-      for (const [asset, balance] of user.balances.matured.entries()) {
-        if (balance > 0 && asset !== 'usd') {
-          assetBalances[asset] = (assetBalances[asset] || 0) + balance;
-        }
-      }
-    }
-    
-    // Convert to array of assets with balance > 0
-    for (const [asset, balance] of Object.entries(assetBalances)) {
-      if (balance > 0) {
-        assets.push(asset);
-      }
-    }
+    // Get current prices from CoinGecko for all assets
+    const assets = Object.keys(userAssetBalance.balances).filter(asset => 
+      userAssetBalance.balances[asset] > 0
+    );
 
     if (assets.length === 0) {
       return res.status(200).json({
@@ -15825,7 +15146,7 @@ app.get('/api/assets/portfolio', protect, async (req, res) => {
     let totalPortfolioProfitLoss = 0;
 
     for (const asset of assets) {
-      const assetBalance = assetBalances[asset];
+      const assetBalance = userAssetBalance.balances[asset];
       if (assetBalance <= 0) continue;
 
       const coinGeckoId = assetToCoinGeckoId[asset] || asset;
@@ -15931,6 +15252,408 @@ app.get('/api/assets/portfolio', protect, async (req, res) => {
     });
   }
 });
+
+
+
+
+
+
+
+
+
+
+
+// =============================================
+// GET /api/withdrawals/available-assets - Get assets available for withdrawal (Real-time from DB)
+// =============================================
+app.get('/api/withdrawals/available-assets', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    // Get user's complete data with real-time balances
+    const user = await User.findById(userId).select('balances');
+    
+    // Get user's asset balances in real-time
+    const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
+    
+    // Get user's transaction history for this session to ensure latest data
+    const recentTransactions = await Transaction.find({
+      user: userId,
+      createdAt: { $gte: new Date(Date.now() - 5 * 60 * 1000) } // Last 5 minutes
+    }).sort({ createdAt: -1 });
+
+    // Log recent transactions for debugging
+    if (recentTransactions.length > 0) {
+      console.log(`User ${userId} has ${recentTransactions.length} recent transactions that might affect balances`);
+    }
+
+    // Prepare available assets array
+    const availableAssets = [];
+
+    // Add USD balance from user's main wallet (real-time)
+    if (user && user.balances) {
+      const mainBalance = parseFloat(user.balances.main) || 0;
+      const activeBalance = parseFloat(user.balances.active) || 0;
+      const maturedBalance = parseFloat(user.balances.matured) || 0;
+      
+      // Only add USD if there's any balance in any wallet
+      if (mainBalance > 0 || activeBalance > 0 || maturedBalance > 0) {
+        availableAssets.push({
+          asset: 'usd',
+          symbol: 'USD',
+          name: 'US Dollar',
+          balance: {
+            main: mainBalance,
+            active: activeBalance,
+            matured: maturedBalance,
+            total: mainBalance + activeBalance + maturedBalance
+          },
+          network: 'Bank Transfer / Card',
+          logo: 'https://cdn.jsdelivr.net/npm/cryptocurrency-icons@0.18.1/svg/color/usd.svg',
+          minWithdrawal: 50,
+          withdrawalFee: 2.99,
+          estimatedValue: mainBalance + activeBalance + maturedBalance,
+          canWithdraw: true
+        });
+      }
+    }
+
+    // Add crypto assets from UserAssetBalance (real-time)
+    if (userAssetBalance && userAssetBalance.balances) {
+      // Get all assets with balance > 0
+      const assetsWithBalance = Object.entries(userAssetBalance.balances)
+        .filter(([_, balance]) => parseFloat(balance) > 0);
+
+      for (const [asset, balance] of assetsWithBalance) {
+        const assetInfo = getAssetInfo(asset);
+        const numericBalance = parseFloat(balance) || 0;
+        
+        availableAssets.push({
+          asset: asset,
+          symbol: asset.toUpperCase(),
+          name: assetInfo.name,
+          balance: {
+            main: 0, // Crypto assets don't use USD balances
+            active: 0,
+            matured: 0,
+            total: numericBalance,
+            available: numericBalance // All balance is available for withdrawal
+          },
+          network: assetInfo.network,
+          logo: assetInfo.logo,
+          minWithdrawal: getMinWithdrawal(asset),
+          withdrawalFee: getWithdrawalFee(asset),
+          estimatedValue: 0, // Will be updated with real-time price
+          canWithdraw: true,
+          lastUpdated: userAssetBalance.updatedAt || new Date()
+        });
+      }
+    }
+
+    // Fetch real-time prices for estimation (optional but recommended)
+    if (availableAssets.length > 0) {
+      try {
+        // Get unique asset symbols (excluding USD)
+        const cryptoAssets = availableAssets.filter(a => a.asset !== 'usd').map(a => a.asset);
+        
+        if (cryptoAssets.length > 0) {
+          const coinGeckoIds = cryptoAssets.map(symbol => {
+            const mapping = {
+              btc: 'bitcoin',
+              eth: 'ethereum',
+              usdt: 'tether',
+              bnb: 'binancecoin',
+              sol: 'solana',
+              usdc: 'usd-coin',
+              xrp: 'xrp',
+              doge: 'dogecoin',
+              ada: 'cardano',
+              shib: 'shiba-inu',
+              avax: 'avalanche-2',
+              dot: 'polkadot',
+              trx: 'tron',
+              link: 'chainlink',
+              matic: 'polygon',
+              wbtc: 'wrapped-bitcoin',
+              ltc: 'litecoin',
+              near: 'near',
+              uni: 'uniswap',
+              bch: 'bitcoin-cash',
+              xlm: 'stellar',
+              atom: 'cosmos',
+              xmr: 'monero',
+              flow: 'flow',
+              vet: 'vechain',
+              fil: 'filecoin',
+              theta: 'theta-token',
+              hbar: 'hedera-hashgraph',
+              ftm: 'fantom',
+              xtz: 'tezos'
+            };
+            return mapping[symbol];
+          }).filter(Boolean);
+
+          if (coinGeckoIds.length > 0) {
+            const priceResponse = await axios.get(
+              `https://api.coingecko.com/api/v3/simple/price?ids=${coinGeckoIds.join(',')}&vs_currencies=usd`,
+              { timeout: 5000 }
+            );
+
+            if (priceResponse.data) {
+              // Update estimated values with real-time prices
+              availableAssets.forEach(asset => {
+                if (asset.asset !== 'usd') {
+                  const coinGeckoId = getCoinGeckoId(asset.asset);
+                  const price = priceResponse.data[coinGeckoId]?.usd || 0;
+                  const totalBalance = asset.balance.total || 0;
+                  asset.estimatedValue = totalBalance * price;
+                  asset.currentPrice = price;
+                  asset.priceTimestamp = new Date();
+                }
+              });
+            }
+          }
+        }
+      } catch (priceError) {
+        console.warn('Could not fetch real-time prices:', priceError.message);
+        // Continue without real-time prices, estimatedValue will remain 0
+      }
+    }
+
+    // Sort by estimated value (highest first)
+    availableAssets.sort((a, b) => (b.estimatedValue || 0) - (a.estimatedValue || 0));
+
+    // Add metadata about when this data was fetched
+    const responseData = {
+      availableAssets,
+      totalWithdrawable: availableAssets.length,
+      fetchedAt: new Date(),
+      hasRealTimePrices: availableAssets.some(a => a.currentPrice !== undefined)
+    };
+
+    // Log the response for debugging
+    console.log(`Returning ${availableAssets.length} available assets for user ${userId} (Real-time from DB)`);
+
+    res.status(200).json({
+      status: 'success',
+      data: responseData
+    });
+
+  } catch (err) {
+    console.error('Available assets error:', err);
+    
+    // Try to fetch basic data even on error
+    try {
+      const userId = req.user._id;
+      const user = await User.findById(userId).select('balances');
+      
+      // Return at least USD balance if available
+      if (user && user.balances) {
+        const mainBalance = parseFloat(user.balances.main) || 0;
+        const activeBalance = parseFloat(user.balances.active) || 0;
+        const maturedBalance = parseFloat(user.balances.matured) || 0;
+        
+        if (mainBalance > 0 || activeBalance > 0 || maturedBalance > 0) {
+          return res.status(200).json({
+            status: 'success',
+            data: {
+              availableAssets: [{
+                asset: 'usd',
+                symbol: 'USD',
+                name: 'US Dollar',
+                balance: {
+                  main: mainBalance,
+                  active: activeBalance,
+                  matured: maturedBalance,
+                  total: mainBalance + activeBalance + maturedBalance
+                },
+                network: 'Bank Transfer / Card',
+                logo: 'https://cdn.jsdelivr.net/npm/cryptocurrency-icons@0.18.1/svg/color/usd.svg',
+                minWithdrawal: 50,
+                withdrawalFee: 2.99,
+                estimatedValue: mainBalance + activeBalance + maturedBalance,
+                canWithdraw: true
+              }],
+              totalWithdrawable: 1,
+              fetchedAt: new Date(),
+              partialData: true
+            }
+          });
+        }
+      }
+    } catch (fallbackErr) {
+      console.error('Even fallback failed:', fallbackErr);
+    }
+
+    // Return empty array as last resort
+    res.status(200).json({
+      status: 'success',
+      data: {
+        availableAssets: [],
+        totalWithdrawable: 0,
+        fetchedAt: new Date()
+      }
+    });
+  }
+});
+
+// Helper function to get asset information
+function getAssetInfo(asset) {
+  const assetMap = {
+    btc: { name: 'Bitcoin', network: 'Bitcoin', logo: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png' },
+    eth: { name: 'Ethereum', network: 'Ethereum (ERC-20)', logo: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png' },
+    usdt: { name: 'Tether', network: 'Multiple networks (TRC-20/ERC-20)', logo: 'https://assets.coingecko.com/coins/images/325/large/Tether.png' },
+    bnb: { name: 'BNB', network: 'BNB Smart Chain (BEP-20)', logo: 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png' },
+    sol: { name: 'Solana', network: 'Solana', logo: 'https://assets.coingecko.com/coins/images/4128/large/solana.png' },
+    usdc: { name: 'USD Coin', network: 'Multiple networks (ERC-20/Solana)', logo: 'https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png' },
+    xrp: { name: 'XRP', network: 'XRP Ledger', logo: 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png' },
+    doge: { name: 'Dogecoin', network: 'Dogecoin', logo: 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png' },
+    ada: { name: 'Cardano', network: 'Cardano', logo: 'https://assets.coingecko.com/coins/images/975/large/cardano.png' },
+    shib: { name: 'Shiba Inu', network: 'Ethereum (ERC-20)', logo: 'https://assets.coingecko.com/coins/images/11939/large/shiba.png' },
+    avax: { name: 'Avalanche', network: 'Avalanche C-Chain', logo: 'https://assets.coingecko.com/coins/images/12559/large/Avalanche_Circle_RedWhite.png' },
+    dot: { name: 'Polkadot', network: 'Polkadot', logo: 'https://assets.coingecko.com/coins/images/12171/large/polkadot.png' },
+    trx: { name: 'TRON', network: 'TRON', logo: 'https://assets.coingecko.com/coins/images/1094/large/tron-logo.png' },
+    link: { name: 'Chainlink', network: 'Ethereum (ERC-20)', logo: 'https://assets.coingecko.com/coins/images/877/large/chainlink-new-logo.png' },
+    matic: { name: 'Polygon', network: 'Polygon', logo: 'https://assets.coingecko.com/coins/images/4713/large/matic-token-icon.png' },
+    wbtc: { name: 'Wrapped Bitcoin', network: 'Ethereum (ERC-20)', logo: 'https://assets.coingecko.com/coins/images/7598/large/wrapped_bitcoin_wbtc.png' },
+    ltc: { name: 'Litecoin', network: 'Litecoin', logo: 'https://assets.coingecko.com/coins/images/2/large/litecoin.png' },
+    near: { name: 'NEAR Protocol', network: 'NEAR', logo: 'https://assets.coingecko.com/coins/images/10365/large/near_icon.png' },
+    uni: { name: 'Uniswap', network: 'Ethereum (ERC-20)', logo: 'https://assets.coingecko.com/coins/images/12504/large/uni.jpg' },
+    bch: { name: 'Bitcoin Cash', network: 'Bitcoin Cash', logo: 'https://assets.coingecko.com/coins/images/780/large/bitcoin-cash-circle.png' },
+    xlm: { name: 'Stellar', network: 'Stellar', logo: 'https://assets.coingecko.com/coins/images/100/large/Stellar_symbol_black_RGB.png' },
+    atom: { name: 'Cosmos', network: 'Cosmos', logo: 'https://assets.coingecko.com/coins/images/1481/large/cosmos_hub.png' },
+    xmr: { name: 'Monero', network: 'Monero', logo: 'https://assets.coingecko.com/coins/images/69/large/monero_logo.png' },
+    flow: { name: 'Flow', network: 'Flow', logo: 'https://assets.coingecko.com/coins/images/13446/large/5f6294c0c7a8cda55cb1.png' },
+    vet: { name: 'VeChain', network: 'VeChain', logo: 'https://assets.coingecko.com/coins/images/1167/large/VET_Token_Icon.png' },
+    fil: { name: 'Filecoin', network: 'Filecoin', logo: 'https://assets.coingecko.com/coins/images/12817/large/filecoin.png' },
+    theta: { name: 'Theta Network', network: 'Theta', logo: 'https://assets.coingecko.com/coins/images/2538/large/theta-token-logo.png' },
+    hbar: { name: 'Hedera', network: 'Hedera', logo: 'https://assets.coingecko.com/coins/images/3688/large/hbar.png' },
+    ftm: { name: 'Fantom', network: 'Fantom', logo: 'https://assets.coingecko.com/coins/images/4001/large/Fantom_round.png' },
+    xtz: { name: 'Tezos', network: 'Tezos', logo: 'https://assets.coingecko.com/coins/images/976/large/Tezos-logo.png' }
+  };
+  
+  return assetMap[asset] || { 
+    name: asset.toUpperCase(), 
+    network: 'Blockchain', 
+    logo: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png' 
+  };
+}
+
+// Helper function to get minimum withdrawal amount
+function getMinWithdrawal(asset) {
+  const minAmounts = {
+    btc: 0.001,
+    eth: 0.01,
+    usdt: 10,
+    bnb: 0.1,
+    sol: 0.1,
+    usdc: 10,
+    xrp: 10,
+    doge: 50,
+    ada: 20,
+    shib: 100000,
+    avax: 0.1,
+    dot: 1,
+    trx: 100,
+    link: 5,
+    matic: 10,
+    wbtc: 0.0005,
+    ltc: 0.01,
+    near: 1,
+    uni: 5,
+    bch: 0.001,
+    xlm: 10,
+    atom: 1,
+    xmr: 0.01,
+    flow: 1,
+    vet: 100,
+    fil: 0.1,
+    theta: 1,
+    hbar: 10,
+    ftm: 10,
+    xtz: 1
+  };
+  
+  return minAmounts[asset] || 0.001;
+}
+
+// Helper function to get withdrawal fee
+function getWithdrawalFee(asset) {
+  const fees = {
+    btc: 0.0005,
+    eth: 0.005,
+    usdt: 1,
+    bnb: 0.01,
+    sol: 0.01,
+    usdc: 1,
+    xrp: 0.1,
+    doge: 1,
+    ada: 0.5,
+    shib: 10000,
+    avax: 0.01,
+    dot: 0.1,
+    trx: 1,
+    link: 0.1,
+    matic: 0.5,
+    wbtc: 0.0001,
+    ltc: 0.001,
+    near: 0.01,
+    uni: 0.1,
+    bch: 0.0005,
+    xlm: 0.1,
+    atom: 0.01,
+    xmr: 0.005,
+    flow: 0.01,
+    vet: 1,
+    fil: 0.001,
+    theta: 0.01,
+    hbar: 0.1,
+    ftm: 0.1,
+    xtz: 0.01
+  };
+  
+  return fees[asset] || 0.001;
+}
+
+// Helper function to get CoinGecko ID
+function getCoinGeckoId(asset) {
+  const mapping = {
+    btc: 'bitcoin',
+    eth: 'ethereum',
+    usdt: 'tether',
+    bnb: 'binancecoin',
+    sol: 'solana',
+    usdc: 'usd-coin',
+    xrp: 'xrp',
+    doge: 'dogecoin',
+    ada: 'cardano',
+    shib: 'shiba-inu',
+    avax: 'avalanche-2',
+    dot: 'polkadot',
+    trx: 'tron',
+    link: 'chainlink',
+    matic: 'polygon',
+    wbtc: 'wrapped-bitcoin',
+    ltc: 'litecoin',
+    near: 'near',
+    uni: 'uniswap',
+    bch: 'bitcoin-cash',
+    xlm: 'stellar',
+    atom: 'cosmos',
+    xmr: 'monero',
+    flow: 'flow',
+    vet: 'vechain',
+    fil: 'filecoin',
+    theta: 'theta-token',
+    hbar: 'hedera-hashgraph',
+    ftm: 'fantom',
+    xtz: 'tezos'
+  };
+  
+  return mapping[asset] || asset;
+}
+
+
 
 
 
@@ -16253,8 +15976,8 @@ app.get('/api/deposits/address/:asset', async (req, res) => {
     
     // Map of deposit addresses from your provided list
     const depositAddresses = {
-      'btc': '1GnMkEjGap5dB3QQEBWjhpW2bQSf2US5Pi',
-      'eth': '1DRPvmx9ET4zSBW215gBoBf6RDknPTAWY3',
+      'btc': '1DRPvmx9ET4zSBW215gBoBf6RDknPTAWY3',
+      'eth': '0x8259B17Be2172ABD24C3CC2aBE5C95bf1CF4CEA5',
       'usdt': '0x8259B17Be2172ABD24C3CC2aBE5C95bf1CF4CEA5',
       'bnb': 'bnb1ezh0f4fhtqgq3zg82f5cuc8ap80uus5rwjyedt',
       'sol': '0x8259B17Be2172ABD24C3CC2aBE5C95bf1CF4CEA5', // Using ETH address as placeholder
@@ -17322,7 +17045,32 @@ function mapSymbolToCoinGeckoId(symbol) {
   return mapping[symbol.toLowerCase()] || symbol.toLowerCase();
 }
 
-
+// Helper function to get total wallet value from User.balances Map
+const calculateWalletValueFromBalances = async (balancesMap, currentPrices) => {
+  let totalValue = 0;
+  
+  if (balancesMap) {
+    for (const [asset, balance] of balancesMap.entries()) {
+      if (balance > 0) {
+        let price = 0;
+        
+        // Try to get price from currentPrices first
+        if (currentPrices && currentPrices[asset.toLowerCase()]) {
+          price = currentPrices[asset.toLowerCase()].price;
+        } else {
+          // Fallback to API
+          price = await getCryptoPrice(asset.toUpperCase());
+        }
+        
+        if (price && price > 0) {
+          totalValue += balance * price;
+        }
+      }
+    }
+  }
+  
+  return totalValue;
+};
 
 const startRealTimePriceUpdates = (io) => {
   if (priceUpdateInterval) clearInterval(priceUpdateInterval);
@@ -17361,15 +17109,64 @@ const startRealTimePriceUpdates = (io) => {
   }, 1000); // EVERY SECOND
 };
 
+// Helper function to recalculate wallet values in real-time using User.balances
+const recalculateAllWalletValuesRealtime = async (io, currentPrices) => {
+  if (isRecalculating) return;
+  isRecalculating = true;
+  
+  try {
+    const users = await User.find({}).select('_id balances');
+    
+    for (const user of users) {
+      let totalMainValue = 0;
+      let totalMaturedValue = 0;
+      
+      // Active wallet value should NOT be recalculated - it's fixed!
+      // Just use stored value
+      let totalActiveValue = 0;
+      if (user.balances && user.balances.active) {
+        const activeBalances = user.balances.active;
+        for (const [asset, balance] of activeBalances.entries()) {
+          if (balance > 0) {
+            totalActiveValue += balance;
+          }
+        }
+      }
+      
+      // Recalculate MAIN wallet (fluctuates)
+      if (user.balances && user.balances.main) {
+        totalMainValue = await calculateWalletValueFromBalances(user.balances.main, currentPrices);
+      }
+      
+      // Recalculate MATURED wallet (fluctuates)
+      if (user.balances && user.balances.matured) {
+        totalMaturedValue = await calculateWalletValueFromBalances(user.balances.matured, currentPrices);
+      }
+      
+      // Send real-time updates via Socket.IO to each specific user
+      if (io) {
+        io.to(`user_${user._id}`).emit('wallet_realtime_update', {
+          main: totalMainValue,
+          active: totalActiveValue,  // FIXED: Use stored value, not recalculated
+          matured: totalMaturedValue,
+          timestamp: Date.now()
+        });
+      }
+    }
+    
+  } catch (err) {
+    console.error('Error in real-time wallet recalculation:', err);
+  } finally {
+    isRecalculating = false;
+  }
+};
 
-
-
+// Initialize real-time updates
 const startRealTimeWalletUpdates = (io) => {
   startRealTimePriceUpdates(io);
-  console.log('💰 Real-time wallet value updates started (every 2 seconds)');
-  console.log('✅ Active wallet is FIXED - does NOT fluctuate with crypto prices');
-  console.log('✅ Main and Matured wallets fluctuate with crypto prices');
+  console.log('💰 Real-time wallet value updates started (every 1 second)');
 };
+
 
 
 
@@ -19263,440 +19060,249 @@ app.get('/api/admin/deposits/:id', adminProtect, restrictTo('super', 'finance'),
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-/**
- * APPROVE DEPOSIT ENDPOINT - CORRECTED
- * POST /api/admin/deposits/:id/approve
- */
+// POST /api/admin/deposits/:id/approve - Approve deposit and add to user's main balance
 app.post('/api/admin/deposits/:id/approve', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
   try {
     const { id } = req.params;
-    const { notes } = req.body;
-    
-    // Find the deposit
-    let deposit = await DepositAsset.findById(id).populate('user', 'firstName lastName email balances');
-    
-    if (!deposit) {
-      const transaction = await Transaction.findOne({ 
-        _id: id, 
-        type: 'deposit', 
-        status: 'pending' 
-      }).populate('user', 'firstName lastName email balances');
-      
-      if (!transaction) {
-        return res.status(404).json({
-          status: 'fail',
-          message: 'Deposit not found'
-        });
-      }
-      deposit = transaction;
-    }
-    
-    // Check if deposit is already processed
-    if (deposit.status !== 'pending') {
+    const { notes, transactionHash } = req.body;
+
+    // Validate ID format
+    if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         status: 'fail',
-        message: `Deposit is already ${deposit.status}`
+        message: 'Invalid deposit ID format'
       });
     }
-    
-    const user = deposit.user;
-    const cryptoAsset = (deposit.asset || deposit.method || 'USDT').toUpperCase();
+
+    // Find deposit with user info
+    const deposit = await Transaction.findOne({
+      _id: id,
+      type: 'deposit',
+      status: 'pending'
+    }).populate('user', 'firstName lastName email phone');
+
+    if (!deposit) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Pending deposit not found'
+      });
+    }
+
+    const user = await User.findById(deposit.user._id);
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+
+    // Determine asset and amount
+    const asset = (deposit.asset || deposit.method || 'usd').toLowerCase();
     const cryptoAmount = deposit.assetAmount || deposit.amount;
     const usdAmount = deposit.amount;
-    
-    // Get current crypto price for exchange rate
-    const currentPrice = await getCryptoPrice(cryptoAsset);
-    const exchangeRate = currentPrice || 1;
-    
-    // Add crypto to user's main balance
-    if (!user.balances) {
-      user.balances = { main: new Map(), active: new Map(), matured: new Map() };
+
+    // Get current crypto price for email display
+    let currentPrice = 1;
+    let cryptoLogoUrl = '';
+    let network = '';
+
+    if (asset !== 'usd') {
+      try {
+        currentPrice = await getCryptoPrice(asset.toUpperCase());
+        cryptoLogoUrl = getCryptoLogo(asset.toUpperCase());
+        network = getNetworkName(asset);
+      } catch (err) {
+        console.warn(`Could not fetch price for ${asset}`);
+      }
     }
-    
-    const currentMainBalance = user.balances.main.get(cryptoAsset) || 0;
-    const newMainBalanceCrypto = currentMainBalance + cryptoAmount;
-    user.balances.main.set(cryptoAsset, newMainBalanceCrypto);
-    
+
+    // Initialize balances Maps if they don't exist
+    if (!user.balances) {
+      user.balances = {
+        main: new Map(),
+        active: new Map(),
+        matured: new Map()
+      };
+    }
+    if (!user.balances.main) user.balances.main = new Map();
+
+    // Add to main balance
+    const currentBalance = user.balances.main.get(asset) || 0;
+    user.balances.main.set(asset, currentBalance + cryptoAmount);
+
+    // Also track USD equivalent for reporting
+    const currentUsdBalance = user.balances.main.get('usd') || 0;
+    user.balances.main.set('usd', currentUsdBalance + usdAmount);
+
+    await user.save();
+
     // Update deposit status
     deposit.status = 'completed';
-    deposit.completedAt = new Date();
     deposit.processedBy = req.admin._id;
     deposit.processedAt = new Date();
-    deposit.adminNotes = notes;
-    deposit.exchangeRateAtTime = exchangeRate;
-    
-    await Promise.all([
-      deposit.save(),
-      user.save()
-    ]);
-    
-    // Create transaction record if not already exists
-    let transactionRecord = deposit;
-    if (deposit._id.toString() !== id || deposit.constructor.modelName !== 'Transaction') {
-      transactionRecord = await Transaction.create({
-        user: user._id,
-        type: 'deposit',
-        amount: usdAmount,
-        asset: cryptoAsset,
-        assetAmount: cryptoAmount,
-        currency: 'USD',
-        status: 'completed',
-        method: cryptoAsset,
-        reference: `DEP-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
-        details: {
-          depositId: deposit._id,
-          adminApprovedBy: req.admin.name,
-          adminNotes: notes,
-          exchangeRate: exchangeRate
-        },
-        fee: 0,
-        netAmount: usdAmount,
-        processedBy: req.admin._id,
-        processedAt: new Date(),
-        exchangeRateAtTime: exchangeRate
-      });
+    deposit.adminNotes = notes || null;
+    if (transactionHash) {
+      deposit.details = deposit.details || {};
+      deposit.details.txHash = transactionHash;
+      deposit.details.processedAt = new Date();
     }
-    
-    // Calculate the TOTAL MAIN WALLET BALANCE IN USD for display in email
-    // Sum up all crypto holdings converted to USD
-    let totalMainBalanceUSD = 0;
-    for (const [asset, balance] of user.balances.main) {
-      if (balance > 0) {
-        const assetPrice = await getCryptoPrice(asset);
-        if (assetPrice) {
-          totalMainBalanceUSD += balance * assetPrice;
-        }
-      }
-    }
-    
-    // Send email notification using deposit_approved template
-    const cryptoLogoUrl = getCryptoLogo(cryptoAsset);
-    
-    await sendProfessionalEmail({
-      email: user.email,
-      template: 'deposit_approved',
-      data: {
-        name: user.firstName,
-        amount: usdAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
-        cryptoAmount: cryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 }),
-        cryptoAsset: cryptoAsset,
-        cryptoLogoUrl: cryptoLogoUrl,
-        method: cryptoAsset,
-        reference: transactionRecord.reference,
-        newBalance: totalMainBalanceUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), // FIXED: Now shows USD value
-        processedAt: new Date().toLocaleString(),
-        exchangeRate: exchangeRate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
-        walletType: 'Main Wallet',
-        walletColor: '#10B981'
+    await deposit.save();
+
+    // Create deposit asset tracking record
+    await DepositAsset.create({
+      user: user._id,
+      asset: asset,
+      amount: cryptoAmount,
+      usdValue: usdAmount,
+      transactionId: deposit._id,
+      status: 'confirmed',
+      confirmedAt: new Date(),
+      metadata: {
+        txHash: transactionHash || deposit.reference,
+        exchangeRate: deposit.exchangeRateAtTime || currentPrice,
+        assetPriceAtTime: currentPrice,
+        approvedBy: req.admin.name,
+        approvedAt: new Date()
       }
     });
-    
-    // Log the activity
+
+    // Record platform revenue (if any fee was charged)
+    if (deposit.fee && deposit.fee > 0) {
+      await PlatformRevenue.create({
+        source: 'deposit_fee',
+        amount: deposit.fee,
+        currency: 'USD',
+        transactionId: deposit._id,
+        userId: user._id,
+        description: `Deposit fee for ${cryptoAmount} ${asset.toUpperCase()}`,
+        metadata: {
+          asset: asset,
+          cryptoAmount: cryptoAmount,
+          usdAmount: usdAmount,
+          feePercentage: (deposit.fee / usdAmount) * 100
+        }
+      });
+    }
+
+    // SEND EMAIL NOTIFICATION USING EXISTING EMAIL TEMPLATE
+    // The backend already has 'deposit_approved' template in sendProfessionalEmail
+    try {
+      await sendProfessionalEmail({
+        email: user.email,
+        template: 'deposit_approved',
+        data: {
+          name: user.firstName,
+          amount: usdAmount,
+          method: deposit.method || asset.toUpperCase(),
+          reference: deposit.reference,
+          newBalance: user.balances.main.get('usd') || 0,
+          processedAt: deposit.processedAt,
+          asset: asset.toUpperCase(),
+          assetAmount: cryptoAmount,
+          price: currentPrice,
+          transactionHash: transactionHash || deposit.reference,
+          network: network
+        }
+      });
+      console.log(`📧 Deposit approval email sent to ${user.email}`);
+    } catch (emailError) {
+      console.error('Failed to send deposit approval email:', emailError);
+      // Don't fail the approval if email fails
+    }
+
+    // Emit real-time update via Socket.IO
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${user._id}`).emit('balance_update', {
+        main: user.balances.main.get('usd') || 0,
+        active: user.balances.active?.get('usd') || 0,
+        matured: user.balances.matured?.get('usd') || 0
+      });
+      
+      io.to(`user_${user._id}`).emit('deposit_confirmed', {
+        depositId: deposit._id,
+        amount: usdAmount,
+        asset: asset.toUpperCase(),
+        assetAmount: cryptoAmount,
+        status: 'completed'
+      });
+    }
+
+    // Log activity
     await logActivity(
       'deposit_approved',
-      'deposit',
+      'Transaction',
       deposit._id,
       req.admin._id,
       'Admin',
       req,
-      { amount: usdAmount, asset: cryptoAsset, userId: user._id }
+      {
+        userId: user._id,
+        amount: usdAmount,
+        asset: asset,
+        cryptoAmount: cryptoAmount,
+        notes: notes
+      }
     );
-    
+
     // Create notification for user
     await Notification.create({
       title: 'Deposit Approved',
-      message: `Your deposit of ${cryptoAmount} ${cryptoAsset} ($${usdAmount.toLocaleString()}) has been approved and credited to your main wallet.`,
+      message: `Your deposit of ${cryptoAmount} ${asset.toUpperCase()} ($${usdAmount.toLocaleString()}) has been approved and credited to your main wallet.`,
       type: 'deposit_approved',
       recipientType: 'specific',
       specificUserId: user._id,
-      isImportant: false,
       sentBy: req.admin._id,
-      metadata: {
-        depositId: deposit._id,
-        amount: usdAmount,
-        cryptoAmount: cryptoAmount,
-        asset: cryptoAsset
-      }
+      isImportant: false
     });
-    
+
     res.status(200).json({
       status: 'success',
-      message: 'Deposit approved successfully',
+      message: `Deposit of ${cryptoAmount} ${asset.toUpperCase()} approved and added to user's main balance`,
       data: {
         deposit: {
           id: deposit._id,
-          status: deposit.status,
+          reference: deposit.reference,
           amount: usdAmount,
-          cryptoAmount: cryptoAmount,
-          asset: cryptoAsset,
-          processedAt: deposit.processedAt
+          asset: asset,
+          assetAmount: cryptoAmount,
+          newBalance: user.balances.main.get('usd') || 0,
+          status: 'completed'
         }
       }
     });
-    
+
   } catch (err) {
-    console.error('Error approving deposit:', err);
+    console.error('Approve deposit error:', err);
     res.status(500).json({
-      status: 'fail',
+      status: 'error',
       message: err.message || 'Failed to approve deposit'
     });
   }
 });
-/**
- * REJECT DEPOSIT ENDPOINT
- * POST /api/admin/deposits/:id/reject
- */
-app.post('/api/admin/deposits/:id/reject', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { reason, notes } = req.body;
-    
-    if (!reason && !notes) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Please provide a reason for rejection'
-      });
-    }
-    
-    const rejectionReason = reason || notes;
-    
-    // Find the deposit
-    let deposit = await DepositAsset.findById(id).populate('user', 'firstName lastName email balances');
-    
-    if (!deposit) {
-      const transaction = await Transaction.findOne({ 
-        _id: id, 
-        type: 'deposit', 
-        status: 'pending' 
-      }).populate('user', 'firstName lastName email balances');
-      
-      if (!transaction) {
-        return res.status(404).json({
-          status: 'fail',
-          message: 'Deposit not found'
-        });
-      }
-      deposit = transaction;
-    }
-    
-    // Check if deposit is already processed
-    if (deposit.status !== 'pending') {
-      return res.status(400).json({
-        status: 'fail',
-        message: `Deposit is already ${deposit.status}`
-      });
-    }
-    
-    const user = deposit.user;
-    const cryptoAsset = (deposit.asset || deposit.method || 'USDT').toUpperCase();
-    const cryptoAmount = deposit.assetAmount || deposit.amount;
-    const usdAmount = deposit.amount;
-    
-    // Get current crypto price for exchange rate (for email)
-    const currentPrice = await getCryptoPrice(cryptoAsset);
-    const exchangeRate = currentPrice || 1;
-    
-    // Update deposit status
-    deposit.status = 'failed';
-    deposit.adminNotes = rejectionReason;
-    deposit.processedBy = req.admin._id;
-    deposit.processedAt = new Date();
-    deposit.metadata = {
-      ...deposit.metadata,
-      rejectionReason: rejectionReason,
-      rejectedBy: req.admin._id,
-      rejectedAt: new Date()
-    };
-    
-    await deposit.save();
-    
-    // Create transaction record for rejected deposit
-    const transactionRecord = await Transaction.create({
-      user: user._id,
-      type: 'deposit',
-      amount: usdAmount,
-      asset: cryptoAsset,
-      assetAmount: cryptoAmount,
-      currency: 'USD',
-      status: 'failed',
-      method: cryptoAsset,
-      reference: `DEP-REJ-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
-      details: {
-        depositId: deposit._id,
-        rejectionReason: rejectionReason,
-        rejectedBy: req.admin.name
-      },
-      fee: 0,
-      netAmount: 0,
-      processedBy: req.admin._id,
-      processedAt: new Date(),
-      adminNotes: rejectionReason,
-      exchangeRateAtTime: exchangeRate
-    });
-    
-    // Send email notification using deposit_rejected template
-    const cryptoLogoUrl = getCryptoLogo(cryptoAsset);
-    
-    await sendProfessionalEmail({
-      email: user.email,
-      template: 'deposit_rejected',
-      data: {
-        name: user.firstName,
-        amount: usdAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
-        cryptoAmount: cryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 }),
-        cryptoAsset: cryptoAsset,
-        cryptoLogoUrl: cryptoLogoUrl,
-        method: cryptoAsset,
-        reference: transactionRecord.reference,
-        reason: rejectionReason,
-        exchangeRate: exchangeRate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-      }
-    });
-    
-    // Log the activity
-    await logActivity(
-      'deposit_rejected',
-      'deposit',
-      deposit._id,
-      req.admin._id,
-      'Admin',
-      req,
-      { amount: usdAmount, asset: cryptoAsset, userId: user._id, reason: rejectionReason }
-    );
-    
-    // Create notification for user
-    await Notification.create({
-      title: 'Deposit Declined',
-      message: `Your deposit request of ${cryptoAmount} ${cryptoAsset} ($${usdAmount.toLocaleString()}) has been declined. Reason: ${rejectionReason}`,
-      type: 'deposit_rejected',
-      recipientType: 'specific',
-      specificUserId: user._id,
-      isImportant: true,
-      sentBy: req.admin._id,
-      metadata: {
-        depositId: deposit._id,
-        amount: usdAmount,
-        cryptoAmount: cryptoAmount,
-        asset: cryptoAsset,
-        reason: rejectionReason
-      }
-    });
-    
-    res.status(200).json({
-      status: 'success',
-      message: 'Deposit rejected successfully',
-      data: {
-        deposit: {
-          id: deposit._id,
-          status: deposit.status,
-          amount: usdAmount,
-          cryptoAmount: cryptoAmount,
-          asset: cryptoAsset,
-          rejectionReason: rejectionReason
-        }
-      }
-    });
-    
-  } catch (err) {
-    console.error('Error rejecting deposit:', err);
-    res.status(500).json({
-      status: 'fail',
-      message: err.message || 'Failed to reject deposit'
-    });
-  }
-});
 
-/**
- * Helper function to get crypto logo URL
- */
-function getCryptoLogo(asset) {
+
+// Helper function to get crypto logo URL
+function getCryptoLogo(assetCode) {
   const logoMap = {
-    'BTC': 'https://cryptologos.cc/logos/bitcoin-btc-logo.png',
-    'ETH': 'https://cryptologos.cc/logos/ethereum-eth-logo.png',
-    'USDT': 'https://cryptologos.cc/logos/tether-usdt-logo.png',
-    'BNB': 'https://cryptologos.cc/logos/bnb-bnb-logo.png',
-    'SOL': 'https://cryptologos.cc/logos/solana-sol-logo.png',
-    'USDC': 'https://cryptologos.cc/logos/usd-coin-usdc-logo.png',
-    'XRP': 'https://cryptologos.cc/logos/xrp-xrp-logo.png',
-    'DOGE': 'https://cryptologos.cc/logos/dogecoin-doge-logo.png',
-    'ADA': 'https://cryptologos.cc/logos/cardano-ada-logo.png',
-    'SHIB': 'https://cryptologos.cc/logos/shiba-inu-shib-logo.png',
-    'AVAX': 'https://cryptologos.cc/logos/avalanche-avax-logo.png',
-    'DOT': 'https://cryptologos.cc/logos/polkadot-new-dot-logo.png',
-    'TRX': 'https://cryptologos.cc/logos/tron-trx-logo.png',
-    'LINK': 'https://cryptologos.cc/logos/chainlink-link-logo.png',
-    'MATIC': 'https://cryptologos.cc/logos/polygon-matic-logo.png',
-    'LTC': 'https://cryptologos.cc/logos/litecoin-ltc-logo.png'
+    'BTC': 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png',
+    'ETH': 'https://assets.coingecko.com/coins/images/279/large/ethereum.png',
+    'USDT': 'https://assets.coingecko.com/coins/images/325/large/Tether.png',
+    'BNB': 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png',
+    'SOL': 'https://assets.coingecko.com/coins/images/4128/large/solana.png',
+    'USDC': 'https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png',
+    'XRP': 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png',
+    'DOGE': 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png',
+    'ADA': 'https://assets.coingecko.com/coins/images/975/large/cardano.png',
+    'SHIB': 'https://assets.coingecko.com/coins/images/11939/large/shiba.png',
+    'AVAX': 'https://assets.coingecko.com/coins/images/12559/large/Avalanche_Circle_RedWhite.png',
+    'DOT': 'https://assets.coingecko.com/coins/images/12171/large/polkadot.png',
+    'TRX': 'https://assets.coingecko.com/coins/images/1094/large/tron-logo.png',
+    'LINK': 'https://assets.coingecko.com/coins/images/877/large/chainlink-new-logo.png',
+    'MATIC': 'https://assets.coingecko.com/coins/images/4713/large/matic-token-icon.png',
+    'LTC': 'https://assets.coingecko.com/coins/images/2/large/litecoin.png'
   };
-  
-  return logoMap[asset.toUpperCase()] || 'https://cryptologos.cc/logos/bitcoin-btc-logo.png';
+  return logoMap[assetCode.toUpperCase()] || 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png';
 }
 
 
@@ -19704,215 +19310,101 @@ function getCryptoLogo(asset) {
 
 
 
-// DELETE /api/admin/users/:userId - Delete user account
-app.delete('/api/admin/users/:userId', adminProtect, restrictTo('super'), async (req, res) => {
-    try {
-        const { userId } = req.params;
-        
-        // Prevent admin from deleting themselves
-        if (userId === req.admin._id.toString()) {
-            return res.status(400).json({
-                status: 'fail',
-                message: 'You cannot delete your own admin account'
-            });
-        }
-        
-        // Find the user
-        const user = await User.findById(userId);
-        if (!user) {
-            return res.status(404).json({
-                status: 'fail',
-                message: 'User not found'
-            });
-        }
-        
-        // Check if user already deleted (if using soft delete)
-        if (user.deletedAt) {
-            return res.status(400).json({
-                status: 'fail',
-                message: 'User already deleted'
-            });
-        }
-        
-        // OPTION 1: Hard Delete (with cascade handling)
-        // =============================================
-        
-        // 1. Anonymize or delete related data
-        
-        // Anonymize Transactions - set user to null and add metadata
-        await Transaction.updateMany(
-            { user: userId },
-            { 
-                $set: { 
-                    user: null,
-                    'metadata.deletedUserEmail': user.email,
-                    'metadata.deletedAt': new Date(),
-                    'metadata.deletedBy': req.admin.email
-                }
-            }
-        );
-        
-        // Cancel and archive active investments
-        await Investment.updateMany(
-            { user: userId, status: 'active' },
-            { 
-                $set: { 
-                    status: 'cancelled',
-                    completionDate: new Date(),
-                    'metadata.cancelledBy': req.admin.email,
-                    'metadata.cancelledReason': 'Account deleted by admin'
-                }
-            }
-        );
-        
-        // Anonymize DepositAssets
-        await DepositAsset.updateMany(
-            { user: userId },
-            {
-                $set: {
-                    user: null,
-                    'metadata.deletedUserEmail': user.email,
-                    'metadata.deletedAt': new Date()
-                }
-            }
-        );
-        
-        // Anonymize KYC data but preserve for compliance
-        await KYC.updateMany(
-            { user: userId },
-            {
-                $set: {
-                    user: null,
-                    adminNotes: `[Account deleted by ${req.admin.email} on ${new Date().toISOString()}] Previously: ${user.email}`
-                }
-            }
-        );
-        
-        // Delete notifications (no need to keep)
-        await Notification.deleteMany({ specificUserId: userId });
-        
-        // Anonymize UserLogs for security audit
-        await UserLog.updateMany(
-            { user: userId },
-            {
-                $set: {
-                    user: null,
-                    email: `deleted_${user._id}@deleted.com`,
-                    username: `deleted_user_${user._id}`,
-                    userFullName: 'Deleted User',
-                    'metadata.deletedAt': new Date(),
-                    'metadata.deletedBy': req.admin.email
-                }
-            }
-        );
-        
-        // Remove downline relationships
-        await DownlineRelationship.deleteMany({ 
-            $or: [{ upline: userId }, { downline: userId }]
-        });
-        
-        // Remove referral relationships
-        await User.updateMany(
-            { referredBy: userId },
-            { $unset: { referredBy: "" } }
-        );
-        
-        // 2. Delete the user
-        await User.findByIdAndDelete(userId);
-        
-        // 3. Log the activity
-        await logActivity(
-            'user_deleted',
-            'User',
-            userId,
-            req.admin._id,
-            'Admin',
-            req,
-            {
-                deletedUserEmail: user.email,
-                deletedUserName: `${user.firstName} ${user.lastName}`,
-                deletedAt: new Date()
-            }
-        );
-        
-        // 4. Send notification email to user (if they still have email access)
-        try {
-            await sendAutomatedEmail(user, 'account_deleted', {
-                name: user.firstName,
-                deletedBy: req.admin.email,
-                deletedAt: new Date().toISOString()
-            });
-        } catch (emailErr) {
-            console.error('Failed to send deletion email:', emailErr);
-            // Don't fail the request if email fails
-        }
-        
-        return res.status(200).json({
-            status: 'success',
-            message: `User ${user.firstName} ${user.lastName} (${user.email}) deleted successfully`
-        });
-        
-        /*
-        // OPTION 2: Soft Delete (Alternative - RECOMMENDED)
-        // ====================================================
-        // Add deletedAt field to UserSchema first:
-        // deletedAt: { type: Date, default: null },
-        // deletedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' }
-        
-        // Then soft delete:
-        user.deletedAt = new Date();
-        user.deletedBy = req.admin._id;
-        user.status = 'deleted';
-        user.email = `deleted_${user._id}@deleted.com`; // Free up email for reuse
-        await user.save();
-        
-        // Log soft deletion
-        await logActivity('user_soft_deleted', 'User', userId, req.admin._id, 'Admin', req, {
-            deletedUserEmail: originalEmail,
-            deletedAt: user.deletedAt
-        });
-        
-        return res.status(200).json({
-            status: 'success',
-            message: `User ${user.firstName} ${user.lastName} has been deactivated and anonymized`
-        });
-        */
-        
-    } catch (err) {
-        console.error('Error deleting user:', err);
-        return res.status(500).json({
-            status: 'error',
-            message: 'Failed to delete user',
-            error: process.env.NODE_ENV === 'development' ? err.message : undefined
-        });
+// POST /api/admin/deposits/:id/reject - Reject a deposit request
+app.post('/api/admin/deposits/:id/reject', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid deposit ID format'
+      });
     }
+
+    const deposit = await Transaction.findOne({
+      _id: id,
+      type: 'deposit',
+      status: 'pending'
+    }).populate('user', 'firstName lastName email');
+
+    if (!deposit) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Pending deposit not found'
+      });
+    }
+
+    deposit.status = 'failed';
+    deposit.adminNotes = reason || 'No reason provided';
+    deposit.processedBy = req.admin._id;
+    deposit.processedAt = new Date();
+    await deposit.save();
+
+    // Send rejection email to user (with error handling)
+    try {
+      await sendProfessionalEmail({
+        email: deposit.user.email,
+        template: 'deposit_rejected',
+        data: {
+          name: deposit.user.firstName,
+          amount: deposit.amount,
+          method: deposit.method || deposit.asset || 'crypto',
+          reason: reason || 'No reason provided'
+        }
+      });
+    } catch (emailErr) {
+      console.error('Failed to send rejection email:', emailErr);
+    }
+
+    // Log activity
+    try {
+      await logActivity(
+        'deposit_rejected',
+        'Transaction',
+        deposit._id,
+        req.admin._id,
+        'Admin',
+        req,
+        {
+          userId: deposit.user._id,
+          amount: deposit.amount,
+          reason: reason,
+          depositId: deposit._id
+        }
+      );
+    } catch (logErr) {
+      console.error('Failed to log activity:', logErr);
+    }
+
+    // Create notification for user
+    try {
+      await Notification.create({
+        title: 'Deposit Rejected',
+        message: `Your deposit of $${deposit.amount.toLocaleString()} has been rejected. Reason: ${reason || 'No reason provided'}`,
+        type: 'deposit_rejected',
+        recipientType: 'specific',
+        specificUserId: deposit.user._id,
+        sentBy: req.admin._id,
+        isImportant: true
+      });
+    } catch (notifErr) {
+      console.error('Failed to create notification:', notifErr);
+    }
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Deposit rejected successfully'
+    });
+  } catch (err) {
+    console.error('Reject deposit error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to reject deposit'
+    });
+  }
 });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -20264,121 +19756,43 @@ io.on('connection', async (socket) => {
         
         const user = await User.findById(userId).select('balances');
         if (user) {
-          // Send USD balances
-          let mainUSD = 0;
-          let activeUSD = 0;
-          let maturedUSD = 0;
-          
-          // Calculate MAIN wallet USD from crypto balances
-          if (user.balances && user.balances.main) {
-            for (const [asset, balance] of user.balances.main.entries()) {
-              if (balance > 0 && asset !== 'usd') {
-                const price = await getCryptoPrice(asset.toUpperCase());
-                if (price) mainUSD += balance * price;
-              }
-            }
-          }
-          
-          // Calculate ACTIVE wallet USD (FIXED - doesn't fluctuate)
-          if (user.balances && user.balances.active) {
-            for (const [asset, balance] of user.balances.active.entries()) {
-              if (balance > 0 && asset === 'usd') {
-                activeUSD = balance;
-              }
-            }
-          }
-          
-          // Calculate MATURED wallet USD from crypto balances
-          if (user.balances && user.balances.matured) {
-            for (const [asset, balance] of user.balances.matured.entries()) {
-              if (balance > 0 && asset !== 'usd') {
-                const price = await getCryptoPrice(asset.toUpperCase());
-                if (price) maturedUSD += balance * price;
-              }
-            }
-          }
-          
           socket.emit('balance_update', {
-            main: mainUSD,
-            active: activeUSD,
-            matured: maturedUSD
+            main: user.balances.main,
+            active: user.balances.active,
+            matured: user.balances.matured
           });
-          
-          // Build asset data from MAIN + MATURED wallets (exclude ACTIVE)
+        }
+        
+        const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
+        if (userAssetBalance) {
           const assetData = [];
-          const allBalances = new Map();
-          
-          // Collect from MAIN wallet
-          if (user.balances && user.balances.main) {
-            for (const [asset, balance] of user.balances.main.entries()) {
-              if (balance > 0 && asset !== 'usd') {
-                allBalances.set(asset, (allBalances.get(asset) || 0) + balance);
-              }
-            }
-          }
-          
-          // Collect from MATURED wallet
-          if (user.balances && user.balances.matured) {
-            for (const [asset, balance] of user.balances.matured.entries()) {
-              if (balance > 0 && asset !== 'usd') {
-                allBalances.set(asset, (allBalances.get(asset) || 0) + balance);
-              }
-            }
-          }
-          
-          // Get buy transaction history for each asset
-          const buyTransactions = await Transaction.find({
-            user: userId,
-            type: 'buy',
-            status: 'completed'
-          }).sort({ createdAt: -1 });
-          
-          const buyHistoryByAsset = {};
-          buyTransactions.forEach(tx => {
-            const asset = (tx.asset || tx.buyDetails?.asset || '').toLowerCase();
-            if (asset && asset !== 'usd') {
-              if (!buyHistoryByAsset[asset]) buyHistoryByAsset[asset] = [];
-              buyHistoryByAsset[asset].push({
-                amount: tx.assetAmount || tx.buyDetails?.assetAmount || 0,
-                usdValue: tx.amount || tx.buyDetails?.amountUSD || 0,
-                price: tx.buyDetails?.buyingPrice || tx.exchangeRateAtTime || 0,
-                date: tx.createdAt
-              });
-            }
-          });
-          
-          for (const [asset, totalBalance] of allBalances.entries()) {
-            if (totalBalance > 0) {
+          for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
+            if (balance > 0) {
               const price = await getCryptoPrice(asset.toUpperCase());
-              const currentValue = totalBalance * (price || 0);
-              
-              const assetBuys = buyHistoryByAsset[asset] || [];
+              const buyTransactions = userAssetBalance.history.filter(h => h.asset === asset && h.type === 'buy');
               let totalSpent = 0;
               let totalBought = 0;
-              assetBuys.forEach(b => {
-                totalSpent += b.usdValue;
-                totalBought += b.amount;
+              buyTransactions.forEach(t => {
+                totalSpent += t.usdValue;
+                totalBought += t.amount;
               });
-              
               const avgPrice = totalBought > 0 ? totalSpent / totalBought : 0;
+              const currentValue = balance * (price || 0);
               const unrealizedPnl = currentValue - totalSpent;
               const unrealizedPercentage = totalSpent > 0 ? (unrealizedPnl / totalSpent) * 100 : 0;
               
               assetData.push({
                 symbol: asset,
-                balance: totalBalance,
+                balance: balance,
                 currentValue: currentValue,
                 avgPrice: avgPrice,
-                totalSpent: totalSpent,
                 unrealizedPnl: unrealizedPnl,
                 unrealizedPnlPercent: unrealizedPercentage,
                 id: asset === 'btc' ? 'bitcoin' : asset === 'eth' ? 'ethereum' : asset,
-                currentPrice: price || 0,
-                transactions: assetBuys.slice(-10)
+                transactions: userAssetBalance.history.filter(h => h.asset === asset).slice(-10)
               });
             }
           }
-          
           socket.emit('asset_balances_update', assetData);
         }
         
@@ -20395,6 +19809,7 @@ io.on('connection', async (socket) => {
       console.error('Socket auth error:', err);
     }
   }
+  
   const currentStats = await getCurrentStats();
   socket.emit('stats-update', currentStats);
   console.log(`📡 Sent initial stats to new client ${socket.id}: ${currentStats.totalInvestors.toLocaleString()} investors`);
@@ -20423,22 +19838,20 @@ io.on('connection', async (socket) => {
   socket.on('refresh_pnl', async () => {
     if (userId) {
       const user = await User.findById(userId).select('balances');
+      const userAssetBalance = await UserAssetBalance.findOne({ user: userId });
       
-      if (user && user.balances) {
+      if (userAssetBalance) {
         let totalMainValue = 0;
         let previousDayValue = 0;
         
-        // Calculate from MAIN wallet using user.balances.main Map
-        if (user.balances.main) {
-          for (const [asset, balance] of user.balances.main.entries()) {
-            if (balance > 0 && asset !== 'usd') {
-              const currentPrice = await getCryptoPrice(asset.toUpperCase());
-              if (currentPrice) {
-                totalMainValue += balance * currentPrice;
-                const change24h = currentPrices[asset]?.usd_24h_change || 0;
-                const previousPrice = currentPrice / (1 + change24h / 100);
-                previousDayValue += balance * previousPrice;
-              }
+        for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
+          if (balance > 0) {
+            const currentPrice = await getCryptoPrice(asset.toUpperCase());
+            if (currentPrice) {
+              totalMainValue += balance * currentPrice;
+              const change24h = currentPrices[asset]?.usd_24h_change || 0;
+              const previousPrice = currentPrice / (1 + change24h / 100);
+              previousDayValue += balance * previousPrice;
             }
           }
         }
@@ -20479,28 +19892,9 @@ const processMaturedInvestments = async () => {
         if (!user) continue;
 
         const totalReturn = investment.amount + (investment.amount * investment.plan.percentage / 100);
-        
-        // ✅ FIXED: Use user.balances object with Maps (active and matured)
-        if (!user.balances) {
-          user.balances = { main: new Map(), active: new Map(), matured: new Map() };
-        }
-        
-        // Get current values from Maps
-        const currentActiveUSD = user.balances.active?.get('usd') || 0;
-        const currentMaturedUSD = user.balances.matured?.get('usd') || 0;
-        
-        // Update Maps
-        user.balances.active.set('usd', currentActiveUSD - investment.amount);
-        user.balances.matured.set('usd', currentMaturedUSD + totalReturn);
-        
-        // Also handle crypto balances if needed
-        const currentActiveBTC = user.balances.active?.get('btc') || 0;
-        const currentMaturedBTC = user.balances.matured?.get('btc') || 0;
-        
-        if (investment.amountBTC) {
-          user.balances.active.set('btc', currentActiveBTC - investment.amountBTC);
-          user.balances.matured.set('btc', currentMaturedBTC + (totalReturn / investment.btcPriceAtCompletion || 0));
-        }
+
+        user.balances.active -= investment.amount;
+        user.balances.matured += totalReturn;
 
         investment.status = 'completed';
         investment.completionDate = now;
@@ -20528,12 +19922,12 @@ const processMaturedInvestments = async () => {
         });
         
         io.to(`user_${user._id}`).emit('balance_update', {
-          main: user.balances.main?.get('usd') || 0,
-          active: user.balances.active?.get('usd') || 0,
-          matured: user.balances.matured?.get('usd') || 0
+          main: user.balances.main,
+          active: user.balances.active,
+          matured: user.balances.matured
         });
 
-        console.log(`✅ Automatically completed investment ${investment._id} for user ${user.email}`);
+        console.log(`Automatically completed investment ${investment._id} for user ${user.email}`);
       } catch (err) {
         console.error(`Error processing investment ${investment._id}:`, err);
       }
@@ -20553,7 +19947,11 @@ startInvestorGrowthJob();
 
 startRealTimeWalletUpdates(io);
 
-
+// Real-time updates already happen every second with price changes
+// This is just a fallback sync every 30 seconds for any missed updates
+setInterval(async () => {
+  await recalculateAllUserBalances(io);
+}, 30000);
 
 const gracefulShutdown = () => {
   console.log('Received shutdown signal. Cleaning up...');
@@ -20579,4 +19977,3 @@ httpServer.listen(PORT, () => {
   console.log(`💰 Real-time crypto price updates started (every 1 second)`);
   console.log(`🔌 WebSocket endpoints: /ws/spotmarket, /ws/ticker, /ws/market`);
 });
-
