@@ -3882,7 +3882,7 @@ const recalculateAllUserBalances = async (io) => {
   try {
     console.log('Recalculating ALL user balances based on current crypto prices...');
     
-    const users = await User.find({}).select('_id');
+    const users = await User.find({}).select('_id balances');
     let updatedCount = 0;
     
     for (const user of users) {
@@ -3890,59 +3890,80 @@ const recalculateAllUserBalances = async (io) => {
       let totalActiveValue = 0;
       let totalMaturedValue = 0;
       
-      const userAssetBalance = await UserAssetBalance.findOne({ user: user._id });
-      if (userAssetBalance) {
-        for (const [asset, balance] of Object.entries(userAssetBalance.balances)) {
-          if (balance > 0) {
+      // ✅ FIXED: Use user.balances directly instead of UserAssetBalance
+      // Calculate MAIN wallet value (crypto assets only - fluctuates with price)
+      if (user.balances && user.balances.main) {
+        const mainBalances = user.balances.main;
+        // Handle both Map and plain object formats
+        const entries = mainBalances instanceof Map ? mainBalances.entries() : Object.entries(mainBalances);
+        
+        for (const [asset, balance] of entries) {
+          if (balance > 0 && asset !== 'usd') {
             const price = await getCryptoPrice(asset.toUpperCase());
-            if (price) {
+            if (price && price > 0) {
               totalMainValue += balance * price;
             }
           }
         }
       }
       
-      const activeInvestments = await Investment.find({
-        user: user._id,
-        status: 'active'
-      }).populate('plan');
-      
-      for (const investment of activeInvestments) {
-        const currentBTCPrice = await getCryptoPrice('BTC');
-        if (currentBTCPrice && investment.originalAmount) {
-          const originalBTCAmount = investment.originalAmount / (investment.originalBTCPrice || 43000);
-          const currentUSDValue = originalBTCAmount * currentBTCPrice;
-          totalActiveValue += currentUSDValue;
-        } else {
-          totalActiveValue += investment.amount;
+      // Calculate ACTIVE wallet value (mining contracts - FIXED, does NOT fluctuate)
+      if (user.balances && user.balances.active) {
+        const activeBalances = user.balances.active;
+        const entries = activeBalances instanceof Map ? activeBalances.entries() : Object.entries(activeBalances);
+        
+        for (const [asset, balance] of entries) {
+          if (balance > 0) {
+            // Active wallet stores USD value directly - no price fluctuation
+            if (asset === 'usd') {
+              totalActiveValue += balance;
+            } else {
+              // For crypto in active wallet, use stored value (not recalculated with current price)
+              totalActiveValue += balance;
+            }
+          }
         }
       }
       
-      const maturedInvestments = await Investment.find({
-        user: user._id,
-        status: 'completed'
-      }).populate('plan');
-      
-      for (const investment of maturedInvestments) {
-        const currentBTCPrice = await getCryptoPrice('BTC');
-        if (currentBTCPrice && investment.originalAmount) {
-          const originalBTCAmount = investment.originalAmount / (investment.originalBTCPrice || 43000);
-          const currentUSDValue = originalBTCAmount * currentBTCPrice;
-          totalMaturedValue += currentUSDValue;
-        } else {
-          totalMaturedValue += investment.amount + (investment.actualReturn || 0);
+      // Calculate MATURED wallet value (crypto assets only - fluctuates with price)
+      if (user.balances && user.balances.matured) {
+        const maturedBalances = user.balances.matured;
+        const entries = maturedBalances instanceof Map ? maturedBalances.entries() : Object.entries(maturedBalances);
+        
+        for (const [asset, balance] of entries) {
+          if (balance > 0 && asset !== 'usd') {
+            const price = await getCryptoPrice(asset.toUpperCase());
+            if (price && price > 0) {
+              totalMaturedValue += balance * price;
+            }
+          }
         }
       }
       
-      const updates = {};
-      if (Math.abs(user.balances.main - totalMainValue) > 0.01) updates['balances.main'] = totalMainValue;
-      if (Math.abs(user.balances.active - totalActiveValue) > 0.01) updates['balances.active'] = totalActiveValue;
-      if (Math.abs(user.balances.matured - totalMaturedValue) > 0.01) updates['balances.matured'] = totalMaturedValue;
+      // Check if we need to update (avoid unnecessary writes)
+      const currentMainUSD = user.balances?.main?.get?.('usd') || user.balances?.main?.usd || 0;
+      const currentActiveUSD = user.balances?.active?.get?.('usd') || user.balances?.active?.usd || 0;
+      const currentMaturedUSD = user.balances?.matured?.get?.('usd') || user.balances?.matured?.usd || 0;
       
-      if (Object.keys(updates).length > 0) {
-        await User.findByIdAndUpdate(user._id, updates);
+      const needsMainUpdate = Math.abs(currentMainUSD - totalMainValue) > 0.01;
+      const needsActiveUpdate = Math.abs(currentActiveUSD - totalActiveValue) > 0.01;
+      const needsMaturedUpdate = Math.abs(currentMaturedUSD - totalMaturedValue) > 0.01;
+      
+      if (needsMainUpdate || needsActiveUpdate || needsMaturedUpdate) {
+        // Update USD values in the balances Maps
+        if (!user.balances) user.balances = { main: new Map(), active: new Map(), matured: new Map() };
+        if (!user.balances.main) user.balances.main = new Map();
+        if (!user.balances.active) user.balances.active = new Map();
+        if (!user.balances.matured) user.balances.matured = new Map();
+        
+        user.balances.main.set('usd', totalMainValue);
+        user.balances.active.set('usd', totalActiveValue);
+        user.balances.matured.set('usd', totalMaturedValue);
+        
+        await User.findByIdAndUpdate(user._id, { balances: user.balances });
         updatedCount++;
         
+        // Emit real-time updates via Socket.IO
         if (io) {
           io.to(`user_${user._id}`).emit('balance_update', {
             main: totalMainValue,
@@ -3950,9 +3971,17 @@ const recalculateAllUserBalances = async (io) => {
             matured: totalMaturedValue
           });
           
-          const previousDayValue = user.balances.main || totalMainValue;
-          const dailyPnL = totalMainValue - previousDayValue;
-          const dailyPnLPercentage = previousDayValue > 0 ? (dailyPnL / previousDayValue) * 100 : 0;
+          // Calculate daily PnL for main wallet (if we have previous day's value)
+          const previousDayKey = `user:${user._id}:prev_main_value`;
+          const cachedPrev = await redis.get(previousDayKey);
+          let dailyPnL = 0;
+          let dailyPnLPercentage = 0;
+          
+          if (cachedPrev) {
+            const prevValue = parseFloat(cachedPrev);
+            dailyPnL = totalMainValue - prevValue;
+            dailyPnLPercentage = prevValue > 0 ? (dailyPnL / prevValue) * 100 : 0;
+          }
           
           io.to(`user_${user._id}`).emit('pnl_update', {
             main: {
@@ -3964,11 +3993,19 @@ const recalculateAllUserBalances = async (io) => {
               percentage: 0
             }
           });
+          
+          // Store today's value for tomorrow's PnL
+          const today = new Date().toDateString();
+          const lastDate = await redis.get(`user:${user._id}:pnl_date`);
+          if (lastDate !== today) {
+            await redis.set(previousDayKey, totalMainValue);
+            await redis.set(`user:${user._id}:pnl_date`, today);
+          }
         }
       }
     }
     
-    console.log(`Recalculated balances for ${updatedCount} users (Main: fluctuates, Active: fluctuates, Matured: fluctuates)`);
+    console.log(`Recalculated balances for ${updatedCount} users (Main: fluctuates, Active: fixed, Matured: fluctuates)`);
     
   } catch (err) {
     console.error('Error recalculating user balances:', err);
