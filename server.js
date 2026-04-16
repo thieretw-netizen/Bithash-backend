@@ -4648,12 +4648,11 @@ case 'crypto_deposit':
           </div>
         `;
         break;
-
-   case 'deposit_approved':
+case 'deposit_approved':
   cryptoLogoUrl = getCryptoLogo(data.cryptoAsset);
   formattedAmount = data.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   formattedCryptoAmount = data.cryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
-  formattedRate = data.exchangeRate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  formattedRate = (data.exchangeRate || 1).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   
   subject = '✅ Deposit Confirmed - ₿itHash Capital';
   html = `
@@ -4717,10 +4716,6 @@ case 'crypto_deposit':
           </table>
         </div>
         
-        <div style="background: #F1F5F9; border-radius: 12px; padding: 12px 16px; text-align: center; margin: 20px 0;">
-          <p style="color: #1E293B; font-size: 13px; margin: 0;">💡 <strong>What's next?</strong> You can now withdraw your funds or invest in our mining plans.</p>
-        </div>
-        
         <div style="text-align: center; margin: 30px 0;">
           <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View Transaction</a>
         </div>
@@ -4740,11 +4735,13 @@ case 'crypto_deposit':
   `;
   break;
 
-     case 'deposit_rejected':
-  const cryptoLogoUrl = getCryptoLogo(data.cryptoAsset);
-  const formattedAmount = data.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const formattedCryptoAmount = data.cryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
-  const formattedRate = data.exchangeRate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+        
+ case 'deposit_rejected':
+  cryptoLogoUrl = getCryptoLogo(data.cryptoAsset);
+  formattedAmount = data.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  formattedCryptoAmount = data.cryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
+  formattedRate = (data.exchangeRate || 1).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   
   subject = '⛔ Deposit Declined - ₿itHash Capital';
   html = `
@@ -4774,23 +4771,16 @@ case 'crypto_deposit':
         </div>
         
         <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+          <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
+            ${cryptoLogoUrl ? `<img src="${cryptoLogoUrl}" width="32" height="32" style="border-radius: 50%;">` : ''}
+            <div>
+              <div style="font-weight: bold; font-size: 18px;">${formattedCryptoAmount} ${data.cryptoAsset}</div>
+              <div style="color: #64748B; font-size: 12px;">≈ $${formattedAmount} USD</div>
+            </div>
+          </div>
+          
           <table style="width: 100%; border-collapse: collapse;">
             <tr>
-              <td style="padding: 8px 0;"><strong>Cryptocurrency:</strong></td>
-              <td style="padding: 8px 0; text-align: right;">
-                ${cryptoLogoUrl ? `<img src="${cryptoLogoUrl}" width="20" height="20" style="vertical-align: middle; margin-right: 5px;">` : ''}
-                ${data.cryptoAsset}
-              </td>
-            </tr>
-            <tr style="border-top: 1px solid #E2E8F0;">
-              <td style="padding: 8px 0;"><strong>Amount Requested:</strong></td>
-              <td style="padding: 8px 0; text-align: right; font-weight: bold;">${formattedCryptoAmount} ${data.cryptoAsset}</td>
-            </tr>
-            <tr style="border-top: 1px solid #E2E8F0;">
-              <td style="padding: 8px 0;"><strong>USD Value:</strong></td>
-              <td style="padding: 8px 0; text-align: right;">$${formattedAmount} USD</td>
-            </tr>
-            <tr style="border-top: 1px solid #E2E8F0;">
               <td style="padding: 8px 0;"><strong>Exchange Rate:</strong></td>
               <td style="padding: 8px 0; text-align: right;">1 ${data.cryptoAsset} = $${formattedRate}</td>
             </tr>
@@ -4803,11 +4793,6 @@ case 'crypto_deposit':
               <td style="padding: 8px 0; text-align: right; font-size: 11px;">${data.reference}</td>
             </tr>
           </table>
-        </div>
-        
-        <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; text-align: center; margin: 20px 0;">
-          <p style="color: #333333; line-height: 1.6; margin: 0 0 10px 0;">❓ Have questions about this decision?</p>
-          <p style="color: #666666; font-size: 13px; margin: 0;">Our support team is available 24/7 to assist you.</p>
         </div>
         
         <div style="text-align: center; margin: 30px 0;">
