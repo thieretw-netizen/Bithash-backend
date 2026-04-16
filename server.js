@@ -2979,13 +2979,20 @@ const detectAndSetIPPreferences = async (userId, req) => {
 
 const getCryptoPrice = async (asset) => {
   try {
+    const assetUpper = asset.toUpperCase();
+    
+    // Handle stablecoins - they are always $1 (this is factual, not a fallback)
+    const stablecoins = ['USDT', 'USDC', 'DAI', 'BUSD', 'TUSD', 'USDP'];
+    if (stablecoins.includes(assetUpper)) {
+      console.log(`${assetUpper} is a stablecoin, price is $1`);
+      return 1;
+    }
+    
     const assetMap = {
       'BTC': 'bitcoin',
       'ETH': 'ethereum',
-      'USDT': 'tether',
       'BNB': 'binancecoin',
       'SOL': 'solana',
-      'USDC': 'usd-coin',
       'XRP': 'ripple',
       'DOGE': 'dogecoin',
       'ADA': 'cardano',
@@ -2995,77 +3002,220 @@ const getCryptoPrice = async (asset) => {
       'TRX': 'tron',
       'LINK': 'chainlink',
       'MATIC': 'matic-network',
-      'LTC': 'litecoin'
+      'LTC': 'litecoin',
+      'NEAR': 'near',
+      'UNI': 'uniswap',
+      'BCH': 'bitcoin-cash',
+      'XLM': 'stellar',
+      'ATOM': 'cosmos',
+      'XMR': 'monero',
+      'VET': 'vechain',
+      'FIL': 'filecoin',
+      'THETA': 'theta-token',
+      'HBAR': 'hedera-hashgraph',
+      'FTM': 'fantom',
+      'XTZ': 'tezos'
     };
     
-    const coinId = assetMap[asset.toUpperCase()];
-    if (!coinId) return null;
-    
-    const errors = [];
-    
-    try {
-      const binancePair = asset.toUpperCase() === 'USDT' ? 'USDTUSDT' : `${asset.toUpperCase()}USDT`;
-      const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${binancePair}`, { timeout: 5000 });
-      if (response.data && response.data.price) {
-        console.log(`Fetched ${asset} price from Binance: $${response.data.price}`);
-        return parseFloat(response.data.price);
-      }
-      errors.push('Binance: Invalid response');
-    } catch (err) {
-      errors.push(`Binance: ${err.message}`);
+    const coinId = assetMap[assetUpper];
+    if (!coinId) {
+      console.error(`No mapping found for ${assetUpper}`);
+      return null;
     }
     
+    // Try CoinGecko first
     try {
-      const response = await axios.get(`https://min-api.cryptocompare.com/data/price?fsym=${asset.toUpperCase()}&tsyms=USD`, { timeout: 5000 });
-      if (response.data && response.data.USD) {
-        console.log(`Fetched ${asset} price from CryptoCompare: $${response.data.USD}`);
-        return response.data.USD;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const response = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd`, {
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data && data[coinId] && data[coinId].usd && data[coinId].usd > 0) {
+          const price = data[coinId].usd;
+          console.log(`✅ ${asset} price from CoinGecko: $${price}`);
+          return price;
+        }
       }
-      errors.push('CryptoCompare: Invalid response');
     } catch (err) {
-      errors.push(`CryptoCompare: ${err.message}`);
+      console.log(`CoinGecko failed for ${asset}:`, err.message);
     }
     
+    // Try Binance
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const response = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${assetUpper}USDT`, {
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data && data.price && parseFloat(data.price) > 0) {
+          const price = parseFloat(data.price);
+          console.log(`✅ ${asset} price from Binance: $${price}`);
+          return price;
+        }
+      }
+    } catch (err) {
+      console.log(`Binance failed for ${asset}:`, err.message);
+    }
+    
+    // Try CryptoCompare
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const response = await fetch(`https://min-api.cryptocompare.com/data/price?fsym=${assetUpper}&tsyms=USD`, {
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data && data.USD && data.USD > 0) {
+          const price = data.USD;
+          console.log(`✅ ${asset} price from CryptoCompare: $${price}`);
+          return price;
+        }
+      }
+    } catch (err) {
+      console.log(`CryptoCompare failed for ${asset}:`, err.message);
+    }
+    
+    // Try Kraken
     try {
       const krakenMap = {
         'BTC': 'XBTUSD',
         'ETH': 'ETHUSD',
-        'USDT': 'USDTUSD',
         'SOL': 'SOLUSD',
         'XRP': 'XRPUSD',
         'DOGE': 'DOGEUSD',
         'ADA': 'ADAUSD',
-        'LTC': 'LTCUSD'
+        'LTC': 'LTCUSD',
+        'DOT': 'DOTUSD',
+        'LINK': 'LINKUSD',
+        'MATIC': 'MATICUSD'
       };
-      const pair = krakenMap[asset.toUpperCase()];
+      const pair = krakenMap[assetUpper];
       if (pair) {
-        const response = await axios.get(`https://api.kraken.com/0/public/Ticker?pair=${pair}`, { timeout: 5000 });
-        if (response.data && response.data.result && response.data.result[pair]) {
-          const price = parseFloat(response.data.result[pair].c[0]);
-          console.log(`Fetched ${asset} price from Kraken: $${price}`);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        const response = await fetch(`https://api.kraken.com/0/public/Ticker?pair=${pair}`, {
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        
+        if (response.ok) {
+          const data = await response.json();
+          if (data && data.result && data.result[pair] && data.result[pair].c && data.result[pair].c[0]) {
+            const price = parseFloat(data.result[pair].c[0]);
+            if (price > 0) {
+              console.log(`✅ ${asset} price from Kraken: $${price}`);
+              return price;
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.log(`Kraken failed for ${asset}:`, err.message);
+    }
+    
+    // Try KuCoin
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const response = await fetch(`https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=${assetUpper}-USDT`, {
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data && data.data && data.data.price && parseFloat(data.data.price) > 0) {
+          const price = parseFloat(data.data.price);
+          console.log(`✅ ${asset} price from KuCoin: $${price}`);
           return price;
         }
       }
-      errors.push('Kraken: No data or unsupported pair');
     } catch (err) {
-      errors.push(`Kraken: ${err.message}`);
+      console.log(`KuCoin failed for ${asset}:`, err.message);
     }
     
+    // Try Bybit
     try {
-      const response = await axios.get(`https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=${asset.toUpperCase()}-USDT`, { timeout: 5000 });
-      if (response.data && response.data.data && response.data.data.price) {
-        console.log(`Fetched ${asset} price from KuCoin: $${response.data.data.price}`);
-        return parseFloat(response.data.data.price);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const response = await fetch(`https://api.bybit.com/v5/market/tickers?category=spot&symbol=${assetUpper}USDT`, {
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data && data.result && data.result.list && data.result.list[0] && data.result.list[0].lastPrice) {
+          const price = parseFloat(data.result.list[0].lastPrice);
+          if (price > 0) {
+            console.log(`✅ ${asset} price from Bybit: $${price}`);
+            return price;
+          }
+        }
       }
-      errors.push('KuCoin: Invalid response');
     } catch (err) {
-      errors.push(`KuCoin: ${err.message}`);
+      console.log(`Bybit failed for ${asset}:`, err.message);
     }
     
-    console.error(`All price APIs failed for ${asset}:`, errors);
+    // Try OKX
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const response = await fetch(`https://www.okx.com/api/v5/market/ticker?instId=${assetUpper}-USDT`, {
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data && data.data && data.data[0] && data.data[0].last && parseFloat(data.data[0].last) > 0) {
+          const price = parseFloat(data.data[0].last);
+          console.log(`✅ ${asset} price from OKX: $${price}`);
+          return price;
+        }
+      }
+    } catch (err) {
+      console.log(`OKX failed for ${asset}:`, err.message);
+    }
+    
+    // Try Gate.io
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const response = await fetch(`https://api.gateio.ws/api/v4/spot/tickers?currency_pair=${assetUpper}_USDT`, {
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data && data[0] && data[0].last && parseFloat(data[0].last) > 0) {
+          const price = parseFloat(data[0].last);
+          console.log(`✅ ${asset} price from Gate.io: $${price}`);
+          return price;
+        }
+      }
+    } catch (err) {
+      console.log(`Gate.io failed for ${asset}:`, err.message);
+    }
+    
+    // If all APIs failed, return null (no fake fallback)
+    console.error(`❌ All APIs failed to fetch price for ${asset}`);
     return null;
+    
   } catch (err) {
-    console.error('Error fetching crypto price:', err);
+    console.error(`Error fetching price for ${asset}:`, err);
     return null;
   }
 };
