@@ -19620,6 +19620,217 @@ function getCryptoLogo(asset) {
 
 
 
+// DELETE /api/admin/users/:userId - Delete user account
+app.delete('/api/admin/users/:userId', adminProtect, restrictTo('super'), async (req, res) => {
+    try {
+        const { userId } = req.params;
+        
+        // Prevent admin from deleting themselves
+        if (userId === req.admin._id.toString()) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'You cannot delete your own admin account'
+            });
+        }
+        
+        // Find the user
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'User not found'
+            });
+        }
+        
+        // Check if user already deleted (if using soft delete)
+        if (user.deletedAt) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'User already deleted'
+            });
+        }
+        
+        // OPTION 1: Hard Delete (with cascade handling)
+        // =============================================
+        
+        // 1. Anonymize or delete related data
+        
+        // Anonymize Transactions - set user to null and add metadata
+        await Transaction.updateMany(
+            { user: userId },
+            { 
+                $set: { 
+                    user: null,
+                    'metadata.deletedUserEmail': user.email,
+                    'metadata.deletedAt': new Date(),
+                    'metadata.deletedBy': req.admin.email
+                }
+            }
+        );
+        
+        // Cancel and archive active investments
+        await Investment.updateMany(
+            { user: userId, status: 'active' },
+            { 
+                $set: { 
+                    status: 'cancelled',
+                    completionDate: new Date(),
+                    'metadata.cancelledBy': req.admin.email,
+                    'metadata.cancelledReason': 'Account deleted by admin'
+                }
+            }
+        );
+        
+        // Anonymize DepositAssets
+        await DepositAsset.updateMany(
+            { user: userId },
+            {
+                $set: {
+                    user: null,
+                    'metadata.deletedUserEmail': user.email,
+                    'metadata.deletedAt': new Date()
+                }
+            }
+        );
+        
+        // Anonymize KYC data but preserve for compliance
+        await KYC.updateMany(
+            { user: userId },
+            {
+                $set: {
+                    user: null,
+                    adminNotes: `[Account deleted by ${req.admin.email} on ${new Date().toISOString()}] Previously: ${user.email}`
+                }
+            }
+        );
+        
+        // Delete notifications (no need to keep)
+        await Notification.deleteMany({ specificUserId: userId });
+        
+        // Anonymize UserLogs for security audit
+        await UserLog.updateMany(
+            { user: userId },
+            {
+                $set: {
+                    user: null,
+                    email: `deleted_${user._id}@deleted.com`,
+                    username: `deleted_user_${user._id}`,
+                    userFullName: 'Deleted User',
+                    'metadata.deletedAt': new Date(),
+                    'metadata.deletedBy': req.admin.email
+                }
+            }
+        );
+        
+        // Remove downline relationships
+        await DownlineRelationship.deleteMany({ 
+            $or: [{ upline: userId }, { downline: userId }]
+        });
+        
+        // Remove referral relationships
+        await User.updateMany(
+            { referredBy: userId },
+            { $unset: { referredBy: "" } }
+        );
+        
+        // 2. Delete the user
+        await User.findByIdAndDelete(userId);
+        
+        // 3. Log the activity
+        await logActivity(
+            'user_deleted',
+            'User',
+            userId,
+            req.admin._id,
+            'Admin',
+            req,
+            {
+                deletedUserEmail: user.email,
+                deletedUserName: `${user.firstName} ${user.lastName}`,
+                deletedAt: new Date()
+            }
+        );
+        
+        // 4. Send notification email to user (if they still have email access)
+        try {
+            await sendAutomatedEmail(user, 'account_deleted', {
+                name: user.firstName,
+                deletedBy: req.admin.email,
+                deletedAt: new Date().toISOString()
+            });
+        } catch (emailErr) {
+            console.error('Failed to send deletion email:', emailErr);
+            // Don't fail the request if email fails
+        }
+        
+        return res.status(200).json({
+            status: 'success',
+            message: `User ${user.firstName} ${user.lastName} (${user.email}) deleted successfully`
+        });
+        
+        /*
+        // OPTION 2: Soft Delete (Alternative - RECOMMENDED)
+        // ====================================================
+        // Add deletedAt field to UserSchema first:
+        // deletedAt: { type: Date, default: null },
+        // deletedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' }
+        
+        // Then soft delete:
+        user.deletedAt = new Date();
+        user.deletedBy = req.admin._id;
+        user.status = 'deleted';
+        user.email = `deleted_${user._id}@deleted.com`; // Free up email for reuse
+        await user.save();
+        
+        // Log soft deletion
+        await logActivity('user_soft_deleted', 'User', userId, req.admin._id, 'Admin', req, {
+            deletedUserEmail: originalEmail,
+            deletedAt: user.deletedAt
+        });
+        
+        return res.status(200).json({
+            status: 'success',
+            message: `User ${user.firstName} ${user.lastName} has been deactivated and anonymized`
+        });
+        */
+        
+    } catch (err) {
+        console.error('Error deleting user:', err);
+        return res.status(500).json({
+            status: 'error',
+            message: 'Failed to delete user',
+            error: process.env.NODE_ENV === 'development' ? err.message : undefined
+        });
+    }
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
