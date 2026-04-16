@@ -20694,9 +20694,28 @@ const processMaturedInvestments = async () => {
         if (!user) continue;
 
         const totalReturn = investment.amount + (investment.amount * investment.plan.percentage / 100);
-
-        user.balances.active -= investment.amount;
-        user.balances.matured += totalReturn;
+        
+        // ✅ FIXED: Use user.balances object with Maps (active and matured)
+        if (!user.balances) {
+          user.balances = { main: new Map(), active: new Map(), matured: new Map() };
+        }
+        
+        // Get current values from Maps
+        const currentActiveUSD = user.balances.active?.get('usd') || 0;
+        const currentMaturedUSD = user.balances.matured?.get('usd') || 0;
+        
+        // Update Maps
+        user.balances.active.set('usd', currentActiveUSD - investment.amount);
+        user.balances.matured.set('usd', currentMaturedUSD + totalReturn);
+        
+        // Also handle crypto balances if needed
+        const currentActiveBTC = user.balances.active?.get('btc') || 0;
+        const currentMaturedBTC = user.balances.matured?.get('btc') || 0;
+        
+        if (investment.amountBTC) {
+          user.balances.active.set('btc', currentActiveBTC - investment.amountBTC);
+          user.balances.matured.set('btc', currentMaturedBTC + (totalReturn / investment.btcPriceAtCompletion || 0));
+        }
 
         investment.status = 'completed';
         investment.completionDate = now;
@@ -20724,12 +20743,12 @@ const processMaturedInvestments = async () => {
         });
         
         io.to(`user_${user._id}`).emit('balance_update', {
-          main: user.balances.main,
-          active: user.balances.active,
-          matured: user.balances.matured
+          main: user.balances.main?.get('usd') || 0,
+          active: user.balances.active?.get('usd') || 0,
+          matured: user.balances.matured?.get('usd') || 0
         });
 
-        console.log(`Automatically completed investment ${investment._id} for user ${user.email}`);
+        console.log(`✅ Automatically completed investment ${investment._id} for user ${user.email}`);
       } catch (err) {
         console.error(`Error processing investment ${investment._id}:`, err);
       }
