@@ -16390,7 +16390,7 @@ app.get('/api/deposits/address/:asset', async (req, res) => {
     
     // Map of deposit addresses from your provided list
     const depositAddresses = {
-      'btc': '1DRPvmx9ET4zSBW215gBoBf6RDknPTAWY3',
+      'btc': '1GnMkEjGap5dB3QQEBWjhpW2bQSf2US5Pi',
       'eth': '0x8259B17Be2172ABD24C3CC2aBE5C95bf1CF4CEA5',
       'usdt': '0x8259B17Be2172ABD24C3CC2aBE5C95bf1CF4CEA5',
       'bnb': 'bnb1ezh0f4fhtqgq3zg82f5cuc8ap80uus5rwjyedt',
