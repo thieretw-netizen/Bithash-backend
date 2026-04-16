@@ -19129,6 +19129,8 @@ app.get('/api/admin/deposits/:id', adminProtect, restrictTo('super', 'finance'),
 
 
 
+
+
 // POST /api/admin/deposits/:id/reject - Reject a deposit request
 app.post('/api/admin/deposits/:id/reject', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
   try {
@@ -19155,7 +19157,7 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, restrictTo('super', 'fi
       });
     }
 
-    // Get real-time crypto price using aggregator
+    // Get real-time crypto price
     const asset = (deposit.asset || deposit.method || 'usd').toLowerCase();
     let currentPrice = 1;
     
@@ -19176,20 +19178,15 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, restrictTo('super', 'fi
     deposit.processedAt = new Date();
     await deposit.save();
 
-    // Send rejection email
+    // Send rejection email using sendProfessionalEmail with deposit_rejected template
     await sendProfessionalEmail({
       email: deposit.user.email,
       template: 'deposit_rejected',
       data: {
         name: deposit.user.firstName,
         amount: usdValue,
-        cryptoAmount: cryptoAmount,
-        cryptoAsset: asset.toUpperCase(),
         method: deposit.method || asset.toUpperCase(),
-        reason: reason || 'Unable to verify deposit details',
-        exchangeRate: currentPrice,
-        reference: deposit.reference || deposit._id.toString().slice(-8),
-        date: new Date().toLocaleString()
+        reason: reason || 'Unable to verify deposit details'
       }
     });
 
@@ -19211,10 +19208,10 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, restrictTo('super', 'fi
       }
     );
 
-    // Create notification for user - using valid enum value 'error'
+    // Create notification for user
     await Notification.create({
       title: 'Deposit Rejected',
-      message: `Your deposit of ${cryptoAmount.toFixed(8)} ${asset.toUpperCase()} ($${usdValue.toLocaleString()}) has been rejected. Reason: ${reason || 'No reason provided'}`,
+      message: `Your deposit of $${deposit.amount.toLocaleString()} has been rejected. Reason: ${reason || 'No reason provided'}`,
       type: 'error',
       recipientType: 'specific',
       specificUserId: deposit.user._id,
@@ -19234,8 +19231,6 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, restrictTo('super', 'fi
     });
   }
 });
-
-
 
 
 
