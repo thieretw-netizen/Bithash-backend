@@ -5905,18 +5905,19 @@ await logActivity('login_attempt', 'authentication', null, null, null, req, {
       }
     });
 
-    await logUserActivity(req, 'login_otp_sent', 'pending', {
-      email: email, // Log exact email used
-      userId: user._id
-    }, user);
+    await logActivity('login_otp_sent', 'authentication', user._id, user._id, 'User', req, {
+  email: email,
+  status: 'pending'
+});
 
   } catch (err) {
     console.error('Login error:', err);
     
-    await logUserActivity(req, 'login_error', 'failed', {
-      error: err.message,
-      email: req.body.email // Log exact email used
-    });
+  await logActivity('login_error', 'authentication', null, null, null, req, {
+  error: err.message,
+  email: req.body.email,
+  status: 'failed'
+});
 
     res.status(500).json({
       status: 'error',
