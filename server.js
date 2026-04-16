@@ -19309,12 +19309,6 @@ function getCryptoLogo(assetCode) {
 
 
 
-
-
-
-
-
-
 // POST /api/admin/deposits/:id/reject - Reject a deposit request
 app.post('/api/admin/deposits/:id/reject', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
   try {
@@ -19347,6 +19341,45 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, restrictTo('super', 'fi
     deposit.processedAt = new Date();
     await deposit.save();
 
+    // Send rejection email to user
+    await sendProfessionalEmail({
+      email: deposit.user.email,
+      template: 'deposit_rejected',
+      data: {
+        name: deposit.user.firstName,
+        amount: deposit.amount,
+        method: deposit.method || deposit.asset || 'crypto',
+        reason: reason || 'No reason provided'
+      }
+    });
+
+    // Log activity
+    await logActivity(
+      'deposit_rejected',
+      'Transaction',
+      deposit._id,
+      req.admin._id,
+      'Admin',
+      req,
+      {
+        userId: deposit.user._id,
+        amount: deposit.amount,
+        reason: reason,
+        depositId: deposit._id
+      }
+    );
+
+    // Create notification for user
+    await Notification.create({
+      title: 'Deposit Rejected',
+      message: `Your deposit of $${deposit.amount.toLocaleString()} has been rejected. Reason: ${reason || 'No reason provided'}`,
+      type: 'deposit_rejected',
+      recipientType: 'specific',
+      specificUserId: deposit.user._id,
+      sentBy: req.admin._id,
+      isImportant: true
+    });
+
     res.status(200).json({
       status: 'success',
       message: 'Deposit rejected successfully'
@@ -19359,6 +19392,8 @@ app.post('/api/admin/deposits/:id/reject', adminProtect, restrictTo('super', 'fi
     });
   }
 });
+
+
 
 
 
