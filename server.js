@@ -19319,12 +19319,8 @@ function getCryptoLogo(assetCode) {
 
 
 
-
-
-
-
-// PATCH /api/admin/deposits/:id/reject
-app.patch('/api/admin/deposits/:id/reject', adminProtect, restrictTo('finance', 'super'), async (req, res) => {
+// POST /api/admin/deposits/:id/reject
+app.post('/api/admin/deposits/:id/reject', adminProtect, restrictTo('finance', 'super'), async (req, res) => {
   try {
     const depositId = req.params.id;
     const { reason } = req.body;
@@ -19335,36 +19331,28 @@ app.patch('/api/admin/deposits/:id/reject', adminProtect, restrictTo('finance', 
     }
     
     deposit.status = 'failed';
-    deposit.adminNotes = reason || 'Rejected by admin';
-    deposit.processedAt = new Date();
-    deposit.processedBy = req.admin._id;
+    deposit.metadata = {
+      ...deposit.metadata,
+      rejectionReason: reason,
+      rejectedBy: req.admin._id,
+      rejectedAt: new Date()
+    };
     await deposit.save();
     
-    // Update transaction status
-    await Transaction.findByIdAndUpdate(deposit.transactionId, { 
-      status: 'failed',
-      adminNotes: reason
-    });
-    
-    // Send rejection email to user
-    const user = await User.findById(deposit.user);
-    if (user) {
-      await sendAutomatedEmail(user, 'deposit_rejected', {
-        amount: deposit.amount,
-        method: deposit.asset.toUpperCase(),
-        reason: reason || 'Admin rejection'
+    if (deposit.transactionId) {
+      await Transaction.findByIdAndUpdate(deposit.transactionId, {
+        status: 'failed',
+        adminNotes: reason,
+        processedBy: req.admin._id,
+        processedAt: new Date()
       });
     }
     
-    await logActivity('deposit_rejected', 'DepositAsset', depositId, req.admin._id, 'Admin', req, { reason });
-    
     res.status(200).json({ status: 'success', message: 'Deposit rejected successfully' });
   } catch (err) {
-    console.error('Error rejecting deposit:', err);
     res.status(500).json({ status: 'error', message: err.message });
   }
 });
-
 
 
 
