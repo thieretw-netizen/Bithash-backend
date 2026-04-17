@@ -5571,14 +5571,7 @@ const getBrowserFromUserAgent = (userAgent) => {
 
 
 
-
-
-
-// =============================================
-// SIMPLE GREETING UTILITIES - SHORT VERSION
-// =============================================
-
-// Get simple time-based greeting (short version)
+// Simple greeting function - short version
 function getShortGreeting(timezone = 'UTC') {
   try {
     const userTime = new Date().toLocaleString('en-US', { timeZone: timezone });
@@ -5598,7 +5591,7 @@ function getShortGreeting(timezone = 'UTC') {
   }
 }
 
-// Truncate email for display (show first 3 and last 3 chars)
+// Truncate email for display
 function truncateEmail(email) {
   if (!email) return 'your email';
   
@@ -5614,7 +5607,19 @@ function truncateEmail(email) {
   return `${firstChars}...${lastChars}@${domain}`;
 }
 
-
+// Get user timezone from IP
+async function getUserTimezoneFromIP(ipAddress) {
+  try {
+    const ipinfoToken = process.env.IPINFO_TOKEN || 'b56ce6e91d732d';
+    const response = await axios.get(`https://ipinfo.io/${ipAddress}?token=${ipinfoToken}`, { timeout: 3000 });
+    if (response.data && response.data.timezone) {
+      return response.data.timezone;
+    }
+  } catch (err) {
+    console.log('Timezone detection failed:', err.message);
+  }
+  return 'UTC';
+}
 
 
 
@@ -5989,11 +5994,19 @@ await logActivity('login_attempt', 'authentication', null, null, null, req, {
 
 
 
+
+
+
+
+
+
+
+
 app.post('/api/auth/google', async (req, res) => {
   try {
     console.log('Google auth request received');
     
-    const { credential, accountType, isSignup = false } = req.body;
+    const { credential, isSignup = false, accountType = 'individual' } = req.body;
     
     if (!credential) {
       return res.status(400).json({
@@ -6010,6 +6023,7 @@ app.post('/api/auth/google', async (req, res) => {
       });
       payload = ticket.getPayload();
     } catch (verifyError) {
+      console.error('Google token verification failed:', verifyError);
       return res.status(400).json({
         status: 'fail',
         message: 'Invalid Google token. Please try again.'
@@ -6025,17 +6039,21 @@ app.post('/api/auth/google', async (req, res) => {
       });
     }
 
-    // Get user's IP and timezone for greeting
+    // Get timezone and greeting for personalized messages
     const clientIP = getRealClientIP(req);
     const userTimezone = await getUserTimezoneFromIP(clientIP);
     const greeting = getShortGreeting(userTimezone);
     const truncatedEmail = truncateEmail(email);
 
+    // CRITICAL: Check if user exists - DO NOT modify this logic
     let user = await User.findOne({ email: email });
     const userExists = !!user;
 
-    // LOGIN attempt but user doesn't exist
+    // =============================================
+    // CASE 1: LOGIN attempt but user doesn't exist
+    // =============================================
     if (isSignup === false && !userExists) {
+      // LOG THIS ATTEMPT - PRESERVE YOUR LOGGING
       await logActivity('google_login_failed', 'authentication', null, null, null, req, {
         email: email,
         reason: 'account_not_found',
@@ -6043,9 +6061,10 @@ app.post('/api/auth/google', async (req, res) => {
         status: 'failed'
       });
       
+      // Return friendly message telling user they need to sign up
       return res.status(404).json({
         status: 'fail',
-        message: `${greeting}! We couldn't find an account with ${truncatedEmail}. Please create an account first.`,
+        message: `${greeting}! No account found for ${truncatedEmail}. Please sign up first.`,
         data: {
           greeting: greeting,
           truncatedEmail: truncatedEmail,
@@ -6054,8 +6073,11 @@ app.post('/api/auth/google', async (req, res) => {
       });
     }
 
-    // SIGNUP attempt but user already exists
+    // =============================================
+    // CASE 2: SIGNUP attempt but user already exists
+    // =============================================
     if (isSignup === true && userExists) {
+      // LOG THIS ATTEMPT - PRESERVE YOUR LOGGING
       await logActivity('google_signup_failed', 'authentication', user._id, user._id, 'User', req, {
         email: email,
         reason: 'account_already_exists',
@@ -6063,16 +6085,16 @@ app.post('/api/auth/google', async (req, res) => {
         status: 'failed'
       });
       
-      // Send security email about duplicate signup attempt
+      // SEND EMAIL NOTIFICATION about attempted duplicate signup
       try {
         await sendProfessionalEmail({
           email: email,
           template: 'default',
           data: {
             name: user.firstName,
-            message: `${greeting} ${user.firstName}, we noticed an attempt to create a new account using your email address (${truncatedEmail}). You already have an account with us.`,
-            details: 'Duplicate signup attempt detected from your email address.',
-            actionRequired: 'If this was you, please log in to your existing account. If this was not you, please contact our support team immediately to secure your account.',
+            message: `We noticed an attempt to create a new account using your email address (${truncatedEmail}). If this was you, please log in to your existing account. If this wasn't you, please contact our support team immediately.`,
+            details: 'Duplicate signup attempt detected',
+            actionRequired: 'No action needed if you initiated this. Otherwise, secure your account.',
             buttonText: 'Login to Your Account',
             actionLink: 'https://www.bithashcapital.live/login',
             referenceId: `SEC-${Date.now()}-${Math.floor(Math.random() * 10000)}`
@@ -6083,9 +6105,10 @@ app.post('/api/auth/google', async (req, res) => {
         console.error('Failed to send duplicate signup alert email:', emailError);
       }
       
+      // Return friendly message telling user they already have an account
       return res.status(409).json({
         status: 'fail',
-        message: `${greeting} ${user.firstName}! You already have an account with ${truncatedEmail}. Please log in instead.`,
+        message: `${greeting}! You already have an account with ${truncatedEmail}. Please log in.`,
         data: {
           greeting: greeting,
           truncatedEmail: truncatedEmail,
@@ -6095,11 +6118,13 @@ app.post('/api/auth/google', async (req, res) => {
       });
     }
 
-    // --- SUCCESS FLOW: Create or update user ---
+    // =============================================
+    // CASE 3: SUCCESS FLOW - Create or update user (PRESERVE YOUR ORIGINAL LOGIC)
+    // =============================================
     let isNewUser = false;
 
     if (!userExists) {
-      // Create new user
+      // Create new user - PRESERVE YOUR EXISTING CODE
       try {
         const referralCode = generateReferralCode();
         user = await User.create({
@@ -6114,6 +6139,7 @@ app.post('/api/auth/google', async (req, res) => {
         isNewUser = true;
         console.log(`New user created via Google: ${email}`);
         
+        // LOG successful signup
         await logActivity('google_signup_success', 'user', user._id, user._id, 'User', req, {
           email: email,
           provider: 'google',
@@ -6121,7 +6147,7 @@ app.post('/api/auth/google', async (req, res) => {
           status: 'success'
         });
         
-        // Send welcome email
+        // SEND WELCOME EMAIL
         try {
           await sendAutomatedEmail(user, 'welcome', {
             name: user.firstName,
@@ -6140,11 +6166,12 @@ app.post('/api/auth/google', async (req, res) => {
         });
       }
     } else if (!user.googleId) {
-      // Link Google account to existing user
+      // Link Google account to existing user - PRESERVE YOUR EXISTING CODE
       user.googleId = sub;
       user.isVerified = true;
       await user.save();
       
+      // LOG successful link
       await logActivity('google_account_linked', 'user', user._id, user._id, 'User', req, {
         email: email,
         provider: 'google',
@@ -6152,15 +6179,15 @@ app.post('/api/auth/google', async (req, res) => {
         status: 'success'
       });
       
-      // Send email about Google account linking
+      // SEND EMAIL about Google account linking
       try {
         await sendProfessionalEmail({
           email: email,
           template: 'default',
           data: {
             name: user.firstName,
-            message: `${greeting} ${user.firstName}, your Google account has been successfully linked to your BitHash Capital account (${truncatedEmail}). You can now sign in using Google.`,
-            details: 'Google authentication enabled for your account.',
+            message: `Your Google account has been successfully linked to your BitHash Capital account (${truncatedEmail}). You can now sign in using Google.`,
+            details: 'Google authentication enabled',
             buttonText: 'Go to Dashboard',
             actionLink: 'https://www.bithashcapital.live/dashboard',
             referenceId: `LINK-${Date.now()}-${Math.floor(Math.random() * 10000)}`
@@ -6172,7 +6199,7 @@ app.post('/api/auth/google', async (req, res) => {
       }
     }
 
-    // Check account status
+    // Check account status - PRESERVE YOUR EXISTING CODE
     if (user.status !== 'active') {
       return res.status(401).json({
         status: 'fail',
@@ -6180,7 +6207,7 @@ app.post('/api/auth/google', async (req, res) => {
       });
     }
 
-    // Generate OTP
+    // Generate OTP - PRESERVE YOUR EXISTING CODE
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
@@ -6193,7 +6220,7 @@ app.post('/api/auth/google', async (req, res) => {
       userAgent: req.headers['user-agent']
     });
 
-    // Send OTP email
+    // SEND OTP EMAIL - PRESERVE YOUR EXISTING CODE
     await sendProfessionalEmail({
       email: email,
       template: 'otp',
@@ -6204,7 +6231,7 @@ app.post('/api/auth/google', async (req, res) => {
       }
     });
 
-    // Log login attempt with OTP sent
+    // LOG login attempt with OTP sent - PRESERVE YOUR EXISTING CODE
     const deviceInfo = await getUserDeviceInfo(req);
     await UserLog.create({
       user: user._id,
@@ -6240,7 +6267,7 @@ app.post('/api/auth/google', async (req, res) => {
       }
     });
 
-    // Send login notification email
+    // SEND LOGIN NOTIFICATION EMAIL - PRESERVE YOUR EXISTING CODE
     try {
       await sendAutomatedEmail(user, 'login_success', {
         name: user.firstName,
@@ -6254,16 +6281,20 @@ app.post('/api/auth/google', async (req, res) => {
       console.error('Login notification email failed:', emailError);
     }
 
-    // Update last login
+    // Update last login - PRESERVE YOUR EXISTING CODE
     user.lastLogin = new Date();
     user.loginHistory.push(deviceInfo);
     await user.save();
 
     const tempToken = generateJWT(user._id);
 
-    const successMessage = isNewUser 
-      ? `${greeting} ${user.firstName}! Your account has been created. A verification code has been sent to ${truncatedEmail}.`
-      : `${greeting} ${user.firstName}! A verification code has been sent to ${truncatedEmail}.`;
+    // Construct personalized success message
+    let successMessage = '';
+    if (isNewUser) {
+      successMessage = `${greeting}! Account created. Verification code sent to ${truncatedEmail}.`;
+    } else {
+      successMessage = `${greeting}! Verification code sent to ${truncatedEmail}.`;
+    }
 
     res.status(200).json({
       status: 'success',
@@ -6285,6 +6316,7 @@ app.post('/api/auth/google', async (req, res) => {
   } catch (err) {
     console.error('Google auth error:', err);
     
+    // LOG the error - PRESERVE YOUR EXISTING CODE
     await logActivity('google_auth_error', 'authentication', null, null, null, req, {
       error: err.message,
       status: 'failed'
@@ -6297,19 +6329,6 @@ app.post('/api/auth/google', async (req, res) => {
   }
 });
 
-// Helper function to get user timezone from IP
-async function getUserTimezoneFromIP(ip) {
-  try {
-    const ipinfoToken = process.env.IPINFO_TOKEN || 'b56ce6e91d732d';
-    const response = await axios.get(`https://ipinfo.io/${ip}?token=${ipinfoToken}`, { timeout: 3000 });
-    if (response.data && response.data.timezone) {
-      return response.data.timezone;
-    }
-  } catch (err) {
-    console.log('Could not get timezone from IP, using UTC');
-  }
-  return 'UTC';
-}
 
 
 
