@@ -4040,7 +4040,6 @@ const recalculateAllUserBalances = async (io) => {
       let totalActiveValue = 0;
       let totalMaturedValue = 0;
       
-      // ✅ FIXED: Use user.balances directly instead of UserAssetBalance
       // Calculate MAIN wallet value (crypto assets only - fluctuates with price)
       if (user.balances && user.balances.main) {
         const mainBalances = user.balances.main;
