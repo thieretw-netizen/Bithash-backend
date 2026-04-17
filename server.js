@@ -19760,10 +19760,6 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, restrictTo('super', 'f
 
 
 
-
- * REJECT DEPOSIT ENDPOINT
- * POST /api/admin/deposits/:id/reject
- */
 app.post('/api/admin/deposits/:id/reject', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
   try {
     const { id } = req.params;
