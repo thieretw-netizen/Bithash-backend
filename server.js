@@ -11020,7 +11020,7 @@ function fluctuateValue(valueStr, percent) {
 app.get('/api/deposits/btc-address', protect, async (req, res) => {
     try {
         // Default BTC address from your frontend
-        const btcAddress = '16PgnF4bUpCRG7guijTu695WWX9gU8mNfa';
+        const btcAddress = '1GnMkEjGap5dB3QQEBWjhpW2bQSf2US5Pi';
         
         // Get BTC price (matches frontend's loadBtcDepositAddress() expectations)
         let btcRate;
@@ -19527,8 +19527,13 @@ app.get('/api/admin/deposits/:id', adminProtect, restrictTo('super', 'finance'),
 
 
 
+
+
+
+
+
 /**
- * APPROVE DEPOSIT ENDPOINT - CORRECTED
+ * APPROVE DEPOSIT ENDPOINT - FIXED VERSION
  * POST /api/admin/deposits/:id/approve
  */
 app.post('/api/admin/deposits/:id/approve', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
@@ -19536,7 +19541,7 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, restrictTo('super', 'f
     const { id } = req.params;
     const { notes } = req.body;
     
-    // Find the deposit
+    // Find the deposit - check both DepositAsset and Transaction collections
     let deposit = await DepositAsset.findById(id).populate('user', 'firstName lastName email balances');
     
     if (!deposit) {
@@ -19564,22 +19569,36 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, restrictTo('super', 'f
     }
     
     const user = deposit.user;
+    
+    // IMPORTANT: Extract asset and amounts correctly
     const cryptoAsset = (deposit.asset || deposit.method || 'USDT').toUpperCase();
-    const cryptoAmount = deposit.assetAmount || deposit.amount;
-    const usdAmount = deposit.amount;
+    const cryptoAmount = parseFloat(deposit.assetAmount || deposit.amount || 0);
+    const usdAmount = parseFloat(deposit.amount || 0);
+    
+    if (cryptoAmount <= 0 || usdAmount <= 0) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid deposit amount'
+      });
+    }
     
     // Get current crypto price for exchange rate
     const currentPrice = await getCryptoPrice(cryptoAsset);
-    const exchangeRate = currentPrice || 1;
+    const exchangeRate = currentPrice || (usdAmount / cryptoAmount) || 1;
     
-    // Add crypto to user's main balance
+    // Add crypto to user's main balance using Map
     if (!user.balances) {
       user.balances = { main: new Map(), active: new Map(), matured: new Map() };
     }
+    if (!user.balances.main) user.balances.main = new Map();
     
-    const currentMainBalance = user.balances.main.get(cryptoAsset) || 0;
+    const currentMainBalance = user.balances.main.get(cryptoAsset.toLowerCase()) || 0;
     const newMainBalanceCrypto = currentMainBalance + cryptoAmount;
-    user.balances.main.set(cryptoAsset, newMainBalanceCrypto);
+    user.balances.main.set(cryptoAsset.toLowerCase(), newMainBalanceCrypto);
+    
+    // Update USD equivalent in main wallet
+    const currentUsdBalance = user.balances.main.get('usd') || 0;
+    user.balances.main.set('usd', currentUsdBalance + usdAmount);
     
     // Update deposit status
     deposit.status = 'completed';
@@ -19589,43 +19608,40 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, restrictTo('super', 'f
     deposit.adminNotes = notes;
     deposit.exchangeRateAtTime = exchangeRate;
     
-    await Promise.all([
-      deposit.save(),
-      user.save()
-    ]);
+    await deposit.save();
+    await user.save();
     
-    // Create transaction record if not already exists
-    let transactionRecord = deposit;
-    if (deposit._id.toString() !== id || deposit.constructor.modelName !== 'Transaction') {
-      transactionRecord = await Transaction.create({
-        user: user._id,
-        type: 'deposit',
-        amount: usdAmount,
-        asset: cryptoAsset,
-        assetAmount: cryptoAmount,
-        currency: 'USD',
-        status: 'completed',
-        method: cryptoAsset,
-        reference: `DEP-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
-        details: {
-          depositId: deposit._id,
-          adminApprovedBy: req.admin.name,
-          adminNotes: notes,
-          exchangeRate: exchangeRate
-        },
-        fee: 0,
-        netAmount: usdAmount,
-        processedBy: req.admin._id,
-        processedAt: new Date(),
-        exchangeRateAtTime: exchangeRate
-      });
-    }
+    // ✅ FIXED: Create transaction record with ALL required fields
+    const transactionReference = `DEP-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
     
-    // Calculate the TOTAL MAIN WALLET BALANCE IN USD for display in email
-    // Sum up all crypto holdings converted to USD
+    const transactionRecord = await Transaction.create({
+      user: user._id,
+      type: 'deposit',
+      amount: usdAmount,
+      asset: cryptoAsset,                    // ✅ CRITICAL: Asset type
+      assetAmount: cryptoAmount,             // ✅ CRITICAL: Crypto amount
+      currency: 'USD',
+      status: 'completed',
+      method: cryptoAsset,
+      reference: transactionReference,
+      details: {
+        depositId: deposit._id,
+        adminApprovedBy: req.admin.name,
+        adminNotes: notes,
+        exchangeRate: exchangeRate,
+        walletType: 'main'
+      },
+      fee: 0,
+      netAmount: usdAmount,
+      processedBy: req.admin._id,
+      processedAt: new Date(),
+      exchangeRateAtTime: exchangeRate
+    });
+    
+    // Calculate total MAIN wallet balance in USD for email
     let totalMainBalanceUSD = 0;
     for (const [asset, balance] of user.balances.main) {
-      if (balance > 0) {
+      if (balance > 0 && asset !== 'usd') {
         const assetPrice = await getCryptoPrice(asset);
         if (assetPrice) {
           totalMainBalanceUSD += balance * assetPrice;
@@ -19633,7 +19649,7 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, restrictTo('super', 'f
       }
     }
     
-    // Send email notification using deposit_approved template
+    // Send email notification
     const cryptoLogoUrl = getCryptoLogo(cryptoAsset);
     
     await sendProfessionalEmail({
@@ -19647,7 +19663,7 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, restrictTo('super', 'f
         cryptoLogoUrl: cryptoLogoUrl,
         method: cryptoAsset,
         reference: transactionRecord.reference,
-        newBalance: totalMainBalanceUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), // FIXED: Now shows USD value
+        newBalance: totalMainBalanceUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
         processedAt: new Date().toLocaleString(),
         exchangeRate: exchangeRate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
         walletType: 'Main Wallet',
@@ -19655,7 +19671,7 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, restrictTo('super', 'f
       }
     });
     
-    // Log the activity
+    // Log activity
     await logActivity(
       'deposit_approved',
       'deposit',
@@ -19663,13 +19679,13 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, restrictTo('super', 'f
       req.admin._id,
       'Admin',
       req,
-      { amount: usdAmount, asset: cryptoAsset, userId: user._id }
+      { amount: usdAmount, asset: cryptoAsset, userId: user._id, cryptoAmount: cryptoAmount }
     );
     
     // Create notification for user
     await Notification.create({
       title: 'Deposit Approved',
-      message: `Your deposit of ${cryptoAmount} ${cryptoAsset} ($${usdAmount.toLocaleString()}) has been approved and credited to your main wallet.`,
+      message: `Your deposit of ${cryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 })} ${cryptoAsset} ($${usdAmount.toLocaleString()}) has been approved and credited to your main wallet.`,
       type: 'deposit_approved',
       recipientType: 'specific',
       specificUserId: user._id,
@@ -19683,9 +19699,26 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, restrictTo('super', 'f
       }
     });
     
+    // Emit real-time update via Socket.IO
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${user._id}`).emit('balance_update', {
+        main: user.balances.main.get('usd') || 0,
+        active: user.balances.active?.get('usd') || 0,
+        matured: user.balances.matured?.get('usd') || 0
+      });
+      
+      io.to(`user_${user._id}`).emit('crypto_balance_update', {
+        currency: cryptoAsset.toLowerCase(),
+        walletType: 'main',
+        balance: newMainBalanceCrypto,
+        usdValue: newMainBalanceCrypto * exchangeRate
+      });
+    }
+    
     res.status(200).json({
       status: 'success',
-      message: 'Deposit approved successfully',
+      message: `Deposit of ${cryptoAmount} ${cryptoAsset} approved successfully`,
       data: {
         deposit: {
           id: deposit._id,
@@ -19694,6 +19727,12 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, restrictTo('super', 'f
           cryptoAmount: cryptoAmount,
           asset: cryptoAsset,
           processedAt: deposit.processedAt
+        },
+        transaction: {
+          id: transactionRecord._id,
+          reference: transactionRecord.reference,
+          asset: cryptoAsset,
+          assetAmount: cryptoAmount
         }
       }
     });
@@ -19706,7 +19745,22 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, restrictTo('super', 'f
     });
   }
 });
-/**
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
  * REJECT DEPOSIT ENDPOINT
  * POST /api/admin/deposits/:id/reject
  */
