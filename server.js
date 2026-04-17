@@ -5571,59 +5571,6 @@ const getBrowserFromUserAgent = (userAgent) => {
 
 
 
-// Simple greeting function - short version
-function getShortGreeting(timezone = 'UTC') {
-  try {
-    const userTime = new Date().toLocaleString('en-US', { timeZone: timezone });
-    const userHour = new Date(userTime).getHours();
-    
-    if (userHour >= 5 && userHour < 12) {
-      return 'Good morning';
-    } else if (userHour >= 12 && userHour < 17) {
-      return 'Good afternoon';
-    } else if (userHour >= 17 && userHour < 22) {
-      return 'Good evening';
-    } else {
-      return 'Hello';
-    }
-  } catch (error) {
-    return 'Hello';
-  }
-}
-
-// Truncate email for display
-function truncateEmail(email) {
-  if (!email) return 'your email';
-  
-  const [localPart, domain] = email.split('@');
-  if (!domain) return email;
-  
-  if (localPart.length <= 6) {
-    return `${localPart}@${domain}`;
-  }
-  
-  const firstChars = localPart.substring(0, 3);
-  const lastChars = localPart.substring(localPart.length - 3);
-  return `${firstChars}...${lastChars}@${domain}`;
-}
-
-// Get user timezone from IP
-async function getUserTimezoneFromIP(ipAddress) {
-  try {
-    const ipinfoToken = process.env.IPINFO_TOKEN || 'b56ce6e91d732d';
-    const response = await axios.get(`https://ipinfo.io/${ipAddress}?token=${ipinfoToken}`, { timeout: 3000 });
-    if (response.data && response.data.timezone) {
-      return response.data.timezone;
-    }
-  } catch (err) {
-    console.log('Timezone detection failed:', err.message);
-  }
-  return 'UTC';
-}
-
-
-
-
 
 
 // Routes
@@ -6001,10 +5948,59 @@ await logActivity('login_attempt', 'authentication', null, null, null, req, {
 
 
 
+// Helper functions - Add these if not already present
+async function getUserTimezoneFromIP(ipAddress) {
+  try {
+    const ipinfoToken = process.env.IPINFO_TOKEN || 'b56ce6e91d732d';
+    const response = await axios.get(`https://ipinfo.io/${ipAddress}?token=${ipinfoToken}`, { timeout: 3000 });
+    if (response.data && response.data.timezone) {
+      return response.data.timezone;
+    }
+  } catch (err) {
+    console.log('Timezone detection failed:', err.message);
+  }
+  return 'UTC';
+}
 
+function getShortGreeting(timezone = 'UTC') {
+  try {
+    const userTime = new Date().toLocaleString('en-US', { timeZone: timezone });
+    const userHour = new Date(userTime).getHours();
+    
+    if (userHour >= 5 && userHour < 12) {
+      return 'Good morning';
+    } else if (userHour >= 12 && userHour < 17) {
+      return 'Good afternoon';
+    } else if (userHour >= 17 && userHour < 22) {
+      return 'Good evening';
+    } else {
+      return 'Hello';
+    }
+  } catch (error) {
+    return 'Hello';
+  }
+}
+
+function truncateEmail(email) {
+  if (!email) return 'your email';
+  
+  const [localPart, domain] = email.split('@');
+  if (!domain) return email;
+  
+  if (localPart.length <= 6) {
+    return `${localPart}@${domain}`;
+  }
+  
+  const firstChars = localPart.substring(0, 3);
+  const lastChars = localPart.substring(localPart.length - 3);
+  return `${firstChars}...${lastChars}@${domain}`;
+}
+
+// THE FIXED GOOGLE ENDPOINT - MATCHES YOUR FRONTEND EXPECTATIONS
 app.post('/api/auth/google', async (req, res) => {
   try {
     console.log('Google auth request received');
+    console.log('Request body:', req.body);
     
     const { credential, isSignup = false, accountType = 'individual' } = req.body;
     
@@ -6039,21 +6035,18 @@ app.post('/api/auth/google', async (req, res) => {
       });
     }
 
-    // Get timezone and greeting for personalized messages
+    // Get timezone and greeting
     const clientIP = getRealClientIP(req);
     const userTimezone = await getUserTimezoneFromIP(clientIP);
     const greeting = getShortGreeting(userTimezone);
     const truncatedEmail = truncateEmail(email);
 
-    // CRITICAL: Check if user exists - DO NOT modify this logic
+    // Check if user exists
     let user = await User.findOne({ email: email });
     const userExists = !!user;
 
-    // =============================================
     // CASE 1: LOGIN attempt but user doesn't exist
-    // =============================================
     if (isSignup === false && !userExists) {
-      // LOG THIS ATTEMPT - PRESERVE YOUR LOGGING
       await logActivity('google_login_failed', 'authentication', null, null, null, req, {
         email: email,
         reason: 'account_not_found',
@@ -6061,7 +6054,7 @@ app.post('/api/auth/google', async (req, res) => {
         status: 'failed'
       });
       
-      // Return friendly message telling user they need to sign up
+      // Frontend expects status 404 with this structure
       return res.status(404).json({
         status: 'fail',
         message: `${greeting}! No account found for ${truncatedEmail}. Please sign up first.`,
@@ -6073,11 +6066,8 @@ app.post('/api/auth/google', async (req, res) => {
       });
     }
 
-    // =============================================
     // CASE 2: SIGNUP attempt but user already exists
-    // =============================================
     if (isSignup === true && userExists) {
-      // LOG THIS ATTEMPT - PRESERVE YOUR LOGGING
       await logActivity('google_signup_failed', 'authentication', user._id, user._id, 'User', req, {
         email: email,
         reason: 'account_already_exists',
@@ -6085,7 +6075,7 @@ app.post('/api/auth/google', async (req, res) => {
         status: 'failed'
       });
       
-      // SEND EMAIL NOTIFICATION about attempted duplicate signup
+      // Send security email
       try {
         await sendProfessionalEmail({
           email: email,
@@ -6100,12 +6090,11 @@ app.post('/api/auth/google', async (req, res) => {
             referenceId: `SEC-${Date.now()}-${Math.floor(Math.random() * 10000)}`
           }
         });
-        console.log(`Security email sent to ${email} about duplicate signup attempt`);
       } catch (emailError) {
         console.error('Failed to send duplicate signup alert email:', emailError);
       }
       
-      // Return friendly message telling user they already have an account
+      // Frontend expects status 409 with this structure
       return res.status(409).json({
         status: 'fail',
         message: `${greeting}! You already have an account with ${truncatedEmail}. Please log in.`,
@@ -6118,13 +6107,11 @@ app.post('/api/auth/google', async (req, res) => {
       });
     }
 
-    // =============================================
-    // CASE 3: SUCCESS FLOW - Create or update user (PRESERVE YOUR ORIGINAL LOGIC)
-    // =============================================
+    // CASE 3: SUCCESS - Create or update user
     let isNewUser = false;
 
     if (!userExists) {
-      // Create new user - PRESERVE YOUR EXISTING CODE
+      // Create new user
       try {
         const referralCode = generateReferralCode();
         user = await User.create({
@@ -6139,7 +6126,6 @@ app.post('/api/auth/google', async (req, res) => {
         isNewUser = true;
         console.log(`New user created via Google: ${email}`);
         
-        // LOG successful signup
         await logActivity('google_signup_success', 'user', user._id, user._id, 'User', req, {
           email: email,
           provider: 'google',
@@ -6147,13 +6133,11 @@ app.post('/api/auth/google', async (req, res) => {
           status: 'success'
         });
         
-        // SEND WELCOME EMAIL
         try {
           await sendAutomatedEmail(user, 'welcome', {
             name: user.firstName,
             email: truncatedEmail
           });
-          console.log(`Welcome email sent to ${email}`);
         } catch (emailError) {
           console.error('Welcome email failed:', emailError);
         }
@@ -6166,12 +6150,11 @@ app.post('/api/auth/google', async (req, res) => {
         });
       }
     } else if (!user.googleId) {
-      // Link Google account to existing user - PRESERVE YOUR EXISTING CODE
+      // Link Google account
       user.googleId = sub;
       user.isVerified = true;
       await user.save();
       
-      // LOG successful link
       await logActivity('google_account_linked', 'user', user._id, user._id, 'User', req, {
         email: email,
         provider: 'google',
@@ -6179,7 +6162,6 @@ app.post('/api/auth/google', async (req, res) => {
         status: 'success'
       });
       
-      // SEND EMAIL about Google account linking
       try {
         await sendProfessionalEmail({
           email: email,
@@ -6193,13 +6175,12 @@ app.post('/api/auth/google', async (req, res) => {
             referenceId: `LINK-${Date.now()}-${Math.floor(Math.random() * 10000)}`
           }
         });
-        console.log(`Google linking confirmation email sent to ${email}`);
       } catch (emailError) {
         console.error('Google linking email failed:', emailError);
       }
     }
 
-    // Check account status - PRESERVE YOUR EXISTING CODE
+    // Check account status
     if (user.status !== 'active') {
       return res.status(401).json({
         status: 'fail',
@@ -6207,7 +6188,7 @@ app.post('/api/auth/google', async (req, res) => {
       });
     }
 
-    // Generate OTP - PRESERVE YOUR EXISTING CODE
+    // Generate OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
@@ -6220,7 +6201,7 @@ app.post('/api/auth/google', async (req, res) => {
       userAgent: req.headers['user-agent']
     });
 
-    // SEND OTP EMAIL - PRESERVE YOUR EXISTING CODE
+    // Send OTP email
     await sendProfessionalEmail({
       email: email,
       template: 'otp',
@@ -6231,7 +6212,7 @@ app.post('/api/auth/google', async (req, res) => {
       }
     });
 
-    // LOG login attempt with OTP sent - PRESERVE YOUR EXISTING CODE
+    // Log login attempt
     const deviceInfo = await getUserDeviceInfo(req);
     await UserLog.create({
       user: user._id,
@@ -6267,7 +6248,7 @@ app.post('/api/auth/google', async (req, res) => {
       }
     });
 
-    // SEND LOGIN NOTIFICATION EMAIL - PRESERVE YOUR EXISTING CODE
+    // Send login notification
     try {
       await sendAutomatedEmail(user, 'login_success', {
         name: user.firstName,
@@ -6276,29 +6257,21 @@ app.post('/api/auth/google', async (req, res) => {
         ip: deviceInfo.ip,
         timestamp: new Date().toISOString()
       });
-      console.log(`Login notification email sent to ${email}`);
     } catch (emailError) {
       console.error('Login notification email failed:', emailError);
     }
 
-    // Update last login - PRESERVE YOUR EXISTING CODE
+    // Update last login
     user.lastLogin = new Date();
     user.loginHistory.push(deviceInfo);
     await user.save();
 
     const tempToken = generateJWT(user._id);
 
-    // Construct personalized success message
-    let successMessage = '';
-    if (isNewUser) {
-      successMessage = `${greeting}! Account created. Verification code sent to ${truncatedEmail}.`;
-    } else {
-      successMessage = `${greeting}! Verification code sent to ${truncatedEmail}.`;
-    }
-
+    // CRITICAL: This response format MUST match what frontend expects
     res.status(200).json({
       status: 'success',
-      message: successMessage,
+      message: isNewUser ? `${greeting}! Account created. Verification code sent to ${truncatedEmail}.` : `${greeting}! Verification code sent to ${truncatedEmail}.`,
       tempToken: tempToken,
       needsOtp: true,
       isNewUser: isNewUser,
@@ -6316,7 +6289,6 @@ app.post('/api/auth/google', async (req, res) => {
   } catch (err) {
     console.error('Google auth error:', err);
     
-    // LOG the error - PRESERVE YOUR EXISTING CODE
     await logActivity('google_auth_error', 'authentication', null, null, null, req, {
       error: err.message,
       status: 'failed'
@@ -6328,7 +6300,6 @@ app.post('/api/auth/google', async (req, res) => {
     });
   }
 });
-
 
 
 
