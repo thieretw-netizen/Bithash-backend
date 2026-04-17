@@ -6062,26 +6062,50 @@ app.post('/api/auth/google', async (req, res) => {
         timeZoneName: 'short'
       });
       
-      // Send security email about duplicate signup attempt with location details
-      try {
-        await sendProfessionalEmail({
-          email: email,
-          template: 'default',
-          data: {
-            name: user.firstName,
-            message: `We noticed an attempt to create a new account using your email address (${truncatedEmail}).`,
-            details: `This attempt was made from:\n\n• Location: ${locationString}\n• Device: ${deviceString}\n• IP Address: ${ipAddress}\n• Time: ${attemptTime}\n\nIf this was you, please log in to your existing account. If this wasn't you, please contact our support team immediately to secure your account.`,
-            actionRequired: 'Please review this activity and take appropriate action.',
-            buttonText: 'Login to Your Account',
-            actionLink: 'https://www.bithashcapital.live/login',
-            referenceId: `SEC-DUPLICATE-${Date.now()}-${Math.floor(Math.random() * 10000)}`
-          }
-        });
-        console.log(`Security email sent to ${email} about duplicate signup attempt from ${locationString}`);
-      } catch (emailError) {
-        console.error('Failed to send duplicate signup alert email:', emailError);
-      }
-      
+     // Send security email about duplicate signup attempt with clean formatting (no emojis)
+try {
+  // Clean up device info for display
+  let cleanDevice = deviceString;
+  // Extract browser and OS from user agent
+  if (deviceString.includes('Chrome/')) cleanDevice = 'Google Chrome';
+  else if (deviceString.includes('Firefox/')) cleanDevice = 'Mozilla Firefox';
+  else if (deviceString.includes('Safari/') && !deviceString.includes('Chrome/')) cleanDevice = 'Safari';
+  else if (deviceString.includes('Edg/')) cleanDevice = 'Microsoft Edge';
+  else if (deviceString.includes('Opera/') || deviceString.includes('OPR/')) cleanDevice = 'Opera';
+  
+  // Extract OS
+  let cleanOS = 'Unknown';
+  if (deviceString.includes('Windows NT 10.0')) cleanOS = 'Windows 10/11';
+  else if (deviceString.includes('Windows NT 6.1')) cleanOS = 'Windows 7';
+  else if (deviceString.includes('Mac OS X')) cleanOS = 'macOS';
+  else if (deviceString.includes('Android')) cleanOS = 'Android';
+  else if (deviceString.includes('iPhone') || deviceString.includes('iPad')) cleanOS = 'iOS';
+  else if (deviceString.includes('Linux')) cleanOS = 'Linux';
+  
+  await sendProfessionalEmail({
+    email: email,
+    template: 'default',
+    data: {
+      name: user.firstName,
+      message: `We noticed an attempt to create a new account using your email address (${truncatedEmail}).`,
+      details: `
+        <div style="background: #F5F5F5; padding: 15px; border-radius: 8px; margin: 15px 0;">
+          <p style="margin: 0 0 10px 0;"><strong>Location:</strong> ${locationString}</p>
+          <p style="margin: 0 0 10px 0;"><strong>Device:</strong> ${cleanDevice} on ${cleanOS}</p>
+          <p style="margin: 0 0 10px 0;"><strong>IP Address:</strong> ${ipAddress}</p>
+          <p style="margin: 0 0 0 0;"><strong>Time:</strong> ${attemptTime}</p>
+        </div>
+      `,
+      actionRequired: 'If this was you, please log in to your existing account. If this was not you, please contact our support team immediately to secure your account.',
+      buttonText: 'Login to Your Account',
+      actionLink: 'https://www.bithashcapital.live/login',
+      referenceId: `SEC-DUPLICATE-${Date.now()}-${Math.floor(Math.random() * 10000)}`
+    }
+  });
+  console.log(`Security email sent to ${email} about duplicate signup attempt from ${locationString}`);
+} catch (emailError) {
+  console.error('Failed to send duplicate signup alert email:', emailError);
+}
       return res.status(409).json({
         status: 'fail',
         message: `${greeting} ${user.firstName}! You already have an account with ${truncatedEmail}. Please log in.`,
