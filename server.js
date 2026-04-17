@@ -18868,221 +18868,151 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
 
 
 
-
-
-
-
-
-
-
-
-// GET /api/admin/stats - Dashboard statistics with real-time USD values
-app.get('/api/admin/stats', adminProtect, restrictTo('super', 'finance', 'support'), async (req, res) => {
-  try {
-    // Get total users count
-    const totalUsers = await User.countDocuments({});
-    
-    // Get total active users (users who logged in within last 30 days)
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    const activeUsers = await User.countDocuments({ lastLogin: { $gte: thirtyDaysAgo } });
-    
-    // Get total deposits (completed)
-    const deposits = await Transaction.aggregate([
-      { $match: { type: 'deposit', status: 'completed' } },
-      { $group: { _id: null, total: { $sum: '$amount' } } }
-    ]);
-    const totalDeposits = deposits[0]?.total || 0;
-    
-    // Get pending withdrawals
-    const pendingWithdrawals = await Transaction.aggregate([
-      { $match: { type: 'withdrawal', status: 'pending' } },
-      { $group: { _id: null, total: { $sum: '$amount' } } }
-    ]);
-    const pendingWithdrawalsTotal = pendingWithdrawals[0]?.total || 0;
-    
-    // Get platform revenue (investment fees + withdrawal fees + conversion fees)
-    const platformRevenue = await PlatformRevenue.aggregate([
-      { $match: { source: { $in: ['investment_fee', 'withdrawal_fee', 'sell_fee'] } } },
-      { $group: { _id: null, total: { $sum: '$amount' } } }
-    ]);
-    const revenueTotal = platformRevenue[0]?.total || 0;
-    
-    // Calculate yesterday's stats for percentage changes
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    yesterday.setHours(0, 0, 0, 0);
-    
-    const yesterdayDeposits = await Transaction.aggregate([
-      { $match: { type: 'deposit', status: 'completed', createdAt: { $gte: yesterday } } },
-      { $group: { _id: null, total: { $sum: '$amount' } } }
-    ]);
-    const yesterdayDepositsTotal = yesterdayDeposits[0]?.total || 0;
-    
-    const yesterdayWithdrawals = await Transaction.aggregate([
-      { $match: { type: 'withdrawal', status: 'pending', createdAt: { $gte: yesterday } } },
-      { $group: { _id: null, total: { $sum: '$amount' } } }
-    ]);
-    const yesterdayWithdrawalsTotal = yesterdayWithdrawals[0]?.total || 0;
-    
-    const yesterdayRevenue = await PlatformRevenue.aggregate([
-      { $match: { recordedAt: { $gte: yesterday } } },
-      { $group: { _id: null, total: { $sum: '$amount' } } }
-    ]);
-    const yesterdayRevenueTotal = yesterdayRevenue[0]?.total || 0;
-    
-    // Calculate percentage changes
-    const depositsChange = yesterdayDepositsTotal > 0 
-      ? ((totalDeposits - yesterdayDepositsTotal) / yesterdayDepositsTotal) * 100 
-      : totalDeposits > 0 ? 100 : 0;
-    
-    const withdrawalsChange = yesterdayWithdrawalsTotal > 0 
-      ? ((pendingWithdrawalsTotal - yesterdayWithdrawalsTotal) / yesterdayWithdrawalsTotal) * 100 
-      : pendingWithdrawalsTotal > 0 ? 100 : 0;
-    
-    const revenueChange = yesterdayRevenueTotal > 0 
-      ? ((revenueTotal - yesterdayRevenueTotal) / yesterdayRevenueTotal) * 100 
-      : revenueTotal > 0 ? 100 : 0;
-    
-    const usersChange = activeUsers > 0 
-      ? ((totalUsers - activeUsers) / activeUsers) * 100 
-      : totalUsers > 0 ? 100 : 0;
-    
-    // Calculate real-time distribution (sum of all user balances in USD)
-    const users = await User.find({}).select('balances');
-    let totalMainBalance = 0;
-    let totalActiveBalance = 0;
-    let totalMaturedBalance = 0;
-    
-    for (const user of users) {
-      if (user.balances) {
-        // Calculate MAIN wallet USD value from crypto Maps
-        if (user.balances.main) {
-          const mainEntries = user.balances.main instanceof Map 
-            ? user.balances.main.entries() 
-            : Object.entries(user.balances.main);
-          
-          for (const [asset, amount] of mainEntries) {
-            if (amount > 0 && asset !== 'usd') {
-              const price = await getCryptoPrice(asset.toUpperCase());
-              if (price) totalMainBalance += amount * price;
-            }
-          }
-        }
-        
-        // Calculate ACTIVE wallet USD value
-        if (user.balances.active) {
-          const activeEntries = user.balances.active instanceof Map 
-            ? user.balances.active.entries() 
-            : Object.entries(user.balances.active);
-          
-          for (const [asset, amount] of activeEntries) {
-            if (amount > 0 && asset === 'usd') {
-              totalActiveBalance += amount;
-            }
-          }
-        }
-        
-        // Calculate MATURED wallet USD value from crypto Maps
-        if (user.balances.matured) {
-          const maturedEntries = user.balances.matured instanceof Map 
-            ? user.balances.matured.entries() 
-            : Object.entries(user.balances.matured);
-          
-          for (const [asset, amount] of maturedEntries) {
-            if (amount > 0 && asset !== 'usd') {
-              const price = await getCryptoPrice(asset.toUpperCase());
-              if (price) totalMaturedBalance += amount * price;
-            }
-          }
-        }
-      }
-    }
-    
-    const realtimeDistribution = {
-      'Main Wallet': totalMainBalance,
-      'Active Mining': totalActiveBalance,
-      'Matured Wallet': totalMaturedBalance
-    };
-    
-    // System status metrics
-    const startTime = process.uptime();
-    const serverUptime = Math.min(100, (startTime / 86400) * 100);
-    
-    res.status(200).json({
-      status: 'success',
-      data: {
-        totalUsers: totalUsers,
-        usersChange: usersChange.toFixed(1),
-        totalDeposits: totalDeposits,
-        depositsChange: depositsChange.toFixed(1),
-        pendingWithdrawals: pendingWithdrawalsTotal,
-        withdrawalsChange: withdrawalsChange.toFixed(1),
-        platformRevenue: revenueTotal,
-        revenueChange: revenueChange.toFixed(1),
-        realtimeDistribution: realtimeDistribution,
-        backendResponseTime: Math.floor(Math.random() * 200) + 50,
-        databaseQueryTime: Math.floor(Math.random() * 100) + 20,
-        lastTransactionTime: Math.floor(Math.random() * 60),
-        serverUptime: serverUptime.toFixed(1)
-      }
-    });
-    
-  } catch (err) {
-    console.error('Error fetching admin stats:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch dashboard statistics'
-    });
-  }
-});
-
-
-// GET /api/admin/activity - Get recent activity with pagination and location data
+// GET /api/admin/activity - Get recent activity with proper deleted user handling
 app.get('/api/admin/activity', adminProtect, async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
     
-    // Build query
-    const query = {};
+    // Get only recent activities (last 7 days by default)
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
     
-    // Filter by category if provided
+    const query = {
+      createdAt: { $gte: sevenDaysAgo }
+    };
+    
+    // Optional filters
     if (req.query.category && req.query.category !== 'all') {
       query.actionCategory = req.query.category;
     }
     
-    // Filter by action type if provided
-    if (req.query.action && req.query.action !== 'all') {
-      query.action = req.query.action;
-    }
-    
-    // Get total count for pagination
+    // Get total count
     const totalActivities = await UserLog.countDocuments(query);
     const totalPages = Math.ceil(totalActivities / limit);
     
-    // Get activities with user details
+    // Get activities - DO NOT populate deleted users, just use stored fields
     const activities = await UserLog.find(query)
-      .populate('user', 'firstName lastName email')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
       .lean();
     
-    // Format activities for frontend display
-    const formattedActivities = activities.map(activity => {
-      // Get user info
-      const userName = activity.userFullName || 
-        (activity.user ? `${activity.user.firstName || ''} ${activity.user.lastName || ''}`.trim() : 'System');
-      const userEmail = activity.email || (activity.user?.email) || 'system@bithash.com';
+    // Action descriptions for display
+    const actionDescriptions = {
+      'login': 'User logged in',
+      'logout': 'User logged out',
+      'signup': 'New user registered',
+      'signup_initiated': 'User initiated registration',
+      'login_attempt': 'Login attempt',
+      'login_otp_sent': 'Login OTP sent',
+      'otp_verified': 'OTP verified successfully',
+      'google_signin': 'Google sign-in',
+      'google_signin_otp_sent': 'Google sign-in OTP sent',
+      'password_change': 'Password changed',
+      'password_reset': 'Password reset requested',
+      'forgot_password': 'Forgot password request',
+      'reset_password': 'Password reset completed',
+      'deposit_created': 'Deposit request created',
+      'deposit_completed': 'Deposit completed',
+      'deposit_failed': 'Deposit failed',
+      'deposit_approved': 'Deposit approved by admin',
+      'deposit_rejected': 'Deposit rejected by admin',
+      'withdrawal_created': 'Withdrawal requested',
+      'withdrawal_completed': 'Withdrawal completed',
+      'withdrawal_failed': 'Withdrawal failed',
+      'withdrawal_approved': 'Withdrawal approved by admin',
+      'withdrawal_rejected': 'Withdrawal rejected by admin',
+      'transfer_created': 'Transfer initiated',
+      'transfer_completed': 'Transfer completed',
+      'transfer_failed': 'Transfer failed',
+      'conversion_completed': 'Crypto conversion completed',
+      'conversion_failed': 'Crypto conversion failed',
+      'gas_payment_recorded': 'Gas payment recorded',
+      'investment_created': 'Investment created',
+      'investment_active': 'Investment activated',
+      'investment_completed': 'Investment completed',
+      'investment_cancelled': 'Investment cancelled',
+      'investment_matured': 'Investment matured',
+      'investment_payout': 'Investment payout sent',
+      'kyc_identity_upload': 'KYC identity documents uploaded',
+      'kyc_address_upload': 'KYC address proof uploaded',
+      'kyc_facial_upload': 'KYC facial verification uploaded',
+      'kyc_submitted': 'KYC application submitted',
+      'kyc_approved': 'KYC approved by admin',
+      'kyc_rejected': 'KYC rejected by admin',
+      'referral_joined': 'New referral joined',
+      'referral_bonus_earned': 'Referral bonus earned',
+      'referral_payout': 'Referral payout sent',
+      'referral_code_used': 'Referral code used',
+      'downline_commission_paid': 'Downline commission paid',
+      'profile_update': 'Profile information updated',
+      'address_update': 'Address information updated',
+      'preferences_update': 'User preferences updated',
+      'two_factor_enabled': '2FA enabled',
+      'two_factor_disabled': '2FA disabled',
+      'api_key_created': 'API key created',
+      'api_key_deleted': 'API key deleted',
+      'dashboard_viewed': 'Viewed dashboard',
+      'investments_viewed': 'Viewed investments page',
+      'deposit_page_viewed': 'Viewed deposit page',
+      'withdrawal_page_viewed': 'Viewed withdrawal page',
+      'profile_page_viewed': 'Viewed profile page',
+      'kyc_page_viewed': 'Viewed KYC page',
+      'referral_page_viewed': 'Viewed referral page',
+      'support_page_viewed': 'Viewed support page'
+    };
+    
+    // Format activities for frontend
+    const formattedActivities = [];
+    
+    for (const activity of activities) {
+      // Get user info - use stored fields instead of populating
+      let userName = activity.userFullName || 'System';
+      let userEmail = activity.email || 'system@bithash.com';
       
-      // Build location display string
+      // Skip deleted users with no meaningful data
+      if (userName === 'Deleted User' || userName.includes('deleted_')) {
+        continue;
+      }
+      
+      // Format timestamp
+      const timestamp = new Date(activity.createdAt);
+      const now = new Date();
+      const diffMs = now - timestamp;
+      const diffMins = Math.floor(diffMs / 60000);
+      const diffHours = Math.floor(diffMs / 3600000);
+      const diffDays = Math.floor(diffMs / 86400000);
+      
+      let timeDisplay;
+      if (diffMins < 1) {
+        timeDisplay = 'Just now';
+      } else if (diffMins < 60) {
+        timeDisplay = `${diffMins} min ago`;
+      } else if (diffHours < 24) {
+        timeDisplay = `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+      } else if (diffDays < 7) {
+        timeDisplay = `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+      } else {
+        timeDisplay = timestamp.toLocaleDateString();
+      }
+      
+      // Get activity type for styling
+      let activityType = 'other';
+      const actionLower = activity.action.toLowerCase();
+      if (actionLower.includes('login')) activityType = 'login';
+      else if (actionLower.includes('signup') || actionLower.includes('register')) activityType = 'signup';
+      else if (actionLower.includes('deposit')) activityType = 'deposit';
+      else if (actionLower.includes('withdrawal')) activityType = 'withdrawal';
+      else if (actionLower.includes('investment')) activityType = 'investment';
+      else if (actionLower.includes('matured')) activityType = 'matured';
+      else if (actionLower.includes('logout')) activityType = 'logout';
+      
+      // Build location display
       let locationDisplay = 'N/A';
       let fullLocation = 'N/A';
       let mapUrl = '#';
-      let lat = null;
-      let lng = null;
       
       if (activity.location) {
         const parts = [];
@@ -19101,93 +19031,49 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
           ].filter(Boolean).join(' • ');
           
           if (activity.location.latitude && activity.location.longitude) {
-            lat = activity.location.latitude;
-            lng = activity.location.longitude;
-            mapUrl = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}&layer=satellite`;
-          } else if (activity.location.city && activity.location.city !== 'Unknown' && 
-                     activity.location.country?.name && activity.location.country.name !== 'Unknown') {
+            mapUrl = `https://www.google.com/maps/search/?api=1&query=${activity.location.latitude},${activity.location.longitude}&layer=satellite`;
+          } else if (activity.location.city && activity.location.city !== 'Unknown') {
             mapUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(locationDisplay)}&layer=satellite`;
           }
         }
       }
       
-      // Get action description
-      const actionDescriptions = {
-        'login': 'User logged in',
-        'logout': 'User logged out',
-        'signup': 'New user registered',
-        'signup_initiated': 'User initiated registration',
-        'login_attempt': 'Login attempt',
-        'login_otp_sent': 'Login OTP sent',
-        'otp_verified': 'OTP verified successfully',
-        'google_signin': 'Google sign-in',
-        'password_change': 'Password changed',
-        'deposit_created': 'Deposit request created',
-        'deposit_completed': 'Deposit completed',
-        'deposit_failed': 'Deposit failed',
-        'deposit_approved': 'Deposit approved by admin',
-        'deposit_rejected': 'Deposit rejected by admin',
-        'withdrawal_created': 'Withdrawal requested',
-        'withdrawal_completed': 'Withdrawal completed',
-        'withdrawal_failed': 'Withdrawal failed',
-        'withdrawal_approved': 'Withdrawal approved by admin',
-        'withdrawal_rejected': 'Withdrawal rejected by admin',
-        'investment_created': 'New investment created',
-        'investment_active': 'Investment activated',
-        'investment_completed': 'Investment completed',
-        'investment_matured': 'Investment matured',
-        'kyc_identity_upload': 'KYC identity documents uploaded',
-        'kyc_address_upload': 'KYC address proof uploaded',
-        'kyc_facial_upload': 'KYC facial verification uploaded',
-        'kyc_submitted': 'KYC application submitted',
-        'kyc_approved': 'KYC approved by admin',
-        'kyc_rejected': 'KYC rejected by admin',
-        'referral_joined': 'New referral joined',
-        'referral_bonus_earned': 'Referral bonus earned',
-        'profile_update': 'Profile information updated'
-      };
+      // Get status class
+      let statusClass = 'badge-success';
+      let statusText = 'success';
+      if (activity.status === 'failed') {
+        statusClass = 'badge-danger';
+        statusText = 'failed';
+      } else if (activity.status === 'pending') {
+        statusClass = 'badge-warning';
+        statusText = 'pending';
+      }
       
+      // Get action description
       const actionDescription = actionDescriptions[activity.action] || 
         activity.action.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
       
-      // Determine status class
-      let statusClass = 'badge-success';
-      let statusText = 'Success';
-      if (activity.status === 'failed') {
-        statusClass = 'badge-danger';
-        statusText = 'Failed';
-      } else if (activity.status === 'pending') {
-        statusClass = 'badge-warning';
-        statusText = 'Pending';
-      }
-      
-      return {
+      formattedActivities.push({
         _id: activity._id,
-        timestamp: activity.createdAt,
+        timestamp: timestamp,
+        timeDisplay: timeDisplay,
         user: {
           name: userName,
           email: userEmail
         },
         action: activity.action,
         actionDescription: actionDescription,
-        actionCategory: activity.actionCategory,
+        activityType: activityType,
         status: activity.status,
         statusClass: statusClass,
         statusText: statusText,
-        location: {
-          display: locationDisplay,
-          full: fullLocation,
-          mapUrl: mapUrl,
-          lat: lat,
-          lng: lng
-        },
-        ipAddress: activity.ipAddress,
-        userAgent: activity.userAgent,
-        metadata: activity.metadata,
-        riskLevel: activity.riskLevel,
-        isSuspicious: activity.isSuspicious
-      };
-    });
+        location: locationDisplay,
+        fullLocation: fullLocation,
+        mapUrl: mapUrl,
+        ipAddress: activity.ipAddress || 'N/A',
+        metadata: activity.metadata
+      });
+    }
     
     res.status(200).json({
       status: 'success',
@@ -19213,31 +19099,78 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
 });
 
 
+
+
+
+
+
 // GET /api/admin/activity/latest - Get latest activities for real-time polling
 app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
   try {
-    const lastTimestamp = req.query.since ? new Date(req.query.since) : null;
+    // Get activities from last 5 minutes only
+    const fiveMinutesAgo = new Date();
+    fiveMinutesAgo.setMinutes(fiveMinutesAgo.getMinutes() - 5);
     
-    // Build query
-    const query = {};
-    if (lastTimestamp) {
-      query.createdAt = { $gt: lastTimestamp };
-    }
+    const query = {
+      createdAt: { $gte: fiveMinutesAgo }
+    };
     
-    // Get latest activities (limit to 20 for polling)
+    // Get latest activities (limit to 20)
     const activities = await UserLog.find(query)
-      .populate('user', 'firstName lastName email')
       .sort({ createdAt: -1 })
       .limit(20)
       .lean();
     
-    // Format activities for frontend
-    const formattedActivities = activities.map(activity => {
-      const userName = activity.userFullName || 
-        (activity.user ? `${activity.user.firstName || ''} ${activity.user.lastName || ''}`.trim() : 'System');
-      const userEmail = activity.email || (activity.user?.email) || 'system@bithash.com';
+    // Action descriptions
+    const actionDescriptions = {
+      'login': 'User logged in',
+      'logout': 'User logged out',
+      'signup': 'New user registered',
+      'deposit_created': 'Deposit request created',
+      'deposit_approved': 'Deposit approved',
+      'deposit_rejected': 'Deposit rejected',
+      'withdrawal_created': 'Withdrawal requested',
+      'withdrawal_approved': 'Withdrawal approved',
+      'withdrawal_rejected': 'Withdrawal rejected',
+      'investment_created': 'Investment created',
+      'investment_matured': 'Investment matured',
+      'kyc_submitted': 'KYC submitted',
+      'kyc_approved': 'KYC approved',
+      'kyc_rejected': 'KYC rejected',
+      'conversion_completed': 'Crypto conversion completed',
+      'transfer_completed': 'Transfer completed'
+    };
+    
+    const formattedActivities = [];
+    
+    for (const activity of activities) {
+      // Skip deleted users
+      const userName = activity.userFullName || 'System';
+      if (userName === 'Deleted User' || userName.includes('deleted_')) {
+        continue;
+      }
       
-      // Build location display
+      const userEmail = activity.email || 'system@bithash.com';
+      
+      // Format time
+      const timestamp = new Date(activity.createdAt);
+      const now = new Date();
+      const diffMins = Math.floor((now - timestamp) / 60000);
+      let timeDisplay;
+      if (diffMins < 1) timeDisplay = 'Just now';
+      else if (diffMins < 60) timeDisplay = `${diffMins} min ago`;
+      else timeDisplay = timestamp.toLocaleTimeString();
+      
+      // Activity type for styling
+      let activityType = 'other';
+      const actionLower = activity.action.toLowerCase();
+      if (actionLower.includes('login')) activityType = 'login';
+      else if (actionLower.includes('signup')) activityType = 'signup';
+      else if (actionLower.includes('deposit')) activityType = 'deposit';
+      else if (actionLower.includes('withdrawal')) activityType = 'withdrawal';
+      else if (actionLower.includes('investment')) activityType = 'investment';
+      
+      // Location
       let locationDisplay = 'N/A';
       if (activity.location) {
         const parts = [];
@@ -19246,50 +19179,26 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
         if (parts.length > 0) locationDisplay = parts.join(', ');
       }
       
-      // Action descriptions
-      const actionDescriptions = {
-        'login': 'User logged in',
-        'logout': 'User logged out',
-        'signup': 'New user registered',
-        'deposit_created': 'Deposit request created',
-        'deposit_approved': 'Deposit approved',
-        'deposit_rejected': 'Deposit rejected',
-        'withdrawal_created': 'Withdrawal requested',
-        'withdrawal_approved': 'Withdrawal approved',
-        'withdrawal_rejected': 'Withdrawal rejected',
-        'investment_created': 'Investment created',
-        'investment_matured': 'Investment matured',
-        'kyc_submitted': 'KYC submitted',
-        'kyc_approved': 'KYC approved',
-        'kyc_rejected': 'KYC rejected'
-      };
-      
       const actionDescription = actionDescriptions[activity.action] || 
         activity.action.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
       
-      return {
+      formattedActivities.push({
         _id: activity._id,
-        timestamp: activity.createdAt,
+        timeDisplay: timeDisplay,
         user: { name: userName, email: userEmail },
-        action: activity.action,
         actionDescription: actionDescription,
-        actionCategory: activity.actionCategory,
+        activityType: activityType,
         status: activity.status,
-        location: locationDisplay,
-        ipAddress: activity.ipAddress,
-        riskLevel: activity.riskLevel
-      };
-    });
-    
-    // Get the latest timestamp for next poll
-    const latestTimestamp = activities.length > 0 ? activities[0].createdAt : null;
+        location: locationDisplay
+      });
+    }
     
     res.status(200).json({
       status: 'success',
       data: {
         activities: formattedActivities,
-        latestTimestamp: latestTimestamp,
-        hasNew: activities.length > 0
+        hasNew: formattedActivities.length > 0,
+        latestTimestamp: activities.length > 0 ? activities[0].createdAt : null
       }
     });
     
@@ -19301,13 +19210,6 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
     });
   }
 });
-
-
-
-
-
-
-
 
 
 
