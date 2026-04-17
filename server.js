@@ -5943,14 +5943,59 @@ await logActivity('login_attempt', 'authentication', null, null, null, req, {
 
 
 
+// Add these helper functions OUTSIDE the route handler (at the top level)
 
+function getShortGreeting(timezone = 'UTC') {
+  try {
+    const userTime = new Date().toLocaleString('en-US', { timeZone: timezone });
+    const userHour = new Date(userTime).getHours();
+    
+    if (userHour >= 5 && userHour < 12) {
+      return 'Good morning';
+    } else if (userHour >= 12 && userHour < 17) {
+      return 'Good afternoon';
+    } else if (userHour >= 17 && userHour < 22) {
+      return 'Good evening';
+    } else {
+      return 'Hello';
+    }
+  } catch (error) {
+    return 'Hello';
+  }
+}
 
+function truncateEmail(email) {
+  if (!email) return 'your email';
+  
+  const [localPart, domain] = email.split('@');
+  if (!domain) return email;
+  
+  if (localPart.length <= 6) {
+    return `${localPart}@${domain}`;
+  }
+  
+  const firstChars = localPart.substring(0, 3);
+  const lastChars = localPart.substring(localPart.length - 3);
+  return `${firstChars}...${lastChars}@${domain}`;
+}
 
-// =============================================
-// REWRITTEN GOOGLE LOGIN ENDPOINT
-// Integrated isSignup logic, personalized greetings, and email truncation
-// =============================================
+function getCryptoLogo(asset) {
+  const logoMap = {
+    'BTC': 'https://cryptologos.cc/logos/bitcoin-btc-logo.png',
+    'ETH': 'https://cryptologos.cc/logos/ethereum-eth-logo.png',
+    'USDT': 'https://cryptologos.cc/logos/tether-usdt-logo.png',
+    'BNB': 'https://cryptologos.cc/logos/bnb-bnb-logo.png',
+    'SOL': 'https://cryptologos.cc/logos/solana-sol-logo.png',
+    'USDC': 'https://cryptologos.cc/logos/usd-coin-usdc-logo.png',
+    'XRP': 'https://cryptologos.cc/logos/xrp-xrp-logo.png',
+    'DOGE': 'https://cryptologos.cc/logos/dogecoin-doge-logo.png',
+    'ADA': 'https://cryptologos.cc/logos/cardano-ada-logo.png',
+    'SHIB': 'https://cryptologos.cc/logos/shiba-inu-shib-logo.png'
+  };
+  return logoMap[asset.toUpperCase()] || 'https://cryptologos.cc/logos/bitcoin-btc-logo.png';
+}
 
+// THEN your Google auth endpoint (FIXED - remove req.user references from logActivity since user isn't authenticated yet)
 app.post('/api/auth/google', async (req, res) => {
   try {
     console.log('Google auth request received');
@@ -5988,7 +6033,7 @@ app.post('/api/auth/google', async (req, res) => {
       });
     }
 
-    // --- Get Client IP and Timezone for Personalized Greeting ---
+    // Get Client IP and Timezone for Personalized Greeting
     const clientIP = getRealClientIP(req);
     let userTimezone = 'UTC';
     try {
@@ -6003,12 +6048,13 @@ app.post('/api/auth/google', async (req, res) => {
     const greeting = getShortGreeting(userTimezone);
     const truncatedEmail = truncateEmail(email);
 
-    // --- Check if User Exists in Database ---
+    // Check if User Exists in Database
     let user = await User.findOne({ email: email });
     const userExists = !!user;
 
-    // --- LOGIN ATTEMPT: User does NOT exist ---
+    // LOGIN ATTEMPT: User does NOT exist
     if (isSignup === false && !userExists) {
+      // FIXED: Don't use req.user - user doesn't exist yet
       await logActivity('google_login_failed', 'authentication', null, null, null, req, {
         email: email,
         reason: 'account_not_found',
@@ -6027,8 +6073,9 @@ app.post('/api/auth/google', async (req, res) => {
       });
     }
 
-    // --- SIGNUP ATTEMPT: User ALREADY exists ---
+    // SIGNUP ATTEMPT: User ALREADY exists
     if (isSignup === true && userExists) {
+      // FIXED: Use user._id since user exists
       await logActivity('google_signup_failed', 'authentication', user._id, user._id, 'User', req, {
         email: email,
         reason: 'account_already_exists',
@@ -6067,7 +6114,7 @@ app.post('/api/auth/google', async (req, res) => {
       });
     }
 
-    // --- SUCCESS FLOW: Create or update user ---
+    // SUCCESS FLOW: Create or update user
     let isNewUser = false;
     let responseMessage = '';
 
@@ -6088,6 +6135,7 @@ app.post('/api/auth/google', async (req, res) => {
         console.log(`New user created via Google: ${email}`);
         responseMessage = `${greeting}! Account created successfully.`;
         
+        // FIXED: Use user._id since user now exists
         await logActivity('google_signup_success', 'user', user._id, user._id, 'User', req, {
           email: email,
           provider: 'google',
@@ -6155,7 +6203,7 @@ app.post('/api/auth/google', async (req, res) => {
       });
     }
 
-    // --- Generate OTP ---
+    // Generate OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
@@ -6168,7 +6216,7 @@ app.post('/api/auth/google', async (req, res) => {
       userAgent: req.headers['user-agent']
     });
 
-    // --- Send OTP Email ---
+    // Send OTP Email
     await sendProfessionalEmail({
       email: email,
       template: 'otp',
@@ -6179,7 +6227,7 @@ app.post('/api/auth/google', async (req, res) => {
       }
     });
 
-    // --- Log Activity ---
+    // Log Activity
     const deviceInfo = await getUserDeviceInfo(req);
     await UserLog.create({
       user: user._id,
@@ -6215,7 +6263,7 @@ app.post('/api/auth/google', async (req, res) => {
       }
     });
 
-    // --- Send Login Notification Email ---
+    // Send Login Notification Email
     try {
       await sendAutomatedEmail(user, 'login_success', {
         name: user.firstName,
@@ -6269,41 +6317,6 @@ app.post('/api/auth/google', async (req, res) => {
     });
   }
 });
-
-// Helper Functions
-function getShortGreeting(timezone = 'UTC') {
-  try {
-    const userTime = new Date().toLocaleString('en-US', { timeZone: timezone });
-    const userHour = new Date(userTime).getHours();
-    
-    if (userHour >= 5 && userHour < 12) {
-      return 'Good morning';
-    } else if (userHour >= 12 && userHour < 17) {
-      return 'Good afternoon';
-    } else if (userHour >= 17 && userHour < 22) {
-      return 'Good evening';
-    } else {
-      return 'Hello';
-    }
-  } catch (error) {
-    return 'Hello';
-  }
-}
-
-function truncateEmail(email) {
-  if (!email) return 'your email';
-  
-  const [localPart, domain] = email.split('@');
-  if (!domain) return email;
-  
-  if (localPart.length <= 6) {
-    return `${localPart}@${domain}`;
-  }
-  
-  const firstChars = localPart.substring(0, 3);
-  const lastChars = localPart.substring(localPart.length - 3);
-  return `${firstChars}...${lastChars}@${domain}`;
-}
 
 
 
