@@ -5993,10 +5993,10 @@ await logActivity('login_attempt', 'authentication', null, null, null, req, {
 
 
 
-
 // =============================================
 // ENHANCED GOOGLE LOGIN/SIGNUP ENDPOINT
 // Handles both login and signup intents with personalized messaging
+// INCLUDES USER'S NAME IN GREETING FOR EXISTING ACCOUNTS
 // =============================================
 app.post('/api/auth/google', async (req, res) => {
   try {
@@ -6042,7 +6042,6 @@ app.post('/api/auth/google', async (req, res) => {
     let greeting = 'Hello';
     
     try {
-      // Attempt to get timezone from IP
       const ipInfoResponse = await axios.get(`https://ipinfo.io/${clientIP}?token=${process.env.IPINFO_TOKEN || 'b56ce6e91d732d'}`, { timeout: 3000 });
       if (ipInfoResponse.data && ipInfoResponse.data.timezone) {
         userTimezone = ipInfoResponse.data.timezone;
@@ -6131,13 +6130,14 @@ app.post('/api/auth/google', async (req, res) => {
         console.error('Failed to send duplicate signup alert email:', emailError);
       }
       
+      // ✅ INCLUDES THE USER'S NAME IN THE GREETING
       return res.status(409).json({
         status: 'fail',
-        message: `${greeting}! You already have an account with ${truncatedEmail}. Please log in.`,
+        message: `${greeting} ${user.firstName}! You already have an account with ${truncatedEmail}. Please log in.`,
         data: {
           greeting: greeting,
-          truncatedEmail: truncatedEmail,
           userName: user.firstName,
+          truncatedEmail: truncatedEmail,
           action: 'login_suggested'
         }
       });
@@ -6308,9 +6308,10 @@ app.post('/api/auth/google', async (req, res) => {
 
     const tempToken = generateJWT(user._id);
 
+    // ✅ PERSONALIZED SUCCESS MESSAGE WITH USER'S NAME FOR EXISTING USERS
     const successMessage = isNewUser 
       ? `${greeting}! Account created. Verification code sent to ${truncatedEmail}.`
-      : `${greeting}! Verification code sent to ${truncatedEmail}.`;
+      : `${greeting} ${user.firstName}! Verification code sent to ${truncatedEmail}.`;
 
     res.status(200).json({
       status: 'success',
@@ -6343,9 +6344,6 @@ app.post('/api/auth/google', async (req, res) => {
     });
   }
 });
-
-
-
 
 
 
