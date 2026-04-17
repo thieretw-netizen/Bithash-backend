@@ -23,11 +23,20 @@ const speakeasy = require('speakeasy');
 const { v4: uuidv4 } = require('uuid');
 const WebSocket = require('ws');
 const OpenAI = require('openai');
+const DeviceDetector = require('node-device-detector');
+const DeviceHelper = require('node-device-detector/helper');
 
 const app = express();
 const { createServer } = require('http');
 const { Server } = require('socket.io');
 app.set('trust proxy', 1);
+
+// Initialize device detector
+const deviceDetector = new DeviceDetector({
+  clientIndexes: true,
+  deviceIndexes: true,
+  deviceAliasCode: false
+});
 
 app.use(helmet({
   contentSecurityPolicy: {
@@ -3414,6 +3423,79 @@ const sendEmail = async (options) => {
   }
 };
 
+const getComprehensiveDeviceInfo = (req) => {
+  const userAgent = req.headers['user-agent'] || '';
+  const ip = getRealClientIP(req);
+  
+  // Use device-detector for comprehensive parsing
+  const result = deviceDetector.detect(userAgent);
+  
+  // Get bot info if applicable
+  const botInfo = deviceDetector.parseBot(userAgent);
+  
+  // Get client info (browser, engine, OS)
+  const clientInfo = result.client || {};
+  const osInfo = result.os || {};
+  const deviceInfo = result.device || {};
+  
+  // Build comprehensive device information
+  const comprehensiveInfo = {
+    // Basic device type
+    type: deviceInfo.type || 'unknown',
+    brand: deviceInfo.brand || '',
+    model: deviceInfo.model || '',
+    
+    // Operating System
+    os: {
+      name: osInfo.name || 'Unknown',
+      version: osInfo.version || '',
+      platform: osInfo.platform || '',
+      family: osInfo.family || ''
+    },
+    
+    // Browser/Client
+    browser: {
+      name: clientInfo.name || 'Unknown',
+      version: clientInfo.version || '',
+      type: clientInfo.type || '',
+      engine: clientInfo.engine || '',
+      engineVersion: clientInfo.engineVersion || ''
+    },
+    
+    // Bot detection
+    isBot: !!botInfo,
+    botInfo: botInfo ? {
+      name: botInfo.name,
+      category: botInfo.category,
+      url: botInfo.url,
+      producer: botInfo.producer
+    } : null,
+    
+    // Additional device characteristics
+    characteristics: {
+      isMobile: deviceInfo.type === 'smartphone' || deviceInfo.type === 'feature phone',
+      isTablet: deviceInfo.type === 'tablet',
+      isDesktop: deviceInfo.type === 'desktop',
+      isTV: deviceInfo.type === 'tv',
+      isConsole: deviceInfo.type === 'console',
+      isWearable: deviceInfo.type === 'wearable',
+      isCarBrowser: deviceInfo.type === 'car browser',
+      isBot: !!botInfo
+    },
+    
+    // Original user agent
+    userAgent: userAgent,
+    
+    // IP address
+    ip: ip,
+    
+    // Timestamp
+    detectedAt: new Date().toISOString()
+  };
+  
+  return comprehensiveInfo;
+};
+
 const getUserDeviceInfo = async (req) => {
   try {
     let ip = getRealClientIP(req);
@@ -3588,13 +3670,28 @@ const getUserDeviceInfo = async (req) => {
       console.log(`Private IP detected: ${ip}, using local network location`);
     }
 
+    // Get comprehensive device info using device-detector
+    const deviceInfo = getComprehensiveDeviceInfo(req);
+
     return {
       ip: ip || 'Unknown',
       device: req.headers['user-agent'] || 'Unknown',
       location: location,
       isPublicIP: isPublicIP,
       exactLocation: exactLocation,
-      locationDetails: locationDetails
+      locationDetails: locationDetails,
+      // Enhanced device information from device-detector
+      deviceDetails: {
+        type: deviceInfo.type,
+        brand: deviceInfo.brand,
+        model: deviceInfo.model,
+        os: deviceInfo.os,
+        browser: deviceInfo.browser,
+        isBot: deviceInfo.isBot,
+        botInfo: deviceInfo.botInfo,
+        characteristics: deviceInfo.characteristics,
+        userAgent: deviceInfo.userAgent
+      }
     };
   } catch (err) {
     console.error('Error getting device info:', err);
@@ -3613,6 +3710,26 @@ const getUserDeviceInfo = async (req) => {
         timezone: 'Unknown',
         latitude: null,
         longitude: null
+      },
+      deviceDetails: {
+        type: 'unknown',
+        brand: '',
+        model: '',
+        os: { name: 'Unknown', version: '' },
+        browser: { name: 'Unknown', version: '' },
+        isBot: false,
+        botInfo: null,
+        characteristics: {
+          isMobile: false,
+          isTablet: false,
+          isDesktop: false,
+          isTV: false,
+          isConsole: false,
+          isWearable: false,
+          isCarBrowser: false,
+          isBot: false
+        },
+        userAgent: req.headers['user-agent'] || ''
       }
     };
   }
@@ -3643,7 +3760,8 @@ const logActivity = async (action, entity, entityId, performedBy, performedByMod
       location: locationData.location,
       changes: {
         ...changes,
-        locationData: locationData
+        locationData: locationData,
+        deviceDetails: deviceInfo.deviceDetails
       }
     });
     
@@ -3653,7 +3771,11 @@ const logActivity = async (action, entity, entityId, performedBy, performedByMod
       location: locationData.location,
       exactLocation: locationData.exactLocation,
       ip: locationData.ip,
-      isPublicIP: locationData.isPublicIP
+      isPublicIP: locationData.isPublicIP,
+      deviceType: deviceInfo.deviceDetails.type,
+      os: deviceInfo.deviceDetails.os.name,
+      browser: deviceInfo.deviceDetails.browser.name,
+      isBot: deviceInfo.deviceDetails.isBot
     });
   } catch (err) {
     console.error('Error logging activity:', err);
@@ -4757,7 +4879,7 @@ case 'crypto_deposit':
               <td style="padding: 8px 0;"><strong>Wallet Type:</strong></td>
               <td style="padding: 8px 0; text-align: right;">
                 <span style="background: ${data.walletColor}; color: white; padding: 4px 12px; border-radius: 20px; font-size: 12px;">${data.walletType}</span>
-              </td>
+               </td>
             </tr>
             <tr style="border-top: 1px solid #E2E8F0;">
               <td style="padding: 8px 0;"><strong>Date:</strong></td>
@@ -5566,11 +5688,6 @@ const getBrowserFromUserAgent = (userAgent) => {
   if (/opera|opr/i.test(userAgent)) return 'Opera';
   return 'Unknown';
 };
-
-
-
-
-
 
 
 // Routes
