@@ -19028,8 +19028,12 @@ app.get('/api/admin/stats', adminProtect, async (req, res) => {
 });
 
 
+
+
+
+
 // =============================================
-// ADMIN ACTIVITY LOGS - COMPLETE WITH LOCATION DATA
+// ADMIN ACTIVITY LOGS - PROPERLY FETCHES FROM USERLOG SCHEMA
 // =============================================
 app.get('/api/admin/activity', adminProtect, async (req, res) => {
   try {
@@ -19037,9 +19041,9 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
-    // Fetch recent user activities from UserLog collection
+    // ✅ CORRECT: Fetch directly from UserLog schema (not SystemLog)
     const activities = await UserLog.find({})
-      .populate('user', 'firstName lastName email')
+      .populate('user', 'firstName lastName email') // Populate user details
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -19048,42 +19052,57 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
     const totalActivities = await UserLog.countDocuments({});
     const totalPages = Math.ceil(totalActivities / limit);
 
-    // Format activities with location data for frontend
+    // Format activities with ALL location data from UserLog
     const formattedActivities = activities.map(activity => {
-      // Extract location data from the log
+      // Extract location data from the UserLog's location field
       let locationData = {
         city: 'Unknown',
         region: 'Unknown',
         country: 'Unknown',
         latitude: null,
-        longitude: null
+        longitude: null,
+        ip: activity.ipAddress || 'Unknown'
       };
 
+      // UserLog already has location data stored in the 'location' field
       if (activity.location) {
         locationData = {
           city: activity.location.city || 'Unknown',
           region: activity.location.region?.name || activity.location.region || 'Unknown',
           country: activity.location.country?.name || activity.location.country || 'Unknown',
           latitude: activity.location.latitude || null,
-          longitude: activity.location.longitude || null
+          longitude: activity.location.longitude || null,
+          ip: activity.location.ip || activity.ipAddress || 'Unknown'
         };
+      }
+
+      // Get user name from populated user or from UserLog's stored fields
+      let userName = 'System';
+      let userEmail = 'system@bithash.com';
+      
+      if (activity.user) {
+        userName = `${activity.user.firstName || ''} ${activity.user.lastName || ''}`.trim() || activity.username || 'System';
+        userEmail = activity.user.email || activity.email || 'system@bithash.com';
+      } else if (activity.username) {
+        userName = activity.username;
+        userEmail = activity.email || 'system@bithash.com';
       }
 
       return {
         _id: activity._id,
         timestamp: activity.createdAt,
-        user: activity.user ? {
-          name: `${activity.user.firstName || ''} ${activity.user.lastName || ''}`.trim() || activity.username || 'System',
-          email: activity.user?.email || activity.email || 'system@bithash.com'
-        } : {
-          name: activity.username || 'System',
-          email: activity.email || 'system@bithash.com'
+        user: {
+          name: userName,
+          email: userEmail
         },
         action: activity.action,
         actionCategory: activity.actionCategory,
         status: activity.status || 'success',
         location: locationData,
-        metadata: activity.metadata || {}
+        deviceInfo: activity.deviceInfo || {},
+        metadata: activity.metadata || {},
+        riskLevel: activity.riskLevel || 'low',
+        isSuspicious: activity.isSuspicious || false
       };
     });
 
@@ -19102,7 +19121,7 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
     });
 
   } catch (err) {
-    console.error('Error fetching activity logs:', err);
+    console.error('Error fetching activity logs from UserLog:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch activity logs'
@@ -19111,14 +19130,21 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
 });
 
 
+
+
+
+
+
+
+
 // =============================================
-// ADMIN LATEST ACTIVITY POLLING - REAL-TIME UPDATES
+// ADMIN LATEST ACTIVITY POLLING - FROM USERLOG SCHEMA
 // =============================================
 app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
   try {
     const since = req.query.since ? new Date(req.query.since) : new Date(Date.now() - 60000);
 
-    // Fetch activities created after the specified timestamp
+    // ✅ CORRECT: Fetch from UserLog schema with proper date filtering
     const latestActivities = await UserLog.find({
       createdAt: { $gt: since }
     })
@@ -19127,14 +19153,15 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
       .limit(50)
       .lean();
 
-    // Format activities with location data
+    // Format activities with location data from UserLog
     const formattedActivities = latestActivities.map(activity => {
       let locationData = {
         city: 'Unknown',
         region: 'Unknown',
         country: 'Unknown',
         latitude: null,
-        longitude: null
+        longitude: null,
+        ip: activity.ipAddress || 'Unknown'
       };
 
       if (activity.location) {
@@ -19143,29 +19170,40 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
           region: activity.location.region?.name || activity.location.region || 'Unknown',
           country: activity.location.country?.name || activity.location.country || 'Unknown',
           latitude: activity.location.latitude || null,
-          longitude: activity.location.longitude || null
+          longitude: activity.location.longitude || null,
+          ip: activity.location.ip || activity.ipAddress || 'Unknown'
         };
+      }
+
+      let userName = 'System';
+      let userEmail = 'system@bithash.com';
+      
+      if (activity.user) {
+        userName = `${activity.user.firstName || ''} ${activity.user.lastName || ''}`.trim() || activity.username || 'System';
+        userEmail = activity.user.email || activity.email || 'system@bithash.com';
+      } else if (activity.username) {
+        userName = activity.username;
+        userEmail = activity.email || 'system@bithash.com';
       }
 
       return {
         _id: activity._id,
         timestamp: activity.createdAt,
-        user: activity.user ? {
-          name: `${activity.user.firstName || ''} ${activity.user.lastName || ''}`.trim() || activity.username || 'System',
-          email: activity.user?.email || activity.email || 'system@bithash.com'
-        } : {
-          name: activity.username || 'System',
-          email: activity.email || 'system@bithash.com'
+        user: {
+          name: userName,
+          email: userEmail
         },
         action: activity.action,
         actionCategory: activity.actionCategory,
         status: activity.status || 'success',
         location: locationData,
-        metadata: activity.metadata || {}
+        deviceInfo: activity.deviceInfo || {},
+        metadata: activity.metadata || {},
+        riskLevel: activity.riskLevel || 'low',
+        isSuspicious: activity.isSuspicious || false
       };
     });
 
-    // Get the latest timestamp for the next poll
     let latestTimestamp = since;
     if (formattedActivities.length > 0) {
       latestTimestamp = formattedActivities[0].timestamp;
@@ -19182,29 +19220,13 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
     });
 
   } catch (err) {
-    console.error('Error fetching latest activities:', err);
+    console.error('Error fetching latest activities from UserLog:', err);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch latest activities'
     });
   }
 });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
