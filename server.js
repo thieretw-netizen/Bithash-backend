@@ -5925,13 +5925,21 @@ await logActivity('login_attempt', 'authentication', null, null, null, req, {
   }
 });
 
+
+
+
+
+
+
+
+
 // =============================================
 // COMPLETE REWRITE: GOOGLE LOGIN & SIGNUP ENDPOINT
 // =============================================
 // This single endpoint handles both Login and Signup requests.
-// It uses an 'isSignup' flag from the request body to determine the action.
-// - If isSignup = true: Creates a new account or links Google to an existing one.
-// - If isSignup = false: Logs the user in, but only if an account already exists.
+// It provides clear feedback to users based on which page they're coming from:
+// - Login page: If no account exists, tells user to sign up first
+// - Signup page: If account already exists, tells user to log in instead
 // =============================================
 app.post('/api/auth/google', async (req, res) => {
   try {
@@ -5977,83 +5985,98 @@ app.post('/api/auth/google', async (req, res) => {
     const originalEmail = email; // Use exact email from Google, no normalization
     console.log(`🔍 Google auth for email: ${originalEmail}, isSignup: ${isSignup}`);
 
-    // --- 3. Handle the Request Based on 'isSignup' Flag ---------------------
-    let user;
-    let isNewUser = false;
+    // --- 3. Check if user exists ---------------------------------------------
+    const existingUser = await User.findOne({ email: originalEmail });
 
-    if (isSignup === true) {
-      // ======================== SIGNUP FLOW ========================
-      console.log('📝 Processing Google SIGNUP');
+    // ======================== LOGIN FLOW (from login page) ========================
+    if (isSignup === false) {
+      console.log('🔑 Processing Google LOGIN request');
 
-      // Check if user already exists with this email
-      user = await User.findOne({ email: originalEmail });
-
-      if (user) {
-        // --- Case A: User exists. Link Google ID if not already linked.
-        if (!user.googleId) {
-          user.googleId = sub;
-          user.isVerified = true;
-          await user.save();
-          console.log(`🔗 Linked Google ID to existing user: ${originalEmail}`);
-        } else {
-          console.log(`ℹ️ User ${originalEmail} already has Google auth linked. Proceeding with login.`);
-        }
-      } else {
-        // --- Case B: User does not exist. Create a new account.
-        const newReferralCode = generateReferralCode();
-        user = await User.create({
-          firstName: given_name || 'Google',
-          lastName: family_name || 'User',
-          email: originalEmail,
-          googleId: sub,
-          isVerified: true, // Google-verified users are considered verified
-          referralCode: newReferralCode,
-          status: 'active',
-        });
-        isNewUser = true;
-        console.log(`🎉 New user created via Google Signup: ${originalEmail}`);
-
-        // Send welcome email (non-blocking)
-        sendAutomatedEmail(user, 'welcome', { firstName: user.firstName }).catch(err =>
-          console.error('Welcome email failed:', err)
-        );
-      }
-    } else {
-      // ======================== LOGIN FLOW ========================
-      console.log('🔑 Processing Google LOGIN');
-
-      // Check if user exists. If not, return an error.
-      user = await User.findOne({ email: originalEmail });
-
-      if (!user) {
-        console.log(`❌ Login attempt failed: No account found for ${originalEmail}`);
+      // Case: User is trying to LOGIN but account doesn't exist
+      if (!existingUser) {
+        console.log(`❌ Login failed: No account found for ${originalEmail}`);
         return res.status(404).json({
           status: 'fail',
-          message: 'Account not found. Please sign up first.',
+          message: `We couldn't find an account associated with ${email}. Please sign up first to continue.`,
+          code: 'ACCOUNT_NOT_FOUND',
+          action: 'signup',
+          email: originalEmail,
         });
       }
 
-      // If user exists but doesn't have a Google ID linked, link it now for future convenience.
-      if (!user.googleId) {
-        user.googleId = sub;
-        user.isVerified = true;
-        await user.save();
+      // Case: User exists but account is suspended
+      if (existingUser.status !== 'active') {
+        return res.status(401).json({
+          status: 'fail',
+          message: 'Your account has been suspended. Please contact support for assistance.',
+          code: 'ACCOUNT_SUSPENDED',
+        });
+      }
+
+      // Success: User exists and is active - proceed with login
+      console.log(`✅ Login successful for existing user: ${originalEmail}`);
+      
+      // Link Google ID if not already linked (for future convenience)
+      if (!existingUser.googleId) {
+        existingUser.googleId = sub;
+        existingUser.isVerified = true;
+        await existingUser.save();
         console.log(`🔗 Linked Google ID to existing user during login: ${originalEmail}`);
       }
-    }
 
-    // --- 4. Final Checks and Common Logic for Both Flows --------------------
-    // This code runs for both successful signups AND successful logins.
+      // Continue with OTP flow...
+      const user = existingUser;
+      // ... (rest of login flow continues below)
 
-    // Check if the user account is active
-    if (user.status !== 'active') {
-      return res.status(401).json({
-        status: 'fail',
-        message: 'Your account has been suspended. Please contact support.',
+    // ======================== SIGNUP FLOW (from signup page) ========================
+    } else {
+      console.log('📝 Processing Google SIGNUP request');
+
+      // Case: User is trying to SIGNUP but account already exists
+      if (existingUser) {
+        console.log(`⚠️ Signup failed: Account already exists for ${originalEmail}`);
+        
+        // Get user's name for a personalized message
+        const userName = existingUser.firstName || 'there';
+        
+        return res.status(409).json({
+          status: 'fail',
+          message: `Welcome back, ${userName}! You already have an account with ${email}. Please log in instead.`,
+          code: 'ACCOUNT_EXISTS',
+          action: 'login',
+          email: originalEmail,
+        });
+      }
+
+      // Case: User doesn't exist - create new account
+      console.log(`✅ Creating new account for: ${originalEmail}`);
+      
+      const newReferralCode = generateReferralCode();
+      const newUser = await User.create({
+        firstName: given_name || 'Google',
+        lastName: family_name || 'User',
+        email: originalEmail,
+        googleId: sub,
+        isVerified: true,
+        referralCode: newReferralCode,
+        status: 'active',
       });
+
+      // Send welcome email (non-blocking)
+      sendAutomatedEmail(newUser, 'welcome', { firstName: newUser.firstName }).catch(err =>
+        console.error('Welcome email failed:', err)
+      );
+
+      // Continue with OTP flow...
+      const user = newUser;
+      const isNewUser = true;
+      // ... (rest of signup flow continues below)
     }
 
-    // --- 5. Generate and Send OTP -------------------------------------------
+    // --- 4. Common OTP Generation and Response Logic -------------------------
+    // This code runs for BOTH successful login AND successful signup
+    
+    // Generate OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes expiry
 
@@ -6082,7 +6105,7 @@ app.post('/api/auth/google', async (req, res) => {
     });
     console.log(`📧 OTP email sent to ${originalEmail}`);
 
-    // --- 6. Log the Activity ------------------------------------------------
+    // --- 5. Log the Activity ------------------------------------------------
     const deviceInfo = await getUserDeviceInfo(req);
     await UserLog.create({
       user: user._id,
@@ -6112,7 +6135,7 @@ app.post('/api/auth/google', async (req, res) => {
         email: originalEmail,
         loginMethod: 'google',
         otpSent: true,
-        isNewUser: isNewUser,
+        isNewUser: isSignup && !existingUser, // True only for brand new signups
         isSignupFlow: isSignup,
       },
     });
@@ -6126,7 +6149,7 @@ app.post('/api/auth/google', async (req, res) => {
       timestamp: new Date().toISOString(),
     }).catch(err => console.error('Failed to send login attempt email:', err));
 
-    // --- 7. Generate Temporary Token and Send Response ----------------------
+    // --- 6. Generate Temporary Token and Send Response ----------------------
     const tempToken = generateJWT(user._id);
 
     // Update user's last login time
@@ -6139,12 +6162,23 @@ app.post('/api/auth/google', async (req, res) => {
     });
     await user.save();
 
+    // Custom success message based on flow
+    let successMessage = '';
+    if (isSignup && !existingUser) {
+      successMessage = 'Account created successfully! Please verify your email to continue.';
+    } else if (isSignup && existingUser) {
+      // This case shouldn't happen due to the early return, but just in case
+      successMessage = 'Google account linked successfully! Please verify to continue.';
+    } else {
+      successMessage = 'OTP sent to your email. Please verify to complete Google sign-in.';
+    }
+
     res.status(200).json({
       status: 'success',
-      message: 'OTP sent to your email. Please verify to complete Google sign-in.',
+      message: successMessage,
       tempToken,
       needsOtp: true,
-      isNewUser: isNewUser,
+      isNewUser: isSignup && !existingUser,
       data: {
         user: {
           id: user._id,
@@ -6157,11 +6191,12 @@ app.post('/api/auth/google', async (req, res) => {
 
     // Final activity log (non-blocking)
     logActivity('google_signin_otp_sent', 'user', user._id, user._id, 'User', req, {
-      isNewUser,
+      isNewUser: isSignup && !existingUser,
       isSignupFlow: isSignup,
       provider: 'google',
       email: originalEmail,
     }).catch(err => console.error('Activity logging error:', err));
+
   } catch (err) {
     // --- Global Error Handler ------------------------------------------------
     console.error('❌ CRITICAL: Google auth unexpected error:', err);
@@ -6172,6 +6207,10 @@ app.post('/api/auth/google', async (req, res) => {
     });
   }
 });
+
+
+
+
 
 app.post('/api/auth/forgot-password', [
   body('email').isEmail().withMessage('Please provide a valid email').normalizeEmail()
