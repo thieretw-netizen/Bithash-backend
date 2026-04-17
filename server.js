@@ -18860,866 +18860,392 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // =============================================
-// ADMIN DASHBOARD STATS ENDPOINT
-// Fetches all dashboard statistics in real-time
+// ADMIN DASHBOARD ENDPOINTS
 // =============================================
-app.get('/api/admin/stats', adminProtect, async (req, res) => {
+
+// ENDPOINT 1: GET /api/admin/stats - Complete dashboard statistics with real-time crypto conversion
+app.get('/api/admin/stats', adminProtect, restrictTo('super', 'finance', 'support'), async (req, res) => {
   try {
-    // Get current real-time crypto prices for all assets
-    const cryptoPrices = await getAllCryptoPrices();
-    
-    // Get all users for balance calculations
-    const users = await User.find({}).select('balances status createdAt');
-    
-    // Initialize counters
-    let totalUsers = 0;
-    let activeUsers = 0;
-    let totalMainBalanceUSD = 0;
-    let totalActiveBalanceUSD = 0;
-    let totalMaturedBalanceUSD = 0;
-    let totalDeposits = 0;
-    let pendingWithdrawalsTotal = 0;
-    let platformRevenueTotal = 0;
-    
-    // Track changes for percentage calculations
-    const yesterday = new Date();
+    // Get current date and yesterday's date for comparison
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const yesterday = new Date(today);
     yesterday.setDate(yesterday.getDate() - 1);
-    yesterday.setHours(0, 0, 0, 0);
+    const lastWeek = new Date(today);
+    lastWeek.setDate(lastWeek.getDate() - 7);
+
+    // =============================================
+    // 1. TOTAL USERS COUNT
+    // =============================================
+    const totalUsers = await User.countDocuments({});
     
-    let yesterdayUsers = 0;
-    let yesterdayDeposits = 0;
-    let yesterdayWithdrawals = 0;
-    let yesterdayRevenue = 0;
-    
-    // Process each user
-    for (const user of users) {
-      totalUsers++;
-      
-      // Count active users (active status)
-      if (user.status === 'active') {
-        activeUsers++;
-      }
-      
-      // Check if user joined yesterday or earlier
-      if (user.createdAt && user.createdAt <= yesterday) {
-        yesterdayUsers++;
-      }
-      
-      // Calculate MAIN wallet USD value from crypto Map
-      if (user.balances && user.balances.main) {
-        const mainMap = user.balances.main;
-        const entries = mainMap instanceof Map ? mainMap.entries() : Object.entries(mainMap);
-        
-        for (const [crypto, amount] of entries) {
-          if (amount > 0 && crypto !== 'usd') {
-            const price = cryptoPrices[crypto.toLowerCase()] || await getCryptoPrice(crypto);
-            if (price && price > 0) {
-              totalMainBalanceUSD += amount * price;
+    // New users today vs yesterday
+    const newUsersToday = await User.countDocuments({
+      createdAt: { $gte: today }
+    });
+    const newUsersYesterday = await User.countDocuments({
+      createdAt: { $gte: yesterday, $lt: today }
+    });
+    const usersChange = newUsersYesterday > 0 
+      ? ((newUsersToday - newUsersYesterday) / newUsersYesterday * 100).toFixed(1)
+      : (newUsersToday > 0 ? 100 : 0);
+
+    // =============================================
+    // 2. TOTAL DEPOSITS (completed deposits only)
+    // =============================================
+    const depositStats = await Transaction.aggregate([
+      { $match: { type: 'deposit', status: 'completed' } },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: '$amount' },
+          todayTotal: {
+            $sum: {
+              $cond: [{ $gte: ['$createdAt', today] }, '$amount', 0]
             }
-          } else if (crypto === 'usd' && amount > 0) {
-            totalMainBalanceUSD += amount;
-          }
-        }
-      }
-      
-      // Calculate ACTIVE wallet USD value (FIXED - no price fluctuation)
-      if (user.balances && user.balances.active) {
-        const activeMap = user.balances.active;
-        const entries = activeMap instanceof Map ? activeMap.entries() : Object.entries(activeMap);
-        
-        for (const [crypto, amount] of entries) {
-          if (amount > 0) {
-            if (crypto === 'usd') {
-              totalActiveBalanceUSD += amount;
-            } else {
-              // Active wallet stores crypto at fixed value (mining contracts)
-              totalActiveBalanceUSD += amount;
+          },
+          yesterdayTotal: {
+            $sum: {
+              $cond: [
+                { $and: [{ $gte: ['$createdAt', yesterday] }, { $lt: ['$createdAt', today] }] },
+                '$amount', 0
+              ]
             }
           }
         }
       }
-      
-      // Calculate MATURED wallet USD value from crypto Map
-      if (user.balances && user.balances.matured) {
-        const maturedMap = user.balances.matured;
-        const entries = maturedMap instanceof Map ? maturedMap.entries() : Object.entries(maturedMap);
-        
-        for (const [crypto, amount] of entries) {
-          if (amount > 0 && crypto !== 'usd') {
-            const price = cryptoPrices[crypto.toLowerCase()] || await getCryptoPrice(crypto);
-            if (price && price > 0) {
-              totalMaturedBalanceUSD += amount * price;
+    ]);
+    
+    const totalDeposits = depositStats[0]?.total || 0;
+    const depositsToday = depositStats[0]?.todayTotal || 0;
+    const depositsYesterday = depositStats[0]?.yesterdayTotal || 0;
+    const depositsChange = depositsYesterday > 0 
+      ? ((depositsToday - depositsYesterday) / depositsYesterday * 100).toFixed(1)
+      : (depositsToday > 0 ? 100 : 0);
+
+    // =============================================
+    // 3. PENDING WITHDRAWALS (total amount pending)
+    // =============================================
+    const pendingWithdrawalsStats = await Transaction.aggregate([
+      { $match: { type: 'withdrawal', status: 'pending' } },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: '$amount' },
+          todayTotal: {
+            $sum: {
+              $cond: [{ $gte: ['$createdAt', today] }, '$amount', 0]
             }
-          } else if (crypto === 'usd' && amount > 0) {
-            totalMaturedBalanceUSD += amount;
+          },
+          yesterdayTotal: {
+            $sum: {
+              $cond: [
+                { $and: [{ $gte: ['$createdAt', yesterday] }, { $lt: ['$createdAt', today] }] },
+                '$amount', 0
+              ]
+            }
+          }
+        }
+      }
+    ]);
+    
+    const pendingWithdrawals = pendingWithdrawalsStats[0]?.total || 0;
+    const withdrawalsToday = pendingWithdrawalsStats[0]?.todayTotal || 0;
+    const withdrawalsYesterday = pendingWithdrawalsStats[0]?.yesterdayTotal || 0;
+    const withdrawalsChange = withdrawalsYesterday > 0 
+      ? ((withdrawalsToday - withdrawalsYesterday) / withdrawalsYesterday * 100).toFixed(1)
+      : (withdrawalsToday > 0 ? 100 : 0);
+
+    // =============================================
+    // 4. PLATFORM REVENUE (from fees)
+    // =============================================
+    const revenueStats = await PlatformRevenue.aggregate([
+      { $match: { recordedAt: { $gte: lastWeek } } },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: '$amount' },
+          todayTotal: {
+            $sum: {
+              $cond: [{ $gte: ['$recordedAt', today] }, '$amount', 0]
+            }
+          },
+          yesterdayTotal: {
+            $sum: {
+              $cond: [
+                { $and: [{ $gte: ['$recordedAt', yesterday] }, { $lt: ['$recordedAt', today] }] },
+                '$amount', 0
+              ]
+            }
+          }
+        }
+      }
+    ]);
+    
+    const platformRevenue = revenueStats[0]?.total || 0;
+    const revenueToday = revenueStats[0]?.todayTotal || 0;
+    const revenueYesterday = revenueStats[0]?.yesterdayTotal || 0;
+    const revenueChange = revenueYesterday > 0 
+      ? ((revenueToday - revenueYesterday) / revenueYesterday * 100).toFixed(1)
+      : (revenueToday > 0 ? 100 : 0);
+
+    // =============================================
+    // 5. REAL-TIME DISTRIBUTION (Main vs Active vs Matured)
+    // Uses Map structure: user.balances.main.get('usd')
+    // =============================================
+    let totalMainUSD = 0;
+    let totalActiveUSD = 0;
+    let totalMaturedUSD = 0;
+    
+    const allUsers = await User.find({}).select('balances');
+    
+    for (const user of allUsers) {
+      if (user.balances) {
+        // MAIN wallet - convert crypto holdings to USD using real-time prices
+        if (user.balances.main && user.balances.main instanceof Map) {
+          for (const [asset, balance] of user.balances.main.entries()) {
+            if (balance > 0 && asset !== 'usd') {
+              const price = await getCryptoPrice(asset.toUpperCase());
+              if (price && price > 0) {
+                totalMainUSD += balance * price;
+              }
+            }
+          }
+        } else if (user.balances.main && typeof user.balances.main === 'object') {
+          // Handle plain object format (fallback)
+          for (const [asset, balance] of Object.entries(user.balances.main)) {
+            if (balance > 0 && asset !== 'usd') {
+              const price = await getCryptoPrice(asset.toUpperCase());
+              if (price && price > 0) {
+                totalMainUSD += balance * price;
+              }
+            }
+          }
+        }
+        
+        // ACTIVE wallet - mining contracts (fixed USD value, no fluctuation)
+        if (user.balances.active && user.balances.active instanceof Map) {
+          const usdBalance = user.balances.active.get('usd') || 0;
+          totalActiveUSD += usdBalance;
+        } else if (user.balances.active && typeof user.balances.active === 'object') {
+          totalActiveUSD += user.balances.active.usd || 0;
+        }
+        
+        // MATURED wallet - convert crypto holdings to USD using real-time prices
+        if (user.balances.matured && user.balances.matured instanceof Map) {
+          for (const [asset, balance] of user.balances.matured.entries()) {
+            if (balance > 0 && asset !== 'usd') {
+              const price = await getCryptoPrice(asset.toUpperCase());
+              if (price && price > 0) {
+                totalMaturedUSD += balance * price;
+              }
+            }
+          }
+        } else if (user.balances.matured && typeof user.balances.matured === 'object') {
+          for (const [asset, balance] of Object.entries(user.balances.matured)) {
+            if (balance > 0 && asset !== 'usd') {
+              const price = await getCryptoPrice(asset.toUpperCase());
+              if (price && price > 0) {
+                totalMaturedUSD += balance * price;
+              }
+            }
           }
         }
       }
     }
     
-    // Get deposit and withdrawal statistics from transactions
-    const completedDeposits = await Transaction.aggregate([
-      { $match: { type: 'deposit', status: 'completed' } },
-      { $group: { _id: null, total: { $sum: '$amount' } } }
-    ]);
-    totalDeposits = completedDeposits[0]?.total || 0;
+    const realtimeDistribution = {
+      'Main Wallet (Crypto)': totalMainUSD,
+      'Active Mining': totalActiveUSD,
+      'Matured Wallet': totalMaturedUSD
+    };
+
+    // =============================================
+    // 6. SYSTEM STATUS (simulate for now)
+    // =============================================
+    const backendResponseTime = Math.floor(Math.random() * 50) + 25;
+    const databaseQueryTime = Math.floor(Math.random() * 30) + 10;
     
-    const pendingWithdrawals = await Transaction.aggregate([
-      { $match: { type: 'withdrawal', status: 'pending' } },
-      { $group: { _id: null, total: { $sum: '$amount' } } }
-    ]);
-    pendingWithdrawalsTotal = pendingWithdrawals[0]?.total || 0;
-    
-    // Get platform revenue
-    const revenueResult = await PlatformRevenue.aggregate([
-      { $group: { _id: null, total: { $sum: '$amount' } } }
-    ]);
-    platformRevenueTotal = revenueResult[0]?.total || 0;
-    
-    // Get yesterday's stats for comparison
-    const yesterdayDate = new Date();
-    yesterdayDate.setDate(yesterdayDate.getDate() - 1);
-    yesterdayDate.setHours(0, 0, 0, 0);
-    
-    const yesterdayDepositsResult = await Transaction.aggregate([
-      { $match: { 
-        type: 'deposit', 
-        status: 'completed',
-        createdAt: { $gte: yesterdayDate, $lt: new Date() }
-      }},
-      { $group: { _id: null, total: { $sum: '$amount' } } }
-    ]);
-    yesterdayDeposits = yesterdayDepositsResult[0]?.total || 0;
-    
-    const yesterdayWithdrawalsResult = await Transaction.aggregate([
-      { $match: { 
-        type: 'withdrawal', 
-        status: 'completed',
-        createdAt: { $gte: yesterdayDate, $lt: new Date() }
-      }},
-      { $group: { _id: null, total: { $sum: '$amount' } } }
-    ]);
-    yesterdayWithdrawals = yesterdayWithdrawalsResult[0]?.total || 0;
-    
-    const yesterdayRevenueResult = await PlatformRevenue.aggregate([
-      { $match: { recordedAt: { $gte: yesterdayDate, $lt: new Date() } } },
-      { $group: { _id: null, total: { $sum: '$amount' } } }
-    ]);
-    yesterdayRevenue = yesterdayRevenueResult[0]?.total || 0;
-    
-    // Calculate percentage changes
-    const usersChange = yesterdayUsers > 0 
-      ? (((totalUsers - yesterdayUsers) / yesterdayUsers) * 100).toFixed(1)
-      : 0;
-    
-    const depositsChange = yesterdayDeposits > 0
-      ? (((totalDeposits - yesterdayDeposits) / yesterdayDeposits) * 100).toFixed(1)
-      : 0;
-    
-    const withdrawalsChange = yesterdayWithdrawals > 0
-      ? (((pendingWithdrawalsTotal - yesterdayWithdrawals) / yesterdayWithdrawals) * 100).toFixed(1)
-      : 0;
-    
-    const revenueChange = yesterdayRevenue > 0
-      ? (((platformRevenueTotal - yesterdayRevenue) / yesterdayRevenue) * 100).toFixed(1)
-      : 0;
-    
-    // Get system status
-    const startTime = process.uptime();
-    const serverUptime = ((startTime / (24 * 60 * 60)) * 100).toFixed(1);
-    
-    // Get recent transaction time
-    const lastTransaction = await Transaction.findOne({})
-      .sort({ createdAt: -1 })
-      .select('createdAt');
-    const lastTransactionSeconds = lastTransaction 
+    const lastTransaction = await Transaction.findOne({}).sort({ createdAt: -1 });
+    const lastTransactionTime = lastTransaction 
       ? Math.floor((Date.now() - new Date(lastTransaction.createdAt)) / 1000)
       : 0;
     
-    // Prepare real-time distribution data
-    const realtimeDistribution = {
-      'Main Wallet': totalMainBalanceUSD,
-      'Active Mining': totalActiveBalanceUSD,
-      'Matured Wallet': totalMaturedBalanceUSD,
-      'Total Platform Value': totalMainBalanceUSD + totalActiveBalanceUSD + totalMaturedBalanceUSD
-    };
-    
-    // Count pending KYC submissions
-    const pendingKYC = await KYC.countDocuments({ overallStatus: 'pending' });
-    
-    // Count pending deposits (using DepositAsset collection)
-    const pendingDepositsCount = await DepositAsset.countDocuments({ status: 'pending' });
-    
+    const serverUptime = 99.99;
+
     res.status(200).json({
       status: 'success',
       data: {
         totalUsers: totalUsers,
-        activeUsers: activeUsers,
         usersChange: parseFloat(usersChange),
         totalDeposits: totalDeposits,
         depositsChange: parseFloat(depositsChange),
-        pendingWithdrawals: pendingWithdrawalsTotal,
+        pendingWithdrawals: pendingWithdrawals,
         withdrawalsChange: parseFloat(withdrawalsChange),
-        platformRevenue: platformRevenueTotal,
+        platformRevenue: platformRevenue,
         revenueChange: parseFloat(revenueChange),
-        totalMainBalance: totalMainBalanceUSD,
-        totalActiveBalance: totalActiveBalanceUSD,
-        totalMaturedBalance: totalMaturedBalanceUSD,
-        pendingKYC: pendingKYC,
-        pendingDeposits: pendingDepositsCount,
         realtimeDistribution: realtimeDistribution,
-        backendResponseTime: Math.floor(Math.random() * 50) + 20,
-        databaseQueryTime: Math.floor(Math.random() * 30) + 10,
-        lastTransactionTime: lastTransactionSeconds,
-        serverUptime: serverUptime,
-        timestamp: Date.now()
+        backendResponseTime: backendResponseTime,
+        databaseQueryTime: databaseQueryTime,
+        lastTransactionTime: lastTransactionTime,
+        serverUptime: serverUptime
       }
     });
-    
+
   } catch (err) {
     console.error('Error fetching admin stats:', err);
     res.status(500).json({
       status: 'error',
-      message: err.message || 'Failed to fetch dashboard statistics'
+      message: 'Failed to fetch dashboard statistics'
     });
   }
 });
 
-
-
-
-
-
-
-
-
-
-// =============================================
-// ROBUST ADMIN STATS ENDPOINT - Complete real-time system overview
-// =============================================
-app.get('/api/admin/stats', adminProtect, async (req, res) => {
-  try {
-    // Get ALL users with their balances
-    const users = await User.find({}).select('firstName lastName email balances status createdAt lastLogin kycStatus twoFactorAuth');
-    
-    // Get ALL transactions for financial overview
-    const allTransactions = await Transaction.find({}).sort({ createdAt: -1 });
-    
-    // Get ALL investments
-    const investments = await Investment.find({}).populate('plan', 'name');
-    
-    // Get ALL pending deposits
-    const pendingDeposits = await DepositAsset.find({ status: 'pending' }).populate('user', 'firstName lastName email');
-    
-    // Get ALL pending withdrawals
-    const pendingWithdrawals = await Transaction.find({ type: 'withdrawal', status: 'pending' }).populate('user', 'firstName lastName email');
-    
-    // Get ALL KYC submissions
-    const kycSubmissions = await KYC.find({ overallStatus: 'pending' }).populate('user', 'firstName lastName email');
-    
-    // Get ALL downline relationships
-    const downlineRelationships = await DownlineRelationship.find({ status: 'active' }).populate('upline downline', 'firstName lastName email');
-    
-    // Get ALL notifications
-    const unreadNotifications = await Notification.countDocuments({ read: false });
-    
-    // Get ALL commission history
-    const commissionHistory = await CommissionHistory.find({}).sort({ createdAt: -1 }).limit(100);
-    
-    // =============================================
-    // REAL-TIME BALANCE CALCULATIONS
-    // =============================================
-    let totalMainBalanceUSD = 0;
-    let totalActiveBalanceUSD = 0;
-    let totalMaturedBalanceUSD = 0;
-    let totalPlatformValueUSD = 0;
-    let activeUsers = 0;
-    let suspendedUsers = 0;
-    let totalUsers = users.length;
-    
-    // Track per-asset holdings for detailed breakdown
-    const assetHoldings = {};
-    
-    for (const user of users) {
-      // Count active vs suspended users
-      if (user.status === 'active') activeUsers++;
-      if (user.status === 'suspended') suspendedUsers++;
-      
-      // Calculate MAIN wallet (crypto - fluctuates with market)
-      if (user.balances && user.balances.main) {
-        const mainMap = user.balances.main;
-        const entries = mainMap instanceof Map ? mainMap.entries() : Object.entries(mainMap);
-        
-        for (const [crypto, amount] of entries) {
-          if (amount > 0 && crypto !== 'usd') {
-            const price = await getCryptoPrice(crypto.toUpperCase());
-            const usdValue = amount * (price || 0);
-            totalMainBalanceUSD += usdValue;
-            totalPlatformValueUSD += usdValue;
-            
-            // Track per-asset holdings
-            if (!assetHoldings[crypto]) assetHoldings[crypto] = { amount: 0, usdValue: 0 };
-            assetHoldings[crypto].amount += amount;
-            assetHoldings[crypto].usdValue += usdValue;
-          } else if (crypto === 'usd' && amount > 0) {
-            totalMainBalanceUSD += amount;
-            totalPlatformValueUSD += amount;
-          }
-        }
-      }
-      
-      // Calculate ACTIVE wallet (mining contracts - FIXED value, no fluctuation)
-      if (user.balances && user.balances.active) {
-        const activeMap = user.balances.active;
-        const entries = activeMap instanceof Map ? activeMap.entries() : Object.entries(activeMap);
-        
-        for (const [asset, amount] of entries) {
-          if (amount > 0) {
-            totalActiveBalanceUSD += amount;
-            totalPlatformValueUSD += amount;
-          }
-        }
-      }
-      
-      // Calculate MATURED wallet (crypto - fluctuates with market)
-      if (user.balances && user.balances.matured) {
-        const maturedMap = user.balances.matured;
-        const entries = maturedMap instanceof Map ? maturedMap.entries() : Object.entries(maturedMap);
-        
-        for (const [crypto, amount] of entries) {
-          if (amount > 0 && crypto !== 'usd') {
-            const price = await getCryptoPrice(crypto.toUpperCase());
-            const usdValue = amount * (price || 0);
-            totalMaturedBalanceUSD += usdValue;
-            totalPlatformValueUSD += usdValue;
-            
-            // Track per-asset holdings
-            if (!assetHoldings[crypto]) assetHoldings[crypto] = { amount: 0, usdValue: 0 };
-            assetHoldings[crypto].amount += amount;
-            assetHoldings[crypto].usdValue += usdValue;
-          } else if (crypto === 'usd' && amount > 0) {
-            totalMaturedBalanceUSD += amount;
-            totalPlatformValueUSD += amount;
-          }
-        }
-      }
-    }
-    
-    // =============================================
-    // FINANCIAL STATISTICS
-    // =============================================
-    let totalDepositsCompleted = 0;
-    let totalDepositsPending = 0;
-    let totalWithdrawalsCompleted = 0;
-    let totalWithdrawalsPending = 0;
-    let totalInvestmentAmount = 0;
-    let totalInvestmentReturn = 0;
-    let totalPlatformRevenue = 0;
-    let totalReferralCommissions = 0;
-    
-    // Process all transactions
-    for (const tx of allTransactions) {
-      if (tx.type === 'deposit') {
-        if (tx.status === 'completed') totalDepositsCompleted += tx.amount;
-        if (tx.status === 'pending') totalDepositsPending += tx.amount;
-      }
-      if (tx.type === 'withdrawal') {
-        if (tx.status === 'completed') totalWithdrawalsCompleted += tx.amount;
-        if (tx.status === 'pending') totalWithdrawalsPending += tx.amount;
-      }
-      if (tx.type === 'investment' && tx.status === 'completed') {
-        totalInvestmentAmount += tx.amount;
-      }
-      if (tx.type === 'interest' && tx.status === 'completed') {
-        totalInvestmentReturn += tx.amount;
-      }
-      if (tx.type === 'referral' && tx.status === 'completed') {
-        totalReferralCommissions += tx.amount;
-      }
-    }
-    
-    // Platform revenue from various sources
-    const revenueBySource = await PlatformRevenue.aggregate([
-      { $group: { _id: '$source', total: { $sum: '$amount' } } }
-    ]);
-    
-    totalPlatformRevenue = revenueBySource.reduce((sum, r) => sum + r.total, 0);
-    
-    // =============================================
-    // INVESTMENT STATISTICS
-    // =============================================
-    let activeInvestments = 0;
-    let completedInvestments = 0;
-    let cancelledInvestments = 0;
-    let totalInvestedByPlan = {};
-    
-    for (const inv of investments) {
-      if (inv.status === 'active') activeInvestments++;
-      if (inv.status === 'completed') completedInvestments++;
-      if (inv.status === 'cancelled') cancelledInvestments++;
-      
-      const planName = inv.plan?.name || 'Unknown';
-      if (!totalInvestedByPlan[planName]) totalInvestedByPlan[planName] = 0;
-      totalInvestedByPlan[planName] += inv.amount;
-    }
-    
-    // =============================================
-    // USER STATISTICS
-    // =============================================
-    const usersByKYCStatus = await KYC.aggregate([
-      { $group: { _id: '$overallStatus', count: { $sum: 1 } } }
-    ]);
-    
-    const usersWith2FA = await User.countDocuments({ 'twoFactorAuth.enabled': true });
-    const verifiedUsers = await KYC.countDocuments({ overallStatus: 'verified' });
-    
-    // Recent signups (last 7 days)
-    const lastWeek = new Date();
-    lastWeek.setDate(lastWeek.getDate() - 7);
-    const recentSignups = await User.countDocuments({ createdAt: { $gte: lastWeek } });
-    
-    // =============================================
-    // ACTIVITY STATISTICS
-    // =============================================
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    const activitiesToday = await UserLog.countDocuments({ createdAt: { $gte: today } });
-    const activitiesLastHour = await UserLog.countDocuments({ 
-      createdAt: { $gte: new Date(Date.now() - 60 * 60 * 1000) } 
-    });
-    
-    const activityByType = await UserLog.aggregate([
-      { $match: { createdAt: { $gte: today } } },
-      { $group: { _id: '$action', count: { $sum: 1 } } },
-      { $sort: { count: -1 } },
-      { $limit: 10 }
-    ]);
-    
-    // =============================================
-    // SYSTEM STATUS
-    // =============================================
-    const systemUptime = process.uptime();
-    const memoryUsage = process.memoryUsage();
-    
-    // Get latest crypto prices for display
-    const currentPrices = {};
-    const majorCryptos = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'XRP', 'DOGE', 'ADA'];
-    for (const crypto of majorCryptos) {
-      currentPrices[crypto] = await getCryptoPrice(crypto);
-    }
-    
-    // =============================================
-    // RESPONSE - COMPLETE SYSTEM OVERVIEW
-    // =============================================
-    res.status(200).json({
-      status: 'success',
-      timestamp: new Date().toISOString(),
-      data: {
-        // User Statistics
-        users: {
-          total: totalUsers,
-          active: activeUsers,
-          suspended: suspendedUsers,
-          verifiedKYC: verifiedUsers,
-          twoFactorEnabled: usersWith2FA,
-          recentSignups: recentSignups,
-          usersByKYCStatus: usersByKYCStatus
-        },
-        
-        // Financial Statistics
-        finances: {
-          totalDepositsCompleted: totalDepositsCompleted,
-          totalDepositsPending: totalDepositsPending,
-          totalWithdrawalsCompleted: totalWithdrawalsCompleted,
-          totalWithdrawalsPending: totalWithdrawalsPending,
-          totalInvestmentAmount: totalInvestmentAmount,
-          totalInvestmentReturn: totalInvestmentReturn,
-          totalReferralCommissions: totalReferralCommissions,
-          totalPlatformRevenue: totalPlatformRevenue,
-          revenueBySource: revenueBySource,
-          netProfit: totalPlatformRevenue - totalReferralCommissions
-        },
-        
-        // Wallet Balances (Real-time USD values)
-        walletBalances: {
-          mainWalletTotal: totalMainBalanceUSD,
-          activeWalletTotal: totalActiveBalanceUSD,
-          maturedWalletTotal: totalMaturedBalanceUSD,
-          platformTotalValue: totalPlatformValueUSD,
-          assetBreakdown: Object.entries(assetHoldings).map(([asset, data]) => ({
-            asset: asset.toUpperCase(),
-            totalAmount: data.amount,
-            totalUSDValue: data.usdValue
-          }))
-        },
-        
-        // Investment Statistics
-        investments: {
-          active: activeInvestments,
-          completed: completedInvestments,
-          cancelled: cancelledInvestments,
-          totalInvestedByPlan: totalInvestedByPlan,
-          totalInvested: totalInvestmentAmount,
-          totalReturns: totalInvestmentReturn,
-          averageROI: totalInvestmentAmount > 0 ? (totalInvestmentReturn / totalInvestmentAmount) * 100 : 0
-        },
-        
-        // Pending Items (Need Admin Action)
-        pendingItems: {
-          deposits: pendingDeposits.length,
-          depositsList: pendingDeposits.map(d => ({
-            id: d._id,
-            user: `${d.user?.firstName} ${d.user?.lastName}`,
-            email: d.user?.email,
-            amount: d.usdValue,
-            asset: d.asset,
-            createdAt: d.createdAt
-          })),
-          withdrawals: pendingWithdrawals.length,
-          withdrawalsList: pendingWithdrawals.map(w => ({
-            id: w._id,
-            user: `${w.user?.firstName} ${w.user?.lastName}`,
-            email: w.user?.email,
-            amount: w.amount,
-            asset: w.asset || 'USD',
-            method: w.method,
-            createdAt: w.createdAt
-          })),
-          kycSubmissions: kycSubmissions.length,
-          kycList: kycSubmissions.map(k => ({
-            id: k._id,
-            user: `${k.user?.firstName} ${k.user?.lastName}`,
-            email: k.user?.email,
-            status: k.overallStatus,
-            submittedAt: k.submittedAt
-          })),
-          unreadNotifications: unreadNotifications
-        },
-        
-        // Downline & Commission System
-        downline: {
-          activeRelationships: downlineRelationships.length,
-          relationshipsList: downlineRelationships.map(r => ({
-            upline: `${r.upline?.firstName} ${r.upline?.lastName}`,
-            downline: `${r.downline?.firstName} ${r.downline?.lastName}`,
-            commissionPercentage: r.commissionPercentage,
-            remainingRounds: r.remainingRounds,
-            totalEarned: r.totalCommissionEarned
-          })),
-          recentCommissions: commissionHistory.slice(0, 20).map(c => ({
-            upline: c.upline,
-            downline: c.downline,
-            amount: c.commissionAmount,
-            percentage: c.commissionPercentage,
-            round: c.roundNumber,
-            date: c.createdAt
-          }))
-        },
-        
-        // Activity Statistics
-        activity: {
-          today: activitiesToday,
-          lastHour: activitiesLastHour,
-          topActionsToday: activityByType
-        },
-        
-        // Current Market Prices
-        marketPrices: currentPrices,
-        
-        // System Health
-        system: {
-          uptime: systemUptime,
-          uptimeHuman: `${Math.floor(systemUptime / 86400)}d ${Math.floor((systemUptime % 86400) / 3600)}h ${Math.floor((systemUptime % 3600) / 60)}m`,
-          memoryUsage: {
-            rss: `${Math.round(memoryUsage.rss / 1024 / 1024)} MB`,
-            heapTotal: `${Math.round(memoryUsage.heapTotal / 1024 / 1024)} MB`,
-            heapUsed: `${Math.round(memoryUsage.heapUsed / 1024 / 1024)} MB`
-          },
-          status: 'operational'
-        }
-      }
-    });
-    
-  } catch (err) {
-    console.error('Admin stats error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: err.message,
-      timestamp: new Date().toISOString()
-    });
-  }
-});
-
-// =============================================
-// ROBUST ADMIN ACTIVITY ENDPOINT - Full activity log with all details
-// =============================================
-app.get('/api/admin/activity', adminProtect, async (req, res) => {
+// ENDPOINT 2: GET /api/admin/activity - Recent user activity with pagination and location data
+app.get('/api/admin/activity', adminProtect, restrictTo('super', 'finance', 'support'), async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
+    const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
-    
-    // Build filter query
-    const query = {};
-    
-    if (req.query.type) query.action = req.query.type;
-    if (req.query.status) query.status = req.query.status;
-    if (req.query.userId) query.user = req.query.userId;
-    
-    if (req.query.startDate && req.query.endDate) {
-      query.createdAt = {
-        $gte: new Date(req.query.startDate),
-        $lte: new Date(req.query.endDate)
-      };
-    }
-    
-    // Get ALL activities with full details
-    const activities = await UserLog.find(query)
-      .populate('user', 'firstName lastName email phone status')
+
+    // Get recent user logs with populated user data
+    const activities = await UserLog.find({})
+      .populate('user', 'firstName lastName email')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
       .lean();
-    
-    const totalCount = await UserLog.countDocuments(query);
-    const totalPages = Math.ceil(totalCount / limit);
-    
-    // Get summary statistics
-    const actionTypes = await UserLog.distinct('action');
-    const actionCategories = await UserLog.distinct('actionCategory');
-    
-    const activityByCategory = await UserLog.aggregate([
-      { $group: { _id: '$actionCategory', count: { $sum: 1 } } }
-    ]);
-    
-    // Format activities with ALL available data
+
+    const totalActivities = await UserLog.countDocuments({});
+    const totalPages = Math.ceil(totalActivities / limit);
+
+    // Format activities for frontend with location data
     const formattedActivities = activities.map(activity => ({
       _id: activity._id,
       timestamp: activity.createdAt,
-      user: activity.user ? {
-        id: activity.user._id,
-        name: `${activity.user.firstName || ''} ${activity.user.lastName || ''}`.trim() || activity.username,
-        email: activity.user.email || activity.email,
-        phone: activity.user.phone,
-        status: activity.user.status
-      } : {
-        name: activity.username || 'System',
-        email: activity.email || 'system@bithash.com',
-        status: 'system'
+      user: activity.user || {
+        name: activity.userFullName || activity.username || 'System',
+        email: activity.email || 'system@bithash.com'
       },
       action: activity.action,
       actionCategory: activity.actionCategory,
-      status: activity.status || 'success',
-      statusCode: activity.statusCode,
-      errorMessage: activity.errorMessage,
-      
-      // Location data (full details)
-      location: activity.location ? {
-        ip: activity.ipAddress,
-        country: activity.location.country,
-        city: activity.location.city,
-        region: activity.location.region,
-        latitude: activity.location.latitude,
-        longitude: activity.location.longitude,
-        timezone: activity.location.timezone,
-        isp: activity.location.isp,
-        exactLocation: activity.location.exactLocation || false
-      } : null,
-      
-      // Device information
-      deviceInfo: activity.deviceInfo ? {
-        type: activity.deviceInfo.type,
-        os: activity.deviceInfo.os,
-        browser: activity.deviceInfo.browser,
-        platform: activity.deviceInfo.platform,
-        language: activity.deviceInfo.language
-      } : null,
-      
-      userAgent: activity.userAgent,
+      status: activity.status,
+      location: activity.location || {
+        city: 'Unknown',
+        country: 'Unknown',
+        region: 'Unknown'
+      },
       ipAddress: activity.ipAddress,
-      
-      // Financial metadata (if applicable)
-      financial: activity.metadata?.amount ? {
-        amount: activity.metadata.amount,
-        currency: activity.metadata.currency,
-        asset: activity.metadata.asset,
-        assetAmount: activity.metadata.assetAmount,
-        fee: activity.metadata.fee,
-        netAmount: activity.metadata.netAmount
-      } : null,
-      
-      // Investment metadata
-      investment: activity.metadata?.planName ? {
-        planName: activity.metadata.planName,
-        investmentAmount: activity.metadata.investmentAmount,
-        expectedReturn: activity.metadata.expectedReturn,
-        duration: activity.metadata.duration
-      } : null,
-      
-      // Security metadata
-      security: activity.isSuspicious ? {
-        isSuspicious: true,
-        riskLevel: activity.riskLevel,
-        suspiciousFactors: activity.metadata?.suspiciousFactors
-      } : null,
-      
-      // Related entity
-      relatedEntity: activity.relatedEntity ? {
-        id: activity.relatedEntity,
-        type: activity.relatedEntityModel
-      } : null,
-      
-      // Session info
-      sessionId: activity.sessionId,
-      requestId: activity.requestId,
-      
-      // Full metadata (everything else)
+      userAgent: activity.deviceInfo?.browser?.name || activity.userAgent,
       metadata: activity.metadata
     }));
-    
+
     res.status(200).json({
       status: 'success',
-      timestamp: new Date().toISOString(),
       data: {
         activities: formattedActivities,
-        summary: {
-          total: totalCount,
-          actionTypes: actionTypes,
-          actionCategories: actionCategories,
-          activityByCategory: activityByCategory,
-          currentPage: page,
-          totalPages: totalPages,
-          itemsPerPage: limit
-        },
         pagination: {
           currentPage: page,
           totalPages: totalPages,
-          totalItems: totalCount,
-          hasNext: page < totalPages,
-          hasPrev: page > 1
+          totalItems: totalActivities,
+          itemsPerPage: limit,
+          hasNextPage: page < totalPages,
+          hasPrevPage: page > 1
         }
       }
     });
-    
+
   } catch (err) {
-    console.error('Activity fetch error:', err);
+    console.error('Error fetching admin activity:', err);
     res.status(500).json({
       status: 'error',
-      message: err.message,
-      timestamp: new Date().toISOString()
+      message: 'Failed to fetch recent activity'
     });
   }
 });
 
-// =============================================
-// ROBUST LATEST ACTIVITY ENDPOINT - Real-time polling
-// =============================================
-app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
+// ENDPOINT 3: GET /api/admin/activity/latest - Poll for new activities (real-time updates)
+app.get('/api/admin/activity/latest', adminProtect, restrictTo('super', 'finance', 'support'), async (req, res) => {
   try {
-    const since = req.query.since ? new Date(req.query.since) : new Date(Date.now() - 60000);
-    const limit = parseInt(req.query.limit) || 50;
+    const { after } = req.query;
+    let query = {};
     
-    // Get ALL new activities since last check
-    const newActivities = await UserLog.find({
-      createdAt: { $gt: since }
-    })
+    if (after) {
+      const afterDate = new Date(after);
+      if (!isNaN(afterDate.getTime())) {
+        query.createdAt = { $gt: afterDate };
+      }
+    } else {
+      // Default: get activities from last 5 minutes
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+      query.createdAt = { $gt: fiveMinutesAgo };
+    }
+
+    const latestActivities = await UserLog.find(query)
       .populate('user', 'firstName lastName email')
       .sort({ createdAt: -1 })
-      .limit(limit)
+      .limit(20)
       .lean();
-    
-    // Get counts for real-time updates
-    const now = new Date();
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    const [activitiesToday, pendingDeposits, pendingWithdrawals, pendingKYC, unreadNotifications] = await Promise.all([
-      UserLog.countDocuments({ createdAt: { $gte: today } }),
-      DepositAsset.countDocuments({ status: 'pending' }),
-      Transaction.countDocuments({ type: 'withdrawal', status: 'pending' }),
-      KYC.countDocuments({ overallStatus: 'pending' }),
-      Notification.countDocuments({ read: false })
-    ]);
-    
-    const formattedActivities = newActivities.map(activity => ({
+
+    const formattedActivities = latestActivities.map(activity => ({
       _id: activity._id,
       timestamp: activity.createdAt,
-      user: {
-        name: activity.user ? `${activity.user.firstName || ''} ${activity.user.lastName || ''}`.trim() : activity.username || 'System',
-        email: activity.user?.email || activity.email
+      user: activity.user || {
+        name: activity.userFullName || activity.username || 'System',
+        email: activity.email || 'system@bithash.com'
       },
       action: activity.action,
       actionCategory: activity.actionCategory,
-      status: activity.status || 'success',
-      location: activity.location ? {
-        city: activity.location.city,
-        country: activity.location.country?.name || activity.location.country
-      } : null,
-      amount: activity.metadata?.amount,
-      asset: activity.metadata?.asset
+      status: activity.status,
+      location: activity.location || {
+        city: 'Unknown',
+        country: 'Unknown',
+        region: 'Unknown'
+      },
+      ipAddress: activity.ipAddress
     }));
-    
-    // Get latest 5 activities for dashboard widget
-    const latestActivities = await UserLog.find({})
-      .populate('user', 'firstName lastName email')
-      .sort({ createdAt: -1 })
-      .limit(5)
-      .lean();
-    
-    const dashboardActivities = latestActivities.map(activity => ({
-      timestamp: activity.createdAt,
-      user: activity.user ? `${activity.user.firstName} ${activity.user.lastName}`.trim() : activity.username || 'System',
-      action: activity.action,
-      status: activity.status || 'success'
-    }));
-    
+
+    // Also get the latest timestamp for the next poll
+    const latestTimestamp = latestActivities.length > 0 
+      ? latestActivities[0].createdAt 
+      : new Date();
+
     res.status(200).json({
       status: 'success',
-      timestamp: now.toISOString(),
       data: {
-        newActivities: formattedActivities,
-        newCount: newActivities.length,
-        latestTimestamp: newActivities.length > 0 ? newActivities[0].createdAt : null,
-        
-        // Real-time counters for dashboard badges
-        counters: {
-          activitiesToday: activitiesToday,
-          pendingDeposits: pendingDeposits,
-          pendingWithdrawals: pendingWithdrawals,
-          pendingKYC: pendingKYC,
-          unreadNotifications: unreadNotifications
-        },
-        
-        // Latest 5 activities for dashboard widget
-        dashboardWidget: dashboardActivities
+        activities: formattedActivities,
+        latestTimestamp: latestTimestamp,
+        count: formattedActivities.length
       }
     });
-    
+
   } catch (err) {
-    console.error('Latest activity error:', err);
+    console.error('Error fetching latest activities:', err);
     res.status(500).json({
       status: 'error',
-      message: err.message,
-      timestamp: new Date().toISOString()
+      message: 'Failed to fetch latest activities'
     });
   }
 });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
