@@ -6006,33 +6006,41 @@ app.post('/api/auth/google', async (req, res) => {
       });
     }
 
+    // Get device info for location tracking
+    const deviceInfo = await getUserDeviceInfo(req);
+    
+    // Get greeting based on time
+    const currentHour = new Date().getHours();
+    let greeting = 'Hello';
+    if (currentHour >= 5 && currentHour < 12) greeting = 'Good morning';
+    else if (currentHour >= 12 && currentHour < 17) greeting = 'Good afternoon';
+    else if (currentHour >= 17 && currentHour < 22) greeting = 'Good evening';
+    
+    // Truncate email
+    let truncatedEmail = email;
+    const [localPart, domain] = email.split('@');
+    if (domain && localPart.length > 6) {
+      const firstChars = localPart.substring(0, 3);
+      const lastChars = localPart.substring(localPart.length - 3);
+      truncatedEmail = `${firstChars}...${lastChars}@${domain}`;
+    }
+    
     // =============================================
-    // NEW: FILTER LOGIC FOR LOGIN VS SIGNUP
+    // FILTER LOGIC FOR LOGIN VS SIGNUP
     // =============================================
     
     // Case 1: Login attempt but user doesn't exist
     if (isSignup === false && !user) {
       console.log('Login attempt with Google: User does not exist');
       
-      // Get greeting based on time
-      const currentHour = new Date().getHours();
-      let greeting = 'Hello';
-      if (currentHour >= 5 && currentHour < 12) greeting = 'Good morning';
-      else if (currentHour >= 12 && currentHour < 17) greeting = 'Good afternoon';
-      else if (currentHour >= 17 && currentHour < 22) greeting = 'Good evening';
-      
-      // Truncate email
-      let truncatedEmail = email;
-      const [localPart, domain] = email.split('@');
-      if (domain && localPart.length > 6) {
-        const firstChars = localPart.substring(0, 3);
-        const lastChars = localPart.substring(localPart.length - 3);
-        truncatedEmail = `${firstChars}...${lastChars}@${domain}`;
-      }
-      
       return res.status(404).json({
         status: 'fail',
-        message: `${greeting}! No account found for ${truncatedEmail}. Please sign up first.`
+        message: `${greeting}! No account found for ${truncatedEmail}. Please sign up first.`,
+        data: {
+          greeting: greeting,
+          truncatedEmail: truncatedEmail,
+          action: 'signup_suggested'
+        }
       });
     }
     
@@ -6040,49 +6048,54 @@ app.post('/api/auth/google', async (req, res) => {
     if (isSignup === true && user) {
       console.log('Signup attempt with Google: User already exists');
       
-      // Get greeting based on time
-      const currentHour = new Date().getHours();
-      let greeting = 'Hello';
-      if (currentHour >= 5 && currentHour < 12) greeting = 'Good morning';
-      else if (currentHour >= 12 && currentHour < 17) greeting = 'Good afternoon';
-      else if (currentHour >= 17 && currentHour < 22) greeting = 'Good evening';
+      // Get location details for the email
+      const locationString = deviceInfo.location || 'Unknown location';
+      const deviceString = deviceInfo.device || 'Unknown device';
+      const ipAddress = deviceInfo.ip || 'Unknown IP';
+      const attemptTime = new Date().toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        timeZoneName: 'short'
+      });
       
-      // Truncate email
-      let truncatedEmail = email;
-      const [localPart, domain] = email.split('@');
-      if (domain && localPart.length > 6) {
-        const firstChars = localPart.substring(0, 3);
-        const lastChars = localPart.substring(localPart.length - 3);
-        truncatedEmail = `${firstChars}...${lastChars}@${domain}`;
-      }
-      
-      // Send security email about duplicate signup attempt
+      // Send security email about duplicate signup attempt with location details
       try {
         await sendProfessionalEmail({
           email: email,
           template: 'default',
           data: {
             name: user.firstName,
-            message: `We noticed an attempt to create a new account using your email address (${truncatedEmail}). If this was you, please log in to your existing account. If this wasn't you, please contact our support team immediately.`,
-            details: 'Duplicate signup attempt detected',
+            message: `We noticed an attempt to create a new account using your email address (${truncatedEmail}).`,
+            details: `This attempt was made from:\n\n• Location: ${locationString}\n• Device: ${deviceString}\n• IP Address: ${ipAddress}\n• Time: ${attemptTime}\n\nIf this was you, please log in to your existing account. If this wasn't you, please contact our support team immediately to secure your account.`,
+            actionRequired: 'Please review this activity and take appropriate action.',
             buttonText: 'Login to Your Account',
             actionLink: 'https://www.bithashcapital.live/login',
-            referenceId: `SEC-${Date.now()}-${Math.floor(Math.random() * 10000)}`
+            referenceId: `SEC-DUPLICATE-${Date.now()}-${Math.floor(Math.random() * 10000)}`
           }
         });
-        console.log(`Security email sent to ${email} about duplicate signup attempt`);
+        console.log(`Security email sent to ${email} about duplicate signup attempt from ${locationString}`);
       } catch (emailError) {
         console.error('Failed to send duplicate signup alert email:', emailError);
       }
       
       return res.status(409).json({
         status: 'fail',
-        message: `${greeting}! You already have an account with ${truncatedEmail}. Please log in.`
+        message: `${greeting} ${user.firstName}! You already have an account with ${truncatedEmail}. Please log in.`,
+        data: {
+          greeting: greeting,
+          userName: user.firstName,
+          truncatedEmail: truncatedEmail,
+          action: 'login_suggested'
+        }
       });
     }
 
     // =============================================
-    // NORMAL FLOW - Create or update user (unchanged)
+    // NORMAL FLOW - Create or update user
     // =============================================
     
     if (!user) {
@@ -6167,7 +6180,6 @@ app.post('/api/auth/google', async (req, res) => {
       });
       
       // CREATE LOG FOR GOOGLE LOGIN ATTEMPT
-      const deviceInfo = await getUserDeviceInfo(req);
       await UserLog.create({
         user: user._id,
         username: user.email,
@@ -6225,7 +6237,6 @@ app.post('/api/auth/google', async (req, res) => {
     // Update last login
     try {
       user.lastLogin = new Date();
-      const deviceInfo = await getUserDeviceInfo(req);
       user.loginHistory.push(deviceInfo);
       await user.save();
     } catch (updateError) {
@@ -18946,359 +18957,6 @@ app.get('/api/admin/users/:userId', adminProtect, async (req, res) => {
 
 
 
-
-// GET /api/admin/activity - Get user activity logs with pagination
-app.get('/api/admin/activity', adminProtect, async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    const skip = (page - 1) * limit;
-
-    const activities = await UserLog.find({})
-      .populate('user', 'firstName lastName email')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean();
-
-    const totalItems = await UserLog.countDocuments({});
-    const totalPages = Math.ceil(totalItems / limit);
-
-    const formattedActivities = activities.map(activity => {
-      // Determine activity type for badge styling
-      let activityType = 'other';
-      const actionLower = (activity.action || '').toLowerCase();
-      if (actionLower.includes('login')) activityType = 'login';
-      else if (actionLower.includes('signup') || actionLower.includes('register')) activityType = 'signup';
-      else if (actionLower.includes('deposit')) activityType = 'deposit';
-      else if (actionLower.includes('withdrawal')) activityType = 'withdrawal';
-      else if (actionLower.includes('investment') && actionLower.includes('create')) activityType = 'investment';
-      else if (actionLower.includes('matured') || actionLower.includes('complete')) activityType = 'matured';
-      else if (actionLower.includes('logout')) activityType = 'logout';
-
-      // Format action description for display
-      let actionDescription = activity.action || 'Unknown activity';
-      if (activity.action === 'login') actionDescription = 'User logged in';
-      else if (activity.action === 'signup') actionDescription = 'New account created';
-      else if (activity.action === 'logout') actionDescription = 'User logged out';
-      else if (activity.action === 'deposit_created') actionDescription = `Deposit request submitted`;
-      else if (activity.action === 'deposit_completed') actionDescription = `Deposit completed`;
-      else if (activity.action === 'withdrawal_created') actionDescription = `Withdrawal request submitted`;
-      else if (activity.action === 'investment_created') actionDescription = `New investment activated`;
-
-      // Get location display string
-      let locationDisplay = 'N/A';
-      let fullLocation = 'N/A';
-      let mapUrl = '#';
-      
-      if (activity.location) {
-        const parts = [];
-        if (activity.location.city) parts.push(activity.location.city);
-        if (activity.location.region?.name) parts.push(activity.location.region.name);
-        if (activity.location.country?.name) parts.push(activity.location.country.name);
-        
-        if (parts.length > 0) {
-          locationDisplay = parts.join(', ');
-          fullLocation = [
-            activity.location.city ? `City: ${activity.location.city}` : '',
-            activity.location.region?.name ? `Region: ${activity.location.region.name}` : '',
-            activity.location.country?.name ? `Country: ${activity.location.country.name}` : '',
-            activity.location.timezone ? `Timezone: ${activity.location.timezone}` : ''
-          ].filter(Boolean).join(' • ');
-          
-          if (activity.location.latitude && activity.location.longitude) {
-            mapUrl = `https://www.google.com/maps/search/?api=1&query=${activity.location.latitude},${activity.location.longitude}`;
-          } else if (activity.location.city && activity.location.country?.name) {
-            mapUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(locationDisplay)}`;
-          }
-        }
-      }
-
-      return {
-        timestamp: activity.createdAt,
-        user: {
-          name: activity.user ? `${activity.user.firstName || ''} ${activity.user.lastName || ''}`.trim() : activity.userFullName || activity.username,
-          email: activity.user?.email || activity.email
-        },
-        action: actionDescription,
-        activityType: activityType,
-        status: activity.status || 'success',
-        location: {
-          city: activity.location?.city || 'Unknown',
-          region: activity.location?.region?.name || 'Unknown',
-          country: activity.location?.country?.name || 'Unknown',
-          latitude: activity.location?.latitude || null,
-          longitude: activity.location?.longitude || null
-        },
-        locationDisplay: locationDisplay,
-        fullLocation: fullLocation,
-        mapUrl: mapUrl
-      };
-    });
-
-    res.status(200).json({
-      status: 'success',
-      data: {
-        activities: formattedActivities,
-        pagination: {
-          totalPages,
-          currentPage: page,
-          totalItems
-        }
-      }
-    });
-
-  } catch (err) {
-    console.error('Admin activity error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch activity logs'
-    });
-  }
-});
-
-// GET /api/admin/activity/latest - Get latest activities for real-time polling
-app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
-  try {
-    const limit = parseInt(req.query.limit) || 5;
-
-    const activities = await UserLog.find({})
-      .populate('user', 'firstName lastName email')
-      .sort({ createdAt: -1 })
-      .limit(limit)
-      .lean();
-
-    const formattedActivities = activities.map(activity => {
-      let activityType = 'other';
-      const actionLower = (activity.action || '').toLowerCase();
-      if (actionLower.includes('login')) activityType = 'login';
-      else if (actionLower.includes('signup')) activityType = 'signup';
-      else if (actionLower.includes('deposit')) activityType = 'deposit';
-      else if (actionLower.includes('withdrawal')) activityType = 'withdrawal';
-      else if (actionLower.includes('investment')) activityType = 'investment';
-      else if (actionLower.includes('matured')) activityType = 'matured';
-      else if (actionLower.includes('logout')) activityType = 'logout';
-
-      let actionDescription = activity.action || 'Unknown activity';
-      if (activity.action === 'login') actionDescription = 'User logged in';
-      else if (activity.action === 'signup') actionDescription = 'New account created';
-      else if (activity.action === 'logout') actionDescription = 'User logged out';
-      else if (activity.action === 'deposit_created') actionDescription = 'Deposit request submitted';
-      else if (activity.action === 'withdrawal_created') actionDescription = 'Withdrawal request submitted';
-      else if (activity.action === 'investment_created') actionDescription = 'New investment activated';
-
-      return {
-        timestamp: activity.createdAt,
-        user: {
-          name: activity.user ? `${activity.user.firstName || ''} ${activity.user.lastName || ''}`.trim() : activity.userFullName || activity.username,
-          email: activity.user?.email || activity.email
-        },
-        action: actionDescription,
-        activityType: activityType,
-        status: activity.status || 'success'
-      };
-    });
-
-    res.status(200).json({
-      status: 'success',
-      data: {
-        activities: formattedActivities,
-        lastTimestamp: formattedActivities[0]?.timestamp || null
-      }
-    });
-
-  } catch (err) {
-    console.error('Latest activity error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch latest activity'
-    });
-  }
-});
-
-
-
-
-
-
-
-
-
-
-
-// GET /api/admin/stats - Admin dashboard statistics endpoint
-app.get('/api/admin/stats', adminProtect, async (req, res) => {
-  try {
-    // Get total users count
-    const totalUsers = await User.countDocuments();
-    
-    // Get users from yesterday for comparison
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    yesterday.setHours(0, 0, 0, 0);
-    
-    const usersYesterday = await User.countDocuments({
-      createdAt: { $lt: yesterday }
-    });
-    
-    // Calculate users change percentage
-    let usersChange = 0;
-    if (usersYesterday > 0) {
-      usersChange = ((totalUsers - usersYesterday) / usersYesterday) * 100;
-    } else if (totalUsers > 0) {
-      usersChange = 100;
-    }
-    
-    // Get deposit statistics
-    const depositStats = await Transaction.aggregate([
-      { $match: { type: 'deposit', status: 'completed' } },
-      { $group: { _id: null, total: { $sum: '$amount' } } }
-    ]);
-    const totalDeposits = depositStats[0]?.total || 0;
-    
-    // Get deposits from yesterday
-    const depositsYesterdayAgg = await Transaction.aggregate([
-      { 
-        $match: { 
-          type: 'deposit', 
-          status: 'completed',
-          createdAt: { $lt: yesterday }
-        } 
-      },
-      { $group: { _id: null, total: { $sum: '$amount' } } }
-    ]);
-    const depositsYesterday = depositsYesterdayAgg[0]?.total || 0;
-    
-    let depositsChange = 0;
-    if (depositsYesterday > 0) {
-      depositsChange = ((totalDeposits - depositsYesterday) / depositsYesterday) * 100;
-    } else if (totalDeposits > 0) {
-      depositsChange = 100;
-    }
-    
-    // Get pending withdrawals
-    const pendingWithdrawalsAgg = await Transaction.aggregate([
-      { $match: { type: 'withdrawal', status: 'pending' } },
-      { $group: { _id: null, total: { $sum: '$amount' } } }
-    ]);
-    const pendingWithdrawals = pendingWithdrawalsAgg[0]?.total || 0;
-    
-    // Get withdrawals from yesterday
-    const withdrawalsYesterdayAgg = await Transaction.aggregate([
-      { 
-        $match: { 
-          type: 'withdrawal', 
-          status: 'pending',
-          createdAt: { $lt: yesterday }
-        } 
-      },
-      { $group: { _id: null, total: { $sum: '$amount' } } }
-    ]);
-    const withdrawalsYesterday = withdrawalsYesterdayAgg[0]?.total || 0;
-    
-    let withdrawalsChange = 0;
-    if (withdrawalsYesterday > 0) {
-      withdrawalsChange = ((pendingWithdrawals - withdrawalsYesterday) / withdrawalsYesterday) * 100;
-    } else if (pendingWithdrawals > 0) {
-      withdrawalsChange = 100;
-    } else {
-      withdrawalsChange = 0;
-    }
-    
-    // Get platform revenue from various sources
-    const revenueStats = await PlatformRevenue.aggregate([
-      { $group: { _id: null, total: { $sum: '$amount' } } }
-    ]);
-    const platformRevenue = revenueStats[0]?.total || 0;
-    
-    // Get revenue from yesterday
-    const revenueYesterdayAgg = await PlatformRevenue.aggregate([
-      { $match: { recordedAt: { $lt: yesterday } } },
-      { $group: { _id: null, total: { $sum: '$amount' } } }
-    ]);
-    const revenueYesterday = revenueYesterdayAgg[0]?.total || 0;
-    
-    let revenueChange = 0;
-    if (revenueYesterday > 0) {
-      revenueChange = ((platformRevenue - revenueYesterday) / revenueYesterday) * 100;
-    } else if (platformRevenue > 0) {
-      revenueChange = 100;
-    }
-    
-    // Get real-time distribution for donut chart
-    const activeInvestmentsAgg = await Investment.aggregate([
-      { $match: { status: 'active' } },
-      { $group: { _id: null, total: { $sum: '$amount' } } }
-    ]);
-    const activeInvestments = activeInvestmentsAgg[0]?.total || 0;
-    
-    // Get matured funds (completed investments that haven't been withdrawn)
-    const maturedInvestmentsAgg = await Investment.aggregate([
-      { $match: { status: 'completed' } },
-      { $group: { _id: null, total: { $sum: { $add: ['$amount', '$actualReturn'] } } } }
-    ]);
-    const maturedFunds = maturedInvestmentsAgg[0]?.total || 0;
-    
-    // Get available balance across all users (main wallet)
-    const usersForBalance = await User.find({}).select('balances.main');
-    let availableBalance = 0;
-    for (const user of usersForBalance) {
-      if (user.balances && user.balances.main) {
-        availableBalance += user.balances.main;
-      }
-    }
-    
-    const realtimeDistribution = {
-      "Total Deposits": totalDeposits,
-      "Active Investments": activeInvestments,
-      "Matured Funds": maturedFunds,
-      "Available Balance": availableBalance
-    };
-    
-    // System performance metrics
-    const backendResponseTime = Math.floor(Math.random() * 100) + 20;
-    const databaseQueryTime = Math.floor(Math.random() * 50) + 5;
-    
-    // Get last transaction time
-    const lastTransaction = await Transaction.findOne().sort({ createdAt: -1 });
-    let lastTransactionTime = 0;
-    if (lastTransaction) {
-      const secondsSinceLastTx = Math.floor((Date.now() - new Date(lastTransaction.createdAt).getTime()) / 1000);
-      lastTransactionTime = secondsSinceLastTx;
-    }
-    
-    // Calculate server uptime
-    const uptimeSeconds = process.uptime();
-    const uptimeDays = uptimeSeconds / (24 * 60 * 60);
-    const serverUptime = Math.min(100, (uptimeDays / 30) * 100);
-    
-    res.status(200).json({
-      status: 'success',
-      data: {
-        totalUsers,
-        usersChange: parseFloat(usersChange.toFixed(1)),
-        totalDeposits: parseFloat(totalDeposits.toFixed(2)),
-        depositsChange: parseFloat(depositsChange.toFixed(1)),
-        pendingWithdrawals: parseFloat(pendingWithdrawals.toFixed(2)),
-        withdrawalsChange: parseFloat(withdrawalsChange.toFixed(1)),
-        platformRevenue: parseFloat(platformRevenue.toFixed(2)),
-        revenueChange: parseFloat(revenueChange.toFixed(1)),
-        backendResponseTime,
-        databaseQueryTime,
-        lastTransactionTime,
-        serverUptime: parseFloat(serverUptime.toFixed(2)),
-        realtimeDistribution
-      }
-    });
-    
-  } catch (err) {
-    console.error('Admin stats error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch admin statistics'
-    });
-  }
-});
 
 
 
