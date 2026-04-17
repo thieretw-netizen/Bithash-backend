@@ -5940,7 +5940,9 @@ await logActivity('login_attempt', 'authentication', null, null, null, req, {
 
 
 
-
+// =============================================
+// REWRITTEN GOOGLE ENDPOINT - WITH SIGNUP/LOGIN FILTERING
+// =============================================
 app.post('/api/auth/google', async (req, res) => {
   try {
     console.log('Google auth request received');
@@ -5977,34 +5979,20 @@ app.post('/api/auth/google', async (req, res) => {
       });
     }
 
-    // Get client IP for location
+    // --- NEW: Get timezone and personalized greeting ---
     const clientIP = getRealClientIP(req);
-    
-    // Simple greeting based on server time (since getUserTimezoneFromIP doesn't exist)
-    const currentHour = new Date().getHours();
-    let greeting = 'Hello';
-    if (currentHour >= 5 && currentHour < 12) greeting = 'Good morning';
-    else if (currentHour >= 12 && currentHour < 17) greeting = 'Good afternoon';
-    else if (currentHour >= 17 && currentHour < 22) greeting = 'Good evening';
-    
-    // Truncate email function
-    const truncateEmailDisplay = (emailStr) => {
-      if (!emailStr) return 'your email';
-      const [localPart, domain] = emailStr.split('@');
-      if (!domain) return emailStr;
-      if (localPart.length <= 6) return `${localPart}@${domain}`;
-      const firstChars = localPart.substring(0, 3);
-      const lastChars = localPart.substring(localPart.length - 3);
-      return `${firstChars}...${lastChars}@${domain}`;
-    };
-    
-    const truncatedEmail = truncateEmailDisplay(email);
+    const userTimezone = await getUserTimezoneFromIP(clientIP);
+    const greeting = getShortGreeting(userTimezone);
+    const truncatedEmail = truncateEmail(email);
 
     let user = await User.findOne({ email: email });
     const userExists = !!user;
 
-    // LOGIN attempt but user doesn't exist
+    // =============================================
+    // CASE 1: LOGIN attempt but user doesn't exist
+    // =============================================
     if (isSignup === false && !userExists) {
+      // LOG THIS ATTEMPT
       await logActivity('google_login_failed', 'authentication', null, null, null, req, {
         email: email,
         reason: 'account_not_found',
@@ -6023,8 +6011,11 @@ app.post('/api/auth/google', async (req, res) => {
       });
     }
 
-    // SIGNUP attempt but user already exists
+    // =============================================
+    // CASE 2: SIGNUP attempt but user already exists
+    // =============================================
     if (isSignup === true && userExists) {
+      // LOG THIS ATTEMPT
       await logActivity('google_signup_failed', 'authentication', user._id, user._id, 'User', req, {
         email: email,
         reason: 'account_already_exists',
@@ -6032,13 +6023,14 @@ app.post('/api/auth/google', async (req, res) => {
         status: 'failed'
       });
       
+      // SEND EMAIL NOTIFICATION about attempted duplicate signup
       try {
         await sendProfessionalEmail({
           email: email,
           template: 'default',
           data: {
             name: user.firstName,
-            message: `${greeting} ${user.firstName}! We noticed an attempt to create a new account using your email address (${truncatedEmail}). If this was you, please log in to your existing account. If this wasn't you, please contact our support team immediately.`,
+            message: `We noticed an attempt to create a new account using your email address (${truncatedEmail}). If this was you, please log in to your existing account. If this wasn't you, please contact our support team immediately.`,
             details: 'Duplicate signup attempt detected',
             actionRequired: 'No action needed if you initiated this. Otherwise, secure your account.',
             buttonText: 'Login to Your Account',
@@ -6053,7 +6045,7 @@ app.post('/api/auth/google', async (req, res) => {
       
       return res.status(409).json({
         status: 'fail',
-        message: `${greeting} ${user.firstName}! You already have an account with ${truncatedEmail}. Please log in.`,
+        message: `${greeting}! You already have an account with ${truncatedEmail}. Please log in.`,
         data: {
           greeting: greeting,
           truncatedEmail: truncatedEmail,
@@ -6067,6 +6059,7 @@ app.post('/api/auth/google', async (req, res) => {
     let isNewUser = false;
 
     if (!userExists) {
+      // Create new user
       try {
         const referralCode = generateReferralCode();
         user = await User.create({
@@ -6081,6 +6074,7 @@ app.post('/api/auth/google', async (req, res) => {
         isNewUser = true;
         console.log(`New user created via Google: ${email}`);
         
+        // LOG successful signup
         await logActivity('google_signup_success', 'user', user._id, user._id, 'User', req, {
           email: email,
           provider: 'google',
@@ -6088,6 +6082,7 @@ app.post('/api/auth/google', async (req, res) => {
           status: 'success'
         });
         
+        // SEND WELCOME EMAIL
         try {
           await sendAutomatedEmail(user, 'welcome', {
             name: user.firstName,
@@ -6106,10 +6101,12 @@ app.post('/api/auth/google', async (req, res) => {
         });
       }
     } else if (!user.googleId) {
+      // Link Google account to existing user
       user.googleId = sub;
       user.isVerified = true;
       await user.save();
       
+      // LOG successful link
       await logActivity('google_account_linked', 'user', user._id, user._id, 'User', req, {
         email: email,
         provider: 'google',
@@ -6117,13 +6114,14 @@ app.post('/api/auth/google', async (req, res) => {
         status: 'success'
       });
       
+      // SEND EMAIL about Google account linking
       try {
         await sendProfessionalEmail({
           email: email,
           template: 'default',
           data: {
             name: user.firstName,
-            message: `${greeting} ${user.firstName}! Your Google account has been successfully linked to your BitHash Capital account (${truncatedEmail}). You can now sign in using Google.`,
+            message: `Your Google account has been successfully linked to your BitHash Capital account (${truncatedEmail}). You can now sign in using Google.`,
             details: 'Google authentication enabled',
             buttonText: 'Go to Dashboard',
             actionLink: 'https://www.bithashcapital.live/dashboard',
@@ -6136,6 +6134,7 @@ app.post('/api/auth/google', async (req, res) => {
       }
     }
 
+    // Check account status
     if (user.status !== 'active') {
       return res.status(401).json({
         status: 'fail',
@@ -6143,6 +6142,7 @@ app.post('/api/auth/google', async (req, res) => {
       });
     }
 
+    // Generate OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
@@ -6155,6 +6155,7 @@ app.post('/api/auth/google', async (req, res) => {
       userAgent: req.headers['user-agent']
     });
 
+    // SEND OTP EMAIL
     await sendProfessionalEmail({
       email: email,
       template: 'otp',
@@ -6165,6 +6166,7 @@ app.post('/api/auth/google', async (req, res) => {
       }
     });
 
+    // LOG login attempt with OTP sent
     const deviceInfo = await getUserDeviceInfo(req);
     await UserLog.create({
       user: user._id,
@@ -6195,10 +6197,12 @@ app.post('/api/auth/google', async (req, res) => {
         loginMethod: 'google',
         otpSent: true,
         isNewUser: isNewUser,
+        timezone: userTimezone,
         greeting: greeting
       }
     });
 
+    // SEND LOGIN NOTIFICATION EMAIL
     try {
       await sendAutomatedEmail(user, 'login_success', {
         name: user.firstName,
@@ -6212,6 +6216,7 @@ app.post('/api/auth/google', async (req, res) => {
       console.error('Login notification email failed:', emailError);
     }
 
+    // Update last login
     user.lastLogin = new Date();
     user.loginHistory.push(deviceInfo);
     await user.save();
@@ -6219,8 +6224,8 @@ app.post('/api/auth/google', async (req, res) => {
     const tempToken = generateJWT(user._id);
 
     const successMessage = isNewUser 
-      ? `${greeting} ${user.firstName}! Account created. Verification code sent to ${truncatedEmail}.`
-      : `${greeting} ${user.firstName}! Verification code sent to ${truncatedEmail}.`;
+      ? `${greeting}! Account created. Verification code sent to ${truncatedEmail}.`
+      : `${greeting}! Verification code sent to ${truncatedEmail}.`;
 
     res.status(200).json({
       status: 'success',
@@ -6234,8 +6239,7 @@ app.post('/api/auth/google', async (req, res) => {
           firstName: user.firstName,
           lastName: user.lastName,
           email: user.email,
-          truncatedEmail: truncatedEmail,
-          greeting: greeting
+          truncatedEmail: truncatedEmail
         }
       }
     });
@@ -6243,6 +6247,7 @@ app.post('/api/auth/google', async (req, res) => {
   } catch (err) {
     console.error('Google auth error:', err);
     
+    // LOG the error
     await logActivity('google_auth_error', 'authentication', null, null, null, req, {
       error: err.message,
       status: 'failed'
@@ -6255,6 +6260,64 @@ app.post('/api/auth/google', async (req, res) => {
   }
 });
 
+// =============================================
+// HELPER FUNCTIONS (ADD THESE TO YOUR server.js IF MISSING)
+// =============================================
+
+// Get user timezone from IP address
+async function getUserTimezoneFromIP(ip) {
+  try {
+    // Skip for local/private IPs
+    if (!ip || ip === '127.0.0.1' || ip === '::1' || ip.startsWith('192.168.') || ip.startsWith('10.') || ip.startsWith('172.')) {
+      return 'UTC';
+    }
+    
+    // Try ipapi.co first
+    const response = await axios.get(`https://ipapi.co/${ip}/json/`, { timeout: 3000 });
+    if (response.data && response.data.timezone) {
+      return response.data.timezone;
+    }
+  } catch (err) {
+    console.log('Timezone lookup failed, using UTC');
+  }
+  return 'UTC';
+}
+
+// Get simple time-based greeting (short version)
+function getShortGreeting(timezone = 'UTC') {
+  try {
+    const userTime = new Date().toLocaleString('en-US', { timeZone: timezone });
+    const userHour = new Date(userTime).getHours();
+    
+    if (userHour >= 5 && userHour < 12) {
+      return 'Good morning';
+    } else if (userHour >= 12 && userHour < 17) {
+      return 'Good afternoon';
+    } else if (userHour >= 17 && userHour < 22) {
+      return 'Good evening';
+    } else {
+      return 'Hello';
+    }
+  } catch (error) {
+    return 'Hello';
+  }
+}
+
+// Truncate email for display (show first 3 and last 3 chars)
+function truncateEmail(email) {
+  if (!email) return 'your email';
+  
+  const [localPart, domain] = email.split('@');
+  if (!domain) return email;
+  
+  if (localPart.length <= 6) {
+    return `${localPart}@${domain}`;
+  }
+  
+  const firstChars = localPart.substring(0, 3);
+  const lastChars = localPart.substring(localPart.length - 3);
+  return `${firstChars}...${lastChars}@${domain}`;
+}
 
 
 
