@@ -5936,10 +5936,6 @@ await logActivity('login_attempt', 'authentication', null, null, null, req, {
 
 
 
-
-// =============================================
-// REWRITTEN GOOGLE ENDPOINT - WITH SIGNUP/LOGIN FILTERING
-// =============================================
 app.post('/api/auth/google', async (req, res) => {
   try {
     console.log('Google auth request received');
@@ -5947,12 +5943,16 @@ app.post('/api/auth/google', async (req, res) => {
     const { credential, isSignup = false } = req.body;
     
     if (!credential) {
+      console.error('No credential provided');
       return res.status(400).json({
         status: 'fail',
-        message: 'Google credential is required.'
+        message: 'Google credential is required'
       });
     }
 
+    console.log('Verifying Google token...');
+
+    // Verify the Google token
     let payload;
     try {
       const ticket = await googleClient.verifyIdToken({
@@ -5960,75 +5960,103 @@ app.post('/api/auth/google', async (req, res) => {
         audience: process.env.GOOGLE_CLIENT_ID
       });
       payload = ticket.getPayload();
+      console.log('Google token verified successfully');
     } catch (verifyError) {
+      console.error('Google token verification failed:', verifyError);
       return res.status(400).json({
         status: 'fail',
         message: 'Invalid Google token. Please try again.'
       });
     }
 
+    if (!payload) {
+      console.error('No payload from Google token');
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid token payload'
+      });
+    }
+
     const { email, given_name, family_name, sub } = payload;
 
     if (!email) {
+      console.error('No email in Google payload');
       return res.status(400).json({
         status: 'fail',
-        message: 'No email found in Google account.'
+        message: 'No email found in Google account'
       });
     }
 
-    // SIMPLE GREETING LOGIC - NO EXTERNAL FUNCTIONS
-    const currentHour = new Date().getHours();
-    let greeting = 'Hello';
-    if (currentHour >= 5 && currentHour < 12) {
-      greeting = 'Good morning';
-    } else if (currentHour >= 12 && currentHour < 17) {
-      greeting = 'Good afternoon';
-    } else if (currentHour >= 17 && currentHour < 22) {
-      greeting = 'Good evening';
+    console.log('Google auth successful for:', email);
+
+    // Use the EXACT email from Google - no normalization
+    const originalEmail = email;
+
+    let user;
+    let isNewUser = false;
+
+    try {
+      user = await User.findOne({ email: originalEmail });
+      console.log('User lookup result:', user ? 'Found' : 'Not found');
+    } catch (dbError) {
+      console.error('Database lookup error:', dbError);
+      return res.status(500).json({
+        status: 'error',
+        message: 'Database error during user lookup'
+      });
     }
+
+    // =============================================
+    // NEW: FILTER LOGIC FOR LOGIN VS SIGNUP
+    // =============================================
     
-    // SIMPLE EMAIL TRUNCATION - NO EXTERNAL FUNCTIONS
-    let truncatedEmail = email;
-    const [localPart, domain] = email.split('@');
-    if (domain && localPart.length > 6) {
-      const firstChars = localPart.substring(0, 3);
-      const lastChars = localPart.substring(localPart.length - 3);
-      truncatedEmail = `${firstChars}...${lastChars}@${domain}`;
-    }
-
-    let user = await User.findOne({ email: email });
-    const userExists = !!user;
-
-    // CASE 1: LOGIN attempt but user doesn't exist
-    if (isSignup === false && !userExists) {
-      await logActivity('google_login_failed', 'authentication', null, null, null, req, {
-        email: email,
-        reason: 'account_not_found',
-        greeting: greeting,
-        status: 'failed'
-      });
+    // Case 1: Login attempt but user doesn't exist
+    if (isSignup === false && !user) {
+      console.log('Login attempt with Google: User does not exist');
+      
+      // Get greeting based on time
+      const currentHour = new Date().getHours();
+      let greeting = 'Hello';
+      if (currentHour >= 5 && currentHour < 12) greeting = 'Good morning';
+      else if (currentHour >= 12 && currentHour < 17) greeting = 'Good afternoon';
+      else if (currentHour >= 17 && currentHour < 22) greeting = 'Good evening';
+      
+      // Truncate email
+      let truncatedEmail = email;
+      const [localPart, domain] = email.split('@');
+      if (domain && localPart.length > 6) {
+        const firstChars = localPart.substring(0, 3);
+        const lastChars = localPart.substring(localPart.length - 3);
+        truncatedEmail = `${firstChars}...${lastChars}@${domain}`;
+      }
       
       return res.status(404).json({
         status: 'fail',
-        message: `${greeting}! No account found for ${truncatedEmail}. Please sign up first.`,
-        data: {
-          greeting: greeting,
-          truncatedEmail: truncatedEmail,
-          action: 'signup_suggested'
-        }
+        message: `${greeting}! No account found for ${truncatedEmail}. Please sign up first.`
       });
     }
-
-    // CASE 2: SIGNUP attempt but user already exists
-    if (isSignup === true && userExists) {
-      await logActivity('google_signup_failed', 'authentication', user._id, user._id, 'User', req, {
-        email: email,
-        reason: 'account_already_exists',
-        greeting: greeting,
-        status: 'failed'
-      });
+    
+    // Case 2: Signup attempt but user already exists
+    if (isSignup === true && user) {
+      console.log('Signup attempt with Google: User already exists');
       
-      // SEND SECURITY EMAIL about duplicate signup attempt
+      // Get greeting based on time
+      const currentHour = new Date().getHours();
+      let greeting = 'Hello';
+      if (currentHour >= 5 && currentHour < 12) greeting = 'Good morning';
+      else if (currentHour >= 12 && currentHour < 17) greeting = 'Good afternoon';
+      else if (currentHour >= 17 && currentHour < 22) greeting = 'Good evening';
+      
+      // Truncate email
+      let truncatedEmail = email;
+      const [localPart, domain] = email.split('@');
+      if (domain && localPart.length > 6) {
+        const firstChars = localPart.substring(0, 3);
+        const lastChars = localPart.substring(localPart.length - 3);
+        truncatedEmail = `${firstChars}...${lastChars}@${domain}`;
+      }
+      
+      // Send security email about duplicate signup attempt
       try {
         await sendProfessionalEmail({
           email: email,
@@ -6037,7 +6065,6 @@ app.post('/api/auth/google', async (req, res) => {
             name: user.firstName,
             message: `We noticed an attempt to create a new account using your email address (${truncatedEmail}). If this was you, please log in to your existing account. If this wasn't you, please contact our support team immediately.`,
             details: 'Duplicate signup attempt detected',
-            actionRequired: 'No action needed if you initiated this. Otherwise, secure your account.',
             buttonText: 'Login to Your Account',
             actionLink: 'https://www.bithashcapital.live/login',
             referenceId: `SEC-${Date.now()}-${Math.floor(Math.random() * 10000)}`
@@ -6050,183 +6077,167 @@ app.post('/api/auth/google', async (req, res) => {
       
       return res.status(409).json({
         status: 'fail',
-        message: `${greeting}! You already have an account with ${truncatedEmail}. Please log in.`,
-        data: {
-          greeting: greeting,
-          truncatedEmail: truncatedEmail,
-          userName: user.firstName,
-          action: 'login_suggested'
-        }
+        message: `${greeting}! You already have an account with ${truncatedEmail}. Please log in.`
       });
     }
 
-    // --- SUCCESS FLOW: Create or update user ---
-    let isNewUser = false;
-
-    if (!userExists) {
+    // =============================================
+    // NORMAL FLOW - Create or update user (unchanged)
+    // =============================================
+    
+    if (!user) {
+      // Create new user with Google auth using exact email (only for signup)
       try {
         const referralCode = generateReferralCode();
         user = await User.create({
           firstName: given_name || 'Google',
           lastName: family_name || 'User',
-          email: email,
+          email: originalEmail,
           googleId: sub,
           isVerified: true,
-          referralCode: referralCode,
+          referralCode,
           status: 'active'
         });
         isNewUser = true;
-        console.log(`New user created via Google: ${email}`);
-        
-        await logActivity('google_signup_success', 'user', user._id, user._id, 'User', req, {
-          email: email,
-          provider: 'google',
-          greeting: greeting,
-          status: 'success'
-        });
-        
+        console.log('New user created via Google:', originalEmail);
+
+        // Send welcome email
         try {
           await sendAutomatedEmail(user, 'welcome', {
-            name: user.firstName
+            firstName: given_name || 'Google User'
           });
-          console.log(`Welcome email sent to ${email}`);
         } catch (emailError) {
           console.error('Welcome email failed:', emailError);
+          // Don't fail the request if email fails
         }
-        
       } catch (createError) {
         console.error('User creation error:', createError);
         return res.status(500).json({
           status: 'error',
-          message: 'Failed to create account. Please try again.'
+          message: 'Failed to create user account'
         });
       }
     } else if (!user.googleId) {
-      user.googleId = sub;
-      user.isVerified = true;
-      await user.save();
-      
-      await logActivity('google_account_linked', 'user', user._id, user._id, 'User', req, {
-        email: email,
-        provider: 'google',
-        greeting: greeting,
-        status: 'success'
-      });
-      
+      // Existing user, add Google auth
       try {
-        await sendProfessionalEmail({
-          email: email,
-          template: 'default',
-          data: {
-            name: user.firstName,
-            message: `Your Google account has been successfully linked to your BitHash Capital account (${truncatedEmail}). You can now sign in using Google.`,
-            details: 'Google authentication enabled',
-            buttonText: 'Go to Dashboard',
-            actionLink: 'https://www.bithashcapital.live/dashboard',
-            referenceId: `LINK-${Date.now()}-${Math.floor(Math.random() * 10000)}`
-          }
+        user.googleId = sub;
+        user.isVerified = true;
+        await user.save();
+        console.log('Existing user linked with Google:', originalEmail);
+      } catch (updateError) {
+        console.error('User update error:', updateError);
+        return res.status(500).json({
+          status: 'error',
+          message: 'Failed to link Google account'
         });
-        console.log(`Google linking confirmation email sent to ${email}`);
-      } catch (emailError) {
-        console.error('Google linking email failed:', emailError);
       }
     }
 
+    // Check if user is active
     if (user.status !== 'active') {
       return res.status(401).json({
         status: 'fail',
-        message: 'Account suspended. Contact support.'
+        message: 'Your account has been suspended. Please contact support.'
       });
     }
 
-    // Generate OTP
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-
-    await OTP.create({
-      email: email,
-      otp,
-      type: 'login',
-      expiresAt,
-      ipAddress: req.ip,
-      userAgent: req.headers['user-agent']
-    });
-
-    // SEND OTP EMAIL
-    await sendProfessionalEmail({
-      email: email,
-      template: 'otp',
-      data: {
-        name: user.firstName,
-        otp: otp,
-        action: 'Google sign-in verification'
-      }
-    });
-
-    // LOG login attempt with OTP sent
-    const deviceInfo = await getUserDeviceInfo(req);
-    await UserLog.create({
-      user: user._id,
-      username: user.email,
-      email: user.email,
-      userFullName: `${user.firstName} ${user.lastName}`,
-      action: 'google_login_otp_sent',
-      actionCategory: 'authentication',
-      ipAddress: deviceInfo.ip,
-      userAgent: deviceInfo.device,
-      deviceInfo: {
-        type: getDeviceType(req),
-        os: getOSFromUserAgent(req.headers['user-agent']),
-        browser: getBrowserFromUserAgent(req.headers['user-agent'])
-      },
-      location: {
-        ip: deviceInfo.ip,
-        country: deviceInfo.locationDetails?.country || 'Unknown',
-        city: deviceInfo.locationDetails?.city || 'Unknown',
-        region: deviceInfo.locationDetails?.region || 'Unknown',
-        exactLocation: deviceInfo.exactLocation,
-        latitude: deviceInfo.locationDetails?.latitude,
-        longitude: deviceInfo.locationDetails?.longitude
-      },
-      status: 'pending',
-      metadata: {
-        email: email,
-        loginMethod: 'google',
-        otpSent: true,
-        isNewUser: isNewUser,
-        greeting: greeting
-      }
-    });
-
-    // SEND LOGIN NOTIFICATION EMAIL
+    // Generate OTP for Google sign-in
     try {
-      await sendAutomatedEmail(user, 'login_success', {
-        name: user.firstName,
-        device: deviceInfo.device,
-        location: deviceInfo.location,
-        ip: deviceInfo.ip,
-        timestamp: new Date().toISOString()
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+      await OTP.create({
+        email: originalEmail,
+        otp,
+        type: 'login',
+        expiresAt,
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent']
       });
-      console.log(`Login notification email sent to ${email}`);
-    } catch (emailError) {
-      console.error('Login notification email failed:', emailError);
+
+      // Send OTP email
+      await sendProfessionalEmail({
+        email: originalEmail,
+        template: 'otp',
+        data: {
+          name: user.firstName,
+          otp: otp,
+          action: 'Google sign-in verification'
+        }
+      });
+      
+      // CREATE LOG FOR GOOGLE LOGIN ATTEMPT
+      const deviceInfo = await getUserDeviceInfo(req);
+      await UserLog.create({
+        user: user._id,
+        username: user.email,
+        email: user.email,
+        userFullName: `${user.firstName} ${user.lastName}`,
+        action: 'login_attempt',
+        actionCategory: 'authentication',
+        ipAddress: deviceInfo.ip,
+        userAgent: deviceInfo.device,
+        deviceInfo: {
+          type: getDeviceType(req),
+          os: getOSFromUserAgent(req.headers['user-agent']),
+          browser: getBrowserFromUserAgent(req.headers['user-agent'])
+        },
+        location: {
+          ip: deviceInfo.ip,
+          country: deviceInfo.locationDetails?.country || 'Unknown',
+          city: deviceInfo.locationDetails?.city || 'Unknown',
+          region: deviceInfo.locationDetails?.region || 'Unknown',
+          exactLocation: deviceInfo.exactLocation,
+          latitude: deviceInfo.locationDetails?.latitude,
+          longitude: deviceInfo.locationDetails?.longitude
+        },
+        status: 'pending',
+        metadata: {
+          email: originalEmail,
+          loginMethod: 'google',
+          otpSent: true,
+          isNewUser: isNewUser
+        }
+      });
+      
+      // SEND LOGIN ATTEMPT EMAIL FOR GOOGLE SIGN-IN
+      try {
+        await sendAutomatedEmail(user, 'login_success', {
+          name: user.firstName,
+          device: deviceInfo.device,
+          location: deviceInfo.location,
+          ip: deviceInfo.ip,
+          timestamp: new Date().toISOString()
+        });
+        console.log(`📧 Google login attempt email sent to ${user.email}`);
+      } catch (emailError) {
+        console.error('Failed to send Google login attempt email:', emailError);
+      }
+      
+    } catch (otpError) {
+      console.error('OTP creation error:', otpError);
+      // Continue even if OTP fails for now
     }
 
-    // Update last login
-    user.lastLogin = new Date();
-    user.loginHistory.push(deviceInfo);
-    await user.save();
-
+    // Generate temporary token
     const tempToken = generateJWT(user._id);
 
-    const successMessage = isNewUser 
-      ? `${greeting}! Account created. Verification code sent to ${truncatedEmail}.`
-      : `${greeting}! Verification code sent to ${truncatedEmail}.`;
+    // Update last login
+    try {
+      user.lastLogin = new Date();
+      const deviceInfo = await getUserDeviceInfo(req);
+      user.loginHistory.push(deviceInfo);
+      await user.save();
+    } catch (updateError) {
+      console.error('User update error:', updateError);
+      // Continue even if update fails
+    }
 
+    // SUCCESS RESPONSE
     res.status(200).json({
       status: 'success',
-      message: successMessage,
-      tempToken: tempToken,
+      message: 'OTP sent to your email. Please verify to complete Google sign-in.',
+      tempToken,
       needsOtp: true,
       isNewUser: isNewUser,
       data: {
@@ -6234,26 +6245,33 @@ app.post('/api/auth/google', async (req, res) => {
           id: user._id,
           firstName: user.firstName,
           lastName: user.lastName,
-          email: user.email,
-          truncatedEmail: truncatedEmail
+          email: user.email
         }
       }
     });
 
+    // Log activity (don't let this break the response)
+    try {
+      await logActivity('google_signin_otp_sent', 'user', user._id, user._id, 'User', req, {
+        isNewUser,
+        provider: 'google',
+        email: originalEmail
+      });
+    } catch (logError) {
+      console.error('Activity logging error:', logError);
+    }
+
   } catch (err) {
-    console.error('Google auth error:', err);
-    
-    await logActivity('google_auth_error', 'authentication', null, null, null, req, {
-      error: err.message,
-      status: 'failed'
-    });
+    console.error('Google auth UNEXPECTED error:', err);
+    console.error('Error stack:', err.stack);
     
     res.status(500).json({
       status: 'error',
-      message: 'Authentication failed. Please try again.'
+      message: 'An unexpected error occurred during Google authentication'
     });
   }
 });
+
 
 
 
