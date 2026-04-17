@@ -18995,16 +18995,20 @@ app.get('/api/admin/stats', adminProtect, restrictTo('super', 'finance', 'suppor
 
 
 
-// GET /api/admin/activity - Recent activity with pagination
 app.get('/api/admin/activity', adminProtect, restrictTo('super', 'finance', 'support'), async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
     
-    // Get activities from UserLog collection with user details
+    // ✅ IMPORTANT: Populate user with correct reference
+    // The 'user' field in UserLog should reference the User model
     const activities = await UserLog.find({})
-      .populate('user', 'firstName lastName email')
+      .populate({
+        path: 'user',
+        select: 'firstName lastName email',
+        model: 'User'  // Explicitly specify the model
+      })
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -19013,90 +19017,51 @@ app.get('/api/admin/activity', adminProtect, restrictTo('super', 'finance', 'sup
     const totalActivities = await UserLog.countDocuments({});
     const totalPages = Math.ceil(totalActivities / limit);
     
-    // Enhance activities with location data and descriptive text
     const enhancedActivities = activities.map(activity => {
-      // Get descriptive action text
-      const actionDescriptions = {
-        'login': 'User logged in',
-        'logout': 'User logged out',
-        'signup': 'New user registered',
-        'signup_initiated': 'User initiated registration',
-        'login_attempt': 'Login attempt',
-        'login_otp_sent': 'Login OTP sent',
-        'otp_verified': 'OTP verified successfully',
-        'google_signin': 'Google sign-in',
-        'password_change': 'Password changed',
-        'password_reset': 'Password reset requested',
-        'forgot_password': 'Forgot password request',
-        'reset_password': 'Password reset completed',
-        'deposit_created': 'Deposit request created',
-        'deposit_completed': 'Deposit completed',
-        'deposit_failed': 'Deposit failed',
-        'deposit_approved': 'Deposit approved by admin',
-        'deposit_rejected': 'Deposit rejected by admin',
-        'withdrawal_created': 'Withdrawal requested',
-        'withdrawal_completed': 'Withdrawal completed',
-        'withdrawal_failed': 'Withdrawal failed',
-        'withdrawal_approved': 'Withdrawal approved by admin',
-        'withdrawal_rejected': 'Withdrawal rejected by admin',
-        'investment_created': 'New investment created',
-        'investment_active': 'Investment activated',
-        'investment_completed': 'Investment completed',
-        'investment_cancelled': 'Investment cancelled',
-        'investment_matured': 'Investment matured',
-        'kyc_identity_upload': 'KYC identity documents uploaded',
-        'kyc_address_upload': 'KYC address proof uploaded',
-        'kyc_facial_upload': 'KYC facial verification uploaded',
-        'kyc_submitted': 'KYC application submitted',
-        'kyc_approved': 'KYC approved by admin',
-        'kyc_rejected': 'KYC rejected by admin',
-        'referral_joined': 'New referral joined',
-        'referral_bonus_earned': 'Referral bonus earned',
-        'referral_code_used': 'Referral code used',
-        'downline_commission_paid': 'Downline commission paid',
-        'profile_update': 'Profile information updated',
-        'address_update': 'Address information updated',
-        'preferences_update': 'User preferences updated',
-        'two_factor_enabled': '2FA enabled',
-        'two_factor_disabled': '2FA disabled'
-      };
+      // ✅ Check if user exists and has proper data
+      let userName = 'System';
+      let userEmail = 'system';
       
-      // Build location object from stored data
-      let location = null;
+      if (activity.user) {
+        if (activity.user.firstName || activity.user.lastName) {
+          userName = `${activity.user.firstName || ''} ${activity.user.lastName || ''}`.trim();
+        } else if (activity.username) {
+          userName = activity.username;
+        }
+        userEmail = activity.user.email || activity.email || 'system';
+      } else if (activity.userFullName) {
+        userName = activity.userFullName;
+        userEmail = activity.email || 'system';
+      } else if (activity.username) {
+        userName = activity.username;
+        userEmail = activity.email || 'system';
+      }
+      
+      // Build location string
+      let locationString = 'Unknown';
       if (activity.location) {
-        location = {
-          city: activity.location.city || 'Unknown',
-          region: activity.location.region || 'Unknown',
-          country: activity.location.country || 'Unknown',
-          postalCode: activity.location.postalCode || '',
-          timezone: activity.location.timezone || '',
-          latitude: activity.location.latitude,
-          longitude: activity.location.longitude
-        };
-      } else if (activity.ipAddress) {
-        // Fallback - try to get location from IP
-        location = {
-          city: 'Unknown',
-          region: 'Unknown',
-          country: 'Unknown',
-          postalCode: '',
-          timezone: '',
-          latitude: null,
-          longitude: null
-        };
+        const parts = [];
+        if (activity.location.city && activity.location.city !== 'Unknown') parts.push(activity.location.city);
+        if (activity.location.region && activity.location.region !== 'Unknown') parts.push(activity.location.region);
+        if (activity.location.country && activity.location.country !== 'Unknown') parts.push(activity.location.country);
+        locationString = parts.length > 0 ? parts.join(', ') : 'Unknown';
       }
       
       return {
         _id: activity._id,
-        user: activity.user || null,
+        user: {
+          name: userName,
+          email: userEmail
+        },
         action: activity.action,
-        actionDescription: actionDescriptions[activity.action] || activity.action.replace(/_/g, ' '),
+        actionDescription: getActionDescription(activity.action),
         status: activity.status || 'success',
         timestamp: activity.createdAt,
-        ipAddress: activity.ipAddress,
-        userAgent: activity.userAgent,
-        location: location,
-        metadata: activity.metadata || {}
+        location: {
+          city: activity.location?.city || 'Unknown',
+          region: activity.location?.region || 'Unknown',
+          country: activity.location?.country || 'Unknown'
+        }
       };
     });
     
@@ -19123,7 +19088,6 @@ app.get('/api/admin/activity', adminProtect, restrictTo('super', 'finance', 'sup
     });
   }
 });
-
 
 
 // GET /api/admin/activity/latest - Poll for new activities since last timestamp
