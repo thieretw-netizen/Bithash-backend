@@ -19031,6 +19031,322 @@ app.get('/api/admin/stats', adminProtect, async (req, res) => {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// =============================================
+// ACTION TYPE MAPPING - Centralized mapping for all actions
+// =============================================
+
+const ACTION_CATEGORY_MAP = {
+  // Authentication
+  'login': 'authentication',
+  'logout': 'authentication',
+  'signup': 'authentication',
+  'signup_initiated': 'authentication',
+  'login_attempt': 'authentication',
+  'login_otp_sent': 'authentication',
+  'otp_verified': 'authentication',
+  'google_signin': 'authentication',
+  'google_signin_otp_sent': 'authentication',
+  'password_change': 'authentication',
+  'password_reset': 'authentication',
+  'forgot_password': 'authentication',
+  'reset_password': 'authentication',
+  'verify-admin': 'authentication',
+  'admin-login': 'authentication',
+  'admin_forgot_password': 'authentication',
+  'admin_reset_password': 'authentication',
+  
+  // Financial
+  'deposit_created': 'financial',
+  'deposit_completed': 'financial',
+  'deposit_failed': 'financial',
+  'deposit_approved': 'financial',
+  'deposit_rejected': 'financial',
+  'withdrawal_created': 'financial',
+  'withdrawal_completed': 'financial',
+  'withdrawal_failed': 'financial',
+  'withdrawal_approved': 'financial',
+  'withdrawal_rejected': 'financial',
+  'transfer_created': 'financial',
+  'transfer_completed': 'financial',
+  'transfer_failed': 'financial',
+  'conversion_completed': 'financial',
+  'conversion_failed': 'financial',
+  'gas_payment_recorded': 'financial',
+  'card_deposit_attempt': 'financial',
+  'btc_deposit_initiated': 'financial',
+  'btc_withdrawal_initiated': 'financial',
+  
+  // Investment
+  'investment_created': 'investment',
+  'investment_active': 'investment',
+  'investment_completed': 'investment',
+  'investment_cancelled': 'investment',
+  'investment_matured': 'investment',
+  'investment_payout': 'investment',
+  'investment_rollover': 'investment',
+  'plan_selected': 'investment',
+  
+  // KYC / Verification
+  'kyc_identity_upload': 'verification',
+  'kyc_address_upload': 'verification',
+  'kyc_facial_upload': 'verification',
+  'kyc_submitted': 'verification',
+  'kyc_approved': 'verification',
+  'kyc_rejected': 'verification',
+  'kyc_pending': 'verification',
+  'kyc_document_upload': 'verification',
+  'identity_verification': 'verification',
+  'address_verification': 'verification',
+  
+  // Referral
+  'referral_joined': 'referral',
+  'referral_bonus_earned': 'referral',
+  'referral_payout': 'referral',
+  'referral_code_used': 'referral',
+  'referral_link_shared': 'referral',
+  'downline_commission_paid': 'referral',
+  'view_downline_details': 'referral',
+  
+  // Profile
+  'profile_update': 'profile',
+  'address_update': 'profile',
+  'preferences_update': 'profile',
+  'two_factor_enabled': 'profile',
+  'two_factor_disabled': 'profile',
+  'api_key_created': 'profile',
+  'api_key_deleted': 'profile',
+  'email_verification': 'profile',
+  'account_settings_update': 'profile',
+  'password_changed': 'profile',
+  
+  // Admin Actions
+  'admin_action': 'admin',
+  'system_maintenance': 'admin',
+  'balance_adjustment': 'admin',
+  'manual_transaction': 'admin',
+  'user_verified': 'admin',
+  'user_blocked': 'admin',
+  'admin_add_crypto_balance': 'admin',
+  'admin_login': 'admin',
+  
+  // Navigation / Page Views
+  'dashboard_viewed': 'navigation',
+  'investments_viewed': 'navigation',
+  'deposit_page_viewed': 'navigation',
+  'withdrawal_page_viewed': 'navigation',
+  'profile_page_viewed': 'navigation',
+  'kyc_page_viewed': 'navigation',
+  'referral_page_viewed': 'navigation',
+  'support_page_viewed': 'navigation',
+  'settings_page_viewed': 'navigation',
+  'wallet_page_visited': 'navigation',
+  'investment_page_visited': 'navigation',
+  'page_visited': 'navigation',
+  
+  // Support
+  'support_ticket_created': 'support',
+  'support_ticket_updated': 'support',
+  'support_ticket_closed': 'support',
+  'contact_form_submitted': 'support',
+  'live_chat_started': 'support',
+  'email_sent': 'support',
+  
+  // Notifications
+  'notification_received': 'notification',
+  'notification_read': 'notification',
+  'email_preference_updated': 'notification',
+  'push_notification_enabled': 'notification',
+  'sms_notification_enabled': 'notification',
+  
+  // Default
+  'location_updated': 'profile'
+};
+
+const ACTION_DESCRIPTIONS = {
+  // Authentication
+  'login': 'User logged in',
+  'logout': 'User logged out',
+  'signup': 'New user registered',
+  'signup_initiated': 'User initiated registration',
+  'login_attempt': 'Login attempt',
+  'login_otp_sent': 'Login OTP sent',
+  'otp_verified': 'OTP verified successfully',
+  'google_signin': 'Google sign-in completed',
+  'google_signin_otp_sent': 'Google sign-in OTP sent',
+  'password_change': 'Password changed',
+  'password_reset': 'Password reset requested',
+  'forgot_password': 'Forgot password request',
+  'reset_password': 'Password reset completed',
+  'verify-admin': 'Admin verified',
+  'admin-login': 'Admin logged in',
+  'admin_forgot_password': 'Admin password reset requested',
+  'admin_reset_password': 'Admin password reset completed',
+  
+  // Financial
+  'deposit_created': 'Deposit request created',
+  'deposit_completed': 'Deposit completed',
+  'deposit_failed': 'Deposit failed',
+  'deposit_approved': 'Deposit approved by admin',
+  'deposit_rejected': 'Deposit rejected by admin',
+  'withdrawal_created': 'Withdrawal requested',
+  'withdrawal_completed': 'Withdrawal completed',
+  'withdrawal_failed': 'Withdrawal failed',
+  'withdrawal_approved': 'Withdrawal approved by admin',
+  'withdrawal_rejected': 'Withdrawal rejected by admin',
+  'transfer_created': 'Transfer initiated',
+  'transfer_completed': 'Transfer completed',
+  'transfer_failed': 'Transfer failed',
+  'conversion_completed': 'Crypto conversion completed',
+  'conversion_failed': 'Crypto conversion failed',
+  'gas_payment_recorded': 'Gas fee payment recorded',
+  'card_deposit_attempt': 'Card deposit attempted',
+  'btc_deposit_initiated': 'BTC deposit initiated',
+  'btc_withdrawal_initiated': 'BTC withdrawal initiated',
+  
+  // Investment
+  'investment_created': 'New investment created',
+  'investment_active': 'Investment activated',
+  'investment_completed': 'Investment completed',
+  'investment_cancelled': 'Investment cancelled',
+  'investment_matured': 'Investment matured',
+  'investment_payout': 'Investment payout processed',
+  'investment_rollover': 'Investment rolled over',
+  'plan_selected': 'Investment plan selected',
+  
+  // KYC / Verification
+  'kyc_identity_upload': 'KYC identity documents uploaded',
+  'kyc_address_upload': 'KYC address proof uploaded',
+  'kyc_facial_upload': 'KYC facial verification uploaded',
+  'kyc_submitted': 'KYC application submitted',
+  'kyc_approved': 'KYC approved by admin',
+  'kyc_rejected': 'KYC rejected by admin',
+  'kyc_pending': 'KYC pending review',
+  'kyc_document_upload': 'KYC document uploaded',
+  'identity_verification': 'Identity verification',
+  'address_verification': 'Address verification',
+  
+  // Referral
+  'referral_joined': 'New referral joined',
+  'referral_bonus_earned': 'Referral bonus earned',
+  'referral_code_used': 'Referral code used',
+  'referral_link_shared': 'Referral link shared',
+  'referral_payout': 'Referral payout processed',
+  'downline_commission_paid': 'Downline commission paid',
+  'view_downline_details': 'Viewed downline details',
+  
+  // Profile
+  'profile_update': 'Profile information updated',
+  'address_update': 'Address information updated',
+  'preferences_update': 'User preferences updated',
+  'two_factor_enabled': '2FA enabled',
+  'two_factor_disabled': '2FA disabled',
+  'api_key_created': 'API key created',
+  'api_key_deleted': 'API key deleted',
+  'email_verification': 'Email verified',
+  'account_settings_update': 'Account settings updated',
+  'password_changed': 'Password changed successfully',
+  
+  // Admin Actions
+  'admin_action': 'Admin action performed',
+  'system_maintenance': 'System maintenance performed',
+  'balance_adjustment': 'Balance adjusted by admin',
+  'manual_transaction': 'Manual transaction processed',
+  'user_verified': 'User verified by admin',
+  'user_blocked': 'User blocked by admin',
+  'admin_add_crypto_balance': 'Admin added crypto balance',
+  'admin_login': 'Admin logged in',
+  
+  // Navigation
+  'dashboard_viewed': 'Viewed dashboard',
+  'investments_viewed': 'Viewed investments page',
+  'deposit_page_viewed': 'Viewed deposit page',
+  'withdrawal_page_viewed': 'Viewed withdrawal page',
+  'profile_page_viewed': 'Viewed profile page',
+  'kyc_page_viewed': 'Viewed KYC page',
+  'referral_page_viewed': 'Viewed referral page',
+  'support_page_viewed': 'Viewed support page',
+  'settings_page_viewed': 'Viewed settings page',
+  'wallet_page_visited': 'Viewed wallet page',
+  'investment_page_visited': 'Viewed investment page',
+  'page_visited': 'Page visited',
+  
+  // Support
+  'support_ticket_created': 'Support ticket created',
+  'support_ticket_updated': 'Support ticket updated',
+  'support_ticket_closed': 'Support ticket closed',
+  'contact_form_submitted': 'Contact form submitted',
+  'live_chat_started': 'Live chat started',
+  'email_sent': 'Email sent',
+  
+  // Notifications
+  'notification_received': 'Notification received',
+  'notification_read': 'Notification marked as read',
+  'email_preference_updated': 'Email preferences updated',
+  'push_notification_enabled': 'Push notifications enabled',
+  'sms_notification_enabled': 'SMS notifications enabled',
+  
+  // Location
+  'location_updated': 'Location updated'
+};
+
+// Helper function to get activity type for styling
+function getActivityTypeClass(action) {
+  const category = ACTION_CATEGORY_MAP[action] || 'other';
+  
+  const typeMap = {
+    'authentication': 'login',
+    'financial': 'deposit',
+    'investment': 'investment',
+    'verification': 'kyc',
+    'referral': 'referral',
+    'profile': 'profile',
+    'admin': 'admin',
+    'navigation': 'other',
+    'support': 'other',
+    'notification': 'other'
+  };
+  
+  return typeMap[category] || 'other';
+}
+
+// Helper function to get category display name
+function getCategoryDisplayName(category) {
+  const names = {
+    'authentication': 'Auth',
+    'financial': 'Financial',
+    'investment': 'Investment',
+    'verification': 'KYC',
+    'referral': 'Referral',
+    'profile': 'Profile',
+    'admin': 'Admin',
+    'navigation': 'Navigation',
+    'support': 'Support',
+    'notification': 'Notification',
+    'other': 'Other'
+  };
+  return names[category] || 'Other';
+}
+
 // =============================================
 // ADMIN STATS ENDPOINT - Dashboard Statistics
 // GET /api/admin/stats
@@ -19234,11 +19550,9 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
     
     // 1. UserLog collection (user actions)
     let userLogQuery = {};
-    if (filter === 'authentication') userLogQuery.actionCategory = 'authentication';
-    else if (filter === 'financial') userLogQuery.actionCategory = 'financial';
-    else if (filter === 'investment') userLogQuery.actionCategory = 'investment';
-    else if (filter === 'verification') userLogQuery.actionCategory = 'verification';
-    else if (filter === 'security') userLogQuery.actionCategory = 'security';
+    if (filter !== 'all' && filter !== 'all') {
+      userLogQuery.actionCategory = filter;
+    }
     
     if (search) {
       userLogQuery.$or = [
@@ -19339,11 +19653,12 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
     
     // Helper function to get readable location
     const getLocationString = (location) => {
-      if (!location) return 'Unknown';
+      if (!location) return 'N/A';
       if (typeof location === 'string') return location;
       if (location.city && location.country) return `${location.city}, ${location.country}`;
       if (location.country) return location.country;
-      return 'Unknown';
+      if (location.name) return location.name;
+      return 'N/A';
     };
     
     // Process UserLogs
@@ -19359,46 +19674,13 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
         userEmail = log.email || '';
       }
       
-      // Get action description
-      const actionDescriptions = {
-        'login': 'User logged in',
-        'logout': 'User logged out',
-        'signup': 'New user registered',
-        'signup_initiated': 'User initiated registration',
-        'login_attempt': 'Login attempt',
-        'login_otp_sent': 'Login OTP sent',
-        'otp_verified': 'OTP verified successfully',
-        'password_change': 'Password changed',
-        'password_reset': 'Password reset requested',
-        'deposit_created': 'Deposit request created',
-        'deposit_completed': 'Deposit completed',
-        'deposit_failed': 'Deposit failed',
-        'deposit_approved': 'Deposit approved by admin',
-        'deposit_rejected': 'Deposit rejected by admin',
-        'withdrawal_created': 'Withdrawal requested',
-        'withdrawal_completed': 'Withdrawal completed',
-        'withdrawal_failed': 'Withdrawal failed',
-        'withdrawal_approved': 'Withdrawal approved by admin',
-        'withdrawal_rejected': 'Withdrawal rejected by admin',
-        'investment_created': 'New investment created',
-        'investment_active': 'Investment activated',
-        'investment_completed': 'Investment completed',
-        'investment_cancelled': 'Investment cancelled',
-        'investment_matured': 'Investment matured',
-        'kyc_identity_upload': 'KYC identity documents uploaded',
-        'kyc_address_upload': 'KYC address proof uploaded',
-        'kyc_facial_upload': 'KYC facial verification uploaded',
-        'kyc_submitted': 'KYC application submitted',
-        'kyc_approved': 'KYC approved by admin',
-        'kyc_rejected': 'KYC rejected by admin',
-        'referral_joined': 'New referral joined',
-        'referral_bonus_earned': 'Referral bonus earned',
-        'profile_update': 'Profile information updated',
-        'two_factor_enabled': '2FA enabled',
-        'two_factor_disabled': '2FA disabled'
-      };
+      // Determine if this is an admin action
+      const isAdmin = userName === 'Admin' || userName === 'Super Admin' || userEmail === 'admin@bithash.com';
       
-      const description = actionDescriptions[log.action] || log.action?.replace(/_/g, ' ') || 'Activity recorded';
+      // Get category and type class
+      const category = ACTION_CATEGORY_MAP[log.action] || 'other';
+      const activityType = getActivityTypeClass(log.action);
+      const description = ACTION_DESCRIPTIONS[log.action] || log.action?.replace(/_/g, ' ') || 'Activity recorded';
       
       allActivities.push({
         _id: log._id,
@@ -19406,10 +19688,13 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
         user: {
           name: userName,
           email: userEmail,
-          id: log.user?._id || log.user
+          id: log.user?._id || log.user,
+          isAdmin: isAdmin
         },
         action: log.action,
-        actionCategory: log.actionCategory || 'system',
+        actionCategory: category,
+        categoryDisplay: getCategoryDisplayName(category),
+        activityType: activityType,
         status: log.status || 'success',
         location: getLocationString(log.location),
         locationDetails: log.location || null,
@@ -19431,42 +19716,56 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
         userEmail = log.performedBy.email || '';
       }
       
+      const category = ACTION_CATEGORY_MAP[log.action] || 'system';
+      const activityType = getActivityTypeClass(log.action);
+      const description = ACTION_DESCRIPTIONS[log.action] || `${log.action} on ${log.entity}`;
+      
       allActivities.push({
         _id: log._id,
         timestamp: log.createdAt,
         user: {
           name: userName,
           email: userEmail,
-          id: log.performedBy
+          id: log.performedBy,
+          isAdmin: true
         },
         action: log.action,
-        actionCategory: 'system',
+        actionCategory: category,
+        categoryDisplay: getCategoryDisplayName(category),
+        activityType: activityType,
         status: 'success',
-        location: log.location || 'Unknown',
+        location: log.location || 'N/A',
         locationDetails: null,
         ipAddress: log.ip,
         userAgent: log.device,
         deviceInfo: null,
         metadata: log.metadata || {},
         source: 'systemlog',
-        description: `${log.action} on ${log.entity}`
+        description: description
       });
     }
     
     // Process LoginRecords (security monitoring)
     for (const record of loginRecords) {
+      const action = `login_${record.provider || 'manual'}`;
+      const category = ACTION_CATEGORY_MAP[action] || 'authentication';
+      const activityType = getActivityTypeClass(action);
+      
       allActivities.push({
         _id: record._id,
         timestamp: record.timestamp,
         user: {
           name: record.email?.split('@')[0] || 'Unknown',
           email: record.email,
-          id: null
+          id: null,
+          isAdmin: false
         },
-        action: `login_${record.provider || 'manual'}`,
-        actionCategory: 'authentication',
+        action: action,
+        actionCategory: category,
+        categoryDisplay: getCategoryDisplayName(category),
+        activityType: activityType,
         status: 'info',
-        location: 'Unknown',
+        location: 'N/A',
         locationDetails: null,
         ipAddress: record.ipAddress,
         userAgent: record.userAgent,
@@ -19489,18 +19788,26 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
         userEmail = tx.user.email || '';
       }
       
+      const action = `${tx.type}_${tx.status}`;
+      const category = ACTION_CATEGORY_MAP[action] || 'financial';
+      const activityType = getActivityTypeClass(action);
+      const description = ACTION_DESCRIPTIONS[action] || `${tx.type} of $${tx.amount?.toLocaleString() || 0}`;
+      
       allActivities.push({
         _id: tx._id,
         timestamp: tx.createdAt,
         user: {
           name: userName,
           email: userEmail,
-          id: tx.user?._id || tx.user
+          id: tx.user?._id || tx.user,
+          isAdmin: false
         },
-        action: `${tx.type}_${tx.status}`,
-        actionCategory: 'financial',
+        action: action,
+        actionCategory: category,
+        categoryDisplay: getCategoryDisplayName(category),
+        activityType: activityType,
         status: tx.status,
-        location: 'Unknown',
+        location: 'N/A',
         locationDetails: null,
         ipAddress: null,
         userAgent: null,
@@ -19511,10 +19818,12 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
           method: tx.method,
           reference: tx.reference,
           fee: tx.fee,
-          netAmount: tx.netAmount
+          netAmount: tx.netAmount,
+          asset: tx.asset,
+          assetAmount: tx.assetAmount
         },
         source: 'transaction',
-        description: `${tx.type.charAt(0).toUpperCase() + tx.type.slice(1)} of $${tx.amount?.toLocaleString() || 0} via ${tx.method || 'crypto'}`
+        description: description
       });
     }
     
@@ -19527,18 +19836,26 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
         userEmail = kyc.user.email || '';
       }
       
+      const action = `kyc_${kyc.overallStatus}`;
+      const category = ACTION_CATEGORY_MAP[action] || 'verification';
+      const activityType = getActivityTypeClass(action);
+      const description = ACTION_DESCRIPTIONS[action] || `KYC submission - ${kyc.overallStatus}`;
+      
       allActivities.push({
         _id: kyc._id,
         timestamp: kyc.submittedAt || kyc.createdAt,
         user: {
           name: userName,
           email: userEmail,
-          id: kyc.user?._id || kyc.user
+          id: kyc.user?._id || kyc.user,
+          isAdmin: false
         },
-        action: `kyc_${kyc.overallStatus}`,
-        actionCategory: 'verification',
+        action: action,
+        actionCategory: category,
+        categoryDisplay: getCategoryDisplayName(category),
+        activityType: activityType,
         status: kyc.overallStatus === 'verified' ? 'success' : kyc.overallStatus === 'rejected' ? 'failed' : 'pending',
-        location: 'Unknown',
+        location: 'N/A',
         locationDetails: null,
         ipAddress: null,
         userAgent: null,
@@ -19551,7 +19868,7 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
           reviewedAt: kyc.reviewedAt
         },
         source: 'kyc',
-        description: `KYC submission - ${kyc.overallStatus}`
+        description: description
       });
     }
     
@@ -19564,18 +19881,25 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
         recipientName = `Group: ${notif.userGroup}`;
       }
       
+      const action = `notification_${notif.type}`;
+      const category = ACTION_CATEGORY_MAP[action] || 'notification';
+      const activityType = getActivityTypeClass(action);
+      
       allActivities.push({
         _id: notif._id,
         timestamp: notif.createdAt,
         user: {
           name: notif.sentBy?.name || 'System',
           email: notif.sentBy?.email || '',
-          id: notif.sentBy
+          id: notif.sentBy,
+          isAdmin: true
         },
-        action: `notification_${notif.type}`,
-        actionCategory: 'support',
+        action: action,
+        actionCategory: category,
+        categoryDisplay: getCategoryDisplayName(category),
+        activityType: activityType,
         status: 'success',
-        location: 'Unknown',
+        location: 'N/A',
         locationDetails: null,
         ipAddress: null,
         userAgent: null,
@@ -19589,7 +19913,7 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
           read: notif.read
         },
         source: 'notification',
-        description: `Notification sent: "${notif.title}" to ${recipientName}`
+        description: `Notification sent: "${notif.title}"`
       });
     }
     
@@ -19645,6 +19969,16 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
     
     // Fetch new activities from all sources
     const newActivities = [];
+    
+    // Helper function to get readable location
+    const getLocationString = (location) => {
+      if (!location) return 'N/A';
+      if (typeof location === 'string') return location;
+      if (location.city && location.country) return `${location.city}, ${location.country}`;
+      if (location.country) return location.country;
+      if (location.name) return location.name;
+      return 'N/A';
+    };
     
     // 1. New UserLogs
     let userLogQuery = { createdAt: { $gt: since } };
@@ -19704,15 +20038,6 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
       .limit(100)
       .lean();
     
-    // Helper function to get location string
-    const getLocationString = (location) => {
-      if (!location) return 'Unknown';
-      if (typeof location === 'string') return location;
-      if (location.city && location.country) return `${location.city}, ${location.country}`;
-      if (location.country) return location.country;
-      return 'Unknown';
-    };
-    
     // Process and format new UserLogs
     for (const log of newUserLogs) {
       let userName = 'System';
@@ -19725,12 +20050,24 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
         userEmail = log.email || '';
       }
       
+      const isAdmin = userName === 'Admin' || userName === 'Super Admin' || userEmail === 'admin@bithash.com';
+      const category = ACTION_CATEGORY_MAP[log.action] || 'other';
+      const activityType = getActivityTypeClass(log.action);
+      const description = ACTION_DESCRIPTIONS[log.action] || log.action?.replace(/_/g, ' ') || 'Activity recorded';
+      
       newActivities.push({
         _id: log._id,
         timestamp: log.createdAt,
-        user: { name: userName, email: userEmail, id: log.user?._id || log.user },
+        user: {
+          name: userName,
+          email: userEmail,
+          id: log.user?._id || log.user,
+          isAdmin: isAdmin
+        },
         action: log.action,
-        actionCategory: log.actionCategory || 'system',
+        actionCategory: category,
+        categoryDisplay: getCategoryDisplayName(category),
+        activityType: activityType,
         status: log.status || 'success',
         location: getLocationString(log.location),
         locationDetails: log.location || null,
@@ -19738,7 +20075,7 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
         userAgent: log.userAgent,
         metadata: log.metadata || {},
         source: 'userlog',
-        description: log.action?.replace(/_/g, ' ') || 'Activity recorded'
+        description: description
       });
     }
     
@@ -19751,33 +20088,55 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
         userEmail = log.performedBy.email || '';
       }
       
+      const category = ACTION_CATEGORY_MAP[log.action] || 'system';
+      const activityType = getActivityTypeClass(log.action);
+      const description = ACTION_DESCRIPTIONS[log.action] || `${log.action} on ${log.entity}`;
+      
       newActivities.push({
         _id: log._id,
         timestamp: log.createdAt,
-        user: { name: userName, email: userEmail, id: log.performedBy },
+        user: {
+          name: userName,
+          email: userEmail,
+          id: log.performedBy,
+          isAdmin: true
+        },
         action: log.action,
-        actionCategory: 'system',
+        actionCategory: category,
+        categoryDisplay: getCategoryDisplayName(category),
+        activityType: activityType,
         status: 'success',
-        location: log.location || 'Unknown',
+        location: log.location || 'N/A',
         locationDetails: null,
         ipAddress: log.ip,
         userAgent: log.device,
         metadata: log.metadata || {},
         source: 'systemlog',
-        description: `${log.action} on ${log.entity}`
+        description: description
       });
     }
     
     // Process new LoginRecords
     for (const record of newLoginRecords) {
+      const action = `login_${record.provider || 'manual'}`;
+      const category = ACTION_CATEGORY_MAP[action] || 'authentication';
+      const activityType = getActivityTypeClass(action);
+      
       newActivities.push({
         _id: record._id,
         timestamp: record.timestamp,
-        user: { name: record.email?.split('@')[0] || 'Unknown', email: record.email, id: null },
-        action: `login_${record.provider || 'manual'}`,
-        actionCategory: 'authentication',
+        user: {
+          name: record.email?.split('@')[0] || 'Unknown',
+          email: record.email,
+          id: null,
+          isAdmin: false
+        },
+        action: action,
+        actionCategory: category,
+        categoryDisplay: getCategoryDisplayName(category),
+        activityType: activityType,
         status: 'info',
-        location: 'Unknown',
+        location: 'N/A',
         locationDetails: null,
         ipAddress: record.ipAddress,
         userAgent: record.userAgent,
@@ -19796,14 +20155,26 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
         userEmail = tx.user.email || '';
       }
       
+      const action = `${tx.type}_${tx.status}`;
+      const category = ACTION_CATEGORY_MAP[action] || 'financial';
+      const activityType = getActivityTypeClass(action);
+      const description = ACTION_DESCRIPTIONS[action] || `${tx.type} of $${tx.amount?.toLocaleString() || 0}`;
+      
       newActivities.push({
         _id: tx._id,
         timestamp: tx.createdAt,
-        user: { name: userName, email: userEmail, id: tx.user?._id || tx.user },
-        action: `${tx.type}_${tx.status}`,
-        actionCategory: 'financial',
+        user: {
+          name: userName,
+          email: userEmail,
+          id: tx.user?._id || tx.user,
+          isAdmin: false
+        },
+        action: action,
+        actionCategory: category,
+        categoryDisplay: getCategoryDisplayName(category),
+        activityType: activityType,
         status: tx.status,
-        location: 'Unknown',
+        location: 'N/A',
         locationDetails: null,
         ipAddress: null,
         userAgent: null,
@@ -19811,10 +20182,12 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
           amount: tx.amount,
           currency: tx.currency || 'USD',
           method: tx.method,
-          reference: tx.reference
+          reference: tx.reference,
+          asset: tx.asset,
+          assetAmount: tx.assetAmount
         },
         source: 'transaction',
-        description: `${tx.type.charAt(0).toUpperCase() + tx.type.slice(1)} of $${tx.amount?.toLocaleString() || 0}`
+        description: description
       });
     }
     
@@ -19827,14 +20200,26 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
         userEmail = kyc.user.email || '';
       }
       
+      const action = `kyc_${kyc.overallStatus}`;
+      const category = ACTION_CATEGORY_MAP[action] || 'verification';
+      const activityType = getActivityTypeClass(action);
+      const description = ACTION_DESCRIPTIONS[action] || `KYC submission - ${kyc.overallStatus}`;
+      
       newActivities.push({
         _id: kyc._id,
         timestamp: kyc.submittedAt || kyc.createdAt,
-        user: { name: userName, email: userEmail, id: kyc.user?._id || kyc.user },
-        action: `kyc_${kyc.overallStatus}`,
-        actionCategory: 'verification',
+        user: {
+          name: userName,
+          email: userEmail,
+          id: kyc.user?._id || kyc.user,
+          isAdmin: false
+        },
+        action: action,
+        actionCategory: category,
+        categoryDisplay: getCategoryDisplayName(category),
+        activityType: activityType,
         status: kyc.overallStatus === 'verified' ? 'success' : kyc.overallStatus === 'rejected' ? 'failed' : 'pending',
-        location: 'Unknown',
+        location: 'N/A',
         locationDetails: null,
         ipAddress: null,
         userAgent: null,
@@ -19844,7 +20229,7 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
           facialStatus: kyc.facial?.status
         },
         source: 'kyc',
-        description: `KYC submission - ${kyc.overallStatus}`
+        description: description
       });
     }
     
@@ -19857,14 +20242,25 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
         recipientName = `Group: ${notif.userGroup}`;
       }
       
+      const action = `notification_${notif.type}`;
+      const category = ACTION_CATEGORY_MAP[action] || 'notification';
+      const activityType = getActivityTypeClass(action);
+      
       newActivities.push({
         _id: notif._id,
         timestamp: notif.createdAt,
-        user: { name: notif.sentBy?.name || 'System', email: notif.sentBy?.email || '', id: notif.sentBy },
-        action: `notification_${notif.type}`,
-        actionCategory: 'support',
+        user: {
+          name: notif.sentBy?.name || 'System',
+          email: notif.sentBy?.email || '',
+          id: notif.sentBy,
+          isAdmin: true
+        },
+        action: action,
+        actionCategory: category,
+        categoryDisplay: getCategoryDisplayName(category),
+        activityType: activityType,
         status: 'success',
-        location: 'Unknown',
+        location: 'N/A',
         locationDetails: null,
         ipAddress: null,
         userAgent: null,
@@ -19906,6 +20302,20 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
     });
   }
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
