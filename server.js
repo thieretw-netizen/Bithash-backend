@@ -2918,7 +2918,7 @@ const SystemLogSchema = new mongoose.Schema({
     type: String, 
     required: [true, 'Entity is required'],
     enum: [
-      'user', 'admin', 'transaction', 'investment', 'kyc', 'plan', 'loan',
+      'user', 'admin', 'transaction','FinancialStatement', 'investment', 'kyc', 'plan', 'loan',
       'withdrawal', 'deposit', 'referral', 'notification', 'system', 'security',
       'authentication', 'api', 'settings', 'support', 'audit', 'maintenance',
       'card_payment', 'deposit_asset', 'buy', 'sell', 'conversion', 'transfer',
