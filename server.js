@@ -23342,13 +23342,19 @@ app.get('/api/admin/transactions/export', adminProtect, async (req, res) => {
 
 
 
+
+
+
+
 // =============================================
-// CANCEL INVESTMENT (Admin)
+// CANCEL INVESTMENT (Admin) - FIXED with valid enum
 // =============================================
 app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => {
   try {
     const { id } = req.params;
     const { reason } = req.body;
+
+    console.log(`Cancelling investment: ${id}, Reason: ${reason}`);
 
     // Validate investment ID
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -23389,37 +23395,37 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
     // Calculate refund amounts
     const refundAmountUSD = investment.amount || 0;
     const refundAmountBTC = investment.amountBTC || 0;
-    const refundAmountAsset = investment.originalAmountBTC || investment.amountBTC || 0;
-    const asset = investment.currency?.toLowerCase() || 'btc';
+    const asset = (investment.currency || 'BTC').toLowerCase();
 
-    // Refund the investment amount to user's main balance
+    console.log(`Refunding user ${user.email}: $${refundAmountUSD}, ${refundAmountBTC} ${asset}`);
+
+    // Initialize balances if needed
     if (!user.balances) {
       user.balances = { main: new Map(), active: new Map(), matured: new Map() };
     }
     if (!user.balances.main) user.balances.main = new Map();
+    if (!user.balances.active) user.balances.active = new Map();
 
     // Get current balances
     const currentMainAssetBalance = user.balances.main.get(asset) || 0;
     const currentMainUSDBalance = user.balances.main.get('usd') || 0;
-    
-    // Get current active wallet balances (where the investment was)
     const currentActiveAssetBalance = user.balances.active.get(asset) || 0;
     const currentActiveUSDBalance = user.balances.active.get('usd') || 0;
 
     // Refund to main wallet
-    user.balances.main.set(asset, currentMainAssetBalance + refundAmountAsset);
+    user.balances.main.set(asset, currentMainAssetBalance + refundAmountBTC);
     user.balances.main.set('usd', currentMainUSDBalance + refundAmountUSD);
     
     // Remove from active wallet
-    const newActiveAssetBalance = currentActiveAssetBalance - refundAmountAsset;
-    if (newActiveAssetBalance <= 0) {
+    const newActiveAssetBalance = currentActiveAssetBalance - refundAmountBTC;
+    if (newActiveAssetBalance <= 0.00000001) {
       user.balances.active.delete(asset);
     } else {
       user.balances.active.set(asset, newActiveAssetBalance);
     }
     
     const newActiveUSDBalance = currentActiveUSDBalance - refundAmountUSD;
-    if (newActiveUSDBalance <= 0) {
+    if (newActiveUSDBalance <= 0.01) {
       user.balances.active.delete('usd');
     } else {
       user.balances.active.set('usd', newActiveUSDBalance);
@@ -23444,17 +23450,18 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
     
     await investment.save();
 
-    // Create transaction record for the refund
-    const refundReference = `REFUND-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+    // Create transaction record for the refund - USING VALID ENUM VALUE 'INTERNAL'
+    const refundReference = `CANCEL-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+    
     await Transaction.create({
       user: user._id,
-      type: 'deposit',
+      type: 'deposit',  // Valid type
       amount: refundAmountUSD,
       asset: asset.toUpperCase(),
-      assetAmount: refundAmountAsset,
+      assetAmount: refundAmountBTC,
       currency: 'USD',
       status: 'completed',
-      method: 'REFUND',
+      method: 'INTERNAL',  // VALID enum value (from your schema: 'BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'SHIB', 'TRX', 'LTC', 'BANK', 'CARD', 'INTERNAL', 'LOAN')
       reference: refundReference,
       details: {
         type: 'investment_cancellation',
@@ -23472,43 +23479,37 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
       processedAt: new Date()
     });
 
-    // Send email notification to user
+    // Send email notification to user (optional - wrap in try-catch)
     try {
       await sendProfessionalEmail({
         email: user.email,
-        template: 'investment_cancelled',
+        template: 'default',
         data: {
           name: user.firstName,
-          planName: investment.plan?.name || 'Unknown Plan',
-          amount: refundAmountUSD,
-          asset: asset.toUpperCase(),
-          assetAmount: refundAmountAsset,
-          reason: reason || 'Cancelled by administrator',
-          refundReference: refundReference,
-          newBalance: user.balances.main.get('usd') || 0
+          message: `Your investment in ${investment.plan?.name || 'Unknown Plan'} of $${refundAmountUSD.toLocaleString()} has been cancelled. A refund of ${refundAmountBTC} ${asset.toUpperCase()} has been credited to your main wallet.`,
+          details: `Reason: ${reason || 'Cancelled by administrator'}`,
+          buttonText: 'View Wallet',
+          actionLink: 'https://www.bithashcapital.live/dashboard'
         }
       });
     } catch (emailError) {
-      console.error('Failed to send investment cancellation email:', emailError);
+      console.error('Failed to send cancellation email:', emailError);
     }
 
     // Create notification for user
-    await Notification.create({
-      title: 'Investment Cancelled',
-      message: `Your investment in ${investment.plan?.name || 'Unknown Plan'} of $${refundAmountUSD.toLocaleString()} has been cancelled. Refund of ${refundAmountAsset} ${asset.toUpperCase()} has been credited to your main wallet.`,
-      type: 'investment_update',
-      recipientType: 'specific',
-      specificUserId: user._id,
-      sentBy: req.admin._id,
-      isImportant: true,
-      metadata: {
-        investmentId: investment._id,
-        refundAmount: refundAmountUSD,
-        refundAsset: asset,
-        refundAssetAmount: refundAmountAsset,
-        reason: reason
-      }
-    });
+    try {
+      await Notification.create({
+        title: 'Investment Cancelled',
+        message: `Your investment in ${investment.plan?.name || 'Unknown Plan'} of $${refundAmountUSD.toLocaleString()} has been cancelled. Refund credited to your main wallet.`,
+        type: 'info',
+        recipientType: 'specific',
+        specificUserId: user._id,
+        sentBy: req.admin._id,
+        isImportant: true
+      });
+    } catch (notifError) {
+      console.error('Failed to create notification:', notifError);
+    }
 
     // Log the activity
     await logActivity(
@@ -23525,7 +23526,7 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
         originalAmount: refundAmountUSD,
         refundAmount: refundAmountUSD,
         asset: asset,
-        assetAmount: refundAmountAsset,
+        assetAmount: refundAmountBTC,
         reason: reason
       }
     );
@@ -23537,15 +23538,6 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
         main: user.balances.main.get('usd') || 0,
         active: user.balances.active.get('usd') || 0,
         matured: user.balances.matured?.get('usd') || 0
-      });
-      
-      io.to(`user_${user._id}`).emit('investment_cancelled', {
-        investmentId: investment._id,
-        planName: investment.plan?.name,
-        refundAmount: refundAmountUSD,
-        refundAsset: asset,
-        refundAssetAmount: refundAmountAsset,
-        timestamp: new Date()
       });
     }
 
@@ -23562,9 +23554,8 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
         refund: {
           amount: refundAmountUSD,
           asset: asset.toUpperCase(),
-          assetAmount: refundAmountAsset,
-          reference: refundReference,
-          newBalance: user.balances.main.get('usd') || 0
+          assetAmount: refundAmountBTC,
+          reference: refundReference
         }
       }
     });
@@ -23577,11 +23568,6 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
     });
   }
 });
-
-
-
-
-
 
 
 
