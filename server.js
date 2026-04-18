@@ -24382,7 +24382,308 @@ app.get('/api/admin/crypto-assets', adminProtect, async (req, res) => {
 
 
 
+// =============================================
+// GET /api/market/orderbook - Order book bids and asks for a trading pair
+// Called by trading.html: fetchOrderBookFromBackend()
+// Expected response format: { bids: [[price, amount], ...], asks: [[price, amount], ...] }
+// =============================================
+app.get('/api/market/orderbook', async (req, res) => {
+  try {
+    // Validate required parameters
+    const { symbol, limit = 100 } = req.query;
+    
+    if (!symbol) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Symbol parameter is required (e.g., symbol=BTCUSDT)'
+      });
+    }
+    
+    const symbolUpper = symbol.toUpperCase();
+    const parsedLimit = parseInt(limit);
+    const safeLimit = Math.min(Math.max(parsedLimit || 100, 1), 1000);
+    
+    // =============================================
+    // STEP 1: Get order book from Redis cache (aggregator)
+    // =============================================
+    const orderbookKey = `orderbook:${symbolUpper}`;
+    const cachedOrderbook = await redis.get(orderbookKey);
+    
+    if (cachedOrderbook) {
+      const orderbook = JSON.parse(cachedOrderbook);
+      
+      // Format exactly as trading.html expects
+      const formattedOrderbook = {
+        bids: (orderbook.bids || []).slice(0, safeLimit).map(bid => [
+          parseFloat(bid[0]).toFixed(8),
+          parseFloat(bid[1]).toFixed(8)
+        ]),
+        asks: (orderbook.asks || []).slice(0, safeLimit).map(ask => [
+          parseFloat(ask[0]).toFixed(8),
+          parseFloat(ask[1]).toFixed(8)
+        ])
+      };
+      
+      return res.status(200).json(formattedOrderbook);
+    }
+    
+    // =============================================
+    // STEP 2: Fallback - Fetch from Binance API directly
+    // =============================================
+    try {
+      const response = await axios.get(
+        `https://api.binance.com/api/v3/depth?symbol=${symbolUpper}&limit=${safeLimit}`,
+        { timeout: 5000 }
+      );
+      
+      if (response.data) {
+        const formattedOrderbook = {
+          bids: (response.data.bids || []).map(bid => [
+            parseFloat(bid[0]).toFixed(8),
+            parseFloat(bid[1]).toFixed(8)
+          ]),
+          asks: (response.data.asks || []).map(ask => [
+            parseFloat(ask[0]).toFixed(8),
+            parseFloat(ask[1]).toFixed(8)
+          ])
+        };
+        
+        // Cache for 1 second (order book updates very frequently)
+        await redis.setex(orderbookKey, 1, JSON.stringify(formattedOrderbook));
+        
+        return res.status(200).json(formattedOrderbook);
+      }
+    } catch (binanceError) {
+      console.error(`Binance API error for ${symbolUpper} orderbook:`, binanceError.message);
+    }
+    
+    // =============================================
+    // STEP 3: Return empty order book as last resort
+    // =============================================
+    return res.status(200).json({
+      bids: [],
+      asks: []
+    });
+    
+  } catch (err) {
+    console.error('Error fetching order book:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch order book'
+    });
+  }
+});
 
+
+// =============================================
+// GET /api/market/pairs - All trading pairs with current prices
+// Called by trading.html: loadMarketPairs()
+// Expected response format: { data: [{ symbol, base, quote, price, change24h, volume, logoUrl }] }
+// =============================================
+app.get('/api/market/pairs', async (req, res) => {
+  try {
+    const { quote = 'USDT', limit = 100 } = req.query;
+    const quoteUpper = quote.toUpperCase();
+    const parsedLimit = parseInt(limit);
+    const safeLimit = Math.min(Math.max(parsedLimit || 100, 1), 500);
+    
+    // =============================================
+    // STEP 1: Get all trading pairs from Redis
+    // =============================================
+    const cachedPairs = await redis.get('market:all:pairs');
+    let allPairs = [];
+    
+    if (cachedPairs) {
+      allPairs = JSON.parse(cachedPairs);
+    } else {
+      // Fetch from Binance
+      const response = await axios.get('https://api.binance.com/api/v3/exchangeInfo', { timeout: 10000 });
+      allPairs = response.data.symbols
+        .filter(s => s.quoteAsset === quoteUpper && s.status === 'TRADING')
+        .map(s => ({ symbol: s.symbol, base: s.baseAsset, quote: s.quoteAsset }));
+      
+      await redis.setex('market:all:pairs', 3600, JSON.stringify(allPairs));
+    }
+    
+    // Filter by quote asset
+    const filteredPairs = allPairs.filter(p => p.quote === quoteUpper);
+    
+    // =============================================
+    // STEP 2: Get ticker data for each pair
+    // =============================================
+    const pairsData = [];
+    
+    for (const pair of filteredPairs.slice(0, safeLimit)) {
+      const tickerKey = `ticker:${pair.symbol}`;
+      const cachedTicker = await redis.get(tickerKey);
+      
+      if (cachedTicker) {
+        const ticker = JSON.parse(cachedTicker);
+        pairsData.push({
+          symbol: pair.base,
+          base: pair.base,
+          quote: pair.quote,
+          price: ticker.lastPrice || 0,
+          change24h: ticker.priceChangePercent || 0,
+          volume: ticker.volume || 0,
+          logoUrl: `https://assets.coingecko.com/coins/images/1/large/${pair.base.toLowerCase()}.png` // Fallback
+        });
+      } else {
+        // Fallback - fetch from Binance
+        try {
+          const tickerResponse = await axios.get(
+            `https://api.binance.com/api/v3/ticker/24hr?symbol=${pair.symbol}`,
+            { timeout: 3000 }
+          );
+          pairsData.push({
+            symbol: pair.base,
+            base: pair.base,
+            quote: pair.quote,
+            price: parseFloat(tickerResponse.data.lastPrice || 0),
+            change24h: parseFloat(tickerResponse.data.priceChangePercent || 0),
+            volume: parseFloat(tickerResponse.data.volume || 0),
+            logoUrl: `https://assets.coingecko.com/coins/images/1/large/${pair.base.toLowerCase()}.png`
+          });
+        } catch (err) {
+          pairsData.push({
+            symbol: pair.base,
+            base: pair.base,
+            quote: pair.quote,
+            price: 0,
+            change24h: 0,
+            volume: 0,
+            logoUrl: ''
+          });
+        }
+      }
+    }
+    
+    // Sort by volume (highest first)
+    pairsData.sort((a, b) => b.volume - a.volume);
+    
+    res.status(200).json({
+      status: 'success',
+      data: pairsData
+    });
+    
+  } catch (err) {
+    console.error('Error fetching market pairs:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch market pairs',
+      data: []
+    });
+  }
+});
+
+// =============================================
+// GET /api/market/candles - Candlestick data for chart
+// Called by trading.html: loadChartData()
+// Expected response format: { candles: [{ openTime, open, high, low, close, volume }] }
+// =============================================
+app.get('/api/market/candles', async (req, res) => {
+  try {
+    // Validate required parameters
+    const { symbol, interval = '15m', limit = 200 } = req.query;
+    
+    if (!symbol) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Symbol parameter is required (e.g., symbol=BTCUSDT)'
+      });
+    }
+    
+    const symbolUpper = symbol.toUpperCase();
+    const parsedLimit = parseInt(limit);
+    const safeLimit = Math.min(Math.max(parsedLimit || 200, 1), 1000);
+    
+    // Map interval to Binance format
+    const intervalMap = {
+      '1m': '1m', '5m': '5m', '15m': '15m', '30m': '30m',
+      '1h': '1h', '2h': '2h', '4h': '4h', '6h': '6h',
+      '8h': '8h', '12h': '12h', '1d': '1d', '3d': '3d',
+      '1w': '1w', '1M': '1M'
+    };
+    
+    const binanceInterval = intervalMap[interval] || '15m';
+    
+    // =============================================
+    // STEP 1: Try to get candles from Redis (aggregator)
+    // =============================================
+    const candlesKey = `candles:${symbolUpper}:${binanceInterval}`;
+    const cachedCandles = await redis.zrange(candlesKey, 0, safeLimit - 1);
+    
+    if (cachedCandles && cachedCandles.length > 0) {
+      const candles = cachedCandles.map(candle => JSON.parse(candle));
+      
+      // Format exactly as trading.html expects
+      const formattedCandles = candles.map(candle => ({
+        openTime: candle.openTime,
+        open: candle.open,
+        high: candle.high,
+        low: candle.low,
+        close: candle.close,
+        volume: candle.volume,
+        closeTime: candle.closeTime
+      }));
+      
+      return res.status(200).json({
+        candles: formattedCandles
+      });
+    }
+    
+    // =============================================
+    // STEP 2: Fallback - Fetch from Binance API directly
+    // =============================================
+    try {
+      const response = await axios.get(
+        `https://api.binance.com/api/v3/klines?symbol=${symbolUpper}&interval=${binanceInterval}&limit=${safeLimit}`,
+        { timeout: 10000 }
+      );
+      
+      if (response.data && Array.isArray(response.data)) {
+        const candles = response.data.map(kline => ({
+          openTime: kline[0],
+          open: parseFloat(kline[1]),
+          high: parseFloat(kline[2]),
+          low: parseFloat(kline[3]),
+          close: parseFloat(kline[4]),
+          volume: parseFloat(kline[5]),
+          closeTime: kline[6]
+        }));
+        
+        // Cache in Redis for future requests
+        const multi = redis.multi();
+        for (const candle of candles) {
+          multi.zadd(candlesKey, candle.openTime, JSON.stringify(candle));
+        }
+        multi.expire(candlesKey, 300); // Expire after 5 minutes
+        await multi.exec();
+        
+        return res.status(200).json({
+          candles: candles
+        });
+      }
+    } catch (binanceError) {
+      console.error(`Binance API error for ${symbolUpper} candles:`, binanceError.message);
+    }
+    
+    // =============================================
+    // STEP 3: Return empty array as last resort
+    // =============================================
+    return res.status(200).json({
+      candles: []
+    });
+    
+  } catch (err) {
+    console.error('Error fetching candles:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch candlestick data',
+      candles: []
+    });
+  }
+});
 
 
 
