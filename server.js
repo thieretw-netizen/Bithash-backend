@@ -21467,6 +21467,685 @@ async function getDetailedFinancialStats() {
 
 
 
+// =============================================
+// GET KYC SUBMISSIONS - Paginated with status filters
+// =============================================
+app.get('/api/admin/kyc/submissions', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+    const status = req.query.status; // 'pending', 'verified', 'rejected', 'not-started', 'all'
+    const search = req.query.search || '';
+
+    // Build query
+    let query = {};
+    
+    if (status && status !== 'all') {
+      query.overallStatus = status;
+    }
+
+    if (search) {
+      query.$or = [
+        { 'user.firstName': { $regex: search, $options: 'i' } },
+        { 'user.lastName': { $regex: search, $options: 'i' } },
+        { 'user.email': { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    // Get total count for pagination
+    const total = await KYC.countDocuments(query);
+    const totalPages = Math.ceil(total / limit);
+
+    // Fetch KYC submissions with user details
+    const submissions = await KYC.find(query)
+      .populate('user', 'firstName lastName email phone createdAt')
+      .populate('identity.verifiedBy', 'name email')
+      .populate('address.verifiedBy', 'name email')
+      .populate('facial.verifiedBy', 'name email')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    // Format submissions for frontend
+    const formattedSubmissions = submissions.map(sub => ({
+      _id: sub._id,
+      user: sub.user ? {
+        _id: sub.user._id,
+        firstName: sub.user.firstName || '',
+        lastName: sub.user.lastName || '',
+        email: sub.user.email || '',
+        phone: sub.user.phone || '',
+        createdAt: sub.user.createdAt
+      } : null,
+      identity: {
+        documentType: sub.identity?.documentType || '',
+        status: sub.identity?.status || 'not-submitted',
+        verifiedAt: sub.identity?.verifiedAt,
+        verifiedBy: sub.identity?.verifiedBy,
+        rejectionReason: sub.identity?.rejectionReason || ''
+      },
+      address: {
+        documentType: sub.address?.documentType || '',
+        status: sub.address?.status || 'not-submitted',
+        verifiedAt: sub.address?.verifiedAt,
+        verifiedBy: sub.address?.verifiedBy,
+        rejectionReason: sub.address?.rejectionReason || ''
+      },
+      facial: {
+        status: sub.facial?.status || 'not-submitted',
+        verifiedAt: sub.facial?.verifiedAt,
+        verifiedBy: sub.facial?.verifiedBy,
+        rejectionReason: sub.facial?.rejectionReason || ''
+      },
+      overallStatus: sub.overallStatus || 'not-started',
+      submittedAt: sub.submittedAt,
+      reviewedAt: sub.reviewedAt,
+      adminNotes: sub.adminNotes || '',
+      createdAt: sub.createdAt,
+      updatedAt: sub.updatedAt
+    }));
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        submissions: formattedSubmissions,
+        pagination: {
+          currentPage: page,
+          totalPages: totalPages,
+          totalItems: total,
+          itemsPerPage: limit,
+          hasNextPage: page < totalPages,
+          hasPrevPage: page > 1
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Error fetching KYC submissions:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch KYC submissions'
+    });
+  }
+});
+
+// =============================================
+// GET SINGLE KYC SUBMISSION DETAILS
+// =============================================
+app.get('/api/admin/kyc/submissions/:id', adminProtect, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid KYC submission ID'
+      });
+    }
+
+    const submission = await KYC.findById(id)
+      .populate('user', 'firstName lastName email phone createdAt')
+      .populate('identity.verifiedBy', 'name email')
+      .populate('address.verifiedBy', 'name email')
+      .populate('facial.verifiedBy', 'name email')
+      .lean();
+
+    if (!submission) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'KYC submission not found'
+      });
+    }
+
+    // Format document URLs for frontend
+    const formatDocumentUrl = (filename, type) => {
+      if (!filename) return null;
+      // Generate token for authenticated access
+      const token = jwt.sign({ kycId: submission._id }, JWT_SECRET, { expiresIn: '1h' });
+      return `/api/admin/kyc/files/preview/${token}/${type}/${filename}`;
+    };
+
+    const formattedSubmission = {
+      _id: submission._id,
+      user: submission.user ? {
+        _id: submission.user._id,
+        firstName: submission.user.firstName || '',
+        lastName: submission.user.lastName || '',
+        email: submission.user.email || '',
+        phone: submission.user.phone || '',
+        createdAt: submission.user.createdAt
+      } : null,
+      identity: {
+        documentType: submission.identity?.documentType || '',
+        documentNumber: submission.identity?.documentNumber || '',
+        documentExpiry: submission.identity?.documentExpiry,
+        frontImage: submission.identity?.frontImage ? {
+          filename: submission.identity.frontImage.filename,
+          url: formatDocumentUrl(submission.identity.frontImage.filename, 'identity-front'),
+          originalName: submission.identity.frontImage.originalName
+        } : null,
+        backImage: submission.identity?.backImage ? {
+          filename: submission.identity.backImage.filename,
+          url: formatDocumentUrl(submission.identity.backImage.filename, 'identity-back'),
+          originalName: submission.identity.backImage.originalName
+        } : null,
+        status: submission.identity?.status || 'not-submitted',
+        verifiedAt: submission.identity?.verifiedAt,
+        verifiedBy: submission.identity?.verifiedBy,
+        rejectionReason: submission.identity?.rejectionReason || ''
+      },
+      address: {
+        documentType: submission.address?.documentType || '',
+        documentDate: submission.address?.documentDate,
+        documentImage: submission.address?.documentImage ? {
+          filename: submission.address.documentImage.filename,
+          url: formatDocumentUrl(submission.address.documentImage.filename, 'address'),
+          originalName: submission.address.documentImage.originalName
+        } : null,
+        status: submission.address?.status || 'not-submitted',
+        verifiedAt: submission.address?.verifiedAt,
+        verifiedBy: submission.address?.verifiedBy,
+        rejectionReason: submission.address?.rejectionReason || ''
+      },
+      facial: {
+        verificationPhoto: submission.facial?.verificationPhoto ? {
+          filename: submission.facial.verificationPhoto.filename,
+          url: formatDocumentUrl(submission.facial.verificationPhoto.filename, 'facial-photo'),
+          originalName: submission.facial.verificationPhoto.originalName
+        } : null,
+        verificationVideo: submission.facial?.verificationVideo ? {
+          filename: submission.facial.verificationVideo.filename,
+          url: formatDocumentUrl(submission.facial.verificationVideo.filename, 'facial-video'),
+          originalName: submission.facial.verificationVideo.originalName
+        } : null,
+        status: submission.facial?.status || 'not-submitted',
+        verifiedAt: submission.facial?.verifiedAt,
+        verifiedBy: submission.facial?.verifiedBy,
+        rejectionReason: submission.facial?.rejectionReason || ''
+      },
+      overallStatus: submission.overallStatus || 'not-started',
+      submittedAt: submission.submittedAt,
+      reviewedAt: submission.reviewedAt,
+      adminNotes: submission.adminNotes || '',
+      createdAt: submission.createdAt,
+      updatedAt: submission.updatedAt
+    };
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        submission: formattedSubmission
+      }
+    });
+
+  } catch (err) {
+    console.error('Error fetching KYC submission details:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch KYC submission details'
+    });
+  }
+});
+
+// =============================================
+// APPROVE KYC SUBMISSION
+// =============================================
+app.post('/api/admin/kyc/submissions/:id/approve', adminProtect, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { notes, section = 'all' } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid KYC submission ID'
+      });
+    }
+
+    const submission = await KYC.findById(id).populate('user', 'firstName lastName email');
+    
+    if (!submission) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'KYC submission not found'
+      });
+    }
+
+    const user = submission.user;
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+
+    // Update status based on section
+    if (section === 'all' || section === 'identity') {
+      submission.identity.status = 'verified';
+      submission.identity.verifiedAt = new Date();
+      submission.identity.verifiedBy = req.admin._id;
+      submission.identity.rejectionReason = null;
+    }
+
+    if (section === 'all' || section === 'address') {
+      submission.address.status = 'verified';
+      submission.address.verifiedAt = new Date();
+      submission.address.verifiedBy = req.admin._id;
+      submission.address.rejectionReason = null;
+    }
+
+    if (section === 'all' || section === 'facial') {
+      submission.facial.status = 'verified';
+      submission.facial.verifiedAt = new Date();
+      submission.facial.verifiedBy = req.admin._id;
+      submission.facial.rejectionReason = null;
+    }
+
+    // Check if all sections are verified
+    const allVerified = 
+      submission.identity.status === 'verified' &&
+      submission.address.status === 'verified' &&
+      submission.facial.status === 'verified';
+
+    if (allVerified) {
+      submission.overallStatus = 'verified';
+      submission.reviewedAt = new Date();
+    }
+
+    submission.adminNotes = notes || submission.adminNotes;
+    submission.updatedAt = new Date();
+    
+    await submission.save();
+
+    // Update user's KYC status
+    await User.findByIdAndUpdate(user._id, {
+      'kycStatus.identity': submission.identity.status,
+      'kycStatus.address': submission.address.status,
+      'kycStatus.facial': submission.facial.status,
+      kycVerified: allVerified,
+      kycUpdatedAt: new Date()
+    });
+
+    // Send email notification to user
+    try {
+      await sendProfessionalEmail({
+        email: user.email,
+        template: 'kyc_approved',
+        data: {
+          name: user.firstName,
+          message: `Your KYC verification has been approved${section !== 'all' ? ` for ${section} section` : ''}. You now have full access to all platform features.`
+        }
+      });
+    } catch (emailError) {
+      console.error('Failed to send KYC approval email:', emailError);
+    }
+
+    // Create notification for user
+    await Notification.create({
+      title: 'KYC Approved',
+      message: `Your KYC verification has been approved. You now have full access to all platform features.`,
+      type: 'kyc_approved',
+      recipientType: 'specific',
+      specificUserId: user._id,
+      sentBy: req.admin._id,
+      isImportant: true
+    });
+
+    // Log activity
+    await logActivity(
+      'kyc_approved',
+      'KYC',
+      submission._id,
+      req.admin._id,
+      'Admin',
+      req,
+      {
+        userId: user._id,
+        userEmail: user.email,
+        section: section,
+        notes: notes
+      }
+    );
+
+    res.status(200).json({
+      status: 'success',
+      message: 'KYC submission approved successfully',
+      data: {
+        submission: {
+          _id: submission._id,
+          overallStatus: submission.overallStatus,
+          identityStatus: submission.identity.status,
+          addressStatus: submission.address.status,
+          facialStatus: submission.facial.status
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Error approving KYC submission:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to approve KYC submission'
+    });
+  }
+});
+
+
+
+// =============================================
+// REJECT KYC SUBMISSION
+// =============================================
+app.post('/api/admin/kyc/submissions/:id/reject', adminProtect, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason, section = 'all' } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid KYC submission ID'
+      });
+    }
+
+    if (!reason || reason.trim() === '') {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Rejection reason is required'
+      });
+    }
+
+    const submission = await KYC.findById(id).populate('user', 'firstName lastName email');
+    
+    if (!submission) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'KYC submission not found'
+      });
+    }
+
+    const user = submission.user;
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+
+    // Update status based on section
+    if (section === 'all' || section === 'identity') {
+      submission.identity.status = 'rejected';
+      submission.identity.rejectionReason = reason;
+      submission.identity.verifiedAt = new Date();
+      submission.identity.verifiedBy = req.admin._id;
+    }
+
+    if (section === 'all' || section === 'address') {
+      submission.address.status = 'rejected';
+      submission.address.rejectionReason = reason;
+      submission.address.verifiedAt = new Date();
+      submission.address.verifiedBy = req.admin._id;
+    }
+
+    if (section === 'all' || section === 'facial') {
+      submission.facial.status = 'rejected';
+      submission.facial.rejectionReason = reason;
+      submission.facial.verifiedAt = new Date();
+      submission.facial.verifiedBy = req.admin._id;
+    }
+
+    // Set overall status to rejected if any section is rejected
+    submission.overallStatus = 'rejected';
+    submission.reviewedAt = new Date();
+    submission.adminNotes = `Rejected: ${reason}`;
+    submission.updatedAt = new Date();
+    
+    await submission.save();
+
+    // Update user's KYC status
+    await User.findByIdAndUpdate(user._id, {
+      'kycStatus.identity': submission.identity.status,
+      'kycStatus.address': submission.address.status,
+      'kycStatus.facial': submission.facial.status,
+      kycVerified: false,
+      kycUpdatedAt: new Date()
+    });
+
+    // Send email notification to user
+    try {
+      await sendProfessionalEmail({
+        email: user.email,
+        template: 'kyc_rejected',
+        data: {
+          name: user.firstName,
+          reason: reason,
+          section: section
+        }
+      });
+    } catch (emailError) {
+      console.error('Failed to send KYC rejection email:', emailError);
+    }
+
+    // Create notification for user
+    await Notification.create({
+      title: 'KYC Rejected',
+      message: `Your KYC verification has been rejected. Reason: ${reason}. Please resubmit with correct documents.`,
+      type: 'kyc_rejected',
+      recipientType: 'specific',
+      specificUserId: user._id,
+      sentBy: req.admin._id,
+      isImportant: true
+    });
+
+    // Log activity
+    await logActivity(
+      'kyc_rejected',
+      'KYC',
+      submission._id,
+      req.admin._id,
+      'Admin',
+      req,
+      {
+        userId: user._id,
+        userEmail: user.email,
+        section: section,
+        reason: reason
+      }
+    );
+
+    res.status(200).json({
+      status: 'success',
+      message: 'KYC submission rejected',
+      data: {
+        submission: {
+          _id: submission._id,
+          overallStatus: submission.overallStatus,
+          identityStatus: submission.identity.status,
+          addressStatus: submission.address.status,
+          facialStatus: submission.facial.status,
+          rejectionReason: reason
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Error rejecting KYC submission:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to reject KYC submission'
+    });
+  }
+});
+
+// =============================================
+// GET KYC STATISTICS (For badge counts)
+// =============================================
+app.get('/api/admin/kyc/stats', adminProtect, async (req, res) => {
+  try {
+    const pendingCount = await KYC.countDocuments({ overallStatus: 'pending' });
+    const verifiedCount = await KYC.countDocuments({ overallStatus: 'verified' });
+    const rejectedCount = await KYC.countDocuments({ overallStatus: 'rejected' });
+    const totalCount = await KYC.countDocuments();
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        stats: {
+          pending: pendingCount,
+          verified: verifiedCount,
+          rejected: rejectedCount,
+          total: totalCount
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Error fetching KYC stats:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch KYC statistics'
+    });
+  }
+});
+
+
+// =============================================
+// SERVE KYC DOCUMENTS WITH AUTHENTICATION
+// =============================================
+app.get('/api/admin/kyc/files/preview/:token/:type/:filename', async (req, res) => {
+  try {
+    const { token, type, filename } = req.params;
+
+    // Verify token
+    let decoded;
+    try {
+      decoded = jwt.verify(token, JWT_SECRET);
+    } catch (err) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Invalid or expired token'
+      });
+    }
+
+    // Determine file path based on type
+    let filePath;
+    switch (type) {
+      case 'identity-front':
+      case 'identity-back':
+        filePath = path.join(__dirname, 'uploads/kyc/identity', filename);
+        break;
+      case 'address':
+        filePath = path.join(__dirname, 'uploads/kyc/address', filename);
+        break;
+      case 'facial-photo':
+      case 'facial-video':
+        filePath = path.join(__dirname, 'uploads/kyc/facial', filename);
+        break;
+      default:
+        return res.status(400).json({
+          status: 'fail',
+          message: 'Invalid file type'
+        });
+    }
+
+    // Check if file exists
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'File not found'
+      });
+    }
+
+    // Get file extension and set content type
+    const ext = path.extname(filename).toLowerCase();
+    let contentType = 'application/octet-stream';
+    
+    if (['.jpg', '.jpeg'].includes(ext)) contentType = 'image/jpeg';
+    else if (ext === '.png') contentType = 'image/png';
+    else if (ext === '.gif') contentType = 'image/gif';
+    else if (ext === '.pdf') contentType = 'application/pdf';
+    else if (['.mp4', '.webm'].includes(ext)) contentType = 'video/mp4';
+
+    // Set headers for inline viewing
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+
+    // Stream the file
+    const fileStream = fs.createReadStream(filePath);
+    fileStream.pipe(res);
+
+  } catch (err) {
+    console.error('Error serving KYC file:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to serve file'
+    });
+  }
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
