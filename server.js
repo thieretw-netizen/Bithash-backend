@@ -38,19 +38,24 @@ const deviceDetector = new DeviceDetector({
   deviceAliasCode: false
 });
 
+// Update your helmet configuration to allow framing from your frontend
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'", "'unsafe-inline'", "https://apis.google.com"],
       styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-      imgSrc: ["'self'", "data:", "https://www.google-analytics.com", "https://cryptologos.cc"],
-      connectSrc: ["'self'", "https://api.ipinfo.io", "https://website-backendd-1.onrender.com", "https://api.coingecko.com"],
+      imgSrc: ["'self'", "data:", "https:", "blob:"],
+      connectSrc: ["'self'", "https://api.ipinfo.io", "https://website-backendd-1.onrender.com", "https://api.coingecko.com", "https://bithash-backend-1.onrender.com"],
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
       objectSrc: ["'none'"],
-      frameSrc: ["'self'", "https://accounts.google.com"]
+      frameSrc: ["'self'", "https://bithash-backend-1.onrender.com", "https://www.bithashcapital.live", "chrome-error://chromewebdata/"],
+      frameAncestors: ["'self'", "https://www.bithashcapital.live", "https://bithhash.vercel.app"],
+      upgradeInsecureRequests: null
     }
   },
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+  crossOriginEmbedderPolicy: false,
   crossOriginOpenerPolicy: { policy: "unsafe-none" }
 }));
 
@@ -22018,61 +22023,37 @@ app.get('/api/admin/kyc/stats', adminProtect, async (req, res) => {
 
 
 
-
 // =============================================
-// SERVE KYC DOCUMENTS - Token in URL (for img tags)
-// URL format: /api/admin/kyc/files/{type}/{filename}?token={adminToken}
+// SERVE KYC FILES - With proper CORS and CSP headers
 // =============================================
 app.get('/api/admin/kyc/files/:type/:filename', async (req, res) => {
   try {
     const { type, filename } = req.params;
     const token = req.query.token;
     
-    // Decode filename (handle URL encoding)
+    // Decode filename
     const decodedFilename = decodeURIComponent(filename);
     
-    console.log(`Serving KYC file - Type: ${type}, Filename: ${decodedFilename}, Token present: ${!!token}`);
+    console.log(`KYC file request - Type: ${type}, File: ${decodedFilename}`);
 
-    // Verify admin token from query parameter
+    // Verify admin token
     if (!token) {
-      console.log('No token provided');
-      return res.status(401).json({
-        status: 'fail',
-        message: 'Authentication required'
-      });
+      console.log('No token provided for KYC file');
+      return res.status(401).json({ error: 'Authentication required' });
     }
 
-    let decoded;
     try {
-      decoded = jwt.verify(token, JWT_SECRET);
+      const decoded = jwt.verify(token, JWT_SECRET);
       if (!decoded.isAdmin) {
-        console.log('Token is not for admin');
-        return res.status(403).json({
-          status: 'fail',
-          message: 'Admin access required'
-        });
+        return res.status(403).json({ error: 'Admin access required' });
       }
     } catch (err) {
-      console.log('Invalid token:', err.message);
-      return res.status(401).json({
-        status: 'fail',
-        message: 'Invalid or expired token'
-      });
+      console.log('Invalid token for KYC file');
+      return res.status(401).json({ error: 'Invalid or expired token' });
     }
 
-    // Verify admin still exists in database
-    const admin = await Admin.findById(decoded.id);
-    if (!admin) {
-      console.log('Admin not found');
-      return res.status(401).json({
-        status: 'fail',
-        message: 'Admin not found'
-      });
-    }
-
-    // Determine file path based on type
+    // Determine file path
     let filePath;
-    
     switch (type) {
       case 'identity-front':
       case 'identity-back':
@@ -22086,137 +22067,110 @@ app.get('/api/admin/kyc/files/:type/:filename', async (req, res) => {
         filePath = path.join(__dirname, 'uploads/kyc/facial', decodedFilename);
         break;
       default:
-        console.log(`Invalid file type: ${type}`);
-        return res.status(400).json({
-          status: 'fail',
-          message: 'Invalid file type'
-        });
+        return res.status(400).json({ error: 'Invalid file type' });
     }
 
     // Check if file exists
     if (!fs.existsSync(filePath)) {
       console.log(`File not found: ${filePath}`);
-      return res.status(404).json({
-        status: 'fail',
-        message: 'File not found'
-      });
+      
+      // Try to find the file with a different pattern (case-insensitive)
+      const dir = path.dirname(filePath);
+      const baseName = path.basename(filePath);
+      
+      if (fs.existsSync(dir)) {
+        const files = fs.readdirSync(dir);
+        const matchingFile = files.find(f => f.toLowerCase() === baseName.toLowerCase());
+        
+        if (matchingFile) {
+          filePath = path.join(dir, matchingFile);
+          console.log(`Found matching file: ${filePath}`);
+        } else {
+          return res.status(404).json({ error: 'File not found' });
+        }
+      } else {
+        return res.status(404).json({ error: 'File not found' });
+      }
     }
 
     // Get file stats
     const stat = fs.statSync(filePath);
     const fileSize = stat.size;
-    
-    // Get content type based on file extension
     const contentType = getContentType(decodedFilename);
-    const isVideo = contentType.startsWith('video/');
-    const isImage = contentType.startsWith('image/');
-    const isPDF = contentType === 'application/pdf';
     
     console.log(`Serving file: ${decodedFilename}, Size: ${fileSize}, Type: ${contentType}`);
 
-    // Set CORS headers for cross-origin requests
+    // Set comprehensive CORS and security headers
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    
-    // Set content type and caching headers
-    res.setHeader('Content-Type', contentType);
-    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range');
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-    res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless');
+    res.setHeader('Cross-Origin-Embedder-Policy', 'unsafe-none');
+    res.setHeader('Cross-Origin-Opener-Policy', 'unsafe-none');
+    res.setHeader('Content-Security-Policy', "frame-ancestors 'self' https://www.bithashcapital.live https://bithhash.vercel.app");
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Length', fileSize);
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.setHeader('Accept-Ranges', 'bytes');
     
     // Set content disposition for inline viewing
-    if (isImage) {
+    if (contentType.startsWith('image/')) {
       res.setHeader('Content-Disposition', `inline; filename="${path.basename(decodedFilename)}"`);
-    } else if (isPDF) {
+    } else if (contentType === 'application/pdf') {
       res.setHeader('Content-Disposition', `inline; filename="${path.basename(decodedFilename)}"`);
-    } else if (isVideo) {
+    } else if (contentType.startsWith('video/')) {
       res.setHeader('Content-Disposition', `inline; filename="${path.basename(decodedFilename)}"`);
     } else {
       res.setHeader('Content-Disposition', `attachment; filename="${path.basename(decodedFilename)}"`);
     }
 
-    // Handle video range requests (for seeking)
-    if (isVideo && req.headers.range) {
-      const range = req.headers.range;
+    // Handle range requests for videos
+    const range = req.headers.range;
+    if (range && contentType.startsWith('video/')) {
       const parts = range.replace(/bytes=/, "").split("-");
       const start = parseInt(parts[0], 10);
       const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
       const chunksize = (end - start) + 1;
       
       const file = fs.createReadStream(filePath, { start, end });
-      const head = {
+      res.writeHead(206, {
         'Content-Range': `bytes ${start}-${end}/${fileSize}`,
         'Accept-Ranges': 'bytes',
         'Content-Length': chunksize,
         'Content-Type': contentType,
-      };
-      
-      res.writeHead(206, head);
+      });
       file.pipe(res);
-    } 
-    // Handle regular file streaming
-    else {
+    } else {
+      // Stream the file
       const fileStream = fs.createReadStream(filePath);
-      
       fileStream.on('error', (err) => {
         console.error('File stream error:', err);
         if (!res.headersSent) {
-          res.status(500).json({ status: 'error', message: 'Failed to read file' });
+          res.status(500).json({ error: 'Failed to read file' });
         }
       });
-      
       fileStream.pipe(res);
     }
 
   } catch (err) {
     console.error('Error serving KYC file:', err);
     if (!res.headersSent) {
-      res.status(500).json({
-        status: 'error',
-        message: 'Failed to serve file'
-      });
+      res.status(500).json({ error: 'Internal server error' });
     }
   }
 });
 
-// Helper function to get content type based on file extension
+// Helper function for content type
 function getContentType(filename) {
   const ext = path.extname(filename).toLowerCase();
-  
-  const contentTypes = {
-    // Images
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.png': 'image/png',
-    '.gif': 'image/gif',
-    '.bmp': 'image/bmp',
-    '.webp': 'image/webp',
-    '.svg': 'image/svg+xml',
-    
-    // Documents
-    '.pdf': 'application/pdf',
-    '.doc': 'application/msword',
-    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    
-    // Videos
-    '.mp4': 'video/mp4',
-    '.webm': 'video/webm',
-    '.avi': 'video/x-msvideo',
-    '.mov': 'video/quicktime',
-    '.wmv': 'video/x-ms-wmv',
-    '.flv': 'video/x-flv',
-    '.mkv': 'video/x-matroska',
-    
-    // Audio (if needed)
-    '.mp3': 'audio/mpeg',
-    '.wav': 'audio/wav',
-    
-    // Default
-    '': 'application/octet-stream'
+  const types = {
+    '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+    '.gif': 'image/gif', '.webp': 'image/webp', '.pdf': 'application/pdf',
+    '.mp4': 'video/mp4', '.webm': 'video/webm', '.avi': 'video/x-msvideo',
+    '.mov': 'video/quicktime'
   };
-  
-  return contentTypes[ext] || 'application/octet-stream';
+  return types[ext] || 'application/octet-stream';
 }
 
 
