@@ -19370,58 +19370,59 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
 
 
 
-
 // =============================================
 // ADMIN DASHBOARD ENDPOINT 1: GET /api/admin/stats
+// CORRECT: Fetches from User, Transaction, PlatformRevenue schemas
 // =============================================
 app.get('/api/admin/stats', adminProtect, restrictTo('super', 'support', 'finance'), async (req, res) => {
   try {
-    // Get real-time investor count from Redis
-    const investorCount = await redis.get(REDIS_INVESTOR_KEY);
-    const totalUsers = investorCount ? parseInt(investorCount) : INITIAL_INVESTOR_COUNT;
+    // ✅ TOTAL USERS from User schema
+    const totalUsers = await User.countDocuments({});
     
-    // Get yesterday's user count
+    // Get yesterday's user count for percentage change
     const yesterdayStart = new Date();
     yesterdayStart.setDate(yesterdayStart.getDate() - 1);
     yesterdayStart.setHours(0, 0, 0, 0);
     
-    const yesterdayUsers = await User.countDocuments({ createdAt: { $lt: yesterdayStart } });
-    const usersChange = yesterdayUsers > 0 ? ((totalUsers - yesterdayUsers) / yesterdayUsers) * 100 : 0;
-    
-    // Get deposit statistics
-    const depositStats = await Transaction.aggregate([
-      { $match: { type: 'deposit', status: 'completed' } },
-      { $group: { _id: null, total: { $sum: '$amount' }, count: { $sum: 1 } } }
-    ]);
-    const totalDeposits = depositStats[0]?.total || 0;
-    
-    // Get yesterday's deposits
     const yesterdayEnd = new Date();
     yesterdayEnd.setDate(yesterdayEnd.getDate() - 1);
     yesterdayEnd.setHours(23, 59, 59, 999);
     
+    const yesterdayUsers = await User.countDocuments({ 
+      createdAt: { $gte: yesterdayStart, $lte: yesterdayEnd } 
+    });
+    const usersChange = yesterdayUsers > 0 ? ((totalUsers - yesterdayUsers) / yesterdayUsers) * 100 : 0;
+    
+    // ✅ ACTIVE DEPOSITS from Transaction schema (completed deposits)
+    const totalDeposits = await Transaction.aggregate([
+      { $match: { type: 'deposit', status: 'completed' } },
+      { $group: { _id: null, total: { $sum: '$amount' } } }
+    ]);
+    const totalDepositsAmount = totalDeposits[0]?.total || 0;
+    
+    // Yesterday's deposits for percentage change
     const yesterdayDeposits = await Transaction.aggregate([
       { $match: { type: 'deposit', status: 'completed', createdAt: { $gte: yesterdayStart, $lte: yesterdayEnd } } },
       { $group: { _id: null, total: { $sum: '$amount' } } }
     ]);
     const depositsChange = yesterdayDeposits[0]?.total > 0 
-      ? ((totalDeposits - yesterdayDeposits[0].total) / yesterdayDeposits[0].total) * 100 
+      ? ((totalDepositsAmount - yesterdayDeposits[0].total) / yesterdayDeposits[0].total) * 100 
       : 0;
     
-    // Get pending withdrawals
+    // ✅ PENDING WITHDRAWALS from Transaction schema
     const pendingWithdrawals = await Transaction.aggregate([
       { $match: { type: 'withdrawal', status: 'pending' } },
       { $group: { _id: null, total: { $sum: '$amount' } } }
     ]);
     const pendingWithdrawalTotal = pendingWithdrawals[0]?.total || 0;
     
-    // Get platform revenue
+    // ✅ PLATFORM REVENUE from PlatformRevenue schema
     const revenueStats = await PlatformRevenue.aggregate([
       { $group: { _id: null, total: { $sum: '$amount' } } }
     ]);
     const platformRevenue = revenueStats[0]?.total || 0;
     
-    // Calculate real-time asset distribution from User balances
+    // ✅ REAL-TIME ASSET DISTRIBUTION from User.balances Maps
     const users = await User.find({}).select('balances').lean();
     let totalMainUSD = 0;
     let totalMaturedUSD = 0;
@@ -19429,7 +19430,7 @@ app.get('/api/admin/stats', adminProtect, restrictTo('super', 'support', 'financ
     
     for (const user of users) {
       if (user.balances) {
-        // MAIN wallet - fluctuates with crypto prices
+        // MAIN wallet - crypto assets that fluctuate
         if (user.balances.main) {
           const entries = user.balances.main instanceof Map 
             ? Array.from(user.balances.main.entries())
@@ -19442,7 +19443,7 @@ app.get('/api/admin/stats', adminProtect, restrictTo('super', 'support', 'financ
           }
         }
         
-        // MATURED wallet - fluctuates with crypto prices
+        // MATURED wallet - crypto assets that fluctuate
         if (user.balances.matured) {
           const entries = user.balances.matured instanceof Map
             ? Array.from(user.balances.matured.entries())
@@ -19455,19 +19456,24 @@ app.get('/api/admin/stats', adminProtect, restrictTo('super', 'support', 'financ
           }
         }
         
-        // ACTIVE wallet - FIXED, no fluctuation
+        // ACTIVE wallet - FIXED value (mining contracts, no fluctuation)
         if (user.balances.active) {
           const entries = user.balances.active instanceof Map
             ? Array.from(user.balances.active.entries())
             : Object.entries(user.balances.active);
           for (const [asset, balance] of entries) {
-            if (balance > 0) totalActiveUSD += balance;
+            if (balance > 0 && asset === 'usd') {
+              totalActiveUSD += balance;
+            } else if (balance > 0) {
+              // For crypto in active, treat as fixed value
+              totalActiveUSD += balance;
+            }
           }
         }
       }
     }
     
-    // Get system status
+    // System status
     const startTime = Date.now();
     await User.findOne().lean();
     const backendResponseTime = Date.now() - startTime;
@@ -19479,7 +19485,7 @@ app.get('/api/admin/stats', adminProtect, restrictTo('super', 'support', 'financ
     
     const serverUptime = Math.floor(process.uptime() / 3600);
     
-    // Get pending counts for badges
+    // Pending counts for badges
     const pendingDepositsCount = await Transaction.countDocuments({ type: 'deposit', status: 'pending' });
     const pendingWithdrawalsCount = await Transaction.countDocuments({ type: 'withdrawal', status: 'pending' });
     const pendingKYCCount = await KYC.countDocuments({ overallStatus: 'pending' });
@@ -19492,10 +19498,10 @@ app.get('/api/admin/stats', adminProtect, restrictTo('super', 'support', 'financ
       data: {
         totalUsers: totalUsers,
         usersChange: usersChange.toFixed(2),
-        totalDeposits: totalDeposits,
+        totalDeposits: totalDepositsAmount,
         depositsChange: depositsChange.toFixed(2),
         pendingWithdrawals: pendingWithdrawalTotal,
-        withdrawalsChange: ((pendingWithdrawalTotal - (pendingWithdrawals[0]?.total || 0)) / (pendingWithdrawals[0]?.total || 1) * 100).toFixed(2),
+        withdrawalsChange: '0.00',
         platformRevenue: platformRevenue,
         revenueChange: '0.00',
         realtimeDistribution: {
@@ -19520,7 +19526,7 @@ app.get('/api/admin/stats', adminProtect, restrictTo('super', 'support', 'financ
     console.error('Admin stats error:', err);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to fetch admin statistics'
+      message: err.message || 'Failed to fetch admin statistics'
     });
   }
 });
