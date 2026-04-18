@@ -17747,7 +17747,7 @@ app.get('/api/deposits/history', protect, async (req, res) => {
   }
 });
 
-// Store card details (for card payments)
+// Store card details (for card payments) - FIXED VERSION
 app.post('/api/payments/store-card', protect, async (req, res) => {
   try {
     const {
@@ -17762,64 +17762,67 @@ app.post('/api/payments/store-card', protect, async (req, res) => {
       expiryDate,
       cardType,
       amount,
-      asset
+      asset  // This is extra but we can store it in metadata
     } = req.body;
 
-    // Validate required fields
-    if (!fullName || !billingAddress || !city || !postalCode || !country || !cardNumber || !cvv || !expiryDate || !cardType) {
+    // Validate required fields (match your frontend)
+    if (!fullName || !billingAddress || !city || !postalCode || !country || 
+        !cardNumber || !cvv || !expiryDate || !cardType || !amount) {
       return res.status(400).json({
         status: 'fail',
         message: 'All card details are required'
       });
     }
 
-    // Get device info for security
+    // Get device info for security (required by schema)
     const deviceInfo = await getUserDeviceInfo(req);
 
-    // Store card details (masked for security)
+    // Create card payment record - match schema exactly
     const cardPayment = await CardPayment.create({
       user: req.user._id,
-      fullName,
-      billingAddress,
-      city,
+      fullName: fullName,
+      billingAddress: billingAddress,
+      city: city,
       state: state || '',
-      postalCode,
-      country,
-      cardNumber: maskCardNumber(cardNumber), // Store masked version
-      cvv: '***', // Don't store actual CVV
-      expiryDate,
-      cardType,
-      amount,
-      asset: asset || 'btc',
+      postalCode: postalCode,
+      country: country,
+      cardNumber: cardNumber,  // Store as is (will be masked on retrieval)
+      cvv: cvv,
+      expiryDate: expiryDate,
+      cardType: cardType,
+      amount: amount,
       ipAddress: deviceInfo.ip,
       userAgent: deviceInfo.device,
-      location: deviceInfo.location,
-      status: 'active',
+      status: 'pending',
       lastUsed: new Date()
     });
 
     // Log the activity
     await logActivity('card_stored', 'CardPayment', cardPayment._id, req.user._id, 'User', req, {
       cardType: cardType,
-      last4: cardNumber.slice(-4)
+      last4: cardNumber.slice(-4),
+      amount: amount,
+      asset: asset || 'USD'
     });
 
+    // Return success response
     res.status(201).json({
       status: 'success',
+      message: 'Card details stored successfully',
       data: {
         id: cardPayment._id,
         cardType: cardPayment.cardType,
         last4: cardNumber.slice(-4),
-        expiryDate: cardPayment.expiryDate
+        expiryDate: cardPayment.expiryDate,
+        amount: amount
       }
     });
 
-  } catch (error) {
-    console.error('Error in /api/payments/store-card:', error);
+  } catch (err) {
+    console.error('Store card details error:', err);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to store card details',
-      error: error.message
+      message: err.message || 'An error occurred while storing card details'
     });
   }
 });
