@@ -20736,17 +20736,150 @@ app.delete('/api/admin/users/:userId', adminProtect, restrictTo('super'), async 
 
 
 
+// =============================================
+// GET ADMIN ACTIVITY - CORRECTLY EXTRACTS SYSTEMLOG LOCATION
+// =============================================
+app.get('/api/admin/activity', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
 
+    // Fetch from BOTH schemas in parallel
+    const [userLogs, systemLogs] = await Promise.all([
+      UserLog.find({})
+        .populate('user', 'firstName lastName email')
+        .sort({ createdAt: -1 })
+        .lean(),
+      SystemLog.find({})
+        .populate('performedBy', 'firstName lastName email')
+        .sort({ createdAt: -1 })
+        .lean()
+    ]);
 
+    // Format UserLog entries
+    const formattedUserLogs = userLogs.map(log => ({
+      _id: log._id,
+      source: 'userlog',
+      action: log.action,
+      actionCategory: log.actionCategory,
+      status: log.status,
+      timestamp: log.createdAt,
+      user: log.user ? {
+        _id: log.user._id,
+        name: `${log.user.firstName || ''} ${log.user.lastName || ''}`.trim() || log.email,
+        email: log.email
+      } : null,
+      location: {
+        city: log.location?.city || 'Unknown',
+        region: log.location?.region?.name || log.location?.region || 'Unknown',
+        country: log.location?.country?.name || log.location?.country || 'Unknown',
+        latitude: log.location?.latitude,
+        longitude: log.location?.longitude,
+        exactLocation: log.location?.exactLocation || false,
+        formatted: log.locationDisplay || 
+                   `${log.location?.city || ''} ${log.location?.region?.name || ''} ${log.location?.country?.name || ''}`.trim() || 
+                   'Unknown'
+      },
+      metadata: log.metadata || {},
+      ipAddress: log.ipAddress,
+      deviceInfo: log.deviceInfo
+    }));
 
+    // Format SystemLog entries - FIXED: Direct location field access
+    const formattedSystemLogs = systemLogs.map(log => {
+      // The location is stored DIRECTLY in the 'location' field of SystemLog
+      // Example from your DB: location: "Nairobi, Nairobi County, Kenya"
+      const locationString = log.location || 'Unknown';
+      
+      // Try to parse location string into components if possible
+      let city = 'Unknown';
+      let region = 'Unknown';
+      let country = 'Unknown';
+      
+      // Attempt to parse the location string (e.g., "Nairobi, Nairobi County, Kenya")
+      if (locationString !== 'Unknown') {
+        const parts = locationString.split(',').map(p => p.trim());
+        if (parts.length >= 1) city = parts[0];
+        if (parts.length >= 2) region = parts[1];
+        if (parts.length >= 3) country = parts[2];
+      }
+      
+      // Also check for individual location fields if they exist
+      if (log.city) city = log.city;
+      if (log.region) region = log.region;
+      if (log.countryCode) country = log.countryCode;
+      
+      return {
+        _id: log._id,
+        source: 'systemlog',
+        action: log.action,
+        actionCategory: log.entity,
+        status: log.status,
+        timestamp: log.createdAt,
+        user: log.performedBy ? {
+          _id: log.performedBy._id,
+          name: log.performedByName || `${log.performedBy?.firstName || ''} ${log.performedBy?.lastName || ''}`.trim() || log.performedByEmail,
+          email: log.performedByEmail
+        } : {
+          name: log.performedByName || 'System',
+          email: log.performedByEmail || 'system@bithash.com'
+        },
+        location: {
+          city: city,
+          region: region,
+          country: country,
+          latitude: log.latitude || null,
+          longitude: log.longitude || null,
+          exactLocation: !!(log.latitude && log.longitude),
+          formatted: locationString  // Use the actual location string from database
+        },
+        metadata: log.metadata || {},
+        ipAddress: log.ip,
+        deviceInfo: {
+          type: log.deviceType,
+          os: log.os,
+          browser: log.browser
+        }
+      };
+    });
 
+    // Combine and sort by timestamp (newest first)
+    let allActivities = [...formattedUserLogs, ...formattedSystemLogs];
+    allActivities.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
+    // Apply pagination
+    const total = allActivities.length;
+    const totalPages = Math.ceil(total / limit);
+    const paginatedActivities = allActivities.slice(skip, skip + limit);
 
+    res.status(200).json({
+      status: 'success',
+      data: {
+        activities: paginatedActivities,
+        pagination: {
+          currentPage: page,
+          totalPages: totalPages,
+          totalItems: total,
+          itemsPerPage: limit,
+          hasNextPage: page < totalPages,
+          hasPrevPage: page > 1
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Error fetching admin activity:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch activity logs'
+    });
+  }
+});
 
 
 // =============================================
-// GET LATEST ACTIVITIES - FOR REAL-TIME POLLING
-// Fetches from BOTH schemas, returns whichever updated first
+// GET LATEST ACTIVITIES - CORRECTLY EXTRACTS SYSTEMLOG LOCATION
 // =============================================
 app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
   try {
@@ -20789,33 +20922,52 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
       metadata: log.metadata || {}
     }));
 
-    // Format SystemLog entries
-    const formattedSystemLogs = systemLogs.map(log => ({
-      _id: log._id,
-      source: 'systemlog',
-      action: log.action,
-      actionCategory: log.entity,
-      status: log.status,
-      timestamp: log.createdAt,
-      user: log.performedBy ? {
-        _id: log.performedBy._id,
-        name: log.performedByName || `${log.performedBy?.firstName || ''} ${log.performedBy?.lastName || ''}`.trim() || log.performedByEmail,
-        email: log.performedByEmail
-      } : null,
-      location: {
-        city: log.city || 'Unknown',
-        region: log.region || 'Unknown',
-        country: log.countryCode || 'Unknown',
-        formatted: log.location || `${log.city || ''} ${log.region || ''} ${log.countryCode || ''}`.trim() || 'Unknown'
-      },
-      metadata: log.metadata || {}
-    }));
+    // Format SystemLog entries - FIXED: Direct location field access
+    const formattedSystemLogs = systemLogs.map(log => {
+      // The location is stored DIRECTLY in the 'location' field
+      const locationString = log.location || 'Unknown';
+      
+      let city = 'Unknown';
+      let region = 'Unknown';
+      let country = 'Unknown';
+      
+      if (locationString !== 'Unknown') {
+        const parts = locationString.split(',').map(p => p.trim());
+        if (parts.length >= 1) city = parts[0];
+        if (parts.length >= 2) region = parts[1];
+        if (parts.length >= 3) country = parts[2];
+      }
+      
+      return {
+        _id: log._id,
+        source: 'systemlog',
+        action: log.action,
+        actionCategory: log.entity,
+        status: log.status,
+        timestamp: log.createdAt,
+        user: log.performedBy ? {
+          _id: log.performedBy._id,
+          name: log.performedByName || `${log.performedBy?.firstName || ''} ${log.performedBy?.lastName || ''}`.trim() || log.performedByEmail,
+          email: log.performedByEmail
+        } : {
+          name: log.performedByName || 'System',
+          email: log.performedByEmail || 'system@bithash.com'
+        },
+        location: {
+          city: city,
+          region: region,
+          country: country,
+          formatted: locationString
+        },
+        metadata: log.metadata || {}
+      };
+    });
 
-    // Combine and sort by timestamp
+    // Combine and sort
     let allActivities = [...formattedUserLogs, ...formattedSystemLogs];
     allActivities.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
-    // Remove duplicates (same action, same user, within 5 seconds)
+    // Remove duplicates
     const uniqueActivities = [];
     const seen = new Set();
     
@@ -20828,7 +20980,6 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
       }
     }
 
-    // Get latest timestamp for next poll
     const latestTimestamp = uniqueActivities.length > 0 ? uniqueActivities[0].timestamp : new Date();
 
     res.status(200).json({
@@ -20850,118 +21001,11 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
 });
 
 
-// =============================================
-// GET ADMIN ACTIVITY - FETCHES FROM BOTH USERLOG AND SYSTEMLOG
-// Returns combined results sorted by most recent
-// =============================================
-app.get('/api/admin/activity', adminProtect, async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    const skip = (page - 1) * limit;
 
-    // Fetch from BOTH schemas in parallel
-    const [userLogs, systemLogs] = await Promise.all([
-      UserLog.find({})
-        .populate('user', 'firstName lastName email')
-        .sort({ createdAt: -1 })
-        .lean(),
-      SystemLog.find({})
-        .populate('performedBy', 'firstName lastName email')
-        .sort({ createdAt: -1 })
-        .lean()
-    ]);
 
-    // Format UserLog entries
-    const formattedUserLogs = userLogs.map(log => ({
-      _id: log._id,
-      source: 'userlog',
-      action: log.action,
-      actionCategory: log.actionCategory,
-      status: log.status,
-      timestamp: log.createdAt,
-      user: log.user ? {
-        _id: log.user._id,
-        name: `${log.user.firstName || ''} ${log.user.lastName || ''}`.trim() || log.email,
-        email: log.email
-      } : null,
-      location: {
-        city: log.location?.city || 'Unknown',
-        region: log.location?.region?.name || log.location?.region || 'Unknown',
-        country: log.location?.country?.name || log.location?.country || 'Unknown',
-        latitude: log.location?.latitude,
-        longitude: log.location?.longitude,
-        exactLocation: log.location?.exactLocation || false,
-        formatted: log.locationDisplay || 'Unknown'
-      },
-      metadata: log.metadata || {},
-      ipAddress: log.ipAddress,
-      deviceInfo: log.deviceInfo
-    }));
 
-    // Format SystemLog entries
-    const formattedSystemLogs = systemLogs.map(log => ({
-      _id: log._id,
-      source: 'systemlog',
-      action: log.action,
-      actionCategory: log.entity,
-      status: log.status,
-      timestamp: log.createdAt,
-      user: log.performedBy ? {
-        _id: log.performedBy._id,
-        name: log.performedByName || `${log.performedBy?.firstName || ''} ${log.performedBy?.lastName || ''}`.trim() || log.performedByEmail,
-        email: log.performedByEmail
-      } : null,
-      location: {
-        city: log.city || 'Unknown',
-        region: log.region || 'Unknown',
-        country: log.countryCode || 'Unknown',
-        latitude: log.latitude,
-        longitude: log.longitude,
-        exactLocation: !!(log.latitude && log.longitude),
-        formatted: log.location || `${log.city || ''} ${log.region || ''} ${log.countryCode || ''}`.trim() || 'Unknown'
-      },
-      metadata: log.metadata || {},
-      ipAddress: log.ip,
-      deviceInfo: {
-        type: log.deviceType,
-        os: log.os,
-        browser: log.browser
-      }
-    }));
 
-    // Combine and sort by timestamp (newest first)
-    let allActivities = [...formattedUserLogs, ...formattedSystemLogs];
-    allActivities.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
-    // Apply pagination
-    const total = allActivities.length;
-    const totalPages = Math.ceil(total / limit);
-    const paginatedActivities = allActivities.slice(skip, skip + limit);
-
-    res.status(200).json({
-      status: 'success',
-      data: {
-        activities: paginatedActivities,
-        pagination: {
-          currentPage: page,
-          totalPages: totalPages,
-          totalItems: total,
-          itemsPerPage: limit,
-          hasNextPage: page < totalPages,
-          hasPrevPage: page > 1
-        }
-      }
-    });
-
-  } catch (err) {
-    console.error('Error fetching admin activity:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch activity logs'
-    });
-  }
-});
 
 
 
