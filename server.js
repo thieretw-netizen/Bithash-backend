@@ -21072,14 +21072,19 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
 
 
 
-
-
-// GET /api/admin/stats - Get dashboard statistics
+// =============================================
+// GET /api/admin/stats - Dashboard Statistics with DETAILED Asset Distribution
+// =============================================
 app.get('/api/admin/stats', adminProtect, async (req, res) => {
   try {
     // Get date from 24 hours ago for comparison
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const startOfMonth = new Date();
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0, 0, 0, 0);
 
     // Fetch all stats in parallel for better performance
     const [
@@ -21095,7 +21100,7 @@ app.get('/api/admin/stats', adminProtect, async (req, res) => {
       databaseQueryTime,
       lastTransactionTime,
       serverUptime,
-      realtimeDistribution
+      detailedDistribution
     ] = await Promise.all([
       // Total users
       User.countDocuments({ status: 'active' }),
@@ -21130,7 +21135,7 @@ app.get('/api/admin/stats', adminProtect, async (req, res) => {
         { $match: { createdAt: { $lte: yesterday } } },
         { $group: { _id: null, total: { $sum: '$amount' } } }
       ]),
-      // Backend response time (get from Redis or default)
+      // Backend response time
       redis.get('backend:response_time').then(val => parseInt(val) || 120),
       // Database query time
       redis.get('db:query_time').then(val => parseInt(val) || 45),
@@ -21144,8 +21149,8 @@ app.get('/api/admin/stats', adminProtect, async (req, res) => {
       }),
       // Server uptime
       Promise.resolve(Math.floor(process.uptime() / 60 / 60 * 100)),
-      // Realtime distribution by asset type
-      getRealtimeAssetDistribution()
+      // NEW: Detailed asset distribution
+      getDetailedAssetDistribution()
     ]);
 
     // Calculate change percentages
@@ -21187,7 +21192,7 @@ app.get('/api/admin/stats', adminProtect, async (req, res) => {
         databaseQueryTime: databaseQueryTime,
         lastTransactionTime: lastTransactionTime,
         serverUptime: serverUptime,
-        realtimeDistribution: realtimeDistribution
+        realtimeDistribution: detailedDistribution
       }
     });
 
@@ -21200,63 +21205,359 @@ app.get('/api/admin/stats', adminProtect, async (req, res) => {
   }
 });
 
-// Helper function to get realtime asset distribution
-async function getRealtimeAssetDistribution() {
+// =============================================
+// DETAILED ASSET DISTRIBUTION FUNCTION
+// Calculates comprehensive breakdown of ALL financial data
+// =============================================
+async function getDetailedAssetDistribution() {
   try {
     // Get all users with balances
     const users = await User.find({}).select('balances').lean();
     
+    // Initialize detailed distribution object
     const distribution = {
-      'BTC': 0,
-      'ETH': 0,
-      'USDT': 0,
-      'Active Mining': 0
+      // Crypto assets breakdown (by wallet type)
+      crypto: {
+        byAsset: {},      // Individual crypto assets
+        byWalletType: {
+          main: 0,        // Crypto in main wallet (fluctuates)
+          matured: 0,     // Crypto in matured wallet (fluctuates)
+          active: 0       // Active mining contracts (fixed USD value)
+        },
+        totalValue: 0
+      },
+      
+      // Transaction volume breakdown
+      transactions: {
+        deposits: {
+          total: 0,
+          byMethod: {
+            btc: 0,
+            eth: 0,
+            usdt: 0,
+            card: 0,
+            bank: 0,
+            other: 0
+          }
+        },
+        withdrawals: {
+          total: 0,
+          byMethod: {
+            btc: 0,
+            eth: 0,
+            usdt: 0,
+            bank: 0,
+            other: 0
+          }
+        },
+        investments: {
+          total: 0,
+          active: 0,
+          completed: 0,
+          cancelled: 0
+        },
+        fees: {
+          total: 0,
+          byType: {
+            deposit_fees: 0,
+            withdrawal_fees: 0,
+            conversion_fees: 0,
+            investment_fees: 0
+          }
+        }
+      },
+      
+      // Platform revenue breakdown
+      revenue: {
+        total: 0,
+        bySource: {
+          investment_fee: 0,
+          withdrawal_fee: 0,
+          buy_fee: 0,
+          sell_fee: 0,
+          other: 0
+        },
+        monthly: 0,
+        daily: 0
+      },
+      
+      // User wallet summary
+      wallets: {
+        totalPlatformValue: 0,
+        averageUserBalance: 0,
+        topAssets: []
+      },
+      
+      // Summary stats
+      summary: {
+        totalCryptoValue: 0,
+        totalFiatValue: 0,
+        totalPlatformValue: 0,
+        mostTradedAsset: '',
+        highestVolumeDay: ''
+      }
     };
+
+    // =============================================
+    // 1. CALCULATE CRYPTO ASSETS FROM USER BALANCES
+    // =============================================
+    let totalMainValue = 0;
+    let totalMaturedValue = 0;
+    let totalActiveValue = 0;
+    const assetValues = {}; // Track value per asset
+    const assetBalances = {}; // Track raw balance per asset
 
     for (const user of users) {
       if (!user.balances) continue;
       
-      // Calculate main wallet values
+      // Process MAIN wallet (crypto, fluctuates with price)
       if (user.balances.main) {
         const mainMap = user.balances.main;
         const entries = mainMap instanceof Map ? mainMap.entries() : Object.entries(mainMap);
         
-        for (const [asset, amount] of entries) {
-          if (amount > 0 && asset !== 'usd') {
+        for (const [asset, balance] of entries) {
+          if (balance > 0 && asset !== 'usd') {
             const price = await getCryptoPrice(asset.toUpperCase());
-            if (price) {
+            if (price && price > 0) {
+              const value = balance * price;
+              totalMainValue += value;
+              
+              // Track by asset
               const assetKey = asset.toUpperCase();
-              if (distribution[assetKey] !== undefined) {
-                distribution[assetKey] += amount * price;
-              } else {
-                distribution['BTC'] += amount * price;
-              }
+              assetValues[assetKey] = (assetValues[assetKey] || 0) + value;
+              assetBalances[assetKey] = (assetBalances[assetKey] || 0) + balance;
             }
           }
         }
       }
       
-      // Active mining value (fixed, doesn't fluctuate)
+      // Process MATURED wallet (crypto, fluctuates with price)
+      if (user.balances.matured) {
+        const maturedMap = user.balances.matured;
+        const entries = maturedMap instanceof Map ? maturedMap.entries() : Object.entries(maturedMap);
+        
+        for (const [asset, balance] of entries) {
+          if (balance > 0 && asset !== 'usd') {
+            const price = await getCryptoPrice(asset.toUpperCase());
+            if (price && price > 0) {
+              const value = balance * price;
+              totalMaturedValue += value;
+              
+              const assetKey = asset.toUpperCase();
+              assetValues[assetKey] = (assetValues[assetKey] || 0) + value;
+              assetBalances[assetKey] = (assetBalances[assetKey] || 0) + balance;
+            }
+          }
+        }
+      }
+      
+      // Process ACTIVE wallet (mining contracts - FIXED USD value, no fluctuation)
       if (user.balances.active) {
         const activeMap = user.balances.active;
         const entries = activeMap instanceof Map ? activeMap.entries() : Object.entries(activeMap);
         
-        for (const [asset, amount] of entries) {
-          if (amount > 0) {
-            distribution['Active Mining'] += amount;
+        for (const [asset, balance] of entries) {
+          if (balance > 0) {
+            // Active wallet stores USD value directly
+            totalActiveValue += balance;
           }
         }
       }
     }
+
+    distribution.crypto.byWalletType.main = totalMainValue;
+    distribution.crypto.byWalletType.matured = totalMaturedValue;
+    distribution.crypto.byWalletType.active = totalActiveValue;
+    distribution.crypto.totalValue = totalMainValue + totalMaturedValue + totalActiveValue;
+
+    // Build byAsset breakdown
+    for (const [asset, value] of Object.entries(assetValues)) {
+      distribution.crypto.byAsset[asset] = {
+        value: value,
+        balance: assetBalances[asset] || 0,
+        percentage: distribution.crypto.totalValue > 0 ? (value / distribution.crypto.totalValue) * 100 : 0
+      };
+    }
+
+    // =============================================
+    // 2. CALCULATE TRANSACTION VOLUMES
+    // =============================================
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
     
+    // Get all completed transactions
+    const allTransactions = await Transaction.find({ 
+      status: 'completed' 
+    }).lean();
+    
+    const todayTransactions = await Transaction.find({
+      status: 'completed',
+      createdAt: { $gte: startOfDay }
+    }).lean();
+
+    for (const tx of allTransactions) {
+      // Deposits
+      if (tx.type === 'deposit') {
+        distribution.transactions.deposits.total += tx.amount || 0;
+        
+        const method = (tx.method || 'other').toLowerCase();
+        if (distribution.transactions.deposits.byMethod[method] !== undefined) {
+          distribution.transactions.deposits.byMethod[method] += tx.amount || 0;
+        } else {
+          distribution.transactions.deposits.byMethod.other += tx.amount || 0;
+        }
+      }
+      
+      // Withdrawals
+      if (tx.type === 'withdrawal') {
+        distribution.transactions.withdrawals.total += tx.amount || 0;
+        
+        const method = (tx.method || 'other').toLowerCase();
+        if (distribution.transactions.withdrawals.byMethod[method] !== undefined) {
+          distribution.transactions.withdrawals.byMethod[method] += tx.amount || 0;
+        } else {
+          distribution.transactions.withdrawals.byMethod.other += tx.amount || 0;
+        }
+      }
+      
+      // Investments
+      if (tx.type === 'investment') {
+        distribution.transactions.investments.total += tx.amount || 0;
+      }
+      
+      // Fees
+      if (tx.fee && tx.fee > 0) {
+        distribution.transactions.fees.total += tx.fee;
+        
+        if (tx.type === 'deposit') {
+          distribution.transactions.fees.byType.deposit_fees += tx.fee;
+        } else if (tx.type === 'withdrawal') {
+          distribution.transactions.fees.byType.withdrawal_fees += tx.fee;
+        } else if (tx.type === 'sell' || tx.type === 'buy') {
+          distribution.transactions.fees.byType.conversion_fees += tx.fee;
+        } else if (tx.type === 'investment') {
+          distribution.transactions.fees.byType.investment_fees += tx.fee;
+        }
+      }
+    }
+    
+    // Get active vs completed investments
+    const activeInvestments = await Investment.countDocuments({ status: 'active' });
+    const completedInvestments = await Investment.countDocuments({ status: 'completed' });
+    const cancelledInvestments = await Investment.countDocuments({ status: 'cancelled' });
+    
+    distribution.transactions.investments.active = activeInvestments;
+    distribution.transactions.investments.completed = completedInvestments;
+    distribution.transactions.investments.cancelled = cancelledInvestments;
+
+    // =============================================
+    // 3. CALCULATE PLATFORM REVENUE
+    // =============================================
+    const allRevenue = await PlatformRevenue.find({}).lean();
+    const monthlyRevenue = await PlatformRevenue.find({
+      createdAt: { $gte: startOfMonth }
+    }).lean();
+    const dailyRevenue = await PlatformRevenue.find({
+      createdAt: { $gte: startOfDay }
+    }).lean();
+    
+    for (const rev of allRevenue) {
+      distribution.revenue.total += rev.amount || 0;
+      
+      if (distribution.revenue.bySource[rev.source] !== undefined) {
+        distribution.revenue.bySource[rev.source] += rev.amount || 0;
+      }
+    }
+    
+    distribution.revenue.monthly = monthlyRevenue.reduce((sum, rev) => sum + (rev.amount || 0), 0);
+    distribution.revenue.daily = dailyRevenue.reduce((sum, rev) => sum + (rev.amount || 0), 0);
+
+    // =============================================
+    // 4. WALLET SUMMARY
+    // =============================================
+    const totalPlatformValue = distribution.crypto.totalValue;
+    distribution.wallets.totalPlatformValue = totalPlatformValue;
+    distribution.wallets.averageUserBalance = totalUsers > 0 ? totalPlatformValue / totalUsers : 0;
+    
+    // Get top 5 assets by value
+    const topAssets = Object.entries(distribution.crypto.byAsset)
+      .sort((a, b) => b[1].value - a[1].value)
+      .slice(0, 5)
+      .map(([asset, data]) => ({
+        asset: asset,
+        value: data.value,
+        balance: data.balance,
+        percentage: data.percentage
+      }));
+    
+    distribution.wallets.topAssets = topAssets;
+
+    // =============================================
+    // 5. SUMMARY STATS
+    // =============================================
+    distribution.summary.totalCryptoValue = totalMainValue + totalMaturedValue;
+    distribution.summary.totalFiatValue = totalActiveValue;
+    distribution.summary.totalPlatformValue = totalPlatformValue;
+    
+    // Find most traded asset
+    const tradeCounts = {};
+    const trades = await Transaction.find({ 
+      type: { $in: ['buy', 'sell'] },
+      status: 'completed'
+    }).lean();
+    
+    for (const trade of trades) {
+      const asset = (trade.asset || 'unknown').toUpperCase();
+      tradeCounts[asset] = (tradeCounts[asset] || 0) + 1;
+    }
+    
+    let mostTradedAsset = 'BTC';
+    let maxTrades = 0;
+    for (const [asset, count] of Object.entries(tradeCounts)) {
+      if (count > maxTrades) {
+        maxTrades = count;
+        mostTradedAsset = asset;
+      }
+    }
+    distribution.summary.mostTradedAsset = mostTradedAsset;
+    
+    // Find highest volume day (last 30 days)
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    
+    const dailyVolumes = await Transaction.aggregate([
+      {
+        $match: {
+          status: 'completed',
+          createdAt: { $gte: thirtyDaysAgo }
+        }
+      },
+      {
+        $group: {
+          _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+          totalVolume: { $sum: "$amount" }
+        }
+      },
+      { $sort: { totalVolume: -1 } },
+      { $limit: 1 }
+    ]);
+    
+    distribution.summary.highestVolumeDay = dailyVolumes[0]?._id || 'N/A';
+    distribution.summary.highestVolumeAmount = dailyVolumes[0]?.totalVolume || 0;
+
     return distribution;
+    
   } catch (err) {
-    console.error('Error getting asset distribution:', err);
-    return { 'BTC': 0, 'ETH': 0, 'USDT': 0, 'Active Mining': 0 };
+    console.error('Error getting detailed asset distribution:', err);
+    return {
+      crypto: { byAsset: {}, byWalletType: { main: 0, matured: 0, active: 0 }, totalValue: 0 },
+      transactions: { deposits: { total: 0, byMethod: {} }, withdrawals: { total: 0, byMethod: {} }, investments: { total: 0, active: 0, completed: 0, cancelled: 0 }, fees: { total: 0, byType: {} } },
+      revenue: { total: 0, bySource: {}, monthly: 0, daily: 0 },
+      wallets: { totalPlatformValue: 0, averageUserBalance: 0, topAssets: [] },
+      summary: { totalCryptoValue: 0, totalFiatValue: 0, totalPlatformValue: 0, mostTradedAsset: '', highestVolumeDay: '' }
+    };
   }
 }
-
-
 
 
 
