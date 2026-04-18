@@ -22010,39 +22010,46 @@ app.get('/api/admin/kyc/stats', adminProtect, async (req, res) => {
 });
 
 
-// =============================================
-// SERVE KYC DOCUMENTS WITH AUTHENTICATION
-// =============================================
-app.get('/api/admin/kyc/files/preview/:token/:type/:filename', async (req, res) => {
-  try {
-    const { token, type, filename } = req.params;
 
-    // Verify token
-    let decoded;
-    try {
-      decoded = jwt.verify(token, JWT_SECRET);
-    } catch (err) {
-      return res.status(401).json({
-        status: 'fail',
-        message: 'Invalid or expired token'
-      });
-    }
+
+
+
+
+
+// =============================================
+// SERVE KYC DOCUMENTS - Direct access (Admin only)
+// Matches frontend URL pattern: /api/admin/kyc/files/{type}/{filename}
+// =============================================
+app.get('/api/admin/kyc/files/:type/:filename', adminProtect, async (req, res) => {
+  try {
+    const { type, filename } = req.params;
+    
+    // Decode filename (handle URL encoding)
+    const decodedFilename = decodeURIComponent(filename);
+    
+    console.log(`Serving KYC file - Type: ${type}, Filename: ${decodedFilename}`);
 
     // Determine file path based on type
     let filePath;
+    let contentType = 'application/octet-stream';
+    
     switch (type) {
       case 'identity-front':
       case 'identity-back':
-        filePath = path.join(__dirname, 'uploads/kyc/identity', filename);
+        filePath = path.join(__dirname, 'uploads/kyc/identity', decodedFilename);
+        contentType = getContentType(decodedFilename);
         break;
       case 'address':
-        filePath = path.join(__dirname, 'uploads/kyc/address', filename);
+        filePath = path.join(__dirname, 'uploads/kyc/address', decodedFilename);
+        contentType = getContentType(decodedFilename);
         break;
       case 'facial-photo':
       case 'facial-video':
-        filePath = path.join(__dirname, 'uploads/kyc/facial', filename);
+        filePath = path.join(__dirname, 'uploads/kyc/facial', decodedFilename);
+        contentType = getContentType(decodedFilename);
         break;
       default:
+        console.log(`Invalid file type: ${type}`);
         return res.status(400).json({
           status: 'fail',
           message: 'Invalid file type'
@@ -22051,31 +22058,63 @@ app.get('/api/admin/kyc/files/preview/:token/:type/:filename', async (req, res) 
 
     // Check if file exists
     if (!fs.existsSync(filePath)) {
+      console.log(`File not found: ${filePath}`);
       return res.status(404).json({
         status: 'fail',
         message: 'File not found'
       });
     }
 
-    // Get file extension and set content type
-    const ext = path.extname(filename).toLowerCase();
-    let contentType = 'application/octet-stream';
-    
-    if (['.jpg', '.jpeg'].includes(ext)) contentType = 'image/jpeg';
-    else if (ext === '.png') contentType = 'image/png';
-    else if (ext === '.gif') contentType = 'image/gif';
-    else if (ext === '.pdf') contentType = 'application/pdf';
-    else if (['.mp4', '.webm'].includes(ext)) contentType = 'video/mp4';
+    console.log(`Serving file: ${filePath}, Content-Type: ${contentType}`);
 
-    // Set headers for inline viewing
+    // Set CORS headers to allow cross-origin requests
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    
+    // Set headers for proper media display in browser
     res.setHeader('Content-Type', contentType);
-    res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+    res.setHeader('Content-Disposition', `inline; filename="${path.basename(decodedFilename)}"`);
     res.setHeader('Cache-Control', 'public, max-age=3600');
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless');
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
 
-    // Stream the file
-    const fileStream = fs.createReadStream(filePath);
-    fileStream.pipe(res);
+    // For videos, support range requests for seeking
+    if (contentType.startsWith('video/')) {
+      const stat = fs.statSync(filePath);
+      const fileSize = stat.size;
+      const range = req.headers.range;
+      
+      if (range) {
+        const parts = range.replace(/bytes=/, "").split("-");
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+        const chunksize = (end - start) + 1;
+        
+        const file = fs.createReadStream(filePath, { start, end });
+        const head = {
+          'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+          'Accept-Ranges': 'bytes',
+          'Content-Length': chunksize,
+          'Content-Type': contentType,
+        };
+        
+        res.writeHead(206, head);
+        file.pipe(res);
+      } else {
+        const head = {
+          'Content-Length': fileSize,
+          'Content-Type': contentType,
+        };
+        res.writeHead(200, head);
+        fs.createReadStream(filePath).pipe(res);
+      }
+    } else {
+      // For images and PDFs, stream directly
+      const fileStream = fs.createReadStream(filePath);
+      fileStream.pipe(res);
+    }
 
   } catch (err) {
     console.error('Error serving KYC file:', err);
@@ -22086,13 +22125,27 @@ app.get('/api/admin/kyc/files/preview/:token/:type/:filename', async (req, res) 
   }
 });
 
-
-
-
-
-
-
-
+// Helper function to get content type based on file extension
+function getContentType(filename) {
+  const ext = path.extname(filename).toLowerCase();
+  
+  const contentTypes = {
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.gif': 'image/gif',
+    '.bmp': 'image/bmp',
+    '.webp': 'image/webp',
+    '.pdf': 'application/pdf',
+    '.mp4': 'video/mp4',
+    '.webm': 'video/webm',
+    '.avi': 'video/x-msvideo',
+    '.mov': 'video/quicktime',
+    '.wmv': 'video/x-ms-wmv'
+  };
+  
+  return contentTypes[ext] || 'application/octet-stream';
+}
 
 
 
