@@ -2494,7 +2494,7 @@ FinancialStatementSchema.index({ reference: 1 }, { unique: true });
 FinancialStatementSchema.index({ 'period.startDate': 1, 'period.endDate': 1 });
 FinancialStatementSchema.index({ statementType: 1, 'period.endDate': -1 });
 
-
+const FinancialStatement = mongoose.model('FinancialStatement', FinancialStatementSchema);
 
 
 
