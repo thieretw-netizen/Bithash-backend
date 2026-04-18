@@ -23561,7 +23561,7 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
           <p style="margin: 0 0 16px 0; color: #3B82F6; font-size: 14px;">
             Your matured wallet funds are available for new investments. Explore our plans and start earning again!
           </p>
-          <a href="https://www.bithashcapital.live/invest" style="display: inline-block; background: #10B981; color: white; padding: 12px 28px; text-decoration: none; border-radius: 999px; font-weight: 600; font-size: 14px; transition: all 0.3s ease;">Invest Now →</a>
+          <a href="https://www.bithashcapital.live" style="display: inline-block; background: #10B981; color: white; padding: 12px 28px; text-decoration: none; border-radius: 999px; font-weight: 600; font-size: 14px; transition: all 0.3s ease;">Invest Now →</a>
         </div>
 
         ${reason ? `
