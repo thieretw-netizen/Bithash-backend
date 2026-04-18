@@ -23346,8 +23346,10 @@ app.get('/api/admin/transactions/export', adminProtect, async (req, res) => {
 
 
 
+
+
 // =============================================
-// CANCEL INVESTMENT (Admin) - CORRECTED SystemLog
+// CANCEL INVESTMENT (Admin) - With Clean Email Content
 // =============================================
 app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => {
   try {
@@ -23445,6 +23447,10 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
 
     await user.save();
 
+    // Calculate new matured wallet total after refund
+    const newMaturedBTCBalance = currentMaturedBTCBalance + refundAmountBTC;
+    const newMaturedUSDBalance = currentMaturedUSDBalance + refundAmountUSD;
+
     // Update investment status
     investment.status = 'cancelled';
     investment.completionDate = new Date();
@@ -23455,7 +23461,7 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
     await investment.save();
 
     // Create transaction record for the refund
-    const refundReference = `CANCEL-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+    const refundReference = `CANCEL-${Date.now()}-${Math.floor(Math.random()  * 10000)}`;
     const transaction = await Transaction.create({
       user: user._id,
       type: 'deposit',
@@ -23488,13 +23494,112 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
     });
 
     // =============================================
-    // LOG TO SYSTEMLOG SCHEMA - CORRECTED VALUES
+    // SEND CLEAN EMAIL USING EXISTING DEFAULT TEMPLATE
     // =============================================
+    try {
+      // Format numbers for display
+      const formattedRefundUSD = refundAmountUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const formattedRefundBTC = refundAmountBTC.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
+      const formattedNewMaturedUSD = newMaturedUSDBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const formattedNewMaturedBTC = newMaturedBTCBalance.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
+      const formattedBTCPrice = currentBTCPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const formattedOriginalAmount = investment.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const planName = investment.plan?.name || 'your investment plan';
+      
+      // Build clean email message
+      const emailMessage = `
+        <div style="text-align: center; padding: 10px 0 20px 0;">
+          <div style="display: inline-block; background: #FEF2F2; border: 1px solid #FEE2E2; border-radius: 60px; padding: 6px 16px; margin-bottom: 20px;">
+            <span style="color: #DC2626; font-size: 13px; font-weight: 600;">⚠️ INVESTMENT CANCELLED</span>
+          </div>
+        </div>
+
+        <p style="margin: 0 0 8px 0; font-size: 16px; font-weight: 600; color: #111827;">Dear ${user.firstName},</p>
+        
+        <p style="margin: 0 0 16px 0; color: #4B5563; line-height: 1.5;">
+          Your investment in <strong>${planName}</strong> of <strong>$${formattedOriginalAmount} USD</strong> has been cancelled by our administration team.
+        </p>
+
+        <div style="background: #F9FAFB; border-radius: 12px; padding: 20px; margin: 20px 0; border: 1px solid #E5E7EB;">
+          <p style="margin: 0 0 12px 0; font-weight: 600; color: #111827;">📋 Cancellation Details</p>
+          <table style="width: 100%; border-collapse: collapse;">
+            <tr>
+              <td style="padding: 6px 0; color: #6B7280; font-size: 14px;">Plan:</td>
+              <td style="padding: 6px 0; text-align: right; color: #111827; font-weight: 500;">${planName}</td>
+            </tr>
+            <tr>
+              <td style="padding: 6px 0; color: #6B7280; font-size: 14px;">Original Investment:</td>
+              <td style="padding: 6px 0; text-align: right; color: #111827; font-weight: 500;">$${formattedOriginalAmount} USD</td>
+            </tr>
+            <tr>
+              <td style="padding: 6px 0; color: #6B7280; font-size: 14px;">BTC Price at Cancellation:</td>
+              <td style="padding: 6px 0; text-align: right; color: #111827; font-weight: 500;">$${formattedBTCPrice}</td>
+            </tr>
+            <tr style="border-top: 1px solid #E5E7EB;">
+              <td style="padding: 12px 0 6px 0; color: #6B7280; font-size: 14px;">Refund Amount:</td>
+              <td style="padding: 12px 0 6px 0; text-align: right; color: #111827; font-weight: 600;">${formattedRefundBTC} BTC (≈ $${formattedRefundUSD})</td>
+            </tr>
+          </table>
+        </div>
+
+        <div style="background: #ECFDF5; border-radius: 12px; padding: 20px; margin: 20px 0; border: 1px solid #A7F3D0;">
+          <p style="margin: 0 0 8px 0; font-weight: 600; color: #065F46;">✅ Funds Credited to Matured Wallet</p>
+          <p style="margin: 0 0 12px 0; color: #047857; font-size: 14px;">Your refund has been successfully credited to your Matured Wallet.</p>
+          <div style="background: #FFFFFF; border-radius: 8px; padding: 12px; text-align: center;">
+            <p style="margin: 0; font-size: 13px; color: #6B7280;">Current Matured Wallet Balance</p>
+            <p style="margin: 8px 0 0 0; font-size: 22px; font-weight: 700; color: #10B981;">
+              $${formattedNewMaturedUSD} USD
+            </p>
+            <p style="margin: 4px 0 0 0; font-size: 12px; color: #6B7280;">
+              ≈ ${formattedNewMaturedBTC} BTC
+            </p>
+          </div>
+        </div>
+
+        <div style="background: #EFF6FF; border-radius: 12px; padding: 20px; margin: 20px 0; text-align: center; border: 1px solid #BFDBFE;">
+          <p style="margin: 0 0 8px 0; font-weight: 600; color: #1E40AF;">🚀 Ready to Grow Your Portfolio?</p>
+          <p style="margin: 0 0 16px 0; color: #3B82F6; font-size: 14px;">
+            Your matured wallet funds are available for new investments. Explore our plans and start earning again!
+          </p>
+          <a href="https://www.bithashcapital.live/invest" style="display: inline-block; background: #10B981; color: white; padding: 12px 28px; text-decoration: none; border-radius: 999px; font-weight: 600; font-size: 14px; transition: all 0.3s ease;">Invest Now →</a>
+        </div>
+
+        ${reason ? `
+        <div style="background: #FEF3C7; border-radius: 8px; padding: 12px 16px; margin: 20px 0; border-left: 3px solid #F59E0B;">
+          <p style="margin: 0; font-size: 13px; color: #92400E;"><strong>Reason for cancellation:</strong> ${reason}</p>
+        </div>
+        ` : ''}
+
+        <p style="margin: 24px 0 0 0; color: #6B7280; font-size: 13px; text-align: center; border-top: 1px solid #E5E7EB; padding-top: 20px;">
+          Need assistance? Contact our support team at <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a>
+        </p>
+      `;
+
+      await sendProfessionalEmail({
+        email: user.email,
+        template: 'default',
+        data: {
+          name: user.firstName,
+          message: `Your investment in ${planName} has been cancelled.`,
+          details: emailMessage,
+          actionRequired: `Your refund of ${formattedRefundBTC} BTC has been credited to your Matured Wallet. Current balance: $${formattedNewMaturedUSD} USD`,
+          buttonText: 'Invest Now',
+          actionLink: 'https://www.bithashcapital.live/invest',
+          referenceId: refundReference
+        }
+      });
+      
+      console.log(`📧 Cancellation email sent to ${user.email}`);
+    } catch (emailError) {
+      console.error('Failed to send cancellation email:', emailError);
+    }
+
+    // Log to SystemLog
     const deviceInfo = await getUserDeviceInfo(req);
     
     await SystemLog.create({
       action: 'investment_cancelled',
-      entity: 'investment',  // ✅ LOWERCASE, not "Investment"
+      entity: 'investment',
       entityId: investment._id,
       performedBy: req.admin._id,
       performedByModel: 'Admin',
@@ -23518,66 +23623,25 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
         userEmail: user.email,
         userName: `${user.firstName} ${user.lastName}`,
         planName: investment.plan?.name,
-        planId: investment.plan?._id,
         originalInvestmentAmountUSD: investment.amount,
-        originalInvestmentAmountBTC: originalBTCAmount,
         refundAmountUSD: refundAmountUSD,
         refundAmountBTC: refundAmountBTC,
         btcPriceAtCancellation: currentBTCPrice,
-        targetWallet: 'matured',
+        newMaturedBalanceUSD: newMaturedUSDBalance,
         reason: reason || 'Cancelled by admin',
-        cancelledBy: req.admin.name,
-        cancelledByEmail: req.admin.email,
-        timestamp: new Date().toISOString()
-      },
-      changes: {
-        before: {
-          status: 'active',
-          activeWalletBTC: currentActiveBTCBalance,
-          activeWalletUSD: currentActiveUSDBalance,
-          maturedWalletBTC: currentMaturedBTCBalance,
-          maturedWalletUSD: currentMaturedUSDBalance
-        },
-        after: {
-          status: 'cancelled',
-          activeWalletBTC: newActiveBTCBalance,
-          activeWalletUSD: newActiveUSDBalance,
-          maturedWalletBTC: currentMaturedBTCBalance + refundAmountBTC,
-          maturedWalletUSD: currentMaturedUSDBalance + refundAmountUSD
-        }
+        cancelledBy: req.admin.name
       },
       financial: {
         amount: refundAmountUSD,
         amountUSD: refundAmountUSD,
         cryptoAmount: refundAmountBTC,
         cryptoAsset: 'BTC',
-        fee: 0,
         exchangeRate: currentBTCPrice,
-        balanceBefore: currentMaturedUSDBalance,
-        balanceAfter: currentMaturedUSDBalance + refundAmountUSD,
+        balanceAfter: newMaturedUSDBalance,
         walletType: 'matured',
-        transactionId: transaction._id  // ✅ Use ObjectId, not string
+        transactionId: transaction._id
       }
     });
-
-    console.log(`✅ SystemLog entry created for investment cancellation: ${investment._id}`);
-
-    // Send email notification to user
-    try {
-      await sendProfessionalEmail({
-        email: user.email,
-        template: 'default',
-        data: {
-          name: user.firstName,
-          message: `Your investment in ${investment.plan?.name || 'Unknown Plan'} of $${refundAmountUSD.toLocaleString()} has been cancelled.`,
-          details: `A refund of ${refundAmountBTC.toFixed(8)} BTC (worth $${refundAmountUSD.toLocaleString()} at current BTC price of $${currentBTCPrice.toLocaleString()}) has been credited to your MATURED wallet.`,
-          buttonText: 'View Matured Wallet',
-          actionLink: 'https://www.bithashcapital.live/dashboard'
-        }
-      });
-    } catch (emailError) {
-      console.error('Failed to send cancellation email:', emailError);
-    }
 
     // Emit real-time update via Socket.IO
     const io = req.app.get('io');
@@ -23605,6 +23669,10 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
           btcPrice: currentBTCPrice,
           walletType: 'matured',
           reference: refundReference
+        },
+        newMaturedBalance: {
+          usd: newMaturedUSDBalance,
+          btc: newMaturedBTCBalance
         }
       }
     });
@@ -23612,37 +23680,12 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
   } catch (err) {
     console.error('Error cancelling investment:', err);
     
-    // Log error to SystemLog
-    try {
-      await SystemLog.create({
-        action: 'investment_cancellation_failed',
-        entity: 'investment',
-        entityId: req.params.id,
-        performedBy: req.admin._id,
-        performedByModel: 'Admin',
-        performedByEmail: req.admin.email,
-        status: 'failed',
-        errorMessage: err.message,
-        metadata: {
-          reason: req.body.reason,
-          error: err.toString()
-        }
-      });
-    } catch (logError) {
-      console.error('Failed to log cancellation error:', logError);
-    }
-    
     res.status(500).json({
       status: 'error',
       message: err.message || 'Failed to cancel investment'
     });
   }
 });
-
-
-
-
-
 
 
 
