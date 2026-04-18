@@ -22358,7 +22358,71 @@ app.delete('/api/admin/cards/:id', adminProtect, async (req, res) => {
 
 
 
+// =============================================
+// DELETE INVESTMENT PLAN
+// =============================================
+app.delete('/api/admin/investment/plans/:id', adminProtect, async (req, res) => {
+  try {
+    const { id } = req.params;
 
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid plan ID'
+      });
+    }
+
+    // Check if plan exists
+    const plan = await Plan.findById(id);
+    if (!plan) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Investment plan not found'
+      });
+    }
+
+    // Check if any active investments use this plan
+    const activeInvestments = await Investment.countDocuments({ 
+      plan: id, 
+      status: 'active' 
+    });
+
+    if (activeInvestments > 0) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Cannot delete plan. ${activeInvestments} active investment(s) are using this plan.`
+      });
+    }
+
+    // Delete the plan
+    await Plan.findByIdAndDelete(id);
+
+    // Log the activity
+    await logActivity(
+      'investment_plan_deleted',
+      'Plan',
+      id,
+      req.admin._id,
+      'Admin',
+      req,
+      {
+        planName: plan.name
+      }
+    );
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Investment plan deleted successfully'
+    });
+
+  } catch (err) {
+    console.error('Error deleting investment plan:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to delete investment plan'
+    });
+  }
+});
 
 
 
@@ -22883,6 +22947,393 @@ app.post('/api/admin/investment/plans', adminProtect, async (req, res) => {
     res.status(500).json({
       status: 'error',
       message: err.message || 'Failed to create investment plan'
+    });
+  }
+});
+
+
+// =============================================
+// GET ALL TRANSACTIONS (Paginated)
+// =============================================
+app.get('/api/admin/transactions', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+    const type = req.query.type; // Optional filter by transaction type
+    const status = req.query.status; // Optional filter by status
+
+    // Build query
+    let query = {};
+    if (type && type !== 'all') query.type = type;
+    if (status && status !== 'all') query.status = status;
+
+    // Fetch transactions with user details
+    const transactions = await Transaction.find(query)
+      .populate('user', 'firstName lastName email')
+      .populate('processedBy', 'name email')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const total = await Transaction.countDocuments(query);
+    const totalPages = Math.ceil(total / limit);
+
+    // Format transactions for frontend display
+    const formattedTransactions = transactions.map(tx => {
+      const user = tx.user || {};
+      const processedBy = tx.processedBy || {};
+      
+      return {
+        _id: tx._id,
+        user: {
+          _id: user._id || null,
+          firstName: user.firstName || 'Deleted',
+          lastName: user.lastName || 'User',
+          email: user.email || 'unknown@deleted.com',
+          fullName: `${user.firstName || 'Deleted'} ${user.lastName || 'User'}`.trim()
+        },
+        type: tx.type,
+        amount: tx.amount || 0,
+        asset: tx.asset || 'USD',
+        assetAmount: tx.assetAmount || 0,
+        currency: tx.currency || 'USD',
+        status: tx.status || 'pending',
+        method: tx.method || 'unknown',
+        reference: tx.reference,
+        fee: tx.fee || 0,
+        netAmount: tx.netAmount || tx.amount || 0,
+        description: tx.details?.description || tx.details || `${tx.type} transaction`,
+        processedBy: processedBy.name ? {
+          _id: processedBy._id,
+          name: processedBy.name,
+          email: processedBy.email
+        } : null,
+        createdAt: tx.createdAt,
+        updatedAt: tx.updatedAt,
+        processedAt: tx.processedAt
+      };
+    });
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        transactions: formattedTransactions,
+        pagination: {
+          currentPage: page,
+          totalPages: totalPages,
+          totalItems: total,
+          itemsPerPage: limit,
+          hasNextPage: page < totalPages,
+          hasPrevPage: page > 1
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Error fetching transactions:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch transactions'
+    });
+  }
+});
+
+
+// =============================================
+// GET DEPOSIT TRANSACTIONS (Paginated)
+// =============================================
+app.get('/api/admin/transactions/deposits', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    // Query for deposit transactions
+    const query = { type: 'deposit' };
+
+    const transactions = await Transaction.find(query)
+      .populate('user', 'firstName lastName email')
+      .populate('processedBy', 'name email')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const total = await Transaction.countDocuments(query);
+    const totalPages = Math.ceil(total / limit);
+
+    const formattedTransactions = transactions.map(tx => {
+      const user = tx.user || {};
+      const processedBy = tx.processedBy || {};
+      
+      return {
+        _id: tx._id,
+        user: {
+          _id: user._id || null,
+          firstName: user.firstName || 'Deleted',
+          lastName: user.lastName || 'User',
+          email: user.email || 'unknown@deleted.com'
+        },
+        amount: tx.amount || 0,
+        asset: tx.asset || 'USD',
+        assetAmount: tx.assetAmount || 0,
+        method: tx.method || 'unknown',
+        status: tx.status || 'pending',
+        reference: tx.reference,
+        proof: tx.details?.proofUrl || tx.details?.txHash || null,
+        processedBy: processedBy.name ? {
+          _id: processedBy._id,
+          name: processedBy.name
+        } : null,
+        createdAt: tx.createdAt,
+        processedAt: tx.processedAt
+      };
+    });
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        transactions: formattedTransactions,
+        pagination: {
+          currentPage: page,
+          totalPages: totalPages,
+          totalItems: total,
+          itemsPerPage: limit,
+          hasNextPage: page < totalPages,
+          hasPrevPage: page > 1
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Error fetching deposit transactions:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch deposit transactions'
+    });
+  }
+});
+
+
+
+// =============================================
+// GET WITHDRAWAL TRANSACTIONS (Paginated)
+// =============================================
+app.get('/api/admin/transactions/withdrawals', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    // Query for withdrawal transactions
+    const query = { type: 'withdrawal' };
+
+    const transactions = await Transaction.find(query)
+      .populate('user', 'firstName lastName email')
+      .populate('processedBy', 'name email')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const total = await Transaction.countDocuments(query);
+    const totalPages = Math.ceil(total / limit);
+
+    const formattedTransactions = transactions.map(tx => {
+      const user = tx.user || {};
+      const processedBy = tx.processedBy || {};
+      
+      return {
+        _id: tx._id,
+        user: {
+          _id: user._id || null,
+          firstName: user.firstName || 'Deleted',
+          lastName: user.lastName || 'User',
+          email: user.email || 'unknown@deleted.com'
+        },
+        amount: tx.amount || 0,
+        asset: tx.asset || 'USD',
+        assetAmount: tx.assetAmount || 0,
+        method: tx.method || 'unknown',
+        status: tx.status || 'pending',
+        reference: tx.reference,
+        walletAddress: tx.btcAddress || tx.details?.walletAddress || 'N/A',
+        fee: tx.fee || 0,
+        netAmount: tx.netAmount || tx.amount || 0,
+        processedBy: processedBy.name ? {
+          _id: processedBy._id,
+          name: processedBy.name
+        } : null,
+        createdAt: tx.createdAt,
+        processedAt: tx.processedAt
+      };
+    });
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        transactions: formattedTransactions,
+        pagination: {
+          currentPage: page,
+          totalPages: totalPages,
+          totalItems: total,
+          itemsPerPage: limit,
+          hasNextPage: page < totalPages,
+          hasPrevPage: page > 1
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Error fetching withdrawal transactions:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch withdrawal transactions'
+    });
+  }
+});
+
+// =============================================
+// GET TRANSFER TRANSACTIONS (Paginated)
+// =============================================
+app.get('/api/admin/transactions/transfers', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    // Query for transfer transactions (internal transfers)
+    const query = { type: 'transfer' };
+
+    const transactions = await Transaction.find(query)
+      .populate('user', 'firstName lastName email')
+      .populate('processedBy', 'name email')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const total = await Transaction.countDocuments(query);
+    const totalPages = Math.ceil(total / limit);
+
+    const formattedTransactions = transactions.map(tx => {
+      const user = tx.user || {};
+      
+      // Extract sender and recipient from details if available
+      const fromWallet = tx.details?.from || 'unknown';
+      const toWallet = tx.details?.to || 'unknown';
+      
+      return {
+        _id: tx._id,
+        sender: {
+          _id: user._id || null,
+          name: `${user.firstName || 'Deleted'} ${user.lastName || 'User'}`.trim(),
+          email: user.email || 'unknown@deleted.com'
+        },
+        recipient: {
+          name: tx.details?.recipientName || 'System',
+          email: tx.details?.recipientEmail || 'system@bithash.com'
+        },
+        amount: tx.amount || 0,
+        fromWallet: fromWallet,
+        toWallet: toWallet,
+        status: tx.status || 'completed',
+        reference: tx.reference,
+        description: tx.details?.description || tx.details || 'Internal transfer',
+        createdAt: tx.createdAt
+      };
+    });
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        transactions: formattedTransactions,
+        pagination: {
+          currentPage: page,
+          totalPages: totalPages,
+          totalItems: total,
+          itemsPerPage: limit,
+          hasNextPage: page < totalPages,
+          hasPrevPage: page > 1
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Error fetching transfer transactions:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch transfer transactions'
+    });
+  }
+});
+
+
+// =============================================
+// EXPORT TRANSACTIONS TO CSV
+// =============================================
+app.get('/api/admin/transactions/export', adminProtect, async (req, res) => {
+  try {
+    const { type, startDate, endDate } = req.query;
+    
+    // Build query
+    let query = {};
+    if (type && type !== 'all') query.type = type;
+    if (startDate || endDate) {
+      query.createdAt = {};
+      if (startDate) query.createdAt.$gte = new Date(startDate);
+      if (endDate) query.createdAt.$lte = new Date(endDate);
+    }
+
+    const transactions = await Transaction.find(query)
+      .populate('user', 'firstName lastName email')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    // Format CSV data
+    const csvData = transactions.map(tx => ({
+      'Transaction ID': tx._id,
+      'User': tx.user ? `${tx.user.firstName} ${tx.user.lastName}` : 'Deleted User',
+      'Email': tx.user?.email || 'N/A',
+      'Type': tx.type,
+      'Amount': tx.amount,
+      'Asset': tx.asset || 'USD',
+      'Status': tx.status,
+      'Method': tx.method,
+      'Reference': tx.reference,
+      'Fee': tx.fee || 0,
+      'Net Amount': tx.netAmount || tx.amount,
+      'Date': tx.createdAt,
+      'Processed At': tx.processedAt || 'N/A'
+    }));
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename=transactions_${Date.now()}.csv`);
+    
+    // Write CSV headers and data
+    const headers = Object.keys(csvData[0] || {});
+    res.write(headers.join(',') + '\n');
+    
+    csvData.forEach(row => {
+      const values = headers.map(header => {
+        let value = row[header] || '';
+        if (typeof value === 'string' && value.includes(',')) {
+          value = `"${value}"`;
+        }
+        return value;
+      });
+      res.write(values.join(',') + '\n');
+    });
+    
+    res.end();
+
+  } catch (err) {
+    console.error('Error exporting transactions:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to export transactions'
     });
   }
 });
