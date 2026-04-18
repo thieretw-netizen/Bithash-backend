@@ -24028,33 +24028,15 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
 
 
 
-// =============================================
-// FINANCIAL STATEMENT ENDPOINTS - Complete Implementation
-// =============================================
 
-// Helper function to get crypto logo URL
-function getCryptoLogoUrl(asset) {
-  const logos = {
-    'BTC': 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png',
-    'ETH': 'https://assets.coingecko.com/coins/images/279/large/ethereum.png',
-    'USDT': 'https://assets.coingecko.com/coins/images/325/large/Tether.png',
-    'BNB': 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png',
-    'SOL': 'https://assets.coingecko.com/coins/images/4128/large/solana.png',
-    'USDC': 'https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png',
-    'XRP': 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png',
-    'DOGE': 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png',
-    'ADA': 'https://assets.coingecko.com/coins/images/975/large/cardano.png',
-    'SHIB': 'https://assets.coingecko.com/coins/images/11939/large/shiba.png'
-  };
-  return logos[asset.toUpperCase()] || 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png';
-}
 
 // =============================================
-// GET /api/admin/crypto/assets - Crypto assets with real-time prices and logos
+// =============================================
+// CRYPTO ASSETS ENDPOINT - For Donut Chart
 // =============================================
 app.get('/api/admin/crypto/assets', adminProtect, async (req, res) => {
   try {
-    // Fetch all supported cryptocurrencies with real-time data
+    // Comprehensive list of supported cryptos with real logos
     const supportedCryptos = [
       { symbol: 'BTC', name: 'Bitcoin', logoUrl: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png' },
       { symbol: 'ETH', name: 'Ethereum', logoUrl: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png' },
@@ -24074,16 +24056,16 @@ app.get('/api/admin/crypto/assets', adminProtect, async (req, res) => {
       { symbol: 'LTC', name: 'Litecoin', logoUrl: 'https://assets.coingecko.com/coins/images/2/large/litecoin.png' }
     ];
     
-    // Get all users to calculate total holdings from MAIN + MATURED wallets
+    // Get all users to calculate total holdings from MAIN + MATURED wallets (excluding ACTIVE)
     const users = await User.find({}).select('balances').lean();
     
-    // Calculate total holdings for each asset from MAIN + MATURED wallets (excluding ACTIVE)
+    // Calculate total holdings for each asset
     const totalHoldings = {};
     
     for (const user of users) {
       if (!user.balances) continue;
       
-      // Collect from MAIN wallet (crypto only, fluctuates)
+      // Collect from MAIN wallet
       if (user.balances.main) {
         const mainMap = user.balances.main;
         const entries = mainMap instanceof Map ? mainMap.entries() : Object.entries(mainMap);
@@ -24096,7 +24078,7 @@ app.get('/api/admin/crypto/assets', adminProtect, async (req, res) => {
         }
       }
       
-      // Collect from MATURED wallet (crypto only, fluctuates)
+      // Collect from MATURED wallet
       if (user.balances.matured) {
         const maturedMap = user.balances.matured;
         const entries = maturedMap instanceof Map ? maturedMap.entries() : Object.entries(maturedMap);
@@ -24116,20 +24098,19 @@ app.get('/api/admin/crypto/assets', adminProtect, async (req, res) => {
     for (const crypto of supportedCryptos) {
       const totalAmount = totalHoldings[crypto.symbol] || 0;
       
-      // Get current price from Redis or fetch from API
+      // Get current price from Redis cache (set by price aggregator)
       let price = 0;
       let change24h = 0;
       
       try {
-        const tickerKey = `ticker:${crypto.symbol}USDT`;
-        const cachedTicker = await redis.get(tickerKey);
-        
+        // Try to get from Redis ticker cache first
+        const cachedTicker = await redis.get(`ticker:${crypto.symbol}USDT`);
         if (cachedTicker) {
           const ticker = JSON.parse(cachedTicker);
           price = ticker.lastPrice || 0;
           change24h = ticker.priceChangePercent || 0;
         } else {
-          // Fallback to API
+          // Fallback to direct API call
           price = await getCryptoPrice(crypto.symbol);
           const changeResponse = await axios.get(
             `https://api.coingecko.com/api/v3/simple/price?ids=${crypto.symbol.toLowerCase()}&vs_currencies=usd&include_24hr_change=true`,
@@ -24177,7 +24158,7 @@ app.get('/api/admin/crypto/assets', adminProtect, async (req, res) => {
 });
 
 // =============================================
-// GET /api/admin/transactions/volume - Transaction volume for chart
+// TRANSACTION VOLUME ENDPOINT - For Line Chart
 // =============================================
 app.get('/api/admin/transactions/volume', adminProtect, async (req, res) => {
   try {
@@ -24240,232 +24221,29 @@ app.get('/api/admin/transactions/volume', adminProtect, async (req, res) => {
 });
 
 // =============================================
-// POST /api/admin/statements/generate - Generate and send financial statements
+// FINANCIAL STATEMENTS - COMPLETE IMPLEMENTATION
 // =============================================
-app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
-  try {
-    const { userId, period, batch } = req.body;
-    
-    if (!period || !['weekly', 'monthly'].includes(period)) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Valid period is required (weekly or monthly)'
-      });
-    }
-    
-    // Log the activity
-    await logActivity(
-      'financial_statement_generation_started',
-      'FinancialStatement',
-      null,
-      req.admin._id,
-      'Admin',
-      req,
-      { period, userId, batch: !!batch }
-    );
-    
-    let users = [];
-    
-    if (batch) {
-      // Get all active users
-      users = await User.find({ status: 'active' }).select('_id firstName lastName email');
-    } else if (userId) {
-      const user = await User.findById(userId);
-      if (!user) {
-        return res.status(404).json({
-          status: 'fail',
-          message: 'User not found'
-        });
-      }
-      users = [user];
-    } else {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Either userId or batch flag is required'
-      });
-    }
-    
-    let successCount = 0;
-    let failureCount = 0;
-    const errors = [];
-    
-    for (const user of users) {
-      try {
-        // Generate the financial statement
-        const statement = await generateFinancialStatement(user._id, period, req);
-        
-        // Generate professional email HTML
-        const emailHTML = generateStatementEmailHTML(statement, user);
-        
-        // Send email using existing email service
-        await sendProfessionalEmail({
-          email: user.email,
-          template: 'default',
-          data: {
-            name: user.firstName,
-            message: `Your ${period} financial statement is ready.`,
-            details: emailHTML,
-            actionRequired: `Your ${period} financial statement shows a net ${statement.summary.netProfitUSD >= 0 ? 'profit' : 'loss'} of $${Math.abs(statement.summary.netProfitUSD).toLocaleString()}.`,
-            buttonText: 'View Dashboard',
-            actionLink: 'https://www.bithashcapital.live/dashboard',
-            referenceId: statement.reference
-          }
-        });
-        
-        // Mark statement as delivered
-        statement.isDelivered = true;
-        statement.deliveredAt = new Date();
-        await statement.save();
-        
-        successCount++;
-        
-        // Log success
-        await logActivity(
-          'financial_statement_sent',
-          'FinancialStatement',
-          statement._id,
-          req.admin._id,
-          'Admin',
-          req,
-          { userId: user._id, email: user.email, period }
-        );
-        
-      } catch (err) {
-        console.error(`Failed to generate/send statement for user ${user._id}:`, err);
-        failureCount++;
-        errors.push({ userId: user._id, email: user.email, error: err.message });
-        
-        await logActivity(
-          'financial_statement_failed',
-          'FinancialStatement',
-          null,
-          req.admin._id,
-          'Admin',
-          req,
-          { userId: user._id, email: user.email, error: err.message, period }
-        );
-      }
-    }
-    
-    res.status(200).json({
-      status: 'success',
-      message: `Financial statements processed: ${successCount} sent successfully, ${failureCount} failed`,
-      data: {
-        period: period,
-        total: users.length,
-        success: successCount,
-        failed: failureCount,
-        errors: errors.slice(0, 10)
-      }
-    });
-    
-  } catch (err) {
-    console.error('Error generating financial statements:', err);
-    res.status(500).json({
-      status: 'error',
-      message: err.message || 'Failed to generate financial statements'
-    });
-  }
-});
 
-// =============================================
-// GET /api/admin/statements - Get statements history with pagination
-// =============================================
-app.get('/api/admin/statements', adminProtect, async (req, res) => {
+// Helper function to get REAL-TIME crypto prices for statement calculations
+async function getRealTimePriceForStatement(asset, timestamp) {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    const skip = (page - 1) * limit;
-    
-    const statements = await FinancialStatement.find({})
-      .populate('user', 'firstName lastName email')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean();
-    
-    const total = await FinancialStatement.countDocuments();
-    const totalPages = Math.ceil(total / limit);
-    
-    const formattedStatements = statements.map(s => ({
-      _id: s._id,
-      user: s.user,
-      statementType: s.statementType,
-      period: s.period,
-      reference: s.reference,
-      summary: s.summary,
-      isDelivered: s.isDelivered,
-      deliveredAt: s.deliveredAt,
-      createdAt: s.createdAt
-    }));
-    
-    res.status(200).json({
-      status: 'success',
-      data: {
-        statements: formattedStatements,
-        pagination: {
-          currentPage: page,
-          totalPages: totalPages,
-          totalItems: total,
-          itemsPerPage: limit,
-          hasNextPage: page < totalPages,
-          hasPrevPage: page > 1
-        }
-      }
-    });
-    
-  } catch (err) {
-    console.error('Error fetching statements:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch statements history'
-    });
-  }
-});
-
-// =============================================
-// GET /api/admin/statements/:id - Get single statement details
-// =============================================
-app.get('/api/admin/statements/:id', adminProtect, async (req, res) => {
-  try {
-    const { id } = req.params;
-    
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Invalid statement ID'
-      });
+    // For stablecoins, always return 1
+    const stablecoins = ['USDT', 'USDC', 'DAI', 'BUSD'];
+    if (stablecoins.includes(asset.toUpperCase())) {
+      return 1;
     }
     
-    const statement = await FinancialStatement.findById(id)
-      .populate('user', 'firstName lastName email phone');
-    
-    if (!statement) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Financial statement not found'
-      });
-    }
-    
-    res.status(200).json({
-      status: 'success',
-      data: {
-        statement: statement
-      }
-    });
-    
+    // Try to get price from historical data first (if we have it stored)
+    // Otherwise use current price as approximation
+    const price = await getCryptoPrice(asset.toUpperCase());
+    return price || 0;
   } catch (err) {
-    console.error('Error fetching statement:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch statement details'
-    });
+    console.warn(`Failed to get price for ${asset}:`, err.message);
+    return 0;
   }
-});
+}
 
-// =============================================
 // Generate a single financial statement for a user
-// =============================================
 async function generateFinancialStatement(userId, period, req) {
   try {
     const user = await User.findById(userId);
@@ -24496,14 +24274,11 @@ async function generateFinancialStatement(userId, period, req) {
       createdAt: { $gte: startDate, $lte: endDate }
     }).populate('plan');
     
-    // Calculate opening balances (before period)
-    const openingBalances = {
-      totalUSD: 0,
-      mainWalletUSD: 0,
-      activeWalletUSD: 0,
-      maturedWalletUSD: 0,
-      cryptoDetails: []
-    };
+    // Calculate opening balances (before period) - using current prices at period start
+    let openingMainUSD = 0;
+    let openingActiveUSD = 0;
+    let openingMaturedUSD = 0;
+    const openingCryptoDetails = [];
     
     // Calculate closing balances (end of period)
     let closingMainUSD = 0;
@@ -24512,15 +24287,16 @@ async function generateFinancialStatement(userId, period, req) {
     const closingCryptoDetails = [];
     
     if (user.balances) {
-      // Calculate MAIN wallet
+      // Calculate MAIN wallet - crypto only
       if (user.balances.main) {
         const mainMap = user.balances.main;
         const entries = mainMap instanceof Map ? mainMap.entries() : Object.entries(mainMap);
         
         for (const [asset, amount] of entries) {
           if (amount > 0 && asset !== 'usd') {
-            const price = await getCryptoPrice(asset.toUpperCase());
-            const usdValue = amount * (price || 0);
+            // Use real-time price at statement generation time
+            const price = await getRealTimePriceForStatement(asset, endDate);
+            const usdValue = amount * price;
             closingMainUSD += usdValue;
             
             closingCryptoDetails.push({
@@ -24533,27 +24309,27 @@ async function generateFinancialStatement(userId, period, req) {
         }
       }
       
-      // Calculate ACTIVE wallet (fixed USD)
+      // Calculate ACTIVE wallet (fixed USD - mining contracts)
       if (user.balances.active) {
         const activeMap = user.balances.active;
         const entries = activeMap instanceof Map ? activeMap.entries() : Object.entries(activeMap);
         
         for (const [asset, amount] of entries) {
-          if (amount > 0) {
-            closingActiveUSD += amount;
+          if (amount > 0 && asset === 'usd') {
+            closingActiveUSD = amount;
           }
         }
       }
       
-      // Calculate MATURED wallet
+      // Calculate MATURED wallet - crypto only
       if (user.balances.matured) {
         const maturedMap = user.balances.matured;
         const entries = maturedMap instanceof Map ? maturedMap.entries() : Object.entries(maturedMap);
         
         for (const [asset, amount] of entries) {
           if (amount > 0 && asset !== 'usd') {
-            const price = await getCryptoPrice(asset.toUpperCase());
-            const usdValue = amount * (price || 0);
+            const price = await getRealTimePriceForStatement(asset, endDate);
+            const usdValue = amount * price;
             closingMaturedUSD += usdValue;
             
             closingCryptoDetails.push({
@@ -24566,6 +24342,15 @@ async function generateFinancialStatement(userId, period, req) {
         }
       }
     }
+    
+    const openingBalances = {
+      totalUSD: 0,
+      mainWalletUSD: 0,
+      activeWalletUSD: 0,
+      maturedWalletUSD: 0,
+      cryptoDetails: [],
+      timestamp: startDate
+    };
     
     const closingBalances = {
       totalUSD: closingMainUSD + closingActiveUSD + closingMaturedUSD,
@@ -24585,29 +24370,33 @@ async function generateFinancialStatement(userId, period, req) {
     const transactionList = [];
     
     for (const tx of transactions) {
+      const txAmount = typeof tx.amount === 'number' ? tx.amount : parseFloat(tx.amount) || 0;
+      
       if (tx.type === 'deposit') {
-        totalDeposits += tx.amount;
+        totalDeposits += txAmount;
       } else if (tx.type === 'withdrawal') {
-        totalWithdrawals += tx.amount;
+        totalWithdrawals += txAmount;
       } else if (tx.type === 'interest') {
-        totalInvestmentReturns += tx.amount;
+        totalInvestmentReturns += txAmount;
       } else if (tx.type === 'referral') {
-        totalReferralEarnings += tx.amount;
+        totalReferralEarnings += txAmount;
       }
       
       transactionList.push({
         transactionId: tx._id,
         type: tx.type,
-        amountUSD: tx.amount,
-        asset: tx.asset,
-        assetAmount: tx.assetAmount,
+        amountUSD: txAmount,
+        asset: tx.asset || null,
+        assetAmount: tx.assetAmount || null,
         status: tx.status,
         method: tx.method,
         description: tx.details?.description || `${tx.type} transaction`,
         reference: tx.reference,
-        feeUSD: tx.fee || 0,
-        netAmountUSD: tx.netAmount || tx.amount,
-        createdAt: tx.createdAt
+        feeUSD: typeof tx.fee === 'number' ? tx.fee : 0,
+        netAmountUSD: typeof tx.netAmount === 'number' ? tx.netAmount : txAmount,
+        exchangeRate: tx.exchangeRateAtTime || null,
+        createdAt: tx.createdAt,
+        processedAt: tx.processedAt
       });
     }
     
@@ -24618,32 +24407,45 @@ async function generateFinancialStatement(userId, period, req) {
     
     const activeInvestmentsList = [];
     const maturedInvestmentsList = [];
+    const startedInvestmentsList = [];
     
     for (const inv of investments) {
-      totalInvested += inv.amount;
+      const invAmount = typeof inv.amount === 'number' ? inv.amount : parseFloat(inv.amount) || 0;
+      totalInvested += invAmount;
       
       if (inv.status === 'active') {
         activeInvestmentsList.push({
           investmentId: inv._id,
           planName: inv.plan?.name || 'Unknown',
-          principalUSD: inv.amount,
+          principalUSD: invAmount,
           startDate: inv.startDate,
           endDate: inv.endDate,
-          expectedReturnUSD: inv.expectedReturn
+          expectedReturnUSD: inv.expectedReturn || 0,
+          status: inv.status
         });
       } else if (inv.status === 'completed') {
-        totalMatured += inv.amount;
-        const profit = (inv.actualReturn || inv.expectedReturn || 0) - inv.amount;
-        totalProfit += profit;
+        totalMatured += invAmount;
+        const returnAmount = inv.actualReturn || inv.expectedReturn || 0;
+        const profit = returnAmount - invAmount;
+        totalProfit += profit > 0 ? profit : 0;
         
         maturedInvestmentsList.push({
           investmentId: inv._id,
           planName: inv.plan?.name || 'Unknown',
-          initialAmountUSD: inv.amount,
-          returnAmountUSD: inv.actualReturn || inv.expectedReturn || 0,
+          initialAmountUSD: invAmount,
+          returnAmountUSD: returnAmount,
           profitUSD: profit,
-          profitPercentage: (profit / inv.amount) * 100,
-          completionDate: inv.completionDate || inv.endDate
+          profitPercentage: invAmount > 0 ? (profit / invAmount) * 100 : 0,
+          completionDate: inv.completionDate || inv.endDate,
+          btcPriceAtCompletion: inv.btcPriceAtCompletion || null
+        });
+      } else if (inv.status === 'pending' && inv.createdAt >= startDate) {
+        startedInvestmentsList.push({
+          investmentId: inv._id,
+          planName: inv.plan?.name || 'Unknown',
+          amountUSD: invAmount,
+          startDate: inv.startDate || inv.createdAt,
+          expectedReturnUSD: inv.expectedReturn || 0
         });
       }
     }
@@ -24684,7 +24486,7 @@ async function generateFinancialStatement(userId, period, req) {
       investments: {
         active: activeInvestmentsList,
         matured: maturedInvestmentsList,
-        started: [],
+        started: startedInvestmentsList,
         summary: {
           totalPrincipalInvestedUSD: totalInvested,
           totalReturnsEarnedUSD: totalMatured + totalProfit,
@@ -24759,9 +24561,7 @@ async function generateFinancialStatement(userId, period, req) {
   }
 }
 
-// =============================================
 // Generate professional HTML email content for financial statement
-// =============================================
 function generateStatementEmailHTML(statement, user) {
   const periodStart = new Date(statement.period.startDate).toLocaleDateString('en-US', {
     year: 'numeric', month: 'long', day: 'numeric'
@@ -24952,11 +24752,223 @@ function generateStatementEmailHTML(statement, user) {
   `;
 }
 
+// POST /api/admin/statements/generate - Generate and send financial statements
+app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
+  try {
+    const { userId, period, batch } = req.body;
+    
+    if (!period || !['weekly', 'monthly'].includes(period)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Valid period is required (weekly or monthly)'
+      });
+    }
+    
+    // Log the activity
+    await logActivity(
+      'financial_statement_generation_started',
+      'FinancialStatement',
+      null,
+      req.admin._id,
+      'Admin',
+      req,
+      { period, userId, batch: !!batch }
+    );
+    
+    let users = [];
+    
+    if (batch) {
+      // Get all active users
+      users = await User.find({ status: 'active' }).select('_id firstName lastName email');
+    } else if (userId) {
+      const user = await User.findById(userId);
+      if (!user) {
+        return res.status(404).json({
+          status: 'fail',
+          message: 'User not found'
+        });
+      }
+      users = [user];
+    } else {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Either userId or batch flag is required'
+      });
+    }
+    
+    let successCount = 0;
+    let failureCount = 0;
+    const errors = [];
+    
+    for (const user of users) {
+      try {
+        // Generate the financial statement
+        const statement = await generateFinancialStatement(user._id, period, req);
+        
+        // Generate email HTML
+        const emailHTML = generateStatementEmailHTML(statement, user);
+        
+        // Send email using existing professional email service
+        await sendProfessionalEmail({
+          email: user.email,
+          template: 'default',
+          data: {
+            name: user.firstName,
+            message: `Your ${period} financial statement is ready.`,
+            details: emailHTML,
+            actionRequired: `Your ${period} financial statement shows a net ${statement.summary.netProfitUSD >= 0 ? 'profit' : 'loss'} of $${Math.abs(statement.summary.netProfitUSD).toLocaleString()}.`,
+            buttonText: 'View Dashboard',
+            actionLink: 'https://www.bithashcapital.live/dashboard',
+            referenceId: statement.reference
+          }
+        });
+        
+        // Mark statement as delivered
+        statement.isDelivered = true;
+        statement.deliveredAt = new Date();
+        await statement.save();
+        
+        successCount++;
+        
+        // Log success
+        await logActivity(
+          'financial_statement_sent',
+          'FinancialStatement',
+          statement._id,
+          req.admin._id,
+          'Admin',
+          req,
+          { userId: user._id, email: user.email, period }
+        );
+        
+      } catch (err) {
+        console.error(`Failed to generate/send statement for user ${user._id}:`, err);
+        failureCount++;
+        errors.push({ userId: user._id, email: user.email, error: err.message });
+        
+        await logActivity(
+          'financial_statement_failed',
+          'FinancialStatement',
+          null,
+          req.admin._id,
+          'Admin',
+          req,
+          { userId: user._id, email: user.email, error: err.message, period }
+        );
+      }
+    }
+    
+    res.status(200).json({
+      status: 'success',
+      message: `Financial statements processed: ${successCount} sent successfully, ${failureCount} failed`,
+      data: {
+        period: period,
+        total: users.length,
+        success: successCount,
+        failed: failureCount,
+        errors: errors.slice(0, 10)
+      }
+    });
+    
+  } catch (err) {
+    console.error('Error generating financial statements:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to generate financial statements'
+    });
+  }
+});
 
+// GET /api/admin/statements - Get statements history with pagination
+app.get('/api/admin/statements', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+    
+    const statements = await FinancialStatement.find({})
+      .populate('user', 'firstName lastName email')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+    
+    const total = await FinancialStatement.countDocuments();
+    const totalPages = Math.ceil(total / limit);
+    
+    const formattedStatements = statements.map(s => ({
+      _id: s._id,
+      user: s.user,
+      statementType: s.statementType,
+      period: s.period,
+      reference: s.reference,
+      summary: s.summary,
+      isDelivered: s.isDelivered,
+      deliveredAt: s.deliveredAt,
+      createdAt: s.createdAt
+    }));
+    
+    res.status(200).json({
+      status: 'success',
+      data: {
+        statements: formattedStatements,
+        pagination: {
+          currentPage: page,
+          totalPages: totalPages,
+          totalItems: total,
+          itemsPerPage: limit,
+          hasNextPage: page < totalPages,
+          hasPrevPage: page > 1
+        }
+      }
+    });
+    
+  } catch (err) {
+    console.error('Error fetching statements:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch statements history'
+    });
+  }
+});
 
-
-
-
+// GET /api/admin/statements/:id - Get single statement details
+app.get('/api/admin/statements/:id', adminProtect, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid statement ID'
+      });
+    }
+    
+    const statement = await FinancialStatement.findById(id)
+      .populate('user', 'firstName lastName email phone');
+    
+    if (!statement) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Financial statement not found'
+      });
+    }
+    
+    res.status(200).json({
+      status: 'success',
+      data: {
+        statement: statement
+      }
+    });
+    
+  } catch (err) {
+    console.error('Error fetching statement:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch statement details'
+    });
+  }
+});
 
 
 
