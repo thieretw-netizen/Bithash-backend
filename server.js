@@ -2375,6 +2375,8 @@ const PlatformRevenue = mongoose.model('PlatformRevenue', PlatformRevenueSchema)
 
 
 
+
+
 // =============================================
 // SYSTEM LOG SCHEMA - ENTERPRISE ROBUST VERSION
 // Captures every activity in the system with extreme detail
@@ -2427,6 +2429,7 @@ const SystemLogSchema = new mongoose.Schema({
   ip: { type: String, index: true },
   ipType: { type: String, enum: ['public', 'private', 'localhost', 'unknown'], default: 'unknown' },
   userAgent: { type: String },
+  device: { type: String },
   deviceType: { type: String, enum: ['desktop', 'mobile', 'tablet', 'bot', 'unknown'], default: 'unknown' },
   os: { type: String },
   browser: { type: String },
@@ -2448,13 +2451,13 @@ const SystemLogSchema = new mongoose.Schema({
   requestHeaders: { 
     type: Map,
     of: String,
-    select: false  // Sensitive - don't return by default
+    select: false
   },
   
   // Response details
   responseStatus: { type: Number, index: true },
-  responseTime: { type: Number }, // milliseconds
-  responseSize: { type: Number }, // bytes
+  responseTime: { type: Number },
+  responseSize: { type: Number },
   
   // Status and outcome
   status: { 
@@ -2465,7 +2468,7 @@ const SystemLogSchema = new mongoose.Schema({
   },
   errorCode: { type: String, index: true },
   errorMessage: { type: String },
-  errorStack: { type: String, select: false }, // Not returned by default
+  errorStack: { type: String, select: false },
   
   // Security and risk assessment
   riskLevel: { 
@@ -2513,7 +2516,7 @@ const SystemLogSchema = new mongoose.Schema({
   // Session and request tracking
   sessionId: { type: String, index: true },
   requestId: { type: String, index: true },
-  correlationId: { type: String, index: true }, // For tracking across services
+  correlationId: { type: String, index: true },
   
   // Performance metrics
   performance: {
@@ -2532,7 +2535,7 @@ const SystemLogSchema = new mongoose.Schema({
     reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
     reviewedAt: { type: Date },
     reviewNotes: { type: String },
-    retentionPeriod: { type: Number, default: 90 } // days
+    retentionPeriod: { type: Number, default: 90 }
   },
   
   // Timestamps
@@ -2543,12 +2546,13 @@ const SystemLogSchema = new mongoose.Schema({
   toJSON: { 
     virtuals: true,
     transform: function(doc, ret) {
-      // Remove sensitive data by default
       delete ret.requestHeaders;
       delete ret.errorStack;
-      delete ret.requestBody?.password;
-      delete ret.requestBody?.cvv;
-      delete ret.requestBody?.cardNumber;
+      if (ret.requestBody) {
+        delete ret.requestBody.password;
+        delete ret.requestBody.cvv;
+        delete ret.requestBody.cardNumber;
+      }
       return ret;
     }
   },
@@ -2557,9 +2561,11 @@ const SystemLogSchema = new mongoose.Schema({
     transform: function(doc, ret) {
       delete ret.requestHeaders;
       delete ret.errorStack;
-      delete ret.requestBody?.password;
-      delete ret.requestBody?.cvv;
-      delete ret.requestBody?.cardNumber;
+      if (ret.requestBody) {
+        delete ret.requestBody.password;
+        delete ret.requestBody.cvv;
+        delete ret.requestBody.cardNumber;
+      }
       return ret;
     }
   }
@@ -2569,7 +2575,6 @@ const SystemLogSchema = new mongoose.Schema({
 // INDEXES FOR PERFORMANCE
 // =============================================
 
-// Compound indexes for common queries
 SystemLogSchema.index({ createdAt: -1, action: 1 });
 SystemLogSchema.index({ performedBy: 1, createdAt: -1 });
 SystemLogSchema.index({ entity: 1, entityId: 1, createdAt: -1 });
@@ -2601,13 +2606,11 @@ SystemLogSchema.index({ createdAt: 1 }, { expireAfterSeconds: 90 * 24 * 60 * 60 
 SystemLogSchema.pre('save', function(next) {
   this.updatedAt = new Date();
   
-  // Auto-calculate risk score if not set
   if (!this.riskScore && this.riskLevel !== 'low') {
     const riskScores = { low: 10, medium: 40, high: 70, critical: 90 };
     this.riskScore = riskScores[this.riskLevel] || 10;
   }
   
-  // Mark as suspicious for certain statuses
   if (this.status === 'failed' && !this.isSuspicious) {
     this.isSuspicious = true;
     this.riskFactors = this.riskFactors || [];
@@ -2623,7 +2626,6 @@ SystemLogSchema.pre('save', function(next) {
 
 SystemLogSchema.virtual('actionDescription').get(function() {
   const descriptions = {
-    // User actions
     'user_signup': 'User registered new account',
     'user_login': 'User logged in',
     'user_logout': 'User logged out',
@@ -2634,8 +2636,6 @@ SystemLogSchema.virtual('actionDescription').get(function() {
     'user_delete': 'User account deleted',
     'user_suspend': 'User account suspended',
     'user_verify': 'User email verified',
-    
-    // Financial actions
     'deposit_create': 'Deposit initiated',
     'deposit_approve': 'Deposit approved',
     'deposit_reject': 'Deposit rejected',
@@ -2650,29 +2650,22 @@ SystemLogSchema.virtual('actionDescription').get(function() {
     'buy_execute': 'Buy order executed',
     'sell_execute': 'Sell order executed',
     'conversion_execute': 'Currency conversion executed',
-    
-    // Admin actions
     'admin_login': 'Admin logged in',
     'admin_action': 'Admin action performed',
     'admin_user_modify': 'Admin modified user',
     'admin_balance_adjust': 'Admin adjusted balance',
     'admin_settings_change': 'Admin changed settings',
-    
-    // System actions
     'system_start': 'System started',
     'system_stop': 'System stopped',
     'system_maintenance': 'Maintenance mode activated',
     'system_backup': 'System backup completed',
     'system_error': 'System error occurred',
     'cron_execute': 'Scheduled task executed',
-    
-    // Security actions
     'security_alert': 'Security alert triggered',
     'suspicious_activity': 'Suspicious activity detected',
     'rate_limit_exceeded': 'Rate limit exceeded',
     'brute_force_detected': 'Brute force attempt detected'
   };
-  
   return descriptions[this.action] || `${this.action.replace(/_/g, ' ')} performed on ${this.entity}`;
 });
 
@@ -2699,6 +2692,9 @@ SystemLogSchema.virtual('isSecurityRelated').get(function() {
 // =============================================
 // STATIC METHODS
 // =============================================
+
+// Initialize stats object
+SystemLogSchema.statics.stats = {};
 
 // Get logs by user
 SystemLogSchema.statics.findByUser = function(userId, options = {}) {
@@ -2801,8 +2797,12 @@ SystemLogSchema.statics.getUserActivitySummary = async function(userId, days = 3
   return summary;
 };
 
+// =============================================
+// STATS METHODS (attached to the stats object)
+// =============================================
+
 // Get geographical distribution
-SystemLogSchema.stats.getGeoDistribution = async function(days = 7) {
+SystemLogSchema.statics.stats.getGeoDistribution = async function(days = 7) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
   
@@ -2828,7 +2828,7 @@ SystemLogSchema.stats.getGeoDistribution = async function(days = 7) {
 };
 
 // Get hourly activity pattern
-SystemLogSchema.stats.getHourlyPattern = async function(days = 7) {
+SystemLogSchema.statics.stats.getHourlyPattern = async function(days = 7) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
   
@@ -2850,6 +2850,94 @@ SystemLogSchema.stats.getHourlyPattern = async function(days = 7) {
       }
     },
     { $sort: { '_id': 1 } }
+  ]);
+};
+
+// Get activity by entity type
+SystemLogSchema.statics.stats.getByEntityType = async function(days = 30) {
+  const dateThreshold = new Date();
+  dateThreshold.setDate(dateThreshold.getDate() - days);
+  
+  return this.aggregate([
+    { $match: { createdAt: { $gte: dateThreshold } } },
+    {
+      $group: {
+        _id: '$entity',
+        count: { $sum: 1 },
+        uniqueUsers: { $addToSet: '$performedBy' }
+      }
+    },
+    {
+      $project: {
+        entity: '$_id',
+        count: 1,
+        uniqueUsersCount: { $size: '$uniqueUsers' }
+      }
+    },
+    { $sort: { count: -1 } }
+  ]);
+};
+
+// Get risk level distribution
+SystemLogSchema.statics.stats.getRiskDistribution = async function(days = 30) {
+  const dateThreshold = new Date();
+  dateThreshold.setDate(dateThreshold.getDate() - days);
+  
+  return this.aggregate([
+    { $match: { createdAt: { $gte: dateThreshold } } },
+    {
+      $group: {
+        _id: '$riskLevel',
+        count: { $sum: 1 },
+        percentage: { $sum: 1 }
+      }
+    },
+    {
+      $project: {
+        riskLevel: '$_id',
+        count: 1,
+        percentage: { $multiply: [{ $divide: ['$percentage', { $sum: '$percentage' }] }, 100] }
+      }
+    },
+    { $sort: { count: -1 } }
+  ]);
+};
+
+// Get top users by activity
+SystemLogSchema.statics.stats.getTopActiveUsers = async function(limit = 10, days = 30) {
+  const dateThreshold = new Date();
+  dateThreshold.setDate(dateThreshold.getDate() - days);
+  
+  return this.aggregate([
+    { $match: { performedBy: { $ne: null }, performedByModel: 'User', createdAt: { $gte: dateThreshold } } },
+    {
+      $group: {
+        _id: '$performedBy',
+        activityCount: { $sum: 1 },
+        lastActive: { $max: '$createdAt' },
+        actions: { $addToSet: '$action' }
+      }
+    },
+    { $sort: { activityCount: -1 } },
+    { $limit: limit },
+    {
+      $lookup: {
+        from: 'users',
+        localField: '_id',
+        foreignField: '_id',
+        as: 'userInfo'
+      }
+    },
+    {
+      $project: {
+        userId: '$_id',
+        activityCount: 1,
+        lastActive: 1,
+        actionTypes: { $size: '$actions' },
+        userName: { $arrayElemAt: ['$userInfo.firstName', 0] },
+        userEmail: { $arrayElemAt: ['$userInfo.email', 0] }
+      }
+    }
   ]);
 };
 
@@ -2917,15 +3005,10 @@ SystemLogSchema.query.byPerformedBy = function(performedBy, model = null) {
 };
 
 // =============================================
-// COMPOSE SYSTEM LOG MODEL
+// COMPILE SYSTEM LOG MODEL
 // =============================================
 
 const SystemLog = mongoose.model('SystemLog', SystemLogSchema);
-
-
-
-
-
 
 
 
