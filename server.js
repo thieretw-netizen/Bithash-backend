@@ -20736,8 +20736,19 @@ app.delete('/api/admin/users/:userId', adminProtect, restrictTo('super'), async 
 
 
 
+
+
+
+
+
+
+
+
+
+
+
 // =============================================
-// GET ADMIN ACTIVITY - CORRECTLY EXTRACTS SYSTEMLOG LOCATION
+// GET ADMIN ACTIVITY - CORRECT USER MAPPING FOR SYSTEMLOG
 // =============================================
 app.get('/api/admin/activity', adminProtect, async (req, res) => {
   try {
@@ -20786,18 +20797,12 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
       deviceInfo: log.deviceInfo
     }));
 
-    // Format SystemLog entries - FIXED: Direct location field access
+    // Format SystemLog entries - FIXED: Proper user mapping
     const formattedSystemLogs = systemLogs.map(log => {
-      // The location is stored DIRECTLY in the 'location' field of SystemLog
-      // Example from your DB: location: "Nairobi, Nairobi County, Kenya"
+      // Extract location from SystemLog
       const locationString = log.location || 'Unknown';
+      let city = 'Unknown', region = 'Unknown', country = 'Unknown';
       
-      // Try to parse location string into components if possible
-      let city = 'Unknown';
-      let region = 'Unknown';
-      let country = 'Unknown';
-      
-      // Attempt to parse the location string (e.g., "Nairobi, Nairobi County, Kenya")
       if (locationString !== 'Unknown') {
         const parts = locationString.split(',').map(p => p.trim());
         if (parts.length >= 1) city = parts[0];
@@ -20805,10 +20810,36 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
         if (parts.length >= 3) country = parts[2];
       }
       
-      // Also check for individual location fields if they exist
-      if (log.city) city = log.city;
-      if (log.region) region = log.region;
-      if (log.countryCode) country = log.countryCode;
+      // Determine the user based on performedByModel
+      let userName = 'System';
+      let userEmail = 'system@bithash.com';
+      let userId = null;
+      
+      if (log.performedBy) {
+        // performedBy is populated from the database
+        userId = log.performedBy._id;
+        
+        if (log.performedByModel === 'Admin') {
+          // This is an admin user
+          userName = log.performedBy.name || log.performedByName || 'Admin';
+          userEmail = log.performedBy.email || log.performedByEmail || 'admin@bithash.com';
+        } else if (log.performedByModel === 'User') {
+          // This is a regular user
+          userName = `${log.performedBy.firstName || ''} ${log.performedBy.lastName || ''}`.trim() || 
+                     log.performedByName || 
+                     log.performedByEmail?.split('@')[0] || 
+                     'User';
+          userEmail = log.performedBy.email || log.performedByEmail || 'user@bithash.com';
+        } else {
+          // Fallback to stored values
+          userName = log.performedByName || 'Unknown User';
+          userEmail = log.performedByEmail || 'unknown@bithash.com';
+        }
+      } else if (log.performedByName) {
+        // No populated performedBy, but we have stored name
+        userName = log.performedByName;
+        userEmail = log.performedByEmail || `${log.performedByName.toLowerCase().replace(/\s/g, '')}@bithash.com`;
+      }
       
       return {
         _id: log._id,
@@ -20817,13 +20848,10 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
         actionCategory: log.entity,
         status: log.status,
         timestamp: log.createdAt,
-        user: log.performedBy ? {
-          _id: log.performedBy._id,
-          name: log.performedByName || `${log.performedBy?.firstName || ''} ${log.performedBy?.lastName || ''}`.trim() || log.performedByEmail,
-          email: log.performedByEmail
-        } : {
-          name: log.performedByName || 'System',
-          email: log.performedByEmail || 'system@bithash.com'
+        user: {
+          _id: userId,
+          name: userName,
+          email: userEmail
         },
         location: {
           city: city,
@@ -20832,7 +20860,7 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
           latitude: log.latitude || null,
           longitude: log.longitude || null,
           exactLocation: !!(log.latitude && log.longitude),
-          formatted: locationString  // Use the actual location string from database
+          formatted: locationString
         },
         metadata: log.metadata || {},
         ipAddress: log.ip,
@@ -20877,9 +20905,8 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
   }
 });
 
-
 // =============================================
-// GET LATEST ACTIVITIES - CORRECTLY EXTRACTS SYSTEMLOG LOCATION
+// GET LATEST ACTIVITIES - CORRECT USER MAPPING FOR SYSTEMLOG
 // =============================================
 app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
   try {
@@ -20922,20 +20949,42 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
       metadata: log.metadata || {}
     }));
 
-    // Format SystemLog entries - FIXED: Direct location field access
+    // Format SystemLog entries - FIXED: Proper user mapping
     const formattedSystemLogs = systemLogs.map(log => {
-      // The location is stored DIRECTLY in the 'location' field
       const locationString = log.location || 'Unknown';
-      
-      let city = 'Unknown';
-      let region = 'Unknown';
-      let country = 'Unknown';
+      let city = 'Unknown', region = 'Unknown', country = 'Unknown';
       
       if (locationString !== 'Unknown') {
         const parts = locationString.split(',').map(p => p.trim());
         if (parts.length >= 1) city = parts[0];
         if (parts.length >= 2) region = parts[1];
         if (parts.length >= 3) country = parts[2];
+      }
+      
+      // Determine the user based on performedByModel
+      let userName = 'System';
+      let userEmail = 'system@bithash.com';
+      let userId = null;
+      
+      if (log.performedBy) {
+        userId = log.performedBy._id;
+        
+        if (log.performedByModel === 'Admin') {
+          userName = log.performedBy.name || log.performedByName || 'Admin';
+          userEmail = log.performedBy.email || log.performedByEmail || 'admin@bithash.com';
+        } else if (log.performedByModel === 'User') {
+          userName = `${log.performedBy.firstName || ''} ${log.performedBy.lastName || ''}`.trim() || 
+                     log.performedByName || 
+                     log.performedByEmail?.split('@')[0] || 
+                     'User';
+          userEmail = log.performedBy.email || log.performedByEmail || 'user@bithash.com';
+        } else {
+          userName = log.performedByName || 'Unknown User';
+          userEmail = log.performedByEmail || 'unknown@bithash.com';
+        }
+      } else if (log.performedByName) {
+        userName = log.performedByName;
+        userEmail = log.performedByEmail || `${log.performedByName.toLowerCase().replace(/\s/g, '')}@bithash.com`;
       }
       
       return {
@@ -20945,13 +20994,10 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
         actionCategory: log.entity,
         status: log.status,
         timestamp: log.createdAt,
-        user: log.performedBy ? {
-          _id: log.performedBy._id,
-          name: log.performedByName || `${log.performedBy?.firstName || ''} ${log.performedBy?.lastName || ''}`.trim() || log.performedByEmail,
-          email: log.performedByEmail
-        } : {
-          name: log.performedByName || 'System',
-          email: log.performedByEmail || 'system@bithash.com'
+        user: {
+          _id: userId,
+          name: userName,
+          email: userEmail
         },
         location: {
           city: city,
@@ -20999,6 +21045,16 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
     });
   }
 });
+
+
+
+
+
+
+
+
+
+
 
 
 
