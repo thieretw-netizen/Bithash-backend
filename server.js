@@ -24109,6 +24109,249 @@ app.get('/api/market/trades', async (req, res) => {
 
 
 
+// =============================================
+// GET /api/market/ticker/24hr - 24 hour ticker statistics for a trading pair
+// Called by trading.html: fetch24hrStatsFromBackend()
+// Expected response format: { priceChangePercent, highPrice, lowPrice, volume, quoteVolume, openPrice, lastPrice }
+// =============================================
+app.get('/api/market/ticker/24hr', async (req, res) => {
+  try {
+    // Validate required parameters
+    const { symbol } = req.query;
+    
+    if (!symbol) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Symbol parameter is required (e.g., symbol=BTCUSDT)'
+      });
+    }
+    
+    const symbolUpper = symbol.toUpperCase();
+    
+    // =============================================
+    // STEP 1: Try to get ticker from Redis cache (aggregator)
+    // =============================================
+    const tickerKey = `ticker:${symbolUpper}`;
+    const cachedTicker = await redis.get(tickerKey);
+    
+    if (cachedTicker) {
+      const ticker = JSON.parse(cachedTicker);
+      
+      // Format exactly as trading.html expects
+      const formattedTicker = {
+        symbol: symbolUpper,
+        priceChangePercent: ticker.priceChangePercent || 0,
+        highPrice: ticker.highPrice || 0,
+        lowPrice: ticker.lowPrice || 0,
+        volume: ticker.volume || 0,
+        quoteVolume: ticker.quoteVolume || 0,
+        openPrice: ticker.openPrice || ticker.prevClosePrice || 0,
+        lastPrice: ticker.lastPrice || 0,
+        bidPrice: ticker.bidPrice || 0,
+        askPrice: ticker.askPrice || 0,
+        weightedAvgPrice: ticker.weightedAvgPrice || 0,
+        priceChange: ticker.priceChange || 0,
+        count: ticker.count || 0
+      };
+      
+      return res.status(200).json(formattedTicker);
+    }
+    
+    // =============================================
+    // STEP 2: Fallback - Fetch from Binance API directly
+    // =============================================
+    try {
+      const response = await axios.get(
+        `https://api.binance.com/api/v3/ticker/24hr?symbol=${symbolUpper}`,
+        { timeout: 5000 }
+      );
+      
+      if (response.data) {
+        const data = response.data;
+        const formattedTicker = {
+          symbol: data.symbol,
+          priceChangePercent: parseFloat(data.priceChangePercent || 0),
+          highPrice: parseFloat(data.highPrice || 0),
+          lowPrice: parseFloat(data.lowPrice || 0),
+          volume: parseFloat(data.volume || 0),
+          quoteVolume: parseFloat(data.quoteVolume || 0),
+          openPrice: parseFloat(data.openPrice || 0),
+          lastPrice: parseFloat(data.lastPrice || 0),
+          bidPrice: parseFloat(data.bidPrice || 0),
+          askPrice: parseFloat(data.askPrice || 0),
+          weightedAvgPrice: parseFloat(data.weightedAvgPrice || 0),
+          priceChange: parseFloat(data.priceChange || 0),
+          count: data.count || 0
+        };
+        
+        // Cache for 2 seconds (ticker updates frequently)
+        await redis.setex(tickerKey, 2, JSON.stringify(formattedTicker));
+        
+        return res.status(200).json(formattedTicker);
+      }
+    } catch (binanceError) {
+      console.error(`Binance API error for ${symbolUpper} ticker:`, binanceError.message);
+    }
+    
+    // =============================================
+    // STEP 3: Return default/zero values as last resort
+    // =============================================
+    return res.status(200).json({
+      symbol: symbolUpper,
+      priceChangePercent: 0,
+      highPrice: 0,
+      lowPrice: 0,
+      volume: 0,
+      quoteVolume: 0,
+      openPrice: 0,
+      lastPrice: 0,
+      bidPrice: 0,
+      askPrice: 0,
+      weightedAvgPrice: 0,
+      priceChange: 0,
+      count: 0
+    });
+    
+  } catch (err) {
+    console.error('Error fetching 24hr ticker:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch ticker data'
+    });
+  }
+});
+
+
+
+// =============================================
+// GET /api/market/all-pairs - All available trading pairs
+// Called by trading.html: fetchAllPairsFromBackend()
+// Expected response format: { pairs: [], quoteAssets: [] }
+// =============================================
+app.get('/api/market/all-pairs', async (req, res) => {
+  try {
+    // =============================================
+    // STEP 1: Try to get pairs from Redis cache
+    // =============================================
+    const cachedPairs = await redis.get('market:all:pairs');
+    const cachedQuoteAssets = await redis.get('market:quote:assets');
+    
+    if (cachedPairs && cachedQuoteAssets) {
+      return res.status(200).json({
+        pairs: JSON.parse(cachedPairs),
+        quoteAssets: JSON.parse(cachedQuoteAssets)
+      });
+    }
+    
+    // =============================================
+    // STEP 2: Fetch from Binance API
+    // =============================================
+    try {
+      const response = await axios.get(
+        'https://api.binance.com/api/v3/exchangeInfo',
+        { timeout: 10000 }
+      );
+      
+      if (response.data && response.data.symbols) {
+        // Filter for USDT, USDC, BUSD, BTC, ETH pairs
+        const quoteAssets = ['USDT', 'USDC', 'BUSD', 'BTC', 'ETH'];
+        const pairs = [];
+        
+        for (const quote of quoteAssets) {
+          const filteredPairs = response.data.symbols
+            .filter(s => s.quoteAsset === quote && s.status === 'TRADING')
+            .map(s => ({
+              symbol: s.symbol,
+              base: s.baseAsset,
+              quote: s.quoteAsset,
+              status: 'active'
+            }));
+          
+          pairs.push(...filteredPairs);
+        }
+        
+        // Cache for 1 hour (exchange info doesn't change often)
+        await redis.setex('market:all:pairs', 3600, JSON.stringify(pairs));
+        await redis.setex('market:quote:assets', 3600, JSON.stringify(quoteAssets));
+        
+        return res.status(200).json({
+          pairs: pairs,
+          quoteAssets: quoteAssets
+        });
+      }
+    } catch (binanceError) {
+      console.error('Binance exchangeInfo error:', binanceError.message);
+    }
+    
+    // =============================================
+    // STEP 3: Return fallback pairs as last resort
+    // =============================================
+    const fallbackPairs = [
+      { symbol: 'BTCUSDT', base: 'BTC', quote: 'USDT', status: 'active' },
+      { symbol: 'ETHUSDT', base: 'ETH', quote: 'USDT', status: 'active' },
+      { symbol: 'BNBUSDT', base: 'BNB', quote: 'USDT', status: 'active' },
+      { symbol: 'SOLUSDT', base: 'SOL', quote: 'USDT', status: 'active' },
+      { symbol: 'XRPUSDT', base: 'XRP', quote: 'USDT', status: 'active' },
+      { symbol: 'DOGEUSDT', base: 'DOGE', quote: 'USDT', status: 'active' },
+      { symbol: 'ADAUSDT', base: 'ADA', quote: 'USDT', status: 'active' },
+      { symbol: 'AVAXUSDT', base: 'AVAX', quote: 'USDT', status: 'active' },
+      { symbol: 'DOTUSDT', base: 'DOT', quote: 'USDT', status: 'active' },
+      { symbol: 'LINKUSDT', base: 'LINK', quote: 'USDT', status: 'active' }
+    ];
+    
+    const fallbackQuoteAssets = ['USDT'];
+    
+    return res.status(200).json({
+      pairs: fallbackPairs,
+      quoteAssets: fallbackQuoteAssets
+    });
+    
+  } catch (err) {
+    console.error('Error fetching all pairs:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch trading pairs'
+    });
+  }
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
