@@ -176,7 +176,7 @@ app.use('/api/login', authLimiter);
 app.use('/api/signup', authLimiter);
 app.use('/api/auth/forgot-password', authLimiter);
 
-app.use(universalRequestLogger);
+
 
 app.get('/api/health', (req, res) => {
   res.status(200).json({ 
