@@ -20744,58 +20744,99 @@ app.delete('/api/admin/users/:userId', adminProtect, restrictTo('super'), async 
 
 
 
-
-
-
-
-
 // =============================================
-// ENDPOINT 2: GET LATEST ACTIVITIES (FOR POLLING)
+// GET LATEST ACTIVITIES - FOR REAL-TIME POLLING
+// Fetches from BOTH schemas, returns whichever updated first
 // =============================================
 app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
   try {
-    const since = req.query.since ? new Date(req.query.since) : new Date(Date.now() - 5 * 60 * 1000); // Default last 5 minutes
+    const since = req.query.since ? new Date(req.query.since) : new Date(Date.now() - 5 * 60 * 1000);
     const limit = parseInt(req.query.limit) || 20;
 
-    // Fetch latest activities from UserLog schema (gets updated first)
-    const activities = await UserLog.find({
-      createdAt: { $gt: since }
-    })
-      .populate('user', 'firstName lastName email')
-      .sort({ createdAt: -1 })
-      .limit(limit)
-      .lean();
+    // Fetch from BOTH schemas in parallel
+    const [userLogs, systemLogs] = await Promise.all([
+      UserLog.find({ createdAt: { $gt: since } })
+        .populate('user', 'firstName lastName email')
+        .sort({ createdAt: -1 })
+        .limit(limit)
+        .lean(),
+      SystemLog.find({ createdAt: { $gt: since } })
+        .populate('performedBy', 'firstName lastName email')
+        .sort({ createdAt: -1 })
+        .limit(limit)
+        .lean()
+    ]);
 
-    // Format activities
-    const formattedActivities = activities.map(activity => ({
-      _id: activity._id,
-      action: activity.action,
-      actionCategory: activity.actionCategory,
-      status: activity.status,
-      timestamp: activity.createdAt,
-      user: activity.user ? {
-        _id: activity.user._id,
-        name: `${activity.user.firstName || ''} ${activity.user.lastName || ''}`.trim() || activity.email,
-        email: activity.email
+    // Format UserLog entries
+    const formattedUserLogs = userLogs.map(log => ({
+      _id: log._id,
+      source: 'userlog',
+      action: log.action,
+      actionCategory: log.actionCategory,
+      status: log.status,
+      timestamp: log.createdAt,
+      user: log.user ? {
+        _id: log.user._id,
+        name: `${log.user.firstName || ''} ${log.user.lastName || ''}`.trim() || log.email,
+        email: log.email
       } : null,
       location: {
-        city: activity.location?.city || 'Unknown',
-        region: activity.location?.region?.name || activity.location?.region || 'Unknown',
-        country: activity.location?.country?.name || activity.location?.country || 'Unknown',
-        formatted: activity.locationDisplay || 'Unknown'
+        city: log.location?.city || 'Unknown',
+        region: log.location?.region?.name || log.location?.region || 'Unknown',
+        country: log.location?.country?.name || log.location?.country || 'Unknown',
+        formatted: log.locationDisplay || 'Unknown'
       },
-      metadata: activity.metadata || {}
+      metadata: log.metadata || {}
     }));
 
+    // Format SystemLog entries
+    const formattedSystemLogs = systemLogs.map(log => ({
+      _id: log._id,
+      source: 'systemlog',
+      action: log.action,
+      actionCategory: log.entity,
+      status: log.status,
+      timestamp: log.createdAt,
+      user: log.performedBy ? {
+        _id: log.performedBy._id,
+        name: log.performedByName || `${log.performedBy?.firstName || ''} ${log.performedBy?.lastName || ''}`.trim() || log.performedByEmail,
+        email: log.performedByEmail
+      } : null,
+      location: {
+        city: log.city || 'Unknown',
+        region: log.region || 'Unknown',
+        country: log.countryCode || 'Unknown',
+        formatted: log.location || `${log.city || ''} ${log.region || ''} ${log.countryCode || ''}`.trim() || 'Unknown'
+      },
+      metadata: log.metadata || {}
+    }));
+
+    // Combine and sort by timestamp
+    let allActivities = [...formattedUserLogs, ...formattedSystemLogs];
+    allActivities.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    // Remove duplicates (same action, same user, within 5 seconds)
+    const uniqueActivities = [];
+    const seen = new Set();
+    
+    for (const activity of allActivities) {
+      const timeSlot = Math.floor(new Date(activity.timestamp).getTime() / 5000);
+      const key = `${activity.user?._id || 'system'}_${activity.action}_${timeSlot}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        uniqueActivities.push(activity);
+      }
+    }
+
     // Get latest timestamp for next poll
-    const latestTimestamp = activities.length > 0 ? activities[0].createdAt : new Date();
+    const latestTimestamp = uniqueActivities.length > 0 ? uniqueActivities[0].timestamp : new Date();
 
     res.status(200).json({
       status: 'success',
       data: {
-        activities: formattedActivities,
+        activities: uniqueActivities.slice(0, limit),
         latestTimestamp: latestTimestamp,
-        count: formattedActivities.length
+        count: uniqueActivities.length
       }
     });
 
@@ -20809,10 +20850,9 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
 });
 
 
-
-
 // =============================================
-// ENDPOINT 1: GET ADMIN ACTIVITY LOGS (PAGINATED)
+// GET ADMIN ACTIVITY - FETCHES FROM BOTH USERLOG AND SYSTEMLOG
+// Returns combined results sorted by most recent
 // =============================================
 app.get('/api/admin/activity', adminProtect, async (req, res) => {
   try {
@@ -20820,56 +20860,89 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
-    // Build query - fetch from UserLog schema (gets updated first after activity)
-    const query = {};
-    
-    // Optional filters
-    if (req.query.action) query.action = req.query.action;
-    if (req.query.status) query.status = req.query.status;
-    if (req.query.userId) query.user = req.query.userId;
+    // Fetch from BOTH schemas in parallel
+    const [userLogs, systemLogs] = await Promise.all([
+      UserLog.find({})
+        .populate('user', 'firstName lastName email')
+        .sort({ createdAt: -1 })
+        .lean(),
+      SystemLog.find({})
+        .populate('performedBy', 'firstName lastName email')
+        .sort({ createdAt: -1 })
+        .lean()
+    ]);
 
-    // Get total count for pagination
-    const total = await UserLog.countDocuments(query);
-    const totalPages = Math.ceil(total / limit);
-
-    // Fetch activities with user details
-    const activities = await UserLog.find(query)
-      .populate('user', 'firstName lastName email')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean();
-
-    // Format activities for frontend
-    const formattedActivities = activities.map(activity => ({
-      _id: activity._id,
-      action: activity.action,
-      actionCategory: activity.actionCategory,
-      status: activity.status,
-      timestamp: activity.createdAt,
-      user: activity.user ? {
-        _id: activity.user._id,
-        name: `${activity.user.firstName || ''} ${activity.user.lastName || ''}`.trim() || activity.email,
-        email: activity.email
+    // Format UserLog entries
+    const formattedUserLogs = userLogs.map(log => ({
+      _id: log._id,
+      source: 'userlog',
+      action: log.action,
+      actionCategory: log.actionCategory,
+      status: log.status,
+      timestamp: log.createdAt,
+      user: log.user ? {
+        _id: log.user._id,
+        name: `${log.user.firstName || ''} ${log.user.lastName || ''}`.trim() || log.email,
+        email: log.email
       } : null,
       location: {
-        city: activity.location?.city || 'Unknown',
-        region: activity.location?.region?.name || activity.location?.region || 'Unknown',
-        country: activity.location?.country?.name || activity.location?.country || 'Unknown',
-        latitude: activity.location?.latitude,
-        longitude: activity.location?.longitude,
-        exactLocation: activity.location?.exactLocation || false,
-        formatted: activity.locationDisplay || `${activity.location?.city || ''} ${activity.location?.region?.name || ''} ${activity.location?.country?.name || ''}`.trim() || 'Unknown'
+        city: log.location?.city || 'Unknown',
+        region: log.location?.region?.name || log.location?.region || 'Unknown',
+        country: log.location?.country?.name || log.location?.country || 'Unknown',
+        latitude: log.location?.latitude,
+        longitude: log.location?.longitude,
+        exactLocation: log.location?.exactLocation || false,
+        formatted: log.locationDisplay || 'Unknown'
       },
-      metadata: activity.metadata || {},
-      ipAddress: activity.ipAddress,
-      deviceInfo: activity.deviceInfo
+      metadata: log.metadata || {},
+      ipAddress: log.ipAddress,
+      deviceInfo: log.deviceInfo
     }));
+
+    // Format SystemLog entries
+    const formattedSystemLogs = systemLogs.map(log => ({
+      _id: log._id,
+      source: 'systemlog',
+      action: log.action,
+      actionCategory: log.entity,
+      status: log.status,
+      timestamp: log.createdAt,
+      user: log.performedBy ? {
+        _id: log.performedBy._id,
+        name: log.performedByName || `${log.performedBy?.firstName || ''} ${log.performedBy?.lastName || ''}`.trim() || log.performedByEmail,
+        email: log.performedByEmail
+      } : null,
+      location: {
+        city: log.city || 'Unknown',
+        region: log.region || 'Unknown',
+        country: log.countryCode || 'Unknown',
+        latitude: log.latitude,
+        longitude: log.longitude,
+        exactLocation: !!(log.latitude && log.longitude),
+        formatted: log.location || `${log.city || ''} ${log.region || ''} ${log.countryCode || ''}`.trim() || 'Unknown'
+      },
+      metadata: log.metadata || {},
+      ipAddress: log.ip,
+      deviceInfo: {
+        type: log.deviceType,
+        os: log.os,
+        browser: log.browser
+      }
+    }));
+
+    // Combine and sort by timestamp (newest first)
+    let allActivities = [...formattedUserLogs, ...formattedSystemLogs];
+    allActivities.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    // Apply pagination
+    const total = allActivities.length;
+    const totalPages = Math.ceil(total / limit);
+    const paginatedActivities = allActivities.slice(skip, skip + limit);
 
     res.status(200).json({
       status: 'success',
       data: {
-        activities: formattedActivities,
+        activities: paginatedActivities,
         pagination: {
           currentPage: page,
           totalPages: totalPages,
@@ -20889,6 +20962,10 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
     });
   }
 });
+
+
+
+
 
 
 
