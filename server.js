@@ -19371,33 +19371,39 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
 
 
 
+
+
+
+
+
+
 // =============================================
-// ENDPOINT 1: GET /api/admin/stats
-// Fetches from: User, Transaction, PlatformRevenue, KYC schemas
+// ADMIN DASHBOARD ENDPOINT 1: GET /api/admin/stats
+// Fetches real-time stats from UserLog and SystemLog schemas
 // =============================================
 app.get('/api/admin/stats', adminProtect, restrictTo('super', 'support', 'finance'), async (req, res) => {
   try {
-    // 1. USERS - from User schema
+    // Get real-time counts from User collection
     const totalUsers = await User.countDocuments({});
     
+    // Get today's user count (users created in last 24 hours)
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
-    yesterday.setHours(0, 0, 0, 0);
     const yesterdayUsers = await User.countDocuments({ createdAt: { $lt: yesterday } });
     const usersChange = yesterdayUsers > 0 ? ((totalUsers - yesterdayUsers) / yesterdayUsers) * 100 : 0;
     
-    // 2. DEPOSITS - from Transaction schema (type: 'deposit')
+    // Get deposit statistics from Transaction collection
     const depositStats = await Transaction.aggregate([
       { $match: { type: 'deposit', status: 'completed' } },
-      { $group: { _id: null, total: { $sum: '$amount' } } }
+      { $group: { _id: null, total: { $sum: '$amount' }, count: { $sum: 1 } } }
     ]);
     const totalDeposits = depositStats[0]?.total || 0;
     
+    // Get yesterday's deposits
     const yesterdayStart = new Date();
     yesterdayStart.setDate(yesterdayStart.getDate() - 1);
     yesterdayStart.setHours(0, 0, 0, 0);
-    const yesterdayEnd = new Date();
-    yesterdayEnd.setDate(yesterdayEnd.getDate() - 1);
+    const yesterdayEnd = new Date(yesterdayStart);
     yesterdayEnd.setHours(23, 59, 59, 999);
     
     const yesterdayDeposits = await Transaction.aggregate([
@@ -19408,28 +19414,29 @@ app.get('/api/admin/stats', adminProtect, restrictTo('super', 'support', 'financ
       ? ((totalDeposits - yesterdayDeposits[0].total) / yesterdayDeposits[0].total) * 100 
       : 0;
     
-    // 3. PENDING WITHDRAWALS - from Transaction schema (type: 'withdrawal', status: 'pending')
+    // Get pending withdrawals total from Transaction collection
     const pendingWithdrawals = await Transaction.aggregate([
       { $match: { type: 'withdrawal', status: 'pending' } },
       { $group: { _id: null, total: { $sum: '$amount' } } }
     ]);
     const pendingWithdrawalTotal = pendingWithdrawals[0]?.total || 0;
     
-    const yesterdayPendingWithdrawals = await Transaction.aggregate([
+    // Get yesterday's pending withdrawals
+    const yesterdayPending = await Transaction.aggregate([
       { $match: { type: 'withdrawal', status: 'pending', createdAt: { $gte: yesterdayStart, $lte: yesterdayEnd } } },
       { $group: { _id: null, total: { $sum: '$amount' } } }
     ]);
-    const withdrawalsChange = yesterdayPendingWithdrawals[0]?.total > 0
-      ? ((pendingWithdrawalTotal - yesterdayPendingWithdrawals[0].total) / yesterdayPendingWithdrawals[0].total) * 100
+    const withdrawalsChange = yesterdayPending[0]?.total > 0 
+      ? ((pendingWithdrawalTotal - yesterdayPending[0].total) / yesterdayPending[0].total) * 100 
       : 0;
     
-    // 4. PLATFORM REVENUE - from PlatformRevenue schema
+    // Get platform revenue from PlatformRevenue collection
     const revenueStats = await PlatformRevenue.aggregate([
       { $group: { _id: null, total: { $sum: '$amount' } } }
     ]);
     const platformRevenue = revenueStats[0]?.total || 0;
     
-    // 5. ASSET DISTRIBUTION - from User schema (balances)
+    // Calculate real-time asset distribution from User balances
     const users = await User.find({}).select('balances').lean();
     let totalMainUSD = 0;
     let totalMaturedUSD = 0;
@@ -19437,6 +19444,7 @@ app.get('/api/admin/stats', adminProtect, restrictTo('super', 'support', 'financ
     
     for (const user of users) {
       if (user.balances) {
+        // MAIN wallet - calculate USD value from crypto balances
         if (user.balances.main) {
           const entries = user.balances.main instanceof Map 
             ? Array.from(user.balances.main.entries())
@@ -19449,6 +19457,7 @@ app.get('/api/admin/stats', adminProtect, restrictTo('super', 'support', 'financ
           }
         }
         
+        // MATURED wallet - calculate USD value from crypto balances
         if (user.balances.matured) {
           const entries = user.balances.matured instanceof Map
             ? Array.from(user.balances.matured.entries())
@@ -19461,6 +19470,7 @@ app.get('/api/admin/stats', adminProtect, restrictTo('super', 'support', 'financ
           }
         }
         
+        // ACTIVE wallet - FIXED USD values (no fluctuation)
         if (user.balances.active) {
           const entries = user.balances.active instanceof Map
             ? Array.from(user.balances.active.entries())
@@ -19472,7 +19482,7 @@ app.get('/api/admin/stats', adminProtect, restrictTo('super', 'support', 'financ
       }
     }
     
-    // 6. SYSTEM METRICS
+    // Get system status metrics
     const startTime = Date.now();
     await User.findOne().lean();
     const backendResponseTime = Date.now() - startTime;
@@ -19484,7 +19494,7 @@ app.get('/api/admin/stats', adminProtect, restrictTo('super', 'support', 'financ
     
     const serverUptime = Math.floor(process.uptime() / 3600);
     
-    // 7. PENDING COUNTS - from multiple schemas
+    // Get pending counts for badges
     const pendingDepositsCount = await Transaction.countDocuments({ type: 'deposit', status: 'pending' });
     const pendingWithdrawalsCount = await Transaction.countDocuments({ type: 'withdrawal', status: 'pending' });
     const pendingKYCCount = await KYC.countDocuments({ overallStatus: 'pending' });
@@ -19531,8 +19541,8 @@ app.get('/api/admin/stats', adminProtect, restrictTo('super', 'support', 'financ
 });
 
 // =============================================
-// ENDPOINT 2: GET /api/admin/activity
-// Fetches from: SystemLog AND UserLog schemas only
+// ADMIN DASHBOARD ENDPOINT 2: GET /api/admin/activity
+// Fetches from UserLog schema with location data
 // =============================================
 app.get('/api/admin/activity', adminProtect, restrictTo('super', 'support'), async (req, res) => {
   try {
@@ -19542,149 +19552,101 @@ app.get('/api/admin/activity', adminProtect, restrictTo('super', 'support'), asy
     
     // Build query filters
     const query = {};
-    if (req.query.entity) query.entity = req.query.entity;
-    if (req.query.performedByModel) query.performedByModel = req.query.performedByModel;
-    if (req.query.startDate) query.createdAt = { $gte: new Date(req.query.startDate) };
-    if (req.query.endDate) query.createdAt = { ...query.createdAt, $lte: new Date(req.query.endDate) };
     
-    // Fetch from SystemLog schema
-    const systemLogs = await SystemLog.find(query)
-      .populate('performedBy', 'name email firstName lastName')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean();
+    if (req.query.entity) {
+      query.actionCategory = req.query.entity;
+    }
     
-    // Fetch from UserLog schema
-    const userQuery = {};
-    if (req.query.startDate) userQuery.createdAt = { $gte: new Date(req.query.startDate) };
-    if (req.query.endDate) userQuery.createdAt = { ...userQuery.createdAt, $lte: new Date(req.query.endDate) };
+    if (req.query.startDate) {
+      query.createdAt = { $gte: new Date(req.query.startDate) };
+    }
     
-    const userLogs = await UserLog.find(userQuery)
+    if (req.query.endDate) {
+      query.createdAt = { ...query.createdAt, $lte: new Date(req.query.endDate) };
+    }
+    
+    // Get total count from UserLog
+    const totalCount = await UserLog.countDocuments(query);
+    const totalPages = Math.ceil(totalCount / limit);
+    
+    // Get activities from UserLog with populated user info
+    const activities = await UserLog.find(query)
       .populate('user', 'firstName lastName email')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
       .lean();
     
-    // Get total counts from both schemas
-    const systemTotal = await SystemLog.countDocuments(query);
-    const userTotal = await UserLog.countDocuments(userQuery);
-    const totalCount = systemTotal + userTotal;
-    const totalPages = Math.ceil(totalCount / limit);
-    
-    // Format SystemLog activities
-    const formattedSystemLogs = systemLogs.map(activity => {
-      let locationDisplay = activity.location || 'Unknown';
-      let fullLocation = '';
-      let lat = null;
-      let lng = null;
-      
-      if (activity.changes?.locationData?.locationDetails) {
-        const locData = activity.changes.locationData.locationDetails;
-        const parts = [];
-        if (locData.city) parts.push(locData.city);
-        if (locData.region) parts.push(locData.region);
-        if (locData.country) parts.push(locData.country);
-        if (parts.length > 0) locationDisplay = parts.join(', ');
-        fullLocation = `City: ${locData.city || 'Unknown'} | Region: ${locData.region || 'Unknown'} | Country: ${locData.country || 'Unknown'}`;
-        lat = locData.latitude || null;
-        lng = locData.longitude || null;
-      }
-      
-      let actorName = 'System';
-      let actorEmail = '';
-      
-      if (activity.performedBy) {
-        if (activity.performedByModel === 'Admin') {
-          actorName = activity.performedBy.name || 'Admin';
-          actorEmail = activity.performedBy.email || '';
-        } else if (activity.performedByModel === 'User') {
-          actorName = `${activity.performedBy.firstName || ''} ${activity.performedBy.lastName || ''}`.trim() || 'User';
-          actorEmail = activity.performedBy.email || '';
-        }
-      }
-      
-      return {
-        _id: activity._id,
-        timestamp: activity.createdAt,
-        user: { name: actorName, email: actorEmail },
-        action: getActionDescription(activity.action),
-        actionRaw: activity.action,
-        entity: activity.entity,
-        entityId: activity.entityId,
-        performedByModel: activity.performedByModel,
-        activityType: getActivityTypeFromEntity(activity.entity),
-        status: 'success',
-        location: locationDisplay,
-        fullLocation: fullLocation,
-        lat: lat,
-        lng: lng,
-        ipAddress: activity.ip,
-        deviceInfo: activity.device,
-        changes: activity.changes
-      };
-    });
-    
-    // Format UserLog activities
-    const formattedUserLogs = userLogs.map(log => {
+    // Format activities for frontend display
+    const formattedActivities = activities.map(activity => {
+      // Extract location data from the location field
       let locationDisplay = 'Unknown';
       let fullLocation = '';
       let lat = null;
       let lng = null;
       
-      if (log.location) {
-        const parts = [];
-        if (log.location.city) parts.push(log.location.city);
-        if (log.location.region?.name) parts.push(log.location.region.name);
-        if (log.location.country?.name) parts.push(log.location.country.name);
-        if (parts.length > 0) locationDisplay = parts.join(', ');
-        fullLocation = `City: ${log.location.city || 'Unknown'} | Region: ${log.location.region?.name || 'Unknown'} | Country: ${log.location.country?.name || 'Unknown'}`;
-        lat = log.location.latitude || null;
-        lng = log.location.longitude || null;
+      if (activity.location) {
+        const loc = activity.location;
+        if (typeof loc === 'object') {
+          const parts = [];
+          if (loc.city) parts.push(loc.city);
+          if (loc.region?.name) parts.push(loc.region.name);
+          if (loc.country?.name) parts.push(loc.country.name);
+          if (parts.length > 0) locationDisplay = parts.join(', ');
+          
+          fullLocation = `City: ${loc.city || 'Unknown'} | Region: ${loc.region?.name || 'Unknown'} | Country: ${loc.country?.name || 'Unknown'} | Timezone: ${loc.timezone || 'Unknown'}`;
+          lat = loc.latitude || null;
+          lng = loc.longitude || null;
+        } else if (typeof loc === 'string') {
+          locationDisplay = loc;
+          fullLocation = loc;
+        }
       }
       
-      const actorName = log.userFullName || log.username || 'User';
-      const actorEmail = log.email || '';
+      // Get user/actor name
+      let actorName = activity.userFullName || 'System';
+      let actorEmail = activity.email || '';
+      
+      if (activity.user) {
+        actorName = `${activity.user.firstName || ''} ${activity.user.lastName || ''}`.trim() || activity.userFullName || 'User';
+        actorEmail = activity.user.email || activity.email || '';
+      }
+      
+      // Determine activity type for styling
+      const activityType = getActivityTypeFromCategory(activity.actionCategory);
       
       return {
-        _id: log._id,
-        timestamp: log.createdAt,
-        user: { name: actorName, email: actorEmail },
-        action: log.actionDescription || log.action,
-        actionRaw: log.action,
-        entity: log.actionCategory || 'user',
-        entityId: log.user,
-        performedByModel: 'User',
-        activityType: getActivityTypeFromCategory(log.actionCategory),
-        status: log.status || 'success',
+        _id: activity._id,
+        timestamp: activity.createdAt,
+        user: {
+          name: actorName,
+          email: actorEmail
+        },
+        action: activity.actionDescription || activity.action.replace(/_/g, ' '),
+        actionRaw: activity.action,
+        entity: activity.actionCategory,
+        activityType: activityType,
+        status: activity.status,
         location: locationDisplay,
         fullLocation: fullLocation,
         lat: lat,
         lng: lng,
-        ipAddress: log.ipAddress,
-        deviceInfo: log.userAgent,
-        metadata: log.metadata
+        ipAddress: activity.ipAddress,
+        deviceInfo: activity.userAgent,
+        metadata: activity.metadata
       };
     });
-    
-    // Combine and sort by timestamp (newest first)
-    const allActivities = [...formattedSystemLogs, ...formattedUserLogs];
-    allActivities.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-    
-    // Apply pagination to combined results
-    const paginatedActivities = allActivities.slice(skip, skip + limit);
     
     res.status(200).json({
       status: 'success',
       data: {
-        activities: paginatedActivities,
+        activities: formattedActivities,
         pagination: {
           currentPage: page,
           totalPages: totalPages,
           totalItems: totalCount,
           itemsPerPage: limit,
-          hasNext: skip + limit < totalCount,
+          hasNext: page < totalPages,
           hasPrev: page > 1
         }
       }
@@ -19700,139 +19662,92 @@ app.get('/api/admin/activity', adminProtect, restrictTo('super', 'support'), asy
 });
 
 // =============================================
-// ENDPOINT 3: GET /api/admin/activity/latest
-// Fetches from: SystemLog AND UserLog schemas only
-// Real-time polling for live feed
+// ADMIN DASHBOARD ENDPOINT 3: GET /api/admin/activity/latest
+// Real-time polling from UserLog for LIVE feed
 // =============================================
 app.get('/api/admin/activity/latest', adminProtect, restrictTo('super', 'support'), async (req, res) => {
   try {
     const { after, limit = 20 } = req.query;
     
-    // Build time filter
-    let timeFilter = {};
+    let query = {};
+    
+    // If 'after' timestamp provided, only get activities newer than that
     if (after && !isNaN(parseInt(after))) {
       const afterDate = new Date(parseInt(after));
-      timeFilter.createdAt = { $gt: afterDate };
+      query.createdAt = { $gt: afterDate };
     } else {
+      // Default: get activities from the last 5 minutes
       const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-      timeFilter.createdAt = { $gt: fiveMinutesAgo };
+      query.createdAt = { $gt: fiveMinutesAgo };
     }
     
-    // Fetch from SystemLog schema
-    const systemLogs = await SystemLog.find(timeFilter)
-      .populate('performedBy', 'name email firstName lastName')
-      .sort({ createdAt: -1 })
-      .limit(parseInt(limit))
-      .lean();
-    
-    // Fetch from UserLog schema
-    const userLogs = await UserLog.find(timeFilter)
+    // Get latest activities from UserLog
+    const activities = await UserLog.find(query)
       .populate('user', 'firstName lastName email')
       .sort({ createdAt: -1 })
       .limit(parseInt(limit))
       .lean();
     
-    const activities = [];
-    
-    // Format SystemLog activities
-    for (const activity of systemLogs) {
-      let locationDisplay = activity.location || 'Unknown';
-      let fullLocation = '';
-      let lat = null;
-      let lng = null;
-      
-      if (activity.changes?.locationData?.locationDetails) {
-        const locData = activity.changes.locationData.locationDetails;
-        const parts = [];
-        if (locData.city) parts.push(locData.city);
-        if (locData.region) parts.push(locData.region);
-        if (locData.country) parts.push(locData.country);
-        if (parts.length > 0) locationDisplay = parts.join(', ');
-        fullLocation = `City: ${locData.city || 'Unknown'} | Region: ${locData.region || 'Unknown'} | Country: ${locData.country || 'Unknown'}`;
-        lat = locData.latitude || null;
-        lng = locData.longitude || null;
-      }
-      
-      let actorName = 'System';
-      let actorEmail = '';
-      
-      if (activity.performedBy) {
-        if (activity.performedByModel === 'Admin') {
-          actorName = activity.performedBy.name || 'Admin';
-          actorEmail = activity.performedBy.email || '';
-        } else if (activity.performedByModel === 'User') {
-          actorName = `${activity.performedBy.firstName || ''} ${activity.performedBy.lastName || ''}`.trim() || 'User';
-          actorEmail = activity.performedBy.email || '';
-        }
-      }
-      
-      activities.push({
-        _id: activity._id,
-        timestamp: activity.createdAt,
-        user: { name: actorName, email: actorEmail },
-        action: getActionDescription(activity.action),
-        actionRaw: activity.action,
-        entity: activity.entity,
-        activityType: getActivityTypeFromEntity(activity.entity),
-        status: 'success',
-        location: locationDisplay,
-        fullLocation: fullLocation,
-        lat: lat,
-        lng: lng,
-        ipAddress: activity.ip,
-        deviceInfo: activity.device
-      });
-    }
-    
-    // Format UserLog activities
-    for (const log of userLogs) {
+    // Format activities for frontend
+    const formattedActivities = activities.map(activity => {
       let locationDisplay = 'Unknown';
       let fullLocation = '';
       let lat = null;
       let lng = null;
       
-      if (log.location) {
-        const parts = [];
-        if (log.location.city) parts.push(log.location.city);
-        if (log.location.region?.name) parts.push(log.location.region.name);
-        if (log.location.country?.name) parts.push(log.location.country.name);
-        if (parts.length > 0) locationDisplay = parts.join(', ');
-        fullLocation = `City: ${log.location.city || 'Unknown'} | Region: ${log.location.region?.name || 'Unknown'} | Country: ${log.location.country?.name || 'Unknown'}`;
-        lat = log.location.latitude || null;
-        lng = log.location.longitude || null;
+      if (activity.location) {
+        const loc = activity.location;
+        if (typeof loc === 'object') {
+          const parts = [];
+          if (loc.city) parts.push(loc.city);
+          if (loc.region?.name) parts.push(loc.region.name);
+          if (loc.country?.name) parts.push(loc.country.name);
+          if (parts.length > 0) locationDisplay = parts.join(', ');
+          
+          fullLocation = `City: ${loc.city || 'Unknown'} | Region: ${loc.region?.name || 'Unknown'} | Country: ${loc.country?.name || 'Unknown'}`;
+          lat = loc.latitude || null;
+          lng = loc.longitude || null;
+        } else if (typeof loc === 'string') {
+          locationDisplay = loc;
+          fullLocation = loc;
+        }
       }
       
-      const actorName = log.userFullName || log.username || 'User';
-      const actorEmail = log.email || '';
+      let actorName = activity.userFullName || 'System';
+      let actorEmail = activity.email || '';
       
-      activities.push({
-        _id: log._id,
-        timestamp: log.createdAt,
-        user: { name: actorName, email: actorEmail },
-        action: log.actionDescription || log.action,
-        actionRaw: log.action,
-        entity: log.actionCategory || 'user',
-        activityType: getActivityTypeFromCategory(log.actionCategory),
-        status: log.status || 'success',
+      if (activity.user) {
+        actorName = `${activity.user.firstName || ''} ${activity.user.lastName || ''}`.trim() || activity.userFullName || 'User';
+        actorEmail = activity.user.email || activity.email || '';
+      }
+      
+      return {
+        _id: activity._id,
+        timestamp: activity.createdAt,
+        user: {
+          name: actorName,
+          email: actorEmail
+        },
+        action: activity.actionDescription || activity.action.replace(/_/g, ' '),
+        actionRaw: activity.action,
+        entity: activity.actionCategory,
+        activityType: getActivityTypeFromCategory(activity.actionCategory),
+        status: activity.status,
         location: locationDisplay,
         fullLocation: fullLocation,
         lat: lat,
         lng: lng,
-        ipAddress: log.ipAddress,
-        deviceInfo: log.userAgent
-      });
-    }
-    
-    // Sort by timestamp (newest first) and limit
-    activities.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-    const latestActivities = activities.slice(0, parseInt(limit));
+        ipAddress: activity.ipAddress,
+        deviceInfo: activity.userAgent
+      };
+    });
     
     // Get latest timestamp for next poll
-    const latestTimestamp = latestActivities.length > 0 
-      ? new Date(latestActivities[0].timestamp).getTime()
+    const latestTimestamp = activities.length > 0 
+      ? new Date(activities[0].createdAt).getTime()
       : Date.now();
     
-    // Fetch pending counts from respective schemas
+    // Get pending counts for badges
     const pendingDepositsCount = await Transaction.countDocuments({ type: 'deposit', status: 'pending' });
     const pendingWithdrawalsCount = await Transaction.countDocuments({ type: 'withdrawal', status: 'pending' });
     const pendingKYCCount = await KYC.countDocuments({ overallStatus: 'pending' });
@@ -19840,14 +19755,14 @@ app.get('/api/admin/activity/latest', adminProtect, restrictTo('super', 'support
     res.status(200).json({
       status: 'success',
       data: {
-        activities: latestActivities,
+        activities: formattedActivities,
         latestTimestamp: latestTimestamp,
         counts: {
           pendingDeposits: pendingDepositsCount,
           pendingWithdrawals: pendingWithdrawalsCount,
           pendingKYC: pendingKYCCount
         },
-        hasNew: latestActivities.length > 0
+        hasNew: activities.length > 0
       }
     });
     
@@ -19860,117 +19775,20 @@ app.get('/api/admin/activity/latest', adminProtect, restrictTo('super', 'support
   }
 });
 
-// =============================================
-// HELPER FUNCTIONS
-// =============================================
-
-function getActionDescription(action) {
-  const descriptions = {
-    'signup_initiated': 'New user registration started',
-    'login': 'User logged in',
-    'logout': 'User logged out',
-    'deposit_created': 'Deposit request created',
-    'deposit_approved': 'Deposit approved',
-    'deposit_rejected': 'Deposit rejected',
-    'withdrawal_created': 'Withdrawal requested',
-    'withdrawal_approved': 'Withdrawal approved',
-    'withdrawal_rejected': 'Withdrawal rejected',
-    'investment_created': 'New investment created',
-    'investment_completed': 'Investment completed',
-    'investment_matured': 'Investment matured',
-    'kyc_submitted': 'KYC application submitted',
-    'kyc_approved': 'KYC approved',
-    'kyc_rejected': 'KYC rejected',
-    'profile_update': 'Profile updated',
-    'password_change': 'Password changed',
-    'admin_login': 'Admin logged in',
-    'admin_action': 'Admin action performed',
-    'user_verified': 'User verified',
-    'user_blocked': 'User blocked',
-    'balance_adjustment': 'Balance adjusted by admin',
-    'transfer_completed': 'Transfer completed',
-    'buy_completed': 'Purchase completed',
-    'sell_completed': 'Sale completed',
-    'conversion_completed': 'Currency conversion completed',
-    'two_factor_enabled': '2FA enabled',
-    'two_factor_disabled': '2FA disabled',
-    'referral_joined': 'New referral joined',
-    'referral_bonus_earned': 'Referral bonus earned',
-    'api_key_created': 'API key created',
-    'api_key_deleted': 'API key deleted'
-  };
-  return descriptions[action] || action.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-}
-
-function getActivityTypeFromEntity(entity) {
-  const typeMap = {
-    'user': 'login',
-    'transaction': 'deposit',
-    'investment': 'investment',
-    'kyc': 'kyc',
-    'admin': 'admin',
-    'authentication': 'login',
-    'financial': 'deposit',
-    'verification': 'kyc',
-    'referral': 'referral',
-    'profile': 'profile',
-    'navigation': 'other'
-  };
-  return typeMap[entity] || 'other';
-}
-
+// Helper function to get activity type from category
 function getActivityTypeFromCategory(category) {
   const typeMap = {
     'authentication': 'login',
     'financial': 'deposit',
     'investment': 'investment',
     'verification': 'kyc',
-    'referral': 'referral',
-    'profile': 'profile',
-    'security': 'security',
-    'system': 'system',
+    'profile': 'other',
+    'security': 'other',
+    'referral': 'other',
     'navigation': 'other'
   };
   return typeMap[category] || 'other';
 }
-
-async function getCryptoPrice(asset) {
-  try {
-    const stablecoins = ['USDT', 'USDC', 'DAI', 'BUSD', 'USDP', 'TUSD'];
-    if (stablecoins.includes(asset.toUpperCase())) return 1;
-    
-    const assetMap = {
-      'BTC': 'bitcoin', 'ETH': 'ethereum', 'BNB': 'binancecoin', 'SOL': 'solana',
-      'XRP': 'xrp', 'DOGE': 'dogecoin', 'ADA': 'cardano', 'SHIB': 'shiba-inu',
-      'AVAX': 'avalanche-2', 'DOT': 'polkadot', 'TRX': 'tron', 'LINK': 'chainlink',
-      'MATIC': 'matic-network', 'LTC': 'litecoin', 'NEAR': 'near', 'UNI': 'uniswap'
-    };
-    
-    const coinId = assetMap[asset.toUpperCase()];
-    if (!coinId) return 0;
-    
-    const response = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd`);
-    const data = await response.json();
-    return data[coinId]?.usd || 0;
-  } catch (err) {
-    return 0;
-  }
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
