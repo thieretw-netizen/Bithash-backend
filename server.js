@@ -23342,7 +23342,241 @@ app.get('/api/admin/transactions/export', adminProtect, async (req, res) => {
 
 
 
+// =============================================
+// CANCEL INVESTMENT (Admin)
+// =============================================
+app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
 
+    // Validate investment ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid investment ID'
+      });
+    }
+
+    // Find investment with user and plan details
+    const investment = await Investment.findById(id)
+      .populate('user', 'firstName lastName email balances')
+      .populate('plan', 'name percentage duration');
+
+    if (!investment) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Investment not found'
+      });
+    }
+
+    // Check if investment can be cancelled
+    if (investment.status !== 'active') {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Cannot cancel investment with status: ${investment.status}. Only active investments can be cancelled.`
+      });
+    }
+
+    const user = investment.user;
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found for this investment'
+      });
+    }
+
+    // Calculate refund amounts
+    const refundAmountUSD = investment.amount || 0;
+    const refundAmountBTC = investment.amountBTC || 0;
+    const refundAmountAsset = investment.originalAmountBTC || investment.amountBTC || 0;
+    const asset = investment.currency?.toLowerCase() || 'btc';
+
+    // Refund the investment amount to user's main balance
+    if (!user.balances) {
+      user.balances = { main: new Map(), active: new Map(), matured: new Map() };
+    }
+    if (!user.balances.main) user.balances.main = new Map();
+
+    // Get current balances
+    const currentMainAssetBalance = user.balances.main.get(asset) || 0;
+    const currentMainUSDBalance = user.balances.main.get('usd') || 0;
+    
+    // Get current active wallet balances (where the investment was)
+    const currentActiveAssetBalance = user.balances.active.get(asset) || 0;
+    const currentActiveUSDBalance = user.balances.active.get('usd') || 0;
+
+    // Refund to main wallet
+    user.balances.main.set(asset, currentMainAssetBalance + refundAmountAsset);
+    user.balances.main.set('usd', currentMainUSDBalance + refundAmountUSD);
+    
+    // Remove from active wallet
+    const newActiveAssetBalance = currentActiveAssetBalance - refundAmountAsset;
+    if (newActiveAssetBalance <= 0) {
+      user.balances.active.delete(asset);
+    } else {
+      user.balances.active.set(asset, newActiveAssetBalance);
+    }
+    
+    const newActiveUSDBalance = currentActiveUSDBalance - refundAmountUSD;
+    if (newActiveUSDBalance <= 0) {
+      user.balances.active.delete('usd');
+    } else {
+      user.balances.active.set('usd', newActiveUSDBalance);
+    }
+
+    await user.save();
+
+    // Update investment status
+    investment.status = 'cancelled';
+    investment.completionDate = new Date();
+    investment.adminNotes = reason || `Cancelled by admin: ${req.admin.name}`;
+    
+    // Add to status history
+    if (!investment.statusHistory) investment.statusHistory = [];
+    investment.statusHistory.push({
+      status: 'cancelled',
+      changedAt: new Date(),
+      changedBy: req.admin._id,
+      changedByModel: 'Admin',
+      reason: reason || 'Cancelled by admin'
+    });
+    
+    await investment.save();
+
+    // Create transaction record for the refund
+    const refundReference = `REFUND-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+    await Transaction.create({
+      user: user._id,
+      type: 'deposit',
+      amount: refundAmountUSD,
+      asset: asset.toUpperCase(),
+      assetAmount: refundAmountAsset,
+      currency: 'USD',
+      status: 'completed',
+      method: 'REFUND',
+      reference: refundReference,
+      details: {
+        type: 'investment_cancellation',
+        investmentId: investment._id,
+        planName: investment.plan?.name || 'Unknown Plan',
+        originalAmount: investment.amount,
+        refundAmount: refundAmountUSD,
+        cancelledBy: req.admin.name,
+        cancellationReason: reason || 'Cancelled by admin',
+        refundProcessedAt: new Date()
+      },
+      fee: 0,
+      netAmount: refundAmountUSD,
+      processedBy: req.admin._id,
+      processedAt: new Date()
+    });
+
+    // Send email notification to user
+    try {
+      await sendProfessionalEmail({
+        email: user.email,
+        template: 'investment_cancelled',
+        data: {
+          name: user.firstName,
+          planName: investment.plan?.name || 'Unknown Plan',
+          amount: refundAmountUSD,
+          asset: asset.toUpperCase(),
+          assetAmount: refundAmountAsset,
+          reason: reason || 'Cancelled by administrator',
+          refundReference: refundReference,
+          newBalance: user.balances.main.get('usd') || 0
+        }
+      });
+    } catch (emailError) {
+      console.error('Failed to send investment cancellation email:', emailError);
+    }
+
+    // Create notification for user
+    await Notification.create({
+      title: 'Investment Cancelled',
+      message: `Your investment in ${investment.plan?.name || 'Unknown Plan'} of $${refundAmountUSD.toLocaleString()} has been cancelled. Refund of ${refundAmountAsset} ${asset.toUpperCase()} has been credited to your main wallet.`,
+      type: 'investment_update',
+      recipientType: 'specific',
+      specificUserId: user._id,
+      sentBy: req.admin._id,
+      isImportant: true,
+      metadata: {
+        investmentId: investment._id,
+        refundAmount: refundAmountUSD,
+        refundAsset: asset,
+        refundAssetAmount: refundAmountAsset,
+        reason: reason
+      }
+    });
+
+    // Log the activity
+    await logActivity(
+      'investment_cancelled',
+      'Investment',
+      investment._id,
+      req.admin._id,
+      'Admin',
+      req,
+      {
+        userId: user._id,
+        userEmail: user.email,
+        planName: investment.plan?.name,
+        originalAmount: refundAmountUSD,
+        refundAmount: refundAmountUSD,
+        asset: asset,
+        assetAmount: refundAmountAsset,
+        reason: reason
+      }
+    );
+
+    // Emit real-time update via Socket.IO
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${user._id}`).emit('balance_update', {
+        main: user.balances.main.get('usd') || 0,
+        active: user.balances.active.get('usd') || 0,
+        matured: user.balances.matured?.get('usd') || 0
+      });
+      
+      io.to(`user_${user._id}`).emit('investment_cancelled', {
+        investmentId: investment._id,
+        planName: investment.plan?.name,
+        refundAmount: refundAmountUSD,
+        refundAsset: asset,
+        refundAssetAmount: refundAmountAsset,
+        timestamp: new Date()
+      });
+    }
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Investment cancelled successfully',
+      data: {
+        investment: {
+          _id: investment._id,
+          status: investment.status,
+          cancelledAt: investment.completionDate,
+          planName: investment.plan?.name
+        },
+        refund: {
+          amount: refundAmountUSD,
+          asset: asset.toUpperCase(),
+          assetAmount: refundAmountAsset,
+          reference: refundReference,
+          newBalance: user.balances.main.get('usd') || 0
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Error cancelling investment:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to cancel investment'
+    });
+  }
+});
 
 
 
