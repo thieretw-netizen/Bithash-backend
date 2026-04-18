@@ -5886,7 +5886,6 @@ initializePriceAggregator();
 
 
 
-
 // =============================================
 // ENHANCED EMAIL SERVICE WITH ENTERPRISE TEMPLATES
 // =============================================
@@ -6501,8 +6500,16 @@ case 'login_success':
         break;
 
     default:
-  subject = 'Important Account Update - ₿itHash Capital';
-  html = ''; // Default email body is blank as requested
+  subject = data.reason || data.message || 'Account Update Notification';
+  html = `
+    <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+      ${brandHeader}
+      <div style="padding: 30px; background: #FFFFFF;">
+        <!-- BODY SECTION IS INTENTIONALLY BLANK - ONLY HEADER AND FOOTER DISPLAYED -->
+      </div>
+      ${brandFooter}
+    </div>
+  `;
   break;
   } 
 
