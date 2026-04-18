@@ -23343,8 +23343,11 @@ app.get('/api/admin/transactions/export', adminProtect, async (req, res) => {
 
 
 
+
+
+
 // =============================================
-// CANCEL INVESTMENT (Admin) - Refund to MATURED wallet with real-time BTC price
+// CANCEL INVESTMENT (Admin) - CORRECTED SystemLog
 // =============================================
 app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => {
   try {
@@ -23396,19 +23399,17 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
       console.log(`Current BTC price at cancellation: $${currentBTCPrice}`);
     } catch (priceError) {
       console.error('Failed to get BTC price:', priceError);
-      currentBTCPrice = 50000; // Fallback price if API fails
+      currentBTCPrice = 50000;
     }
 
     // Calculate refund amounts
     const refundAmountUSD = investment.amount || 0;
     const refundAmountBTC = refundAmountUSD / currentBTCPrice;
     const originalBTCAmount = investment.amountBTC || 0;
-    const asset = (investment.currency || 'BTC').toLowerCase();
 
     console.log(`Refunding user ${user.email}:`);
     console.log(`  - USD Amount: $${refundAmountUSD}`);
-    console.log(`  - BTC Amount (at current price $${currentBTCPrice}): ${refundAmountBTC} BTC`);
-    console.log(`  - Original BTC Amount at investment: ${originalBTCAmount} BTC`);
+    console.log(`  - BTC Amount: ${refundAmountBTC} BTC`);
     console.log(`  - Target Wallet: MATURED`);
 
     // Initialize balances if needed
@@ -23417,15 +23418,13 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
     }
     if (!user.balances.matured) user.balances.matured = new Map();
 
-    // Get current matured wallet balances
+    // Get current balances
     const currentMaturedBTCBalance = user.balances.matured.get('btc') || 0;
     const currentMaturedUSDBalance = user.balances.matured.get('usd') || 0;
-    
-    // Get current active wallet balances (where the investment was)
     const currentActiveBTCBalance = user.balances.active.get('btc') || 0;
     const currentActiveUSDBalance = user.balances.active.get('usd') || 0;
 
-    // REFUND TO MATURED WALLET (not main wallet)
+    // REFUND TO MATURED WALLET
     user.balances.matured.set('btc', currentMaturedBTCBalance + refundAmountBTC);
     user.balances.matured.set('usd', currentMaturedUSDBalance + refundAmountUSD);
     
@@ -23453,22 +23452,11 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
     investment.cancellationBTCPrice = currentBTCPrice;
     investment.cancellationBTCAmount = refundAmountBTC;
     
-    // Add to status history
-    if (!investment.statusHistory) investment.statusHistory = [];
-    investment.statusHistory.push({
-      status: 'cancelled',
-      changedAt: new Date(),
-      changedBy: req.admin._id,
-      changedByModel: 'Admin',
-      reason: reason || 'Cancelled by admin'
-    });
-    
     await investment.save();
 
     // Create transaction record for the refund
     const refundReference = `CANCEL-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
-    
-    await Transaction.create({
+    const transaction = await Transaction.create({
       user: user._id,
       type: 'deposit',
       amount: refundAmountUSD,
@@ -23500,13 +23488,13 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
     });
 
     // =============================================
-    // LOG TO SYSTEMLOG SCHEMA with all details
+    // LOG TO SYSTEMLOG SCHEMA - CORRECTED VALUES
     // =============================================
     const deviceInfo = await getUserDeviceInfo(req);
     
     await SystemLog.create({
       action: 'investment_cancelled',
-      entity: 'Investment',
+      entity: 'investment',  // ✅ LOWERCASE, not "Investment"
       entityId: investment._id,
       performedBy: req.admin._id,
       performedByModel: 'Admin',
@@ -23568,7 +23556,7 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
         balanceBefore: currentMaturedUSDBalance,
         balanceAfter: currentMaturedUSDBalance + refundAmountUSD,
         walletType: 'matured',
-        transactionId: refundReference
+        transactionId: transaction._id  // ✅ Use ObjectId, not string
       }
     });
 
@@ -23591,28 +23579,6 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
       console.error('Failed to send cancellation email:', emailError);
     }
 
-    // Create notification for user
-    try {
-      await Notification.create({
-        title: 'Investment Cancelled - Refund to Matured Wallet',
-        message: `Your investment in ${investment.plan?.name || 'Unknown Plan'} has been cancelled. ${refundAmountBTC.toFixed(8)} BTC ($${refundAmountUSD.toLocaleString()}) has been credited to your MATURED wallet at BTC price $${currentBTCPrice.toLocaleString()}.`,
-        type: 'investment_update',
-        recipientType: 'specific',
-        specificUserId: user._id,
-        sentBy: req.admin._id,
-        isImportant: true,
-        metadata: {
-          investmentId: investment._id,
-          refundAmountUSD: refundAmountUSD,
-          refundAmountBTC: refundAmountBTC,
-          btcPrice: currentBTCPrice,
-          targetWallet: 'matured'
-        }
-      });
-    } catch (notifError) {
-      console.error('Failed to create notification:', notifError);
-    }
-
     // Emit real-time update via Socket.IO
     const io = req.app.get('io');
     if (io) {
@@ -23620,16 +23586,6 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
         main: user.balances.main?.get('usd') || 0,
         active: user.balances.active?.get('usd') || 0,
         matured: user.balances.matured?.get('usd') || 0
-      });
-      
-      io.to(`user_${user._id}`).emit('investment_cancelled', {
-        investmentId: investment._id,
-        planName: investment.plan?.name,
-        refundAmountUSD: refundAmountUSD,
-        refundAmountBTC: refundAmountBTC,
-        refundWallet: 'matured',
-        btcPrice: currentBTCPrice,
-        timestamp: new Date()
       });
     }
 
@@ -23649,12 +23605,6 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
           btcPrice: currentBTCPrice,
           walletType: 'matured',
           reference: refundReference
-        },
-        newBalances: {
-          maturedBTC: user.balances.matured.get('btc') || 0,
-          maturedUSD: user.balances.matured.get('usd') || 0,
-          activeBTC: user.balances.active.get('btc') || 0,
-          activeUSD: user.balances.active.get('usd') || 0
         }
       }
     });
@@ -23666,7 +23616,7 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
     try {
       await SystemLog.create({
         action: 'investment_cancellation_failed',
-        entity: 'Investment',
+        entity: 'investment',
         entityId: req.params.id,
         performedBy: req.admin._id,
         performedByModel: 'Admin',
@@ -23688,6 +23638,13 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
     });
   }
 });
+
+
+
+
+
+
+
 
 
 
