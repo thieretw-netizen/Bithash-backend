@@ -5887,16 +5887,6 @@ initializePriceAggregator();
 
 
 
-
-
-
-
-
-
-
-
-
-
 // =============================================
 // ENHANCED EMAIL SERVICE WITH ENTERPRISE TEMPLATES
 // =============================================
@@ -6512,71 +6502,7 @@ case 'login_success':
 
     default:
   subject = 'Important Account Update - ₿itHash Capital';
-  html = `
-    <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-      ${brandHeader}
-      <div style="padding: 30px; background: #FFFFFF;">
-        <div style="background: #F3F4F6; border-radius: 12px; padding: 20px; margin-bottom: 25px; text-align: center;">
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin: 0 auto 12px auto;">
-            <path d="M12 8V12M12 16H12.01M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="#F7A600" stroke-width="2" stroke-linecap="round"/>
-          </svg>
-          <h2 style="color: #0B0E11; font-size: 20px; margin: 0 0 8px 0;">Account Update Notification</h2>
-          <p style="color: #6C7480; font-size: 14px; margin: 0;">Action Required / Information</p>
-        </div>
-        
-        <p style="color: #333333; line-height: 1.6;">Dear <strong>${data.name || 'Valued Customer'}</strong>,</p>
-        
-        <p style="color: #333333; line-height: 1.6;">${data.message || 'We have an important update regarding your account that requires your attention.'}</p>
-        
-        ${data.details ? `
-        <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-          <h3 style="color: #0B0E11; margin: 0 0 12px 0; font-size: 16px;">Update Details:</h3>
-          <p style="color: #4B5563; margin: 0; line-height: 1.5;">${data.details}</p>
-        </div>
-        ` : ''}
-        
-        ${data.actionRequired ? `
-        <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
-          <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">⚠️ Action Required</p>
-          <p style="color: #78350F; margin: 0; font-size: 14px;">${data.actionRequired}</p>
-        </div>
-        ` : ''}
-        
-        ${data.actionLink ? `
-        <div style="text-align: center; margin: 30px 0;">
-          <a href="${data.actionLink}" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">${data.buttonText || 'View Details'}</a>
-        </div>
-        ` : ''}
-        
-        <div style="margin-top: 25px; padding-top: 20px; border-top: 1px solid #E5E7EB;">
-          <p style="color: #6C7480; font-size: 13px; line-height: 1.5; margin: 0 0 10px 0;">
-            <strong>What this means for you:</strong>
-          </p>
-          <ul style="color: #6C7480; font-size: 13px; margin: 0; padding-left: 20px;">
-            <li style="margin: 5px 0;">Your account security is our top priority</li>
-            <li style="margin: 5px 0;">Review the information above for any necessary actions</li>
-            <li style="margin: 5px 0;">Contact support if you have any questions</li>
-          </ul>
-        </div>
-        
-        <p style="color: #666666; font-size: 12px; margin-top: 30px;">
-          <strong>Reference ID:</strong> ${data.referenceId || 'N/A'}<br>
-          <strong>Email sent:</strong> ${formattedTimestamp}
-        </p>
-        
-        <div style="background: #F9FAFB; padding: 15px; border-radius: 8px; margin-top: 20px;">
-          <p style="color: #6C7480; font-size: 12px; margin: 0 0 5px 0;">
-            <strong>Need help?</strong> Contact our support team:
-          </p>
-          <p style="color: #6C7480; font-size: 12px; margin: 0;">
-            📧 <a href="mailto:support@bithashcapital.live" style="color: #F7A600;">support@bithashcapital.live</a><br>
-            🌐 <a href="https://www.bithashcapital.live/support" style="color: #F7A600;">www.bithashcapital.live/support</a>
-          </p>
-        </div>
-      </div>
-      ${brandFooter}
-    </div>
-  `;
+  html = ''; // Default email body is blank as requested
   break;
   } 
 
@@ -6742,6 +6668,13 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
     return false;
   }
 };
+
+
+
+
+
+
+
 
 // =============================================
 // ENHANCED DEVICE DETECTION WITH ACCURATE BROWSER/OS DETECTION
