@@ -22355,8 +22355,19 @@ app.delete('/api/admin/cards/:id', adminProtect, async (req, res) => {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
 // =============================================
-// GET ACTIVE INVESTMENTS (Paginated)
+// GET ACTIVE INVESTMENTS - With proper null handling
 // =============================================
 app.get('/api/admin/investments/active', adminProtect, async (req, res) => {
   try {
@@ -22367,7 +22378,7 @@ app.get('/api/admin/investments/active', adminProtect, async (req, res) => {
     // Fetch active investments with user and plan details
     const investments = await Investment.find({ status: 'active' })
       .populate('user', 'firstName lastName email')
-      .populate('plan', 'name percentage duration')
+      .populate('plan', 'name percentage duration minAmount maxAmount')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -22376,36 +22387,68 @@ app.get('/api/admin/investments/active', adminProtect, async (req, res) => {
     const total = await Investment.countDocuments({ status: 'active' });
     const totalPages = Math.ceil(total / limit);
 
-    // Enhance investment data with calculated fields
-    const enhancedInvestments = investments.map(inv => {
+    // Format investments exactly as HTML expects with null checks
+    const formattedInvestments = investments.map(inv => {
+      // Safe user data extraction with fallbacks
+      const user = inv.user || {};
+      const firstName = user.firstName || 'Deleted';
+      const lastName = user.lastName || 'User';
+      const userEmail = user.email || 'unknown@deleted.com';
+      
+      // Safe plan data extraction
+      const plan = inv.plan || {};
+      const planName = plan.name || 'Unknown Plan';
+      const planPercentage = plan.percentage || 0;
+      const planDuration = plan.duration || 0;
+      
+      // Calculate remaining time
       const now = new Date();
       const endDate = new Date(inv.endDate);
-      const timeLeft = Math.max(0, endDate - now);
-      const hoursLeft = Math.floor(timeLeft / (1000 * 60 * 60));
-      const dailyProfit = (inv.amount * (inv.plan?.percentage || 0)) / 100;
-      const totalProfit = (inv.expectedReturn || 0) - inv.amount;
+      const timeLeftMs = Math.max(0, endDate - now);
+      const hoursLeft = Math.floor(timeLeftMs / (1000 * 60 * 60));
+      const daysLeft = Math.floor(hoursLeft / 24);
+      const remainingHours = hoursLeft % 24;
+      const timeRemainingDisplay = daysLeft > 0 ? `${daysLeft}d ${remainingHours}h` : `${hoursLeft}h`;
+      
+      // Calculate daily profit (percentage-based)
+      const dailyProfit = (inv.amount * planPercentage) / 100;
+      
+      // Calculate total profit so far
+      const totalProfit = (inv.expectedReturn || 0) - (inv.amount || 0);
       
       return {
         _id: inv._id,
-        user: inv.user,
-        plan: inv.plan,
-        amount: inv.amount,
-        startDate: inv.startDate,
+        user: {
+          _id: user._id || null,
+          firstName: firstName,
+          lastName: lastName,
+          email: userEmail,
+          fullName: `${firstName} ${lastName}`.trim()
+        },
+        plan: {
+          _id: plan._id || null,
+          name: planName,
+          percentage: planPercentage,
+          duration: planDuration
+        },
+        amount: inv.amount || 0,
+        startDate: inv.startDate || inv.createdAt,
         endDate: inv.endDate,
         dailyProfit: dailyProfit,
         totalProfit: totalProfit,
         timeRemaining: {
           hours: hoursLeft,
-          display: `${Math.floor(hoursLeft / 24)}d ${hoursLeft % 24}h`
+          days: daysLeft,
+          display: timeRemainingDisplay
         },
-        status: inv.status
+        status: inv.status || 'active'
       };
     });
 
     res.status(200).json({
       status: 'success',
       data: {
-        investments: enhancedInvestments,
+        investments: formattedInvestments,
         pagination: {
           currentPage: page,
           totalPages: totalPages,
@@ -22426,8 +22469,10 @@ app.get('/api/admin/investments/active', adminProtect, async (req, res) => {
   }
 });
 
+
+
 // =============================================
-// GET COMPLETED INVESTMENTS (Paginated)
+// GET COMPLETED INVESTMENTS - With proper null handling
 // =============================================
 app.get('/api/admin/investments/completed', adminProtect, async (req, res) => {
   try {
@@ -22451,24 +22496,50 @@ app.get('/api/admin/investments/completed', adminProtect, async (req, res) => {
     });
     const totalPages = Math.ceil(total / limit);
 
-    const enhancedInvestments = investments.map(inv => ({
-      _id: inv._id,
-      user: inv.user,
-      plan: inv.plan,
-      amount: inv.amount,
-      expectedReturn: inv.expectedReturn,
-      actualReturn: inv.actualReturn || inv.expectedReturn,
-      profit: (inv.actualReturn || inv.expectedReturn) - inv.amount,
-      startDate: inv.startDate,
-      endDate: inv.endDate,
-      completedAt: inv.completedAt || inv.endDate,
-      status: inv.status
-    }));
+    // Format completed investments with null checks
+    const formattedInvestments = investments.map(inv => {
+      // Safe user data extraction
+      const user = inv.user || {};
+      const firstName = user.firstName || 'Deleted';
+      const lastName = user.lastName || 'User';
+      const userEmail = user.email || 'unknown@deleted.com';
+      
+      // Safe plan data
+      const plan = inv.plan || {};
+      const planName = plan.name || 'Unknown Plan';
+      
+      // Calculate profit
+      const actualReturn = inv.actualReturn || inv.expectedReturn || 0;
+      const profit = actualReturn - (inv.amount || 0);
+      
+      return {
+        _id: inv._id,
+        user: {
+          _id: user._id || null,
+          firstName: firstName,
+          lastName: lastName,
+          email: userEmail,
+          fullName: `${firstName} ${lastName}`.trim()
+        },
+        plan: {
+          _id: plan._id || null,
+          name: planName
+        },
+        amount: inv.amount || 0,
+        expectedReturn: inv.expectedReturn || 0,
+        actualReturn: actualReturn,
+        profit: profit,
+        startDate: inv.startDate || inv.createdAt,
+        endDate: inv.endDate,
+        completedAt: inv.completedAt || inv.endDate || inv.updatedAt,
+        status: inv.status || 'completed'
+      };
+    });
 
     res.status(200).json({
       status: 'success',
       data: {
-        investments: enhancedInvestments,
+        investments: formattedInvestments,
         pagination: {
           currentPage: page,
           totalPages: totalPages,
@@ -22489,8 +22560,11 @@ app.get('/api/admin/investments/completed', adminProtect, async (req, res) => {
   }
 });
 
+
+
+
 // =============================================
-// GET INVESTMENT PLANS (Paginated)
+// GET INVESTMENT PLANS - With proper status formatting
 // =============================================
 app.get('/api/admin/investment/plans', adminProtect, async (req, res) => {
   try {
@@ -22507,10 +22581,28 @@ app.get('/api/admin/investment/plans', adminProtect, async (req, res) => {
     const total = await Plan.countDocuments({});
     const totalPages = Math.ceil(total / limit);
 
+    // Format plans exactly as HTML expects
+    const formattedPlans = plans.map(plan => ({
+      _id: plan._id,
+      name: plan.name || 'Unnamed Plan',
+      description: plan.description || '',
+      minAmount: plan.minAmount || 0,
+      maxAmount: plan.maxAmount || 0,
+      duration: plan.duration || 0,
+      dailyProfit: plan.percentage || 0,  // HTML expects dailyProfit
+      totalProfit: plan.percentage || 0,   // HTML expects totalProfit
+      percentage: plan.percentage || 0,
+      status: plan.isActive ? 'active' : 'inactive',
+      isActive: plan.isActive || false,
+      referralBonus: plan.referralBonus || 0,
+      createdAt: plan.createdAt,
+      updatedAt: plan.updatedAt
+    }));
+
     res.status(200).json({
       status: 'success',
       data: {
-        plans: plans,
+        plans: formattedPlans,
         pagination: {
           currentPage: page,
           totalPages: totalPages,
@@ -22531,92 +22623,10 @@ app.get('/api/admin/investment/plans', adminProtect, async (req, res) => {
   }
 });
 
-// =============================================
-// CANCEL INVESTMENT (Admin)
-// =============================================
-app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { reason } = req.body;
 
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Invalid investment ID'
-      });
-    }
-
-    const investment = await Investment.findById(id).populate('user', 'firstName lastName email');
-    
-    if (!investment) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Investment not found'
-      });
-    }
-
-    if (investment.status !== 'active') {
-      return res.status(400).json({
-        status: 'fail',
-        message: `Cannot cancel investment with status: ${investment.status}`
-      });
-    }
-
-    // Update investment status
-    investment.status = 'cancelled';
-    investment.completionDate = new Date();
-    investment.adminNotes = reason || 'Cancelled by admin';
-    await investment.save();
-
-    // Refund the investment amount to user's main balance
-    const user = await User.findById(investment.user._id);
-    if (user && investment.amountBTC) {
-      const currentBTCBalance = user.balances.main?.get('btc') || 0;
-      user.balances.main.set('btc', currentBTCBalance + investment.amountBTC);
-      
-      const currentUSDBalance = user.balances.main?.get('usd') || 0;
-      user.balances.main.set('usd', currentUSDBalance + investment.amount);
-      await user.save();
-    }
-
-    // Log the activity
-    await logActivity(
-      'investment_cancelled',
-      'Investment',
-      investment._id,
-      req.admin._id,
-      'Admin',
-      req,
-      {
-        userId: investment.user._id,
-        amount: investment.amount,
-        reason: reason
-      }
-    );
-
-    res.status(200).json({
-      status: 'success',
-      message: 'Investment cancelled successfully',
-      data: {
-        investment: {
-          _id: investment._id,
-          status: investment.status,
-          cancelledAt: investment.completionDate
-        }
-      }
-    });
-
-  } catch (err) {
-    console.error('Error cancelling investment:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to cancel investment'
-    });
-  }
-});
 
 // =============================================
-// GET SINGLE INVESTMENT PLAN
+// GET SINGLE INVESTMENT PLAN - For edit modal
 // =============================================
 app.get('/api/admin/investment/plans/:id', adminProtect, async (req, res) => {
   try {
@@ -22638,9 +22648,24 @@ app.get('/api/admin/investment/plans/:id', adminProtect, async (req, res) => {
       });
     }
 
+    // Format plan as HTML expects
+    const formattedPlan = {
+      _id: plan._id,
+      name: plan.name || '',
+      description: plan.description || '',
+      minAmount: plan.minAmount || 0,
+      maxAmount: plan.maxAmount || 0,
+      duration: plan.duration || 0,
+      dailyProfit: plan.percentage || 0,
+      totalProfit: plan.percentage || 0,
+      status: plan.isActive ? 'active' : 'inactive'
+    };
+
     res.status(200).json({
       status: 'success',
-      data: { plan }
+      data: {
+        plan: formattedPlan
+      }
     });
 
   } catch (err) {
@@ -22648,107 +22673,6 @@ app.get('/api/admin/investment/plans/:id', adminProtect, async (req, res) => {
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch investment plan'
-    });
-  }
-});
-
-
-// =============================================
-// UPDATE INVESTMENT PLAN
-// =============================================
-app.put('/api/admin/investment/plans/:id', adminProtect, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { name, description, minAmount, maxAmount, duration, dailyProfit, totalProfit, status } = req.body;
-
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Invalid plan ID'
-      });
-    }
-
-    const updateData = {};
-    if (name) updateData.name = name;
-    if (description) updateData.description = description;
-    if (minAmount) updateData.minAmount = minAmount;
-    if (maxAmount) updateData.maxAmount = maxAmount;
-    if (duration) updateData.duration = duration;
-    if (dailyProfit) updateData.dailyProfit = dailyProfit;
-    if (totalProfit) updateData.totalProfit = totalProfit;
-    if (status) updateData.status = status;
-
-    const plan = await Plan.findByIdAndUpdate(id, updateData, { new: true, runValidators: true });
-
-    if (!plan) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Investment plan not found'
-      });
-    }
-
-    res.status(200).json({
-      status: 'success',
-      message: 'Investment plan updated successfully',
-      data: { plan }
-    });
-
-  } catch (err) {
-    console.error('Error updating plan:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to update investment plan'
-    });
-  }
-});
-
-
-// =============================================
-// DELETE INVESTMENT PLAN
-// =============================================
-app.delete('/api/admin/investment/plans/:id', adminProtect, async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Invalid plan ID'
-      });
-    }
-
-    // Check if any active investments use this plan
-    const activeInvestments = await Investment.countDocuments({ 
-      plan: id, 
-      status: 'active' 
-    });
-
-    if (activeInvestments > 0) {
-      return res.status(400).json({
-        status: 'fail',
-        message: `Cannot delete plan. ${activeInvestments} active investment(s) are using this plan.`
-      });
-    }
-
-    const plan = await Plan.findByIdAndDelete(id);
-
-    if (!plan) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Investment plan not found'
-      });
-    }
-
-    res.status(200).json({
-      status: 'success',
-      message: 'Investment plan deleted successfully'
-    });
-
-  } catch (err) {
-    console.error('Error deleting plan:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to delete investment plan'
     });
   }
 });
