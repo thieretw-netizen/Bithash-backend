@@ -23584,7 +23584,7 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
           details: emailMessage,
           actionRequired: `Your refund of ${formattedRefundBTC} BTC has been credited to your Matured Wallet. Current balance: $${formattedNewMaturedUSD} USD`,
           buttonText: 'Invest Now',
-          actionLink: 'https://www.bithashcapital.live/invest',
+          actionLink: 'https://www.bithashcapital.live',
           referenceId: refundReference
         }
       });
