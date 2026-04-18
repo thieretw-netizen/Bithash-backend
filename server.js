@@ -712,25 +712,87 @@ const UserLogSchema = new mongoose.Schema({
     timezone: String,
     deviceId: String
   },
+  // =============================================
+  // FIXED: Enhanced Location Field Structure
+  // Now properly stores all location data needed by admin dashboard
+  // =============================================
   location: {
-    ip: String,
+    // IP address (removed from JSON output for security)
+    ip: {
+      type: String,
+      select: false  // Don't expose IP in API responses by default
+    },
+    // Country information
     country: {
-      code: String,
-      name: String
+      code: {
+        type: String,
+        uppercase: true,
+        default: 'Unknown'
+      },
+      name: {
+        type: String,
+        default: 'Unknown'
+      }
     },
+    // Region/State information
     region: {
-      code: String,
-      name: String
+      code: {
+        type: String,
+        default: 'Unknown'
+      },
+      name: {
+        type: String,
+        default: 'Unknown'
+      }
     },
-    city: String,
-    postalCode: String,
-    latitude: Number,
-    longitude: Number,
-    timezone: String,
-    isp: String,
-    asn: String,
-    street: String,
-    exactLocation: { type: Boolean, default: true }
+    // City
+    city: {
+      type: String,
+      default: 'Unknown'
+    },
+    // Postal/ZIP code
+    postalCode: {
+      type: String,
+      default: 'Unknown'
+    },
+    // Geographic coordinates (for map display)
+    latitude: {
+      type: Number,
+      default: null
+    },
+    longitude: {
+      type: Number,
+      default: null
+    },
+    // Timezone
+    timezone: {
+      type: String,
+      default: 'Unknown'
+    },
+    // ISP information
+    isp: {
+      type: String,
+      default: 'Unknown'
+    },
+    asn: {
+      type: String,
+      default: 'Unknown'
+    },
+    // Street address (if available)
+    street: {
+      type: String,
+      default: 'Unknown'
+    },
+    // Flag indicating if this is an exact location (vs approximate)
+    exactLocation: {
+      type: Boolean,
+      default: false
+    },
+    // Formatted location string for quick display (backward compatibility)
+    formatted: {
+      type: String,
+      default: 'Unknown'
+    }
   },
   status: {
     type: String,
@@ -822,23 +884,63 @@ const UserLogSchema = new mongoose.Schema({
   toJSON: { 
     virtuals: true,
     transform: function(doc, ret) {
-      delete ret.deviceInfo.deviceId;
-      delete ret.location.ip;
-      delete ret.metadata.adminId;
+      // Remove sensitive data from JSON output
+      delete ret.deviceInfo?.deviceId;
+      delete ret.location?.ip;
+      delete ret.metadata?.adminId;
       return ret;
     }
   },
   toObject: { 
     virtuals: true,
     transform: function(doc, ret) {
-      delete ret.deviceInfo.deviceId;
-      delete ret.location.ip;
-      delete ret.metadata.adminId;
+      delete ret.deviceInfo?.deviceId;
+      delete ret.location?.ip;
+      delete ret.metadata?.adminId;
       return ret;
     }
   }
 });
 
+// =============================================
+// VIRTUAL: Get formatted location string for display
+// =============================================
+UserLogSchema.virtual('locationDisplay').get(function() {
+  if (this.location && this.location.formatted && this.location.formatted !== 'Unknown') {
+    return this.location.formatted;
+  }
+  
+  const parts = [];
+  if (this.location?.city && this.location.city !== 'Unknown') parts.push(this.location.city);
+  if (this.location?.region?.name && this.location.region.name !== 'Unknown') parts.push(this.location.region.name);
+  if (this.location?.country?.name && this.location.country.name !== 'Unknown') parts.push(this.location.country.name);
+  
+  return parts.length > 0 ? parts.join(', ') : 'Unknown';
+});
+
+// =============================================
+// VIRTUAL: Get map URL for this location
+// =============================================
+UserLogSchema.virtual('mapUrl').get(function() {
+  if (this.location?.latitude && this.location?.longitude) {
+    return `https://www.google.com/maps/search/?api=1&query=${this.location.latitude},${this.location.longitude}&layer=satellite`;
+  }
+  if (this.locationDisplay && this.locationDisplay !== 'Unknown') {
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(this.locationDisplay)}&layer=satellite`;
+  }
+  return null;
+});
+
+// =============================================
+// VIRTUAL: Check if location has coordinates
+// =============================================
+UserLogSchema.virtual('hasExactCoordinates').get(function() {
+  return !!(this.location?.latitude && this.location?.longitude && this.location?.exactLocation === true);
+});
+
+// =============================================
+// VIRTUAL: Action description for display
+// =============================================
 UserLogSchema.virtual('actionDescription').get(function() {
   const actionDescriptions = {
     'signup': 'User registered a new account',
@@ -855,6 +957,9 @@ UserLogSchema.virtual('actionDescription').get(function() {
   return actionDescriptions[this.action] || `User performed ${this.action.replace(/_/g, ' ')}`;
 });
 
+// =============================================
+// VIRTUAL: Check if this is a financial action
+// =============================================
 UserLogSchema.virtual('isFinancialAction').get(function() {
   return [
     'deposit_created', 'deposit_completed', 'withdrawal_created', 
@@ -863,17 +968,24 @@ UserLogSchema.virtual('isFinancialAction').get(function() {
   ].includes(this.action);
 });
 
+// =============================================
+// VIRTUAL: Check if this is a security action
+// =============================================
 UserLogSchema.virtual('isSecurityAction').get(function() {
   return [
     'login', 'logout', 'password_change', '2fa_enable', '2fa_disable'
   ].includes(this.action);
 });
 
+// =============================================
+// INDEXES for performance
+// =============================================
 UserLogSchema.index({ user: 1, createdAt: -1 });
 UserLogSchema.index({ action: 1, createdAt: -1 });
 UserLogSchema.index({ status: 1, createdAt: -1 });
 UserLogSchema.index({ ipAddress: 1, createdAt: -1 });
 UserLogSchema.index({ 'location.country.code': 1, createdAt: -1 });
+UserLogSchema.index({ 'location.city': 1, createdAt: -1 });
 UserLogSchema.index({ actionCategory: 1, createdAt: -1 });
 UserLogSchema.index({ isSuspicious: 1, createdAt: -1 });
 UserLogSchema.index({ sessionId: 1 });
@@ -882,30 +994,57 @@ UserLogSchema.index({ riskLevel: 1, createdAt: -1 });
 UserLogSchema.index({ user: 1, actionCategory: 1, createdAt: -1 });
 UserLogSchema.index({ action: 1, status: 1, createdAt: -1 });
 UserLogSchema.index({ user: 1, isSuspicious: 1, createdAt: -1 });
+
+// =============================================
+// TEXT SEARCH INDEX
+// =============================================
 UserLogSchema.index({
   'username': 'text',
   'email': 'text',
   'userFullName': 'text',
   'metadata.description': 'text',
-  'metadata.notes': 'text'
+  'metadata.notes': 'text',
+  'location.city': 'text',
+  'location.country.name': 'text',
+  'location.region.name': 'text'
 });
 
+// =============================================
+// PRE-SAVE HOOK: Auto-calculate missing fields
+// =============================================
 UserLogSchema.pre('save', function(next) {
+  // Set userFullName if missing
   if (!this.userFullName && this.username) {
     this.userFullName = this.username;
   }
   
+  // Auto-calculate action category
   if (!this.actionCategory) {
     this.actionCategory = this.calculateActionCategory(this.action);
   }
   
+  // Auto-calculate risk level
   if (!this.riskLevel || this.riskLevel === 'low') {
     this.riskLevel = this.calculateRiskLevel();
+  }
+  
+  // Auto-format location string from components if formatted is missing
+  if (this.location && (!this.location.formatted || this.location.formatted === 'Unknown')) {
+    const parts = [];
+    if (this.location.city && this.location.city !== 'Unknown') parts.push(this.location.city);
+    if (this.location.region?.name && this.location.region.name !== 'Unknown') parts.push(this.location.region.name);
+    if (this.location.country?.name && this.location.country.name !== 'Unknown') parts.push(this.location.country.name);
+    this.location.formatted = parts.length > 0 ? parts.join(', ') : 'Unknown';
   }
   
   next();
 });
 
+// =============================================
+// STATIC METHODS
+// =============================================
+
+// Find logs by user with pagination
 UserLogSchema.statics.findByUser = function(userId, options = {}) {
   const { limit = 50, page = 1, action = null } = options;
   const skip = (page - 1) * limit;
@@ -919,6 +1058,7 @@ UserLogSchema.statics.findByUser = function(userId, options = {}) {
     .limit(limit);
 };
 
+// Get user activity summary
 UserLogSchema.statics.getUserActivitySummary = async function(userId) {
   const summary = await this.aggregate([
     { $match: { user: mongoose.Types.ObjectId(userId) } },
@@ -937,6 +1077,7 @@ UserLogSchema.statics.getUserActivitySummary = async function(userId) {
   return summary;
 };
 
+// Find suspicious activities
 UserLogSchema.statics.findSuspiciousActivities = function(days = 7) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
@@ -947,6 +1088,43 @@ UserLogSchema.statics.findSuspiciousActivities = function(days = 7) {
   }).sort({ createdAt: -1 });
 };
 
+// Get location statistics (for admin dashboard)
+UserLogSchema.statics.getLocationStats = async function(days = 30) {
+  const dateThreshold = new Date();
+  dateThreshold.setDate(dateThreshold.getDate() - days);
+  
+  return this.aggregate([
+    { $match: { createdAt: { $gte: dateThreshold } } },
+    { $match: { 'location.country.name': { $ne: 'Unknown' } } },
+    {
+      $group: {
+        _id: {
+          country: '$location.country.name',
+          countryCode: '$location.country.code',
+          city: '$location.city'
+        },
+        count: { $sum: 1 },
+        uniqueUsers: { $addToSet: '$user' }
+      }
+    },
+    {
+      $project: {
+        country: '$_id.country',
+        countryCode: '$_id.countryCode',
+        city: '$_id.city',
+        count: 1,
+        uniqueUsersCount: { $size: '$uniqueUsers' }
+      }
+    },
+    { $sort: { count: -1 } }
+  ]);
+};
+
+// =============================================
+// INSTANCE METHODS
+// =============================================
+
+// Calculate action category based on action type
 UserLogSchema.methods.calculateActionCategory = function(action) {
   const categoryMap = {
     'signup': 'authentication',
@@ -969,6 +1147,7 @@ UserLogSchema.methods.calculateActionCategory = function(action) {
   return categoryMap[action] || 'system';
 };
 
+// Calculate risk level based on action and status
 UserLogSchema.methods.calculateRiskLevel = function() {
   const highRiskActions = ['failed_login', 'suspicious_activity', 'withdrawal_created'];
   const mediumRiskActions = ['login', 'password_change', 'deposit_created'];
@@ -980,6 +1159,7 @@ UserLogSchema.methods.calculateRiskLevel = function() {
   return 'low';
 };
 
+// Mark as suspicious with reason
 UserLogSchema.methods.markAsSuspicious = function(reason) {
   this.isSuspicious = true;
   this.riskLevel = 'high';
@@ -988,6 +1168,20 @@ UserLogSchema.methods.markAsSuspicious = function(reason) {
   }
   return this.save();
 };
+
+// Update location with new data
+UserLogSchema.methods.updateLocation = function(locationData) {
+  this.location = {
+    ...this.location,
+    ...locationData,
+    formatted: locationData.formatted || this.locationDisplay
+  };
+  return this.save();
+};
+
+// =============================================
+// QUERY HELPERS
+// =============================================
 
 UserLogSchema.query.byDateRange = function(startDate, endDate) {
   return this.where('createdAt').gte(startDate).lte(endDate);
@@ -1005,6 +1199,17 @@ UserLogSchema.query.byRiskLevel = function(riskLevel) {
   return this.where('riskLevel', riskLevel);
 };
 
+UserLogSchema.query.byCountry = function(countryCode) {
+  return this.where('location.country.code', countryCode.toUpperCase());
+};
+
+UserLogSchema.query.byCity = function(cityName) {
+  return this.where('location.city', new RegExp(cityName, 'i'));
+};
+
+// =============================================
+// COMPILE AND EXPORT MODEL
+// =============================================
 const UserLog = mongoose.model('UserLog', UserLogSchema);
 
 const LoginRecordSchema = new mongoose.Schema({
