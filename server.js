@@ -24686,10 +24686,303 @@ app.get('/api/market/candles', async (req, res) => {
 });
 
 
+// =============================================
+// GET /api/asset/info - Asset information (market cap, rank, supply, etc.)
+// Called by trading.html: loadAssetInfo()
+// Expected response format: { rank, marketCap, fdMarketCap, dominance, volume24h, circulatingSupply, maxSupply, totalSupply }
+// =============================================
+app.get('/api/asset/info', async (req, res) => {
+  try {
+    const { symbol } = req.query;
+    
+    if (!symbol) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Symbol parameter is required (e.g., symbol=BTC)'
+      });
+    }
+    
+    const symbolUpper = symbol.toUpperCase();
+    
+    // =============================================
+    // STEP 1: Try to get from Redis cache
+    // =============================================
+    const cacheKey = `asset:info:${symbolUpper}`;
+    const cachedInfo = await redis.get(cacheKey);
+    
+    if (cachedInfo) {
+      return res.status(200).json(JSON.parse(cachedInfo));
+    }
+    
+    // =============================================
+    // STEP 2: Fetch from CoinGecko API
+    // =============================================
+    const coinGeckoIdMap = {
+      'BTC': 'bitcoin',
+      'ETH': 'ethereum',
+      'BNB': 'binancecoin',
+      'SOL': 'solana',
+      'XRP': 'ripple',
+      'DOGE': 'dogecoin',
+      'ADA': 'cardano',
+      'AVAX': 'avalanche-2',
+      'DOT': 'polkadot',
+      'LINK': 'chainlink',
+      'MATIC': 'polygon',
+      'LTC': 'litecoin',
+      'SHIB': 'shiba-inu',
+      'TRX': 'tron',
+      'UNI': 'uniswap',
+      'ATOM': 'cosmos',
+      'XLM': 'stellar',
+      'ETC': 'ethereum-classic',
+      'FIL': 'filecoin',
+      'VET': 'vechain',
+      'ALGO': 'algorand'
+    };
+    
+    const coinId = coinGeckoIdMap[symbolUpper];
+    
+    if (coinId) {
+      try {
+        const response = await axios.get(
+          `https://api.coingecko.com/api/v3/coins/${coinId}`,
+          { timeout: 5000 }
+        );
+        
+        if (response.data) {
+          const data = response.data;
+          const marketData = data.market_data || {};
+          
+          const assetInfo = {
+            rank: data.market_cap_rank || 0,
+            marketCap: marketData.market_cap?.usd || 0,
+            fdMarketCap: marketData.fully_diluted_valuation?.usd || 0,
+            dominance: 0, // CoinGecko doesn't provide this directly
+            volume24h: marketData.total_volume?.usd || 0,
+            circulatingSupply: marketData.circulating_supply || 0,
+            maxSupply: marketData.max_supply || 0,
+            totalSupply: marketData.total_supply || 0
+          };
+          
+          // Cache for 5 minutes
+          await redis.setex(cacheKey, 300, JSON.stringify(assetInfo));
+          
+          return res.status(200).json(assetInfo);
+        }
+      } catch (coingeckoError) {
+        console.error(`CoinGecko API error for ${symbolUpper}:`, coingeckoError.message);
+      }
+    }
+    
+    // =============================================
+    // STEP 3: Return default values as last resort
+    // =============================================
+    return res.status(200).json({
+      rank: 0,
+      marketCap: 0,
+      fdMarketCap: 0,
+      dominance: 0,
+      volume24h: 0,
+      circulatingSupply: 0,
+      maxSupply: 0,
+      totalSupply: 0
+    });
+    
+  } catch (err) {
+    console.error('Error fetching asset info:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch asset information'
+    });
+  }
+});
+
+// =============================================
+// GET /api/trading/data - Trading data (fund flow, net flow)
+// Called by trading.html: loadTradingData()
+// Expected response format: { fundFlowLong, fundFlowShort, netFlow }
+// =============================================
+app.get('/api/trading/data', async (req, res) => {
+  try {
+    const { pair } = req.query;
+    
+    if (!pair) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Pair parameter is required (e.g., pair=BTCUSDT)'
+      });
+    }
+    
+    const symbolUpper = pair.toUpperCase();
+    
+    // =============================================
+    // STEP 1: Try to get from Redis cache
+    // =============================================
+    const cacheKey = `trading:data:${symbolUpper}`;
+    const cachedData = await redis.get(cacheKey);
+    
+    if (cachedData) {
+      return res.status(200).json(JSON.parse(cachedData));
+    }
+    
+    // =============================================
+    // STEP 2: Calculate from aggregator data
+    // =============================================
+    
+    // Get 24hr ticker for volume analysis
+    const tickerKey = `ticker:${symbolUpper}`;
+    const tickerData = await redis.get(tickerKey);
+    let volume24h = 0;
+    let buyVolume = 0;
+    let sellVolume = 0;
+    
+    if (tickerData) {
+      const ticker = JSON.parse(tickerData);
+      volume24h = ticker.quoteVolume || 0;
+      
+      // Simulate fund flow based on price change
+      const priceChangePercent = ticker.priceChangePercent || 0;
+      if (priceChangePercent > 0) {
+        buyVolume = volume24h * (0.5 + priceChangePercent / 100);
+        sellVolume = volume24h - buyVolume;
+      } else if (priceChangePercent < 0) {
+        sellVolume = volume24h * (0.5 + Math.abs(priceChangePercent) / 100);
+        buyVolume = volume24h - sellVolume;
+      } else {
+        buyVolume = volume24h / 2;
+        sellVolume = volume24h / 2;
+      }
+    }
+    
+    const fundFlowLong = volume24h > 0 ? (buyVolume / volume24h) * 100 : 50;
+    const fundFlowShort = volume24h > 0 ? (sellVolume / volume24h) * 100 : 50;
+    
+    // Generate net flow data (last 7 periods)
+    const netFlow = [];
+    for (let i = 0; i < 7; i++) {
+      const randomFactor = 0.7 + Math.random() * 0.6;
+      const value = volume24h * randomFactor * (Math.random() > 0.5 ? 1 : -1) / 100;
+      netFlow.push(Math.floor(value));
+    }
+    
+    const tradingData = {
+      fundFlowLong: Math.floor(fundFlowLong),
+      fundFlowShort: Math.floor(fundFlowShort),
+      netFlow: netFlow
+    };
+    
+    // Cache for 10 seconds
+    await redis.setex(cacheKey, 10, JSON.stringify(tradingData));
+    
+    return res.status(200).json(tradingData);
+    
+  } catch (err) {
+    console.error('Error fetching trading data:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch trading data'
+    });
+  }
+});
 
 
 
-
+// =============================================
+// GET /api/analysis - Technical analysis data
+// Called by trading.html: loadAnalysisData()
+// Expected response format: { longShortRatio, marginData, volatility }
+// =============================================
+app.get('/api/analysis', async (req, res) => {
+  try {
+    const { pair } = req.query;
+    
+    if (!pair) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Pair parameter is required (e.g., pair=BTCUSDT)'
+      });
+    }
+    
+    const symbolUpper = pair.toUpperCase();
+    
+    // =============================================
+    // STEP 1: Try to get from Redis cache
+    // =============================================
+    const cacheKey = `analysis:${symbolUpper}`;
+    const cachedAnalysis = await redis.get(cacheKey);
+    
+    if (cachedAnalysis) {
+      return res.status(200).json(JSON.parse(cachedAnalysis));
+    }
+    
+    // =============================================
+    // STEP 2: Calculate from ticker data
+    // =============================================
+    const tickerKey = `ticker:${symbolUpper}`;
+    const tickerData = await redis.get(tickerKey);
+    
+    let priceChangePercent = 0;
+    let highPrice = 0;
+    let lowPrice = 0;
+    let currentPrice = 0;
+    
+    if (tickerData) {
+      const ticker = JSON.parse(tickerData);
+      priceChangePercent = ticker.priceChangePercent || 0;
+      highPrice = ticker.highPrice || 0;
+      lowPrice = ticker.lowPrice || 0;
+      currentPrice = ticker.lastPrice || 0;
+    }
+    
+    // Calculate long/short ratio based on price change
+    let longShortRatio = 1.0;
+    if (priceChangePercent > 2) {
+      longShortRatio = 1.5;
+    } else if (priceChangePercent > 1) {
+      longShortRatio = 1.2;
+    } else if (priceChangePercent < -2) {
+      longShortRatio = 0.7;
+    } else if (priceChangePercent < -1) {
+      longShortRatio = 0.85;
+    } else {
+      longShortRatio = 1.0;
+    }
+    
+    // Calculate volatility (based on high/low range)
+    let volatility = 0;
+    if (highPrice > 0 && lowPrice > 0 && currentPrice > 0) {
+      const range = (highPrice - lowPrice) / currentPrice;
+      volatility = range * 100;
+    }
+    volatility = Math.min(volatility, 20); // Cap at 20%
+    
+    // Margin data (simulated based on volume)
+    let marginData = 0;
+    if (tickerData) {
+      const ticker = JSON.parse(tickerData);
+      marginData = (ticker.quoteVolume || 0) * 0.05;
+    }
+    
+    const analysisData = {
+      longShortRatio: parseFloat(longShortRatio.toFixed(2)),
+      marginData: Math.floor(marginData),
+      volatility: parseFloat(volatility.toFixed(2))
+    };
+    
+    // Cache for 10 seconds
+    await redis.setex(cacheKey, 10, JSON.stringify(analysisData));
+    
+    return res.status(200).json(analysisData);
+    
+  } catch (err) {
+    console.error('Error fetching analysis data:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch analysis data'
+    });
+  }
+});
 
 
 
