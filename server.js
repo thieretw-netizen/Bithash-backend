@@ -24041,7 +24041,6 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
 
 const PDFDocument = require('pdfkit');
 const { createCanvas } = require('canvas');
-const fs = require('fs');
 const path = require('path');
 
 // =============================================
