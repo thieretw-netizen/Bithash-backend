@@ -24248,7 +24248,127 @@ app.get('/api/market/all-pairs', async (req, res) => {
 
 
 
-
+// =============================================
+// GET /api/admin/crypto-assets - Crypto assets overview with real-time prices
+// Called by admin dashboard to display crypto assets grid
+// =============================================
+app.get('/api/admin/crypto-assets', adminProtect, async (req, res) => {
+  try {
+    // Fetch all supported cryptocurrencies with real-time data
+    const supportedCryptos = [
+      { symbol: 'BTC', name: 'Bitcoin', logoUrl: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png' },
+      { symbol: 'ETH', name: 'Ethereum', logoUrl: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png' },
+      { symbol: 'USDT', name: 'Tether', logoUrl: 'https://assets.coingecko.com/coins/images/325/large/Tether.png' },
+      { symbol: 'BNB', name: 'Binance Coin', logoUrl: 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png' },
+      { symbol: 'SOL', name: 'Solana', logoUrl: 'https://assets.coingecko.com/coins/images/4128/large/solana.png' },
+      { symbol: 'USDC', name: 'USD Coin', logoUrl: 'https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png' },
+      { symbol: 'XRP', name: 'Ripple', logoUrl: 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png' },
+      { symbol: 'DOGE', name: 'Dogecoin', logoUrl: 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png' },
+      { symbol: 'ADA', name: 'Cardano', logoUrl: 'https://assets.coingecko.com/coins/images/975/large/cardano.png' },
+      { symbol: 'SHIB', name: 'Shiba Inu', logoUrl: 'https://assets.coingecko.com/coins/images/11939/large/shiba.png' },
+      { symbol: 'AVAX', name: 'Avalanche', logoUrl: 'https://assets.coingecko.com/coins/images/12559/large/Avalanche_Circle_RedWhite.png' },
+      { symbol: 'DOT', name: 'Polkadot', logoUrl: 'https://assets.coingecko.com/coins/images/12171/large/polkadot.png' },
+      { symbol: 'TRX', name: 'TRON', logoUrl: 'https://assets.coingecko.com/coins/images/1094/large/tron-logo.png' },
+      { symbol: 'LINK', name: 'Chainlink', logoUrl: 'https://assets.coingecko.com/coins/images/877/large/chainlink-new-logo.png' },
+      { symbol: 'MATIC', name: 'Polygon', logoUrl: 'https://assets.coingecko.com/coins/images/4713/large/matic-token-icon.png' },
+      { symbol: 'LTC', name: 'Litecoin', logoUrl: 'https://assets.coingecko.com/coins/images/2/large/litecoin.png' }
+    ];
+    
+    const assets = [];
+    
+    for (const crypto of supportedCryptos) {
+      try {
+        // Get real-time price from CoinGecko
+        let price = 0;
+        let change24h = 0;
+        let marketCap = 0;
+        let volume24h = 0;
+        
+        const coinIdMap = {
+          'BTC': 'bitcoin',
+          'ETH': 'ethereum',
+          'USDT': 'tether',
+          'BNB': 'binancecoin',
+          'SOL': 'solana',
+          'USDC': 'usd-coin',
+          'XRP': 'ripple',
+          'DOGE': 'dogecoin',
+          'ADA': 'cardano',
+          'SHIB': 'shiba-inu',
+          'AVAX': 'avalanche-2',
+          'DOT': 'polkadot',
+          'TRX': 'tron',
+          'LINK': 'chainlink',
+          'MATIC': 'matic-network',
+          'LTC': 'litecoin'
+        };
+        
+        const coinId = coinIdMap[crypto.symbol];
+        
+        if (coinId) {
+          const response = await axios.get(
+            `https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd&include_24hr_change=true&include_market_cap=true&include_24hr_vol=true`,
+            { timeout: 5000 }
+          );
+          
+          if (response.data && response.data[coinId]) {
+            price = response.data[coinId].usd || 0;
+            change24h = response.data[coinId].usd_24h_change || 0;
+            marketCap = response.data[coinId].usd_market_cap || 0;
+            volume24h = response.data[coinId].usd_24h_vol || 0;
+          }
+        }
+        
+        // For stablecoins, force price to 1 if not available
+        if (crypto.symbol === 'USDT' || crypto.symbol === 'USDC') {
+          price = price > 0 ? price : 1;
+        }
+        
+        assets.push({
+          symbol: crypto.symbol,
+          name: crypto.name,
+          logoUrl: crypto.logoUrl,
+          price: price,
+          change24h: change24h.toFixed(2),
+          marketCap: marketCap,
+          volume24h: volume24h,
+          lastUpdated: new Date()
+        });
+        
+      } catch (err) {
+        console.warn(`Failed to fetch data for ${crypto.symbol}:`, err.message);
+        
+        // Add with fallback values
+        assets.push({
+          symbol: crypto.symbol,
+          name: crypto.name,
+          logoUrl: crypto.logoUrl,
+          price: crypto.symbol === 'USDT' || crypto.symbol === 'USDC' ? 1 : 0,
+          change24h: '0.00',
+          marketCap: 0,
+          volume24h: 0,
+          lastUpdated: new Date()
+        });
+      }
+    }
+    
+    res.status(200).json({
+      status: 'success',
+      data: {
+        assets: assets,
+        totalAssets: assets.length,
+        fetchedAt: new Date()
+      }
+    });
+    
+  } catch (err) {
+    console.error('Error fetching crypto assets:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch crypto assets'
+    });
+  }
+});
 
 
 
