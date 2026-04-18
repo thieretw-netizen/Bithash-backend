@@ -19370,59 +19370,68 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
 
 
 
+
+
+
+
+
+
 // =============================================
-// ADMIN DASHBOARD ENDPOINT 1: GET /api/admin/stats
-// CORRECT: Fetches from User, Transaction, PlatformRevenue schemas
+// ADMIN DASHBOARD - THREE ROBUST ENDPOINTS
 // =============================================
-app.get('/api/admin/stats', adminProtect, restrictTo('super', 'support', 'finance'), async (req, res) => {
+
+/**
+ * ENDPOINT 1: GET /api/admin/stats
+ * Fetches real-time statistics from ALL schemas
+ * Includes real-time distribution, system status, and pending counts
+ */
+app.get('/api/admin/stats', adminProtect, async (req, res) => {
   try {
-    // ✅ TOTAL USERS from User schema
-    const totalUsers = await User.countDocuments({});
+    // Get current investor count from Redis (or calculate from User schema)
+    let totalUsers = await User.countDocuments({});
     
-    // Get yesterday's user count for percentage change
+    // Get yesterday's user count for change calculation
     const yesterdayStart = new Date();
     yesterdayStart.setDate(yesterdayStart.getDate() - 1);
     yesterdayStart.setHours(0, 0, 0, 0);
     
+    const yesterdayUsers = await User.countDocuments({ createdAt: { $lt: yesterdayStart } });
+    const usersChange = yesterdayUsers > 0 ? ((totalUsers - yesterdayUsers) / yesterdayUsers) * 100 : 0;
+    
+    // Get deposit statistics
+    const depositStats = await Transaction.aggregate([
+      { $match: { type: 'deposit', status: 'completed' } },
+      { $group: { _id: null, total: { $sum: '$amount' }, count: { $sum: 1 } } }
+    ]);
+    const totalDeposits = depositStats[0]?.total || 0;
+    
+    // Get yesterday's deposits
     const yesterdayEnd = new Date();
     yesterdayEnd.setDate(yesterdayEnd.getDate() - 1);
     yesterdayEnd.setHours(23, 59, 59, 999);
     
-    const yesterdayUsers = await User.countDocuments({ 
-      createdAt: { $gte: yesterdayStart, $lte: yesterdayEnd } 
-    });
-    const usersChange = yesterdayUsers > 0 ? ((totalUsers - yesterdayUsers) / yesterdayUsers) * 100 : 0;
-    
-    // ✅ ACTIVE DEPOSITS from Transaction schema (completed deposits)
-    const totalDeposits = await Transaction.aggregate([
-      { $match: { type: 'deposit', status: 'completed' } },
-      { $group: { _id: null, total: { $sum: '$amount' } } }
-    ]);
-    const totalDepositsAmount = totalDeposits[0]?.total || 0;
-    
-    // Yesterday's deposits for percentage change
     const yesterdayDeposits = await Transaction.aggregate([
       { $match: { type: 'deposit', status: 'completed', createdAt: { $gte: yesterdayStart, $lte: yesterdayEnd } } },
       { $group: { _id: null, total: { $sum: '$amount' } } }
     ]);
     const depositsChange = yesterdayDeposits[0]?.total > 0 
-      ? ((totalDepositsAmount - yesterdayDeposits[0].total) / yesterdayDeposits[0].total) * 100 
+      ? ((totalDeposits - yesterdayDeposits[0].total) / yesterdayDeposits[0].total) * 100 
       : 0;
     
-    // ✅ PENDING WITHDRAWALS from Transaction schema
+    // Get pending withdrawals
     const pendingWithdrawals = await Transaction.aggregate([
       { $match: { type: 'withdrawal', status: 'pending' } },
       { $group: { _id: null, total: { $sum: '$amount' } } }
     ]);
     const pendingWithdrawalTotal = pendingWithdrawals[0]?.total || 0;
     
-    // ✅ PLATFORM REVENUE from PlatformRevenue schema
+    // Get platform revenue
     const revenueStats = await PlatformRevenue.aggregate([
       { $group: { _id: null, total: { $sum: '$amount' } } }
     ]);
     const platformRevenue = revenueStats[0]?.total || 0;
     
-    // ✅ REAL-TIME ASSET DISTRIBUTION from User.balances Maps
+    // Calculate real-time asset distribution from User balances
     const users = await User.find({}).select('balances').lean();
     let totalMainUSD = 0;
     let totalMaturedUSD = 0;
@@ -19430,7 +19439,7 @@ app.get('/api/admin/stats', adminProtect, restrictTo('super', 'support', 'financ
     
     for (const user of users) {
       if (user.balances) {
-        // MAIN wallet - crypto assets that fluctuate
+        // MAIN wallet - fluctuates with crypto prices
         if (user.balances.main) {
           const entries = user.balances.main instanceof Map 
             ? Array.from(user.balances.main.entries())
@@ -19443,7 +19452,7 @@ app.get('/api/admin/stats', adminProtect, restrictTo('super', 'support', 'financ
           }
         }
         
-        // MATURED wallet - crypto assets that fluctuate
+        // MATURED wallet - fluctuates with crypto prices
         if (user.balances.matured) {
           const entries = user.balances.matured instanceof Map
             ? Array.from(user.balances.matured.entries())
@@ -19456,24 +19465,19 @@ app.get('/api/admin/stats', adminProtect, restrictTo('super', 'support', 'financ
           }
         }
         
-        // ACTIVE wallet - FIXED value (mining contracts, no fluctuation)
+        // ACTIVE wallet - FIXED, no fluctuation
         if (user.balances.active) {
           const entries = user.balances.active instanceof Map
             ? Array.from(user.balances.active.entries())
             : Object.entries(user.balances.active);
           for (const [asset, balance] of entries) {
-            if (balance > 0 && asset === 'usd') {
-              totalActiveUSD += balance;
-            } else if (balance > 0) {
-              // For crypto in active, treat as fixed value
-              totalActiveUSD += balance;
-            }
+            if (balance > 0) totalActiveUSD += balance;
           }
         }
       }
     }
     
-    // System status
+    // Get system status metrics
     const startTime = Date.now();
     await User.findOne().lean();
     const backendResponseTime = Date.now() - startTime;
@@ -19485,7 +19489,7 @@ app.get('/api/admin/stats', adminProtect, restrictTo('super', 'support', 'financ
     
     const serverUptime = Math.floor(process.uptime() / 3600);
     
-    // Pending counts for badges
+    // Get pending counts for badges
     const pendingDepositsCount = await Transaction.countDocuments({ type: 'deposit', status: 'pending' });
     const pendingWithdrawalsCount = await Transaction.countDocuments({ type: 'withdrawal', status: 'pending' });
     const pendingKYCCount = await KYC.countDocuments({ overallStatus: 'pending' });
@@ -19498,7 +19502,7 @@ app.get('/api/admin/stats', adminProtect, restrictTo('super', 'support', 'financ
       data: {
         totalUsers: totalUsers,
         usersChange: usersChange.toFixed(2),
-        totalDeposits: totalDepositsAmount,
+        totalDeposits: totalDeposits,
         depositsChange: depositsChange.toFixed(2),
         pendingWithdrawals: pendingWithdrawalTotal,
         withdrawalsChange: '0.00',
@@ -19526,16 +19530,17 @@ app.get('/api/admin/stats', adminProtect, restrictTo('super', 'support', 'financ
     console.error('Admin stats error:', err);
     res.status(500).json({
       status: 'error',
-      message: err.message || 'Failed to fetch admin statistics'
+      message: 'Failed to fetch admin statistics'
     });
   }
 });
 
-// =============================================
-// ADMIN DASHBOARD ENDPOINT 2: GET /api/admin/activity
-// Fetches from SystemLog schema with location data
-// =============================================
-app.get('/api/admin/activity', adminProtect, restrictTo('super', 'support'), async (req, res) => {
+/**
+ * ENDPOINT 2: GET /api/admin/activity
+ * Fetches from SystemLog schema with location data mapping
+ * Checks which schema (SystemLog or UserLog) gets updated first
+ */
+app.get('/api/admin/activity', adminProtect, async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
@@ -19560,22 +19565,69 @@ app.get('/api/admin/activity', adminProtect, restrictTo('super', 'support'), asy
       query.createdAt = { ...query.createdAt, $lte: new Date(req.query.endDate) };
     }
     
-    // Get total count from SystemLog
-    const totalCount = await SystemLog.countDocuments(query);
-    const totalPages = Math.ceil(totalCount / limit);
+    // Get latest timestamp from both schemas to determine which is fresher
+    const latestSystemLog = await SystemLog.findOne().sort({ createdAt: -1 }).select('createdAt').lean();
+    const latestUserLog = await UserLog.findOne().sort({ createdAt: -1 }).select('createdAt').lean();
     
-    // Get activities from SystemLog with populated performedBy
-    const activities = await SystemLog.find(query)
-      .populate('performedBy', 'name email firstName lastName')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean();
+    let primarySource = 'systemlog';
+    if (latestUserLog && (!latestSystemLog || latestUserLog.createdAt > latestSystemLog.createdAt)) {
+      primarySource = 'userlog';
+    }
     
-    // Format activities for frontend display
+    // Fetch from primary source first, then supplement from secondary if needed
+    let activities = [];
+    let totalCount = 0;
+    
+    if (primarySource === 'systemlog') {
+      // Get total count from SystemLog
+      totalCount = await SystemLog.countDocuments(query);
+      
+      // Get activities from SystemLog
+      activities = await SystemLog.find(query)
+        .populate('performedBy', 'name email firstName lastName')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean();
+    } else {
+      // Get total count from UserLog
+      totalCount = await UserLog.countDocuments(query);
+      
+      // Get activities from UserLog
+      const userLogs = await UserLog.find(query)
+        .populate('user', 'firstName lastName email')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean();
+      
+      // Transform UserLog to match SystemLog structure
+      activities = userLogs.map(log => ({
+        _id: log._id,
+        createdAt: log.createdAt,
+        action: log.action,
+        entity: log.actionCategory || 'user',
+        entityId: log.user,
+        performedBy: log.user,
+        performedByModel: 'User',
+        ip: log.ipAddress,
+        device: log.userAgent,
+        location: log.location?.country?.name || 'Unknown',
+        changes: {
+          locationData: {
+            locationDetails: log.location,
+            exactLocation: log.location?.exactLocation || false
+          }
+        },
+        metadata: log.metadata,
+        status: log.status
+      }));
+    }
+    
+    // Format activities for frontend display with location data mapping
     const formattedActivities = activities.map(activity => {
-      // Extract location from the changes metadata (where it's stored)
-      let locationDisplay = activity.location || 'Unknown';
+      // Extract location from the changes metadata
+      let locationDisplay = 'Unknown';
       let fullLocation = '';
       let lat = null;
       let lng = null;
@@ -19596,6 +19648,8 @@ app.get('/api/admin/activity', adminProtect, restrictTo('super', 'support'), asy
         } else if (locData.location) {
           locationDisplay = locData.location;
         }
+      } else if (activity.location && typeof activity.location === 'string') {
+        locationDisplay = activity.location;
       }
       
       // Get user/actor name
@@ -19606,14 +19660,17 @@ app.get('/api/admin/activity', adminProtect, restrictTo('super', 'support'), asy
         if (activity.performedByModel === 'Admin') {
           actorName = activity.performedBy.name || 'Admin';
           actorEmail = activity.performedBy.email || '';
-        } else if (activity.performedByModel === 'User') {
+        } else if (activity.performedByModel === 'User' && activity.performedBy) {
           actorName = `${activity.performedBy.firstName || ''} ${activity.performedBy.lastName || ''}`.trim() || 'User';
           actorEmail = activity.performedBy.email || '';
         }
+      } else if (activity.user) {
+        actorName = `${activity.user.firstName || ''} ${activity.user.lastName || ''}`.trim() || 'User';
+        actorEmail = activity.user.email || '';
       }
       
       // Determine activity type for styling
-      const activityType = getActivityTypeFromEntity(activity.entity);
+      const activityType = getActivityTypeFromAction(activity.action);
       
       return {
         _id: activity._id,
@@ -19622,13 +19679,13 @@ app.get('/api/admin/activity', adminProtect, restrictTo('super', 'support'), asy
           name: actorName,
           email: actorEmail
         },
-        action: getActionDescriptionFromAction(activity.action),
+        action: getActionDescription(activity.action),
         actionRaw: activity.action,
         entity: activity.entity,
         entityId: activity.entityId,
         performedByModel: activity.performedByModel,
         activityType: activityType,
-        status: 'success',
+        status: activity.status === 'failed' ? 'failed' : 'success',
         location: locationDisplay,
         fullLocation: fullLocation,
         lat: lat,
@@ -19639,6 +19696,8 @@ app.get('/api/admin/activity', adminProtect, restrictTo('super', 'support'), asy
         metadata: activity.metadata
       };
     });
+    
+    const totalPages = Math.ceil(totalCount / limit);
     
     res.status(200).json({
       status: 'success',
@@ -19651,7 +19710,8 @@ app.get('/api/admin/activity', adminProtect, restrictTo('super', 'support'), asy
           itemsPerPage: limit,
           hasNext: page < totalPages,
           hasPrev: page > 1
-        }
+        },
+        source: primarySource // Let frontend know which schema provided the data
       }
     });
     
@@ -19664,40 +19724,88 @@ app.get('/api/admin/activity', adminProtect, restrictTo('super', 'support'), asy
   }
 });
 
-// =============================================
-// ADMIN DASHBOARD ENDPOINT 3: GET /api/admin/activity/latest
-// Real-time polling from SystemLog for LIVE feed
-// =============================================
-app.get('/api/admin/activity/latest', adminProtect, restrictTo('super', 'support'), async (req, res) => {
+/**
+ * ENDPOINT 3: GET /api/admin/activity/latest
+ * Real-time polling endpoint for LIVE feed
+ * Fetches from SystemLog and UserLog - whichever was updated most recently
+ */
+app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
   try {
     const { after, limit = 20 } = req.query;
     
-    let query = {};
+    // Get latest activities from BOTH schemas and merge
+    let systemLogs = [];
+    let userLogs = [];
     
-    // If 'after' timestamp provided, only get activities newer than that
     if (after && !isNaN(parseInt(after))) {
       const afterDate = new Date(parseInt(after));
-      query.createdAt = { $gt: afterDate };
+      
+      systemLogs = await SystemLog.find({ createdAt: { $gt: afterDate } })
+        .populate('performedBy', 'name email firstName lastName')
+        .sort({ createdAt: -1 })
+        .limit(parseInt(limit))
+        .lean();
+      
+      userLogs = await UserLog.find({ createdAt: { $gt: afterDate } })
+        .populate('user', 'firstName lastName email')
+        .sort({ createdAt: -1 })
+        .limit(parseInt(limit))
+        .lean();
     } else {
       // Default: get activities from the last 5 minutes
       const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-      query.createdAt = { $gt: fiveMinutesAgo };
+      
+      systemLogs = await SystemLog.find({ createdAt: { $gt: fiveMinutesAgo } })
+        .populate('performedBy', 'name email firstName lastName')
+        .sort({ createdAt: -1 })
+        .limit(parseInt(limit))
+        .lean();
+      
+      userLogs = await UserLog.find({ createdAt: { $gt: fiveMinutesAgo } })
+        .populate('user', 'firstName lastName email')
+        .sort({ createdAt: -1 })
+        .limit(parseInt(limit))
+        .lean();
     }
     
-    // Get latest activities from SystemLog
-    const activities = await SystemLog.find(query)
-      .populate('performedBy', 'name email firstName lastName')
-      .sort({ createdAt: -1 })
-      .limit(parseInt(limit))
-      .lean();
+    // Transform UserLogs to match SystemLog structure
+    const transformedUserLogs = userLogs.map(log => ({
+      _id: log._id,
+      createdAt: log.createdAt,
+      action: log.action,
+      entity: log.actionCategory || 'user',
+      entityId: log.user,
+      performedBy: log.user,
+      performedByModel: 'User',
+      ip: log.ipAddress,
+      device: log.userAgent,
+      location: log.location?.country?.name || 'Unknown',
+      changes: {
+        locationData: {
+          locationDetails: log.location,
+          exactLocation: log.location?.exactLocation || false
+        }
+      },
+      metadata: log.metadata,
+      status: log.status,
+      user: log.user
+    }));
+    
+    // Merge and sort by createdAt (newest first)
+    let allActivities = [...systemLogs, ...transformedUserLogs];
+    allActivities.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    
+    // Limit to requested amount
+    allActivities = allActivities.slice(0, parseInt(limit));
     
     // Format activities for frontend
-    const formattedActivities = activities.map(activity => {
-      let locationDisplay = activity.location || 'Unknown';
+    const formattedActivities = allActivities.map(activity => {
+      let locationDisplay = 'Unknown';
       let fullLocation = '';
       let lat = null;
       let lng = null;
       
+      // Extract location from changes metadata
       if (activity.changes?.locationData?.locationDetails) {
         const locData = activity.changes.locationData.locationDetails;
         const parts = [];
@@ -19709,6 +19817,8 @@ app.get('/api/admin/activity/latest', adminProtect, restrictTo('super', 'support
         fullLocation = `City: ${locData.city || 'Unknown'} | Region: ${locData.region || 'Unknown'} | Country: ${locData.country || 'Unknown'}`;
         lat = locData.latitude || null;
         lng = locData.longitude || null;
+      } else if (activity.location && typeof activity.location === 'string') {
+        locationDisplay = activity.location;
       }
       
       let actorName = 'System';
@@ -19718,10 +19828,13 @@ app.get('/api/admin/activity/latest', adminProtect, restrictTo('super', 'support
         if (activity.performedByModel === 'Admin') {
           actorName = activity.performedBy.name || 'Admin';
           actorEmail = activity.performedBy.email || '';
-        } else if (activity.performedByModel === 'User') {
+        } else if (activity.performedByModel === 'User' && activity.performedBy) {
           actorName = `${activity.performedBy.firstName || ''} ${activity.performedBy.lastName || ''}`.trim() || 'User';
           actorEmail = activity.performedBy.email || '';
         }
+      } else if (activity.user) {
+        actorName = `${activity.user.firstName || ''} ${activity.user.lastName || ''}`.trim() || 'User';
+        actorEmail = activity.user.email || '';
       }
       
       return {
@@ -19731,11 +19844,11 @@ app.get('/api/admin/activity/latest', adminProtect, restrictTo('super', 'support
           name: actorName,
           email: actorEmail
         },
-        action: getActionDescriptionFromAction(activity.action),
+        action: getActionDescription(activity.action),
         actionRaw: activity.action,
         entity: activity.entity,
-        activityType: getActivityTypeFromEntity(activity.entity),
-        status: 'success',
+        activityType: getActivityTypeFromAction(activity.action),
+        status: activity.status === 'failed' ? 'failed' : 'success',
         location: locationDisplay,
         fullLocation: fullLocation,
         lat: lat,
@@ -19746,14 +19859,17 @@ app.get('/api/admin/activity/latest', adminProtect, restrictTo('super', 'support
     });
     
     // Get latest timestamp for next poll
-    const latestTimestamp = activities.length > 0 
-      ? new Date(activities[0].timestamp).getTime()
+    const latestTimestamp = allActivities.length > 0 
+      ? new Date(allActivities[0].createdAt).getTime()
       : Date.now();
     
     // Get pending counts for badges
     const pendingDepositsCount = await Transaction.countDocuments({ type: 'deposit', status: 'pending' });
     const pendingWithdrawalsCount = await Transaction.countDocuments({ type: 'withdrawal', status: 'pending' });
     const pendingKYCCount = await KYC.countDocuments({ overallStatus: 'pending' });
+    const newUsersCount = await User.countDocuments({ 
+      createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }
+    });
     
     res.status(200).json({
       status: 'success',
@@ -19763,9 +19879,14 @@ app.get('/api/admin/activity/latest', adminProtect, restrictTo('super', 'support
         counts: {
           pendingDeposits: pendingDepositsCount,
           pendingWithdrawals: pendingWithdrawalsCount,
-          pendingKYC: pendingKYCCount
+          pendingKYC: pendingKYCCount,
+          newUsers: newUsersCount
         },
-        hasNew: activities.length > 0
+        hasNew: allActivities.length > 0,
+        sources: {
+          systemLogCount: systemLogs.length,
+          userLogCount: userLogs.length
+        }
       }
     });
     
@@ -19778,59 +19899,57 @@ app.get('/api/admin/activity/latest', adminProtect, restrictTo('super', 'support
   }
 });
 
-// Helper functions for SystemLog
-function getActionDescriptionFromAction(action) {
+// =============================================
+// HELPER FUNCTIONS
+// =============================================
+
+function getActionDescription(action) {
   const descriptions = {
     'signup_initiated': 'New user registration started',
     'login': 'User logged in',
     'logout': 'User logged out',
+    'login_attempt': 'Login attempt',
     'deposit_created': 'Deposit request created',
     'withdrawal_created': 'Withdrawal requested',
     'investment_created': 'New investment created',
     'investment_completed': 'Investment completed',
+    'investment_matured': 'Investment matured',
     'kyc_submitted': 'KYC application submitted',
     'kyc_approved': 'KYC approved',
     'kyc_rejected': 'KYC rejected',
     'profile_update': 'Profile updated',
     'password_change': 'Password changed',
     'admin_login': 'Admin logged in',
-    'admin_action': 'Admin action performed',
     'user_verified': 'User verified',
     'user_blocked': 'User blocked',
     'balance_adjustment': 'Balance adjusted by admin',
-    'manual_transaction': 'Manual transaction processed'
+    'manual_transaction': 'Manual transaction processed',
+    'referral_joined': 'New referral joined',
+    'referral_bonus_earned': 'Referral bonus earned',
+    'two_factor_enabled': '2FA enabled',
+    'two_factor_disabled': '2FA disabled',
+    'dashboard_viewed': 'Dashboard viewed',
+    'investments_viewed': 'Investments page viewed'
   };
   return descriptions[action] || action.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
 }
 
-function getActivityTypeFromEntity(entity) {
-  const typeMap = {
-    'user': 'login',
-    'transaction': 'deposit',
-    'investment': 'investment',
-    'kyc': 'kyc',
-    'admin': 'admin',
-    'authentication': 'login',
-    'financial': 'deposit'
-  };
-  return typeMap[entity] || 'other';
+function getActivityTypeFromAction(action) {
+  const actionLower = action.toLowerCase();
+  
+  if (actionLower.includes('login')) return 'login';
+  if (actionLower.includes('signup') || actionLower.includes('register')) return 'signup';
+  if (actionLower.includes('deposit')) return 'deposit';
+  if (actionLower.includes('withdrawal') || actionLower.includes('withdraw')) return 'withdrawal';
+  if (actionLower.includes('investment') && actionLower.includes('create')) return 'investment';
+  if (actionLower.includes('matured') || actionLower.includes('complete')) return 'matured';
+  if (actionLower.includes('logout')) return 'logout';
+  if (actionLower.includes('kyc')) return 'kyc';
+  if (actionLower.includes('referral')) return 'referral';
+  if (actionLower.includes('2fa') || actionLower.includes('two_factor')) return 'security';
+  
+  return 'other';
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
