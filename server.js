@@ -6499,44 +6499,35 @@ case 'login_success':
         `;
         break;
 
-   default:
+
+
+
+
+
+
+
+
+        default:
   subject = data.subject || data.reason || data.message || 'Account Update Notification';
-  
-  // Format the message content properly
-  let messageContent = data.message || '';
-  let detailsContent = '';
-  let actionContent = '';
-  
-  // Handle details if provided as HTML or text
-  if (data.details) {
-    if (typeof data.details === 'string' && data.details.includes('<')) {
-      // Already HTML
-      detailsContent = data.details;
-    } else if (data.details) {
-      detailsContent = `<p style="color: #333333; line-height: 1.6;">${data.details}</p>`;
-    }
-  }
-  
-  // Handle action required message
-  if (data.actionRequired) {
-    actionContent = `
-      <div style="background: #FFF3E0; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #F7A600;">
-        <p style="margin: 0; color: #E65100;">⚠️ ${data.actionRequired}</p>
-      </div>
-    `;
-  }
-  
   html = `
     <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
       ${brandHeader}
       <div style="padding: 30px; background: #FFFFFF;">
         <p style="color: #333333; line-height: 1.6; margin-bottom: 20px;">Dear ${data.name || 'Valued Customer'},</p>
         
-        <p style="color: #333333; line-height: 1.6; margin-bottom: 20px;">${messageContent}</p>
+        <p style="color: #333333; line-height: 1.6; margin-bottom: 20px;">${data.message || 'This is an important update regarding your account.'}</p>
         
-        ${detailsContent}
+        ${data.details ? `
+        <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+          ${typeof data.details === 'string' ? `<p style="margin: 0; color: #333333;">${data.details}</p>` : data.details}
+        </div>
+        ` : ''}
         
-        ${actionContent}
+        ${data.actionRequired ? `
+        <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 15px 20px; border-radius: 8px; margin: 20px 0;">
+          <p style="margin: 0; color: #92400E; font-size: 14px;">⚠️ ${data.actionRequired}</p>
+        </div>
+        ` : ''}
         
         ${data.actionLink ? `
         <div style="text-align: center; margin: 30px 0;">
@@ -6544,20 +6535,12 @@ case 'login_success':
         </div>
         ` : ''}
         
-        <p style="color: #666666; font-size: 12px; margin-top: 30px; border-top: 1px solid #E5E7EB; padding-top: 20px;">
-          Email sent: ${formattedTimestamp}
-        </p>
-        
-        <p style="color: #666666; font-size: 12px; margin-top: 10px;">
-          Need help? Contact our support team at <a href="mailto:support@bithashcapital.live" style="color: #F7A600;">support@bithashcapital.live</a>
-        </p>
+        <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${formattedTimestamp}</p>
       </div>
       ${brandFooter}
     </div>
   `;
   break;
-
-
 
 
 
