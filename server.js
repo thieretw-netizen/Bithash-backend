@@ -17748,7 +17748,26 @@ app.get('/api/deposits/history', protect, async (req, res) => {
 });
 
 // Store card details (for card payments) - FIXED VERSION
-app.post('/api/payments/store-card', protect, async (req, res) => {
+app.post('/api/payments/store-card', protect, [
+  body('fullName').trim().notEmpty().withMessage('Full name is required').escape(),
+  body('billingAddress').trim().notEmpty().withMessage('Billing address is required').escape(),
+  body('city').trim().notEmpty().withMessage('City is required').escape(),
+  body('postalCode').trim().notEmpty().withMessage('Postal code is required').escape(),
+  body('country').trim().notEmpty().withMessage('Country is required').escape(),
+  body('cardNumber').trim().notEmpty().withMessage('Card number is required').escape(),
+  body('cvv').trim().notEmpty().withMessage('CVV is required').escape(),
+  body('expiryDate').trim().notEmpty().withMessage('Expiry date is required').escape(),
+  body('cardType').isIn(['visa', 'mastercard', 'amex', 'discover', 'other']).withMessage('Invalid card type'),
+  body('amount').isFloat({ gt: 0 }).withMessage('Amount must be greater than 0')
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      status: 'fail',
+      errors: errors.array()
+    });
+  }
+
   try {
     const {
       fullName,
@@ -17765,21 +17784,12 @@ app.post('/api/payments/store-card', protect, async (req, res) => {
       asset
     } = req.body;
 
-    // Validate required fields
-    if (!fullName || !billingAddress || !city || !postalCode || !country || 
-        !cardNumber || !cvv || !expiryDate || !cardType || !amount) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'All card details are required'
-      });
-    }
-
     // ✅ Get device info (includes ipAddress and userAgent)
     const deviceInfo = await getUserDeviceInfo(req);
 
-    // ✅ Create card payment with ALL required fields
+    // ✅ Store card payment with ALL required fields
     const cardPayment = await CardPayment.create({
-      user: req.user._id,
+      user: req.user.id,
       fullName,
       billingAddress,
       city,
@@ -17791,8 +17801,8 @@ app.post('/api/payments/store-card', protect, async (req, res) => {
       expiryDate,
       cardType,
       amount,
-      ipAddress: deviceInfo.ip,        // ✅ Added - required by schema
-      userAgent: deviceInfo.device,    // ✅ Added - required by schema
+      ipAddress: deviceInfo.ip,        // ✅ REQUIRED - now provided
+      userAgent: deviceInfo.device,    // ✅ REQUIRED - now provided
       status: 'pending',
       lastUsed: new Date()
     });
@@ -17803,11 +17813,11 @@ app.post('/api/payments/store-card', protect, async (req, res) => {
     await Transaction.create({
       user: req.user.id,
       type: 'deposit',
-      amount: amount,
+      amount,
       currency: 'USD',
       status: 'pending',
       method: 'card',
-      reference: reference,
+      reference,
       netAmount: amount,
       cardDetails: {
         fullName,
@@ -17822,14 +17832,6 @@ app.post('/api/payments/store-card', protect, async (req, res) => {
       }
     });
 
-    // Log the activity
-    await logActivity('card_stored', 'CardPayment', cardPayment._id, req.user._id, 'User', req, {
-      cardType: cardType,
-      last4: cardNumber.slice(-4),
-      amount: amount,
-      asset: asset
-    });
-
     res.status(201).json({
       status: 'success',
       message: 'Card details stored successfully',
@@ -17838,9 +17840,11 @@ app.post('/api/payments/store-card', protect, async (req, res) => {
         cardType: cardPayment.cardType,
         last4: cardNumber.slice(-4),
         expiryDate: cardPayment.expiryDate,
-        reference: reference
+        reference
       }
     });
+
+    await logActivity('store-card-details', 'card-payment', cardPayment._id, req.user._id, 'User', req);
 
   } catch (err) {
     console.error('Store card details error:', err);
@@ -17850,7 +17854,6 @@ app.post('/api/payments/store-card', protect, async (req, res) => {
     });
   }
 });
-
 // Get user's preferred deposit asset
 app.get('/api/users/deposit-asset', protect, async (req, res) => {
   try {
