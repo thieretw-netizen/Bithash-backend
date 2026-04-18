@@ -24015,246 +24015,84 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
 
 
 
+
+
+
+
+
+
+
+
 // =============================================
-// GET /api/market/trades - Recent trades for a trading pair
-// Called by trading.html: fetchRecentTradesFromBackend()
-// Expected response format: Array of trades with price, amount, time, isBuyerMaker
+// GET /api/admin/transactions/volume - Transaction volume for chart (7 days)
 // =============================================
-app.get('/api/market/trades', async (req, res) => {
+app.get('/api/admin/transactions/volume', adminProtect, async (req, res) => {
   try {
-    // Validate required parameters
-    const { symbol, limit = 50 } = req.query;
+    const days = parseInt(req.query.days) || 7;
     
-    if (!symbol) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Symbol parameter is required (e.g., symbol=BTCUSDT)'
-      });
-    }
+    // Calculate date range
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+    startDate.setHours(0, 0, 0, 0);
     
-    // Validate and sanitize limit
-    const parsedLimit = parseInt(limit);
-    const safeLimit = Math.min(Math.max(parsedLimit || 50, 1), 100);
-    
-    const symbolUpper = symbol.toUpperCase();
-    
-    // =============================================
-    // STEP 1: Try to get trades from Redis cache (aggregator)
-    // =============================================
-    const tradesKey = `trades:${symbolUpper}`;
-    const cachedTrades = await redis.get(tradesKey);
-    
-    if (cachedTrades) {
-      const trades = JSON.parse(cachedTrades);
-      const limitedTrades = trades.slice(0, safeLimit);
-      
-      // Format exactly as trading.html expects
-      const formattedTrades = limitedTrades.map(trade => ({
-        price: parseFloat(trade.price),
-        amount: parseFloat(trade.amount),
-        time: trade.time || Date.now(),
-        isBuyerMaker: trade.isBuyerMaker || false
-      }));
-      
-      return res.status(200).json(formattedTrades);
-    }
-    
-    // =============================================
-    // STEP 2: Fallback - Fetch from Binance API directly
-    // =============================================
-    try {
-      const response = await axios.get(
-        `https://api.binance.com/api/v3/trades?symbol=${symbolUpper}&limit=${safeLimit}`,
-        { timeout: 5000 }
-      );
-      
-      if (response.data && Array.isArray(response.data)) {
-        const formattedTrades = response.data.map(trade => ({
-          price: parseFloat(trade.price),
-          amount: parseFloat(trade.qty),
-          time: trade.time,
-          isBuyerMaker: trade.isBuyerMaker
-        }));
-        
-        // Cache for 5 seconds (trades update frequently)
-        await redis.setex(tradesKey, 5, JSON.stringify(formattedTrades));
-        
-        return res.status(200).json(formattedTrades);
-      }
-    } catch (binanceError) {
-      console.error(`Binance API error for ${symbolUpper} trades:`, binanceError.message);
-    }
-    
-    // =============================================
-    // STEP 3: No data available
-    // =============================================
-    return res.status(200).json([]);
-    
-  } catch (err) {
-    console.error('Error fetching trades:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch recent trades'
-    });
-  }
-});
-
-
-
-
-
-
-
-
-
-
-app.get('/api/market/ticker/24hr', async (req, res) => {
-  try {
-    // Get all trading pairs
-    const allPairs = await redis.get('market:all:pairs');
-    let pairs = [];
-    
-    if (allPairs) {
-      pairs = JSON.parse(allPairs);
-    } else {
-      // Fallback to fetch from Binance
-      const response = await axios.get('https://api.binance.com/api/v3/exchangeInfo');
-      pairs = response.data.symbols
-        .filter(s => s.quoteAsset === 'USDT' && s.status === 'TRADING')
-        .map(s => ({ symbol: s.symbol, base: s.baseAsset, quote: s.quoteAsset }));
-    }
-    
-    // Get ticker for each pair from Redis
-    const tickerData = [];
-    
-    for (const pair of pairs.slice(0, 100)) { // Limit to 100 for performance
-      const tickerKey = `ticker:${pair.symbol}`;
-      const cachedTicker = await redis.get(tickerKey);
-      
-      if (cachedTicker) {
-        const ticker = JSON.parse(cachedTicker);
-        tickerData.push({
-          symbol: pair.symbol,
-          price: ticker.lastPrice || 0,
-          change24h: ticker.priceChangePercent || 0
-        });
-      }
-    }
-    
-    // Sort by volume or market cap (highest first)
-    tickerData.sort((a, b) => b.volume - a.volume);
-    
-    res.status(200).json(tickerData);
-    
-  } catch (err) {
-    console.error('Error fetching all tickers:', err);
-    res.status(500).json([]);
-  }
-});
-
-
-
-// =============================================
-// GET /api/market/all-pairs - All available trading pairs
-// Called by trading.html: fetchAllPairsFromBackend()
-// Expected response format: { pairs: [], quoteAssets: [] }
-// =============================================
-app.get('/api/market/all-pairs', async (req, res) => {
-  try {
-    // =============================================
-    // STEP 1: Try to get pairs from Redis cache
-    // =============================================
-    const cachedPairs = await redis.get('market:all:pairs');
-    const cachedQuoteAssets = await redis.get('market:quote:assets');
-    
-    if (cachedPairs && cachedQuoteAssets) {
-      return res.status(200).json({
-        pairs: JSON.parse(cachedPairs),
-        quoteAssets: JSON.parse(cachedQuoteAssets)
-      });
-    }
-    
-    // =============================================
-    // STEP 2: Fetch from Binance API
-    // =============================================
-    try {
-      const response = await axios.get(
-        'https://api.binance.com/api/v3/exchangeInfo',
-        { timeout: 10000 }
-      );
-      
-      if (response.data && response.data.symbols) {
-        // Filter for USDT, USDC, BUSD, BTC, ETH pairs
-        const quoteAssets = ['USDT', 'USDC', 'BUSD', 'BTC', 'ETH'];
-        const pairs = [];
-        
-        for (const quote of quoteAssets) {
-          const filteredPairs = response.data.symbols
-            .filter(s => s.quoteAsset === quote && s.status === 'TRADING')
-            .map(s => ({
-              symbol: s.symbol,
-              base: s.baseAsset,
-              quote: s.quoteAsset,
-              status: 'active'
-            }));
-          
-          pairs.push(...filteredPairs);
+    // Get daily transaction volume
+    const dailyVolume = await Transaction.aggregate([
+      {
+        $match: {
+          status: 'completed',
+          createdAt: { $gte: startDate, $lte: endDate }
         }
-        
-        // Cache for 1 hour (exchange info doesn't change often)
-        await redis.setex('market:all:pairs', 3600, JSON.stringify(pairs));
-        await redis.setex('market:quote:assets', 3600, JSON.stringify(quoteAssets));
-        
-        return res.status(200).json({
-          pairs: pairs,
-          quoteAssets: quoteAssets
-        });
-      }
-    } catch (binanceError) {
-      console.error('Binance exchangeInfo error:', binanceError.message);
+      },
+      {
+        $group: {
+          _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+          volume: { $sum: '$amount' }
+        }
+      },
+      { $sort: { _id: 1 } }
+    ]);
+    
+    // Fill in missing days with zero volume
+    const labels = [];
+    const values = [];
+    const currentDate = new Date(startDate);
+    
+    for (let i = 0; i < days; i++) {
+      const dateStr = currentDate.toISOString().split('T')[0];
+      labels.push(dateStr);
+      
+      const found = dailyVolume.find(d => d._id === dateStr);
+      values.push(found ? found.volume : 0);
+      
+      currentDate.setDate(currentDate.getDate() + 1);
     }
     
-    // =============================================
-    // STEP 3: Return fallback pairs as last resort
-    // =============================================
-    const fallbackPairs = [
-      { symbol: 'BTCUSDT', base: 'BTC', quote: 'USDT', status: 'active' },
-      { symbol: 'ETHUSDT', base: 'ETH', quote: 'USDT', status: 'active' },
-      { symbol: 'BNBUSDT', base: 'BNB', quote: 'USDT', status: 'active' },
-      { symbol: 'SOLUSDT', base: 'SOL', quote: 'USDT', status: 'active' },
-      { symbol: 'XRPUSDT', base: 'XRP', quote: 'USDT', status: 'active' },
-      { symbol: 'DOGEUSDT', base: 'DOGE', quote: 'USDT', status: 'active' },
-      { symbol: 'ADAUSDT', base: 'ADA', quote: 'USDT', status: 'active' },
-      { symbol: 'AVAXUSDT', base: 'AVAX', quote: 'USDT', status: 'active' },
-      { symbol: 'DOTUSDT', base: 'DOT', quote: 'USDT', status: 'active' },
-      { symbol: 'LINKUSDT', base: 'LINK', quote: 'USDT', status: 'active' }
-    ];
-    
-    const fallbackQuoteAssets = ['USDT'];
-    
-    return res.status(200).json({
-      pairs: fallbackPairs,
-      quoteAssets: fallbackQuoteAssets
+    res.status(200).json({
+      status: 'success',
+      data: {
+        labels: labels,
+        values: values,
+        totalVolume: values.reduce((a, b) => a + b, 0),
+        averageVolume: values.reduce((a, b) => a + b, 0) / days
+      }
     });
     
   } catch (err) {
-    console.error('Error fetching all pairs:', err);
+    console.error('Error fetching transaction volume:', err);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to fetch trading pairs'
+      message: 'Failed to fetch transaction volume'
     });
   }
 });
 
-
-
 // =============================================
-// GET /api/admin/crypto-assets - Crypto assets overview with real-time prices
-// Called by admin dashboard to display crypto assets grid
+// GET /api/admin/crypto/assets - Crypto assets with total values
 // =============================================
-app.get('/api/admin/crypto-assets', adminProtect, async (req, res) => {
+app.get('/api/admin/crypto/assets', adminProtect, async (req, res) => {
   try {
-    // Fetch all supported cryptocurrencies with real-time data
+    // List of supported cryptocurrencies with their logos
     const supportedCryptos = [
       { symbol: 'BTC', name: 'Bitcoin', logoUrl: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png' },
       { symbol: 'ETH', name: 'Ethereum', logoUrl: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png' },
@@ -24274,89 +24112,100 @@ app.get('/api/admin/crypto-assets', adminProtect, async (req, res) => {
       { symbol: 'LTC', name: 'Litecoin', logoUrl: 'https://assets.coingecko.com/coins/images/2/large/litecoin.png' }
     ];
     
+    // Get all users with balances
+    const users = await User.find({}).select('balances').lean();
+    
+    // Calculate total holdings per asset across all users
+    const assetTotals = {};
+    
+    for (const crypto of supportedCryptos) {
+      assetTotals[crypto.symbol] = {
+        totalAmount: 0,
+        totalValueUSD: 0
+      };
+    }
+    
+    for (const user of users) {
+      if (!user.balances) continue;
+      
+      // Check MAIN wallet
+      if (user.balances.main) {
+        const mainMap = user.balances.main;
+        const entries = mainMap instanceof Map ? mainMap.entries() : Object.entries(mainMap);
+        
+        for (const [asset, amount] of entries) {
+          if (amount > 0 && asset !== 'usd') {
+            const assetUpper = asset.toUpperCase();
+            if (assetTotals[assetUpper]) {
+              assetTotals[assetUpper].totalAmount += amount;
+            }
+          }
+        }
+      }
+      
+      // Check MATURED wallet
+      if (user.balances.matured) {
+        const maturedMap = user.balances.matured;
+        const entries = maturedMap instanceof Map ? maturedMap.entries() : Object.entries(maturedMap);
+        
+        for (const [asset, amount] of entries) {
+          if (amount > 0 && asset !== 'usd') {
+            const assetUpper = asset.toUpperCase();
+            if (assetTotals[assetUpper]) {
+              assetTotals[assetUpper].totalAmount += amount;
+            }
+          }
+        }
+      }
+    }
+    
+    // Get current prices for each asset
     const assets = [];
     
     for (const crypto of supportedCryptos) {
-      try {
-        // Get real-time price from CoinGecko
+      const totalAmount = assetTotals[crypto.symbol].totalAmount;
+      
+      if (totalAmount > 0) {
         let price = 0;
-        let change24h = 0;
-        let marketCap = 0;
-        let volume24h = 0;
         
-        const coinIdMap = {
-          'BTC': 'bitcoin',
-          'ETH': 'ethereum',
-          'USDT': 'tether',
-          'BNB': 'binancecoin',
-          'SOL': 'solana',
-          'USDC': 'usd-coin',
-          'XRP': 'ripple',
-          'DOGE': 'dogecoin',
-          'ADA': 'cardano',
-          'SHIB': 'shiba-inu',
-          'AVAX': 'avalanche-2',
-          'DOT': 'polkadot',
-          'TRX': 'tron',
-          'LINK': 'chainlink',
-          'MATIC': 'matic-network',
-          'LTC': 'litecoin'
-        };
-        
-        const coinId = coinIdMap[crypto.symbol];
-        
-        if (coinId) {
-          const response = await axios.get(
-            `https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd&include_24hr_change=true&include_market_cap=true&include_24hr_vol=true`,
-            { timeout: 5000 }
-          );
-          
-          if (response.data && response.data[coinId]) {
-            price = response.data[coinId].usd || 0;
-            change24h = response.data[coinId].usd_24h_change || 0;
-            marketCap = response.data[coinId].usd_market_cap || 0;
-            volume24h = response.data[coinId].usd_24h_vol || 0;
-          }
+        // Get current price from API
+        try {
+          price = await getCryptoPrice(crypto.symbol);
+        } catch (err) {
+          console.warn(`Could not fetch price for ${crypto.symbol}`);
         }
         
-        // For stablecoins, force price to 1 if not available
-        if (crypto.symbol === 'USDT' || crypto.symbol === 'USDC') {
-          price = price > 0 ? price : 1;
-        }
+        const totalValueUSD = totalAmount * (price || 0);
         
         assets.push({
           symbol: crypto.symbol,
           name: crypto.name,
           logoUrl: crypto.logoUrl,
-          price: price,
-          change24h: change24h.toFixed(2),
-          marketCap: marketCap,
-          volume24h: volume24h,
-          lastUpdated: new Date()
+          totalAmount: totalAmount,
+          totalValueUSD: totalValueUSD,
+          currentPrice: price
         });
-        
-      } catch (err) {
-        console.warn(`Failed to fetch data for ${crypto.symbol}:`, err.message);
-        
-        // Add with fallback values
+      } else {
+        // Include assets with zero balance (for completeness)
         assets.push({
           symbol: crypto.symbol,
           name: crypto.name,
           logoUrl: crypto.logoUrl,
-          price: crypto.symbol === 'USDT' || crypto.symbol === 'USDC' ? 1 : 0,
-          change24h: '0.00',
-          marketCap: 0,
-          volume24h: 0,
-          lastUpdated: new Date()
+          totalAmount: 0,
+          totalValueUSD: 0,
+          currentPrice: 0
         });
       }
     }
+    
+    // Sort by total value descending
+    assets.sort((a, b) => b.totalValueUSD - a.totalValueUSD);
     
     res.status(200).json({
       status: 'success',
       data: {
         assets: assets,
-        totalAssets: assets.length,
+        totalPlatformValue: assets.reduce((sum, a) => sum + a.totalValueUSD, 0),
         fetchedAt: new Date()
       }
     });
@@ -24370,619 +24219,521 @@ app.get('/api/admin/crypto-assets', adminProtect, async (req, res) => {
   }
 });
 
-
-
-
-
-
-
-
-
-
-
-
-
 // =============================================
-// GET /api/market/orderbook - Order book bids and asks for a trading pair
-// Called by trading.html: fetchOrderBookFromBackend()
-// Expected response format: { bids: [[price, amount], ...], asks: [[price, amount], ...] }
+// GET /api/admin/statements - Get financial statements history
 // =============================================
-app.get('/api/market/orderbook', async (req, res) => {
+app.get('/api/admin/statements', adminProtect, async (req, res) => {
   try {
-    // Validate required parameters
-    const { symbol, limit = 100 } = req.query;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
     
-    if (!symbol) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Symbol parameter is required (e.g., symbol=BTCUSDT)'
-      });
+    // Build query (filter by user if provided)
+    let query = {};
+    if (req.query.userId) {
+      query.user = req.query.userId;
     }
     
-    const symbolUpper = symbol.toUpperCase();
-    const parsedLimit = parseInt(limit);
-    const safeLimit = Math.min(Math.max(parsedLimit || 100, 1), 1000);
+    // Get statements with user details
+    const statements = await FinancialStatement.find(query)
+      .populate('user', 'firstName lastName email')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
     
-    // =============================================
-    // STEP 1: Get order book from Redis cache (aggregator)
-    // =============================================
-    const orderbookKey = `orderbook:${symbolUpper}`;
-    const cachedOrderbook = await redis.get(orderbookKey);
+    const total = await FinancialStatement.countDocuments(query);
+    const totalPages = Math.ceil(total / limit);
     
-    if (cachedOrderbook) {
-      const orderbook = JSON.parse(cachedOrderbook);
-      
-      // Format exactly as trading.html expects
-      const formattedOrderbook = {
-        bids: (orderbook.bids || []).slice(0, safeLimit).map(bid => [
-          parseFloat(bid[0]).toFixed(8),
-          parseFloat(bid[1]).toFixed(8)
-        ]),
-        asks: (orderbook.asks || []).slice(0, safeLimit).map(ask => [
-          parseFloat(ask[0]).toFixed(8),
-          parseFloat(ask[1]).toFixed(8)
-        ])
-      };
-      
-      return res.status(200).json(formattedOrderbook);
-    }
-    
-    // =============================================
-    // STEP 2: Fallback - Fetch from Binance API directly
-    // =============================================
-    try {
-      const response = await axios.get(
-        `https://api.binance.com/api/v3/depth?symbol=${symbolUpper}&limit=${safeLimit}`,
-        { timeout: 5000 }
-      );
-      
-      if (response.data) {
-        const formattedOrderbook = {
-          bids: (response.data.bids || []).map(bid => [
-            parseFloat(bid[0]).toFixed(8),
-            parseFloat(bid[1]).toFixed(8)
-          ]),
-          asks: (response.data.asks || []).map(ask => [
-            parseFloat(ask[0]).toFixed(8),
-            parseFloat(ask[1]).toFixed(8)
-          ])
-        };
-        
-        // Cache for 1 second (order book updates very frequently)
-        await redis.setex(orderbookKey, 1, JSON.stringify(formattedOrderbook));
-        
-        return res.status(200).json(formattedOrderbook);
-      }
-    } catch (binanceError) {
-      console.error(`Binance API error for ${symbolUpper} orderbook:`, binanceError.message);
-    }
-    
-    // =============================================
-    // STEP 3: Return empty order book as last resort
-    // =============================================
-    return res.status(200).json({
-      bids: [],
-      asks: []
-    });
-    
-  } catch (err) {
-    console.error('Error fetching order book:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch order book'
-    });
-  }
-});
-
-
-// =============================================
-// GET /api/market/pairs - All trading pairs with current prices
-// Called by trading.html: loadMarketPairs()
-// Expected response format: { data: [{ symbol, base, quote, price, change24h, volume, logoUrl }] }
-// =============================================
-app.get('/api/market/pairs', async (req, res) => {
-  try {
-    const { quote = 'USDT', limit = 100 } = req.query;
-    const quoteUpper = quote.toUpperCase();
-    const parsedLimit = parseInt(limit);
-    const safeLimit = Math.min(Math.max(parsedLimit || 100, 1), 500);
-    
-    // =============================================
-    // STEP 1: Get all trading pairs from Redis
-    // =============================================
-    const cachedPairs = await redis.get('market:all:pairs');
-    let allPairs = [];
-    
-    if (cachedPairs) {
-      allPairs = JSON.parse(cachedPairs);
-    } else {
-      // Fetch from Binance
-      const response = await axios.get('https://api.binance.com/api/v3/exchangeInfo', { timeout: 10000 });
-      allPairs = response.data.symbols
-        .filter(s => s.quoteAsset === quoteUpper && s.status === 'TRADING')
-        .map(s => ({ symbol: s.symbol, base: s.baseAsset, quote: s.quoteAsset }));
-      
-      await redis.setex('market:all:pairs', 3600, JSON.stringify(allPairs));
-    }
-    
-    // Filter by quote asset
-    const filteredPairs = allPairs.filter(p => p.quote === quoteUpper);
-    
-    // =============================================
-    // STEP 2: Get ticker data for each pair
-    // =============================================
-    const pairsData = [];
-    
-    for (const pair of filteredPairs.slice(0, safeLimit)) {
-      const tickerKey = `ticker:${pair.symbol}`;
-      const cachedTicker = await redis.get(tickerKey);
-      
-      if (cachedTicker) {
-        const ticker = JSON.parse(cachedTicker);
-        pairsData.push({
-          symbol: pair.base,
-          base: pair.base,
-          quote: pair.quote,
-          price: ticker.lastPrice || 0,
-          change24h: ticker.priceChangePercent || 0,
-          volume: ticker.volume || 0,
-          logoUrl: `https://assets.coingecko.com/coins/images/1/large/${pair.base.toLowerCase()}.png` // Fallback
-        });
-      } else {
-        // Fallback - fetch from Binance
-        try {
-          const tickerResponse = await axios.get(
-            `https://api.binance.com/api/v3/ticker/24hr?symbol=${pair.symbol}`,
-            { timeout: 3000 }
-          );
-          pairsData.push({
-            symbol: pair.base,
-            base: pair.base,
-            quote: pair.quote,
-            price: parseFloat(tickerResponse.data.lastPrice || 0),
-            change24h: parseFloat(tickerResponse.data.priceChangePercent || 0),
-            volume: parseFloat(tickerResponse.data.volume || 0),
-            logoUrl: `https://assets.coingecko.com/coins/images/1/large/${pair.base.toLowerCase()}.png`
-          });
-        } catch (err) {
-          pairsData.push({
-            symbol: pair.base,
-            base: pair.base,
-            quote: pair.quote,
-            price: 0,
-            change24h: 0,
-            volume: 0,
-            logoUrl: ''
-          });
-        }
-      }
-    }
-    
-    // Sort by volume (highest first)
-    pairsData.sort((a, b) => b.volume - a.volume);
+    // Format statements for frontend
+    const formattedStatements = statements.map(statement => ({
+      _id: statement._id,
+      user: statement.user,
+      statementType: statement.statementType,
+      period: statement.period,
+      reference: statement.reference,
+      netChangeUSD: statement.netChangeUSD,
+      summary: statement.summary,
+      isDelivered: statement.isDelivered,
+      deliveredAt: statement.deliveredAt,
+      downloadUrl: statement.downloadUrl,
+      createdAt: statement.createdAt
+    }));
     
     res.status(200).json({
       status: 'success',
-      data: pairsData
+      data: {
+        statements: formattedStatements,
+        pagination: {
+          currentPage: page,
+          totalPages: totalPages,
+          totalItems: total,
+          itemsPerPage: limit,
+          hasNextPage: page < totalPages,
+          hasPrevPage: page > 1
+        }
+      }
     });
     
   } catch (err) {
-    console.error('Error fetching market pairs:', err);
+    console.error('Error fetching statements:', err);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to fetch market pairs',
-      data: []
+      message: 'Failed to fetch financial statements'
     });
   }
 });
 
 // =============================================
-// GET /api/market/candles - Candlestick data for chart
-// Called by trading.html: loadChartData()
-// Expected response format: { candles: [{ openTime, open, high, low, close, volume }] }
+// POST /api/admin/statements/generate - Generate and send financial statements
 // =============================================
-app.get('/api/market/candles', async (req, res) => {
+app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
   try {
-    // Validate required parameters
-    const { symbol, interval = '15m', limit = 200 } = req.query;
+    const { userId, period, batch } = req.body;
     
-    if (!symbol) {
+    // Validate period
+    if (!period || !['weekly', 'monthly'].includes(period)) {
       return res.status(400).json({
         status: 'fail',
-        message: 'Symbol parameter is required (e.g., symbol=BTCUSDT)'
+        message: 'Invalid period. Must be "weekly" or "monthly"'
       });
     }
     
-    const symbolUpper = symbol.toUpperCase();
-    const parsedLimit = parseInt(limit);
-    const safeLimit = Math.min(Math.max(parsedLimit || 200, 1), 1000);
+    // Calculate date range
+    const endDate = new Date();
+    const startDate = new Date();
     
-    // Map interval to Binance format
-    const intervalMap = {
-      '1m': '1m', '5m': '5m', '15m': '15m', '30m': '30m',
-      '1h': '1h', '2h': '2h', '4h': '4h', '6h': '6h',
-      '8h': '8h', '12h': '12h', '1d': '1d', '3d': '3d',
-      '1w': '1w', '1M': '1M'
-    };
-    
-    const binanceInterval = intervalMap[interval] || '15m';
-    
-    // =============================================
-    // STEP 1: Try to get candles from Redis (aggregator)
-    // =============================================
-    const candlesKey = `candles:${symbolUpper}:${binanceInterval}`;
-    const cachedCandles = await redis.zrange(candlesKey, 0, safeLimit - 1);
-    
-    if (cachedCandles && cachedCandles.length > 0) {
-      const candles = cachedCandles.map(candle => JSON.parse(candle));
-      
-      // Format exactly as trading.html expects
-      const formattedCandles = candles.map(candle => ({
-        openTime: candle.openTime,
-        open: candle.open,
-        high: candle.high,
-        low: candle.low,
-        close: candle.close,
-        volume: candle.volume,
-        closeTime: candle.closeTime
-      }));
-      
-      return res.status(200).json({
-        candles: formattedCandles
-      });
+    if (period === 'weekly') {
+      startDate.setDate(startDate.getDate() - 7);
+    } else {
+      startDate.setDate(startDate.getDate() - 30);
     }
+    startDate.setHours(0, 0, 0, 0);
     
-    // =============================================
-    // STEP 2: Fallback - Fetch from Binance API directly
-    // =============================================
-    try {
-      const response = await axios.get(
-        `https://api.binance.com/api/v3/klines?symbol=${symbolUpper}&interval=${binanceInterval}&limit=${safeLimit}`,
-        { timeout: 10000 }
-      );
-      
-      if (response.data && Array.isArray(response.data)) {
-        const candles = response.data.map(kline => ({
-          openTime: kline[0],
-          open: parseFloat(kline[1]),
-          high: parseFloat(kline[2]),
-          low: parseFloat(kline[3]),
-          close: parseFloat(kline[4]),
-          volume: parseFloat(kline[5]),
-          closeTime: kline[6]
-        }));
-        
-        // Cache in Redis for future requests
-        const multi = redis.multi();
-        for (const candle of candles) {
-          multi.zadd(candlesKey, candle.openTime, JSON.stringify(candle));
-        }
-        multi.expire(candlesKey, 300); // Expire after 5 minutes
-        await multi.exec();
-        
-        return res.status(200).json({
-          candles: candles
+    let usersToProcess = [];
+    
+    if (batch) {
+      // Get all active users
+      usersToProcess = await User.find({ status: 'active' }).select('_id firstName lastName email balances');
+    } else if (userId) {
+      const user = await User.findById(userId);
+      if (!user) {
+        return res.status(404).json({
+          status: 'fail',
+          message: 'User not found'
         });
       }
-    } catch (binanceError) {
-      console.error(`Binance API error for ${symbolUpper} candles:`, binanceError.message);
-    }
-    
-    // =============================================
-    // STEP 3: Return empty array as last resort
-    // =============================================
-    return res.status(200).json({
-      candles: []
-    });
-    
-  } catch (err) {
-    console.error('Error fetching candles:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch candlestick data',
-      candles: []
-    });
-  }
-});
-
-
-// =============================================
-// GET /api/asset/info - Asset information (market cap, rank, supply, etc.)
-// Called by trading.html: loadAssetInfo()
-// Expected response format: { rank, marketCap, fdMarketCap, dominance, volume24h, circulatingSupply, maxSupply, totalSupply }
-// =============================================
-app.get('/api/asset/info', async (req, res) => {
-  try {
-    const { symbol } = req.query;
-    
-    if (!symbol) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Symbol parameter is required (e.g., symbol=BTC)'
-      });
-    }
-    
-    const symbolUpper = symbol.toUpperCase();
-    
-    // =============================================
-    // STEP 1: Try to get from Redis cache
-    // =============================================
-    const cacheKey = `asset:info:${symbolUpper}`;
-    const cachedInfo = await redis.get(cacheKey);
-    
-    if (cachedInfo) {
-      return res.status(200).json(JSON.parse(cachedInfo));
-    }
-    
-    // =============================================
-    // STEP 2: Fetch from CoinGecko API
-    // =============================================
-    const coinGeckoIdMap = {
-      'BTC': 'bitcoin',
-      'ETH': 'ethereum',
-      'BNB': 'binancecoin',
-      'SOL': 'solana',
-      'XRP': 'ripple',
-      'DOGE': 'dogecoin',
-      'ADA': 'cardano',
-      'AVAX': 'avalanche-2',
-      'DOT': 'polkadot',
-      'LINK': 'chainlink',
-      'MATIC': 'polygon',
-      'LTC': 'litecoin',
-      'SHIB': 'shiba-inu',
-      'TRX': 'tron',
-      'UNI': 'uniswap',
-      'ATOM': 'cosmos',
-      'XLM': 'stellar',
-      'ETC': 'ethereum-classic',
-      'FIL': 'filecoin',
-      'VET': 'vechain',
-      'ALGO': 'algorand'
-    };
-    
-    const coinId = coinGeckoIdMap[symbolUpper];
-    
-    if (coinId) {
-      try {
-        const response = await axios.get(
-          `https://api.coingecko.com/api/v3/coins/${coinId}`,
-          { timeout: 5000 }
-        );
-        
-        if (response.data) {
-          const data = response.data;
-          const marketData = data.market_data || {};
-          
-          const assetInfo = {
-            rank: data.market_cap_rank || 0,
-            marketCap: marketData.market_cap?.usd || 0,
-            fdMarketCap: marketData.fully_diluted_valuation?.usd || 0,
-            dominance: 0, // CoinGecko doesn't provide this directly
-            volume24h: marketData.total_volume?.usd || 0,
-            circulatingSupply: marketData.circulating_supply || 0,
-            maxSupply: marketData.max_supply || 0,
-            totalSupply: marketData.total_supply || 0
-          };
-          
-          // Cache for 5 minutes
-          await redis.setex(cacheKey, 300, JSON.stringify(assetInfo));
-          
-          return res.status(200).json(assetInfo);
-        }
-      } catch (coingeckoError) {
-        console.error(`CoinGecko API error for ${symbolUpper}:`, coingeckoError.message);
-      }
-    }
-    
-    // =============================================
-    // STEP 3: Return default values as last resort
-    // =============================================
-    return res.status(200).json({
-      rank: 0,
-      marketCap: 0,
-      fdMarketCap: 0,
-      dominance: 0,
-      volume24h: 0,
-      circulatingSupply: 0,
-      maxSupply: 0,
-      totalSupply: 0
-    });
-    
-  } catch (err) {
-    console.error('Error fetching asset info:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch asset information'
-    });
-  }
-});
-
-// =============================================
-// GET /api/trading/data - Trading data (fund flow, net flow)
-// Called by trading.html: loadTradingData()
-// Expected response format: { fundFlowLong, fundFlowShort, netFlow }
-// =============================================
-app.get('/api/trading/data', async (req, res) => {
-  try {
-    const { pair } = req.query;
-    
-    if (!pair) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Pair parameter is required (e.g., pair=BTCUSDT)'
-      });
-    }
-    
-    const symbolUpper = pair.toUpperCase();
-    
-    // =============================================
-    // STEP 1: Try to get from Redis cache
-    // =============================================
-    const cacheKey = `trading:data:${symbolUpper}`;
-    const cachedData = await redis.get(cacheKey);
-    
-    if (cachedData) {
-      return res.status(200).json(JSON.parse(cachedData));
-    }
-    
-    // =============================================
-    // STEP 2: Calculate from aggregator data
-    // =============================================
-    
-    // Get 24hr ticker for volume analysis
-    const tickerKey = `ticker:${symbolUpper}`;
-    const tickerData = await redis.get(tickerKey);
-    let volume24h = 0;
-    let buyVolume = 0;
-    let sellVolume = 0;
-    
-    if (tickerData) {
-      const ticker = JSON.parse(tickerData);
-      volume24h = ticker.quoteVolume || 0;
-      
-      // Simulate fund flow based on price change
-      const priceChangePercent = ticker.priceChangePercent || 0;
-      if (priceChangePercent > 0) {
-        buyVolume = volume24h * (0.5 + priceChangePercent / 100);
-        sellVolume = volume24h - buyVolume;
-      } else if (priceChangePercent < 0) {
-        sellVolume = volume24h * (0.5 + Math.abs(priceChangePercent) / 100);
-        buyVolume = volume24h - sellVolume;
-      } else {
-        buyVolume = volume24h / 2;
-        sellVolume = volume24h / 2;
-      }
-    }
-    
-    const fundFlowLong = volume24h > 0 ? (buyVolume / volume24h) * 100 : 50;
-    const fundFlowShort = volume24h > 0 ? (sellVolume / volume24h) * 100 : 50;
-    
-    // Generate net flow data (last 7 periods)
-    const netFlow = [];
-    for (let i = 0; i < 7; i++) {
-      const randomFactor = 0.7 + Math.random() * 0.6;
-      const value = volume24h * randomFactor * (Math.random() > 0.5 ? 1 : -1) / 100;
-      netFlow.push(Math.floor(value));
-    }
-    
-    const tradingData = {
-      fundFlowLong: Math.floor(fundFlowLong),
-      fundFlowShort: Math.floor(fundFlowShort),
-      netFlow: netFlow
-    };
-    
-    // Cache for 10 seconds
-    await redis.setex(cacheKey, 10, JSON.stringify(tradingData));
-    
-    return res.status(200).json(tradingData);
-    
-  } catch (err) {
-    console.error('Error fetching trading data:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch trading data'
-    });
-  }
-});
-
-
-
-// =============================================
-// GET /api/analysis - Technical analysis data
-// Called by trading.html: loadAnalysisData()
-// Expected response format: { longShortRatio, marginData, volatility }
-// =============================================
-app.get('/api/analysis', async (req, res) => {
-  try {
-    const { pair } = req.query;
-    
-    if (!pair) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Pair parameter is required (e.g., pair=BTCUSDT)'
-      });
-    }
-    
-    const symbolUpper = pair.toUpperCase();
-    
-    // =============================================
-    // STEP 1: Try to get from Redis cache
-    // =============================================
-    const cacheKey = `analysis:${symbolUpper}`;
-    const cachedAnalysis = await redis.get(cacheKey);
-    
-    if (cachedAnalysis) {
-      return res.status(200).json(JSON.parse(cachedAnalysis));
-    }
-    
-    // =============================================
-    // STEP 2: Calculate from ticker data
-    // =============================================
-    const tickerKey = `ticker:${symbolUpper}`;
-    const tickerData = await redis.get(tickerKey);
-    
-    let priceChangePercent = 0;
-    let highPrice = 0;
-    let lowPrice = 0;
-    let currentPrice = 0;
-    
-    if (tickerData) {
-      const ticker = JSON.parse(tickerData);
-      priceChangePercent = ticker.priceChangePercent || 0;
-      highPrice = ticker.highPrice || 0;
-      lowPrice = ticker.lowPrice || 0;
-      currentPrice = ticker.lastPrice || 0;
-    }
-    
-    // Calculate long/short ratio based on price change
-    let longShortRatio = 1.0;
-    if (priceChangePercent > 2) {
-      longShortRatio = 1.5;
-    } else if (priceChangePercent > 1) {
-      longShortRatio = 1.2;
-    } else if (priceChangePercent < -2) {
-      longShortRatio = 0.7;
-    } else if (priceChangePercent < -1) {
-      longShortRatio = 0.85;
+      usersToProcess = [user];
     } else {
-      longShortRatio = 1.0;
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Either userId or batch must be provided'
+      });
     }
     
-    // Calculate volatility (based on high/low range)
-    let volatility = 0;
-    if (highPrice > 0 && lowPrice > 0 && currentPrice > 0) {
-      const range = (highPrice - lowPrice) / currentPrice;
-      volatility = range * 100;
-    }
-    volatility = Math.min(volatility, 20); // Cap at 20%
-    
-    // Margin data (simulated based on volume)
-    let marginData = 0;
-    if (tickerData) {
-      const ticker = JSON.parse(tickerData);
-      marginData = (ticker.quoteVolume || 0) * 0.05;
+    if (usersToProcess.length === 0) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'No users found to generate statements for'
+      });
     }
     
-    const analysisData = {
-      longShortRatio: parseFloat(longShortRatio.toFixed(2)),
-      marginData: Math.floor(marginData),
-      volatility: parseFloat(volatility.toFixed(2))
+    const results = {
+      success: [],
+      failed: [],
+      total: usersToProcess.length
     };
     
-    // Cache for 10 seconds
-    await redis.setex(cacheKey, 10, JSON.stringify(analysisData));
+    for (const user of usersToProcess) {
+      try {
+        // Generate financial statement for this user
+        const statement = await generateUserFinancialStatement(user._id, startDate, endDate, period);
+        
+        if (statement) {
+          // Log to SystemLog
+          await SystemLog.create({
+            action: 'financial_statement_generated',
+            entity: 'FinancialStatement',
+            entityId: statement._id,
+            performedBy: req.admin._id,
+            performedByModel: 'Admin',
+            performedByEmail: req.admin.email,
+            performedByName: req.admin.name,
+            ip: getRealClientIP(req),
+            userAgent: req.headers['user-agent'] || 'Unknown',
+            status: 'success',
+            metadata: {
+              userId: user._id,
+              userEmail: user.email,
+              period: period,
+              startDate: startDate,
+              endDate: endDate
+            }
+          });
+          
+          results.success.push({
+            userId: user._id,
+            email: user.email,
+            statementId: statement._id,
+            reference: statement.reference
+          });
+        } else {
+          results.failed.push({
+            userId: user._id,
+            email: user.email,
+            reason: 'Failed to generate statement'
+          });
+        }
+        
+      } catch (err) {
+        console.error(`Error generating statement for user ${user.email}:`, err);
+        results.failed.push({
+          userId: user._id,
+          email: user.email,
+          reason: err.message
+        });
+      }
+    }
     
-    return res.status(200).json(analysisData);
+    res.status(200).json({
+      status: 'success',
+      message: `Generated ${results.success.length} of ${results.total} statements`,
+      data: {
+        generated: results.success.length,
+        failed: results.failed.length,
+        total: results.total,
+        details: results
+      }
+    });
     
   } catch (err) {
-    console.error('Error fetching analysis data:', err);
+    console.error('Error generating statements:', err);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to fetch analysis data'
+      message: err.message || 'Failed to generate financial statements'
     });
   }
 });
+
+// =============================================
+// Helper function: Generate financial statement for a user
+// =============================================
+async function generateUserFinancialStatement(userId, startDate, endDate, statementType) {
+  try {
+    const user = await User.findById(userId);
+    if (!user) {
+      throw new Error('User not found');
+    }
+    
+    // Generate unique reference
+    const reference = `FIN-${statementType.toUpperCase()}-${userId.toString().slice(-6)}-${Date.now()}`;
+    
+    // Calculate opening balances (at startDate)
+    const openingBalances = await calculateUserBalancesAtDate(userId, startDate);
+    
+    // Calculate closing balances (at endDate)
+    const closingBalances = await calculateUserBalancesAtDate(userId, endDate);
+    
+    // Get transactions within period
+    const transactions = await Transaction.find({
+      user: userId,
+      createdAt: { $gte: startDate, $lte: endDate },
+      status: 'completed'
+    }).sort({ createdAt: 1 }).lean();
+    
+    // Get investments within period
+    const investments = await Investment.find({
+      user: userId,
+      $or: [
+        { startDate: { $gte: startDate, $lte: endDate } },
+        { endDate: { $gte: startDate, $lte: endDate } },
+        { createdAt: { $gte: startDate, $lte: endDate } }
+      ]
+    }).populate('plan').lean();
+    
+    // Calculate summaries
+    let totalDeposits = 0;
+    let totalWithdrawals = 0;
+    let totalFees = 0;
+    let totalReferralEarnings = 0;
+    
+    transactions.forEach(tx => {
+      if (tx.type === 'deposit') totalDeposits += tx.amount;
+      if (tx.type === 'withdrawal') totalWithdrawals += tx.amount;
+      if (tx.fee) totalFees += tx.fee;
+      if (tx.type === 'referral') totalReferralEarnings += tx.amount;
+    });
+    
+    const netChange = closingBalances.totalUSD - openingBalances.totalUSD;
+    const totalInflow = totalDeposits + totalReferralEarnings;
+    const totalOutflow = totalWithdrawals + totalFees;
+    const netProfit = netChange;
+    const roiPercentage = openingBalances.totalUSD > 0 
+      ? (netProfit / openingBalances.totalUSD) * 100 
+      : 0;
+    
+    // Create financial statement record
+    const statement = await FinancialStatement.create({
+      user: userId,
+      statementType: statementType,
+      period: {
+        startDate: startDate,
+        endDate: endDate,
+        generationDate: new Date()
+      },
+      reference: reference,
+      openingBalances: openingBalances,
+      closingBalances: closingBalances,
+      netChangeUSD: netChange,
+      transactions: {
+        list: transactions.map(tx => ({
+          transactionId: tx._id,
+          type: tx.type,
+          amountUSD: tx.amount,
+          asset: tx.asset,
+          assetAmount: tx.assetAmount,
+          status: tx.status,
+          method: tx.method,
+          description: tx.details?.description || tx.details || `${tx.type} transaction`,
+          reference: tx.reference,
+          feeUSD: tx.fee || 0,
+          netAmountUSD: tx.netAmount || tx.amount,
+          exchangeRate: tx.exchangeRateAtTime,
+          createdAt: tx.createdAt,
+          processedAt: tx.processedAt
+        })),
+        summary: {
+          totalDepositsUSD: totalDeposits,
+          totalWithdrawalsUSD: totalWithdrawals,
+          totalFeesPaidUSD: totalFees,
+          totalTransfersUSD: 0,
+          count: {
+            deposits: transactions.filter(t => t.type === 'deposit').length,
+            withdrawals: transactions.filter(t => t.type === 'withdrawal').length,
+            transfers: transactions.filter(t => t.type === 'transfer').length
+          }
+        }
+      },
+      investments: {
+        active: investments.filter(i => i.status === 'active').map(i => ({
+          investmentId: i._id,
+          planName: i.plan?.name || 'Unknown',
+          principalUSD: i.amount,
+          principalBTC: i.amountBTC,
+          expectedReturnUSD: i.expectedReturn,
+          startDate: i.startDate,
+          endDate: i.endDate,
+          status: i.status
+        })),
+        matured: investments.filter(i => i.status === 'completed').map(i => ({
+          investmentId: i._id,
+          planName: i.plan?.name || 'Unknown',
+          initialAmountUSD: i.amount,
+          returnAmountUSD: i.expectedReturn || i.amount,
+          profitUSD: (i.expectedReturn || i.amount) - i.amount,
+          profitPercentage: i.returnPercentage,
+          completionDate: i.completionDate || i.endDate
+        })),
+        started: investments.filter(i => i.status === 'active' && new Date(i.startDate) >= startDate).map(i => ({
+          investmentId: i._id,
+          planName: i.plan?.name || 'Unknown',
+          amountUSD: i.amount,
+          amountBTC: i.amountBTC,
+          startDate: i.startDate,
+          expectedReturnUSD: i.expectedReturn
+        })),
+        summary: {
+          totalPrincipalInvestedUSD: investments.filter(i => i.status === 'active').reduce((sum, i) => sum + i.amount, 0),
+          totalReturnsEarnedUSD: investments.filter(i => i.status === 'completed').reduce((sum, i) => sum + ((i.expectedReturn || i.amount) - i.amount), 0),
+          totalProfitUSD: investments.filter(i => i.status === 'completed').reduce((sum, i) => sum + ((i.expectedReturn || i.amount) - i.amount), 0),
+          totalActiveInvestmentsCount: investments.filter(i => i.status === 'active').length,
+          totalActivePrincipalUSD: investments.filter(i => i.status === 'active').reduce((sum, i) => sum + i.amount, 0)
+        }
+      },
+      fees: {
+        summary: {
+          totalFeesUSD: totalFees,
+          investmentFeesUSD: 0,
+          withdrawalFeesUSD: transactions.filter(t => t.type === 'withdrawal').reduce((sum, t) => sum + (t.fee || 0), 0),
+          tradingFeesUSD: 0,
+          conversionFeesUSD: 0,
+          loanFeesUSD: 0
+        }
+      },
+      referrals: {
+        summary: {
+          totalReferralEarningsUSD: totalReferralEarnings,
+          directReferralEarningsUSD: totalReferralEarnings,
+          downlineCommissionEarningsUSD: 0
+        }
+      },
+      summary: {
+        totalInflowUSD: totalInflow,
+        totalOutflowUSD: totalOutflow,
+        netCashFlowUSD: totalInflow - totalOutflow,
+        totalProfitUSD: netProfit,
+        totalLossUSD: 0,
+        netProfitUSD: netProfit,
+        roiPercentage: roiPercentage
+      },
+      isDelivered: true,
+      deliveredAt: new Date(),
+      ipAddress: null,
+      userAgent: null,
+      location: null
+    });
+    
+    // Send professional email with statement summary
+    await sendProfessionalEmail({
+      email: user.email,
+      template: 'default',
+      data: {
+        name: user.firstName,
+        message: `Your ${statementType} financial statement for ${startDate.toLocaleDateString()} to ${endDate.toLocaleDateString()} is ready.`,
+        details: `
+          <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+            <h3 style="margin: 0 0 15px 0;">Statement Summary</h3>
+            <div class="stat-item"><strong>Opening Balance:</strong> $${openingBalances.totalUSD.toLocaleString()}</div>
+            <div class="stat-item"><strong>Closing Balance:</strong> $${closingBalances.totalUSD.toLocaleString()}</div>
+            <div class="stat-item" style="color: ${netChange >= 0 ? '#10B981' : '#EF4444'};">
+              <strong>Net Change:</strong> ${netChange >= 0 ? '+' : ''}$${netChange.toLocaleString()}
+            </div>
+            <div class="stat-item"><strong>Total Deposits:</strong> $${totalDeposits.toLocaleString()}</div>
+            <div class="stat-item"><strong>Total Withdrawals:</strong> $${totalWithdrawals.toLocaleString()}</div>
+            <div class="stat-item"><strong>Referral Earnings:</strong> $${totalReferralEarnings.toLocaleString()}</div>
+            <div class="stat-item"><strong>ROI:</strong> ${roiPercentage.toFixed(2)}%</div>
+          </div>
+        `,
+        actionRequired: `Reference: ${reference}`,
+        buttonText: 'View Dashboard',
+        actionLink: 'https://www.bithashcapital.live/dashboard',
+        referenceId: reference
+      }
+    });
+    
+    return statement;
+    
+  } catch (err) {
+    console.error('Error generating financial statement:', err);
+    throw err;
+  }
+}
+
+// =============================================
+// Helper function: Calculate user balances at a specific date
+// =============================================
+async function calculateUserBalancesAtDate(userId, targetDate) {
+  try {
+    const user = await User.findById(userId);
+    if (!user) {
+      return {
+        totalUSD: 0,
+        mainWalletUSD: 0,
+        activeWalletUSD: 0,
+        maturedWalletUSD: 0,
+        cryptoDetails: [],
+        timestamp: targetDate
+      };
+    }
+    
+    let mainUSD = 0;
+    let activeUSD = 0;
+    let maturedUSD = 0;
+    const cryptoDetails = [];
+    
+    // Calculate MAIN wallet USD value from crypto balances
+    if (user.balances && user.balances.main) {
+      const mainMap = user.balances.main;
+      const entries = mainMap instanceof Map ? mainMap.entries() : Object.entries(mainMap);
+      
+      for (const [asset, balance] of entries) {
+        if (balance > 0 && asset !== 'usd') {
+          // Get historical price at targetDate (simplified - use current as fallback)
+          let price = await getCryptoPrice(asset.toUpperCase());
+          if (price) {
+            const value = balance * price;
+            mainUSD += value;
+            cryptoDetails.push({
+              asset: asset,
+              amount: balance,
+              usdValue: value,
+              walletType: 'main'
+            });
+          }
+        }
+      }
+    }
+    
+    // Calculate ACTIVE wallet USD (fixed value, doesn't fluctuate)
+    if (user.balances && user.balances.active) {
+      const activeMap = user.balances.active;
+      const entries = activeMap instanceof Map ? activeMap.entries() : Object.entries(activeMap);
+      
+      for (const [asset, balance] of entries) {
+        if (balance > 0) {
+          if (asset === 'usd') {
+            activeUSD = balance;
+          } else {
+            activeUSD += balance;
+          }
+        }
+      }
+    }
+    
+    // Calculate MATURED wallet USD value from crypto balances
+    if (user.balances && user.balances.matured) {
+      const maturedMap = user.balances.matured;
+      const entries = maturedMap instanceof Map ? maturedMap.entries() : Object.entries(maturedMap);
+      
+      for (const [asset, balance] of entries) {
+        if (balance > 0 && asset !== 'usd') {
+          let price = await getCryptoPrice(asset.toUpperCase());
+          if (price) {
+            const value = balance * price;
+            maturedUSD += value;
+            cryptoDetails.push({
+              asset: asset,
+              amount: balance,
+              usdValue: value,
+              walletType: 'matured'
+            });
+          }
+        }
+      }
+    }
+    
+    const totalUSD = mainUSD + activeUSD + maturedUSD;
+    
+    return {
+      totalUSD: totalUSD,
+      mainWalletUSD: mainUSD,
+      activeWalletUSD: activeUSD,
+      maturedWalletUSD: maturedUSD,
+      cryptoDetails: cryptoDetails,
+      timestamp: targetDate
+    };
+    
+  } catch (err) {
+    console.error('Error calculating balances at date:', err);
+    return {
+      totalUSD: 0,
+      mainWalletUSD: 0,
+      activeWalletUSD: 0,
+      maturedWalletUSD: 0,
+      cryptoDetails: [],
+      timestamp: targetDate
+    };
+  }
+}
+
+
+
+
+
+
+
+
+
 
 
 
