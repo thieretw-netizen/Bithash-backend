@@ -5886,6 +5886,7 @@ initializePriceAggregator();
 
 
 
+
 // =============================================
 // ENHANCED EMAIL SERVICE WITH ENTERPRISE TEMPLATES
 // =============================================
@@ -6500,19 +6501,16 @@ case 'login_success':
         break;
 
     default:
-  subject = data.reason || data.message || 'Account Update Notification';
-  html = `
-    <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-      ${brandHeader}
-      <div style="padding: 30px; background: #FFFFFF;">
-        <!-- BODY SECTION IS INTENTIONALLY BLANK - ONLY HEADER AND FOOTER DISPLAYED -->
-      </div>
-      ${brandFooter}
-    </div>
-  `;
+  subject = '{{subject}}';
+  html = '<div style="font-family: Arial, sans-serif; padding: 20px;">
+            <h2>₿itHash Capital</h2>
+            <div style="margin: 20px 0; padding: 15px; background: #f5f5f5; border-left: 4px solid #ff9900;">
+              {{email_body}}
+            </div>
+            <hr>
+            <small>₿itHash Capital - Secure Digital Asset Management</small>
+          </div>';
   break;
-  } 
-
 
 
 
@@ -23959,6 +23957,18 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+// =============================================
 // =============================================
 // CRYPTO ASSETS ENDPOINT - For Donut Chart
 // =============================================
@@ -24026,7 +24036,7 @@ app.get('/api/admin/crypto/assets', adminProtect, async (req, res) => {
     for (const crypto of supportedCryptos) {
       const totalAmount = totalHoldings[crypto.symbol] || 0;
       
-      // Get current price from Redis cache or API
+      // Get current price from Redis cache (set by price aggregator)
       let price = 0;
       let change24h = 0;
       
@@ -24038,24 +24048,17 @@ app.get('/api/admin/crypto/assets', adminProtect, async (req, res) => {
           price = ticker.lastPrice || 0;
           change24h = ticker.priceChangePercent || 0;
         } else {
-          // Fallback to CoinGecko API
+          // Fallback to direct API call
           price = await getCryptoPrice(crypto.symbol);
-          try {
-            const changeResponse = await axios.get(
-              `https://api.coingecko.com/api/v3/simple/price?ids=${crypto.symbol.toLowerCase()}&vs_currencies=usd&include_24hr_change=true`,
-              { timeout: 5000 }
-            );
-            change24h = changeResponse.data[crypto.symbol.toLowerCase()]?.usd_24h_change || 0;
-          } catch (changeErr) {
-            change24h = 0;
-          }
+          const changeResponse = await axios.get(
+            `https://api.coingecko.com/api/v3/simple/price?ids=${crypto.symbol.toLowerCase()}&vs_currencies=usd&include_24hr_change=true`,
+            { timeout: 5000 }
+          );
+          change24h = changeResponse.data[crypto.symbol.toLowerCase()]?.usd_24h_change || 0;
         }
       } catch (err) {
         console.warn(`Failed to fetch price for ${crypto.symbol}:`, err.message);
-        // Fallback prices for stablecoins
-        if (crypto.symbol === 'USDT' || crypto.symbol === 'USDC') {
-          price = 1;
-        }
+        price = crypto.symbol === 'USDT' || crypto.symbol === 'USDC' ? 1 : 0;
       }
       
       const totalValueUSD = totalAmount * price;
@@ -24904,6 +24907,11 @@ app.get('/api/admin/statements/:id', adminProtect, async (req, res) => {
     });
   }
 });
+
+
+
+
+
 
 
 
