@@ -19376,18 +19376,202 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
 
 
 
+
+
+
+
+
 // =============================================
-// ADMIN DASHBOARD - THREE ROBUST ENDPOINTS
+// ADMIN DASHBOARD - THREE ROBUST ENDPOINTS (FIXED LOCATION MAPPING)
 // =============================================
 
 /**
+ * Helper function to extract location data from logs
+ * Works with both SystemLog and UserLog schemas
+ */
+function extractLocationData(logEntry) {
+  // Default location object
+  const defaultLocation = {
+    display: 'Unknown',
+    fullDetails: '',
+    latitude: null,
+    longitude: null,
+    country: 'Unknown',
+    city: 'Unknown',
+    region: 'Unknown',
+    exactLocation: false
+  };
+  
+  // Check for location in SystemLog format (changes.locationData)
+  if (logEntry.changes?.locationData?.locationDetails) {
+    const loc = logEntry.changes.locationData.locationDetails;
+    const parts = [];
+    if (loc.city) parts.push(loc.city);
+    if (loc.region) parts.push(loc.region);
+    if (loc.country) parts.push(loc.country);
+    
+    return {
+      display: parts.length > 0 ? parts.join(', ') : (logEntry.location || 'Unknown'),
+      fullDetails: `City: ${loc.city || 'Unknown'} | Region: ${loc.region || 'Unknown'} | Country: ${loc.country || 'Unknown'} | Timezone: ${loc.timezone || 'Unknown'}`,
+      latitude: loc.latitude || null,
+      longitude: loc.longitude || null,
+      country: loc.country || 'Unknown',
+      city: loc.city || 'Unknown',
+      region: loc.region || 'Unknown',
+      exactLocation: logEntry.changes.locationData.exactLocation || false
+    };
+  }
+  
+  // Check for location in SystemLog direct location field
+  if (logEntry.location && typeof logEntry.location === 'string' && logEntry.location !== 'Unknown') {
+    return {
+      ...defaultLocation,
+      display: logEntry.location,
+      fullDetails: logEntry.location
+    };
+  }
+  
+  // Check for location in UserLog schema (location object with country/name)
+  if (logEntry.location && typeof logEntry.location === 'object') {
+    const loc = logEntry.location;
+    const parts = [];
+    
+    // Handle different location structures
+    if (loc.city) parts.push(loc.city);
+    if (loc.region?.name || loc.region) parts.push(loc.region?.name || loc.region);
+    if (loc.country?.name || loc.country) parts.push(loc.country?.name || loc.country);
+    
+    return {
+      display: parts.length > 0 ? parts.join(', ') : 'Unknown',
+      fullDetails: `City: ${loc.city || 'Unknown'} | Region: ${loc.region?.name || loc.region || 'Unknown'} | Country: ${loc.country?.name || loc.country || 'Unknown'} | IP: ${loc.ip || 'Unknown'}`,
+      latitude: loc.latitude || null,
+      longitude: loc.longitude || null,
+      country: loc.country?.name || loc.country || 'Unknown',
+      city: loc.city || 'Unknown',
+      region: loc.region?.name || loc.region || 'Unknown',
+      exactLocation: loc.exactLocation || false
+    };
+  }
+  
+  // Check for location in UserLog locationDetails
+  if (logEntry.locationDetails) {
+    const loc = logEntry.locationDetails;
+    const parts = [];
+    if (loc.city) parts.push(loc.city);
+    if (loc.region) parts.push(loc.region);
+    if (loc.country) parts.push(loc.country);
+    
+    return {
+      display: parts.length > 0 ? parts.join(', ') : 'Unknown',
+      fullDetails: `City: ${loc.city || 'Unknown'} | Region: ${loc.region || 'Unknown'} | Country: ${loc.country || 'Unknown'}`,
+      latitude: loc.latitude || null,
+      longitude: loc.longitude || null,
+      country: loc.country || 'Unknown',
+      city: loc.city || 'Unknown',
+      region: loc.region || 'Unknown',
+      exactLocation: !!loc.latitude && !!loc.longitude
+    };
+  }
+  
+  return defaultLocation;
+}
+
+/**
+ * Helper to get user name from various log formats
+ */
+function getUserNameFromLog(logEntry) {
+  // SystemLog with performedBy populated
+  if (logEntry.performedBy) {
+    if (logEntry.performedByModel === 'Admin') {
+      return logEntry.performedBy.name || 'Admin';
+    } else if (logEntry.performedByModel === 'User') {
+      return `${logEntry.performedBy.firstName || ''} ${logEntry.performedBy.lastName || ''}`.trim() || 'User';
+    }
+  }
+  
+  // UserLog with user populated
+  if (logEntry.user) {
+    if (logEntry.user.firstName || logEntry.user.lastName) {
+      return `${logEntry.user.firstName || ''} ${logEntry.user.lastName || ''}`.trim();
+    }
+    return logEntry.user.email || logEntry.username || 'User';
+  }
+  
+  // Direct fields
+  if (logEntry.userFullName) return logEntry.userFullName;
+  if (logEntry.username) return logEntry.username;
+  if (logEntry.performedByName) return logEntry.performedByName;
+  if (logEntry.performedByEmail) return logEntry.performedByEmail.split('@')[0];
+  
+  return 'System';
+}
+
+/**
+ * Helper to get user email from various log formats
+ */
+function getUserEmailFromLog(logEntry) {
+  if (logEntry.performedBy?.email) return logEntry.performedBy.email;
+  if (logEntry.user?.email) return logEntry.user.email;
+  if (logEntry.email) return logEntry.email;
+  if (logEntry.performedByEmail) return logEntry.performedByEmail;
+  return '';
+}
+
+/**
+ * Helper to get activity type for styling
+ */
+function getActivityTypeFromAction(action) {
+  const actionLower = action.toLowerCase();
+  if (actionLower.includes('login')) return 'login';
+  if (actionLower.includes('signup')) return 'signup';
+  if (actionLower.includes('deposit')) return 'deposit';
+  if (actionLower.includes('withdrawal')) return 'withdrawal';
+  if (actionLower.includes('investment')) return 'investment';
+  if (actionLower.includes('matured')) return 'matured';
+  if (actionLower.includes('logout')) return 'logout';
+  if (actionLower.includes('kyc')) return 'kyc';
+  if (actionLower.includes('referral')) return 'referral';
+  if (actionLower.includes('2fa') || actionLower.includes('two_factor')) return 'security';
+  if (actionLower.includes('admin')) return 'admin';
+  return 'other';
+}
+
+/**
+ * Helper to get action description
+ */
+function getActionDescription(action) {
+  const descriptions = {
+    'signup_initiated': 'Signup Initiated',
+    'login': 'User Logged In',
+    'logout': 'User Logged Out',
+    'login_attempt': 'Login Attempt',
+    'google_signin_otp_sent': 'Google Signin OTP Sent',
+    'google_signin': 'Google Signin',
+    'admin_login': 'Admin Login',
+    'view_downline_details': 'View Downline Details',
+    'deposit_created': 'Deposit Created',
+    'withdrawal_created': 'Withdrawal Requested',
+    'investment_created': 'Investment Created',
+    'investment_completed': 'Investment Completed',
+    'kyc_submitted': 'KYC Submitted',
+    'kyc_approved': 'KYC Approved',
+    'kyc_rejected': 'KYC Rejected',
+    'profile_update': 'Profile Updated',
+    'password_change': 'Password Changed',
+    'referral_joined': 'Referral Joined',
+    'referral_bonus_earned': 'Referral Bonus Earned',
+    'two_factor_enabled': '2FA Enabled',
+    'two_factor_disabled': '2FA Disabled'
+  };
+  return descriptions[action] || action.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+}
+
+/**
  * ENDPOINT 1: GET /api/admin/stats
- * Fetches real-time statistics from ALL schemas
- * Includes real-time distribution, system status, and pending counts
  */
 app.get('/api/admin/stats', adminProtect, async (req, res) => {
   try {
-    // Get current investor count from Redis (or calculate from User schema)
+    // Get current user count
     let totalUsers = await User.countDocuments({});
     
     // Get yesterday's user count for change calculation
@@ -19418,7 +19602,7 @@ app.get('/api/admin/stats', adminProtect, async (req, res) => {
       ? ((totalDeposits - yesterdayDeposits[0].total) / yesterdayDeposits[0].total) * 100 
       : 0;
     
-    // Get pending withdrawals
+    // Get pending withdrawals total
     const pendingWithdrawals = await Transaction.aggregate([
       { $match: { type: 'withdrawal', status: 'pending' } },
       { $group: { _id: null, total: { $sum: '$amount' } } }
@@ -19537,8 +19721,7 @@ app.get('/api/admin/stats', adminProtect, async (req, res) => {
 
 /**
  * ENDPOINT 2: GET /api/admin/activity
- * Fetches from SystemLog schema with location data mapping
- * Checks which schema (SystemLog or UserLog) gets updated first
+ * Fetches from SystemLog schema with proper location data mapping
  */
 app.get('/api/admin/activity', adminProtect, async (req, res) => {
   try {
@@ -19565,119 +19748,47 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
       query.createdAt = { ...query.createdAt, $lte: new Date(req.query.endDate) };
     }
     
-    // Get latest timestamp from both schemas to determine which is fresher
-    const latestSystemLog = await SystemLog.findOne().sort({ createdAt: -1 }).select('createdAt').lean();
-    const latestUserLog = await UserLog.findOne().sort({ createdAt: -1 }).select('createdAt').lean();
+    // Get total count from SystemLog
+    const totalCount = await SystemLog.countDocuments(query);
+    const totalPages = Math.ceil(totalCount / limit);
     
-    let primarySource = 'systemlog';
-    if (latestUserLog && (!latestSystemLog || latestUserLog.createdAt > latestSystemLog.createdAt)) {
-      primarySource = 'userlog';
-    }
+    // Get activities from SystemLog with populated performedBy
+    const activities = await SystemLog.find(query)
+      .populate('performedBy', 'name email firstName lastName')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
     
-    // Fetch from primary source first, then supplement from secondary if needed
-    let activities = [];
-    let totalCount = 0;
-    
-    if (primarySource === 'systemlog') {
-      // Get total count from SystemLog
-      totalCount = await SystemLog.countDocuments(query);
-      
-      // Get activities from SystemLog
-      activities = await SystemLog.find(query)
-        .populate('performedBy', 'name email firstName lastName')
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .lean();
-    } else {
-      // Get total count from UserLog
-      totalCount = await UserLog.countDocuments(query);
-      
-      // Get activities from UserLog
-      const userLogs = await UserLog.find(query)
-        .populate('user', 'firstName lastName email')
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .lean();
-      
-      // Transform UserLog to match SystemLog structure
-      activities = userLogs.map(log => ({
-        _id: log._id,
-        createdAt: log.createdAt,
-        action: log.action,
-        entity: log.actionCategory || 'user',
-        entityId: log.user,
-        performedBy: log.user,
-        performedByModel: 'User',
-        ip: log.ipAddress,
-        device: log.userAgent,
-        location: log.location?.country?.name || 'Unknown',
-        changes: {
-          locationData: {
-            locationDetails: log.location,
-            exactLocation: log.location?.exactLocation || false
-          }
-        },
-        metadata: log.metadata,
-        status: log.status
-      }));
-    }
-    
-    // Format activities for frontend display with location data mapping
+    // Format activities for frontend display with location data
     const formattedActivities = activities.map(activity => {
-      // Extract location from the changes metadata
-      let locationDisplay = 'Unknown';
-      let fullLocation = '';
-      let lat = null;
-      let lng = null;
+      // Extract location data using helper
+      const location = extractLocationData(activity);
       
-      // Try to get detailed location from changes.locationData
-      if (activity.changes?.locationData) {
-        const locData = activity.changes.locationData;
-        if (locData.locationDetails) {
-          const parts = [];
-          if (locData.locationDetails.city) parts.push(locData.locationDetails.city);
-          if (locData.locationDetails.region) parts.push(locData.locationDetails.region);
-          if (locData.locationDetails.country) parts.push(locData.locationDetails.country);
-          if (parts.length > 0) locationDisplay = parts.join(', ');
-          
-          fullLocation = `City: ${locData.locationDetails?.city || 'Unknown'} | Region: ${locData.locationDetails?.region || 'Unknown'} | Country: ${locData.locationDetails?.country || 'Unknown'} | Timezone: ${locData.locationDetails?.timezone || 'Unknown'}`;
-          lat = locData.locationDetails?.latitude || null;
-          lng = locData.locationDetails?.longitude || null;
-        } else if (locData.location) {
-          locationDisplay = locData.location;
-        }
-      } else if (activity.location && typeof activity.location === 'string') {
-        locationDisplay = activity.location;
-      }
+      // Get user info
+      const userName = getUserNameFromLog(activity);
+      const userEmail = getUserEmailFromLog(activity);
       
-      // Get user/actor name
-      let actorName = 'System';
-      let actorEmail = '';
-      
-      if (activity.performedBy) {
-        if (activity.performedByModel === 'Admin') {
-          actorName = activity.performedBy.name || 'Admin';
-          actorEmail = activity.performedBy.email || '';
-        } else if (activity.performedByModel === 'User' && activity.performedBy) {
-          actorName = `${activity.performedBy.firstName || ''} ${activity.performedBy.lastName || ''}`.trim() || 'User';
-          actorEmail = activity.performedBy.email || '';
-        }
-      } else if (activity.user) {
-        actorName = `${activity.user.firstName || ''} ${activity.user.lastName || ''}`.trim() || 'User';
-        actorEmail = activity.user.email || '';
-      }
-      
-      // Determine activity type for styling
+      // Determine activity type
       const activityType = getActivityTypeFromAction(activity.action);
+      
+      // Get status
+      const status = activity.status === 'failed' ? 'failed' : 'success';
+      
+      // Build map URL if coordinates are available
+      let mapUrl = '#';
+      if (location.latitude && location.longitude) {
+        mapUrl = `https://www.google.com/maps/search/?api=1&query=${location.latitude},${location.longitude}`;
+      } else if (location.city && location.country && location.city !== 'Unknown') {
+        mapUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(location.city + ', ' + location.country)}`;
+      }
       
       return {
         _id: activity._id,
         timestamp: activity.createdAt,
         user: {
-          name: actorName,
-          email: actorEmail
+          name: userName,
+          email: userEmail
         },
         action: getActionDescription(activity.action),
         actionRaw: activity.action,
@@ -19685,19 +19796,18 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
         entityId: activity.entityId,
         performedByModel: activity.performedByModel,
         activityType: activityType,
-        status: activity.status === 'failed' ? 'failed' : 'success',
-        location: locationDisplay,
-        fullLocation: fullLocation,
-        lat: lat,
-        lng: lng,
+        status: status,
+        location: location.display,
+        fullLocation: location.fullDetails,
+        lat: location.latitude,
+        lng: location.longitude,
+        mapUrl: mapUrl,
         ipAddress: activity.ip,
         deviceInfo: activity.device,
         changes: activity.changes,
         metadata: activity.metadata
       };
     });
-    
-    const totalPages = Math.ceil(totalCount / limit);
     
     res.status(200).json({
       status: 'success',
@@ -19710,8 +19820,7 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
           itemsPerPage: limit,
           hasNext: page < totalPages,
           hasPrev: page > 1
-        },
-        source: primarySource // Let frontend know which schema provided the data
+        }
       }
     });
     
@@ -19726,141 +19835,79 @@ app.get('/api/admin/activity', adminProtect, async (req, res) => {
 
 /**
  * ENDPOINT 3: GET /api/admin/activity/latest
- * Real-time polling endpoint for LIVE feed
- * Fetches from SystemLog and UserLog - whichever was updated most recently
+ * Real-time polling endpoint for LIVE feed with proper location mapping
  */
 app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
   try {
     const { after, limit = 20 } = req.query;
     
-    // Get latest activities from BOTH schemas and merge
-    let systemLogs = [];
-    let userLogs = [];
+    let query = {};
     
+    // If 'after' timestamp provided, only get activities newer than that
     if (after && !isNaN(parseInt(after))) {
       const afterDate = new Date(parseInt(after));
-      
-      systemLogs = await SystemLog.find({ createdAt: { $gt: afterDate } })
-        .populate('performedBy', 'name email firstName lastName')
-        .sort({ createdAt: -1 })
-        .limit(parseInt(limit))
-        .lean();
-      
-      userLogs = await UserLog.find({ createdAt: { $gt: afterDate } })
-        .populate('user', 'firstName lastName email')
-        .sort({ createdAt: -1 })
-        .limit(parseInt(limit))
-        .lean();
+      query.createdAt = { $gt: afterDate };
     } else {
       // Default: get activities from the last 5 minutes
       const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-      
-      systemLogs = await SystemLog.find({ createdAt: { $gt: fiveMinutesAgo } })
-        .populate('performedBy', 'name email firstName lastName')
-        .sort({ createdAt: -1 })
-        .limit(parseInt(limit))
-        .lean();
-      
-      userLogs = await UserLog.find({ createdAt: { $gt: fiveMinutesAgo } })
-        .populate('user', 'firstName lastName email')
-        .sort({ createdAt: -1 })
-        .limit(parseInt(limit))
-        .lean();
+      query.createdAt = { $gt: fiveMinutesAgo };
     }
     
-    // Transform UserLogs to match SystemLog structure
-    const transformedUserLogs = userLogs.map(log => ({
-      _id: log._id,
-      createdAt: log.createdAt,
-      action: log.action,
-      entity: log.actionCategory || 'user',
-      entityId: log.user,
-      performedBy: log.user,
-      performedByModel: 'User',
-      ip: log.ipAddress,
-      device: log.userAgent,
-      location: log.location?.country?.name || 'Unknown',
-      changes: {
-        locationData: {
-          locationDetails: log.location,
-          exactLocation: log.location?.exactLocation || false
-        }
-      },
-      metadata: log.metadata,
-      status: log.status,
-      user: log.user
-    }));
+    // Get latest activities from SystemLog
+    const activities = await SystemLog.find(query)
+      .populate('performedBy', 'name email firstName lastName')
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .lean();
     
-    // Merge and sort by createdAt (newest first)
-    let allActivities = [...systemLogs, ...transformedUserLogs];
-    allActivities.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-    
-    // Limit to requested amount
-    allActivities = allActivities.slice(0, parseInt(limit));
-    
-    // Format activities for frontend
-    const formattedActivities = allActivities.map(activity => {
-      let locationDisplay = 'Unknown';
-      let fullLocation = '';
-      let lat = null;
-      let lng = null;
+    // Format activities for frontend with location data
+    const formattedActivities = activities.map(activity => {
+      // Extract location data using helper
+      const location = extractLocationData(activity);
       
-      // Extract location from changes metadata
-      if (activity.changes?.locationData?.locationDetails) {
-        const locData = activity.changes.locationData.locationDetails;
-        const parts = [];
-        if (locData.city) parts.push(locData.city);
-        if (locData.region) parts.push(locData.region);
-        if (locData.country) parts.push(locData.country);
-        if (parts.length > 0) locationDisplay = parts.join(', ');
-        
-        fullLocation = `City: ${locData.city || 'Unknown'} | Region: ${locData.region || 'Unknown'} | Country: ${locData.country || 'Unknown'}`;
-        lat = locData.latitude || null;
-        lng = locData.longitude || null;
-      } else if (activity.location && typeof activity.location === 'string') {
-        locationDisplay = activity.location;
-      }
+      // Get user info
+      const userName = getUserNameFromLog(activity);
+      const userEmail = getUserEmailFromLog(activity);
       
-      let actorName = 'System';
-      let actorEmail = '';
+      // Determine activity type
+      const activityType = getActivityTypeFromAction(activity.action);
       
-      if (activity.performedBy) {
-        if (activity.performedByModel === 'Admin') {
-          actorName = activity.performedBy.name || 'Admin';
-          actorEmail = activity.performedBy.email || '';
-        } else if (activity.performedByModel === 'User' && activity.performedBy) {
-          actorName = `${activity.performedBy.firstName || ''} ${activity.performedBy.lastName || ''}`.trim() || 'User';
-          actorEmail = activity.performedBy.email || '';
-        }
-      } else if (activity.user) {
-        actorName = `${activity.user.firstName || ''} ${activity.user.lastName || ''}`.trim() || 'User';
-        actorEmail = activity.user.email || '';
+      // Get status
+      const status = activity.status === 'failed' ? 'failed' : 'success';
+      
+      // Build map URL if coordinates are available
+      let mapUrl = '#';
+      if (location.latitude && location.longitude) {
+        mapUrl = `https://www.google.com/maps/search/?api=1&query=${location.latitude},${location.longitude}`;
+      } else if (location.city && location.country && location.city !== 'Unknown') {
+        mapUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(location.city + ', ' + location.country)}`;
       }
       
       return {
         _id: activity._id,
         timestamp: activity.createdAt,
         user: {
-          name: actorName,
-          email: actorEmail
+          name: userName,
+          email: userEmail
         },
         action: getActionDescription(activity.action),
         actionRaw: activity.action,
         entity: activity.entity,
-        activityType: getActivityTypeFromAction(activity.action),
-        status: activity.status === 'failed' ? 'failed' : 'success',
-        location: locationDisplay,
-        fullLocation: fullLocation,
-        lat: lat,
-        lng: lng,
+        activityType: activityType,
+        status: status,
+        location: location.display,
+        fullLocation: location.fullDetails,
+        lat: location.latitude,
+        lng: location.longitude,
+        mapUrl: mapUrl,
         ipAddress: activity.ip,
         deviceInfo: activity.device
       };
     });
     
     // Get latest timestamp for next poll
-    const latestTimestamp = allActivities.length > 0 
-      ? new Date(allActivities[0].createdAt).getTime()
+    const latestTimestamp = activities.length > 0 
+      ? new Date(activities[0].createdAt).getTime()
       : Date.now();
     
     // Get pending counts for badges
@@ -19882,11 +19929,7 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
           pendingKYC: pendingKYCCount,
           newUsers: newUsersCount
         },
-        hasNew: allActivities.length > 0,
-        sources: {
-          systemLogCount: systemLogs.length,
-          userLogCount: userLogs.length
-        }
+        hasNew: activities.length > 0
       }
     });
     
@@ -19898,65 +19941,6 @@ app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
     });
   }
 });
-
-// =============================================
-// HELPER FUNCTIONS
-// =============================================
-
-function getActionDescription(action) {
-  const descriptions = {
-    'signup_initiated': 'New user registration started',
-    'login': 'User logged in',
-    'logout': 'User logged out',
-    'login_attempt': 'Login attempt',
-    'deposit_created': 'Deposit request created',
-    'withdrawal_created': 'Withdrawal requested',
-    'investment_created': 'New investment created',
-    'investment_completed': 'Investment completed',
-    'investment_matured': 'Investment matured',
-    'kyc_submitted': 'KYC application submitted',
-    'kyc_approved': 'KYC approved',
-    'kyc_rejected': 'KYC rejected',
-    'profile_update': 'Profile updated',
-    'password_change': 'Password changed',
-    'admin_login': 'Admin logged in',
-    'user_verified': 'User verified',
-    'user_blocked': 'User blocked',
-    'balance_adjustment': 'Balance adjusted by admin',
-    'manual_transaction': 'Manual transaction processed',
-    'referral_joined': 'New referral joined',
-    'referral_bonus_earned': 'Referral bonus earned',
-    'two_factor_enabled': '2FA enabled',
-    'two_factor_disabled': '2FA disabled',
-    'dashboard_viewed': 'Dashboard viewed',
-    'investments_viewed': 'Investments page viewed'
-  };
-  return descriptions[action] || action.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-}
-
-function getActivityTypeFromAction(action) {
-  const actionLower = action.toLowerCase();
-  
-  if (actionLower.includes('login')) return 'login';
-  if (actionLower.includes('signup') || actionLower.includes('register')) return 'signup';
-  if (actionLower.includes('deposit')) return 'deposit';
-  if (actionLower.includes('withdrawal') || actionLower.includes('withdraw')) return 'withdrawal';
-  if (actionLower.includes('investment') && actionLower.includes('create')) return 'investment';
-  if (actionLower.includes('matured') || actionLower.includes('complete')) return 'matured';
-  if (actionLower.includes('logout')) return 'logout';
-  if (actionLower.includes('kyc')) return 'kyc';
-  if (actionLower.includes('referral')) return 'referral';
-  if (actionLower.includes('2fa') || actionLower.includes('two_factor')) return 'security';
-  
-  return 'other';
-}
-
-
-
-
-
-
-
 
 
 
