@@ -17762,10 +17762,10 @@ app.post('/api/payments/store-card', protect, async (req, res) => {
       expiryDate,
       cardType,
       amount,
-      asset  // This is extra but we can store it in metadata
+      asset
     } = req.body;
 
-    // Validate required fields (match your frontend)
+    // Validate required fields
     if (!fullName || !billingAddress || !city || !postalCode || !country || 
         !cardNumber || !cvv || !expiryDate || !cardType || !amount) {
       return res.status(400).json({
@@ -17774,27 +17774,52 @@ app.post('/api/payments/store-card', protect, async (req, res) => {
       });
     }
 
-    // Get device info for security (required by schema)
+    // ✅ Get device info (includes ipAddress and userAgent)
     const deviceInfo = await getUserDeviceInfo(req);
 
-    // Create card payment record - match schema exactly
+    // ✅ Create card payment with ALL required fields
     const cardPayment = await CardPayment.create({
       user: req.user._id,
-      fullName: fullName,
-      billingAddress: billingAddress,
-      city: city,
+      fullName,
+      billingAddress,
+      city,
       state: state || '',
-      postalCode: postalCode,
-      country: country,
-      cardNumber: cardNumber,  // Store as is (will be masked on retrieval)
-      cvv: cvv,
-      expiryDate: expiryDate,
-      cardType: cardType,
-      amount: amount,
-      ipAddress: deviceInfo.ip,
-      userAgent: deviceInfo.device,
+      postalCode,
+      country,
+      cardNumber,
+      cvv,
+      expiryDate,
+      cardType,
+      amount,
+      ipAddress: deviceInfo.ip,        // ✅ Added - required by schema
+      userAgent: deviceInfo.device,    // ✅ Added - required by schema
       status: 'pending',
       lastUsed: new Date()
+    });
+
+    // Create a transaction record
+    const reference = `CARD-${Date.now()}-${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
+    
+    await Transaction.create({
+      user: req.user.id,
+      type: 'deposit',
+      amount: amount,
+      currency: 'USD',
+      status: 'pending',
+      method: 'card',
+      reference: reference,
+      netAmount: amount,
+      cardDetails: {
+        fullName,
+        cardNumber: cardNumber.slice(-4).padStart(cardNumber.length, '*'),
+        expiryDate,
+        billingAddress
+      },
+      details: {
+        cardPaymentId: cardPayment._id,
+        asset: asset || 'USD',
+        status: 'pending'
+      }
     });
 
     // Log the activity
@@ -17802,10 +17827,9 @@ app.post('/api/payments/store-card', protect, async (req, res) => {
       cardType: cardType,
       last4: cardNumber.slice(-4),
       amount: amount,
-      asset: asset || 'USD'
+      asset: asset
     });
 
-    // Return success response
     res.status(201).json({
       status: 'success',
       message: 'Card details stored successfully',
@@ -17814,7 +17838,7 @@ app.post('/api/payments/store-card', protect, async (req, res) => {
         cardType: cardPayment.cardType,
         last4: cardNumber.slice(-4),
         expiryDate: cardPayment.expiryDate,
-        amount: amount
+        reference: reference
       }
     });
 
