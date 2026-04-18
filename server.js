@@ -22678,6 +22678,214 @@ app.get('/api/admin/investment/plans/:id', adminProtect, async (req, res) => {
 });
 
 
+// =============================================
+// UPDATE INVESTMENT PLAN
+// =============================================
+app.put('/api/admin/investment/plans/:id', adminProtect, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { 
+      name, 
+      description, 
+      minAmount, 
+      maxAmount, 
+      duration, 
+      dailyProfit, 
+      totalProfit, 
+      status 
+    } = req.body;
+
+    // Validate plan ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid plan ID'
+      });
+    }
+
+    // Check if plan exists
+    const existingPlan = await Plan.findById(id);
+    if (!existingPlan) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Investment plan not found'
+      });
+    }
+
+    // Build update object
+    const updateData = {};
+    
+    if (name !== undefined) updateData.name = name;
+    if (description !== undefined) updateData.description = description;
+    if (minAmount !== undefined) updateData.minAmount = parseFloat(minAmount);
+    if (maxAmount !== undefined) updateData.maxAmount = parseFloat(maxAmount);
+    if (duration !== undefined) updateData.duration = parseInt(duration);
+    
+    // Handle percentage (maps to both dailyProfit and totalProfit in frontend)
+    if (dailyProfit !== undefined) updateData.percentage = parseFloat(dailyProfit);
+    if (totalProfit !== undefined && dailyProfit === undefined) updateData.percentage = parseFloat(totalProfit);
+    
+    // Handle status (convert 'active'/'inactive' to isActive boolean)
+    if (status !== undefined) {
+      updateData.isActive = status === 'active';
+    }
+
+    // Update the plan
+    const updatedPlan = await Plan.findByIdAndUpdate(
+      id, 
+      updateData, 
+      { new: true, runValidators: true }
+    );
+
+    if (!updatedPlan) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Investment plan not found'
+      });
+    }
+
+    // Format response as HTML expects
+    const formattedPlan = {
+      _id: updatedPlan._id,
+      name: updatedPlan.name,
+      description: updatedPlan.description,
+      minAmount: updatedPlan.minAmount,
+      maxAmount: updatedPlan.maxAmount,
+      duration: updatedPlan.duration,
+      dailyProfit: updatedPlan.percentage,
+      totalProfit: updatedPlan.percentage,
+      status: updatedPlan.isActive ? 'active' : 'inactive',
+      referralBonus: updatedPlan.referralBonus
+    };
+
+    // Log the activity
+    await logActivity(
+      'investment_plan_updated',
+      'Plan',
+      updatedPlan._id,
+      req.admin._id,
+      'Admin',
+      req,
+      {
+        planName: updatedPlan.name,
+        changes: updateData
+      }
+    );
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Investment plan updated successfully',
+      data: {
+        plan: formattedPlan
+      }
+    });
+
+  } catch (err) {
+    console.error('Error updating investment plan:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to update investment plan'
+    });
+  }
+});
+
+
+// =============================================
+// CREATE INVESTMENT PLAN
+// =============================================
+app.post('/api/admin/investment/plans', adminProtect, async (req, res) => {
+  try {
+    const { 
+      name, 
+      description, 
+      minAmount, 
+      maxAmount, 
+      duration, 
+      dailyProfit, 
+      totalProfit, 
+      status,
+      referralBonus 
+    } = req.body;
+
+    // Validate required fields
+    if (!name || !description || !minAmount || !maxAmount || !duration) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Missing required fields: name, description, minAmount, maxAmount, duration'
+      });
+    }
+
+    // Check if plan name already exists
+    const existingPlan = await Plan.findOne({ name: name });
+    if (existingPlan) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Plan with this name already exists'
+      });
+    }
+
+    // Get percentage from dailyProfit or totalProfit
+    const percentage = dailyProfit || totalProfit || 0;
+
+    // Create new plan
+    const newPlan = await Plan.create({
+      name: name,
+      description: description,
+      minAmount: parseFloat(minAmount),
+      maxAmount: parseFloat(maxAmount),
+      duration: parseInt(duration),
+      percentage: parseFloat(percentage),
+      isActive: status === 'active',
+      referralBonus: referralBonus ? parseFloat(referralBonus) : 5
+    });
+
+    // Format response
+    const formattedPlan = {
+      _id: newPlan._id,
+      name: newPlan.name,
+      description: newPlan.description,
+      minAmount: newPlan.minAmount,
+      maxAmount: newPlan.maxAmount,
+      duration: newPlan.duration,
+      dailyProfit: newPlan.percentage,
+      totalProfit: newPlan.percentage,
+      status: newPlan.isActive ? 'active' : 'inactive',
+      referralBonus: newPlan.referralBonus
+    };
+
+    // Log the activity
+    await logActivity(
+      'investment_plan_created',
+      'Plan',
+      newPlan._id,
+      req.admin._id,
+      'Admin',
+      req,
+      {
+        planName: newPlan.name,
+        minAmount: newPlan.minAmount,
+        maxAmount: newPlan.maxAmount,
+        duration: newPlan.duration,
+        percentage: newPlan.percentage
+      }
+    );
+
+    res.status(201).json({
+      status: 'success',
+      message: 'Investment plan created successfully',
+      data: {
+        plan: formattedPlan
+      }
+    });
+
+  } catch (err) {
+    console.error('Error creating investment plan:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to create investment plan'
+    });
+  }
+});
 
 
 
