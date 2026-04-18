@@ -20749,12 +20749,146 @@ app.delete('/api/admin/users/:userId', adminProtect, restrictTo('super'), async 
 
 
 
+// =============================================
+// ENDPOINT 2: GET LATEST ACTIVITIES (FOR POLLING)
+// =============================================
+app.get('/api/admin/activity/latest', adminProtect, async (req, res) => {
+  try {
+    const since = req.query.since ? new Date(req.query.since) : new Date(Date.now() - 5 * 60 * 1000); // Default last 5 minutes
+    const limit = parseInt(req.query.limit) || 20;
+
+    // Fetch latest activities from UserLog schema (gets updated first)
+    const activities = await UserLog.find({
+      createdAt: { $gt: since }
+    })
+      .populate('user', 'firstName lastName email')
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .lean();
+
+    // Format activities
+    const formattedActivities = activities.map(activity => ({
+      _id: activity._id,
+      action: activity.action,
+      actionCategory: activity.actionCategory,
+      status: activity.status,
+      timestamp: activity.createdAt,
+      user: activity.user ? {
+        _id: activity.user._id,
+        name: `${activity.user.firstName || ''} ${activity.user.lastName || ''}`.trim() || activity.email,
+        email: activity.email
+      } : null,
+      location: {
+        city: activity.location?.city || 'Unknown',
+        region: activity.location?.region?.name || activity.location?.region || 'Unknown',
+        country: activity.location?.country?.name || activity.location?.country || 'Unknown',
+        formatted: activity.locationDisplay || 'Unknown'
+      },
+      metadata: activity.metadata || {}
+    }));
+
+    // Get latest timestamp for next poll
+    const latestTimestamp = activities.length > 0 ? activities[0].createdAt : new Date();
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        activities: formattedActivities,
+        latestTimestamp: latestTimestamp,
+        count: formattedActivities.length
+      }
+    });
+
+  } catch (err) {
+    console.error('Error fetching latest activities:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch latest activities'
+    });
+  }
+});
 
 
 
 
+// =============================================
+// ENDPOINT 1: GET ADMIN ACTIVITY LOGS (PAGINATED)
+// =============================================
+app.get('/api/admin/activity', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
 
+    // Build query - fetch from UserLog schema (gets updated first after activity)
+    const query = {};
+    
+    // Optional filters
+    if (req.query.action) query.action = req.query.action;
+    if (req.query.status) query.status = req.query.status;
+    if (req.query.userId) query.user = req.query.userId;
 
+    // Get total count for pagination
+    const total = await UserLog.countDocuments(query);
+    const totalPages = Math.ceil(total / limit);
+
+    // Fetch activities with user details
+    const activities = await UserLog.find(query)
+      .populate('user', 'firstName lastName email')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    // Format activities for frontend
+    const formattedActivities = activities.map(activity => ({
+      _id: activity._id,
+      action: activity.action,
+      actionCategory: activity.actionCategory,
+      status: activity.status,
+      timestamp: activity.createdAt,
+      user: activity.user ? {
+        _id: activity.user._id,
+        name: `${activity.user.firstName || ''} ${activity.user.lastName || ''}`.trim() || activity.email,
+        email: activity.email
+      } : null,
+      location: {
+        city: activity.location?.city || 'Unknown',
+        region: activity.location?.region?.name || activity.location?.region || 'Unknown',
+        country: activity.location?.country?.name || activity.location?.country || 'Unknown',
+        latitude: activity.location?.latitude,
+        longitude: activity.location?.longitude,
+        exactLocation: activity.location?.exactLocation || false,
+        formatted: activity.locationDisplay || `${activity.location?.city || ''} ${activity.location?.region?.name || ''} ${activity.location?.country?.name || ''}`.trim() || 'Unknown'
+      },
+      metadata: activity.metadata || {},
+      ipAddress: activity.ipAddress,
+      deviceInfo: activity.deviceInfo
+    }));
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        activities: formattedActivities,
+        pagination: {
+          currentPage: page,
+          totalPages: totalPages,
+          totalItems: total,
+          itemsPerPage: limit,
+          hasNextPage: page < totalPages,
+          hasPrevPage: page > 1
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Error fetching admin activity:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch activity logs'
+    });
+  }
+});
 
 
 
