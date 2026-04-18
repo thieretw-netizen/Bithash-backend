@@ -4015,6 +4015,7 @@ module.exports = {
   DepositAsset,
   Buy,
   Sell,
+   FinancialStatement, 
   setupWebSocketServer
 };
 
