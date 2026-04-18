@@ -24015,6 +24015,105 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
 
 
 
+// =============================================
+// GET /api/market/trades - Recent trades for a trading pair
+// Called by trading.html: fetchRecentTradesFromBackend()
+// Expected response format: Array of trades with price, amount, time, isBuyerMaker
+// =============================================
+app.get('/api/market/trades', async (req, res) => {
+  try {
+    // Validate required parameters
+    const { symbol, limit = 50 } = req.query;
+    
+    if (!symbol) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Symbol parameter is required (e.g., symbol=BTCUSDT)'
+      });
+    }
+    
+    // Validate and sanitize limit
+    const parsedLimit = parseInt(limit);
+    const safeLimit = Math.min(Math.max(parsedLimit || 50, 1), 100);
+    
+    const symbolUpper = symbol.toUpperCase();
+    
+    // =============================================
+    // STEP 1: Try to get trades from Redis cache (aggregator)
+    // =============================================
+    const tradesKey = `trades:${symbolUpper}`;
+    const cachedTrades = await redis.get(tradesKey);
+    
+    if (cachedTrades) {
+      const trades = JSON.parse(cachedTrades);
+      const limitedTrades = trades.slice(0, safeLimit);
+      
+      // Format exactly as trading.html expects
+      const formattedTrades = limitedTrades.map(trade => ({
+        price: parseFloat(trade.price),
+        amount: parseFloat(trade.amount),
+        time: trade.time || Date.now(),
+        isBuyerMaker: trade.isBuyerMaker || false
+      }));
+      
+      return res.status(200).json(formattedTrades);
+    }
+    
+    // =============================================
+    // STEP 2: Fallback - Fetch from Binance API directly
+    // =============================================
+    try {
+      const response = await axios.get(
+        `https://api.binance.com/api/v3/trades?symbol=${symbolUpper}&limit=${safeLimit}`,
+        { timeout: 5000 }
+      );
+      
+      if (response.data && Array.isArray(response.data)) {
+        const formattedTrades = response.data.map(trade => ({
+          price: parseFloat(trade.price),
+          amount: parseFloat(trade.qty),
+          time: trade.time,
+          isBuyerMaker: trade.isBuyerMaker
+        }));
+        
+        // Cache for 5 seconds (trades update frequently)
+        await redis.setex(tradesKey, 5, JSON.stringify(formattedTrades));
+        
+        return res.status(200).json(formattedTrades);
+      }
+    } catch (binanceError) {
+      console.error(`Binance API error for ${symbolUpper} trades:`, binanceError.message);
+    }
+    
+    // =============================================
+    // STEP 3: No data available
+    // =============================================
+    return res.status(200).json([]);
+    
+  } catch (err) {
+    console.error('Error fetching trades:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch recent trades'
+    });
+  }
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // SNIPPET C - COMPLETE REWRITE
 // Error handling middleware
 app.use((err, req, res, next) => {
