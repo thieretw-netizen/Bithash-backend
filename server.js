@@ -23343,11 +23343,8 @@ app.get('/api/admin/transactions/export', adminProtect, async (req, res) => {
 
 
 
-
-
-
 // =============================================
-// CANCEL INVESTMENT (Admin) - FIXED with valid enum
+// CANCEL INVESTMENT (Admin) - Refund to MATURED wallet with real-time BTC price
 // =============================================
 app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => {
   try {
@@ -23392,36 +23389,52 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
       });
     }
 
+    // Get REAL-TIME BTC price at cancellation moment
+    let currentBTCPrice = 0;
+    try {
+      currentBTCPrice = await getRealTimeBitcoinPrice();
+      console.log(`Current BTC price at cancellation: $${currentBTCPrice}`);
+    } catch (priceError) {
+      console.error('Failed to get BTC price:', priceError);
+      currentBTCPrice = 50000; // Fallback price if API fails
+    }
+
     // Calculate refund amounts
     const refundAmountUSD = investment.amount || 0;
-    const refundAmountBTC = investment.amountBTC || 0;
+    const refundAmountBTC = refundAmountUSD / currentBTCPrice;
+    const originalBTCAmount = investment.amountBTC || 0;
     const asset = (investment.currency || 'BTC').toLowerCase();
 
-    console.log(`Refunding user ${user.email}: $${refundAmountUSD}, ${refundAmountBTC} ${asset}`);
+    console.log(`Refunding user ${user.email}:`);
+    console.log(`  - USD Amount: $${refundAmountUSD}`);
+    console.log(`  - BTC Amount (at current price $${currentBTCPrice}): ${refundAmountBTC} BTC`);
+    console.log(`  - Original BTC Amount at investment: ${originalBTCAmount} BTC`);
+    console.log(`  - Target Wallet: MATURED`);
 
     // Initialize balances if needed
     if (!user.balances) {
       user.balances = { main: new Map(), active: new Map(), matured: new Map() };
     }
-    if (!user.balances.main) user.balances.main = new Map();
-    if (!user.balances.active) user.balances.active = new Map();
+    if (!user.balances.matured) user.balances.matured = new Map();
 
-    // Get current balances
-    const currentMainAssetBalance = user.balances.main.get(asset) || 0;
-    const currentMainUSDBalance = user.balances.main.get('usd') || 0;
-    const currentActiveAssetBalance = user.balances.active.get(asset) || 0;
+    // Get current matured wallet balances
+    const currentMaturedBTCBalance = user.balances.matured.get('btc') || 0;
+    const currentMaturedUSDBalance = user.balances.matured.get('usd') || 0;
+    
+    // Get current active wallet balances (where the investment was)
+    const currentActiveBTCBalance = user.balances.active.get('btc') || 0;
     const currentActiveUSDBalance = user.balances.active.get('usd') || 0;
 
-    // Refund to main wallet
-    user.balances.main.set(asset, currentMainAssetBalance + refundAmountBTC);
-    user.balances.main.set('usd', currentMainUSDBalance + refundAmountUSD);
+    // REFUND TO MATURED WALLET (not main wallet)
+    user.balances.matured.set('btc', currentMaturedBTCBalance + refundAmountBTC);
+    user.balances.matured.set('usd', currentMaturedUSDBalance + refundAmountUSD);
     
     // Remove from active wallet
-    const newActiveAssetBalance = currentActiveAssetBalance - refundAmountBTC;
-    if (newActiveAssetBalance <= 0.00000001) {
-      user.balances.active.delete(asset);
+    const newActiveBTCBalance = currentActiveBTCBalance - originalBTCAmount;
+    if (newActiveBTCBalance <= 0.00000001) {
+      user.balances.active.delete('btc');
     } else {
-      user.balances.active.set(asset, newActiveAssetBalance);
+      user.balances.active.set('btc', newActiveBTCBalance);
     }
     
     const newActiveUSDBalance = currentActiveUSDBalance - refundAmountUSD;
@@ -23437,6 +23450,8 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
     investment.status = 'cancelled';
     investment.completionDate = new Date();
     investment.adminNotes = reason || `Cancelled by admin: ${req.admin.name}`;
+    investment.cancellationBTCPrice = currentBTCPrice;
+    investment.cancellationBTCAmount = refundAmountBTC;
     
     // Add to status history
     if (!investment.statusHistory) investment.statusHistory = [];
@@ -23450,45 +23465,125 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
     
     await investment.save();
 
-    // Create transaction record for the refund - USING VALID ENUM VALUE 'INTERNAL'
+    // Create transaction record for the refund
     const refundReference = `CANCEL-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
     
     await Transaction.create({
       user: user._id,
-      type: 'deposit',  // Valid type
+      type: 'deposit',
       amount: refundAmountUSD,
-      asset: asset.toUpperCase(),
+      asset: 'BTC',
       assetAmount: refundAmountBTC,
       currency: 'USD',
       status: 'completed',
-      method: 'INTERNAL',  // VALID enum value (from your schema: 'BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'SHIB', 'TRX', 'LTC', 'BANK', 'CARD', 'INTERNAL', 'LOAN')
+      method: 'INTERNAL',
       reference: refundReference,
       details: {
-        type: 'investment_cancellation',
+        type: 'investment_cancellation_refund',
         investmentId: investment._id,
         planName: investment.plan?.name || 'Unknown Plan',
         originalAmount: investment.amount,
-        refundAmount: refundAmountUSD,
+        originalBTCAmount: originalBTCAmount,
+        refundAmountUSD: refundAmountUSD,
+        refundAmountBTC: refundAmountBTC,
+        btcPriceAtCancellation: currentBTCPrice,
         cancelledBy: req.admin.name,
         cancellationReason: reason || 'Cancelled by admin',
-        refundProcessedAt: new Date()
+        refundProcessedAt: new Date(),
+        targetWallet: 'matured'
       },
       fee: 0,
       netAmount: refundAmountUSD,
       processedBy: req.admin._id,
-      processedAt: new Date()
+      processedAt: new Date(),
+      exchangeRateAtTime: currentBTCPrice
     });
 
-    // Send email notification to user (optional - wrap in try-catch)
+    // =============================================
+    // LOG TO SYSTEMLOG SCHEMA with all details
+    // =============================================
+    const deviceInfo = await getUserDeviceInfo(req);
+    
+    await SystemLog.create({
+      action: 'investment_cancelled',
+      entity: 'Investment',
+      entityId: investment._id,
+      performedBy: req.admin._id,
+      performedByModel: 'Admin',
+      performedByEmail: req.admin.email,
+      performedByName: req.admin.name,
+      ip: getRealClientIP(req),
+      userAgent: req.headers['user-agent'] || 'Unknown',
+      deviceType: deviceInfo.deviceDetails?.type || 'desktop',
+      os: deviceInfo.deviceDetails?.os?.name,
+      browser: deviceInfo.deviceDetails?.browser?.name,
+      location: deviceInfo.location,
+      city: deviceInfo.locationDetails?.city,
+      region: deviceInfo.locationDetails?.region,
+      countryCode: deviceInfo.locationDetails?.country,
+      latitude: deviceInfo.locationDetails?.latitude,
+      longitude: deviceInfo.locationDetails?.longitude,
+      status: 'success',
+      riskLevel: 'low',
+      metadata: {
+        userId: user._id,
+        userEmail: user.email,
+        userName: `${user.firstName} ${user.lastName}`,
+        planName: investment.plan?.name,
+        planId: investment.plan?._id,
+        originalInvestmentAmountUSD: investment.amount,
+        originalInvestmentAmountBTC: originalBTCAmount,
+        refundAmountUSD: refundAmountUSD,
+        refundAmountBTC: refundAmountBTC,
+        btcPriceAtCancellation: currentBTCPrice,
+        targetWallet: 'matured',
+        reason: reason || 'Cancelled by admin',
+        cancelledBy: req.admin.name,
+        cancelledByEmail: req.admin.email,
+        timestamp: new Date().toISOString()
+      },
+      changes: {
+        before: {
+          status: 'active',
+          activeWalletBTC: currentActiveBTCBalance,
+          activeWalletUSD: currentActiveUSDBalance,
+          maturedWalletBTC: currentMaturedBTCBalance,
+          maturedWalletUSD: currentMaturedUSDBalance
+        },
+        after: {
+          status: 'cancelled',
+          activeWalletBTC: newActiveBTCBalance,
+          activeWalletUSD: newActiveUSDBalance,
+          maturedWalletBTC: currentMaturedBTCBalance + refundAmountBTC,
+          maturedWalletUSD: currentMaturedUSDBalance + refundAmountUSD
+        }
+      },
+      financial: {
+        amount: refundAmountUSD,
+        amountUSD: refundAmountUSD,
+        cryptoAmount: refundAmountBTC,
+        cryptoAsset: 'BTC',
+        fee: 0,
+        exchangeRate: currentBTCPrice,
+        balanceBefore: currentMaturedUSDBalance,
+        balanceAfter: currentMaturedUSDBalance + refundAmountUSD,
+        walletType: 'matured',
+        transactionId: refundReference
+      }
+    });
+
+    console.log(`✅ SystemLog entry created for investment cancellation: ${investment._id}`);
+
+    // Send email notification to user
     try {
       await sendProfessionalEmail({
         email: user.email,
         template: 'default',
         data: {
           name: user.firstName,
-          message: `Your investment in ${investment.plan?.name || 'Unknown Plan'} of $${refundAmountUSD.toLocaleString()} has been cancelled. A refund of ${refundAmountBTC} ${asset.toUpperCase()} has been credited to your main wallet.`,
-          details: `Reason: ${reason || 'Cancelled by administrator'}`,
-          buttonText: 'View Wallet',
+          message: `Your investment in ${investment.plan?.name || 'Unknown Plan'} of $${refundAmountUSD.toLocaleString()} has been cancelled.`,
+          details: `A refund of ${refundAmountBTC.toFixed(8)} BTC (worth $${refundAmountUSD.toLocaleString()} at current BTC price of $${currentBTCPrice.toLocaleString()}) has been credited to your MATURED wallet.`,
+          buttonText: 'View Matured Wallet',
           actionLink: 'https://www.bithashcapital.live/dashboard'
         }
       });
@@ -23499,51 +23594,48 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
     // Create notification for user
     try {
       await Notification.create({
-        title: 'Investment Cancelled',
-        message: `Your investment in ${investment.plan?.name || 'Unknown Plan'} of $${refundAmountUSD.toLocaleString()} has been cancelled. Refund credited to your main wallet.`,
-        type: 'info',
+        title: 'Investment Cancelled - Refund to Matured Wallet',
+        message: `Your investment in ${investment.plan?.name || 'Unknown Plan'} has been cancelled. ${refundAmountBTC.toFixed(8)} BTC ($${refundAmountUSD.toLocaleString()}) has been credited to your MATURED wallet at BTC price $${currentBTCPrice.toLocaleString()}.`,
+        type: 'investment_update',
         recipientType: 'specific',
         specificUserId: user._id,
         sentBy: req.admin._id,
-        isImportant: true
+        isImportant: true,
+        metadata: {
+          investmentId: investment._id,
+          refundAmountUSD: refundAmountUSD,
+          refundAmountBTC: refundAmountBTC,
+          btcPrice: currentBTCPrice,
+          targetWallet: 'matured'
+        }
       });
     } catch (notifError) {
       console.error('Failed to create notification:', notifError);
     }
 
-    // Log the activity
-    await logActivity(
-      'investment_cancelled',
-      'Investment',
-      investment._id,
-      req.admin._id,
-      'Admin',
-      req,
-      {
-        userId: user._id,
-        userEmail: user.email,
-        planName: investment.plan?.name,
-        originalAmount: refundAmountUSD,
-        refundAmount: refundAmountUSD,
-        asset: asset,
-        assetAmount: refundAmountBTC,
-        reason: reason
-      }
-    );
-
     // Emit real-time update via Socket.IO
     const io = req.app.get('io');
     if (io) {
       io.to(`user_${user._id}`).emit('balance_update', {
-        main: user.balances.main.get('usd') || 0,
-        active: user.balances.active.get('usd') || 0,
+        main: user.balances.main?.get('usd') || 0,
+        active: user.balances.active?.get('usd') || 0,
         matured: user.balances.matured?.get('usd') || 0
+      });
+      
+      io.to(`user_${user._id}`).emit('investment_cancelled', {
+        investmentId: investment._id,
+        planName: investment.plan?.name,
+        refundAmountUSD: refundAmountUSD,
+        refundAmountBTC: refundAmountBTC,
+        refundWallet: 'matured',
+        btcPrice: currentBTCPrice,
+        timestamp: new Date()
       });
     }
 
     res.status(200).json({
       status: 'success',
-      message: 'Investment cancelled successfully',
+      message: `Investment cancelled successfully. ${refundAmountBTC.toFixed(8)} BTC ($${refundAmountUSD.toLocaleString()}) credited to matured wallet.`,
       data: {
         investment: {
           _id: investment._id,
@@ -23552,16 +23644,44 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
           planName: investment.plan?.name
         },
         refund: {
-          amount: refundAmountUSD,
-          asset: asset.toUpperCase(),
-          assetAmount: refundAmountBTC,
+          amountUSD: refundAmountUSD,
+          amountBTC: refundAmountBTC,
+          btcPrice: currentBTCPrice,
+          walletType: 'matured',
           reference: refundReference
+        },
+        newBalances: {
+          maturedBTC: user.balances.matured.get('btc') || 0,
+          maturedUSD: user.balances.matured.get('usd') || 0,
+          activeBTC: user.balances.active.get('btc') || 0,
+          activeUSD: user.balances.active.get('usd') || 0
         }
       }
     });
 
   } catch (err) {
     console.error('Error cancelling investment:', err);
+    
+    // Log error to SystemLog
+    try {
+      await SystemLog.create({
+        action: 'investment_cancellation_failed',
+        entity: 'Investment',
+        entityId: req.params.id,
+        performedBy: req.admin._id,
+        performedByModel: 'Admin',
+        performedByEmail: req.admin.email,
+        status: 'failed',
+        errorMessage: err.message,
+        metadata: {
+          reason: req.body.reason,
+          error: err.toString()
+        }
+      });
+    } catch (logError) {
+      console.error('Failed to log cancellation error:', logError);
+    }
+    
     res.status(500).json({
       status: 'error',
       message: err.message || 'Failed to cancel investment'
