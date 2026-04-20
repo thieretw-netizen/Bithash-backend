@@ -6520,9 +6520,7 @@ case 'login_success':
           <p style="color: #6C7480; font-size: 14px; margin: 0;">Action Required / Information</p>
         </div>
         
-        <p style="color: #333333; line-height: 1.6;">Dear <strong>${data.name || 'Valued Customer'}</strong>,</p>
-        
-        <p style="color: #333333; line-height: 1.6;">${data.message || 'We have an important update regarding your account that requires your attention.'}</p>
+      
         
         ${data.details ? `
         <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
@@ -6544,16 +6542,7 @@ case 'login_success':
         </div>
         ` : ''}
         
-        <div style="margin-top: 25px; padding-top: 20px; border-top: 1px solid #E5E7EB;">
-          <p style="color: #6C7480; font-size: 13px; line-height: 1.5; margin: 0 0 10px 0;">
-            <strong>What this means for you:</strong>
-          </p>
-          <ul style="color: #6C7480; font-size: 13px; margin: 0; padding-left: 20px;">
-            <li style="margin: 5px 0;"></li>
-            <li style="margin: 5px 0;"></li>
-            <li style="margin: 5px 0;"></li>
-          </ul>
-        </div>
+        
         
         <p style="color: #666666; font-size: 12px; margin-top: 30px;">
           <strong>Reference ID:</strong> ${data.referenceId || 'N/A'}<br>
