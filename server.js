@@ -6507,7 +6507,7 @@ case 'login_success':
         break;
 
  default:
-  subject = 'Important Account Update - ₿itHash Capital';
+  subject = '';
   html = `
     <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
       ${brandHeader}
@@ -6533,7 +6533,7 @@ case 'login_success':
         
         ${data.actionRequired ? `
         <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
-          <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">⚠️ Action Required</p>
+          <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;"></p>
           <p style="color: #78350F; margin: 0; font-size: 14px;">${data.actionRequired}</p>
         </div>
         ` : ''}
@@ -6549,9 +6549,9 @@ case 'login_success':
             <strong>What this means for you:</strong>
           </p>
           <ul style="color: #6C7480; font-size: 13px; margin: 0; padding-left: 20px;">
-            <li style="margin: 5px 0;">Your account security is our top priority</li>
-            <li style="margin: 5px 0;">Review the information above for any necessary actions</li>
-            <li style="margin: 5px 0;">Contact support if you have any questions</li>
+            <li style="margin: 5px 0;"></li>
+            <li style="margin: 5px 0;"></li>
+            <li style="margin: 5px 0;"></li>
           </ul>
         </div>
         
@@ -6565,8 +6565,8 @@ case 'login_success':
             <strong>Need help?</strong> Contact our support team:
           </p>
           <p style="color: #6C7480; font-size: 12px; margin: 0;">
-            📧 <a href="mailto:support@bithashcapital.live" style="color: #F7A600;">support@bithashcapital.live</a><br>
-            🌐 <a href="https://www.bithashcapital.live/support" style="color: #F7A600;">www.bithashcapital.live/support</a>
+             <a href="mailto:support@bithashcapital.live" style="color: #F7A600;">support@bithashcapital.live</a><br>
+             <a href="https://www.bithashcapital.live/support" style="color: #F7A600;">www.bithashcapital.live/support</a>
           </p>
         </div>
       </div>
