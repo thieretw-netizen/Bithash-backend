@@ -6506,7 +6506,7 @@ case 'login_success':
         `;
         break;
 
-Here is your rewritten template with only the static content removed from the body, while keeping the header and footer completely intact. The subject remains empty ready to receive dynamic content.
+
 
 
 default:
