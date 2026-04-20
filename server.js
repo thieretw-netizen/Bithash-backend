@@ -6506,9 +6506,6 @@ case 'login_success':
         `;
         break;
 
-
-
-
 default:
   subject = '';
   html = `
@@ -6521,8 +6518,6 @@ default:
     </div>
   `;
   break;
-
-
 
 
 
