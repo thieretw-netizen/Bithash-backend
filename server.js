@@ -19597,6 +19597,563 @@ app.get('/api/admin/withdrawals/:id', adminProtect, restrictTo('super', 'finance
   }
 });
 
+
+
+
+
+// =============================================
+// SPOT WITHDRAWAL ENDPOINT - Withdraw from user.balances Maps
+// Minimum withdrawal: $350 USD worth of crypto
+// =============================================
+app.post('/api/withdrawals/spot', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const {
+      amount,        // USD amount requested
+      asset,         // crypto asset symbol (btc, eth, etc.)
+      walletAddress, // destination wallet address
+      gasFee,        // optional gas fee amount
+      exchangeRate   // current exchange rate
+    } = req.body;
+
+    const MIN_WITHDRAWAL_USD = 350;
+    
+    console.log('Spot withdrawal request:', { userId, amountUSD: amount, asset, walletAddress });
+
+    // Validate minimum withdrawal
+    if (!amount || amount < MIN_WITHDRAWAL_USD) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Minimum withdrawal amount is $${MIN_WITHDRAWAL_USD} USD worth of ${asset.toUpperCase()}`
+      });
+    }
+
+    // Validate required fields
+    if (!asset) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Asset type is required'
+      });
+    }
+
+    if (!walletAddress || walletAddress.trim().length < 10) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Valid ${asset.toUpperCase()} wallet address is required`
+      });
+    }
+
+    // Get current crypto price if exchange rate not provided
+    let currentRate = exchangeRate;
+    if (!currentRate || currentRate <= 0) {
+      currentRate = await getCryptoPrice(asset.toUpperCase());
+      if (!currentRate || currentRate <= 0) {
+        return res.status(400).json({
+          status: 'fail',
+          message: `Unable to fetch current ${asset.toUpperCase()} price. Please try again.`
+        });
+      }
+    }
+
+    // Calculate crypto amount based on USD value
+    const cryptoAmount = amount / currentRate;
+    
+    console.log(`Conversion: $${amount} USD = ${cryptoAmount.toFixed(8)} ${asset.toUpperCase()} at rate $${currentRate}`);
+
+    // Get user with balances
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+
+    // Initialize balances if needed
+    if (!user.balances) {
+      user.balances = { main: new Map(), active: new Map(), matured: new Map() };
+    }
+    if (!user.balances.main) user.balances.main = new Map();
+    if (!user.balances.matured) user.balances.matured = new Map();
+
+    const assetLower = asset.toLowerCase();
+    
+    // Get current crypto balances from MAIN and MATURED wallets
+    const mainCryptoBalance = user.balances.main.get(assetLower) || 0;
+    const maturedCryptoBalance = user.balances.matured.get(assetLower) || 0;
+    const totalCryptoBalance = mainCryptoBalance + maturedCryptoBalance;
+
+    console.log(`Balance check - ${asset.toUpperCase()}:`);
+    console.log(`  Main wallet: ${mainCryptoBalance.toFixed(8)}`);
+    console.log(`  Matured wallet: ${maturedCryptoBalance.toFixed(8)}`);
+    console.log(`  Total: ${totalCryptoBalance.toFixed(8)}`);
+    console.log(`  Requested: ${cryptoAmount.toFixed(8)}`);
+
+    // Check if user has sufficient balance
+    if (cryptoAmount > totalCryptoBalance) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Insufficient ${asset.toUpperCase()} balance. Available: ${totalCryptoBalance.toFixed(8)} ${asset.toUpperCase()}, Requested: ${cryptoAmount.toFixed(8)} ${asset.toUpperCase()} ($${amount.toFixed(2)} USD)`
+      });
+    }
+
+    // Determine withdrawal source (main first, then matured)
+    let mainAmountUsed = 0;
+    let maturedAmountUsed = 0;
+    let balanceSource = '';
+
+    if (mainCryptoBalance >= cryptoAmount) {
+      // Withdraw entirely from MAIN wallet
+      mainAmountUsed = cryptoAmount;
+      maturedAmountUsed = 0;
+      balanceSource = 'main';
+    } else if (maturedCryptoBalance >= cryptoAmount) {
+      // Withdraw entirely from MATURED wallet
+      mainAmountUsed = 0;
+      maturedAmountUsed = cryptoAmount;
+      balanceSource = 'matured';
+    } else {
+      // Withdraw from BOTH wallets
+      mainAmountUsed = mainCryptoBalance;
+      maturedAmountUsed = cryptoAmount - mainCryptoBalance;
+      balanceSource = 'both';
+    }
+
+    console.log(`Withdrawal source: ${balanceSource}`);
+    console.log(`  Main amount: ${mainAmountUsed.toFixed(8)}`);
+    console.log(`  Matured amount: ${maturedAmountUsed.toFixed(8)}`);
+
+    // Perform the withdrawal from user balances
+    if (mainAmountUsed > 0) {
+      const newMainBalance = mainCryptoBalance - mainAmountUsed;
+      if (newMainBalance <= 0.00000001) {
+        user.balances.main.delete(assetLower);
+      } else {
+        user.balances.main.set(assetLower, newMainBalance);
+      }
+    }
+
+    if (maturedAmountUsed > 0) {
+      const newMaturedBalance = maturedCryptoBalance - maturedAmountUsed;
+      if (newMaturedBalance <= 0.00000001) {
+        user.balances.matured.delete(assetLower);
+      } else {
+        user.balances.matured.set(assetLower, newMaturedBalance);
+      }
+    }
+
+    // Update USD equivalents in wallets
+    const usdValueUsed = amount;
+    const mainUSDPortion = (mainAmountUsed / cryptoAmount) * usdValueUsed;
+    const maturedUSDPortion = (maturedAmountUsed / cryptoAmount) * usdValueUsed;
+
+    const currentMainUSD = user.balances.main.get('usd') || 0;
+    const currentMaturedUSD = user.balances.matured.get('usd') || 0;
+    
+    if (mainAmountUsed > 0) {
+      user.balances.main.set('usd', currentMainUSD - mainUSDPortion);
+    }
+    if (maturedAmountUsed > 0) {
+      user.balances.matured.set('usd', currentMaturedUSD - maturedUSDPortion);
+    }
+
+    await user.save();
+
+    // Calculate withdrawal fee (1% of amount, minimum $1)
+    const fee = Math.max(1, amount * 0.01);
+    const netAmount = amount - fee;
+
+    // Generate unique reference
+    const reference = `WTH-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+
+    // Create transaction record
+    const transaction = await Transaction.create({
+      user: userId,
+      type: 'withdrawal',
+      amount: amount,
+      asset: asset.toLowerCase(),
+      assetAmount: cryptoAmount,
+      currency: 'USD',
+      status: 'pending',
+      method: asset.toUpperCase(),
+      reference: reference,
+      details: {
+        withdrawalAddress: walletAddress,
+        exchangeRate: currentRate,
+        gasFee: gasFee || 0,
+        balanceSource: balanceSource,
+        mainAmountUsed: mainAmountUsed,
+        maturedAmountUsed: maturedAmountUsed,
+        network: getNetworkName(asset),
+        submittedAt: new Date(),
+        usdValue: amount,
+        cryptoValue: cryptoAmount
+      },
+      btcAddress: walletAddress,
+      fee: fee,
+      netAmount: netAmount,
+      exchangeRateAtTime: currentRate
+    });
+
+    // Log the activity
+    await logActivity(
+      'withdrawal_created',
+      'Transaction',
+      transaction._id,
+      userId,
+      'User',
+      req,
+      {
+        amountUSD: amount,
+        asset: asset,
+        cryptoAmount: cryptoAmount,
+        walletAddress: walletAddress,
+        balanceSource: balanceSource,
+        mainAmountUsed: mainAmountUsed,
+        maturedAmountUsed: maturedAmountUsed,
+        exchangeRate: currentRate,
+        fee: fee
+      }
+    );
+
+    // Send email notification
+    try {
+      await sendProfessionalEmail({
+        email: user.email,
+        template: 'withdrawal_request',
+        data: {
+          name: user.firstName,
+          amount: cryptoAmount.toFixed(8),
+          asset: asset.toUpperCase(),
+          usdValue: amount,
+          fee: fee,
+          feeUsd: fee,
+          netAmount: (cryptoAmount - (fee / currentRate)).toFixed(8),
+          withdrawalAddress: walletAddress,
+          requestId: reference,
+          timestamp: new Date(),
+          network: getNetworkName(asset),
+          exchangeRate: currentRate
+        }
+      });
+      console.log(`📧 Withdrawal request email sent to ${user.email}`);
+    } catch (emailError) {
+      console.error('Failed to send withdrawal request email:', emailError);
+    }
+
+    // Return success response
+    res.status(201).json({
+      status: 'success',
+      message: `Withdrawal request submitted successfully. You requested to withdraw ${cryptoAmount.toFixed(8)} ${asset.toUpperCase()} ($${amount.toFixed(2)} USD). Reference: ${reference}`,
+      data: {
+        transaction: {
+          id: transaction._id,
+          reference: reference,
+          amountUSD: amount,
+          cryptoAmount: cryptoAmount,
+          asset: asset,
+          status: 'pending',
+          createdAt: transaction.createdAt,
+          fee: fee,
+          netAmountUSD: netAmount,
+          exchangeRate: currentRate
+        },
+        balanceInfo: {
+          source: balanceSource,
+          mainAmountUsed: mainAmountUsed,
+          maturedAmountUsed: maturedAmountUsed,
+          remainingMainBalance: user.balances.main.get(assetLower) || 0,
+          remainingMaturedBalance: user.balances.matured.get(assetLower) || 0
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Spot withdrawal error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to process withdrawal request'
+    });
+  }
+});// =============================================
+// SPOT WITHDRAWAL ENDPOINT - Withdraw from user.balances Maps
+// Minimum withdrawal: $350 USD worth of crypto
+// =============================================
+app.post('/api/withdrawals/spot', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const {
+      amount,        // USD amount requested
+      asset,         // crypto asset symbol (btc, eth, etc.)
+      walletAddress, // destination wallet address
+      gasFee,        // optional gas fee amount
+      exchangeRate   // current exchange rate
+    } = req.body;
+
+    const MIN_WITHDRAWAL_USD = 350;
+    
+    console.log('Spot withdrawal request:', { userId, amountUSD: amount, asset, walletAddress });
+
+    // Validate minimum withdrawal
+    if (!amount || amount < MIN_WITHDRAWAL_USD) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Minimum withdrawal amount is $${MIN_WITHDRAWAL_USD} USD worth of ${asset.toUpperCase()}`
+      });
+    }
+
+    // Validate required fields
+    if (!asset) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Asset type is required'
+      });
+    }
+
+    if (!walletAddress || walletAddress.trim().length < 10) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Valid ${asset.toUpperCase()} wallet address is required`
+      });
+    }
+
+    // Get current crypto price if exchange rate not provided
+    let currentRate = exchangeRate;
+    if (!currentRate || currentRate <= 0) {
+      currentRate = await getCryptoPrice(asset.toUpperCase());
+      if (!currentRate || currentRate <= 0) {
+        return res.status(400).json({
+          status: 'fail',
+          message: `Unable to fetch current ${asset.toUpperCase()} price. Please try again.`
+        });
+      }
+    }
+
+    // Calculate crypto amount based on USD value
+    const cryptoAmount = amount / currentRate;
+    
+    console.log(`Conversion: $${amount} USD = ${cryptoAmount.toFixed(8)} ${asset.toUpperCase()} at rate $${currentRate}`);
+
+    // Get user with balances
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+
+    // Initialize balances if needed
+    if (!user.balances) {
+      user.balances = { main: new Map(), active: new Map(), matured: new Map() };
+    }
+    if (!user.balances.main) user.balances.main = new Map();
+    if (!user.balances.matured) user.balances.matured = new Map();
+
+    const assetLower = asset.toLowerCase();
+    
+    // Get current crypto balances from MAIN and MATURED wallets
+    const mainCryptoBalance = user.balances.main.get(assetLower) || 0;
+    const maturedCryptoBalance = user.balances.matured.get(assetLower) || 0;
+    const totalCryptoBalance = mainCryptoBalance + maturedCryptoBalance;
+
+    console.log(`Balance check - ${asset.toUpperCase()}:`);
+    console.log(`  Main wallet: ${mainCryptoBalance.toFixed(8)}`);
+    console.log(`  Matured wallet: ${maturedCryptoBalance.toFixed(8)}`);
+    console.log(`  Total: ${totalCryptoBalance.toFixed(8)}`);
+    console.log(`  Requested: ${cryptoAmount.toFixed(8)}`);
+
+    // Check if user has sufficient balance
+    if (cryptoAmount > totalCryptoBalance) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Insufficient ${asset.toUpperCase()} balance. Available: ${totalCryptoBalance.toFixed(8)} ${asset.toUpperCase()}, Requested: ${cryptoAmount.toFixed(8)} ${asset.toUpperCase()} ($${amount.toFixed(2)} USD)`
+      });
+    }
+
+    // Determine withdrawal source (main first, then matured)
+    let mainAmountUsed = 0;
+    let maturedAmountUsed = 0;
+    let balanceSource = '';
+
+    if (mainCryptoBalance >= cryptoAmount) {
+      // Withdraw entirely from MAIN wallet
+      mainAmountUsed = cryptoAmount;
+      maturedAmountUsed = 0;
+      balanceSource = 'main';
+    } else if (maturedCryptoBalance >= cryptoAmount) {
+      // Withdraw entirely from MATURED wallet
+      mainAmountUsed = 0;
+      maturedAmountUsed = cryptoAmount;
+      balanceSource = 'matured';
+    } else {
+      // Withdraw from BOTH wallets
+      mainAmountUsed = mainCryptoBalance;
+      maturedAmountUsed = cryptoAmount - mainCryptoBalance;
+      balanceSource = 'both';
+    }
+
+    console.log(`Withdrawal source: ${balanceSource}`);
+    console.log(`  Main amount: ${mainAmountUsed.toFixed(8)}`);
+    console.log(`  Matured amount: ${maturedAmountUsed.toFixed(8)}`);
+
+    // Perform the withdrawal from user balances
+    if (mainAmountUsed > 0) {
+      const newMainBalance = mainCryptoBalance - mainAmountUsed;
+      if (newMainBalance <= 0.00000001) {
+        user.balances.main.delete(assetLower);
+      } else {
+        user.balances.main.set(assetLower, newMainBalance);
+      }
+    }
+
+    if (maturedAmountUsed > 0) {
+      const newMaturedBalance = maturedCryptoBalance - maturedAmountUsed;
+      if (newMaturedBalance <= 0.00000001) {
+        user.balances.matured.delete(assetLower);
+      } else {
+        user.balances.matured.set(assetLower, newMaturedBalance);
+      }
+    }
+
+    // Update USD equivalents in wallets
+    const usdValueUsed = amount;
+    const mainUSDPortion = (mainAmountUsed / cryptoAmount) * usdValueUsed;
+    const maturedUSDPortion = (maturedAmountUsed / cryptoAmount) * usdValueUsed;
+
+    const currentMainUSD = user.balances.main.get('usd') || 0;
+    const currentMaturedUSD = user.balances.matured.get('usd') || 0;
+    
+    if (mainAmountUsed > 0) {
+      user.balances.main.set('usd', currentMainUSD - mainUSDPortion);
+    }
+    if (maturedAmountUsed > 0) {
+      user.balances.matured.set('usd', currentMaturedUSD - maturedUSDPortion);
+    }
+
+    await user.save();
+
+    // Calculate withdrawal fee (1% of amount, minimum $1)
+    const fee = Math.max(1, amount * 0.01);
+    const netAmount = amount - fee;
+
+    // Generate unique reference
+    const reference = `WTH-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+
+    // Create transaction record
+    const transaction = await Transaction.create({
+      user: userId,
+      type: 'withdrawal',
+      amount: amount,
+      asset: asset.toLowerCase(),
+      assetAmount: cryptoAmount,
+      currency: 'USD',
+      status: 'pending',
+      method: asset.toUpperCase(),
+      reference: reference,
+      details: {
+        withdrawalAddress: walletAddress,
+        exchangeRate: currentRate,
+        gasFee: gasFee || 0,
+        balanceSource: balanceSource,
+        mainAmountUsed: mainAmountUsed,
+        maturedAmountUsed: maturedAmountUsed,
+        network: getNetworkName(asset),
+        submittedAt: new Date(),
+        usdValue: amount,
+        cryptoValue: cryptoAmount
+      },
+      btcAddress: walletAddress,
+      fee: fee,
+      netAmount: netAmount,
+      exchangeRateAtTime: currentRate
+    });
+
+    // Log the activity
+    await logActivity(
+      'withdrawal_created',
+      'Transaction',
+      transaction._id,
+      userId,
+      'User',
+      req,
+      {
+        amountUSD: amount,
+        asset: asset,
+        cryptoAmount: cryptoAmount,
+        walletAddress: walletAddress,
+        balanceSource: balanceSource,
+        mainAmountUsed: mainAmountUsed,
+        maturedAmountUsed: maturedAmountUsed,
+        exchangeRate: currentRate,
+        fee: fee
+      }
+    );
+
+    // Send email notification
+    try {
+      await sendProfessionalEmail({
+        email: user.email,
+        template: 'withdrawal_request',
+        data: {
+          name: user.firstName,
+          amount: cryptoAmount.toFixed(8),
+          asset: asset.toUpperCase(),
+          usdValue: amount,
+          fee: fee,
+          feeUsd: fee,
+          netAmount: (cryptoAmount - (fee / currentRate)).toFixed(8),
+          withdrawalAddress: walletAddress,
+          requestId: reference,
+          timestamp: new Date(),
+          network: getNetworkName(asset),
+          exchangeRate: currentRate
+        }
+      });
+      console.log(`📧 Withdrawal request email sent to ${user.email}`);
+    } catch (emailError) {
+      console.error('Failed to send withdrawal request email:', emailError);
+    }
+
+    // Return success response
+    res.status(201).json({
+      status: 'success',
+      message: `Withdrawal request submitted successfully. You requested to withdraw ${cryptoAmount.toFixed(8)} ${asset.toUpperCase()} ($${amount.toFixed(2)} USD). Reference: ${reference}`,
+      data: {
+        transaction: {
+          id: transaction._id,
+          reference: reference,
+          amountUSD: amount,
+          cryptoAmount: cryptoAmount,
+          asset: asset,
+          status: 'pending',
+          createdAt: transaction.createdAt,
+          fee: fee,
+          netAmountUSD: netAmount,
+          exchangeRate: currentRate
+        },
+        balanceInfo: {
+          source: balanceSource,
+          mainAmountUsed: mainAmountUsed,
+          maturedAmountUsed: maturedAmountUsed,
+          remainingMainBalance: user.balances.main.get(assetLower) || 0,
+          remainingMaturedBalance: user.balances.matured.get(assetLower) || 0
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Spot withdrawal error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to process withdrawal request'
+    });
+  }
+});
+
+
+
+
 // POST /api/admin/withdrawals/:id/approve - Approve withdrawal and deduct from user balance
 app.post('/api/admin/withdrawals/:id/approve', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
   try {
