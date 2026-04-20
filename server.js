@@ -4054,7 +4054,7 @@ const KYC = mongoose.model('KYC', KYCSchema);
 
 const multer = require('multer');
 
-const fs = require('fs');
+
 
 const ensureUploadDirectories = () => {
   const dirs = [
