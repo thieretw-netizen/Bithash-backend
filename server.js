@@ -26,15 +26,6 @@ const OpenAI = require('openai');
 const DeviceDetector = require('node-device-detector');
 const DeviceHelper = require('node-device-detector/helper');
 
-// =============================================
-// PDF GENERATION DEPENDENCIES
-// =============================================
-const PDFDocument = require('pdfkit');
-const { createCanvas } = require('canvas');
-const sharp = require('sharp');
-const fs = require('fs');
-const path = require('path');
-
 const app = express();
 const { createServer } = require('http');
 const { Server } = require('socket.io');
@@ -183,10 +174,14 @@ const authLimiter = rateLimit({
   }
 });
 
+
+
 app.use('/api', apiLimiter);
 app.use('/api/login', authLimiter);
 app.use('/api/signup', authLimiter);
 app.use('/api/auth/forgot-password', authLimiter);
+
+
 
 app.get('/api/health', (req, res) => {
   res.status(200).json({ 
@@ -722,11 +717,17 @@ const UserLogSchema = new mongoose.Schema({
     timezone: String,
     deviceId: String
   },
+  // =============================================
+  // FIXED: Enhanced Location Field Structure
+  // Now properly stores all location data needed by admin dashboard
+  // =============================================
   location: {
+    // IP address (removed from JSON output for security)
     ip: {
       type: String,
-      select: false
+      select: false  // Don't expose IP in API responses by default
     },
+    // Country information
     country: {
       code: {
         type: String,
@@ -738,6 +739,7 @@ const UserLogSchema = new mongoose.Schema({
         default: 'Unknown'
       }
     },
+    // Region/State information
     region: {
       code: {
         type: String,
@@ -748,14 +750,17 @@ const UserLogSchema = new mongoose.Schema({
         default: 'Unknown'
       }
     },
+    // City
     city: {
       type: String,
       default: 'Unknown'
     },
+    // Postal/ZIP code
     postalCode: {
       type: String,
       default: 'Unknown'
     },
+    // Geographic coordinates (for map display)
     latitude: {
       type: Number,
       default: null
@@ -764,10 +769,12 @@ const UserLogSchema = new mongoose.Schema({
       type: Number,
       default: null
     },
+    // Timezone
     timezone: {
       type: String,
       default: 'Unknown'
     },
+    // ISP information
     isp: {
       type: String,
       default: 'Unknown'
@@ -776,14 +783,17 @@ const UserLogSchema = new mongoose.Schema({
       type: String,
       default: 'Unknown'
     },
+    // Street address (if available)
     street: {
       type: String,
       default: 'Unknown'
     },
+    // Flag indicating if this is an exact location (vs approximate)
     exactLocation: {
       type: Boolean,
       default: false
     },
+    // Formatted location string for quick display (backward compatibility)
     formatted: {
       type: String,
       default: 'Unknown'
@@ -879,6 +889,7 @@ const UserLogSchema = new mongoose.Schema({
   toJSON: { 
     virtuals: true,
     transform: function(doc, ret) {
+      // Remove sensitive data from JSON output
       delete ret.deviceInfo?.deviceId;
       delete ret.location?.ip;
       delete ret.metadata?.adminId;
@@ -896,6 +907,9 @@ const UserLogSchema = new mongoose.Schema({
   }
 });
 
+// =============================================
+// VIRTUAL: Get formatted location string for display
+// =============================================
 UserLogSchema.virtual('locationDisplay').get(function() {
   if (this.location && this.location.formatted && this.location.formatted !== 'Unknown') {
     return this.location.formatted;
@@ -909,6 +923,9 @@ UserLogSchema.virtual('locationDisplay').get(function() {
   return parts.length > 0 ? parts.join(', ') : 'Unknown';
 });
 
+// =============================================
+// VIRTUAL: Get map URL for this location
+// =============================================
 UserLogSchema.virtual('mapUrl').get(function() {
   if (this.location?.latitude && this.location?.longitude) {
     return `https://www.google.com/maps/search/?api=1&query=${this.location.latitude},${this.location.longitude}&layer=satellite`;
@@ -919,10 +936,16 @@ UserLogSchema.virtual('mapUrl').get(function() {
   return null;
 });
 
+// =============================================
+// VIRTUAL: Check if location has coordinates
+// =============================================
 UserLogSchema.virtual('hasExactCoordinates').get(function() {
   return !!(this.location?.latitude && this.location?.longitude && this.location?.exactLocation === true);
 });
 
+// =============================================
+// VIRTUAL: Action description for display
+// =============================================
 UserLogSchema.virtual('actionDescription').get(function() {
   const actionDescriptions = {
     'signup': 'User registered a new account',
@@ -939,6 +962,9 @@ UserLogSchema.virtual('actionDescription').get(function() {
   return actionDescriptions[this.action] || `User performed ${this.action.replace(/_/g, ' ')}`;
 });
 
+// =============================================
+// VIRTUAL: Check if this is a financial action
+// =============================================
 UserLogSchema.virtual('isFinancialAction').get(function() {
   return [
     'deposit_created', 'deposit_completed', 'withdrawal_created', 
@@ -947,12 +973,18 @@ UserLogSchema.virtual('isFinancialAction').get(function() {
   ].includes(this.action);
 });
 
+// =============================================
+// VIRTUAL: Check if this is a security action
+// =============================================
 UserLogSchema.virtual('isSecurityAction').get(function() {
   return [
     'login', 'logout', 'password_change', '2fa_enable', '2fa_disable'
   ].includes(this.action);
 });
 
+// =============================================
+// INDEXES for performance
+// =============================================
 UserLogSchema.index({ user: 1, createdAt: -1 });
 UserLogSchema.index({ action: 1, createdAt: -1 });
 UserLogSchema.index({ status: 1, createdAt: -1 });
@@ -968,6 +1000,9 @@ UserLogSchema.index({ user: 1, actionCategory: 1, createdAt: -1 });
 UserLogSchema.index({ action: 1, status: 1, createdAt: -1 });
 UserLogSchema.index({ user: 1, isSuspicious: 1, createdAt: -1 });
 
+// =============================================
+// TEXT SEARCH INDEX
+// =============================================
 UserLogSchema.index({
   'username': 'text',
   'email': 'text',
@@ -979,19 +1014,26 @@ UserLogSchema.index({
   'location.region.name': 'text'
 });
 
+// =============================================
+// PRE-SAVE HOOK: Auto-calculate missing fields
+// =============================================
 UserLogSchema.pre('save', function(next) {
+  // Set userFullName if missing
   if (!this.userFullName && this.username) {
     this.userFullName = this.username;
   }
   
+  // Auto-calculate action category
   if (!this.actionCategory) {
     this.actionCategory = this.calculateActionCategory(this.action);
   }
   
+  // Auto-calculate risk level
   if (!this.riskLevel || this.riskLevel === 'low') {
     this.riskLevel = this.calculateRiskLevel();
   }
   
+  // Auto-format location string from components if formatted is missing
   if (this.location && (!this.location.formatted || this.location.formatted === 'Unknown')) {
     const parts = [];
     if (this.location.city && this.location.city !== 'Unknown') parts.push(this.location.city);
@@ -1003,6 +1045,11 @@ UserLogSchema.pre('save', function(next) {
   next();
 });
 
+// =============================================
+// STATIC METHODS
+// =============================================
+
+// Find logs by user with pagination
 UserLogSchema.statics.findByUser = function(userId, options = {}) {
   const { limit = 50, page = 1, action = null } = options;
   const skip = (page - 1) * limit;
@@ -1016,6 +1063,7 @@ UserLogSchema.statics.findByUser = function(userId, options = {}) {
     .limit(limit);
 };
 
+// Get user activity summary
 UserLogSchema.statics.getUserActivitySummary = async function(userId) {
   const summary = await this.aggregate([
     { $match: { user: mongoose.Types.ObjectId(userId) } },
@@ -1034,6 +1082,7 @@ UserLogSchema.statics.getUserActivitySummary = async function(userId) {
   return summary;
 };
 
+// Find suspicious activities
 UserLogSchema.statics.findSuspiciousActivities = function(days = 7) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
@@ -1044,6 +1093,7 @@ UserLogSchema.statics.findSuspiciousActivities = function(days = 7) {
   }).sort({ createdAt: -1 });
 };
 
+// Get location statistics (for admin dashboard)
 UserLogSchema.statics.getLocationStats = async function(days = 30) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
@@ -1075,6 +1125,11 @@ UserLogSchema.statics.getLocationStats = async function(days = 30) {
   ]);
 };
 
+// =============================================
+// INSTANCE METHODS
+// =============================================
+
+// Calculate action category based on action type
 UserLogSchema.methods.calculateActionCategory = function(action) {
   const categoryMap = {
     'signup': 'authentication',
@@ -1097,6 +1152,7 @@ UserLogSchema.methods.calculateActionCategory = function(action) {
   return categoryMap[action] || 'system';
 };
 
+// Calculate risk level based on action and status
 UserLogSchema.methods.calculateRiskLevel = function() {
   const highRiskActions = ['failed_login', 'suspicious_activity', 'withdrawal_created'];
   const mediumRiskActions = ['login', 'password_change', 'deposit_created'];
@@ -1108,6 +1164,7 @@ UserLogSchema.methods.calculateRiskLevel = function() {
   return 'low';
 };
 
+// Mark as suspicious with reason
 UserLogSchema.methods.markAsSuspicious = function(reason) {
   this.isSuspicious = true;
   this.riskLevel = 'high';
@@ -1117,6 +1174,7 @@ UserLogSchema.methods.markAsSuspicious = function(reason) {
   return this.save();
 };
 
+// Update location with new data
 UserLogSchema.methods.updateLocation = function(locationData) {
   this.location = {
     ...this.location,
@@ -1125,6 +1183,10 @@ UserLogSchema.methods.updateLocation = function(locationData) {
   };
   return this.save();
 };
+
+// =============================================
+// QUERY HELPERS
+// =============================================
 
 UserLogSchema.query.byDateRange = function(startDate, endDate) {
   return this.where('createdAt').gte(startDate).lte(endDate);
@@ -1150,6 +1212,9 @@ UserLogSchema.query.byCity = function(cityName) {
   return this.where('location.city', new RegExp(cityName, 'i'));
 };
 
+// =============================================
+// COMPILE AND EXPORT MODEL
+// =============================================
 const UserLog = mongoose.model('UserLog', UserLogSchema);
 
 const LoginRecordSchema = new mongoose.Schema({
@@ -1322,6 +1387,7 @@ const CandleSchema = new mongoose.Schema({
 });
 
 CandleSchema.index({ symbol: 1, interval: 1, openTime: 1 }, { unique: true });
+
 
 const PairLimitsSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true, index: true },
@@ -2119,7 +2185,16 @@ TransactionSchema.index({ createdAt: -1 });
 
 const Transaction = mongoose.model('Transaction', TransactionSchema);
 
+
+
+
+
+
+
 const FinancialStatementSchema = new mongoose.Schema({
+    // =============================================
+    // 1. STATEMENT IDENTIFICATION
+    // =============================================
     user: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
@@ -2141,15 +2216,22 @@ const FinancialStatementSchema = new mongoose.Schema({
         unique: true,
         required: true
     },
+
+    // =============================================
+    // 2. OPENING & CLOSING BALANCES (SNAPSHOTS)
+    // =============================================
     openingBalances: {
+        // Sum of all crypto assets in USD value at start of period
         totalUSD: { type: Number, required: true },
+        // Detailed breakdown per wallet type
         mainWalletUSD: { type: Number, required: true },
-        activeWalletUSD: { type: Number, required: true },
+        activeWalletUSD: { type: Number, required: true }, // Mining contracts
         maturedWalletUSD: { type: Number, required: true },
+        // Detailed crypto balances (for pro users)
         cryptoDetails: [{
-            asset: { type: String, required: true },
+            asset: { type: String, required: true }, // e.g., 'btc', 'eth'
             amount: { type: Number, required: true },
-            usdValue: { type: Number, required: true },
+            usdValue: { type: Number, required: true }, // Value at period start
             walletType: { type: String, enum: ['main', 'matured'] }
         }],
         timestamp: { type: Date, required: true }
@@ -2162,29 +2244,35 @@ const FinancialStatementSchema = new mongoose.Schema({
         cryptoDetails: [{
             asset: { type: String, required: true },
             amount: { type: Number, required: true },
-            usdValue: { type: Number, required: true },
+            usdValue: { type: Number, required: true }, // Value at period end
             walletType: { type: String, enum: ['main', 'matured'] }
         }],
         timestamp: { type: Date, required: true }
     },
-    netChangeUSD: { type: Number, required: true },
+    netChangeUSD: { type: Number, required: true }, // closingBalances.totalUSD - openingBalances.totalUSD
+
+    // =============================================
+    // 3. TRANSACTIONS (ALL FINANCIAL MOVEMENTS)
+    // =============================================
     transactions: {
+        // All standard transactions from the Transaction model
         list: [{
             transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
             type: { type: String, enum: ['deposit', 'withdrawal', 'transfer', 'investment', 'interest', 'referral', 'loan', 'buy', 'sell'] },
             amountUSD: { type: Number, required: true },
-            asset: { type: String },
+            asset: { type: String }, // e.g., 'BTC', 'ETH'
             assetAmount: { type: Number },
             status: { type: String, enum: ['pending', 'completed', 'failed', 'cancelled'] },
-            method: { type: String },
-            description: { type: String },
+            method: { type: String }, // e.g., 'BTC', 'CARD', 'BANK'
+            description: { type: String }, // From Transaction.details
             reference: { type: String },
             feeUSD: { type: Number, default: 0 },
             netAmountUSD: { type: Number, required: true },
-            exchangeRate: { type: Number },
+            exchangeRate: { type: Number }, // Rate at time of transaction
             createdAt: { type: Date, required: true },
             processedAt: { type: Date }
         }],
+        // Aggregated summaries
         summary: {
             totalDepositsUSD: { type: Number, default: 0 },
             totalWithdrawalsUSD: { type: Number, default: 0 },
@@ -2197,7 +2285,12 @@ const FinancialStatementSchema = new mongoose.Schema({
             }
         }
     },
+
+    // =============================================
+    // 4. INVESTMENTS & MINING RETURNS
+    // =============================================
     investments: {
+        // Active investments during the period
         active: [{
             investmentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Investment' },
             planName: { type: String, required: true },
@@ -2208,16 +2301,18 @@ const FinancialStatementSchema = new mongoose.Schema({
             endDate: { type: Date },
             status: { type: String }
         }],
+        // Investments that matured/completed in this period
         matured: [{
             investmentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Investment' },
             planName: { type: String, required: true },
             initialAmountUSD: { type: Number, required: true },
-            returnAmountUSD: { type: Number, required: true },
+            returnAmountUSD: { type: Number, required: true }, // Principal + Profit
             profitUSD: { type: Number, required: true },
             profitPercentage: { type: Number, required: true },
             completionDate: { type: Date, required: true },
-            btcPriceAtCompletion: { type: Number }
+            btcPriceAtCompletion: { type: Number } // If applicable
         }],
+        // New investments started in this period
         started: [{
             investmentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Investment' },
             planName: { type: String, required: true },
@@ -2228,12 +2323,16 @@ const FinancialStatementSchema = new mongoose.Schema({
         }],
         summary: {
             totalPrincipalInvestedUSD: { type: Number, default: 0 },
-            totalReturnsEarnedUSD: { type: Number, default: 0 },
+            totalReturnsEarnedUSD: { type: Number, default: 0 }, // From matured investments
             totalProfitUSD: { type: Number, default: 0 },
             totalActiveInvestmentsCount: { type: Number, default: 0 },
             totalActivePrincipalUSD: { type: Number, default: 0 }
         }
     },
+
+    // =============================================
+    // 5. TRADING ACTIVITY (BUYS & SELLS)
+    // =============================================
     trading: {
         buys: [{
             buyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Buy' },
@@ -2263,6 +2362,10 @@ const FinancialStatementSchema = new mongoose.Schema({
             netTradingPnLUSD: { type: Number, default: 0 }
         }
     },
+
+    // =============================================
+    // 6. FEES PAID (PLATFORM REVENUE)
+    // =============================================
     fees: {
         items: [{
             source: { type: String, enum: ['investment_fee', 'withdrawal_fee', 'buy_fee', 'sell_fee', 'conversion_fee', 'loan_disbursement_fee'] },
@@ -2280,6 +2383,10 @@ const FinancialStatementSchema = new mongoose.Schema({
             loanFeesUSD: { type: Number, default: 0 }
         }
     },
+
+    // =============================================
+    // 7. REFERRAL & DOWNLINE COMMISSIONS
+    // =============================================
     referrals: {
         commissionsEarned: [{
             commissionId: { type: mongoose.Schema.Types.ObjectId, ref: 'CommissionHistory' },
@@ -2288,7 +2395,7 @@ const FinancialStatementSchema = new mongoose.Schema({
                 name: { type: String }
             },
             amountUSD: { type: Number, required: true },
-            level: { type: Number },
+            level: { type: Number }, // 1 for direct, 2+ for downline
             sourceInvestmentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Investment' },
             date: { type: Date, required: true }
         }],
@@ -2298,6 +2405,10 @@ const FinancialStatementSchema = new mongoose.Schema({
             downlineCommissionEarningsUSD: { type: Number, default: 0 }
         }
     },
+
+    // =============================================
+    // 8. LOANS
+    // =============================================
     loans: {
         activeLoans: [{
             loanId: { type: mongoose.Schema.Types.ObjectId, ref: 'Loan' },
@@ -2322,18 +2433,28 @@ const FinancialStatementSchema = new mongoose.Schema({
             totalInterestPaidUSD: { type: Number, default: 0 }
         }
     },
+
+    // =============================================
+    // 9. CRYPTO ASSET PERFORMANCE (PnL)
+    // =============================================
     assetPerformance: [{
-        asset: { type: String, required: true },
-        openingBalance: { type: Number, required: true },
-        closingBalance: { type: Number, required: true },
-        netChangeAmount: { type: Number, required: true },
-        openingValueUSD: { type: Number, required: true },
-        closingValueUSD: { type: Number, required: true },
-        netChangeValueUSD: { type: Number, required: true },
-        priceChangePercentage: { type: Number, required: true },
+        asset: { type: String, required: true }, // e.g., 'btc'
+        openingBalance: { type: Number, required: true }, // Amount at period start
+        closingBalance: { type: Number, required: true }, // Amount at period end
+        netChangeAmount: { type: Number, required: true }, // Closing - Opening (in units)
+        openingValueUSD: { type: Number, required: true }, // Value at start price
+        closingValueUSD: { type: Number, required: true }, // Value at end price
+        netChangeValueUSD: { type: Number, required: true }, // Unrealized PnL from holding
+        priceChangePercentage: { type: Number, required: true }, // Asset's market price change
+        // Realized PnL from trading this asset
         realizedPnLUSD: { type: Number, default: 0 },
+        // Total PnL = Realized + Unrealized
         totalPnLUSD: { type: Number, default: 0 }
     }],
+
+    // =============================================
+    // 10. CARD PAYMENTS (If used)
+    // =============================================
     cardPayments: [{
         cardPaymentId: { type: mongoose.Schema.Types.ObjectId, ref: 'CardPayment' },
         amountUSD: { type: Number, required: true },
@@ -2342,29 +2463,46 @@ const FinancialStatementSchema = new mongoose.Schema({
         status: { type: String },
         date: { type: Date, required: true }
     }],
+
+    // =============================================
+    // 11. STATEMENT METADATA & GENERATION INFO
+    // =============================================
     summary: {
-        totalInflowUSD: { type: Number, default: 0 },
-        totalOutflowUSD: { type: Number, default: 0 },
-        netCashFlowUSD: { type: Number, default: 0 },
-        totalProfitUSD: { type: Number, default: 0 },
-        totalLossUSD: { type: Number, default: 0 },
-        netProfitUSD: { type: Number, default: 0 },
-        roiPercentage: { type: Number, default: 0 }
+        // Overall net performance for the period
+        totalInflowUSD: { type: Number, default: 0 }, // Deposits + Interest + Referrals + Trading Profits
+        totalOutflowUSD: { type: Number, default: 0 }, // Withdrawals + Fees + Trading Losses
+        netCashFlowUSD: { type: Number, default: 0 }, // Inflow - Outflow
+        totalProfitUSD: { type: Number, default: 0 }, // Investment profits + Trading profits + Referral earnings
+        totalLossUSD: { type: Number, default: 0 }, // Trading losses + Fees
+        netProfitUSD: { type: Number, default: 0 }, // TotalProfit - TotalLoss
+        roiPercentage: { type: Number, default: 0 } // (NetProfit / OpeningBalance) * 100
     },
+    
+    // For compliance and auditing
     ipAddress: { type: String },
     userAgent: { type: String },
     location: { type: String },
     isDelivered: { type: Boolean, default: false },
     deliveredAt: { type: Date },
-    downloadUrl: { type: String }
+    downloadUrl: { type: String } // For PDF version
+
 }, { timestamps: true });
 
+// Indexes for fast queries
 FinancialStatementSchema.index({ user: 1, 'period.endDate': -1 });
 FinancialStatementSchema.index({ reference: 1 }, { unique: true });
 FinancialStatementSchema.index({ 'period.startDate': 1, 'period.endDate': 1 });
 FinancialStatementSchema.index({ statementType: 1, 'period.endDate': -1 });
 
 const FinancialStatement = mongoose.model('FinancialStatement', FinancialStatementSchema);
+
+
+
+
+
+
+
+
 
 const NotificationSchema = new mongoose.Schema({
   title: {
@@ -2751,7 +2889,26 @@ PlatformRevenueSchema.index({ userId: 1 });
 
 const PlatformRevenue = mongoose.model('PlatformRevenue', PlatformRevenueSchema);
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+// =============================================
+// SYSTEM LOG SCHEMA - ENTERPRISE ROBUST VERSION
+// Captures every activity in the system with extreme detail
+// =============================================
+
 const SystemLogSchema = new mongoose.Schema({
+  // Core identification
   action: { 
     type: String, 
     required: [true, 'Action is required'],
@@ -2778,6 +2935,8 @@ const SystemLogSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     index: true
   },
+  
+  // Who performed the action
   performedBy: { 
     type: mongoose.Schema.Types.ObjectId, 
     refPath: 'performedByModel',
@@ -2790,6 +2949,8 @@ const SystemLogSchema = new mongoose.Schema({
   },
   performedByEmail: { type: String, index: true },
   performedByName: { type: String },
+  
+  // Network and location details (ENHANCED)
   ip: { type: String, index: true },
   ipType: { type: String, enum: ['public', 'private', 'localhost', 'unknown'], default: 'unknown' },
   userAgent: { type: String },
@@ -2805,6 +2966,8 @@ const SystemLogSchema = new mongoose.Schema({
   longitude: { type: Number },
   timezone: { type: String },
   isp: { type: String },
+  
+  // Request details
   requestMethod: { type: String, enum: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD'] },
   requestUrl: { type: String },
   requestPath: { type: String },
@@ -2815,9 +2978,13 @@ const SystemLogSchema = new mongoose.Schema({
     of: String,
     select: false
   },
+  
+  // Response details
   responseStatus: { type: Number, index: true },
   responseTime: { type: Number },
   responseSize: { type: Number },
+  
+  // Status and outcome
   status: { 
     type: String, 
     enum: ['success', 'failed', 'pending', 'processing', 'cancelled', 'blocked', 'retry'],
@@ -2827,6 +2994,8 @@ const SystemLogSchema = new mongoose.Schema({
   errorCode: { type: String, index: true },
   errorMessage: { type: String },
   errorStack: { type: String, select: false },
+  
+  // Security and risk assessment
   riskLevel: { 
     type: String, 
     enum: ['low', 'medium', 'high', 'critical'],
@@ -2837,6 +3006,8 @@ const SystemLogSchema = new mongoose.Schema({
   riskFactors: [{ type: String }],
   isSuspicious: { type: Boolean, default: false, index: true },
   isAnomaly: { type: Boolean, default: false },
+  
+  // Financial details (when applicable)
   financial: {
     amount: { type: Number },
     amountUSD: { type: Number },
@@ -2851,27 +3022,39 @@ const SystemLogSchema = new mongoose.Schema({
     transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
     reference: { type: String, index: true }
   },
+  
+  // Changes tracking (for updates)
   changes: {
     before: { type: mongoose.Schema.Types.Mixed },
     after: { type: mongoose.Schema.Types.Mixed },
     fields: [{ type: String }],
     diff: { type: mongoose.Schema.Types.Mixed }
   },
+  
+  // Related entities
   relatedEntities: [{
     entityType: { type: String },
     entityId: { type: mongoose.Schema.Types.ObjectId },
     entityModel: { type: String }
   }],
+  
+  // Session and request tracking
   sessionId: { type: String, index: true },
   requestId: { type: String, index: true },
   correlationId: { type: String, index: true },
+  
+  // Performance metrics
   performance: {
     memoryUsage: { type: Number },
     cpuUsage: { type: Number },
     dbQueryTime: { type: Number },
     externalApiTime: { type: Number }
   },
+  
+  // Metadata (flexible for any additional data)
   metadata: { type: mongoose.Schema.Types.Mixed },
+  
+  // Audit trail
   audit: {
     requiresReview: { type: Boolean, default: false },
     reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
@@ -2879,6 +3062,8 @@ const SystemLogSchema = new mongoose.Schema({
     reviewNotes: { type: String },
     retentionPeriod: { type: Number, default: 90 }
   },
+  
+  // Timestamps
   createdAt: { type: Date, default: Date.now, index: true },
   updatedAt: { type: Date, default: Date.now }
 }, { 
@@ -2911,6 +3096,10 @@ const SystemLogSchema = new mongoose.Schema({
   }
 });
 
+// =============================================
+// INDEXES FOR PERFORMANCE
+// =============================================
+
 SystemLogSchema.index({ createdAt: -1, action: 1 });
 SystemLogSchema.index({ performedBy: 1, createdAt: -1 });
 SystemLogSchema.index({ entity: 1, entityId: 1, createdAt: -1 });
@@ -2922,6 +3111,7 @@ SystemLogSchema.index({ 'financial.reference': 1 });
 SystemLogSchema.index({ sessionId: 1, createdAt: -1 });
 SystemLogSchema.index({ correlationId: 1 });
 
+// Text search index
 SystemLogSchema.index({
   action: 'text',
   errorMessage: 'text',
@@ -2931,7 +3121,12 @@ SystemLogSchema.index({
   'metadata.description': 'text'
 });
 
+// TTL index for automatic cleanup (90 days default)
 SystemLogSchema.index({ createdAt: 1 }, { expireAfterSeconds: 90 * 24 * 60 * 60 });
+
+// =============================================
+// PRE-SAVE HOOKS
+// =============================================
 
 SystemLogSchema.pre('save', function(next) {
   this.updatedAt = new Date();
@@ -2949,6 +3144,10 @@ SystemLogSchema.pre('save', function(next) {
   
   next();
 });
+
+// =============================================
+// VIRTUALS
+// =============================================
 
 SystemLogSchema.virtual('actionDescription').get(function() {
   const descriptions = {
@@ -3015,8 +3214,14 @@ SystemLogSchema.virtual('isSecurityRelated').get(function() {
   return securityActions.includes(this.action);
 });
 
+// =============================================
+// STATIC METHODS
+// =============================================
+
+// Initialize stats object
 SystemLogSchema.statics.stats = {};
 
+// Get logs by user
 SystemLogSchema.statics.findByUser = function(userId, options = {}) {
   const { limit = 50, page = 1, action = null, startDate = null, endDate = null } = options;
   const skip = (page - 1) * limit;
@@ -3035,6 +3240,7 @@ SystemLogSchema.statics.findByUser = function(userId, options = {}) {
     .limit(limit);
 };
 
+// Get logs by admin
 SystemLogSchema.statics.findByAdmin = function(adminId, options = {}) {
   const { limit = 50, page = 1, action = null } = options;
   const skip = (page - 1) * limit;
@@ -3048,6 +3254,7 @@ SystemLogSchema.statics.findByAdmin = function(adminId, options = {}) {
     .limit(limit);
 };
 
+// Get logs by entity
 SystemLogSchema.statics.findByEntity = function(entityType, entityId, options = {}) {
   const { limit = 50, page = 1 } = options;
   const skip = (page - 1) * limit;
@@ -3058,6 +3265,7 @@ SystemLogSchema.statics.findByEntity = function(entityType, entityId, options = 
     .limit(limit);
 };
 
+// Get suspicious activities
 SystemLogSchema.statics.findSuspicious = function(days = 7, options = {}) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
@@ -3070,6 +3278,7 @@ SystemLogSchema.statics.findSuspicious = function(days = 7, options = {}) {
   .limit(options.limit || 100);
 };
 
+// Get activities by risk level
 SystemLogSchema.statics.findByRiskLevel = function(riskLevel, days = 7) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
@@ -3080,6 +3289,7 @@ SystemLogSchema.statics.findByRiskLevel = function(riskLevel, days = 7) {
   }).sort({ createdAt: -1 });
 };
 
+// Get user activity summary
 SystemLogSchema.statics.getUserActivitySummary = async function(userId, days = 30) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
@@ -3112,6 +3322,11 @@ SystemLogSchema.statics.getUserActivitySummary = async function(userId, days = 3
   return summary;
 };
 
+// =============================================
+// STATS METHODS (attached to the stats object)
+// =============================================
+
+// Get geographical distribution
 SystemLogSchema.statics.stats.getGeoDistribution = async function(days = 7) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
@@ -3137,7 +3352,8 @@ SystemLogSchema.statics.stats.getGeoDistribution = async function(days = 7) {
   ]);
 };
 
-SystemLogSchema.stats.getHourlyPattern = async function(days = 7) {
+// Get hourly activity pattern
+SystemLogSchema.statics.stats.getHourlyPattern = async function(days = 7) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
   
@@ -3162,7 +3378,8 @@ SystemLogSchema.stats.getHourlyPattern = async function(days = 7) {
   ]);
 };
 
-SystemLogSchema.stats.getByEntityType = async function(days = 30) {
+// Get activity by entity type
+SystemLogSchema.statics.stats.getByEntityType = async function(days = 30) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
   
@@ -3186,7 +3403,8 @@ SystemLogSchema.stats.getByEntityType = async function(days = 30) {
   ]);
 };
 
-SystemLogSchema.stats.getRiskDistribution = async function(days = 30) {
+// Get risk level distribution
+SystemLogSchema.statics.stats.getRiskDistribution = async function(days = 30) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
   
@@ -3210,7 +3428,8 @@ SystemLogSchema.stats.getRiskDistribution = async function(days = 30) {
   ]);
 };
 
-SystemLogSchema.stats.getTopActiveUsers = async function(limit = 10, days = 30) {
+// Get top users by activity
+SystemLogSchema.statics.stats.getTopActiveUsers = async function(limit = 10, days = 30) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
   
@@ -3247,6 +3466,11 @@ SystemLogSchema.stats.getTopActiveUsers = async function(limit = 10, days = 30) 
   ]);
 };
 
+// =============================================
+// INSTANCE METHODS
+// =============================================
+
+// Mark as reviewed
 SystemLogSchema.methods.markAsReviewed = async function(adminId, notes) {
   this.audit = {
     requiresReview: false,
@@ -3258,6 +3482,7 @@ SystemLogSchema.methods.markAsReviewed = async function(adminId, notes) {
   return this.save();
 };
 
+// Mark as suspicious with reason
 SystemLogSchema.methods.markAsSuspicious = async function(reason, riskLevel = 'high') {
   this.isSuspicious = true;
   this.riskLevel = riskLevel;
@@ -3267,11 +3492,16 @@ SystemLogSchema.methods.markAsSuspicious = async function(reason, riskLevel = 'h
   return this.save();
 };
 
+// Add related entity
 SystemLogSchema.methods.addRelatedEntity = function(entityType, entityId, entityModel) {
   if (!this.relatedEntities) this.relatedEntities = [];
   this.relatedEntities.push({ entityType, entityId, entityModel });
   return this;
 };
+
+// =============================================
+// QUERY HELPERS
+// =============================================
 
 SystemLogSchema.query.byDateRange = function(startDate, endDate) {
   return this.where('createdAt').gte(startDate).lte(endDate);
@@ -3299,7 +3529,20 @@ SystemLogSchema.query.byPerformedBy = function(performedBy, model = null) {
   return query;
 };
 
+// =============================================
+// COMPILE SYSTEM LOG MODEL
+// =============================================
+
 const SystemLog = mongoose.model('SystemLog', SystemLogSchema);
+
+
+
+
+
+
+
+
+
 
 const KYCSchema = new mongoose.Schema({
   user: {
@@ -3414,7 +3657,8 @@ KYCSchema.index({ submittedAt: -1 });
 const KYC = mongoose.model('KYC', KYCSchema);
 
 const multer = require('multer');
-
+const path = require('path');
+const fs = require('fs');
 
 const ensureUploadDirectories = () => {
   const dirs = [
@@ -3754,528 +3998,6 @@ const setupWebSocketServer = (server) => {
   return wss;
 };
 
-// =============================================
-// PDF GENERATION FUNCTIONS
-// =============================================
-
-const generateFinancialStatementPDF = async (statement, user) => {
-  return new Promise(async (resolve, reject) => {
-    try {
-      const doc = new PDFDocument({ 
-        size: 'A4', 
-        margin: 50,
-        info: {
-          Title: `Financial Statement - ${statement.reference}`,
-          Author: 'BitHash Capital',
-          Subject: `Financial Statement for ${user.firstName} ${user.lastName}`,
-          Keywords: 'financial statement, investment, trading',
-          Creator: 'BitHash Capital'
-        }
-      });
-      
-      const chunks = [];
-      doc.on('data', chunk => chunks.push(chunk));
-      doc.on('end', () => resolve(Buffer.concat(chunks)));
-      
-      // Helper function to format currency
-      const formatCurrency = (amount) => {
-        return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
-      };
-      
-      const formatCrypto = (amount) => {
-        return new Intl.NumberFormat('en-US', { minimumFractionDigits: 8, maximumFractionDigits: 8 }).format(amount);
-      };
-      
-      const formatDate = (date) => {
-        return new Date(date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
-      };
-      
-      // Branding header
-      const addHeader = () => {
-        doc.fontSize(24).font('Helvetica-Bold').fillColor('#0B0E11').text('₿itHash Capital', { align: 'center' });
-        doc.fontSize(10).font('Helvetica').fillColor('#6C7480').text('Where Your Financial Goals Become Reality', { align: 'center' });
-        doc.moveDown(0.5);
-        doc.strokeColor('#F7A600').lineWidth(2).moveTo(50, doc.y).lineTo(545, doc.y).stroke();
-        doc.moveDown(0.5);
-      };
-      
-      addHeader();
-      
-      // Statement title
-      doc.fontSize(18).font('Helvetica-Bold').fillColor('#0B0E11').text('FINANCIAL STATEMENT', { align: 'center' });
-      doc.fontSize(10).font('Helvetica').fillColor('#6C7480').text(`Reference: ${statement.reference}`, { align: 'center' });
-      doc.moveDown(0.5);
-      
-      // Period info
-      doc.fontSize(10).font('Helvetica').fillColor('#333333');
-      doc.text(`Period: ${formatDate(statement.period.startDate)} - ${formatDate(statement.period.endDate)}`, { align: 'center' });
-      doc.text(`Generated: ${formatDate(statement.period.generationDate)}`, { align: 'center' });
-      doc.moveDown(1);
-      
-      // User info
-      doc.fontSize(10).font('Helvetica-Bold').fillColor('#0B0E11').text(`Client: ${user.firstName} ${user.lastName}`);
-      doc.fontSize(10).font('Helvetica').text(`Email: ${user.email}`);
-      doc.moveDown(1);
-      
-      // =============================================
-      // BALANCE SUMMARY TABLE
-      // =============================================
-      doc.fontSize(12).font('Helvetica-Bold').fillColor('#0B0E11').text('BALANCE SUMMARY', { underline: true });
-      doc.moveDown(0.5);
-      
-      const balanceTableTop = doc.y;
-      const balanceCol1 = 50;
-      const balanceCol2 = 250;
-      const balanceCol3 = 350;
-      const balanceCol4 = 450;
-      
-      doc.fontSize(9).font('Helvetica-Bold').fillColor('#FFFFFF');
-      doc.rect(balanceCol1, balanceTableTop, 495, 20).fill('#0B0E11');
-      doc.fillColor('#FFFFFF').text('Wallet', balanceCol1 + 5, balanceTableTop + 5);
-      doc.text('Opening Balance', balanceCol2 + 5, balanceTableTop + 5);
-      doc.text('Closing Balance', balanceCol3 + 5, balanceTableTop + 5);
-      doc.text('Net Change', balanceCol4 + 5, balanceTableTop + 5);
-      
-      let currentY = balanceTableTop + 20;
-      doc.fontSize(9).font('Helvetica').fillColor('#333333');
-      
-      const wallets = [
-        { name: 'Main Wallet', opening: statement.openingBalances.mainWalletUSD, closing: statement.closingBalances.mainWalletUSD },
-        { name: 'Active Wallet', opening: statement.openingBalances.activeWalletUSD, closing: statement.closingBalances.activeWalletUSD },
-        { name: 'Matured Wallet', opening: statement.openingBalances.maturedWalletUSD, closing: statement.closingBalances.maturedWalletUSD },
-        { name: 'TOTAL', opening: statement.openingBalances.totalUSD, closing: statement.closingBalances.totalUSD, isTotal: true }
-      ];
-      
-      wallets.forEach(wallet => {
-        const netChange = wallet.closing - wallet.opening;
-        const netChangeColor = netChange >= 0 ? '#10B981' : '#DC2626';
-        
-        doc.rect(balanceCol1, currentY, 495, 20).fill(wallet.isTotal ? '#F5F5F5' : '#FFFFFF');
-        
-        doc.fillColor(wallet.isTotal ? '#0B0E11' : '#333333');
-        if (wallet.isTotal) doc.font('Helvetica-Bold');
-        doc.text(wallet.name, balanceCol1 + 5, currentY + 5);
-        
-        doc.fillColor('#333333');
-        doc.text(formatCurrency(wallet.opening), balanceCol2 + 5, currentY + 5);
-        doc.text(formatCurrency(wallet.closing), balanceCol3 + 5, currentY + 5);
-        
-        doc.fillColor(netChangeColor);
-        doc.text(`${netChange >= 0 ? '+' : ''}${formatCurrency(netChange)}`, balanceCol4 + 5, currentY + 5);
-        
-        if (wallet.isTotal) doc.font('Helvetica');
-        currentY += 20;
-      });
-      
-      doc.moveDown(1);
-      
-      // =============================================
-      // TRANSACTIONS SUMMARY
-      // =============================================
-      doc.fontSize(12).font('Helvetica-Bold').fillColor('#0B0E11').text('TRANSACTION SUMMARY', { underline: true });
-      doc.moveDown(0.5);
-      
-      const txTableTop = doc.y;
-      const txCol1 = 50;
-      const txCol2 = 200;
-      const txCol3 = 300;
-      const txCol4 = 400;
-      const txCol5 = 500;
-      
-      doc.fontSize(9).font('Helvetica-Bold').fillColor('#FFFFFF');
-      doc.rect(txCol1, txTableTop, 495, 20).fill('#0B0E11');
-      doc.fillColor('#FFFFFF').text('Type', txCol1 + 5, txTableTop + 5);
-      doc.text('Count', txCol2 + 5, txTableTop + 5);
-      doc.text('Total', txCol3 + 5, txTableTop + 5);
-      doc.text('Fees', txCol4 + 5, txTableTop + 5);
-      doc.text('Net', txCol5 + 5, txTableTop + 5);
-      
-      currentY = txTableTop + 20;
-      doc.fontSize(9).font('Helvetica').fillColor('#333333');
-      
-      const transactionTypes = [
-        { name: 'Deposits', count: statement.transactions.summary.count.deposits, total: statement.transactions.summary.totalDepositsUSD, fee: 0 },
-        { name: 'Withdrawals', count: statement.transactions.summary.count.withdrawals, total: statement.transactions.summary.totalWithdrawalsUSD, fee: 0 },
-        { name: 'Transfers', count: statement.transactions.summary.count.transfers, total: statement.transactions.summary.totalTransfersUSD, fee: 0 },
-        { name: 'Fees Paid', count: '-', total: statement.transactions.summary.totalFeesPaidUSD, fee: statement.transactions.summary.totalFeesPaidUSD, isFeeRow: true }
-      ];
-      
-      transactionTypes.forEach(tx => {
-        doc.rect(txCol1, currentY, 495, 20).fill('#FFFFFF');
-        
-        doc.fillColor(tx.isFeeRow ? '#DC2626' : '#333333');
-        doc.text(tx.name, txCol1 + 5, currentY + 5);
-        doc.text(tx.count.toString(), txCol2 + 5, currentY + 5);
-        doc.text(formatCurrency(tx.total), txCol3 + 5, currentY + 5);
-        doc.text(tx.isFeeRow ? formatCurrency(tx.fee) : '-', txCol4 + 5, currentY + 5);
-        doc.text(tx.isFeeRow ? formatCurrency(tx.total) : formatCurrency(tx.total), txCol5 + 5, currentY + 5);
-        
-        currentY += 20;
-      });
-      
-      doc.moveDown(1);
-      
-      // =============================================
-      // INVESTMENT SUMMARY
-      // =============================================
-      if (statement.investments.summary.totalPrincipalInvestedUSD > 0 || statement.investments.summary.totalActiveInvestmentsCount > 0) {
-        doc.fontSize(12).font('Helvetica-Bold').fillColor('#0B0E11').text('INVESTMENT SUMMARY', { underline: true });
-        doc.moveDown(0.5);
-        
-        const invSummary = [
-          { label: 'Total Principal Invested', value: formatCurrency(statement.investments.summary.totalPrincipalInvestedUSD) },
-          { label: 'Total Returns Earned', value: formatCurrency(statement.investments.summary.totalReturnsEarnedUSD) },
-          { label: 'Total Profit from Investments', value: formatCurrency(statement.investments.summary.totalProfitUSD), isProfit: true },
-          { label: 'Active Investments', value: statement.investments.summary.totalActiveInvestmentsCount.toString() },
-          { label: 'Active Principal', value: formatCurrency(statement.investments.summary.totalActivePrincipalUSD) }
-        ];
-        
-        invSummary.forEach(item => {
-          doc.fontSize(9).font('Helvetica');
-          doc.text(item.label, 50, doc.y);
-          if (item.isProfit && item.value !== formatCurrency(0)) {
-            doc.fillColor('#10B981').font('Helvetica-Bold').text(item.value, 250, doc.y - 9);
-            doc.fillColor('#333333').font('Helvetica');
-          } else {
-            doc.text(item.value, 250, doc.y - 9);
-          }
-          doc.moveDown(0.8);
-        });
-        
-        doc.moveDown(0.5);
-      }
-      
-      // =============================================
-      // TRADING SUMMARY
-      // =============================================
-      if (statement.trading.summary.totalBuyVolumeUSD > 0 || statement.trading.summary.totalSellVolumeUSD > 0) {
-        doc.fontSize(12).font('Helvetica-Bold').fillColor('#0B0E11').text('TRADING SUMMARY', { underline: true });
-        doc.moveDown(0.5);
-        
-        const tradingSummary = [
-          { label: 'Total Buy Volume', value: formatCurrency(statement.trading.summary.totalBuyVolumeUSD) },
-          { label: 'Total Sell Volume', value: formatCurrency(statement.trading.summary.totalSellVolumeUSD) },
-          { label: 'Trading Profit', value: formatCurrency(statement.trading.summary.totalTradingProfitUSD), color: '#10B981' },
-          { label: 'Trading Loss', value: formatCurrency(statement.trading.summary.totalTradingLossUSD), color: '#DC2626' },
-          { label: 'Net Trading P&L', value: formatCurrency(statement.trading.summary.netTradingPnLUSD), isProfit: statement.trading.summary.netTradingPnLUSD >= 0 }
-        ];
-        
-        tradingSummary.forEach(item => {
-          doc.fontSize(9).font('Helvetica');
-          doc.text(item.label, 50, doc.y);
-          if (item.color) {
-            doc.fillColor(item.color).text(item.value, 250, doc.y - 9);
-            doc.fillColor('#333333');
-          } else if (item.isProfit !== undefined) {
-            doc.fillColor(item.isProfit ? '#10B981' : '#DC2626').text(item.value, 250, doc.y - 9);
-            doc.fillColor('#333333');
-          } else {
-            doc.text(item.value, 250, doc.y - 9);
-          }
-          doc.moveDown(0.8);
-        });
-        
-        doc.moveDown(0.5);
-      }
-      
-      // =============================================
-      // REFERRAL EARNINGS
-      // =============================================
-      if (statement.referrals.summary.totalReferralEarningsUSD > 0) {
-        doc.fontSize(12).font('Helvetica-Bold').fillColor('#0B0E11').text('REFERRAL EARNINGS', { underline: true });
-        doc.moveDown(0.5);
-        
-        doc.fontSize(9).font('Helvetica');
-        doc.text('Total Referral Earnings', 50, doc.y);
-        doc.fillColor('#10B981').text(formatCurrency(statement.referrals.summary.totalReferralEarningsUSD), 250, doc.y - 9);
-        doc.fillColor('#333333');
-        doc.moveDown(0.8);
-        
-        doc.text('Direct Referrals', 50, doc.y);
-        doc.text(formatCurrency(statement.referrals.summary.directReferralEarningsUSD), 250, doc.y - 9);
-        doc.moveDown(0.8);
-        
-        doc.text('Downline Commissions', 50, doc.y);
-        doc.text(formatCurrency(statement.referrals.summary.downlineCommissionEarningsUSD), 250, doc.y - 9);
-        doc.moveDown(0.8);
-      }
-      
-      // =============================================
-      // FEE BREAKDOWN (RED for fees)
-      // =============================================
-      if (statement.fees.summary.totalFeesUSD > 0) {
-        doc.fontSize(12).font('Helvetica-Bold').fillColor('#0B0E11').text('FEE BREAKDOWN', { underline: true });
-        doc.moveDown(0.5);
-        
-        const feeTypes = [
-          { label: 'Investment Fees', value: statement.fees.summary.investmentFeesUSD },
-          { label: 'Withdrawal Fees', value: statement.fees.summary.withdrawalFeesUSD },
-          { label: 'Trading Fees', value: statement.fees.summary.tradingFeesUSD },
-          { label: 'Conversion Fees', value: statement.fees.summary.conversionFeesUSD },
-          { label: 'Loan Fees', value: statement.fees.summary.loanFeesUSD }
-        ];
-        
-        feeTypes.forEach(fee => {
-          if (fee.value > 0) {
-            doc.fontSize(9).font('Helvetica');
-            doc.text(fee.label, 50, doc.y);
-            doc.fillColor('#DC2626').text(formatCurrency(fee.value), 250, doc.y - 9);
-            doc.fillColor('#333333');
-            doc.moveDown(0.8);
-          }
-        });
-        
-        doc.moveDown(0.5);
-        doc.fontSize(10).font('Helvetica-Bold');
-        doc.text('Total Fees Paid', 50, doc.y);
-        doc.fillColor('#DC2626').text(formatCurrency(statement.fees.summary.totalFeesUSD), 250, doc.y - 10);
-        doc.fillColor('#333333');
-        doc.moveDown(1);
-      }
-      
-      // =============================================
-      // ASSET PERFORMANCE
-      // =============================================
-      if (statement.assetPerformance && statement.assetPerformance.length > 0) {
-        doc.fontSize(12).font('Helvetica-Bold').fillColor('#0B0E11').text('ASSET PERFORMANCE', { underline: true });
-        doc.moveDown(0.5);
-        
-        const assetTableTop = doc.y;
-        const assetCol1 = 50;
-        const assetCol2 = 150;
-        const assetCol3 = 250;
-        const assetCol4 = 350;
-        const assetCol5 = 450;
-        
-        doc.fontSize(8).font('Helvetica-Bold').fillColor('#FFFFFF');
-        doc.rect(assetCol1, assetTableTop, 495, 18).fill('#0B0E11');
-        doc.fillColor('#FFFFFF').text('Asset', assetCol1 + 5, assetTableTop + 4);
-        doc.text('Opening', assetCol2 + 5, assetTableTop + 4);
-        doc.text('Closing', assetCol3 + 5, assetTableTop + 4);
-        doc.text('Net Change', assetCol4 + 5, assetTableTop + 4);
-        doc.text('P&L', assetCol5 + 5, assetTableTop + 4);
-        
-        currentY = assetTableTop + 18;
-        doc.fontSize(8).font('Helvetica').fillColor('#333333');
-        
-        statement.assetPerformance.forEach(asset => {
-          doc.rect(assetCol1, currentY, 495, 18).fill('#FFFFFF');
-          
-          doc.fillColor('#333333');
-          doc.text(asset.asset.toUpperCase(), assetCol1 + 5, currentY + 4);
-          doc.text(formatCrypto(asset.openingBalance), assetCol2 + 5, currentY + 4);
-          doc.text(formatCrypto(asset.closingBalance), assetCol3 + 5, currentY + 4);
-          doc.text(formatCrypto(asset.netChangeAmount), assetCol4 + 5, currentY + 4);
-          
-          const totalPnL = asset.totalPnLUSD || asset.netChangeValueUSD;
-          doc.fillColor(totalPnL >= 0 ? '#10B981' : '#DC2626');
-          doc.text(formatCurrency(totalPnL), assetCol5 + 5, currentY + 4);
-          
-          doc.fillColor('#333333');
-          currentY += 18;
-        });
-        
-        doc.moveDown(1);
-      }
-      
-      // =============================================
-      // OVERALL SUMMARY
-      // =============================================
-      doc.addPage();
-      addHeader();
-      
-      doc.moveDown(1);
-      doc.fontSize(14).font('Helvetica-Bold').fillColor('#0B0E11').text('OVERALL PERFORMANCE SUMMARY', { align: 'center' });
-      doc.moveDown(1);
-      
-      const summaryCardY = doc.y;
-      const summaryBoxWidth = 200;
-      const summaryBoxHeight = 60;
-      const leftBoxX = 70;
-      const rightBoxX = 330;
-      
-      // Left box - Inflow/Outflow
-      doc.rect(leftBoxX, summaryCardY, summaryBoxWidth, summaryBoxHeight).fill('#F5F5F5');
-      doc.fillColor('#0B0E11').fontSize(10).font('Helvetica-Bold').text('CASH FLOW', leftBoxX + 10, summaryCardY + 8);
-      doc.fontSize(9).font('Helvetica');
-      doc.fillColor('#10B981').text(`Inflow: ${formatCurrency(statement.summary.totalInflowUSD)}`, leftBoxX + 10, summaryCardY + 28);
-      doc.fillColor('#DC2626').text(`Outflow: ${formatCurrency(statement.summary.totalOutflowUSD)}`, leftBoxX + 10, summaryCardY + 44);
-      
-      // Right box - Profit/Loss
-      doc.rect(rightBoxX, summaryCardY, summaryBoxWidth, summaryBoxHeight).fill('#F5F5F5');
-      doc.fillColor('#0B0E11').fontSize(10).font('Helvetica-Bold').text('PROFIT & LOSS', rightBoxX + 10, summaryCardY + 8);
-      doc.fontSize(9).font('Helvetica');
-      doc.fillColor('#10B981').text(`Profit: ${formatCurrency(statement.summary.totalProfitUSD)}`, rightBoxX + 10, summaryCardY + 28);
-      doc.fillColor('#DC2626').text(`Loss: ${formatCurrency(statement.summary.totalLossUSD)}`, rightBoxX + 10, summaryCardY + 44);
-      
-      doc.moveDown(4);
-      
-      const netProfitColor = statement.summary.netProfitUSD >= 0 ? '#10B981' : '#DC2626';
-      doc.fontSize(12).font('Helvetica-Bold');
-      doc.text('Net Profit / Loss:', 150, doc.y);
-      doc.fillColor(netProfitColor).text(formatCurrency(statement.summary.netProfitUSD), 300, doc.y - 12);
-      doc.fillColor('#333333');
-      doc.moveDown(1);
-      
-      doc.fontSize(10).font('Helvetica');
-      doc.text(`ROI Percentage: ${statement.summary.roiPercentage.toFixed(2)}%`, 150, doc.y);
-      doc.text(`Net Cash Flow: ${formatCurrency(statement.summary.netCashFlowUSD)}`, 350, doc.y - 10);
-      
-      doc.moveDown(2);
-      
-      // =============================================
-      // FOOTER
-      // =============================================
-      const pageHeight = doc.page.height;
-      doc.fontSize(8).font('Helvetica').fillColor('#6C7480');
-      doc.text('₿itHash Capital - 800 Plant St, Wilmington, DE 19801, United States', 50, pageHeight - 50, { align: 'center' });
-      doc.text(`Statement generated on ${new Date().toLocaleString()}`, 50, pageHeight - 40, { align: 'center' });
-      doc.text('This is an official financial statement. Please retain for your records.', 50, pageHeight - 30, { align: 'center' });
-      
-      doc.end();
-      
-    } catch (err) {
-      reject(err);
-    }
-  });
-};
-
-const sendFinancialStatementEmail = async (user, statement) => {
-  try {
-    const pdfBuffer = await generateFinancialStatementPDF(statement, user);
-    
-    const pdfBase64 = pdfBuffer.toString('base64');
-    
-    const formattedStartDate = new Date(statement.period.startDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-    const formattedEndDate = new Date(statement.period.endDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-    
-    const periodText = statement.statementType === 'weekly' ? 'Weekly' : 'Monthly';
-    
-    const netProfitColor = statement.summary.netProfitUSD >= 0 ? '#10B981' : '#DC2626';
-    const netProfitSymbol = statement.summary.netProfitUSD >= 0 ? '+' : '';
-    
-    const emailHtml = `
-      <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-        <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-          <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-          <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
-          <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
-        </div>
-        
-        <div style="padding: 30px; background: #FFFFFF;">
-          <div style="background: #F3F4F6; border-radius: 12px; padding: 20px; text-align: center; margin-bottom: 25px;">
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin: 0 auto 12px auto;">
-              <path d="M9 12H15M12 9V15M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="#F7A600" stroke-width="2" stroke-linecap="round"/>
-            </svg>
-            <h2 style="color: #0B0E11; font-size: 22px; margin: 0 0 8px 0;">${periodText} Financial Statement</h2>
-            <p style="color: #6C7480; font-size: 14px; margin: 0;">${formattedStartDate} - ${formattedEndDate}</p>
-            <p style="color: #6C7480; font-size: 12px; margin: 5px 0 0 0;">Reference: ${statement.reference}</p>
-          </div>
-          
-          <p style="color: #333333; line-height: 1.6; margin-bottom: 20px;">Dear <strong>${user.firstName} ${user.lastName}</strong>,</p>
-          
-          <p style="color: #333333; line-height: 1.6; margin-bottom: 20px;">
-            Please find attached your ${periodText.toLowerCase()} Financial Statement for the period of <strong>${formattedStartDate} to ${formattedEndDate}</strong>.
-          </p>
-          
-          <div style="background: #F5F5F5; border-radius: 12px; padding: 20px; margin-bottom: 25px;">
-            <p style="margin: 0 0 12px 0; font-weight: 600; color: #0B0E11;">📊 Statement Summary</p>
-            <table style="width: 100%; border-collapse: collapse;">
-              <tr>
-                <td style="padding: 8px 0; color: #6C7480;">Opening Balance:</td>
-                <td style="padding: 8px 0; text-align: right; font-weight: 600;">$${statement.openingBalances.totalUSD.toLocaleString()}</td>
-              </tr>
-              <tr style="border-top: 1px solid #E5E7EB;">
-                <td style="padding: 8px 0; color: #6C7480;">Closing Balance:</td>
-                <td style="padding: 8px 0; text-align: right; font-weight: 600;">$${statement.closingBalances.totalUSD.toLocaleString()}</td>
-              </tr>
-              <tr style="border-top: 1px solid #E5E7EB;">
-                <td style="padding: 8px 0; color: #6C7480;">Total Inflow:</td>
-                <td style="padding: 8px 0; text-align: right; color: #10B981;">+$${statement.summary.totalInflowUSD.toLocaleString()}</td>
-              </tr>
-              <tr style="border-top: 1px solid #E5E7EB;">
-                <td style="padding: 8px 0; color: #6C7480;">Total Outflow:</td>
-                <td style="padding: 8px 0; text-align: right; color: #DC2626;">-$${statement.summary.totalOutflowUSD.toLocaleString()}</td>
-              </tr>
-              <tr style="border-top: 2px solid #E5E7EB; background: #F9FAFB;">
-                <td style="padding: 10px 0; font-weight: 700; color: #0B0E11;">Net Profit/Loss:</td>
-                <td style="padding: 10px 0; text-align: right; font-weight: 700; color: ${netProfitColor};">${netProfitSymbol}$${Math.abs(statement.summary.netProfitUSD).toLocaleString()}</td>
-              </tr>
-              <tr>
-                <td style="padding: 8px 0; color: #6C7480;">ROI Percentage:</td>
-                <td style="padding: 8px 0; text-align: right; font-weight: 500;">${statement.summary.roiPercentage.toFixed(2)}%</td>
-              </tr>
-            </table>
-          </div>
-          
-          <div style="background: #EFF6FF; border-radius: 12px; padding: 16px 20px; margin-bottom: 25px; border-left: 4px solid #3B82F6;">
-            <p style="margin: 0; color: #1E40AF; font-size: 13px; line-height: 1.5;">
-              <strong>📄 Document Information</strong><br>
-              Your complete financial statement is attached as a PDF. It includes detailed breakdowns of all transactions, investments, trading activity, fees, and asset performance.
-            </p>
-          </div>
-          
-          <div style="text-align: center; margin: 30px 0;">
-            <a href="cid:statement.pdf" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">📎 Download Statement</a>
-          </div>
-          
-          <p style="color: #666666; font-size: 12px; margin-top: 30px;">
-            <strong>Reference ID:</strong> ${statement.reference}<br>
-            <strong>Generated:</strong> ${new Date(statement.period.generationDate).toLocaleString()}
-          </p>
-          
-          <div style="background: #F9FAFB; padding: 15px; border-radius: 8px; margin-top: 20px;">
-            <p style="color: #6C7480; font-size: 12px; margin: 0 0 5px 0;">
-              <strong>Need assistance?</strong> Contact our support team:
-            </p>
-            <p style="color: #6C7480; font-size: 12px; margin: 0;">
-              📧 <a href="mailto:support@bithashcapital.live" style="color: #F7A600;">support@bithashcapital.live</a><br>
-              🌐 <a href="https://www.bithashcapital.live/support" style="color: #F7A600;">www.bithashcapital.live/support</a>
-            </p>
-          </div>
-        </div>
-        
-        <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-          <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-          <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-          <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
-            <a href="mailto:support@bithash.com" style="color: #F7A600; text-decoration: none;">support@bithash.com</a> | 
-            <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
-          </p>
-        </div>
-      </div>
-    `;
-    
-    const mailTransporter = infoTransporter;
-    
-    const mailOptions = {
-      from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
-      to: user.email,
-      subject: `${periodText} Financial Statement - ${formattedStartDate} to ${formattedEndDate}`,
-      html: emailHtml,
-      attachments: [{
-        filename: `Financial_Statement_${statement.reference}.pdf`,
-        content: pdfBuffer,
-        contentType: 'application/pdf',
-        cid: 'statement.pdf'
-      }]
-    };
-    
-    await mailTransporter.sendMail(mailOptions);
-    
-    statement.isDelivered = true;
-    statement.deliveredAt = new Date();
-    await statement.save();
-    
-    console.log(`📧 Financial statement email sent to ${user.email} with PDF attachment`);
-    return true;
-    
-  } catch (err) {
-    console.error('Error sending financial statement email:', err);
-    return false;
-  }
-};
-
 module.exports = {
   User,
   Admin,
@@ -4293,10 +4015,8 @@ module.exports = {
   DepositAsset,
   Buy,
   Sell,
-  FinancialStatement,
-  setupWebSocketServer,
-  generateFinancialStatementPDF,
-  sendFinancialStatementEmail
+   FinancialStatement, 
+  setupWebSocketServer
 };
 
 const generateJWT = (id, isAdmin = false) => {
@@ -4427,6 +4147,7 @@ const getCryptoPrice = async (asset) => {
   try {
     const assetUpper = asset.toUpperCase();
     
+    // Handle stablecoins - they are always $1 (this is factual, not a fallback)
     const stablecoins = ['USDT', 'USDC', 'DAI', 'BUSD', 'TUSD', 'USDP'];
     if (stablecoins.includes(assetUpper)) {
       console.log(`${assetUpper} is a stablecoin, price is $1`);
@@ -4468,6 +4189,7 @@ const getCryptoPrice = async (asset) => {
       return null;
     }
     
+    // Try CoinGecko first
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -4488,6 +4210,7 @@ const getCryptoPrice = async (asset) => {
       console.log(`CoinGecko failed for ${asset}:`, err.message);
     }
     
+    // Try Binance
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -4508,6 +4231,7 @@ const getCryptoPrice = async (asset) => {
       console.log(`Binance failed for ${asset}:`, err.message);
     }
     
+    // Try CryptoCompare
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -4528,6 +4252,7 @@ const getCryptoPrice = async (asset) => {
       console.log(`CryptoCompare failed for ${asset}:`, err.message);
     }
     
+    // Try Kraken
     try {
       const krakenMap = {
         'BTC': 'XBTUSD',
@@ -4565,6 +4290,7 @@ const getCryptoPrice = async (asset) => {
       console.log(`Kraken failed for ${asset}:`, err.message);
     }
     
+    // Try KuCoin
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -4585,6 +4311,7 @@ const getCryptoPrice = async (asset) => {
       console.log(`KuCoin failed for ${asset}:`, err.message);
     }
     
+    // Try Bybit
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -4607,6 +4334,7 @@ const getCryptoPrice = async (asset) => {
       console.log(`Bybit failed for ${asset}:`, err.message);
     }
     
+    // Try OKX
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -4627,6 +4355,7 @@ const getCryptoPrice = async (asset) => {
       console.log(`OKX failed for ${asset}:`, err.message);
     }
     
+    // Try Gate.io
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -4647,6 +4376,7 @@ const getCryptoPrice = async (asset) => {
       console.log(`Gate.io failed for ${asset}:`, err.message);
     }
     
+    // If all APIs failed, return null (no fake fallback)
     console.error(`❌ All APIs failed to fetch price for ${asset}`);
     return null;
     
@@ -4854,24 +4584,33 @@ const getComprehensiveDeviceInfo = (req) => {
   const userAgent = req.headers['user-agent'] || '';
   const ip = getRealClientIP(req);
   
+  // Use device-detector for comprehensive parsing
   const result = deviceDetector.detect(userAgent);
   
+  // Get bot info if applicable
   const botInfo = deviceDetector.parseBot(userAgent);
   
+  // Get client info (browser, engine, OS)
   const clientInfo = result.client || {};
   const osInfo = result.os || {};
   const deviceInfo = result.device || {};
   
+  // Build comprehensive device information
   const comprehensiveInfo = {
+    // Basic device type
     type: deviceInfo.type || 'unknown',
     brand: deviceInfo.brand || '',
     model: deviceInfo.model || '',
+    
+    // Operating System
     os: {
       name: osInfo.name || 'Unknown',
       version: osInfo.version || '',
       platform: osInfo.platform || '',
       family: osInfo.family || ''
     },
+    
+    // Browser/Client
     browser: {
       name: clientInfo.name || 'Unknown',
       version: clientInfo.version || '',
@@ -4879,6 +4618,8 @@ const getComprehensiveDeviceInfo = (req) => {
       engine: clientInfo.engine || '',
       engineVersion: clientInfo.engineVersion || ''
     },
+    
+    // Bot detection
     isBot: !!botInfo,
     botInfo: botInfo ? {
       name: botInfo.name,
@@ -4886,6 +4627,8 @@ const getComprehensiveDeviceInfo = (req) => {
       url: botInfo.url,
       producer: botInfo.producer
     } : null,
+    
+    // Additional device characteristics
     characteristics: {
       isMobile: deviceInfo.type === 'smartphone' || deviceInfo.type === 'feature phone',
       isTablet: deviceInfo.type === 'tablet',
@@ -4896,8 +4639,14 @@ const getComprehensiveDeviceInfo = (req) => {
       isCarBrowser: deviceInfo.type === 'car browser',
       isBot: !!botInfo
     },
+    
+    // Original user agent
     userAgent: userAgent,
+    
+    // IP address
     ip: ip,
+    
+    // Timestamp
     detectedAt: new Date().toISOString()
   };
   
@@ -5078,6 +4827,7 @@ const getUserDeviceInfo = async (req) => {
       console.log(`Private IP detected: ${ip}, using local network location`);
     }
 
+    // Get comprehensive device info using device-detector
     const deviceInfo = getComprehensiveDeviceInfo(req);
 
     return {
@@ -5087,6 +4837,7 @@ const getUserDeviceInfo = async (req) => {
       isPublicIP: isPublicIP,
       exactLocation: exactLocation,
       locationDetails: locationDetails,
+      // Enhanced device information from device-detector
       deviceDetails: {
         type: deviceInfo.type,
         brand: deviceInfo.brand,
@@ -5568,8 +5319,10 @@ const recalculateAllUserBalances = async (io) => {
       let totalActiveValue = 0;
       let totalMaturedValue = 0;
       
+      // Calculate MAIN wallet value (crypto assets only - fluctuates with price)
       if (user.balances && user.balances.main) {
         const mainBalances = user.balances.main;
+        // Handle both Map and plain object formats
         const entries = mainBalances instanceof Map ? mainBalances.entries() : Object.entries(mainBalances);
         
         for (const [asset, balance] of entries) {
@@ -5582,21 +5335,25 @@ const recalculateAllUserBalances = async (io) => {
         }
       }
       
+      // Calculate ACTIVE wallet value (mining contracts - FIXED, does NOT fluctuate)
       if (user.balances && user.balances.active) {
         const activeBalances = user.balances.active;
         const entries = activeBalances instanceof Map ? activeBalances.entries() : Object.entries(activeBalances);
         
         for (const [asset, balance] of entries) {
           if (balance > 0) {
+            // Active wallet stores USD value directly - no price fluctuation
             if (asset === 'usd') {
               totalActiveValue += balance;
             } else {
+              // For crypto in active wallet, use stored value (not recalculated with current price)
               totalActiveValue += balance;
             }
           }
         }
       }
       
+      // Calculate MATURED wallet value (crypto assets only - fluctuates with price)
       if (user.balances && user.balances.matured) {
         const maturedBalances = user.balances.matured;
         const entries = maturedBalances instanceof Map ? maturedBalances.entries() : Object.entries(maturedBalances);
@@ -5611,6 +5368,7 @@ const recalculateAllUserBalances = async (io) => {
         }
       }
       
+      // Check if we need to update (avoid unnecessary writes)
       const currentMainUSD = user.balances?.main?.get?.('usd') || user.balances?.main?.usd || 0;
       const currentActiveUSD = user.balances?.active?.get?.('usd') || user.balances?.active?.usd || 0;
       const currentMaturedUSD = user.balances?.matured?.get?.('usd') || user.balances?.matured?.usd || 0;
@@ -5620,6 +5378,7 @@ const recalculateAllUserBalances = async (io) => {
       const needsMaturedUpdate = Math.abs(currentMaturedUSD - totalMaturedValue) > 0.01;
       
       if (needsMainUpdate || needsActiveUpdate || needsMaturedUpdate) {
+        // Update USD values in the balances Maps
         if (!user.balances) user.balances = { main: new Map(), active: new Map(), matured: new Map() };
         if (!user.balances.main) user.balances.main = new Map();
         if (!user.balances.active) user.balances.active = new Map();
@@ -5632,6 +5391,7 @@ const recalculateAllUserBalances = async (io) => {
         await User.findByIdAndUpdate(user._id, { balances: user.balances });
         updatedCount++;
         
+        // Emit real-time updates via Socket.IO
         if (io) {
           io.to(`user_${user._id}`).emit('balance_update', {
             main: totalMainValue,
@@ -5639,6 +5399,7 @@ const recalculateAllUserBalances = async (io) => {
             matured: totalMaturedValue
           });
           
+          // Calculate daily PnL for main wallet (if we have previous day's value)
           const previousDayKey = `user:${user._id}:prev_main_value`;
           const cachedPrev = await redis.get(previousDayKey);
           let dailyPnL = 0;
@@ -5661,6 +5422,7 @@ const recalculateAllUserBalances = async (io) => {
             }
           });
           
+          // Store today's value for tomorrow's PnL
           const today = new Date().toDateString();
           const lastDate = await redis.get(`user:${user._id}:pnl_date`);
           if (lastDate !== today) {
@@ -5677,6 +5439,10 @@ const recalculateAllUserBalances = async (io) => {
     console.error('Error recalculating user balances:', err);
   }
 };
+
+// =============================================
+// PRICE AGGREGATOR WORKER - SINGLE SOURCE OF TRUTH
+// =============================================
 
 let binanceWs = null;
 let wsReconnectAttempts = 0;
@@ -6112,6 +5878,19 @@ async function getQuoteAssetsFromRedis() {
 
 initializePriceAggregator();
 
+
+
+
+
+
+
+
+
+
+// =============================================
+// ENHANCED EMAIL SERVICE WITH ENTERPRISE TEMPLATES
+// =============================================
+
 const sendProfessionalEmail = async ({ email, template, data, useSupportEmail = false }) => {
   try {
     let mailTransporter = infoTransporter;
@@ -6204,82 +5983,86 @@ const sendProfessionalEmail = async ({ email, template, data, useSupportEmail = 
         `;
         break;
 
-      case 'crypto_deposit':
-        subject = `Crypto Deposit Confirmed - ₿itHash Capital`;
-        html = `
-          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-            <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-              <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-              <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
-              <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
-            </div>
-            <div style="padding: 30px; background: #FFFFFF;">
-              <div style="text-align: center; margin-bottom: 20px;">
-                <img src="${data.cryptoLogoUrl}" alt="${data.currency} logo" style="width: 64px; height: 64px; border-radius: 50%;">
-              </div>
-              <h2 style="color: #0B0E11; margin-bottom: 20px;">Crypto Deposit Received</h2>
-              <p style="color: #333333; line-height: 1.6;">Dear ${data.name},</p>
-              <p style="color: #333333; line-height: 1.6;">You have received a crypto deposit from ₿itHash Capital Secure Asset Fund (BCSAF).</p>
-              <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-                <table style="width: 100%; border-collapse: collapse;">
-                  <tr>
-                    <td style="padding: 8px 0;"><strong>Cryptocurrency:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;">
-                      <img src="${data.cryptoLogoUrl}" alt="${data.currency}" style="width: 20px; height: 20px; vertical-align: middle; margin-right: 5px;">
-                      ${data.currency}
-                    </td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Amount:</strong></td>
-                    <td style="padding: 8px 0; text-align: right; font-weight: bold;">${data.amount} ${data.currency}</td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>USD Value:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;">$${data.usdValue} USD</td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Exchange Rate:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;">1 ${data.currency} = $${data.price}</td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Wallet Type:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;">
-                      <span style="background: ${data.walletColor}; color: white; padding: 4px 12px; border-radius: 20px; font-size: 12px;">${data.walletType}</span>
-                    </td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Date:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;">${data.timestamp}</td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Transaction ID:</strong></td>
-                    <td style="padding: 8px 0; text-align: right; font-size: 11px;">${data.transactionId}</td>
-                  </tr>
-                  ${data.description ? `
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Note:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;">${data.description}</td>
-                  </tr>
-                  ` : ''}
-                </table>
-              </div>
-              <div style="text-align: center; margin: 30px 0;">
-                <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Go to Dashboard</a>
-              </div>
-              <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${data.timestamp}</p>
-            </div>
-            <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-              <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-              <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-              <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
-                <a href="mailto:support@bithash.com" style="color: #F7A600; text-decoration: none;">support@bithash.com</a> | 
-                <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
-              </p>
-            </div>
-          </div>
-        `;
-        break;
 
+
+case 'crypto_deposit':
+  subject = `Crypto Deposit Confirmed - ₿itHash Capital`;
+  html = `
+    <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+      <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+        <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+        <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+        <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+      </div>
+      <div style="padding: 30px; background: #FFFFFF;">
+        <div style="text-align: center; margin-bottom: 20px;">
+          <img src="${data.cryptoLogoUrl}" alt="${data.currency} logo" style="width: 64px; height: 64px; border-radius: 50%;">
+        </div>
+        <h2 style="color: #0B0E11; margin-bottom: 20px;">Crypto Deposit Received</h2>
+        <p style="color: #333333; line-height: 1.6;">Dear ${data.name},</p>
+        <p style="color: #333333; line-height: 1.6;">You have received a crypto deposit from ₿itHash Capital Secure Asset Fund (BCSAF).</p>
+        <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+          <table style="width: 100%; border-collapse: collapse;">
+            <tr>
+              <td style="padding: 8px 0;"><strong>Cryptocurrency:</strong></td>
+              <td style="padding: 8px 0; text-align: right;">
+                <img src="${data.cryptoLogoUrl}" alt="${data.currency}" style="width: 20px; height: 20px; vertical-align: middle; margin-right: 5px;">
+                ${data.currency}
+              </td>
+            </tr>
+            <tr style="border-top: 1px solid #E2E8F0;">
+              <td style="padding: 8px 0;"><strong>Amount:</strong></td>
+              <td style="padding: 8px 0; text-align: right; font-weight: bold;">${data.amount} ${data.currency}</td>
+            </tr>
+            <tr style="border-top: 1px solid #E2E8F0;">
+              <td style="padding: 8px 0;"><strong>USD Value:</strong></td>
+              <td style="padding: 8px 0; text-align: right;">$${data.usdValue} USD</td>
+            </tr>
+            <tr style="border-top: 1px solid #E2E8F0;">
+              <td style="padding: 8px 0;"><strong>Exchange Rate:</strong></td>
+              <td style="padding: 8px 0; text-align: right;">1 ${data.currency} = $${data.price}</td>
+            </tr>
+            <tr style="border-top: 1px solid #E2E8F0;">
+              <td style="padding: 8px 0;"><strong>Wallet Type:</strong></td>
+              <td style="padding: 8px 0; text-align: right;">
+                <span style="background: ${data.walletColor}; color: white; padding: 4px 12px; border-radius: 20px; font-size: 12px;">${data.walletType}</span>
+               </td>
+            </tr>
+            <tr style="border-top: 1px solid #E2E8F0;">
+              <td style="padding: 8px 0;"><strong>Date:</strong></td>
+              <td style="padding: 8px 0; text-align: right;">${data.timestamp}</td>
+            </tr>
+            <tr style="border-top: 1px solid #E2E8F0;">
+              <td style="padding: 8px 0;"><strong>Transaction ID:</strong></td>
+              <td style="padding: 8px 0; text-align: right; font-size: 11px;">${data.transactionId}</td>
+            </tr>
+            ${data.description ? `
+            <tr style="border-top: 1px solid #E2E8F0;">
+              <td style="padding: 8px 0;"><strong>Note:</strong></td>
+              <td style="padding: 8px 0; text-align: right;">${data.description}</td>
+            </tr>
+            ` : ''}
+          </table>
+        </div>
+        <div style="text-align: center; margin: 30px 0;">
+          <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Go to Dashboard</a>
+        </div>
+        <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${data.timestamp}</p>
+      </div>
+      <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
+          <a href="mailto:support@bithash.com" style="color: #F7A600; text-decoration: none;">support@bithash.com</a> | 
+          <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
+        </p>
+      </div>
+    </div>
+  `;
+  break;
+
+
+        
       case 'kyc_approved':
         subject = 'KYC Verification Approved - ₿itHash Capital';
         html = `
@@ -6320,170 +6103,171 @@ const sendProfessionalEmail = async ({ email, template, data, useSupportEmail = 
           </div>
         `;
         break;
-
-      case 'deposit_approved':
-        cryptoLogoUrl = getCryptoLogo(data.cryptoAsset);
-        formattedAmount = data.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        formattedCryptoAmount = data.cryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
-        formattedRate = (data.exchangeRate || 1).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+case 'deposit_approved':
+  cryptoLogoUrl = getCryptoLogo(data.cryptoAsset);
+  formattedAmount = data.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  formattedCryptoAmount = data.cryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
+  formattedRate = (data.exchangeRate || 1).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  
+  subject = '✅ Deposit Confirmed - ₿itHash Capital';
+  html = `
+    <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+      <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+        <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+        <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+        <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+      </div>
+      
+      <div style="padding: 30px; background: #FFFFFF;">
+        <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
+          <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
+            ${cryptoLogoUrl ? `<img src="${cryptoLogoUrl}" width="32" height="32" style="border-radius: 50%;">` : ''}
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="12" cy="12" r="10" stroke="#10B981" stroke-width="2"/>
+              <path d="M8 12L11 15L16 9" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+          <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">DEPOSIT CONFIRMED!</h2>
+          <p style="color: #065F46; font-size: 13px; margin: 0;">Your funds have been successfully credited</p>
+        </div>
         
-        subject = '✅ Deposit Confirmed - ₿itHash Capital';
-        html = `
-          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-            <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-              <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-              <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
-              <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
-            </div>
-            
-            <div style="padding: 30px; background: #FFFFFF;">
-              <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-                <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
-                  ${cryptoLogoUrl ? `<img src="${cryptoLogoUrl}" width="32" height="32" style="border-radius: 50%;">` : ''}
-                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <circle cx="12" cy="12" r="10" stroke="#10B981" stroke-width="2"/>
-                    <path d="M8 12L11 15L16 9" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                  </svg>
-                </div>
-                <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">DEPOSIT CONFIRMED!</h2>
-                <p style="color: #065F46; font-size: 13px; margin: 0;">Your funds have been successfully credited</p>
-              </div>
-              
-              <p style="color: #333333; line-height: 1.6;">Dear <strong>${data.name}</strong>,</p>
-              <p style="color: #333333; line-height: 1.6;">Great news! Your deposit has been successfully processed and credited to your <strong style="color: #10B981;">Main Wallet</strong>.</p>
-              
-              <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-                <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
-                  ${cryptoLogoUrl ? `<img src="${cryptoLogoUrl}" width="32" height="32" style="border-radius: 50%;">` : ''}
-                  <div>
-                    <div style="font-weight: bold; font-size: 18px;">+ ${formattedCryptoAmount} ${data.cryptoAsset}</div>
-                    <div style="color: #64748B; font-size: 12px;">≈ $${formattedAmount} USD</div>
-                  </div>
-                </div>
-                
-                <table style="width: 100%; border-collapse: collapse;">
-                  <tr>
-                    <td style="padding: 8px 0;"><strong>Exchange Rate (Live):</strong></td>
-                    <td style="padding: 8px 0; text-align: right;">1 ${data.cryptoAsset} = $${formattedRate}</td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Wallet Credited:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;"><span style="background: #10B981; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Main Wallet</span></td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Payment Method:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;">${data.method}</td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Transaction ID:</strong></td>
-                    <td style="padding: 8px 0; text-align: right; font-size: 11px;">${data.reference}</td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>New Main Wallet Balance:</strong></td>
-                    <td style="padding: 8px 0; text-align: right; font-weight: bold; color: #10B981;">$${data.newBalance.toLocaleString()}</td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Processed At:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;">${new Date(data.processedAt).toLocaleString()}</td>
-                  </tr>
-                </table>
-              </div>
-              
-              <div style="text-align: center; margin: 30px 0;">
-                <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View Transaction</a>
-              </div>
-              
-              <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${new Date().toLocaleString()}</p>
-            </div>
-            
-            <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-              <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-              <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-              <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
-                <a href="mailto:support@bithash.com" style="color: #F7A600; text-decoration: none;">support@bithash.com</a> | 
-                <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
-              </p>
+        <p style="color: #333333; line-height: 1.6;">Dear <strong>${data.name}</strong>,</p>
+        <p style="color: #333333; line-height: 1.6;">Great news! Your deposit has been successfully processed and credited to your <strong style="color: #10B981;">Main Wallet</strong>.</p>
+        
+        <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+          <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
+            ${cryptoLogoUrl ? `<img src="${cryptoLogoUrl}" width="32" height="32" style="border-radius: 50%;">` : ''}
+            <div>
+              <div style="font-weight: bold; font-size: 18px;">+ ${formattedCryptoAmount} ${data.cryptoAsset}</div>
+              <div style="color: #64748B; font-size: 12px;">≈ $${formattedAmount} USD</div>
             </div>
           </div>
-        `;
-        break;
-
-      case 'deposit_rejected':
-        cryptoLogoUrl = getCryptoLogo(data.cryptoAsset);
-        formattedAmount = data.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        formattedCryptoAmount = data.cryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
-        formattedRate = (data.exchangeRate || 1).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+          
+          <table style="width: 100%; border-collapse: collapse;">
+            <tr>
+              <td style="padding: 8px 0;"><strong>Exchange Rate (Live):</strong></td>
+              <td style="padding: 8px 0; text-align: right;">1 ${data.cryptoAsset} = $${formattedRate}</td>
+            </tr>
+            <tr style="border-top: 1px solid #E2E8F0;">
+              <td style="padding: 8px 0;"><strong>Wallet Credited:</strong></td>
+              <td style="padding: 8px 0; text-align: right;"><span style="background: #10B981; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Main Wallet</span></td>
+            </tr>
+            <tr style="border-top: 1px solid #E2E8F0;">
+              <td style="padding: 8px 0;"><strong>Payment Method:</strong></td>
+              <td style="padding: 8px 0; text-align: right;">${data.method}</td>
+            </tr>
+            <tr style="border-top: 1px solid #E2E8F0;">
+              <td style="padding: 8px 0;"><strong>Transaction ID:</strong></td>
+              <td style="padding: 8px 0; text-align: right; font-size: 11px;">${data.reference}</td>
+            </tr>
+            <tr style="border-top: 1px solid #E2E8F0;">
+              <td style="padding: 8px 0;"><strong>New Main Wallet Balance:</strong></td>
+              <td style="padding: 8px 0; text-align: right; font-weight: bold; color: #10B981;">$${data.newBalance.toLocaleString()}</td>
+            </tr>
+            <tr style="border-top: 1px solid #E2E8F0;">
+              <td style="padding: 8px 0;"><strong>Processed At:</strong></td>
+              <td style="padding: 8px 0; text-align: right;">${new Date(data.processedAt).toLocaleString()}</td>
+            </tr>
+          </table>
+        </div>
         
-        subject = '⛔ Deposit Declined - ₿itHash Capital';
-        html = `
-          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-            <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-              <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-              <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
-              <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
-            </div>
-            
-            <div style="padding: 30px; background: #FFFFFF;">
-              <div style="background: #FEF2F2; border-radius: 12px; padding: 20px; text-align: center; margin-bottom: 25px;">
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin-bottom: 12px;">
-                  <circle cx="12" cy="12" r="10" stroke="#DC2626" stroke-width="2"/>
-                  <path d="M12 8V12M12 16H12.01" stroke="#DC2626" stroke-width="2" stroke-linecap="round"/>
-                </svg>
-                <h2 style="color: #DC2626; font-size: 22px; margin: 0 0 8px 0; font-weight: 700;">DEPOSIT DECLINED</h2>
-                <p style="color: #991B1B; font-size: 14px; margin: 0;">Your deposit request could not be approved</p>
-              </div>
-              
-              <p style="color: #333333; line-height: 1.6; margin-bottom: 20px;">Dear <strong>${data.name}</strong>,</p>
-              <p style="color: #333333; line-height: 1.6; margin-bottom: 25px;">We regret to inform you that your deposit request has been reviewed and <strong style="color: #DC2626;">could not be approved</strong> at this time.</p>
-              
-              <div style="background: #FEF2F2; border-left: 4px solid #DC2626; padding: 16px 20px; border-radius: 8px; margin-bottom: 25px;">
-                <p style="color: #991B1B; font-size: 13px; margin: 0 0 6px 0; font-weight: 600;">ⓘ REASON</p>
-                <p style="color: #7F1D1D; font-size: 14px; margin: 0; line-height: 1.5;">${data.reason}</p>
-              </div>
-              
-              <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-                <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
-                  ${cryptoLogoUrl ? `<img src="${cryptoLogoUrl}" width="32" height="32" style="border-radius: 50%;">` : ''}
-                  <div>
-                    <div style="font-weight: bold; font-size: 18px;">${formattedCryptoAmount} ${data.cryptoAsset}</div>
-                    <div style="color: #64748B; font-size: 12px;">≈ $${formattedAmount} USD</div>
-                  </div>
-                </div>
-                
-                <table style="width: 100%; border-collapse: collapse;">
-                  <tr>
-                    <td style="padding: 8px 0;"><strong>Exchange Rate:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;">1 ${data.cryptoAsset} = $${formattedRate}</td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Payment Method:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;">${data.method}</td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Request ID:</strong></td>
-                    <td style="padding: 8px 0; text-align: right; font-size: 11px;">${data.reference}</td>
-                  </tr>
-                </table>
-              </div>
-              
-              <div style="text-align: center; margin: 30px 0;">
-                <a href="https://www.bithashcapital.live/support" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Contact Support</a>
-              </div>
-              
-              <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${new Date().toLocaleString()}</p>
-            </div>
-            
-            <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-              <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-              <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-              <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
-                <a href="mailto:support@bithash.com" style="color: #F7A600; text-decoration: none;">support@bithash.com</a> | 
-                <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
-              </p>
+        <div style="text-align: center; margin: 30px 0;">
+          <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View Transaction</a>
+        </div>
+        
+        <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${new Date().toLocaleString()}</p>
+      </div>
+      
+      <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
+          <a href="mailto:support@bithash.com" style="color: #F7A600; text-decoration: none;">support@bithash.com</a> | 
+          <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
+        </p>
+      </div>
+    </div>
+  `;
+  break;
+
+
+        
+ case 'deposit_rejected':
+  cryptoLogoUrl = getCryptoLogo(data.cryptoAsset);
+  formattedAmount = data.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  formattedCryptoAmount = data.cryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
+  formattedRate = (data.exchangeRate || 1).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  
+  subject = '⛔ Deposit Declined - ₿itHash Capital';
+  html = `
+    <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+      <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+        <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+        <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+        <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+      </div>
+      
+      <div style="padding: 30px; background: #FFFFFF;">
+        <div style="background: #FEF2F2; border-radius: 12px; padding: 20px; text-align: center; margin-bottom: 25px;">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin-bottom: 12px;">
+            <circle cx="12" cy="12" r="10" stroke="#DC2626" stroke-width="2"/>
+            <path d="M12 8V12M12 16H12.01" stroke="#DC2626" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <h2 style="color: #DC2626; font-size: 22px; margin: 0 0 8px 0; font-weight: 700;">DEPOSIT DECLINED</h2>
+          <p style="color: #991B1B; font-size: 14px; margin: 0;">Your deposit request could not be approved</p>
+        </div>
+        
+        <p style="color: #333333; line-height: 1.6; margin-bottom: 20px;">Dear <strong>${data.name}</strong>,</p>
+        <p style="color: #333333; line-height: 1.6; margin-bottom: 25px;">We regret to inform you that your deposit request has been reviewed and <strong style="color: #DC2626;">could not be approved</strong> at this time.</p>
+        
+        <div style="background: #FEF2F2; border-left: 4px solid #DC2626; padding: 16px 20px; border-radius: 8px; margin-bottom: 25px;">
+          <p style="color: #991B1B; font-size: 13px; margin: 0 0 6px 0; font-weight: 600;">ⓘ REASON</p>
+          <p style="color: #7F1D1D; font-size: 14px; margin: 0; line-height: 1.5;">${data.reason}</p>
+        </div>
+        
+        <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+          <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
+            ${cryptoLogoUrl ? `<img src="${cryptoLogoUrl}" width="32" height="32" style="border-radius: 50%;">` : ''}
+            <div>
+              <div style="font-weight: bold; font-size: 18px;">${formattedCryptoAmount} ${data.cryptoAsset}</div>
+              <div style="color: #64748B; font-size: 12px;">≈ $${formattedAmount} USD</div>
             </div>
           </div>
-        `;
-        break;
+          
+          <table style="width: 100%; border-collapse: collapse;">
+            <tr>
+              <td style="padding: 8px 0;"><strong>Exchange Rate:</strong></td>
+              <td style="padding: 8px 0; text-align: right;">1 ${data.cryptoAsset} = $${formattedRate}</td>
+            </tr>
+            <tr style="border-top: 1px solid #E2E8F0;">
+              <td style="padding: 8px 0;"><strong>Payment Method:</strong></td>
+              <td style="padding: 8px 0; text-align: right;">${data.method}</td>
+            </tr>
+            <tr style="border-top: 1px solid #E2E8F0;">
+              <td style="padding: 8px 0;"><strong>Request ID:</strong></td>
+              <td style="padding: 8px 0; text-align: right; font-size: 11px;">${data.reference}</td>
+            </tr>
+          </table>
+        </div>
+        
+        <div style="text-align: center; margin: 30px 0;">
+          <a href="https://www.bithashcapital.live/support" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Contact Support</a>
+        </div>
+        
+        <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${new Date().toLocaleString()}</p>
+      </div>
+      
+      <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
+          <a href="mailto:support@bithash.com" style="color: #F7A600; text-decoration: none;">support@bithash.com</a> | 
+          <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
+        </p>
+      </div>
+    </div>
+  `;
+  break;
 
       case 'withdrawal_approved':
         const withdrawalRate = await getCurrentExchangeRate('bitcoin');
@@ -6616,31 +6400,32 @@ const sendProfessionalEmail = async ({ email, template, data, useSupportEmail = 
         `;
         break;
 
-      case 'login_success':
-        const loginTime = data.timestamp ? new Date(data.timestamp) : new Date();
-        const isValidTime = !isNaN(loginTime.getTime());
-        
-        subject = 'New Login Detected - ₿itHash Capital';
-        html = `
-          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-            ${brandHeader}
-            <div style="padding: 30px; background: #FFFFFF;">
-              <h2 style="color: #0B0E11; margin-bottom: 20px;">New Login Detected</h2>
-              <p style="color: #333333; line-height: 1.6;">Hello ${data.name},</p>
-              <p style="color: #333333; line-height: 1.6;">A new login was detected on your account.</p>
-              <div style="background: #F5F5F5; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                <p style="margin: 5px 0;"><strong>Device:</strong> ${data.device || 'Unknown'}</p>
-                <p style="margin: 5px 0;"><strong>Location:</strong> ${data.location || 'Unknown'}</p>
-                <p style="margin: 5px 0;"><strong>IP Address:</strong> ${data.ip || 'Unknown'}</p>
-                <p style="margin: 5px 0;"><strong>Time:</strong> ${isValidTime ? loginTime.toLocaleString() : formattedTimestamp}</p>
-              </div>
-              <p style="color: #333333; line-height: 1.6;">If this wasn't you, please contact support immediately.</p>
-              <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${formattedTimestamp}</p>
-            </div>
-            ${brandFooter}
-          </div>
-        `;
-        break;
+case 'login_success':
+  // Use a fallback if timestamp is missing
+  const loginTime = data.timestamp ? new Date(data.timestamp) : new Date();
+  const isValidTime = !isNaN(loginTime.getTime());
+  
+  subject = 'New Login Detected - ₿itHash Capital';
+  html = `
+    <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+      ${brandHeader}
+      <div style="padding: 30px; background: #FFFFFF;">
+        <h2 style="color: #0B0E11; margin-bottom: 20px;">New Login Detected</h2>
+        <p style="color: #333333; line-height: 1.6;">Hello ${data.name},</p>
+        <p style="color: #333333; line-height: 1.6;">A new login was detected on your account.</p>
+        <div style="background: #F5F5F5; padding: 20px; border-radius: 8px; margin: 20px 0;">
+          <p style="margin: 5px 0;"><strong>Device:</strong> ${data.device || 'Unknown'}</p>
+          <p style="margin: 5px 0;"><strong>Location:</strong> ${data.location || 'Unknown'}</p>
+          <p style="margin: 5px 0;"><strong>IP Address:</strong> ${data.ip || 'Unknown'}</p>
+          <p style="margin: 5px 0;"><strong>Time:</strong> ${isValidTime ? loginTime.toLocaleString() : formattedTimestamp}</p>
+        </div>
+        <p style="color: #333333; line-height: 1.6;">If this wasn't you, please contact support immediately.</p>
+        <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${formattedTimestamp}</p>
+      </div>
+      ${brandFooter}
+    </div>
+  `;
+  break;
 
       case 'password_changed':
         subject = 'Password Changed - ₿itHash Capital';
@@ -6697,12 +6482,12 @@ const sendProfessionalEmail = async ({ email, template, data, useSupportEmail = 
                 <p style="margin: 5px 0;"><strong>Location:</strong> ${data.location}</p>
                 <p style="margin: 5px 0;"><strong>IP Address:</strong> ${data.ip}</p>
               <p style="margin: 5px 0;"><strong>Time:</strong> ${(() => {
-                let date = data.timestamp;
-                if (!date) return 'Unknown';
-                if (date instanceof Date) return date.toLocaleString();
-                const parsed = new Date(date);
-                return isNaN(parsed.getTime()) ? new Date().toLocaleString() : parsed.toLocaleString();
-              })()}</p>
+  let date = data.timestamp;
+  if (!date) return 'Unknown';
+  if (date instanceof Date) return date.toLocaleString();
+  const parsed = new Date(date);
+  return isNaN(parsed.getTime()) ? new Date().toLocaleString() : parsed.toLocaleString();
+})()}</p>
               </div>
               <p style="color: #333333; line-height: 1.6;">If this was you, you can safely ignore this email. If not, please secure your account immediately.</p>
               <div style="text-align: center; margin: 30px 0;">
@@ -6715,75 +6500,156 @@ const sendProfessionalEmail = async ({ email, template, data, useSupportEmail = 
         `;
         break;
 
-      default:
-        subject = 'Important Account Update - ₿itHash Capital';
-        html = `
-          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-            ${brandHeader}
-            <div style="padding: 30px; background: #FFFFFF;">
-              <div style="background: #F3F4F6; border-radius: 12px; padding: 20px; margin-bottom: 25px; text-align: center;">
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin: 0 auto 12px auto;">
-                  <path d="M12 8V12M12 16H12.01M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="#F7A600" stroke-width="2" stroke-linecap="round"/>
-                </svg>
-                <h2 style="color: #0B0E11; font-size: 20px; margin: 0 0 8px 0;">Account Update Notification</h2>
-                <p style="color: #6C7480; font-size: 14px; margin: 0;">Action Required / Information</p>
-              </div>
-              
-              <p style="color: #333333; line-height: 1.6;">Dear <strong>${data.name || 'Valued Customer'}</strong>,</p>
-              
-              <p style="color: #333333; line-height: 1.6;">${data.message || 'We have an important update regarding your account that requires your attention.'}</p>
-              
-              ${data.details ? `
-              <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-                <h3 style="color: #0B0E11; margin: 0 0 12px 0; font-size: 16px;">Update Details:</h3>
-                <p style="color: #4B5563; margin: 0; line-height: 1.5;">${data.details}</p>
-              </div>
-              ` : ''}
-              
-              ${data.actionRequired ? `
-              <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
-                <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">⚠️ Action Required</p>
-                <p style="color: #78350F; margin: 0; font-size: 14px;">${data.actionRequired}</p>
-              </div>
-              ` : ''}
-              
-              ${data.actionLink ? `
-              <div style="text-align: center; margin: 30px 0;">
-                <a href="${data.actionLink}" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">${data.buttonText || 'View Details'}</a>
-              </div>
-              ` : ''}
-              
-              <div style="margin-top: 25px; padding-top: 20px; border-top: 1px solid #E5E7EB;">
-                <p style="color: #6C7480; font-size: 13px; line-height: 1.5; margin: 0 0 10px 0;">
-                  <strong>What this means for you:</strong>
-                </p>
-                <ul style="color: #6C7480; font-size: 13px; margin: 0; padding-left: 20px;">
-                  <li style="margin: 5px 0;">Your account security is our top priority</li>
-                  <li style="margin: 5px 0;">Review the information above for any necessary actions</li>
-                  <li style="margin: 5px 0;">Contact support if you have any questions</li>
-                </ul>
-              </div>
-              
-              <p style="color: #666666; font-size: 12px; margin-top: 30px;">
-                <strong>Reference ID:</strong> ${data.referenceId || 'N/A'}<br>
-                <strong>Email sent:</strong> ${formattedTimestamp}
-              </p>
-              
-              <div style="background: #F9FAFB; padding: 15px; border-radius: 8px; margin-top: 20px;">
-                <p style="color: #6C7480; font-size: 12px; margin: 0 0 5px 0;">
-                  <strong>Need help?</strong> Contact our support team:
-                </p>
-                <p style="color: #6C7480; font-size: 12px; margin: 0;">
-                  📧 <a href="mailto:support@bithashcapital.live" style="color: #F7A600;">support@bithashcapital.live</a><br>
-                  🌐 <a href="https://www.bithashcapital.live/support" style="color: #F7A600;">www.bithashcapital.live/support</a>
-                </p>
-              </div>
-            </div>
-            ${brandFooter}
-          </div>
-        `;
-        break;
-    }
+ default:
+  subject = 'Important Account Update - ₿itHash Capital';
+  html = `
+    <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+      ${brandHeader}
+      <div style="padding: 30px; background: #FFFFFF;">
+        <div style="background: #F3F4F6; border-radius: 12px; padding: 20px; margin-bottom: 25px; text-align: center;">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin: 0 auto 12px auto;">
+            <path d="M12 8V12M12 16H12.01M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="#F7A600" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <h2 style="color: #0B0E11; font-size: 20px; margin: 0 0 8px 0;">Account Update Notification</h2>
+          <p style="color: #6C7480; font-size: 14px; margin: 0;">Action Required / Information</p>
+        </div>
+        
+        <p style="color: #333333; line-height: 1.6;">Dear <strong>${data.name || 'Valued Customer'}</strong>,</p>
+        
+        <p style="color: #333333; line-height: 1.6;">${data.message || 'We have an important update regarding your account that requires your attention.'}</p>
+        
+        ${data.details ? `
+        <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+          <h3 style="color: #0B0E11; margin: 0 0 12px 0; font-size: 16px;">Update Details:</h3>
+          <p style="color: #4B5563; margin: 0; line-height: 1.5;">${data.details}</p>
+        </div>
+        ` : ''}
+        
+        ${data.actionRequired ? `
+        <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
+          <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">⚠️ Action Required</p>
+          <p style="color: #78350F; margin: 0; font-size: 14px;">${data.actionRequired}</p>
+        </div>
+        ` : ''}
+        
+        ${data.actionLink ? `
+        <div style="text-align: center; margin: 30px 0;">
+          <a href="${data.actionLink}" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">${data.buttonText || 'View Details'}</a>
+        </div>
+        ` : ''}
+        
+        <div style="margin-top: 25px; padding-top: 20px; border-top: 1px solid #E5E7EB;">
+          <p style="color: #6C7480; font-size: 13px; line-height: 1.5; margin: 0 0 10px 0;">
+            <strong>What this means for you:</strong>
+          </p>
+          <ul style="color: #6C7480; font-size: 13px; margin: 0; padding-left: 20px;">
+            <li style="margin: 5px 0;">Your account security is our top priority</li>
+            <li style="margin: 5px 0;">Review the information above for any necessary actions</li>
+            <li style="margin: 5px 0;">Contact support if you have any questions</li>
+          </ul>
+        </div>
+        
+        <p style="color: #666666; font-size: 12px; margin-top: 30px;">
+          <strong>Reference ID:</strong> ${data.referenceId || 'N/A'}<br>
+          <strong>Email sent:</strong> ${formattedTimestamp}
+        </p>
+        
+        <div style="background: #F9FAFB; padding: 15px; border-radius: 8px; margin-top: 20px;">
+          <p style="color: #6C7480; font-size: 12px; margin: 0 0 5px 0;">
+            <strong>Need help?</strong> Contact our support team:
+          </p>
+          <p style="color: #6C7480; font-size: 12px; margin: 0;">
+            📧 <a href="mailto:support@bithashcapital.live" style="color: #F7A600;">support@bithashcapital.live</a><br>
+            🌐 <a href="https://www.bithashcapital.live/support" style="color: #F7A600;">www.bithashcapital.live/support</a>
+          </p>
+        </div>
+      </div>
+      ${brandFooter}
+    </div>
+  `;
+  break;
+  } 
+
+
+
+
+
+
+
+// Helper function for sending admin action notifications
+const sendAdminActionNotification = async (user, action, details, actionRequired = null, actionLink = null) => {
+  try {
+    // Map admin actions to appropriate messages
+    const actionMessages = {
+      'account_suspended': {
+        message: 'Your account has been temporarily suspended due to unusual activity.',
+        subject: 'Account Temporarily Suspended - Action Required'
+      },
+      'account_restricted': {
+        message: 'Your account has been restricted. Please review the details below.',
+        subject: 'Account Restrictions Applied'
+      },
+      'kyc_review': {
+        message: 'Your KYC documents are under review. We will notify you once completed.',
+        subject: 'KYC Document Review Status'
+      },
+      'deposit_manual': {
+        message: 'Your deposit has been manually processed by our finance team.',
+        subject: 'Manual Deposit Processed'
+      },
+      'withdrawal_manual': {
+        message: 'Your withdrawal request has been manually reviewed and processed.',
+        subject: 'Manual Withdrawal Processed'
+      },
+      'balance_adjustment': {
+        message: 'Your account balance has been adjusted by our administration team.',
+        subject: 'Account Balance Adjustment'
+      },
+      'security_alert': {
+        message: 'Security alert: Unusual activity detected on your account.',
+        subject: '⚠️ Security Alert - Action Required'
+      },
+      'compliance_update': {
+        message: 'Important update regarding your account compliance status.',
+        subject: 'Compliance Status Update'
+      },
+      'investment_update': {
+        message: 'Your investment portfolio has been updated by our management team.',
+        subject: 'Investment Portfolio Update'
+      }
+    };
+
+    const actionConfig = actionMessages[action] || {
+      message: details?.message || 'An important update has been made to your account.',
+      subject: 'Important Account Update - ₿itHash Capital'
+    };
+
+    // Send the email using the professional email service
+    await sendProfessionalEmail({
+      email: user.email,
+      template: 'default',
+      data: {
+        name: user.firstName || 'Valued Customer',
+        message: actionConfig.message,
+        details: details?.description || details?.reason || JSON.stringify(details, null, 2),
+        actionRequired: actionRequired,
+        actionLink: actionLink,
+        buttonText: details?.buttonText || 'View Details',
+        referenceId: `${action.toUpperCase()}-${Date.now()}-${Math.floor(Math.random() * 10000)}`
+      }
+    });
+
+    console.log(`📧 Admin action notification sent to ${user.email} for action: ${action}`);
+    return true;
+
+  } catch (err) {
+    console.error('Failed to send admin action notification:', err);
+    return false;
+  }
+};
+
+
+        
 
     const mailOptions = {
       from: `₿itHash Capital <${mailTransporter === supportTransporter ? process.env.EMAIL_SUPPORT_USER : process.env.EMAIL_INFO_USER}>`,
@@ -6864,6 +6730,17 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
     return false;
   }
 };
+
+
+
+
+
+
+
+
+// =============================================
+// ENHANCED DEVICE DETECTION WITH ACCURATE BROWSER/OS DETECTION
+// =============================================
 
 const getAccurateDeviceInfo = (userAgent) => {
   if (!userAgent) return { device: 'Unknown', os: 'Unknown', browser: 'Unknown', model: 'Unknown' };
@@ -6963,36 +6840,6 @@ const getBrowserFromUserAgent = (userAgent) => {
   if (/opera|opr/i.test(userAgent)) return 'Opera';
   return 'Unknown';
 };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 // Routes
@@ -24178,7 +24025,6 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
 
 
 
-
 // SNIPPET C - COMPLETE REWRITE
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -25194,11 +25040,6 @@ async function getInitialMarketData() {
     return [];
   }
 }
-
-
-
-
-
 
 
 
