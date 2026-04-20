@@ -27,10 +27,10 @@ const DeviceDetector = require('node-device-detector');
 const DeviceHelper = require('node-device-detector/helper');
 
 // =============================================
-// PDF GENERATION IMPORTS
+// PDF GENERATION DEPENDENCIES
 // =============================================
 const PDFDocument = require('pdfkit');
-const { ChartJSNodeCanvas } = require('chartjs-node-canvas');
+const { createCanvas } = require('canvas');
 const sharp = require('sharp');
 const fs = require('fs');
 const path = require('path');
@@ -183,14 +183,10 @@ const authLimiter = rateLimit({
   }
 });
 
-
-
 app.use('/api', apiLimiter);
 app.use('/api/login', authLimiter);
 app.use('/api/signup', authLimiter);
 app.use('/api/auth/forgot-password', authLimiter);
-
-
 
 app.get('/api/health', (req, res) => {
   res.status(200).json({ 
@@ -1327,7 +1323,6 @@ const CandleSchema = new mongoose.Schema({
 
 CandleSchema.index({ symbol: 1, interval: 1, openTime: 1 }, { unique: true });
 
-
 const PairLimitsSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true, index: true },
   baseAsset: { type: String, required: true },
@@ -2124,12 +2119,6 @@ TransactionSchema.index({ createdAt: -1 });
 
 const Transaction = mongoose.model('Transaction', TransactionSchema);
 
-
-
-
-
-
-
 const FinancialStatementSchema = new mongoose.Schema({
     user: {
         type: mongoose.Schema.Types.ObjectId,
@@ -2376,634 +2365,6 @@ FinancialStatementSchema.index({ 'period.startDate': 1, 'period.endDate': 1 });
 FinancialStatementSchema.index({ statementType: 1, 'period.endDate': -1 });
 
 const FinancialStatement = mongoose.model('FinancialStatement', FinancialStatementSchema);
-
-// =============================================
-// PDF GENERATION FUNCTIONS
-// =============================================
-
-// Helper to format currency
-const formatCurrency = (amount, color = null) => {
-    const formatted = new Intl.NumberFormat('en-US', {
-        style: 'currency',
-        currency: 'USD',
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
-    }).format(amount);
-    if (color === 'red' && amount < 0) return { text: formatted, color: '#DC2626' };
-    if (color === 'green' && amount > 0) return { text: formatted, color: '#10B981' };
-    return { text: formatted, color: '#1F2937' };
-};
-
-// Helper to format crypto amount
-const formatCryptoAmount = (amount, asset) => {
-    const decimals = asset === 'BTC' ? 8 : 4;
-    return `${amount.toFixed(decimals)} ${asset}`;
-};
-
-// Create bar chart for profit/loss visualization
-const createProfitLossChart = async (profitLossData, periodLabel) => {
-    const width = 600;
-    const height = 300;
-    const chartJSNodeCanvas = new ChartJSNodeCanvas({ width, height });
-    
-    const configuration = {
-        type: 'bar',
-        data: {
-            labels: profitLossData.labels,
-            datasets: [
-                {
-                    label: 'Profit ($)',
-                    data: profitLossData.profits,
-                    backgroundColor: '#10B981',
-                    borderColor: '#059669',
-                    borderWidth: 1
-                },
-                {
-                    label: 'Loss ($)',
-                    data: profitLossData.losses,
-                    backgroundColor: '#DC2626',
-                    borderColor: '#B91C1C',
-                    borderWidth: 1
-                }
-            ]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: true,
-            plugins: {
-                legend: { position: 'top', labels: { font: { size: 12 } } },
-                title: { display: true, text: `Profit & Loss - ${periodLabel}`, font: { size: 14, weight: 'bold' } }
-            },
-            scales: {
-                y: { beginAtZero: true, title: { display: true, text: 'Amount (USD)' } },
-                x: { title: { display: true, text: 'Date' } }
-            }
-        }
-    };
-    
-    return await chartJSNodeCanvas.renderToBuffer(configuration);
-};
-
-// Create asset distribution pie chart
-const createAssetDistributionChart = async (assetData) => {
-    const width = 400;
-    const height = 400;
-    const chartJSNodeCanvas = new ChartJSNodeCanvas({ width, height });
-    
-    const colors = ['#F7A600', '#3B82F6', '#10B981', '#8B5CF6', '#EC4899', '#06B6D4', '#F97316', '#6B7280'];
-    
-    const configuration = {
-        type: 'pie',
-        data: {
-            labels: assetData.map(a => a.asset),
-            datasets: [{
-                data: assetData.map(a => a.valueUSD),
-                backgroundColor: assetData.map((_, i) => colors[i % colors.length]),
-                borderWidth: 2,
-                borderColor: '#FFFFFF'
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: true,
-            plugins: {
-                legend: { position: 'right', labels: { font: { size: 10 } } },
-                title: { display: true, text: 'Asset Distribution', font: { size: 14, weight: 'bold' } },
-                tooltip: { callbacks: { label: (context) => `${context.label}: $${context.raw.toLocaleString()}` } }
-            }
-        }
-    };
-    
-    return await chartJSNodeCanvas.renderToBuffer(configuration);
-};
-
-// Create fee breakdown pie chart
-const createFeeBreakdownChart = async (feeData) => {
-    const width = 400;
-    const height = 400;
-    const chartJSNodeCanvas = new ChartJSNodeCanvas({ width, height });
-    
-    const colors = ['#DC2626', '#EA580C', '#D97706', '#B45309', '#92400E'];
-    
-    const configuration = {
-        type: 'pie',
-        data: {
-            labels: feeData.map(f => f.type),
-            datasets: [{
-                data: feeData.map(f => f.amount),
-                backgroundColor: colors,
-                borderWidth: 2,
-                borderColor: '#FFFFFF'
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: true,
-            plugins: {
-                legend: { position: 'right', labels: { font: { size: 10 } } },
-                title: { display: true, text: 'Fees Breakdown', font: { size: 14, weight: 'bold' } },
-                tooltip: { callbacks: { label: (context) => `${context.label}: $${context.raw.toLocaleString()}` } }
-            }
-        }
-    };
-    
-    return await chartJSNodeCanvas.renderToBuffer(configuration);
-};
-
-// Generate professional PDF financial statement
-const generateFinancialStatementPDF = async (statement, user) => {
-    return new Promise(async (resolve, reject) => {
-        try {
-            const doc = new PDFDocument({ margin: 50, size: 'A4' });
-            const buffers = [];
-            
-            doc.on('data', buffers.push.bind(buffers));
-            doc.on('end', () => resolve(Buffer.concat(buffers)));
-            doc.on('error', reject);
-            
-            // Brand Header
-            doc.fontSize(24).font('Helvetica-Bold').fillColor('#0B0E11').text('₿itHash Capital', { align: 'center' });
-            doc.fontSize(10).font('Helvetica').fillColor('#6C7480').text('Financial Statement', { align: 'center' });
-            doc.moveDown(0.5);
-            
-            // Statement Info Box
-            doc.rect(50, doc.y, 495, 60).fill('#F3F4F6');
-            doc.fillColor('#1F2937').fontSize(9);
-            doc.text(`Statement Period: ${new Date(statement.period.startDate).toLocaleDateString()} - ${new Date(statement.period.endDate).toLocaleDateString()}`, 60, doc.y - 55);
-            doc.text(`Generated: ${new Date(statement.period.generationDate).toLocaleString()}`, 60, doc.y - 45);
-            doc.text(`Reference: ${statement.reference}`, 60, doc.y - 35);
-            doc.text(`Account Holder: ${user.fullName || `${user.firstName} ${user.lastName}`}`, 350, doc.y - 55);
-            doc.text(`Email: ${user.email}`, 350, doc.y - 45);
-            doc.moveDown();
-            
-            // Balance Summary Section
-            doc.fontSize(14).font('Helvetica-Bold').fillColor('#0B0E11').text('Balance Summary', { underline: true });
-            doc.moveDown(0.5);
-            
-            const balanceStartY = doc.y;
-            doc.fontSize(10).font('Helvetica');
-            
-            // Opening Balances Table
-            doc.fillColor('#374151').text('Opening Balances', 50, balanceStartY);
-            doc.fillColor('#1F2937');
-            doc.text(`Total: ${formatCurrency(statement.openingBalances.totalUSD).text}`, 200, balanceStartY);
-            doc.text(`Main Wallet: ${formatCurrency(statement.openingBalances.mainWalletUSD).text}`, 350, balanceStartY);
-            doc.text(`Active Wallet: ${formatCurrency(statement.openingBalances.activeWalletUSD).text}`, 50, balanceStartY + 20);
-            doc.text(`Matured Wallet: ${formatCurrency(statement.openingBalances.maturedWalletUSD).text}`, 200, balanceStartY + 20);
-            doc.moveDown(1.5);
-            
-            // Closing Balances Table
-            const closingStartY = doc.y;
-            doc.fillColor('#374151').text('Closing Balances', 50, closingStartY);
-            doc.fillColor('#1F2937');
-            doc.text(`Total: ${formatCurrency(statement.closingBalances.totalUSD).text}`, 200, closingStartY);
-            doc.text(`Main Wallet: ${formatCurrency(statement.closingBalances.mainWalletUSD).text}`, 350, closingStartY);
-            doc.text(`Active Wallet: ${formatCurrency(statement.closingBalances.activeWalletUSD).text}`, 50, closingStartY + 20);
-            doc.text(`Matured Wallet: ${formatCurrency(statement.closingBalances.maturedWalletUSD).text}`, 200, closingStartY + 20);
-            doc.moveDown(1.5);
-            
-            // Net Change Highlight
-            const netChangeColor = statement.netChangeUSD >= 0 ? '#10B981' : '#DC2626';
-            doc.fillColor(netChangeColor).fontSize(12).font('Helvetica-Bold');
-            doc.text(`Net Change: ${formatCurrency(Math.abs(statement.netChangeUSD)).text} ${statement.netChangeUSD >= 0 ? '(↑)' : '(↓)'}`, { align: 'center' });
-            doc.fillColor('#1F2937').fontSize(10).font('Helvetica');
-            doc.moveDown(1);
-            
-            // Transaction Summary Section
-            doc.fontSize(14).font('Helvetica-Bold').fillColor('#0B0E11').text('Transaction Summary', { underline: true });
-            doc.moveDown(0.5);
-            
-            // Transaction Stats Box
-            doc.rect(50, doc.y, 495, 45).fill('#F9FAFB');
-            doc.fillColor('#1F2937').fontSize(9);
-            doc.text(`Total Deposits: ${formatCurrency(statement.transactions.summary.totalDepositsUSD).text}`, 60, doc.y - 40);
-            doc.text(`Total Withdrawals: ${formatCurrency(statement.transactions.summary.totalWithdrawalsUSD).text}`, 200, doc.y - 40);
-            doc.text(`Total Fees Paid: ${formatCurrency(statement.transactions.summary.totalFeesPaidUSD, 'red').text}`, 350, doc.y - 40);
-            doc.text(`Deposits Count: ${statement.transactions.summary.count.deposits}`, 60, doc.y - 28);
-            doc.text(`Withdrawals Count: ${statement.transactions.summary.count.withdrawals}`, 200, doc.y - 28);
-            doc.text(`Net Cash Flow: ${formatCurrency(statement.summary.netCashFlowUSD, statement.summary.netCashFlowUSD >= 0 ? 'green' : 'red').text}`, 350, doc.y - 28);
-            doc.moveDown(1.5);
-            
-            // Recent Transactions Table
-            if (statement.transactions.list.length > 0) {
-                doc.fontSize(12).font('Helvetica-Bold').text('Recent Transactions', { underline: true });
-                doc.moveDown(0.3);
-                
-                const tableTop = doc.y;
-                const colPositions = { date: 50, type: 130, description: 220, amount: 400 };
-                
-                doc.fontSize(8).font('Helvetica-Bold').fillColor('#6C7480');
-                doc.text('Date', colPositions.date, tableTop);
-                doc.text('Type', colPositions.type, tableTop);
-                doc.text('Description', colPositions.description, tableTop);
-                doc.text('Amount', colPositions.amount, tableTop);
-                
-                doc.moveDown(0.5);
-                let currentY = doc.y;
-                doc.fontSize(8).font('Helvetica').fillColor('#1F2937');
-                
-                const recentTransactions = statement.transactions.list.slice(-15);
-                for (const tx of recentTransactions) {
-                    if (currentY > 700) { doc.addPage(); currentY = 50; }
-                    const amountInfo = formatCurrency(tx.netAmountUSD, tx.netAmountUSD >= 0 ? 'green' : 'red');
-                    doc.text(new Date(tx.createdAt).toLocaleDateString(), colPositions.date, currentY);
-                    doc.text(tx.type, colPositions.type, currentY);
-                    let desc = tx.description || tx.type;
-                    if (desc.length > 30) desc = desc.substring(0, 27) + '...';
-                    doc.text(desc, colPositions.description, currentY);
-                    doc.fillColor(amountInfo.color).text(amountInfo.text, colPositions.amount, currentY);
-                    doc.fillColor('#1F2937');
-                    currentY += 18;
-                }
-                doc.moveDown();
-            }
-            
-            // Investment Summary Section
-            if (statement.investments.summary.totalPrincipalInvestedUSD > 0 || statement.investments.matured.length > 0) {
-                doc.addPage();
-                doc.fontSize(14).font('Helvetica-Bold').fillColor('#0B0E11').text('Investment Performance', { underline: true });
-                doc.moveDown(0.5);
-                
-                doc.fillColor('#1F2937').fontSize(10);
-                doc.text(`Total Principal Invested: ${formatCurrency(statement.investments.summary.totalPrincipalInvestedUSD).text}`, 50);
-                doc.text(`Total Returns Earned: ${formatCurrency(statement.investments.summary.totalReturnsEarnedUSD, 'green').text}`, 250);
-                doc.text(`Total Profit: ${formatCurrency(statement.investments.summary.totalProfitUSD, 'green').text}`, 450);
-                doc.moveDown();
-                
-                if (statement.investments.matured.length > 0) {
-                    doc.fontSize(12).font('Helvetica-Bold').text('Matured Investments', { underline: true });
-                    doc.moveDown(0.3);
-                    
-                    let currentY = doc.y;
-                    doc.fontSize(8).font('Helvetica-Bold').fillColor('#6C7480');
-                    doc.text('Plan', 50, currentY);
-                    doc.text('Initial', 200, currentY);
-                    doc.text('Return', 300, currentY);
-                    doc.text('Profit', 400, currentY);
-                    doc.text('ROI', 470, currentY);
-                    
-                    currentY += 15;
-                    doc.fontSize(8).font('Helvetica').fillColor('#1F2937');
-                    
-                    for (const inv of statement.investments.matured.slice(-10)) {
-                        if (currentY > 750) { doc.addPage(); currentY = 50; }
-                        const profitInfo = formatCurrency(inv.profitUSD, 'green');
-                        doc.text(inv.planName, 50, currentY);
-                        doc.text(formatCurrency(inv.initialAmountUSD).text, 200, currentY);
-                        doc.text(formatCurrency(inv.returnAmountUSD).text, 300, currentY);
-                        doc.fillColor(profitInfo.color).text(profitInfo.text, 400, currentY);
-                        doc.fillColor('#1F2937').text(`${inv.profitPercentage}%`, 470, currentY);
-                        currentY += 18;
-                    }
-                    doc.moveDown();
-                }
-            }
-            
-            // Trading Summary Section
-            if (statement.trading.summary.totalBuyVolumeUSD > 0 || statement.trading.summary.totalSellVolumeUSD > 0) {
-                doc.addPage();
-                doc.fontSize(14).font('Helvetica-Bold').fillColor('#0B0E11').text('Trading Activity', { underline: true });
-                doc.moveDown(0.5);
-                
-                doc.fillColor('#1F2937').fontSize(10);
-                doc.text(`Total Buy Volume: ${formatCurrency(statement.trading.summary.totalBuyVolumeUSD).text}`, 50);
-                doc.text(`Total Sell Volume: ${formatCurrency(statement.trading.summary.totalSellVolumeUSD).text}`, 250);
-                doc.text(`Net Trading PnL: ${formatCurrency(statement.trading.summary.netTradingPnLUSD, statement.trading.summary.netTradingPnLUSD >= 0 ? 'green' : 'red').text}`, 450);
-                doc.moveDown();
-                
-                if (statement.trading.buys.length > 0 || statement.trading.sells.length > 0) {
-                    const trades = [...statement.trading.buys.map(b => ({ ...b, tradeType: 'buy' })), ...statement.trading.sells.map(s => ({ ...s, tradeType: 'sell' }))];
-                    trades.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-                    
-                    doc.fontSize(10).font('Helvetica-Bold').text('Recent Trades', { underline: true });
-                    doc.moveDown(0.3);
-                    
-                    let currentY = doc.y;
-                    doc.fontSize(8).font('Helvetica-Bold').fillColor('#6C7480');
-                    doc.text('Date', 50, currentY);
-                    doc.text('Type', 120, currentY);
-                    doc.text('Asset', 180, currentY);
-                    doc.text('Amount', 240, currentY);
-                    doc.text('Price', 320, currentY);
-                    doc.text('Total', 400, currentY);
-                    doc.text('PnL', 470, currentY);
-                    
-                    currentY += 15;
-                    doc.fontSize(8).font('Helvetica').fillColor('#1F2937');
-                    
-                    for (const trade of trades.slice(-15)) {
-                        if (currentY > 750) { doc.addPage(); currentY = 50; }
-                        const typeColor = trade.tradeType === 'buy' ? '#10B981' : '#DC2626';
-                        doc.text(new Date(trade.createdAt).toLocaleDateString(), 50, currentY);
-                        doc.fillColor(typeColor).text(trade.tradeType.toUpperCase(), 120, currentY);
-                        doc.fillColor('#1F2937').text(trade.asset.toUpperCase(), 180, currentY);
-                        doc.text(formatCryptoAmount(trade.assetAmount, trade.asset), 240, currentY);
-                        doc.text(formatCurrency(trade.pricePerUnit).text, 320, currentY);
-                        doc.text(formatCurrency(trade.amountUSD).text, 400, currentY);
-                        if (trade.profitLossUSD) {
-                            const pnlInfo = formatCurrency(trade.profitLossUSD, trade.profitLossUSD >= 0 ? 'green' : 'red');
-                            doc.fillColor(pnlInfo.color).text(pnlInfo.text, 470, currentY);
-                            doc.fillColor('#1F2937');
-                        } else { doc.text('-', 470, currentY); }
-                        currentY += 18;
-                    }
-                }
-            }
-            
-            // Fees Summary Section (Red for fees)
-            if (statement.fees.summary.totalFeesUSD > 0) {
-                doc.addPage();
-                doc.fontSize(14).font('Helvetica-Bold').fillColor('#0B0E11').text('Fees & Charges', { underline: true });
-                doc.moveDown(0.5);
-                
-                doc.fillColor('#DC2626').fontSize(12);
-                doc.text(`Total Fees Paid: ${formatCurrency(statement.fees.summary.totalFeesUSD).text}`, { align: 'center' });
-                doc.fillColor('#1F2937').fontSize(10);
-                doc.moveDown();
-                
-                doc.text(`Investment Fees: ${formatCurrency(statement.fees.summary.investmentFeesUSD).text}`, 50);
-                doc.text(`Withdrawal Fees: ${formatCurrency(statement.fees.summary.withdrawalFeesUSD).text}`, 250);
-                doc.text(`Trading Fees: ${formatCurrency(statement.fees.summary.tradingFeesUSD).text}`, 450);
-                doc.moveDown();
-                
-                if (statement.fees.items.length > 0) {
-                    doc.fontSize(10).font('Helvetica-Bold').text('Fee Details', { underline: true });
-                    doc.moveDown(0.3);
-                    
-                    let currentY = doc.y;
-                    doc.fontSize(8).font('Helvetica-Bold').fillColor('#6C7480');
-                    doc.text('Date', 50, currentY);
-                    doc.text('Source', 150, currentY);
-                    doc.text('Description', 250, currentY);
-                    doc.text('Amount', 450, currentY);
-                    
-                    currentY += 15;
-                    doc.fontSize(8).font('Helvetica').fillColor('#DC2626');
-                    
-                    for (const fee of statement.fees.items.slice(-15)) {
-                        if (currentY > 750) { doc.addPage(); currentY = 50; }
-                        doc.text(new Date(fee.date).toLocaleDateString(), 50, currentY);
-                        doc.text(fee.source.replace(/_/g, ' '), 150, currentY);
-                        let desc = fee.description || fee.source;
-                        if (desc.length > 35) desc = desc.substring(0, 32) + '...';
-                        doc.text(desc, 250, currentY);
-                        doc.text(formatCurrency(fee.amountUSD).text, 450, currentY);
-                        currentY += 18;
-                    }
-                }
-            }
-            
-            // Referral Earnings Section
-            if (statement.referrals.summary.totalReferralEarningsUSD > 0) {
-                doc.addPage();
-                doc.fontSize(14).font('Helvetica-Bold').fillColor('#0B0E11').text('Referral Earnings', { underline: true });
-                doc.moveDown(0.5);
-                
-                doc.fillColor('#10B981').fontSize(12);
-                doc.text(`Total Referral Earnings: ${formatCurrency(statement.referrals.summary.totalReferralEarningsUSD).text}`, { align: 'center' });
-                doc.fillColor('#1F2937').fontSize(10);
-                doc.moveDown();
-                
-                doc.text(`Direct Referrals: ${formatCurrency(statement.referrals.summary.directReferralEarningsUSD).text}`, 50);
-                doc.text(`Downline Commissions: ${formatCurrency(statement.referrals.summary.downlineCommissionEarningsUSD).text}`, 250);
-                doc.moveDown();
-                
-                if (statement.referrals.commissionsEarned.length > 0) {
-                    doc.fontSize(10).font('Helvetica-Bold').text('Commission Details', { underline: true });
-                    doc.moveDown(0.3);
-                    
-                    let currentY = doc.y;
-                    doc.fontSize(8).font('Helvetica-Bold').fillColor('#6C7480');
-                    doc.text('Date', 50, currentY);
-                    doc.text('From', 150, currentY);
-                    doc.text('Level', 280, currentY);
-                    doc.text('Amount', 450, currentY);
-                    
-                    currentY += 15;
-                    doc.fontSize(8).font('Helvetica').fillColor('#1F2937');
-                    
-                    for (const comm of statement.referrals.commissionsEarned.slice(-15)) {
-                        if (currentY > 750) { doc.addPage(); currentY = 50; }
-                        doc.text(new Date(comm.date).toLocaleDateString(), 50, currentY);
-                        doc.text(comm.fromUser.name || 'User', 150, currentY);
-                        doc.text(comm.level ? `Level ${comm.level}` : 'Direct', 280, currentY);
-                        doc.fillColor('#10B981').text(formatCurrency(comm.amountUSD).text, 450, currentY);
-                        doc.fillColor('#1F2937');
-                        currentY += 18;
-                    }
-                }
-            }
-            
-            // Asset Performance Section
-            if (statement.assetPerformance.length > 0) {
-                doc.addPage();
-                doc.fontSize(14).font('Helvetica-Bold').fillColor('#0B0E11').text('Asset Performance', { underline: true });
-                doc.moveDown(0.5);
-                
-                let currentY = doc.y;
-                doc.fontSize(8).font('Helvetica-Bold').fillColor('#6C7480');
-                doc.text('Asset', 50, currentY);
-                doc.text('Opening', 120, currentY);
-                doc.text('Closing', 200, currentY);
-                doc.text('Net Change', 280, currentY);
-                doc.text('Value Change', 360, currentY);
-                doc.text('PnL', 450, currentY);
-                
-                currentY += 15;
-                doc.fontSize(8).font('Helvetica');
-                
-                for (const asset of statement.assetPerformance) {
-                    if (currentY > 750) { doc.addPage(); currentY = 50; }
-                    doc.fillColor('#1F2937').text(asset.asset.toUpperCase(), 50, currentY);
-                    doc.text(formatCryptoAmount(asset.openingBalance, asset.asset), 120, currentY);
-                    doc.text(formatCryptoAmount(asset.closingBalance, asset.asset), 200, currentY);
-                    const changeColor = asset.netChangeAmount >= 0 ? '#10B981' : '#DC2626';
-                    doc.fillColor(changeColor).text(formatCryptoAmount(Math.abs(asset.netChangeAmount), asset.asset), 280, currentY);
-                    doc.fillColor('#1F2937');
-                    const valueChangeInfo = formatCurrency(asset.netChangeValueUSD, asset.netChangeValueUSD >= 0 ? 'green' : 'red');
-                    doc.fillColor(valueChangeInfo.color).text(valueChangeInfo.text, 360, currentY);
-                    const pnlInfo = formatCurrency(asset.totalPnLUSD, asset.totalPnLUSD >= 0 ? 'green' : 'red');
-                    doc.fillColor(pnlInfo.color).text(pnlInfo.text, 450, currentY);
-                    doc.fillColor('#1F2937');
-                    currentY += 18;
-                }
-            }
-            
-            // Overall Summary Footer
-            doc.addPage();
-            doc.fontSize(16).font('Helvetica-Bold').fillColor('#0B0E11').text('Statement Summary', { align: 'center' });
-            doc.moveDown();
-            
-            const summaryBoxY = doc.y;
-            doc.rect(50, summaryBoxY, 495, 100).fill('#F3F4F6');
-            doc.fillColor('#1F2937').fontSize(10);
-            
-            doc.text(`Total Inflow: ${formatCurrency(statement.summary.totalInflowUSD, 'green').text}`, 70, summaryBoxY + 15);
-            doc.text(`Total Outflow: ${formatCurrency(statement.summary.totalOutflowUSD, 'red').text}`, 280, summaryBoxY + 15);
-            doc.text(`Net Cash Flow: ${formatCurrency(statement.summary.netCashFlowUSD, statement.summary.netCashFlowUSD >= 0 ? 'green' : 'red').text}`, 70, summaryBoxY + 40);
-            doc.text(`Net Profit: ${formatCurrency(statement.summary.netProfitUSD, statement.summary.netProfitUSD >= 0 ? 'green' : 'red').text}`, 280, summaryBoxY + 40);
-            doc.text(`ROI: ${statement.summary.roiPercentage.toFixed(2)}%`, 70, summaryBoxY + 65);
-            doc.text(`Period: ${new Date(statement.period.startDate).toLocaleDateString()} - ${new Date(statement.period.endDate).toLocaleDateString()}`, 280, summaryBoxY + 65);
-            
-            doc.moveDown(3);
-            doc.fontSize(8).font('Helvetica').fillColor('#6C7480');
-            doc.text('This is an automatically generated statement. For any discrepancies, please contact support within 30 days.', { align: 'center' });
-            doc.text(`© ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.`, { align: 'center' });
-            
-            doc.end();
-            
-        } catch (err) {
-            reject(err);
-        }
-    });
-};
-
-// Send financial statement email with PDF attachment
-const sendFinancialStatementEmail = async (user, statement, pdfBuffer) => {
-    const periodLabel = `${new Date(statement.period.startDate).toLocaleDateString()} - ${new Date(statement.period.endDate).toLocaleDateString()}`;
-    
-    const htmlContent = `
-        <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-            <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-                <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-                <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash Capital</h1>
-                <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
-            </div>
-            
-            <div style="padding: 30px; background: #FFFFFF;">
-                <h2 style="color: #0B0E11; margin-bottom: 20px;">Your Financial Statement is Ready</h2>
-                
-                <p style="color: #333333; line-height: 1.6;">Dear <strong>${user.firstName || 'Valued Customer'}</strong>,</p>
-                
-                <p style="color: #333333; line-height: 1.6;">
-                    Your ${statement.statementType} financial statement for the period <strong>${periodLabel}</strong> has been generated.
-                </p>
-                
-                <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-                    <h3 style="color: #0B0E11; margin: 0 0 15px 0; font-size: 16px;">Statement Summary</h3>
-                    <table style="width: 100%; border-collapse: collapse;">
-                        <tr>
-                            <td style="padding: 8px 0; color: #6C7480;">Opening Balance:</td>
-                            <td style="padding: 8px 0; text-align: right; font-weight: 600;">${formatCurrency(statement.openingBalances.totalUSD).text}</td>
-                        </tr>
-                        <tr style="border-top: 1px solid #E2E8F0;">
-                            <td style="padding: 8px 0; color: #6C7480;">Closing Balance:</td>
-                            <td style="padding: 8px 0; text-align: right; font-weight: 600;">${formatCurrency(statement.closingBalances.totalUSD).text}</td>
-                        </tr>
-                        <tr style="border-top: 1px solid #E2E8F0;">
-                            <td style="padding: 8px 0; color: #6C7480;">Net Change:</td>
-                            <td style="padding: 8px 0; text-align: right; font-weight: 600; color: ${statement.netChangeUSD >= 0 ? '#10B981' : '#DC2626'};">${formatCurrency(Math.abs(statement.netChangeUSD)).text} ${statement.netChangeUSD >= 0 ? '↑' : '↓'}</td>
-                        </tr>
-                        <tr style="border-top: 1px solid #E2E8F0;">
-                            <td style="padding: 8px 0; color: #6C7480;">Total Deposits:</td>
-                            <td style="padding: 8px 0; text-align: right; color: #10B981;">${formatCurrency(statement.transactions.summary.totalDepositsUSD).text}</td>
-                        </tr>
-                        <tr style="border-top: 1px solid #E2E8F0;">
-                            <td style="padding: 8px 0; color: #6C7480;">Total Withdrawals:</td>
-                            <td style="padding: 8px 0; text-align: right; color: #DC2626;">${formatCurrency(statement.transactions.summary.totalWithdrawalsUSD).text}</td>
-                        </tr>
-                        <tr style="border-top: 1px solid #E2E8F0;">
-                            <td style="padding: 8px 0; color: #6C7480;">Net Profit/Loss:</td>
-                            <td style="padding: 8px 0; text-align: right; font-weight: 700; color: ${statement.summary.netProfitUSD >= 0 ? '#10B981' : '#DC2626'};">${formatCurrency(Math.abs(statement.summary.netProfitUSD)).text}</td>
-                        </tr>
-                    </table>
-                </div>
-                
-                <p style="color: #333333; line-height: 1.6;">
-                    Please find attached your detailed financial statement in PDF format. This document contains a complete breakdown of all transactions, investments, trading activity, and fees for the period.
-                </p>
-                
-                <div style="text-align: center; margin: 30px 0;">
-                    <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Go to Dashboard</a>
-                </div>
-                
-                <div style="background: #EFF6FF; border-radius: 8px; padding: 12px 16px; margin: 20px 0;">
-                    <p style="margin: 0; font-size: 13px; color: #1E40AF;">📄 <strong>Statement Reference:</strong> ${statement.reference}</p>
-                    <p style="margin: 5px 0 0 0; font-size: 12px; color: #3B82F6;">Generated on: ${new Date(statement.period.generationDate).toLocaleString()}</p>
-                </div>
-                
-                <p style="color: #666666; font-size: 12px; margin-top: 30px;">
-                    If you have any questions about your statement, please contact our support team at <a href="mailto:support@bithashcapital.live" style="color: #F7A600;">support@bithashcapital.live</a>
-                </p>
-            </div>
-            
-            <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-                <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-                <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-            </div>
-        </div>
-    `;
-    
-    await sendEmailWithAttachment({
-        email: user.email,
-        subject: `Your ${statement.statementType.charAt(0).toUpperCase() + statement.statementType.slice(1)} Financial Statement - ₿itHash Capital`,
-        html: htmlContent,
-        attachments: [{
-            filename: `financial_statement_${statement.reference}.pdf`,
-            content: pdfBuffer,
-            contentType: 'application/pdf'
-        }]
-    });
-};
-
-// Send email with attachment using existing email infrastructure
-const sendEmailWithAttachment = async (options) => {
-    try {
-        const mailTransporter = options.useSupportEmail ? supportTransporter : infoTransporter;
-        
-        const mailOptions = {
-            from: `₿itHash Capital <${mailTransporter === supportTransporter ? process.env.EMAIL_SUPPORT_USER : process.env.EMAIL_INFO_USER}>`,
-            to: options.email,
-            subject: options.subject,
-            html: options.html,
-            attachments: options.attachments || []
-        };
-        
-        await mailTransporter.sendMail(mailOptions);
-        console.log(`Email with attachment sent to ${options.email}`);
-        return true;
-    } catch (err) {
-        console.error('Error sending email with attachment:', err);
-        return false;
-    }
-};
-
-// Generate and send financial statement for a user
-const generateAndSendFinancialStatement = async (userId, statementType = 'monthly', startDate = null, endDate = null) => {
-    try {
-        const user = await User.findById(userId);
-        if (!user) throw new Error('User not found');
-        
-        const periodEnd = endDate || new Date();
-        const periodStart = startDate || (statementType === 'monthly' 
-            ? new Date(periodEnd.getFullYear(), periodEnd.getMonth() - 1, periodEnd.getDate())
-            : new Date(periodEnd.getTime() - 7 * 24 * 60 * 60 * 1000));
-        
-        // Build financial statement data (simplified - in production this would aggregate all data)
-        const statement = await FinancialStatement.findOne({
-            user: userId,
-            statementType: statementType,
-            'period.endDate': { $gte: periodStart }
-        }).sort({ 'period.endDate': -1 });
-        
-        if (!statement) throw new Error('No financial statement found for the specified period');
-        
-        const pdfBuffer = await generateFinancialStatementPDF(statement, user);
-        
-        await sendFinancialStatementEmail(user, statement, pdfBuffer);
-        
-        statement.isDelivered = true;
-        statement.deliveredAt = new Date();
-        await statement.save();
-        
-        console.log(`Financial statement sent to ${user.email}`);
-        return true;
-        
-    } catch (err) {
-        console.error('Error generating and sending financial statement:', err);
-        return false;
-    }
-};
 
 const NotificationSchema = new mongoose.Schema({
   title: {
@@ -3776,7 +3137,7 @@ SystemLogSchema.statics.stats.getGeoDistribution = async function(days = 7) {
   ]);
 };
 
-SystemLogSchema.stats.stats.getHourlyPattern = async function(days = 7) {
+SystemLogSchema.stats.getHourlyPattern = async function(days = 7) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
   
@@ -3801,7 +3162,7 @@ SystemLogSchema.stats.stats.getHourlyPattern = async function(days = 7) {
   ]);
 };
 
-SystemLogSchema.stats.stats.getByEntityType = async function(days = 30) {
+SystemLogSchema.stats.getByEntityType = async function(days = 30) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
   
@@ -3825,7 +3186,7 @@ SystemLogSchema.stats.stats.getByEntityType = async function(days = 30) {
   ]);
 };
 
-SystemLogSchema.stats.stats.getRiskDistribution = async function(days = 30) {
+SystemLogSchema.stats.getRiskDistribution = async function(days = 30) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
   
@@ -3849,7 +3210,7 @@ SystemLogSchema.stats.stats.getRiskDistribution = async function(days = 30) {
   ]);
 };
 
-SystemLogSchema.stats.stats.getTopActiveUsers = async function(limit = 10, days = 30) {
+SystemLogSchema.stats.getTopActiveUsers = async function(limit = 10, days = 30) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
   
@@ -4053,8 +3414,8 @@ KYCSchema.index({ submittedAt: -1 });
 const KYC = mongoose.model('KYC', KYCSchema);
 
 const multer = require('multer');
-
-
+const path = require('path');
+const fs = require('fs');
 
 const ensureUploadDirectories = () => {
   const dirs = [
@@ -4394,6 +3755,528 @@ const setupWebSocketServer = (server) => {
   return wss;
 };
 
+// =============================================
+// PDF GENERATION FUNCTIONS
+// =============================================
+
+const generateFinancialStatementPDF = async (statement, user) => {
+  return new Promise(async (resolve, reject) => {
+    try {
+      const doc = new PDFDocument({ 
+        size: 'A4', 
+        margin: 50,
+        info: {
+          Title: `Financial Statement - ${statement.reference}`,
+          Author: 'BitHash Capital',
+          Subject: `Financial Statement for ${user.firstName} ${user.lastName}`,
+          Keywords: 'financial statement, investment, trading',
+          Creator: 'BitHash Capital'
+        }
+      });
+      
+      const chunks = [];
+      doc.on('data', chunk => chunks.push(chunk));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      
+      // Helper function to format currency
+      const formatCurrency = (amount) => {
+        return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
+      };
+      
+      const formatCrypto = (amount) => {
+        return new Intl.NumberFormat('en-US', { minimumFractionDigits: 8, maximumFractionDigits: 8 }).format(amount);
+      };
+      
+      const formatDate = (date) => {
+        return new Date(date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+      };
+      
+      // Branding header
+      const addHeader = () => {
+        doc.fontSize(24).font('Helvetica-Bold').fillColor('#0B0E11').text('₿itHash Capital', { align: 'center' });
+        doc.fontSize(10).font('Helvetica').fillColor('#6C7480').text('Where Your Financial Goals Become Reality', { align: 'center' });
+        doc.moveDown(0.5);
+        doc.strokeColor('#F7A600').lineWidth(2).moveTo(50, doc.y).lineTo(545, doc.y).stroke();
+        doc.moveDown(0.5);
+      };
+      
+      addHeader();
+      
+      // Statement title
+      doc.fontSize(18).font('Helvetica-Bold').fillColor('#0B0E11').text('FINANCIAL STATEMENT', { align: 'center' });
+      doc.fontSize(10).font('Helvetica').fillColor('#6C7480').text(`Reference: ${statement.reference}`, { align: 'center' });
+      doc.moveDown(0.5);
+      
+      // Period info
+      doc.fontSize(10).font('Helvetica').fillColor('#333333');
+      doc.text(`Period: ${formatDate(statement.period.startDate)} - ${formatDate(statement.period.endDate)}`, { align: 'center' });
+      doc.text(`Generated: ${formatDate(statement.period.generationDate)}`, { align: 'center' });
+      doc.moveDown(1);
+      
+      // User info
+      doc.fontSize(10).font('Helvetica-Bold').fillColor('#0B0E11').text(`Client: ${user.firstName} ${user.lastName}`);
+      doc.fontSize(10).font('Helvetica').text(`Email: ${user.email}`);
+      doc.moveDown(1);
+      
+      // =============================================
+      // BALANCE SUMMARY TABLE
+      // =============================================
+      doc.fontSize(12).font('Helvetica-Bold').fillColor('#0B0E11').text('BALANCE SUMMARY', { underline: true });
+      doc.moveDown(0.5);
+      
+      const balanceTableTop = doc.y;
+      const balanceCol1 = 50;
+      const balanceCol2 = 250;
+      const balanceCol3 = 350;
+      const balanceCol4 = 450;
+      
+      doc.fontSize(9).font('Helvetica-Bold').fillColor('#FFFFFF');
+      doc.rect(balanceCol1, balanceTableTop, 495, 20).fill('#0B0E11');
+      doc.fillColor('#FFFFFF').text('Wallet', balanceCol1 + 5, balanceTableTop + 5);
+      doc.text('Opening Balance', balanceCol2 + 5, balanceTableTop + 5);
+      doc.text('Closing Balance', balanceCol3 + 5, balanceTableTop + 5);
+      doc.text('Net Change', balanceCol4 + 5, balanceTableTop + 5);
+      
+      let currentY = balanceTableTop + 20;
+      doc.fontSize(9).font('Helvetica').fillColor('#333333');
+      
+      const wallets = [
+        { name: 'Main Wallet', opening: statement.openingBalances.mainWalletUSD, closing: statement.closingBalances.mainWalletUSD },
+        { name: 'Active Wallet', opening: statement.openingBalances.activeWalletUSD, closing: statement.closingBalances.activeWalletUSD },
+        { name: 'Matured Wallet', opening: statement.openingBalances.maturedWalletUSD, closing: statement.closingBalances.maturedWalletUSD },
+        { name: 'TOTAL', opening: statement.openingBalances.totalUSD, closing: statement.closingBalances.totalUSD, isTotal: true }
+      ];
+      
+      wallets.forEach(wallet => {
+        const netChange = wallet.closing - wallet.opening;
+        const netChangeColor = netChange >= 0 ? '#10B981' : '#DC2626';
+        
+        doc.rect(balanceCol1, currentY, 495, 20).fill(wallet.isTotal ? '#F5F5F5' : '#FFFFFF');
+        
+        doc.fillColor(wallet.isTotal ? '#0B0E11' : '#333333');
+        if (wallet.isTotal) doc.font('Helvetica-Bold');
+        doc.text(wallet.name, balanceCol1 + 5, currentY + 5);
+        
+        doc.fillColor('#333333');
+        doc.text(formatCurrency(wallet.opening), balanceCol2 + 5, currentY + 5);
+        doc.text(formatCurrency(wallet.closing), balanceCol3 + 5, currentY + 5);
+        
+        doc.fillColor(netChangeColor);
+        doc.text(`${netChange >= 0 ? '+' : ''}${formatCurrency(netChange)}`, balanceCol4 + 5, currentY + 5);
+        
+        if (wallet.isTotal) doc.font('Helvetica');
+        currentY += 20;
+      });
+      
+      doc.moveDown(1);
+      
+      // =============================================
+      // TRANSACTIONS SUMMARY
+      // =============================================
+      doc.fontSize(12).font('Helvetica-Bold').fillColor('#0B0E11').text('TRANSACTION SUMMARY', { underline: true });
+      doc.moveDown(0.5);
+      
+      const txTableTop = doc.y;
+      const txCol1 = 50;
+      const txCol2 = 200;
+      const txCol3 = 300;
+      const txCol4 = 400;
+      const txCol5 = 500;
+      
+      doc.fontSize(9).font('Helvetica-Bold').fillColor('#FFFFFF');
+      doc.rect(txCol1, txTableTop, 495, 20).fill('#0B0E11');
+      doc.fillColor('#FFFFFF').text('Type', txCol1 + 5, txTableTop + 5);
+      doc.text('Count', txCol2 + 5, txTableTop + 5);
+      doc.text('Total', txCol3 + 5, txTableTop + 5);
+      doc.text('Fees', txCol4 + 5, txTableTop + 5);
+      doc.text('Net', txCol5 + 5, txTableTop + 5);
+      
+      currentY = txTableTop + 20;
+      doc.fontSize(9).font('Helvetica').fillColor('#333333');
+      
+      const transactionTypes = [
+        { name: 'Deposits', count: statement.transactions.summary.count.deposits, total: statement.transactions.summary.totalDepositsUSD, fee: 0 },
+        { name: 'Withdrawals', count: statement.transactions.summary.count.withdrawals, total: statement.transactions.summary.totalWithdrawalsUSD, fee: 0 },
+        { name: 'Transfers', count: statement.transactions.summary.count.transfers, total: statement.transactions.summary.totalTransfersUSD, fee: 0 },
+        { name: 'Fees Paid', count: '-', total: statement.transactions.summary.totalFeesPaidUSD, fee: statement.transactions.summary.totalFeesPaidUSD, isFeeRow: true }
+      ];
+      
+      transactionTypes.forEach(tx => {
+        doc.rect(txCol1, currentY, 495, 20).fill('#FFFFFF');
+        
+        doc.fillColor(tx.isFeeRow ? '#DC2626' : '#333333');
+        doc.text(tx.name, txCol1 + 5, currentY + 5);
+        doc.text(tx.count.toString(), txCol2 + 5, currentY + 5);
+        doc.text(formatCurrency(tx.total), txCol3 + 5, currentY + 5);
+        doc.text(tx.isFeeRow ? formatCurrency(tx.fee) : '-', txCol4 + 5, currentY + 5);
+        doc.text(tx.isFeeRow ? formatCurrency(tx.total) : formatCurrency(tx.total), txCol5 + 5, currentY + 5);
+        
+        currentY += 20;
+      });
+      
+      doc.moveDown(1);
+      
+      // =============================================
+      // INVESTMENT SUMMARY
+      // =============================================
+      if (statement.investments.summary.totalPrincipalInvestedUSD > 0 || statement.investments.summary.totalActiveInvestmentsCount > 0) {
+        doc.fontSize(12).font('Helvetica-Bold').fillColor('#0B0E11').text('INVESTMENT SUMMARY', { underline: true });
+        doc.moveDown(0.5);
+        
+        const invSummary = [
+          { label: 'Total Principal Invested', value: formatCurrency(statement.investments.summary.totalPrincipalInvestedUSD) },
+          { label: 'Total Returns Earned', value: formatCurrency(statement.investments.summary.totalReturnsEarnedUSD) },
+          { label: 'Total Profit from Investments', value: formatCurrency(statement.investments.summary.totalProfitUSD), isProfit: true },
+          { label: 'Active Investments', value: statement.investments.summary.totalActiveInvestmentsCount.toString() },
+          { label: 'Active Principal', value: formatCurrency(statement.investments.summary.totalActivePrincipalUSD) }
+        ];
+        
+        invSummary.forEach(item => {
+          doc.fontSize(9).font('Helvetica');
+          doc.text(item.label, 50, doc.y);
+          if (item.isProfit && item.value !== formatCurrency(0)) {
+            doc.fillColor('#10B981').font('Helvetica-Bold').text(item.value, 250, doc.y - 9);
+            doc.fillColor('#333333').font('Helvetica');
+          } else {
+            doc.text(item.value, 250, doc.y - 9);
+          }
+          doc.moveDown(0.8);
+        });
+        
+        doc.moveDown(0.5);
+      }
+      
+      // =============================================
+      // TRADING SUMMARY
+      // =============================================
+      if (statement.trading.summary.totalBuyVolumeUSD > 0 || statement.trading.summary.totalSellVolumeUSD > 0) {
+        doc.fontSize(12).font('Helvetica-Bold').fillColor('#0B0E11').text('TRADING SUMMARY', { underline: true });
+        doc.moveDown(0.5);
+        
+        const tradingSummary = [
+          { label: 'Total Buy Volume', value: formatCurrency(statement.trading.summary.totalBuyVolumeUSD) },
+          { label: 'Total Sell Volume', value: formatCurrency(statement.trading.summary.totalSellVolumeUSD) },
+          { label: 'Trading Profit', value: formatCurrency(statement.trading.summary.totalTradingProfitUSD), color: '#10B981' },
+          { label: 'Trading Loss', value: formatCurrency(statement.trading.summary.totalTradingLossUSD), color: '#DC2626' },
+          { label: 'Net Trading P&L', value: formatCurrency(statement.trading.summary.netTradingPnLUSD), isProfit: statement.trading.summary.netTradingPnLUSD >= 0 }
+        ];
+        
+        tradingSummary.forEach(item => {
+          doc.fontSize(9).font('Helvetica');
+          doc.text(item.label, 50, doc.y);
+          if (item.color) {
+            doc.fillColor(item.color).text(item.value, 250, doc.y - 9);
+            doc.fillColor('#333333');
+          } else if (item.isProfit !== undefined) {
+            doc.fillColor(item.isProfit ? '#10B981' : '#DC2626').text(item.value, 250, doc.y - 9);
+            doc.fillColor('#333333');
+          } else {
+            doc.text(item.value, 250, doc.y - 9);
+          }
+          doc.moveDown(0.8);
+        });
+        
+        doc.moveDown(0.5);
+      }
+      
+      // =============================================
+      // REFERRAL EARNINGS
+      // =============================================
+      if (statement.referrals.summary.totalReferralEarningsUSD > 0) {
+        doc.fontSize(12).font('Helvetica-Bold').fillColor('#0B0E11').text('REFERRAL EARNINGS', { underline: true });
+        doc.moveDown(0.5);
+        
+        doc.fontSize(9).font('Helvetica');
+        doc.text('Total Referral Earnings', 50, doc.y);
+        doc.fillColor('#10B981').text(formatCurrency(statement.referrals.summary.totalReferralEarningsUSD), 250, doc.y - 9);
+        doc.fillColor('#333333');
+        doc.moveDown(0.8);
+        
+        doc.text('Direct Referrals', 50, doc.y);
+        doc.text(formatCurrency(statement.referrals.summary.directReferralEarningsUSD), 250, doc.y - 9);
+        doc.moveDown(0.8);
+        
+        doc.text('Downline Commissions', 50, doc.y);
+        doc.text(formatCurrency(statement.referrals.summary.downlineCommissionEarningsUSD), 250, doc.y - 9);
+        doc.moveDown(0.8);
+      }
+      
+      // =============================================
+      // FEE BREAKDOWN (RED for fees)
+      // =============================================
+      if (statement.fees.summary.totalFeesUSD > 0) {
+        doc.fontSize(12).font('Helvetica-Bold').fillColor('#0B0E11').text('FEE BREAKDOWN', { underline: true });
+        doc.moveDown(0.5);
+        
+        const feeTypes = [
+          { label: 'Investment Fees', value: statement.fees.summary.investmentFeesUSD },
+          { label: 'Withdrawal Fees', value: statement.fees.summary.withdrawalFeesUSD },
+          { label: 'Trading Fees', value: statement.fees.summary.tradingFeesUSD },
+          { label: 'Conversion Fees', value: statement.fees.summary.conversionFeesUSD },
+          { label: 'Loan Fees', value: statement.fees.summary.loanFeesUSD }
+        ];
+        
+        feeTypes.forEach(fee => {
+          if (fee.value > 0) {
+            doc.fontSize(9).font('Helvetica');
+            doc.text(fee.label, 50, doc.y);
+            doc.fillColor('#DC2626').text(formatCurrency(fee.value), 250, doc.y - 9);
+            doc.fillColor('#333333');
+            doc.moveDown(0.8);
+          }
+        });
+        
+        doc.moveDown(0.5);
+        doc.fontSize(10).font('Helvetica-Bold');
+        doc.text('Total Fees Paid', 50, doc.y);
+        doc.fillColor('#DC2626').text(formatCurrency(statement.fees.summary.totalFeesUSD), 250, doc.y - 10);
+        doc.fillColor('#333333');
+        doc.moveDown(1);
+      }
+      
+      // =============================================
+      // ASSET PERFORMANCE
+      // =============================================
+      if (statement.assetPerformance && statement.assetPerformance.length > 0) {
+        doc.fontSize(12).font('Helvetica-Bold').fillColor('#0B0E11').text('ASSET PERFORMANCE', { underline: true });
+        doc.moveDown(0.5);
+        
+        const assetTableTop = doc.y;
+        const assetCol1 = 50;
+        const assetCol2 = 150;
+        const assetCol3 = 250;
+        const assetCol4 = 350;
+        const assetCol5 = 450;
+        
+        doc.fontSize(8).font('Helvetica-Bold').fillColor('#FFFFFF');
+        doc.rect(assetCol1, assetTableTop, 495, 18).fill('#0B0E11');
+        doc.fillColor('#FFFFFF').text('Asset', assetCol1 + 5, assetTableTop + 4);
+        doc.text('Opening', assetCol2 + 5, assetTableTop + 4);
+        doc.text('Closing', assetCol3 + 5, assetTableTop + 4);
+        doc.text('Net Change', assetCol4 + 5, assetTableTop + 4);
+        doc.text('P&L', assetCol5 + 5, assetTableTop + 4);
+        
+        currentY = assetTableTop + 18;
+        doc.fontSize(8).font('Helvetica').fillColor('#333333');
+        
+        statement.assetPerformance.forEach(asset => {
+          doc.rect(assetCol1, currentY, 495, 18).fill('#FFFFFF');
+          
+          doc.fillColor('#333333');
+          doc.text(asset.asset.toUpperCase(), assetCol1 + 5, currentY + 4);
+          doc.text(formatCrypto(asset.openingBalance), assetCol2 + 5, currentY + 4);
+          doc.text(formatCrypto(asset.closingBalance), assetCol3 + 5, currentY + 4);
+          doc.text(formatCrypto(asset.netChangeAmount), assetCol4 + 5, currentY + 4);
+          
+          const totalPnL = asset.totalPnLUSD || asset.netChangeValueUSD;
+          doc.fillColor(totalPnL >= 0 ? '#10B981' : '#DC2626');
+          doc.text(formatCurrency(totalPnL), assetCol5 + 5, currentY + 4);
+          
+          doc.fillColor('#333333');
+          currentY += 18;
+        });
+        
+        doc.moveDown(1);
+      }
+      
+      // =============================================
+      // OVERALL SUMMARY
+      // =============================================
+      doc.addPage();
+      addHeader();
+      
+      doc.moveDown(1);
+      doc.fontSize(14).font('Helvetica-Bold').fillColor('#0B0E11').text('OVERALL PERFORMANCE SUMMARY', { align: 'center' });
+      doc.moveDown(1);
+      
+      const summaryCardY = doc.y;
+      const summaryBoxWidth = 200;
+      const summaryBoxHeight = 60;
+      const leftBoxX = 70;
+      const rightBoxX = 330;
+      
+      // Left box - Inflow/Outflow
+      doc.rect(leftBoxX, summaryCardY, summaryBoxWidth, summaryBoxHeight).fill('#F5F5F5');
+      doc.fillColor('#0B0E11').fontSize(10).font('Helvetica-Bold').text('CASH FLOW', leftBoxX + 10, summaryCardY + 8);
+      doc.fontSize(9).font('Helvetica');
+      doc.fillColor('#10B981').text(`Inflow: ${formatCurrency(statement.summary.totalInflowUSD)}`, leftBoxX + 10, summaryCardY + 28);
+      doc.fillColor('#DC2626').text(`Outflow: ${formatCurrency(statement.summary.totalOutflowUSD)}`, leftBoxX + 10, summaryCardY + 44);
+      
+      // Right box - Profit/Loss
+      doc.rect(rightBoxX, summaryCardY, summaryBoxWidth, summaryBoxHeight).fill('#F5F5F5');
+      doc.fillColor('#0B0E11').fontSize(10).font('Helvetica-Bold').text('PROFIT & LOSS', rightBoxX + 10, summaryCardY + 8);
+      doc.fontSize(9).font('Helvetica');
+      doc.fillColor('#10B981').text(`Profit: ${formatCurrency(statement.summary.totalProfitUSD)}`, rightBoxX + 10, summaryCardY + 28);
+      doc.fillColor('#DC2626').text(`Loss: ${formatCurrency(statement.summary.totalLossUSD)}`, rightBoxX + 10, summaryCardY + 44);
+      
+      doc.moveDown(4);
+      
+      const netProfitColor = statement.summary.netProfitUSD >= 0 ? '#10B981' : '#DC2626';
+      doc.fontSize(12).font('Helvetica-Bold');
+      doc.text('Net Profit / Loss:', 150, doc.y);
+      doc.fillColor(netProfitColor).text(formatCurrency(statement.summary.netProfitUSD), 300, doc.y - 12);
+      doc.fillColor('#333333');
+      doc.moveDown(1);
+      
+      doc.fontSize(10).font('Helvetica');
+      doc.text(`ROI Percentage: ${statement.summary.roiPercentage.toFixed(2)}%`, 150, doc.y);
+      doc.text(`Net Cash Flow: ${formatCurrency(statement.summary.netCashFlowUSD)}`, 350, doc.y - 10);
+      
+      doc.moveDown(2);
+      
+      // =============================================
+      // FOOTER
+      // =============================================
+      const pageHeight = doc.page.height;
+      doc.fontSize(8).font('Helvetica').fillColor('#6C7480');
+      doc.text('₿itHash Capital - 800 Plant St, Wilmington, DE 19801, United States', 50, pageHeight - 50, { align: 'center' });
+      doc.text(`Statement generated on ${new Date().toLocaleString()}`, 50, pageHeight - 40, { align: 'center' });
+      doc.text('This is an official financial statement. Please retain for your records.', 50, pageHeight - 30, { align: 'center' });
+      
+      doc.end();
+      
+    } catch (err) {
+      reject(err);
+    }
+  });
+};
+
+const sendFinancialStatementEmail = async (user, statement) => {
+  try {
+    const pdfBuffer = await generateFinancialStatementPDF(statement, user);
+    
+    const pdfBase64 = pdfBuffer.toString('base64');
+    
+    const formattedStartDate = new Date(statement.period.startDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+    const formattedEndDate = new Date(statement.period.endDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+    
+    const periodText = statement.statementType === 'weekly' ? 'Weekly' : 'Monthly';
+    
+    const netProfitColor = statement.summary.netProfitUSD >= 0 ? '#10B981' : '#DC2626';
+    const netProfitSymbol = statement.summary.netProfitUSD >= 0 ? '+' : '';
+    
+    const emailHtml = `
+      <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+        <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+          <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+          <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+          <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+        </div>
+        
+        <div style="padding: 30px; background: #FFFFFF;">
+          <div style="background: #F3F4F6; border-radius: 12px; padding: 20px; text-align: center; margin-bottom: 25px;">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin: 0 auto 12px auto;">
+              <path d="M9 12H15M12 9V15M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="#F7A600" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            <h2 style="color: #0B0E11; font-size: 22px; margin: 0 0 8px 0;">${periodText} Financial Statement</h2>
+            <p style="color: #6C7480; font-size: 14px; margin: 0;">${formattedStartDate} - ${formattedEndDate}</p>
+            <p style="color: #6C7480; font-size: 12px; margin: 5px 0 0 0;">Reference: ${statement.reference}</p>
+          </div>
+          
+          <p style="color: #333333; line-height: 1.6; margin-bottom: 20px;">Dear <strong>${user.firstName} ${user.lastName}</strong>,</p>
+          
+          <p style="color: #333333; line-height: 1.6; margin-bottom: 20px;">
+            Please find attached your ${periodText.toLowerCase()} Financial Statement for the period of <strong>${formattedStartDate} to ${formattedEndDate}</strong>.
+          </p>
+          
+          <div style="background: #F5F5F5; border-radius: 12px; padding: 20px; margin-bottom: 25px;">
+            <p style="margin: 0 0 12px 0; font-weight: 600; color: #0B0E11;">📊 Statement Summary</p>
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr>
+                <td style="padding: 8px 0; color: #6C7480;">Opening Balance:</td>
+                <td style="padding: 8px 0; text-align: right; font-weight: 600;">$${statement.openingBalances.totalUSD.toLocaleString()}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E5E7EB;">
+                <td style="padding: 8px 0; color: #6C7480;">Closing Balance:</td>
+                <td style="padding: 8px 0; text-align: right; font-weight: 600;">$${statement.closingBalances.totalUSD.toLocaleString()}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E5E7EB;">
+                <td style="padding: 8px 0; color: #6C7480;">Total Inflow:</td>
+                <td style="padding: 8px 0; text-align: right; color: #10B981;">+$${statement.summary.totalInflowUSD.toLocaleString()}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E5E7EB;">
+                <td style="padding: 8px 0; color: #6C7480;">Total Outflow:</td>
+                <td style="padding: 8px 0; text-align: right; color: #DC2626;">-$${statement.summary.totalOutflowUSD.toLocaleString()}</td>
+              </tr>
+              <tr style="border-top: 2px solid #E5E7EB; background: #F9FAFB;">
+                <td style="padding: 10px 0; font-weight: 700; color: #0B0E11;">Net Profit/Loss:</td>
+                <td style="padding: 10px 0; text-align: right; font-weight: 700; color: ${netProfitColor};">${netProfitSymbol}$${Math.abs(statement.summary.netProfitUSD).toLocaleString()}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; color: #6C7480;">ROI Percentage:</td>
+                <td style="padding: 8px 0; text-align: right; font-weight: 500;">${statement.summary.roiPercentage.toFixed(2)}%</td>
+              </tr>
+            </table>
+          </div>
+          
+          <div style="background: #EFF6FF; border-radius: 12px; padding: 16px 20px; margin-bottom: 25px; border-left: 4px solid #3B82F6;">
+            <p style="margin: 0; color: #1E40AF; font-size: 13px; line-height: 1.5;">
+              <strong>📄 Document Information</strong><br>
+              Your complete financial statement is attached as a PDF. It includes detailed breakdowns of all transactions, investments, trading activity, fees, and asset performance.
+            </p>
+          </div>
+          
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="cid:statement.pdf" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">📎 Download Statement</a>
+          </div>
+          
+          <p style="color: #666666; font-size: 12px; margin-top: 30px;">
+            <strong>Reference ID:</strong> ${statement.reference}<br>
+            <strong>Generated:</strong> ${new Date(statement.period.generationDate).toLocaleString()}
+          </p>
+          
+          <div style="background: #F9FAFB; padding: 15px; border-radius: 8px; margin-top: 20px;">
+            <p style="color: #6C7480; font-size: 12px; margin: 0 0 5px 0;">
+              <strong>Need assistance?</strong> Contact our support team:
+            </p>
+            <p style="color: #6C7480; font-size: 12px; margin: 0;">
+              📧 <a href="mailto:support@bithashcapital.live" style="color: #F7A600;">support@bithashcapital.live</a><br>
+              🌐 <a href="https://www.bithashcapital.live/support" style="color: #F7A600;">www.bithashcapital.live/support</a>
+            </p>
+          </div>
+        </div>
+        
+        <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+          <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+          <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+          <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
+            <a href="mailto:support@bithash.com" style="color: #F7A600; text-decoration: none;">support@bithash.com</a> | 
+            <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
+          </p>
+        </div>
+      </div>
+    `;
+    
+    const mailTransporter = infoTransporter;
+    
+    const mailOptions = {
+      from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
+      to: user.email,
+      subject: `${periodText} Financial Statement - ${formattedStartDate} to ${formattedEndDate}`,
+      html: emailHtml,
+      attachments: [{
+        filename: `Financial_Statement_${statement.reference}.pdf`,
+        content: pdfBuffer,
+        contentType: 'application/pdf',
+        cid: 'statement.pdf'
+      }]
+    };
+    
+    await mailTransporter.sendMail(mailOptions);
+    
+    statement.isDelivered = true;
+    statement.deliveredAt = new Date();
+    await statement.save();
+    
+    console.log(`📧 Financial statement email sent to ${user.email} with PDF attachment`);
+    return true;
+    
+  } catch (err) {
+    console.error('Error sending financial statement email:', err);
+    return false;
+  }
+};
+
 module.exports = {
   User,
   Admin,
@@ -4411,9 +4294,10 @@ module.exports = {
   DepositAsset,
   Buy,
   Sell,
-  FinancialStatement, 
+  FinancialStatement,
   setupWebSocketServer,
-  generateAndSendFinancialStatement
+  generateFinancialStatementPDF,
+  sendFinancialStatementEmail
 };
 
 const generateJWT = (id, isAdmin = false) => {
@@ -6362,7 +6246,7 @@ const sendProfessionalEmail = async ({ email, template, data, useSupportEmail = 
                     <td style="padding: 8px 0;"><strong>Wallet Type:</strong></td>
                     <td style="padding: 8px 0; text-align: right;">
                       <span style="background: ${data.walletColor}; color: white; padding: 4px 12px; border-radius: 20px; font-size: 12px;">${data.walletType}</span>
-                     </td>
+                    </td>
                   </tr>
                   <tr style="border-top: 1px solid #E2E8F0;">
                     <td style="padding: 8px 0;"><strong>Date:</strong></td>
@@ -6437,6 +6321,7 @@ const sendProfessionalEmail = async ({ email, template, data, useSupportEmail = 
           </div>
         `;
         break;
+
       case 'deposit_approved':
         cryptoLogoUrl = getCryptoLogo(data.cryptoAsset);
         formattedAmount = data.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -6813,12 +6698,12 @@ const sendProfessionalEmail = async ({ email, template, data, useSupportEmail = 
                 <p style="margin: 5px 0;"><strong>Location:</strong> ${data.location}</p>
                 <p style="margin: 5px 0;"><strong>IP Address:</strong> ${data.ip}</p>
               <p style="margin: 5px 0;"><strong>Time:</strong> ${(() => {
-          let date = data.timestamp;
-          if (!date) return 'Unknown';
-          if (date instanceof Date) return date.toLocaleString();
-          const parsed = new Date(date);
-          return isNaN(parsed.getTime()) ? new Date().toLocaleString() : parsed.toLocaleString();
-        })()}</p>
+                let date = data.timestamp;
+                if (!date) return 'Unknown';
+                if (date instanceof Date) return date.toLocaleString();
+                const parsed = new Date(date);
+                return isNaN(parsed.getTime()) ? new Date().toLocaleString() : parsed.toLocaleString();
+              })()}</p>
               </div>
               <p style="color: #333333; line-height: 1.6;">If this was you, you can safely ignore this email. If not, please secure your account immediately.</p>
               <div style="text-align: center; margin: 30px 0;">
@@ -6900,75 +6785,6 @@ const sendProfessionalEmail = async ({ email, template, data, useSupportEmail = 
         `;
         break;
     }
-
-    const sendAdminActionNotification = async (user, action, details, actionRequired = null, actionLink = null) => {
-      try {
-        const actionMessages = {
-          'account_suspended': {
-            message: 'Your account has been temporarily suspended due to unusual activity.',
-            subject: 'Account Temporarily Suspended - Action Required'
-          },
-          'account_restricted': {
-            message: 'Your account has been restricted. Please review the details below.',
-            subject: 'Account Restrictions Applied'
-          },
-          'kyc_review': {
-            message: 'Your KYC documents are under review. We will notify you once completed.',
-            subject: 'KYC Document Review Status'
-          },
-          'deposit_manual': {
-            message: 'Your deposit has been manually processed by our finance team.',
-            subject: 'Manual Deposit Processed'
-          },
-          'withdrawal_manual': {
-            message: 'Your withdrawal request has been manually reviewed and processed.',
-            subject: 'Manual Withdrawal Processed'
-          },
-          'balance_adjustment': {
-            message: 'Your account balance has been adjusted by our administration team.',
-            subject: 'Account Balance Adjustment'
-          },
-          'security_alert': {
-            message: 'Security alert: Unusual activity detected on your account.',
-            subject: '⚠️ Security Alert - Action Required'
-          },
-          'compliance_update': {
-            message: 'Important update regarding your account compliance status.',
-            subject: 'Compliance Status Update'
-          },
-          'investment_update': {
-            message: 'Your investment portfolio has been updated by our management team.',
-            subject: 'Investment Portfolio Update'
-          }
-        };
-
-        const actionConfig = actionMessages[action] || {
-          message: details?.message || 'An important update has been made to your account.',
-          subject: 'Important Account Update - ₿itHash Capital'
-        };
-
-        await sendProfessionalEmail({
-          email: user.email,
-          template: 'default',
-          data: {
-            name: user.firstName || 'Valued Customer',
-            message: actionConfig.message,
-            details: details?.description || details?.reason || JSON.stringify(details, null, 2),
-            actionRequired: actionRequired,
-            actionLink: actionLink,
-            buttonText: details?.buttonText || 'View Details',
-            referenceId: `${action.toUpperCase()}-${Date.now()}-${Math.floor(Math.random() * 10000)}`
-          }
-        });
-
-        console.log(`📧 Admin action notification sent to ${user.email} for action: ${action}`);
-        return true;
-
-      } catch (err) {
-        console.error('Failed to send admin action notification:', err);
-        return false;
-      }
-    };
 
     const mailOptions = {
       from: `₿itHash Capital <${mailTransporter === supportTransporter ? process.env.EMAIL_SUPPORT_USER : process.env.EMAIL_INFO_USER}>`,
@@ -7148,31 +6964,6 @@ const getBrowserFromUserAgent = (userAgent) => {
   if (/opera|opr/i.test(userAgent)) return 'Opera';
   return 'Unknown';
 };
-
-module.exports = {
-  User,
-  Admin,
-  Plan,
-  Investment,
-  Transaction,
-  Loan,
-  SystemLog,
-  UserLog,
-  DownlineRelationship,
-  CommissionHistory,
-  CommissionSettings,
-  Translation,
-  UserPreference,
-  DepositAsset,
-  Buy,
-  Sell,
-  FinancialStatement,
-  KYC,
-  setupWebSocketServer,
-  generateAndSendFinancialStatement
-};
-
-
 
 
 
