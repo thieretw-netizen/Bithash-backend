@@ -6506,8 +6506,8 @@ case 'login_success':
         `;
         break;
 
- default:
-  subject = 'Important Account Update - ₿itHash Capital';
+default:
+  subject = '';
   html = `
     <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
       ${brandHeader}
@@ -6543,39 +6543,11 @@ case 'login_success':
           <a href="${data.actionLink}" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">${data.buttonText || 'View Details'}</a>
         </div>
         ` : ''}
-        
-        <div style="margin-top: 25px; padding-top: 20px; border-top: 1px solid #E5E7EB;">
-          <p style="color: #6C7480; font-size: 13px; line-height: 1.5; margin: 0 0 10px 0;">
-            <strong>What this means for you:</strong>
-          </p>
-          <ul style="color: #6C7480; font-size: 13px; margin: 0; padding-left: 20px;">
-            <li style="margin: 5px 0;">Your account security is our top priority</li>
-            <li style="margin: 5px 0;">Review the information above for any necessary actions</li>
-            <li style="margin: 5px 0;">Contact support if you have any questions</li>
-          </ul>
-        </div>
-        
-        <p style="color: #666666; font-size: 12px; margin-top: 30px;">
-          <strong>Reference ID:</strong> ${data.referenceId || 'N/A'}<br>
-          <strong>Email sent:</strong> ${formattedTimestamp}
-        </p>
-        
-        <div style="background: #F9FAFB; padding: 15px; border-radius: 8px; margin-top: 20px;">
-          <p style="color: #6C7480; font-size: 12px; margin: 0 0 5px 0;">
-            <strong>Need help?</strong> Contact our support team:
-          </p>
-          <p style="color: #6C7480; font-size: 12px; margin: 0;">
-            📧 <a href="mailto:support@bithashcapital.live" style="color: #F7A600;">support@bithashcapital.live</a><br>
-            🌐 <a href="https://www.bithashcapital.live/support" style="color: #F7A600;">www.bithashcapital.live/support</a>
-          </p>
-        </div>
       </div>
       ${brandFooter}
     </div>
   `;
   break;
-  } 
-
 
 
 
