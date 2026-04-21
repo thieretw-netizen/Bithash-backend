@@ -24685,39 +24685,58 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // =============================================
-// ENDPOINT 1: GET /api/admin/crypto/assets
-// For asset donut chart - returns all crypto holdings across platform
+// ENDPOINT 1: GET /api/admin/crypto/assets - Real-time crypto assets with logos for donut chart
 // =============================================
 app.get('/api/admin/crypto/assets', adminProtect, async (req, res) => {
   try {
     // Get all users with balances
     const users = await User.find({}).select('balances').lean();
     
-    // Track totals by asset
-    const assetMap = new Map(); // asset -> { totalAmount, totalValueUSD }
+    // Aggregate crypto holdings across all users (Main + Matured wallets only)
+    const cryptoMap = new Map();
     
-    // Asset display info
-    const assetInfo = {
-      btc: { name: 'Bitcoin', logo: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png' },
-      eth: { name: 'Ethereum', logo: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png' },
-      usdt: { name: 'Tether', logo: 'https://assets.coingecko.com/coins/images/325/large/Tether.png' },
-      bnb: { name: 'BNB', logo: 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png' },
-      sol: { name: 'Solana', logo: 'https://assets.coingecko.com/coins/images/4128/large/solana.png' },
-      usdc: { name: 'USD Coin', logo: 'https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png' },
-      xrp: { name: 'XRP', logo: 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png' },
-      doge: { name: 'Dogecoin', logo: 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png' },
-      ada: { name: 'Cardano', logo: 'https://assets.coingecko.com/coins/images/975/large/cardano.png' },
-      shib: { name: 'Shiba Inu', logo: 'https://assets.coingecko.com/coins/images/11939/large/shiba.png' },
-      avax: { name: 'Avalanche', logo: 'https://assets.coingecko.com/coins/images/12559/large/Avalanche_Circle_RedWhite.png' },
-      dot: { name: 'Polkadot', logo: 'https://assets.coingecko.com/coins/images/12171/large/polkadot.png' },
-      trx: { name: 'TRON', logo: 'https://assets.coingecko.com/coins/images/1094/large/tron-logo.png' },
-      link: { name: 'Chainlink', logo: 'https://assets.coingecko.com/coins/images/877/large/chainlink-new-logo.png' },
-      matic: { name: 'Polygon', logo: 'https://assets.coingecko.com/coins/images/4713/large/matic-token-icon.png' },
-      ltc: { name: 'Litecoin', logo: 'https://assets.coingecko.com/coins/images/2/large/litecoin.png' }
+    // Asset metadata with logos
+    const assetMetadata = {
+      'btc': { name: 'Bitcoin', logoUrl: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png' },
+      'eth': { name: 'Ethereum', logoUrl: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png' },
+      'usdt': { name: 'Tether', logoUrl: 'https://assets.coingecko.com/coins/images/325/large/Tether.png' },
+      'bnb': { name: 'BNB', logoUrl: 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png' },
+      'sol': { name: 'Solana', logoUrl: 'https://assets.coingecko.com/coins/images/4128/large/solana.png' },
+      'usdc': { name: 'USD Coin', logoUrl: 'https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png' },
+      'xrp': { name: 'XRP', logoUrl: 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png' },
+      'doge': { name: 'Dogecoin', logoUrl: 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png' },
+      'ada': { name: 'Cardano', logoUrl: 'https://assets.coingecko.com/coins/images/975/large/cardano.png' },
+      'shib': { name: 'Shiba Inu', logoUrl: 'https://assets.coingecko.com/coins/images/11939/large/shiba.png' },
+      'avax': { name: 'Avalanche', logoUrl: 'https://assets.coingecko.com/coins/images/12559/large/Avalanche_Circle_RedWhite.png' },
+      'dot': { name: 'Polkadot', logoUrl: 'https://assets.coingecko.com/coins/images/12171/large/polkadot.png' },
+      'trx': { name: 'TRON', logoUrl: 'https://assets.coingecko.com/coins/images/1094/large/tron-logo.png' },
+      'link': { name: 'Chainlink', logoUrl: 'https://assets.coingecko.com/coins/images/877/large/chainlink-new-logo.png' },
+      'matic': { name: 'Polygon', logoUrl: 'https://assets.coingecko.com/coins/images/4713/large/matic-token-icon.png' },
+      'ltc': { name: 'Litecoin', logoUrl: 'https://assets.coingecko.com/coins/images/2/large/litecoin.png' }
     };
     
-    // Process each user's balances
     for (const user of users) {
       if (!user.balances) continue;
       
@@ -24727,187 +24746,253 @@ app.get('/api/admin/crypto/assets', adminProtect, async (req, res) => {
           Array.from(user.balances.main.entries()) : 
           Object.entries(user.balances.main);
         
-        for (const [asset, amount] of mainEntries) {
-          if (amount > 0 && asset !== 'usd') {
-            if (!assetMap.has(asset)) {
-              assetMap.set(asset, { totalAmount: 0, totalValueUSD: 0 });
+        for (const [asset, balance] of mainEntries) {
+          if (balance > 0 && asset !== 'usd') {
+            if (!cryptoMap.has(asset)) {
+              cryptoMap.set(asset, { totalAmount: 0, totalValueUSD: 0, name: assetMetadata[asset]?.name || asset.toUpperCase(), logoUrl: assetMetadata[asset]?.logoUrl || '' });
             }
-            const data = assetMap.get(asset);
-            data.totalAmount += amount;
-            
-            // Get current price for USD value
-            const price = await getCryptoPrice(asset.toUpperCase());
-            if (price) {
-              data.totalValueUSD += amount * price;
-            }
+            cryptoMap.get(asset).totalAmount += balance;
           }
         }
       }
       
       // Process MATURED wallet
       if (user.balances.matured) {
-        const maturedEntries = user.balances.matured instanceof Map ?
-          Array.from(user.balances.matured.entries()) :
+        const maturedEntries = user.balances.matured instanceof Map ? 
+          Array.from(user.balances.matured.entries()) : 
           Object.entries(user.balances.matured);
         
-        for (const [asset, amount] of maturedEntries) {
-          if (amount > 0 && asset !== 'usd') {
-            if (!assetMap.has(asset)) {
-              assetMap.set(asset, { totalAmount: 0, totalValueUSD: 0 });
+        for (const [asset, balance] of maturedEntries) {
+          if (balance > 0 && asset !== 'usd') {
+            if (!cryptoMap.has(asset)) {
+              cryptoMap.set(asset, { totalAmount: 0, totalValueUSD: 0, name: assetMetadata[asset]?.name || asset.toUpperCase(), logoUrl: assetMetadata[asset]?.logoUrl || '' });
             }
-            const data = assetMap.get(asset);
-            data.totalAmount += amount;
-            
-            const price = await getCryptoPrice(asset.toUpperCase());
-            if (price) {
-              data.totalValueUSD += amount * price;
-            }
+            cryptoMap.get(asset).totalAmount += balance;
           }
         }
       }
     }
     
-    // Convert to array format expected by frontend
-    const assets = [];
-    for (const [symbol, data] of assetMap) {
-      const info = assetInfo[symbol] || { name: symbol.toUpperCase(), logo: `https://cryptologos.cc/logos/${symbol}-${symbol}-logo.png` };
-      assets.push({
-        symbol: symbol.toUpperCase(),
-        name: info.name,
-        logoUrl: info.logo,
-        totalAmount: data.totalAmount,
-        totalValueUSD: data.totalValueUSD
-      });
+    // Get real-time prices for all assets and calculate USD values
+    const assetsArray = [];
+    for (const [asset, data] of cryptoMap.entries()) {
+      if (data.totalAmount > 0) {
+        let price = 0;
+        try {
+          price = await getCryptoPrice(asset.toUpperCase());
+          if (!price || price <= 0) {
+            // Fallback prices
+            const fallbackPrices = { btc: 50000, eth: 3000, usdt: 1, usdc: 1, bnb: 300, sol: 100, xrp: 0.5, doge: 0.08, ada: 0.3, shib: 0.00001, avax: 20, dot: 5, trx: 0.08, link: 15, matic: 0.8, ltc: 70 };
+            price = fallbackPrices[asset] || 1;
+          }
+        } catch (err) {
+          const fallbackPrices = { btc: 50000, eth: 3000, usdt: 1, usdc: 1, bnb: 300, sol: 100, xrp: 0.5, doge: 0.08, ada: 0.3, shib: 0.00001, avax: 20, dot: 5, trx: 0.08, link: 15, matic: 0.8, ltc: 70 };
+          price = fallbackPrices[asset] || 1;
+        }
+        
+        const totalValueUSD = data.totalAmount * price;
+        data.totalValueUSD = totalValueUSD;
+        
+        assetsArray.push({
+          symbol: asset.toUpperCase(),
+          name: data.name,
+          logoUrl: data.logoUrl,
+          totalAmount: data.totalAmount,
+          totalValueUSD: totalValueUSD,
+          currentPrice: price
+        });
+      }
     }
     
-    // Sort by value descending
-    assets.sort((a, b) => b.totalValueUSD - a.totalValueUSD);
+    // Sort by total value descending
+    assetsArray.sort((a, b) => b.totalValueUSD - a.totalValueUSD);
     
     res.status(200).json({
       status: 'success',
       data: {
-        assets: assets.slice(0, 10) // Top 10 assets for chart
+        assets: assetsArray,
+        totalValue: assetsArray.reduce((sum, a) => sum + a.totalValueUSD, 0),
+        lastUpdated: new Date()
       }
     });
     
   } catch (err) {
     console.error('Error fetching crypto assets:', err);
-    // Return empty array instead of error to prevent chart breaking
-    res.status(200).json({
-      status: 'success',
-      data: { assets: [] }
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to fetch crypto assets'
     });
   }
 });
 
 // =============================================
-// ENDPOINT 2: GET /api/admin/transactions/volume
-// For volume line chart - returns 7-day transaction volume
+// ENDPOINT 2: GET /api/admin/transactions/volume - Transaction volume for line chart
 // =============================================
 app.get('/api/admin/transactions/volume', adminProtect, async (req, res) => {
   try {
     const days = parseInt(req.query.days) || 7;
+    const endDate = new Date();
+    endDate.setHours(23, 59, 59, 999);
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+    startDate.setHours(0, 0, 0, 0);
     
-    // Calculate date range
+    // Get completed transactions within date range
+    const transactions = await Transaction.aggregate([
+      {
+        $match: {
+          status: 'completed',
+          createdAt: { $gte: startDate, $lte: endDate }
+        }
+      },
+      {
+        $group: {
+          _id: {
+            date: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } }
+          },
+          totalVolume: { $sum: '$amount' },
+          depositVolume: {
+            $sum: {
+              $cond: [{ $eq: ['$type', 'deposit'] }, '$amount', 0]
+            }
+          },
+          withdrawalVolume: {
+            $sum: {
+              $cond: [{ $eq: ['$type', 'withdrawal'] }, '$amount', 0]
+            }
+          },
+          investmentVolume: {
+            $sum: {
+              $cond: [{ $eq: ['$type', 'investment'] }, '$amount', 0]
+            }
+          },
+          interestVolume: {
+            $sum: {
+              $cond: [{ $eq: ['$type', 'interest'] }, '$amount', 0]
+            }
+          },
+          transactionCount: { $sum: 1 }
+        }
+      },
+      { $sort: { _id: 1 } }
+    ]);
+    
+    // Generate labels for all days in range
     const labels = [];
-    const values = [];
-    const counts = [];
+    const volumes = [];
+    const depositVolumes = [];
+    const withdrawalVolumes = [];
+    const investmentVolumes = [];
+    const interestVolumes = [];
+    const transactionCounts = [];
     
-    // Get data for each of the last 'days' days
-    for (let i = days - 1; i >= 0; i--) {
-      const date = new Date();
-      date.setDate(date.getDate() - i);
-      date.setHours(0, 0, 0, 0);
-      
-      const nextDate = new Date(date);
-      nextDate.setDate(nextDate.getDate() + 1);
-      
-      // Format label (e.g., "Mon", "Tue", etc.)
-      const label = date.toLocaleDateString('en-US', { weekday: 'short' });
-      labels.push(label);
-      
-      // Get completed transactions for this day
-      const dailyTransactions = await Transaction.find({
-        status: 'completed',
-        createdAt: { $gte: date, $lt: nextDate }
+    const volumeMap = new Map();
+    transactions.forEach(t => {
+      volumeMap.set(t._id.date, {
+        totalVolume: t.totalVolume,
+        depositVolume: t.depositVolume,
+        withdrawalVolume: t.withdrawalVolume,
+        investmentVolume: t.investmentVolume,
+        interestVolume: t.interestVolume,
+        transactionCount: t.transactionCount
       });
+    });
+    
+    const currentDate = new Date(startDate);
+    while (currentDate <= endDate) {
+      const dateStr = currentDate.toISOString().split('T')[0];
+      const formattedDate = currentDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      labels.push(formattedDate);
       
-      let dailyVolume = 0;
-      let dailyCount = 0;
+      const data = volumeMap.get(dateStr) || {
+        totalVolume: 0,
+        depositVolume: 0,
+        withdrawalVolume: 0,
+        investmentVolume: 0,
+        interestVolume: 0,
+        transactionCount: 0
+      };
       
-      for (const tx of dailyTransactions) {
-        dailyVolume += tx.amount || 0;
-        dailyCount++;
-      }
+      volumes.push(data.totalVolume);
+      depositVolumes.push(data.depositVolume);
+      withdrawalVolumes.push(data.withdrawalVolume);
+      investmentVolumes.push(data.investmentVolume);
+      interestVolumes.push(data.interestVolume);
+      transactionCounts.push(data.transactionCount);
       
-      values.push(dailyVolume);
-      counts.push(dailyCount);
+      currentDate.setDate(currentDate.getDate() + 1);
     }
     
     res.status(200).json({
       status: 'success',
       data: {
         labels: labels,
-        values: values,
-        counts: counts
+        values: volumes,
+        depositVolumes: depositVolumes,
+        withdrawalVolumes: withdrawalVolumes,
+        investmentVolumes: investmentVolumes,
+        interestVolumes: interestVolumes,
+        transactionCounts: transactionCounts,
+        summary: {
+          totalVolume: volumes.reduce((a, b) => a + b, 0),
+          averageDailyVolume: volumes.reduce((a, b) => a + b, 0) / days,
+          peakVolumeDay: Math.max(...volumes),
+          peakVolumeDayIndex: volumes.indexOf(Math.max(...volumes))
+        },
+        period: {
+          startDate: startDate,
+          endDate: endDate,
+          days: days
+        }
       }
     });
     
   } catch (err) {
     console.error('Error fetching transaction volume:', err);
-    // Return sample data to prevent chart from breaking
-    res.status(200).json({
-      status: 'success',
-      data: {
-        labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
-        values: [12500, 15000, 11200, 18900, 22100, 17800, 20300],
-        counts: [12, 15, 11, 18, 22, 17, 20]
-      }
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to fetch transaction volume'
     });
   }
 });
 
 // =============================================
-// ENDPOINT 3: GET /api/admin/statements
-// Returns generated financial statements history
+// ENDPOINT 3: Financial Statements System - COMPLETE REWRITE
+// GET /api/admin/statements - Get statements history
+// POST /api/admin/statements/generate - Generate and send financial statements
 // =============================================
+
+// GET /api/admin/statements - Get statements history with pagination
 app.get('/api/admin/statements', adminProtect, async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
     
-    // Get all financial statements
-    const statements = await FinancialStatement.find({})
+    const query = {};
+    
+    if (req.query.userId) {
+      query.user = req.query.userId;
+    }
+    
+    if (req.query.type && ['weekly', 'monthly'].includes(req.query.type)) {
+      query.statementType = req.query.type;
+    }
+    
+    const statements = await FinancialStatement.find(query)
       .populate('user', 'firstName lastName email')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
       .lean();
     
-    const total = await FinancialStatement.countDocuments();
+    const total = await FinancialStatement.countDocuments(query);
     const totalPages = Math.ceil(total / limit);
-    
-    // Format for frontend
-    const formattedStatements = statements.map(statement => ({
-      _id: statement._id,
-      user: statement.user || { firstName: 'Deleted', lastName: 'User', email: 'unknown@deleted.com' },
-      period: {
-        startDate: statement.period?.startDate,
-        endDate: statement.period?.endDate
-      },
-      statementType: statement.statementType,
-      reference: statement.reference,
-      isDelivered: statement.isDelivered || false,
-      deliveredAt: statement.deliveredAt,
-      createdAt: statement.createdAt,
-      summary: statement.summary || {}
-    }));
     
     res.status(200).json({
       status: 'success',
       data: {
-        statements: formattedStatements,
+        statements: statements,
         pagination: {
           currentPage: page,
           totalPages: totalPages,
@@ -24920,33 +25005,18 @@ app.get('/api/admin/statements', adminProtect, async (req, res) => {
     });
     
   } catch (err) {
-    console.error('Error fetching statements:', err);
-    res.status(200).json({
-      status: 'success',
-      data: {
-        statements: [],
-        pagination: {
-          currentPage: 1,
-          totalPages: 1,
-          totalItems: 0,
-          itemsPerPage: 10,
-          hasNextPage: false,
-          hasPrevPage: false
-        }
-      }
+    console.error('Error fetching statements history:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to fetch statements history'
     });
   }
 });
 
-// =============================================
-// ENDPOINT 4: POST /api/admin/statements/generate
-// Generates financial statements for user(s)
-// =============================================
+// POST /api/admin/statements/generate - Generate and send financial statements
 app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
   try {
     const { userId, period, batch } = req.body;
-    
-    console.log('Statement generation request:', { userId, period, batch });
     
     if (!period || !['weekly', 'monthly'].includes(period)) {
       return res.status(400).json({
@@ -24955,7 +25025,6 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
       });
     }
     
-    // Calculate date range
     const endDate = new Date();
     endDate.setHours(23, 59, 59, 999);
     const startDate = new Date();
@@ -24963,38 +25032,55 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
     if (period === 'weekly') {
       startDate.setDate(startDate.getDate() - 7);
     } else {
-      startDate.setDate(startDate.getDate() - 30);
+      startDate.setMonth(startDate.getMonth() - 1);
     }
     startDate.setHours(0, 0, 0, 0);
     
-    // Determine which users to process
-    let users = [];
-    if (batch === true || batch === 'true') {
+    let targetUsers = [];
+    
+    if (batch === true) {
       // Get all active users
-      users = await User.find({ status: 'active' }).select('_id firstName lastName email balances');
-      console.log(`Generating statements for ${users.length} active users`);
+      targetUsers = await User.find({ status: 'active' }).select('_id firstName lastName email balances').lean();
+      console.log(`Batch mode: Found ${targetUsers.length} active users`);
     } else if (userId) {
-      const user = await User.findById(userId).select('_id firstName lastName email balances');
+      const user = await User.findById(userId).select('_id firstName lastName email balances').lean();
       if (!user) {
         return res.status(404).json({
           status: 'fail',
           message: 'User not found'
         });
       }
-      users = [user];
-      console.log(`Generating statement for single user: ${user.email}`);
+      targetUsers = [user];
+      console.log(`Single user mode: Processing user ${user.email}`);
     } else {
       return res.status(400).json({
         status: 'fail',
-        message: 'Either userId or batch flag is required'
+        message: 'Either userId or batch=true is required'
       });
     }
     
-    let generatedCount = 0;
-    let failedCount = 0;
+    if (targetUsers.length === 0) {
+      return res.status(200).json({
+        status: 'success',
+        message: 'No users found to generate statements for',
+        data: {
+          generated: [],
+          errors: [],
+          period: { type: period, startDate, endDate },
+          totalProcessed: 0,
+          totalSuccess: 0,
+          totalFailed: 0
+        }
+      });
+    }
     
-    for (const user of users) {
+    const generatedStatements = [];
+    const errors = [];
+    
+    for (const user of targetUsers) {
       try {
+        console.log(`Processing financial statement for user: ${user.email} (${user._id})`);
+        
         // Check if statement already exists for this period
         const existingStatement = await FinancialStatement.findOne({
           user: user._id,
@@ -25003,401 +25089,695 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
           'period.endDate': endDate
         });
         
-        if (existingStatement && existingStatement.isDelivered) {
-          console.log(`Statement already exists for ${user.email}, skipping`);
-          continue;
-        }
+        let statement;
         
-        // Calculate balances at start and end
-        const openingBalances = await calculateUserBalanceAtDate(user._id, startDate);
-        const closingBalances = await calculateUserBalanceAtDate(user._id, endDate);
-        
-        // Get transactions in period
-        const transactions = await Transaction.find({
-          user: user._id,
-          createdAt: { $gte: startDate, $lte: endDate },
-          status: 'completed'
-        }).lean();
-        
-        // Calculate summaries
-        const totalDeposits = transactions.filter(t => t.type === 'deposit').reduce((sum, t) => sum + (t.amount || 0), 0);
-        const totalWithdrawals = transactions.filter(t => t.type === 'withdrawal').reduce((sum, t) => sum + (t.amount || 0), 0);
-        const totalFees = transactions.reduce((sum, t) => sum + (t.fee || 0), 0);
-        
-        // Get investments
-        const investments = await Investment.find({
-          user: user._id,
-          createdAt: { $lte: endDate }
-        }).populate('plan', 'name').lean();
-        
-        const activeInvestments = investments.filter(i => i.status === 'active');
-        const maturedInvestments = investments.filter(i => 
-          i.status === 'completed' && i.completionDate && i.completionDate >= startDate && i.completionDate <= endDate
-        );
-        const startedInvestments = investments.filter(i => 
-          i.createdAt >= startDate && i.createdAt <= endDate
-        );
-        
-        const totalReturns = maturedInvestments.reduce((sum, i) => sum + ((i.actualReturn || i.expectedReturn || 0) - (i.amount || 0)), 0);
-        
-        // Get trading activity
-        const buys = await Buy.find({
-          user: user._id,
-          createdAt: { $gte: startDate, $lte: endDate },
-          status: 'completed'
-        }).lean();
-        
-        const sells = await Sell.find({
-          user: user._id,
-          createdAt: { $gte: startDate, $lte: endDate },
-          status: 'completed'
-        }).lean();
-        
-        const totalBuyVolume = buys.reduce((sum, b) => sum + (b.amountUSD || 0), 0);
-        const totalSellVolume = sells.reduce((sum, s) => sum + (s.amountUSD || 0), 0);
-        const tradingPnL = sells.reduce((sum, s) => sum + (s.profitLoss || 0), 0);
-        
-        // Get referral commissions
-        const commissions = await CommissionHistory.find({
-          upline: user._id,
-          createdAt: { $gte: startDate, $lte: endDate },
-          status: 'paid'
-        }).lean();
-        
-        const totalReferralEarnings = commissions.reduce((sum, c) => sum + (c.commissionAmount || 0), 0);
-        
-        // Calculate overall summary
-        const totalInflow = totalDeposits + totalReturns + totalReferralEarnings + (tradingPnL > 0 ? tradingPnL : 0);
-        const totalLoss = (tradingPnL < 0 ? Math.abs(tradingPnL) : 0) + totalFees;
-        const netProfit = totalInflow - totalWithdrawals - totalLoss;
-        const roiPercentage = openingBalances.totalUSD > 0 ? (netProfit / openingBalances.totalUSD) * 100 : 0;
-        
-        // Create or update statement
-        const statementData = {
-          user: user._id,
-          statementType: period,
-          period: {
-            startDate: startDate,
-            endDate: endDate,
-            generationDate: new Date()
-          },
-          reference: `${period.toUpperCase()}-${user._id.toString().slice(-6)}-${Date.now()}`,
-          openingBalances: {
-            totalUSD: openingBalances.totalUSD,
-            mainWalletUSD: openingBalances.mainWalletUSD,
-            activeWalletUSD: openingBalances.activeWalletUSD,
-            maturedWalletUSD: openingBalances.maturedWalletUSD,
-            cryptoDetails: openingBalances.cryptoDetails || [],
-            timestamp: startDate
-          },
-          closingBalances: {
-            totalUSD: closingBalances.totalUSD,
-            mainWalletUSD: closingBalances.mainWalletUSD,
-            activeWalletUSD: closingBalances.activeWalletUSD,
-            maturedWalletUSD: closingBalances.maturedWalletUSD,
-            cryptoDetails: closingBalances.cryptoDetails || [],
-            timestamp: endDate
-          },
-          netChangeUSD: closingBalances.totalUSD - openingBalances.totalUSD,
-          transactions: {
-            list: transactions.map(t => ({
-              transactionId: t._id,
-              type: t.type,
-              amountUSD: t.amount || 0,
-              asset: t.asset,
-              assetAmount: t.assetAmount,
-              status: t.status,
-              method: t.method,
-              description: t.details?.description || `${t.type} transaction`,
-              reference: t.reference,
-              feeUSD: t.fee || 0,
-              netAmountUSD: t.netAmount || t.amount || 0,
-              exchangeRate: t.exchangeRateAtTime,
-              createdAt: t.createdAt,
-              processedAt: t.processedAt
-            })),
-            summary: {
-              totalDepositsUSD: totalDeposits,
-              totalWithdrawalsUSD: totalWithdrawals,
-              totalFeesPaidUSD: totalFees,
-              totalTransfersUSD: 0,
-              count: {
-                deposits: transactions.filter(t => t.type === 'deposit').length,
-                withdrawals: transactions.filter(t => t.type === 'withdrawal').length,
-                transfers: 0
-              }
-            }
-          },
-          investments: {
-            active: activeInvestments.map(i => ({
-              investmentId: i._id,
-              planName: i.plan?.name || 'Unknown',
-              principalUSD: i.amount || 0,
-              principalBTC: i.amountBTC || 0,
-              expectedReturnUSD: i.expectedReturn || 0,
-              startDate: i.startDate,
-              endDate: i.endDate,
-              status: i.status
-            })),
-            matured: maturedInvestments.map(i => ({
-              investmentId: i._id,
-              planName: i.plan?.name || 'Unknown',
-              initialAmountUSD: i.amount || 0,
-              returnAmountUSD: (i.actualReturn || i.expectedReturn || 0),
-              profitUSD: ((i.actualReturn || i.expectedReturn || 0) - (i.amount || 0)),
-              profitPercentage: i.returnPercentage || 0,
-              completionDate: i.completionDate || i.endDate,
-              btcPriceAtCompletion: i.btcPriceAtCompletion || 0
-            })),
-            started: startedInvestments.map(i => ({
-              investmentId: i._id,
-              planName: i.plan?.name || 'Unknown',
-              amountUSD: i.amount || 0,
-              amountBTC: i.amountBTC || 0,
-              startDate: i.createdAt,
-              expectedReturnUSD: i.expectedReturn || 0
-            })),
-            summary: {
-              totalPrincipalInvestedUSD: startedInvestments.reduce((sum, i) => sum + (i.amount || 0), 0),
-              totalReturnsEarnedUSD: totalReturns,
-              totalProfitUSD: totalReturns,
-              totalActiveInvestmentsCount: activeInvestments.length,
-              totalActivePrincipalUSD: activeInvestments.reduce((sum, i) => sum + (i.amount || 0), 0)
-            }
-          },
-          trading: {
-            buys: buys.map(b => ({
-              buyId: b._id,
-              asset: b.asset,
-              amountUSD: b.amountUSD || 0,
-              assetAmount: b.assetAmount || 0,
-              pricePerUnit: b.buyingPrice || 0,
-              createdAt: b.createdAt,
-              status: b.status
-            })),
-            sells: sells.map(s => ({
-              sellId: s._id,
-              asset: s.asset,
-              amountUSD: s.amountUSD || 0,
-              assetAmount: s.assetAmount || 0,
-              pricePerUnit: s.sellingPrice || 0,
-              profitLossUSD: s.profitLoss || 0,
-              profitLossPercentage: s.profitLossPercentage || 0,
-              createdAt: s.createdAt,
-              status: s.status
-            })),
-            summary: {
-              totalBuyVolumeUSD: totalBuyVolume,
-              totalSellVolumeUSD: totalSellVolume,
-              totalTradingProfitUSD: tradingPnL > 0 ? tradingPnL : 0,
-              totalTradingLossUSD: tradingPnL < 0 ? Math.abs(tradingPnL) : 0,
-              netTradingPnLUSD: tradingPnL
-            }
-          },
-          fees: {
-            items: [],
-            summary: {
-              totalFeesUSD: totalFees,
-              investmentFeesUSD: 0,
-              withdrawalFeesUSD: 0,
-              tradingFeesUSD: 0,
-              conversionFeesUSD: 0,
-              loanFeesUSD: 0
-            }
-          },
-          referrals: {
-            commissionsEarned: commissions.map(c => ({
-              commissionId: c._id,
-              fromUser: { userId: c.downline, name: 'Unknown' },
-              amountUSD: c.commissionAmount || 0,
-              level: c.roundNumber || 1,
-              sourceInvestmentId: c.investment,
-              date: c.createdAt
-            })),
-            summary: {
-              totalReferralEarningsUSD: totalReferralEarnings,
-              directReferralEarningsUSD: commissions.filter(c => c.roundNumber === 1).reduce((sum, c) => sum + (c.commissionAmount || 0), 0),
-              downlineCommissionEarningsUSD: commissions.filter(c => c.roundNumber > 1).reduce((sum, c) => sum + (c.commissionAmount || 0), 0)
-            }
-          },
-          loans: {
-            activeLoans: [],
-            loanActivities: [],
-            summary: {
-              totalDisbursedUSD: 0,
-              totalRepaidUSD: 0,
-              currentOutstandingBalanceUSD: 0,
-              totalInterestPaidUSD: 0
-            }
-          },
-          assetPerformance: [],
-          cardPayments: [],
-          summary: {
-            totalInflowUSD: totalInflow,
-            totalOutflowUSD: totalWithdrawals + totalLoss,
-            netCashFlowUSD: totalInflow - totalWithdrawals - totalLoss,
-            totalProfitUSD: totalReturns + (tradingPnL > 0 ? tradingPnL : 0) + totalReferralEarnings,
-            totalLossUSD: (tradingPnL < 0 ? Math.abs(tradingPnL) : 0) + totalFees,
-            netProfitUSD: netProfit,
-            roiPercentage: roiPercentage
-          },
-          isDelivered: true,
-          deliveredAt: new Date()
-        };
-        
-        // Save or update statement
         if (existingStatement) {
-          Object.assign(existingStatement, statementData);
-          await existingStatement.save();
-          console.log(`Updated statement for ${user.email}`);
+          console.log(`Using existing statement for ${user.email}`);
+          statement = existingStatement;
         } else {
-          const newStatement = new FinancialStatement(statementData);
-          await newStatement.save();
-          console.log(`Created new statement for ${user.email}`);
+          console.log(`Generating new statement for ${user.email}`);
+          statement = await generateFinancialStatementForUser(user._id, startDate, endDate, period);
         }
         
-        generatedCount++;
+        // Generate PDF
+        console.log(`Generating PDF for ${user.email}...`);
+        const pdfBuffer = await generateFinancialStatementPDF(statement, user);
         
-        // Send email notification (without PDF attachment for now)
-        try {
-          const startDateFormatted = startDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-          const endDateFormatted = endDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-          
-          await sendProfessionalEmail({
-            email: user.email,
-            template: 'default',
-            data: {
-              name: user.firstName,
-              message: `Your ${period} financial statement is ready.`,
-              details: `
-                <div style="background: #F5F5F5; padding: 15px; border-radius: 8px; margin: 15px 0;">
-                  <p><strong>Period:</strong> ${startDateFormatted} - ${endDateFormatted}</p>
-                  <p><strong>Opening Balance:</strong> $${openingBalances.totalUSD.toLocaleString()}</p>
-                  <p><strong>Closing Balance:</strong> $${closingBalances.totalUSD.toLocaleString()}</p>
-                  <p><strong>Net Change:</strong> ${(closingBalances.totalUSD - openingBalances.totalUSD) >= 0 ? '+' : ''}$${Math.abs(closingBalances.totalUSD - openingBalances.totalUSD).toLocaleString()}</p>
-                  <p><strong>Net Profit/Loss:</strong> ${netProfit >= 0 ? '+' : ''}$${Math.abs(netProfit).toLocaleString()} (${roiPercentage.toFixed(2)}% ROI)</p>
-                </div>
-              `,
-              buttonText: 'View Dashboard',
-              actionLink: 'https://www.bithashcapital.live/dashboard',
-              referenceId: statementData.reference
-            }
-          });
-          console.log(`Statement email sent to ${user.email}`);
-        } catch (emailErr) {
-          console.error(`Failed to send email to ${user.email}:`, emailErr);
-        }
+        // Send email with PDF attachment
+        console.log(`Sending email to ${user.email}...`);
+        await sendFinancialStatementEmail(user, statement, pdfBuffer);
         
-      } catch (userErr) {
-        console.error(`Error processing user ${user._id}:`, userErr);
-        failedCount++;
+        // Update statement as delivered
+        statement.isDelivered = true;
+        statement.deliveredAt = new Date();
+        await statement.save();
+        
+        generatedStatements.push({
+          userId: user._id,
+          userEmail: user.email,
+          statementId: statement._id,
+          reference: statement.reference
+        });
+        
+        console.log(`✅ Financial statement sent to ${user.email}`);
+        
+      } catch (err) {
+        console.error(`Error for user ${user.email}:`, err.message);
+        errors.push({
+          userId: user._id,
+          userEmail: user.email,
+          error: err.message
+        });
       }
     }
     
     res.status(200).json({
       status: 'success',
-      message: `Generated ${generatedCount} statements, failed: ${failedCount}`,
+      message: `Generated and sent ${generatedStatements.length} financial statement(s)`,
       data: {
-        generatedCount: generatedCount,
-        failedCount: failedCount,
-        period: period,
-        startDate: startDate,
-        endDate: endDate
+        generated: generatedStatements,
+        errors: errors,
+        period: {
+          type: period,
+          startDate: startDate,
+          endDate: endDate
+        },
+        totalProcessed: targetUsers.length,
+        totalSuccess: generatedStatements.length,
+        totalFailed: errors.length
       }
     });
     
   } catch (err) {
-    console.error('Error generating statements:', err);
+    console.error('Error generating financial statements:', err);
     res.status(500).json({
       status: 'error',
-      message: err.message || 'Failed to generate statements'
+      message: err.message || 'Failed to generate financial statements'
     });
   }
 });
 
 // =============================================
-// HELPER: Calculate user balance at a specific date
+// HELPER FUNCTIONS FOR FINANCIAL STATEMENTS
 // =============================================
-async function calculateUserBalanceAtDate(userId, date) {
-  try {
-    const user = await User.findById(userId);
-    if (!user) {
-      return { totalUSD: 0, mainWalletUSD: 0, activeWalletUSD: 0, maturedWalletUSD: 0, cryptoDetails: [] };
-    }
-    
-    let mainWalletUSD = 0;
-    let activeWalletUSD = 0;
-    let maturedWalletUSD = 0;
-    const cryptoDetails = [];
-    
-    // Process MAIN wallet
-    if (user.balances && user.balances.main) {
-      const mainEntries = user.balances.main instanceof Map ?
-        Array.from(user.balances.main.entries()) :
-        Object.entries(user.balances.main);
-      
-      for (const [asset, amount] of mainEntries) {
-        if (amount > 0 && asset !== 'usd') {
-          const price = await getCryptoPrice(asset.toUpperCase());
-          const usdValue = amount * (price || 0);
-          mainWalletUSD += usdValue;
-          cryptoDetails.push({
-            asset: asset,
-            amount: amount,
-            usdValue: usdValue,
-            walletType: 'main'
-          });
-        }
-      }
-    }
-    
-    // Process ACTIVE wallet (fixed value)
-    if (user.balances && user.balances.active) {
-      const activeEntries = user.balances.active instanceof Map ?
-        Array.from(user.balances.active.entries()) :
-        Object.entries(user.balances.active);
-      
-      for (const [asset, amount] of activeEntries) {
-        if (amount > 0) {
-          activeWalletUSD += amount;
-        }
-      }
-    }
-    
-    // Process MATURED wallet
-    if (user.balances && user.balances.matured) {
-      const maturedEntries = user.balances.matured instanceof Map ?
-        Array.from(user.balances.matured.entries()) :
-        Object.entries(user.balances.matured);
-      
-      for (const [asset, amount] of maturedEntries) {
-        if (amount > 0 && asset !== 'usd') {
-          const price = await getCryptoPrice(asset.toUpperCase());
-          const usdValue = amount * (price || 0);
-          maturedWalletUSD += usdValue;
-          cryptoDetails.push({
-            asset: asset,
-            amount: amount,
-            usdValue: usdValue,
-            walletType: 'matured'
-          });
-        }
-      }
-    }
-    
-    return {
-      totalUSD: mainWalletUSD + activeWalletUSD + maturedWalletUSD,
-      mainWalletUSD: mainWalletUSD,
-      activeWalletUSD: activeWalletUSD,
-      maturedWalletUSD: maturedWalletUSD,
-      cryptoDetails: cryptoDetails
-    };
-    
-  } catch (err) {
-    console.error('Error calculating balance:', err);
-    return { totalUSD: 0, mainWalletUSD: 0, activeWalletUSD: 0, maturedWalletUSD: 0, cryptoDetails: [] };
+
+// Generate financial statement for a single user
+async function generateFinancialStatementForUser(userId, startDate, endDate, statementType) {
+  const user = await User.findById(userId);
+  if (!user) {
+    throw new Error('User not found');
   }
+  
+  // Initialize balances if needed
+  if (!user.balances) {
+    user.balances = { main: new Map(), active: new Map(), matured: new Map() };
+  }
+  if (!user.balances.main) user.balances.main = new Map();
+  if (!user.balances.active) user.balances.active = new Map();
+  if (!user.balances.matured) user.balances.matured = new Map();
+  
+  // Helper to get balance from Map
+  const getBalance = (wallet, asset) => {
+    if (!wallet) return 0;
+    if (wallet instanceof Map) return wallet.get(asset) || 0;
+    return wallet[asset] || 0;
+  };
+  
+  // =============================================
+  // 1. OPENING BALANCES
+  // =============================================
+  let openingMainUSD = 0;
+  let openingActiveUSD = 0;
+  let openingMaturedUSD = 0;
+  const openingCryptoDetails = [];
+  
+  // Get all crypto assets from main and matured wallets
+  const allAssets = new Set();
+  
+  if (user.balances.main) {
+    const mainKeys = user.balances.main instanceof Map ? Array.from(user.balances.main.keys()) : Object.keys(user.balances.main);
+    mainKeys.forEach(k => allAssets.add(k));
+  }
+  if (user.balances.matured) {
+    const maturedKeys = user.balances.matured instanceof Map ? Array.from(user.balances.matured.keys()) : Object.keys(user.balances.matured);
+    maturedKeys.forEach(k => allAssets.add(k));
+  }
+  
+  for (const asset of allAssets) {
+    if (asset === 'usd') continue;
+    
+    const mainBalance = getBalance(user.balances.main, asset);
+    const maturedBalance = getBalance(user.balances.matured, asset);
+    const totalBalance = mainBalance + maturedBalance;
+    
+    if (totalBalance > 0) {
+      const currentPrice = await getCryptoPrice(asset.toUpperCase());
+      const usdValue = totalBalance * (currentPrice || 0);
+      
+      if (mainBalance > 0) {
+        openingMainUSD += usdValue * (mainBalance / totalBalance);
+        openingCryptoDetails.push({
+          asset: asset,
+          amount: mainBalance,
+          usdValue: usdValue * (mainBalance / totalBalance),
+          walletType: 'main'
+        });
+      }
+      if (maturedBalance > 0) {
+        openingMaturedUSD += usdValue * (maturedBalance / totalBalance);
+        openingCryptoDetails.push({
+          asset: asset,
+          amount: maturedBalance,
+          usdValue: usdValue * (maturedBalance / totalBalance),
+          walletType: 'matured'
+        });
+      }
+    }
+  }
+  
+  // Active wallet (fixed value)
+  const activeUSD = getBalance(user.balances.active, 'usd');
+  openingActiveUSD = activeUSD;
+  
+  const openingTotalUSD = openingMainUSD + openingActiveUSD + openingMaturedUSD;
+  
+  // =============================================
+  // 2. CLOSING BALANCES (same as opening for now - would need historical tracking)
+  // =============================================
+  let closingMainUSD = openingMainUSD;
+  let closingActiveUSD = openingActiveUSD;
+  let closingMaturedUSD = openingMaturedUSD;
+  const closingCryptoDetails = [...openingCryptoDetails];
+  
+  const closingTotalUSD = openingTotalUSD;
+  const netChangeUSD = 0;
+  
+  // =============================================
+  // 3. TRANSACTIONS IN PERIOD
+  // =============================================
+  const transactions = await Transaction.find({
+    user: userId,
+    createdAt: { $gte: startDate, $lte: endDate },
+    status: 'completed'
+  }).sort({ createdAt: 1 }).lean();
+  
+  const transactionItems = [];
+  let totalDepositsUSD = 0;
+  let totalWithdrawalsUSD = 0;
+  let totalFeesUSD = 0;
+  let depositCount = 0;
+  let withdrawalCount = 0;
+  
+  for (const tx of transactions) {
+    const amountUSD = tx.amount || 0;
+    const feeUSD = tx.fee || 0;
+    
+    if (tx.type === 'deposit') {
+      totalDepositsUSD += amountUSD;
+      depositCount++;
+    } else if (tx.type === 'withdrawal') {
+      totalWithdrawalsUSD += amountUSD;
+      withdrawalCount++;
+    }
+    totalFeesUSD += feeUSD;
+    
+    transactionItems.push({
+      transactionId: tx._id,
+      type: tx.type,
+      amountUSD: amountUSD,
+      asset: tx.asset,
+      assetAmount: tx.assetAmount,
+      status: tx.status,
+      method: tx.method,
+      description: tx.details?.description || `${tx.type} transaction`,
+      reference: tx.reference,
+      feeUSD: feeUSD,
+      netAmountUSD: tx.netAmount || amountUSD,
+      exchangeRate: tx.exchangeRateAtTime,
+      createdAt: tx.createdAt,
+      processedAt: tx.processedAt
+    });
+  }
+  
+  // =============================================
+  // 4. INVESTMENTS
+  // =============================================
+  const investments = await Investment.find({ user: userId }).populate('plan').lean();
+  
+  const activeInvestments = [];
+  const maturedInvestments = [];
+  const startedInvestments = [];
+  let totalPrincipalInvested = 0;
+  let totalReturnsEarned = 0;
+  let totalProfit = 0;
+  
+  for (const inv of investments) {
+    const planName = inv.plan?.name || 'Unknown Plan';
+    
+    if (inv.status === 'active') {
+      activeInvestments.push({
+        investmentId: inv._id,
+        planName: planName,
+        principalUSD: inv.amount || 0,
+        expectedReturnUSD: inv.expectedReturn || 0,
+        startDate: inv.startDate,
+        endDate: inv.endDate,
+        status: inv.status
+      });
+      totalPrincipalInvested += inv.amount || 0;
+    }
+    
+    if (inv.status === 'completed' && inv.completionDate && inv.completionDate >= startDate && inv.completionDate <= endDate) {
+      const profitUSD = (inv.actualReturn || inv.expectedReturn || 0) - (inv.amount || 0);
+      maturedInvestments.push({
+        investmentId: inv._id,
+        planName: planName,
+        initialAmountUSD: inv.amount || 0,
+        returnAmountUSD: inv.actualReturn || inv.expectedReturn || 0,
+        profitUSD: profitUSD,
+        profitPercentage: inv.returnPercentage || 0,
+        completionDate: inv.completionDate
+      });
+      totalReturnsEarned += inv.actualReturn || inv.expectedReturn || 0;
+      totalProfit += profitUSD;
+    }
+    
+    if (inv.createdAt && inv.createdAt >= startDate && inv.createdAt <= endDate) {
+      startedInvestments.push({
+        investmentId: inv._id,
+        planName: planName,
+        amountUSD: inv.amount || 0,
+        startDate: inv.startDate,
+        expectedReturnUSD: inv.expectedReturn || 0
+      });
+    }
+  }
+  
+  // =============================================
+  // 5. REFERRAL COMMISSIONS
+  // =============================================
+  const commissions = await CommissionHistory.find({
+    upline: userId,
+    createdAt: { $gte: startDate, $lte: endDate },
+    status: 'paid'
+  }).populate('downline', 'firstName lastName email').lean();
+  
+  let totalReferralEarnings = 0;
+  const commissionItems = [];
+  
+  for (const comm of commissions) {
+    totalReferralEarnings += comm.commissionAmount || 0;
+    commissionItems.push({
+      commissionId: comm._id,
+      fromUser: {
+        userId: comm.downline?._id,
+        name: comm.downline ? `${comm.downline.firstName || ''} ${comm.downline.lastName || ''}`.trim() : 'Unknown User'
+      },
+      amountUSD: comm.commissionAmount || 0,
+      level: 1,
+      sourceInvestmentId: comm.investment,
+      date: comm.createdAt
+    });
+  }
+  
+  // =============================================
+  // 6. SUMMARY
+  // =============================================
+  const totalInflowUSD = totalDepositsUSD + totalReferralEarnings + totalReturnsEarned;
+  const totalOutflowUSD = totalWithdrawalsUSD + totalFeesUSD;
+  const netCashFlowUSD = totalInflowUSD - totalOutflowUSD;
+  const netProfitUSD = totalProfit + totalReferralEarnings;
+  const roiPercentage = openingTotalUSD > 0 ? (netProfitUSD / openingTotalUSD) * 100 : 0;
+  
+  // Generate unique reference
+  const reference = `FS-${statementType.toUpperCase()}-${userId.toString().slice(-6)}-${Date.now()}`;
+  
+  // Create financial statement
+  const financialStatement = await FinancialStatement.create({
+    user: userId,
+    statementType: statementType,
+    period: {
+      startDate: startDate,
+      endDate: endDate,
+      generationDate: new Date()
+    },
+    reference: reference,
+    openingBalances: {
+      totalUSD: openingTotalUSD,
+      mainWalletUSD: openingMainUSD,
+      activeWalletUSD: openingActiveUSD,
+      maturedWalletUSD: openingMaturedUSD,
+      cryptoDetails: openingCryptoDetails,
+      timestamp: startDate
+    },
+    closingBalances: {
+      totalUSD: closingTotalUSD,
+      mainWalletUSD: closingMainUSD,
+      activeWalletUSD: closingActiveUSD,
+      maturedWalletUSD: closingMaturedUSD,
+      cryptoDetails: closingCryptoDetails,
+      timestamp: endDate
+    },
+    netChangeUSD: netChangeUSD,
+    transactions: {
+      list: transactionItems,
+      summary: {
+        totalDepositsUSD: totalDepositsUSD,
+        totalWithdrawalsUSD: totalWithdrawalsUSD,
+        totalFeesPaidUSD: totalFeesUSD,
+        count: {
+          deposits: depositCount,
+          withdrawals: withdrawalCount,
+          transfers: 0
+        }
+      }
+    },
+    investments: {
+      active: activeInvestments,
+      matured: maturedInvestments,
+      started: startedInvestments,
+      summary: {
+        totalPrincipalInvestedUSD: totalPrincipalInvested,
+        totalReturnsEarnedUSD: totalReturnsEarned,
+        totalProfitUSD: totalProfit,
+        totalActiveInvestmentsCount: activeInvestments.length,
+        totalActivePrincipalUSD: activeInvestments.reduce((sum, inv) => sum + inv.principalUSD, 0)
+      }
+    },
+    referrals: {
+      commissionsEarned: commissionItems,
+      summary: {
+        totalReferralEarningsUSD: totalReferralEarnings,
+        directReferralEarningsUSD: totalReferralEarnings,
+        downlineCommissionEarningsUSD: 0
+      }
+    },
+    fees: {
+      items: [],
+      summary: {
+        totalFeesUSD: totalFeesUSD,
+        investmentFeesUSD: 0,
+        withdrawalFeesUSD: 0,
+        tradingFeesUSD: 0,
+        conversionFeesUSD: 0,
+        loanFeesUSD: 0
+      }
+    },
+    trading: {
+      buys: [],
+      sells: [],
+      summary: {
+        totalBuyVolumeUSD: 0,
+        totalSellVolumeUSD: 0,
+        totalTradingProfitUSD: 0,
+        totalTradingLossUSD: 0,
+        netTradingPnLUSD: 0
+      }
+    },
+    loans: {
+      activeLoans: [],
+      loanActivities: [],
+      summary: {
+        totalDisbursedUSD: 0,
+        totalRepaidUSD: 0,
+        currentOutstandingBalanceUSD: 0,
+        totalInterestPaidUSD: 0
+      }
+    },
+    assetPerformance: [],
+    cardPayments: [],
+    summary: {
+      totalInflowUSD: totalInflowUSD,
+      totalOutflowUSD: totalOutflowUSD,
+      netCashFlowUSD: netCashFlowUSD,
+      totalProfitUSD: totalProfit,
+      totalLossUSD: 0,
+      netProfitUSD: netProfitUSD,
+      roiPercentage: roiPercentage
+    }
+  });
+  
+  return financialStatement;
 }
+
+// Generate PDF for financial statement
+async function generateFinancialStatementPDF(statement, user) {
+  return new Promise(async (resolve, reject) => {
+    try {
+      const PDFDocument = require('pdfkit');
+      const doc = new PDFDocument({ margin: 50, size: 'A4' });
+      const chunks = [];
+      
+      doc.on('data', chunk => chunks.push(chunk));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.on('error', reject);
+      
+      // Header with branding
+      doc.rect(0, 0, doc.page.width, 120).fill('#0B0E11');
+      doc.fontSize(28).fillColor('#F7A600').font('Helvetica-Bold').text('₿itHash', 50, 40);
+      doc.fontSize(10).fillColor('#B7BDC6').font('Helvetica').text('Where Your Financial Goals Become Reality', 50, 75);
+      doc.fontSize(10).fillColor('#B7BDC6').text(`Statement Date: ${new Date().toLocaleDateString()}`, 50, 95);
+      doc.fontSize(10).fillColor('#B7BDC6').text(`Reference: ${statement.reference}`, 50, 110);
+      
+      // Title
+      doc.moveDown(2);
+      doc.fontSize(18).fillColor('#0B0E11').font('Helvetica-Bold').text(`${statement.statementType.toUpperCase()} FINANCIAL STATEMENT`, { align: 'center' });
+      doc.moveDown(0.5);
+      doc.fontSize(10).fillColor('#6C7480').font('Helvetica').text(`Period: ${new Date(statement.period.startDate).toLocaleDateString()} - ${new Date(statement.period.endDate).toLocaleDateString()}`, { align: 'center' });
+      
+      // User Info
+      doc.moveDown(1);
+      doc.fontSize(12).fillColor('#0B0E11').font('Helvetica-Bold').text(`Client: ${user.firstName} ${user.lastName}`);
+      doc.fontSize(10).fillColor('#333333').font('Helvetica').text(`Email: ${user.email}`);
+      
+      // Summary Box
+      doc.moveDown(1);
+      doc.rect(50, doc.y, doc.page.width - 100, 80).fill('#F5F5F5');
+      doc.fillColor('#0B0E11').font('Helvetica-Bold').fontSize(12).text('PERFORMANCE SUMMARY', 70, doc.y - 70);
+      
+      const summaryY = doc.y - 50;
+      doc.fontSize(11).font('Helvetica');
+      doc.fillColor('#333333').text(`Opening Balance: $${statement.openingBalances.totalUSD.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 70, summaryY);
+      doc.text(`Closing Balance: $${statement.closingBalances.totalUSD.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 70, summaryY + 20);
+      doc.text(`Net Change: $${statement.netChangeUSD.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 70, summaryY + 40);
+      doc.fillColor(statement.summary.netProfitUSD >= 0 ? '#10B981' : '#EF4444');
+      doc.text(`Net Profit/Loss: $${statement.summary.netProfitUSD.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 300, summaryY);
+      doc.text(`ROI: ${statement.summary.roiPercentage.toFixed(2)}%`, 300, summaryY + 20);
+      
+      // Transaction Summary
+      doc.moveDown(3);
+      doc.fillColor('#0B0E11').font('Helvetica-Bold').fontSize(14).text('TRANSACTION SUMMARY');
+      doc.moveDown(0.5);
+      doc.strokeColor('#E2E8F0').lineWidth(1).moveTo(50, doc.y).lineTo(doc.page.width - 50, doc.y).stroke();
+      
+      doc.moveDown(0.5);
+      doc.fontSize(10).font('Helvetica');
+      doc.fillColor('#10B981').text(`Total Deposits: $${statement.transactions.summary.totalDepositsUSD.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 70, doc.y);
+      doc.fillColor('#EF4444').text(`Total Withdrawals: $${statement.transactions.summary.totalWithdrawalsUSD.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 250, doc.y - 15);
+      doc.fillColor('#F7A600').text(`Total Fees Paid: $${statement.transactions.summary.totalFeesPaidUSD.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 430, doc.y - 15);
+      
+      // Investment Summary
+      doc.moveDown(2);
+      doc.fillColor('#0B0E11').font('Helvetica-Bold').fontSize(14).text('INVESTMENT SUMMARY');
+      doc.moveDown(0.5);
+      doc.strokeColor('#E2E8F0').lineWidth(1).moveTo(50, doc.y).lineTo(doc.page.width - 50, doc.y).stroke();
+      
+      doc.moveDown(0.5);
+      doc.fontSize(10).font('Helvetica');
+      doc.fillColor('#333333').text(`Total Principal Invested: $${statement.investments.summary.totalPrincipalInvestedUSD.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 70, doc.y);
+      doc.text(`Total Returns Earned: $${statement.investments.summary.totalReturnsEarnedUSD.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 70, doc.y + 20);
+      doc.fillColor('#10B981').text(`Total Profit: $${statement.investments.summary.totalProfitUSD.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 70, doc.y + 40);
+      doc.fillColor('#3B82F6').text(`Active Investments: ${statement.investments.summary.totalActiveInvestmentsCount}`, 350, doc.y);
+      
+      // Referral Earnings
+      if (statement.referrals.summary.totalReferralEarningsUSD > 0) {
+        doc.moveDown(2);
+        doc.fillColor('#0B0E11').font('Helvetica-Bold').fontSize(14).text('REFERRAL EARNINGS');
+        doc.moveDown(0.5);
+        doc.strokeColor('#E2E8F0').lineWidth(1).moveTo(50, doc.y).lineTo(doc.page.width - 50, doc.y).stroke();
+        doc.moveDown(0.5);
+        doc.fillColor('#10B981').fontSize(10).text(`Total Referral Earnings: $${statement.referrals.summary.totalReferralEarningsUSD.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 70, doc.y);
+      }
+      
+      // Recent Transactions Table
+      doc.addPage();
+      doc.rect(0, 0, doc.page.width, 80).fill('#0B0E11');
+      doc.fillColor('#F7A600').fontSize(18).font('Helvetica-Bold').text('RECENT TRANSACTIONS', 50, 30);
+      doc.fillColor('#B7BDC6').fontSize(10).font('Helvetica').text(`Period: ${new Date(statement.period.startDate).toLocaleDateString()} - ${new Date(statement.period.endDate).toLocaleDateString()}`, 50, 55);
+      
+      let yPos = 100;
+      doc.fillColor('#0B0E11').font('Helvetica-Bold').fontSize(9);
+      doc.text('Date', 50, yPos);
+      doc.text('Type', 150, yPos);
+      doc.text('Asset', 230, yPos);
+      doc.text('Amount', 310, yPos);
+      doc.text('Fee', 390, yPos);
+      doc.text('Status', 470, yPos);
+      
+      doc.strokeColor('#E2E8F0').lineWidth(1).moveTo(50, yPos + 15).lineTo(doc.page.width - 50, yPos + 15).stroke();
+      
+      yPos += 25;
+      doc.font('Helvetica').fontSize(8);
+      
+      const recentTransactions = statement.transactions.list.slice(0, 20);
+      for (const tx of recentTransactions) {
+        if (yPos > doc.page.height - 100) {
+          doc.addPage();
+          yPos = 50;
+          doc.fillColor('#0B0E11').font('Helvetica-Bold').fontSize(9);
+          doc.text('Date', 50, yPos);
+          doc.text('Type', 150, yPos);
+          doc.text('Asset', 230, yPos);
+          doc.text('Amount', 310, yPos);
+          doc.text('Fee', 390, yPos);
+          doc.text('Status', 470, yPos);
+          doc.strokeColor('#E2E8F0').lineWidth(1).moveTo(50, yPos + 15).lineTo(doc.page.width - 50, yPos + 15).stroke();
+          yPos += 25;
+          doc.font('Helvetica').fontSize(8);
+        }
+        
+        const amountColor = tx.type === 'deposit' || tx.type === 'interest' ? '#10B981' : 
+                           (tx.type === 'withdrawal' ? '#EF4444' : '#F7A600');
+        
+        doc.fillColor('#333333').text(new Date(tx.createdAt).toLocaleDateString(), 50, yPos);
+        doc.text(tx.type, 150, yPos);
+        doc.text(tx.asset || '-', 230, yPos);
+        doc.fillColor(amountColor).text(`$${tx.amountUSD.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 310, yPos);
+        doc.fillColor('#F7A600').text(`$${tx.feeUSD.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 390, yPos);
+        
+        const statusColor = tx.status === 'completed' ? '#10B981' : '#F7A600';
+        doc.fillColor(statusColor).text(tx.status, 470, yPos);
+        doc.fillColor('#333333');
+        
+        yPos += 18;
+      }
+      
+      // Footer on all pages
+      const pageCount = doc.bufferedPageRange().count;
+      for (let i = 0; i < pageCount; i++) {
+        doc.switchToPage(i);
+        doc.fontSize(8).fillColor('#6C7480').font('Helvetica');
+        doc.text(`© ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.`, 50, doc.page.height - 30);
+        doc.text(`Statement Reference: ${statement.reference}`, doc.page.width - 150, doc.page.height - 30);
+        doc.text(`Page ${i + 1} of ${pageCount}`, doc.page.width / 2 - 20, doc.page.height - 30);
+      }
+      
+      doc.end();
+      
+    } catch (err) {
+      console.error('PDF generation error:', err);
+      reject(err);
+    }
+  });
+}
+
+// Send financial statement email with PDF attachment
+async function sendFinancialStatementEmail(user, statement, pdfBuffer) {
+  try {
+    const periodText = statement.statementType === 'weekly' ? 'Weekly' : 'Monthly';
+    const startDateFormatted = new Date(statement.period.startDate).toLocaleDateString();
+    const endDateFormatted = new Date(statement.period.endDate).toLocaleDateString();
+    
+    const subject = `${periodText} Financial Statement - ₿itHash Capital (${startDateFormatted} to ${endDateFormatted})`;
+    
+    const netProfitColor = statement.summary.netProfitUSD >= 0 ? '#10B981' : '#EF4444';
+    const netProfitSign = statement.summary.netProfitUSD >= 0 ? '+' : '';
+    
+    const html = `
+      <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+        <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+          <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+          <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+          <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+        </div>
+        
+        <div style="padding: 30px; background: #FFFFFF;">
+          <div style="background: #F3F4F6; border-radius: 12px; padding: 20px; margin-bottom: 25px; text-align: center;">
+            <h2 style="color: #0B0E11; font-size: 20px; margin: 0 0 8px 0;">${periodText} Financial Statement</h2>
+            <p style="color: #6C7480; font-size: 14px; margin: 0;">${startDateFormatted} - ${endDateFormatted}</p>
+            <p style="color: #6C7480; font-size: 12px; margin: 5px 0 0 0;">Reference: ${statement.reference}</p>
+          </div>
+          
+          <p style="color: #333333; line-height: 1.6;">Dear <strong>${user.firstName}</strong>,</p>
+          <p style="color: #333333; line-height: 1.6;">Please find attached your ${periodText.toLowerCase()} financial statement for the period ${startDateFormatted} to ${endDateFormatted}.</p>
+          
+          <div style="background: #F5F5F5; border-radius: 12px; padding: 20px; margin: 20px 0;">
+            <h3 style="color: #0B0E11; margin: 0 0 15px 0; font-size: 16px;">Quick Summary</h3>
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr style="border-bottom: 1px solid #E5E7EB;">
+                <td style="padding: 8px 0;">Opening Balance: </td>
+                <td style="padding: 8px 0; text-align: right; font-weight: 500;">$${statement.openingBalances.totalUSD.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+               </tr>
+               <tr style="border-bottom: 1px solid #E5E7EB;">
+                <td style="padding: 8px 0;">Closing Balance: </td>
+                <td style="padding: 8px 0; text-align: right; font-weight: 500;">$${statement.closingBalances.totalUSD.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+               </tr>
+               <tr style="border-bottom: 1px solid #E5E7EB;">
+                <td style="padding: 8px 0;">Net Change: </td>
+                <td style="padding: 8px 0; text-align: right; font-weight: 500;">$${statement.netChangeUSD.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+               </tr>
+               <tr>
+                <td style="padding: 8px 0;">Net Profit/Loss: </td>
+                <td style="padding: 8px 0; text-align: right; font-weight: 700; color: ${netProfitColor};">${netProfitSign}$${statement.summary.netProfitUSD.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+               </tr>
+             </table>
+           </div>
+           
+           <div style="background: #F3F4F6; border-radius: 12px; padding: 15px; margin: 20px 0; text-align: center;">
+             <p style="color: #6C7480; font-size: 13px; margin: 0;">Your financial statement is attached as a PDF. Please review it carefully.</p>
+           </div>
+           
+           <div style="text-align: center; margin: 30px 0;">
+             <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Go to Dashboard</a>
+           </div>
+           
+           <p style="color: #666666; font-size: 12px; margin-top: 30px;">
+             <strong>Email sent:</strong> ${new Date().toLocaleString()}<br>
+             <strong>Statement Reference:</strong> ${statement.reference}
+           </p>
+           
+           <div style="background: #F9FAFB; padding: 15px; border-radius: 8px; margin-top: 20px;">
+             <p style="color: #6C7480; font-size: 12px; margin: 0 0 5px 0;">
+               <strong>Need help?</strong> Contact our support team:
+             </p>
+             <p style="color: #6C7480; font-size: 12px; margin: 0;">
+               📧 <a href="mailto:support@bithashcapital.live" style="color: #F7A600;">support@bithashcapital.live</a><br>
+               🌐 <a href="https://www.bithashcapital.live/support" style="color: #F7A600;">www.bithashcapital.live/support</a>
+             </p>
+           </div>
+         </div>
+         
+         <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+           <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+           <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+         </div>
+       </div>
+     `;
+     
+     // Use the existing transporter (infoTransporter)
+     const mailOptions = {
+       from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
+       to: user.email,
+       subject: subject,
+       html: html,
+       attachments: [{
+         filename: `financial_statement_${statement.reference}.pdf`,
+         content: pdfBuffer,
+         contentType: 'application/pdf'
+       }]
+     };
+     
+     await infoTransporter.sendMail(mailOptions);
+     console.log(`✅ Financial statement email sent to ${user.email} with PDF attachment`);
+     return true;
+     
+   } catch (err) {
+     console.error('Error sending financial statement email:', err);
+     throw new Error(`Failed to send email: ${err.message}`);
+   }
+ }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
