@@ -19980,21 +19980,17 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
 
 
           
-
-
-
-
-
-
-
 // =============================================
-// SPOT WITHDRAWAL ENDPOINT - With gas fee deducted from MAIN wallet only
+// SPOT WITHDRAWAL ENDPOINT - Complete Implementation
 // Minimum withdrawal: $350 USD worth of crypto
-// Gas fee logic matching HTML:
-//   - Withdrawal < $10,000 USD → 0.0056 BTC equivalent
-//   - Withdrawal ≥ $10,000 USD → 0.0072 BTC equivalent
-//   - Gas fee deducted from MAIN wallet in SAME asset
-// Uses price aggregator for real-time conversions
+// Gas fee logic:
+//   - BTC withdrawals: 0.0056 BTC (< $10k) or 0.0072 BTC (≥ $10k) on Bitcoin network
+//   - ETH withdrawals: Convert BTC gas fee to ETH using real-time prices on Ethereum network
+//   - USDT withdrawals: Convert BTC gas fee to USDT on selected network (ERC20/TRC20/BEP20)
+//   - Other assets: Convert BTC gas fee to target asset using real-time prices
+// Gas fee deducted from MAIN wallet only, in the SAME asset
+// Uses price aggregator (Redis) for all real-time conversions
+// Full system logging to SystemLog schema with network information
 // =============================================
 app.post('/api/withdrawals/spot', protect, async (req, res) => {
   try {
@@ -20003,28 +19999,57 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
       amount,           // USD amount requested
       asset,            // crypto asset symbol (btc, eth, usdt, etc.)
       walletAddress,    // destination wallet address
-      exchangeRate      // current exchange rate (optional, will fetch if not provided)
+      exchangeRate,     // current exchange rate (optional)
+      network           // blockchain network (optional, will auto-detect)
     } = req.body;
 
     const MIN_WITHDRAWAL_USD = 350;
+    const GAS_FEE_BTC_LOW = 0.0056;   // For withdrawals < $10,000
+    const GAS_FEE_BTC_HIGH = 0.0072;  // For withdrawals ≥ $10,000
     
-    console.log('=' .repeat(60));
-    console.log('SPOT WITHDRAWAL REQUEST');
-    console.log('=' .repeat(60));
-    console.log(`User ID: ${userId}`);
-    console.log(`Amount USD: $${amount}`);
-    console.log(`Asset: ${asset}`);
-    console.log(`Wallet Address: ${walletAddress.substring(0, 10)}...`);
-    console.log('=' .repeat(60));
+    const startTime = Date.now();
+    const requestId = `WTH-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`;
+    
+    console.log('=' .repeat(80));
+    console.log('💰 SPOT WITHDRAWAL REQUEST');
+    console.log('=' .repeat(80));
+    console.log(`📅 Timestamp: ${new Date().toISOString()}`);
+    console.log(`🆔 Request ID: ${requestId}`);
+    console.log(`👤 User ID: ${userId}`);
+    console.log(`💵 Amount USD: $${amount}`);
+    console.log(`🪙 Asset: ${asset.toUpperCase()}`);
+    console.log(`📍 Wallet Address: ${walletAddress.substring(0, 20)}...`);
+    if (network) console.log(`🌐 Network: ${network}`);
+    console.log('=' .repeat(80));
 
     // =============================================
     // 1. VALIDATION
     // =============================================
     
     if (!amount || amount < MIN_WITHDRAWAL_USD) {
+      const errorMsg = `Minimum withdrawal amount is $${MIN_WITHDRAWAL_USD} USD worth of ${asset.toUpperCase()}`;
+      
+      await SystemLog.create({
+        action: 'withdrawal_failed',
+        entity: 'withdrawal',
+        entityId: null,
+        performedBy: userId,
+        performedByModel: 'User',
+        status: 'failed',
+        errorMessage: errorMsg,
+        errorCode: 'MIN_AMOUNT_ERROR',
+        metadata: {
+          requestId: requestId,
+          requestedAmount: amount,
+          asset: asset,
+          minRequired: MIN_WITHDRAWAL_USD,
+          reason: 'minimum_amount_not_met'
+        }
+      });
+      
       return res.status(400).json({
         status: 'fail',
-        message: `Minimum withdrawal amount is $${MIN_WITHDRAWAL_USD} USD worth of ${asset.toUpperCase()}`
+        message: errorMsg
       });
     }
 
@@ -20043,92 +20068,173 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     }
 
     // =============================================
-    // 2. GET REAL-TIME PRICE FROM PRICE AGGREGATOR (Redis)
+    // 2. DETECT NETWORK FOR THE ASSET
+    // =============================================
+    
+    const assetNetworkMap = {
+      'btc': { network: 'Bitcoin', networkType: 'UTXO', gasAsset: 'BTC' },
+      'eth': { network: 'Ethereum', networkType: 'EVM', gasAsset: 'ETH' },
+      'usdt': { network: network || 'ERC20', networkType: 'EVM', gasAsset: 'USDT' },
+      'usdc': { network: network || 'ERC20', networkType: 'EVM', gasAsset: 'USDC' },
+      'bnb': { network: 'BSC', networkType: 'EVM', gasAsset: 'BNB' },
+      'sol': { network: 'Solana', networkType: 'SOL', gasAsset: 'SOL' },
+      'xrp': { network: 'XRP Ledger', networkType: 'XRP', gasAsset: 'XRP' },
+      'doge': { network: 'Dogecoin', networkType: 'UTXO', gasAsset: 'DOGE' },
+      'trx': { network: 'TRON', networkType: 'TRX', gasAsset: 'TRX' },
+      'ltc': { network: 'Litecoin', networkType: 'UTXO', gasAsset: 'LTC' },
+      'ada': { network: 'Cardano', networkType: 'ADA', gasAsset: 'ADA' },
+      'avax': { network: 'Avalanche C-Chain', networkType: 'EVM', gasAsset: 'AVAX' },
+      'dot': { network: 'Polkadot', networkType: 'DOT', gasAsset: 'DOT' },
+      'matic': { network: 'Polygon', networkType: 'EVM', gasAsset: 'MATIC' },
+      'link': { network: 'Ethereum', networkType: 'EVM', gasAsset: 'LINK' }
+    };
+    
+    const assetLower = asset.toLowerCase();
+    const assetInfo = assetNetworkMap[assetLower] || { 
+      network: 'Blockchain', 
+      networkType: 'UNKNOWN', 
+      gasAsset: asset.toUpperCase() 
+    };
+    
+    const detectedNetwork = assetInfo.network;
+    const networkType = assetInfo.networkType;
+    
+    console.log(`\n🌐 NETWORK DETECTION:`);
+    console.log(`  Asset: ${asset.toUpperCase()}`);
+    console.log(`  Network: ${detectedNetwork}`);
+    console.log(`  Network Type: ${networkType}`);
+    console.log(`  Gas Asset: ${assetInfo.gasAsset}`);
+
+    // =============================================
+    // 3. GET REAL-TIME PRICE FROM PRICE AGGREGATOR (Redis)
     // =============================================
     
     let currentRate = exchangeRate;
+    let priceSource = 'provided';
     
     if (!currentRate || currentRate <= 0) {
-      // Try to get price from Redis cache first (price aggregator)
       const priceKey = REDIS_KEYS.LAST_PRICE(`${asset.toUpperCase()}USDT`);
       const cachedPrice = await redis.get(priceKey);
       
       if (cachedPrice) {
         const priceData = JSON.parse(cachedPrice);
         currentRate = priceData.price;
-        console.log(`✅ Price from Redis aggregator: $${currentRate} (cached at ${new Date(priceData.timestamp).toISOString()})`);
+        priceSource = 'redis_aggregator';
+        console.log(`✅ Price from Redis aggregator: $${currentRate.toFixed(4)} (cached at ${new Date(priceData.timestamp).toISOString()})`);
       } else {
-        // Fallback to direct API call
         currentRate = await getCryptoPrice(asset.toUpperCase());
+        priceSource = 'api_fallback';
         if (!currentRate || currentRate <= 0) {
+          const errorMsg = `Unable to fetch current ${asset.toUpperCase()} price`;
+          
+          await SystemLog.create({
+            action: 'withdrawal_failed',
+            entity: 'withdrawal',
+            entityId: null,
+            performedBy: userId,
+            performedByModel: 'User',
+            status: 'failed',
+            errorMessage: errorMsg,
+            errorCode: 'PRICE_FETCH_ERROR',
+            metadata: {
+              requestId: requestId,
+              asset: asset,
+              reason: 'price_fetch_failed'
+            }
+          });
+          
           return res.status(400).json({
             status: 'fail',
-            message: `Unable to fetch current ${asset.toUpperCase()} price. Please try again.`
+            message: errorMsg + '. Please try again.'
           });
         }
-        console.log(`✅ Price from API: $${currentRate}`);
+        console.log(`✅ Price from API fallback: $${currentRate.toFixed(4)}`);
       }
     }
 
-    // Calculate crypto amount for withdrawal (what user wants to withdraw)
     const withdrawalCryptoAmount = amount / currentRate;
     
     console.log(`\n📊 WITHDRAWAL CALCULATION:`);
-    console.log(`  Exchange Rate: 1 ${asset.toUpperCase()} = $${currentRate.toFixed(2)}`);
+    console.log(`  Exchange Rate: 1 ${asset.toUpperCase()} = $${currentRate.toFixed(4)}`);
+    console.log(`  Price Source: ${priceSource}`);
     console.log(`  Withdrawal Amount: ${withdrawalCryptoAmount.toFixed(8)} ${asset.toUpperCase()} ($${amount.toFixed(2)} USD)`);
 
     // =============================================
-    // 3. CALCULATE GAS FEE (Matching HTML logic exactly)
+    // 4. CALCULATE GAS FEE USING REAL-TIME PRICES
     // =============================================
-    // Gas fee logic from HTML:
-    // const btcGasFee = withdrawalAmount < 10000 ? 0.0056 : 0.0072;
     
-    const GAS_FEE_BTC_LOW = 0.0056;   // For withdrawals < $10,000
-    const GAS_FEE_BTC_HIGH = 0.0072;  // For withdrawals ≥ $10,000
-    
-    let gasFeeInBTC = amount < 10000 ? GAS_FEE_BTC_LOW : GAS_FEE_BTC_HIGH;
+    // Step 1: Determine gas fee in BTC based on withdrawal amount
+    const gasFeeInBTC = amount < 10000 ? GAS_FEE_BTC_LOW : GAS_FEE_BTC_HIGH;
     let gasFeeInTargetAsset = 0;
     let gasFeeInUSD = 0;
+    let btcPrice = 0;
     
-    if (asset.toLowerCase() === 'btc') {
-      // For BTC withdrawals, gas fee is directly in BTC
+    console.log(`\n⛽ GAS FEE CALCULATION:`);
+    console.log(`  Withdrawal amount: $${amount.toLocaleString()} USD`);
+    console.log(`  Gas fee tier: ${amount < 10000 ? 'Standard (< $10k)' : 'High (≥ $10k)'}`);
+    console.log(`  Gas fee in BTC: ${gasFeeInBTC.toFixed(8)} BTC`);
+    
+    if (assetLower === 'btc') {
+      // For BTC withdrawals, gas fee is directly in BTC on Bitcoin network
       gasFeeInTargetAsset = gasFeeInBTC;
       gasFeeInUSD = gasFeeInBTC * currentRate;
-      console.log(`\n⛽ GAS FEE CALCULATION (BTC):`);
-      console.log(`  Gas fee in BTC: ${gasFeeInBTC.toFixed(8)} BTC`);
+      btcPrice = currentRate;
+      
+      console.log(`  Asset: BTC (direct match)`);
+      console.log(`  Network: ${detectedNetwork}`);
+      console.log(`  Gas fee in BTC: ${gasFeeInTargetAsset.toFixed(8)} BTC`);
       console.log(`  Gas fee in USD: $${gasFeeInUSD.toFixed(2)}`);
+      
     } else {
       // For other assets, convert BTC gas fee to target asset using real-time prices
       // Get BTC price from price aggregator
       const btcPriceKey = REDIS_KEYS.LAST_PRICE('BTCUSDT');
       const cachedBTCPrice = await redis.get(btcPriceKey);
-      let btcPrice = 0;
       
       if (cachedBTCPrice) {
-        const priceData = JSON.parse(cachedBTCPrice);
-        btcPrice = priceData.price;
+        const btcPriceData = JSON.parse(cachedBTCPrice);
+        btcPrice = btcPriceData.price;
+        console.log(`  BTC price from aggregator: $${btcPrice.toFixed(4)}`);
       } else {
         btcPrice = await getCryptoPrice('BTC');
+        console.log(`  BTC price from API fallback: $${btcPrice.toFixed(4)}`);
       }
       
       if (!btcPrice || btcPrice <= 0) {
+        const errorMsg = 'Unable to fetch BTC price for gas fee calculation';
+        
+        await SystemLog.create({
+          action: 'withdrawal_failed',
+          entity: 'withdrawal',
+          entityId: null,
+          performedBy: userId,
+          performedByModel: 'User',
+          status: 'failed',
+          errorMessage: errorMsg,
+          errorCode: 'BTC_PRICE_ERROR',
+          metadata: {
+            requestId: requestId,
+            asset: asset,
+            reason: 'btc_price_fetch_failed'
+          }
+        });
+        
         return res.status(400).json({
           status: 'fail',
-          message: 'Unable to fetch BTC price for gas fee calculation. Please try again.'
+          message: errorMsg + '. Please try again.'
         });
       }
       
+      // Convert BTC gas fee to USD, then to target asset
       gasFeeInUSD = gasFeeInBTC * btcPrice;
       gasFeeInTargetAsset = gasFeeInUSD / currentRate;
       
-      console.log(`\n⛽ GAS FEE CALCULATION (${asset.toUpperCase()}):`);
-      console.log(`  BTC Price: $${btcPrice.toFixed(2)}`);
-      console.log(`  Gas fee in BTC: ${gasFeeInBTC.toFixed(8)} BTC`);
+      console.log(`  BTC price: $${btcPrice.toFixed(4)}`);
       console.log(`  Gas fee in USD: $${gasFeeInUSD.toFixed(2)}`);
       console.log(`  Gas fee in ${asset.toUpperCase()}: ${gasFeeInTargetAsset.toFixed(8)} ${asset.toUpperCase()}`);
+      console.log(`  Network: ${detectedNetwork}`);
     }
     
-    // Total crypto needed = withdrawal amount + gas fee
     const totalCryptoNeeded = withdrawalCryptoAmount + gasFeeInTargetAsset;
     
     console.log(`\n💰 TOTAL CRYPTO NEEDED:`);
@@ -20137,11 +20243,23 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     console.log(`  TOTAL: ${totalCryptoNeeded.toFixed(8)} ${asset.toUpperCase()}`);
 
     // =============================================
-    // 4. GET USER AND CHECK BALANCES
+    // 5. GET USER AND CHECK BALANCES
     // =============================================
     
     const user = await User.findById(userId);
     if (!user) {
+      await SystemLog.create({
+        action: 'withdrawal_failed',
+        entity: 'withdrawal',
+        entityId: null,
+        performedBy: userId,
+        performedByModel: 'User',
+        status: 'failed',
+        errorMessage: 'User not found',
+        errorCode: 'USER_NOT_FOUND',
+        metadata: { requestId: requestId }
+      });
+      
       return res.status(404).json({
         status: 'fail',
         message: 'User not found'
@@ -20155,8 +20273,6 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     if (!user.balances.main) user.balances.main = new Map();
     if (!user.balances.matured) user.balances.matured = new Map();
 
-    const assetLower = asset.toLowerCase();
-    
     // Get current crypto balances from BOTH wallets
     const mainCryptoBalance = user.balances.main.get(assetLower) || 0;
     const maturedCryptoBalance = user.balances.matured.get(assetLower) || 0;
@@ -20168,10 +20284,8 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     console.log(`  TOTAL: ${totalCryptoBalance.toFixed(8)} ${asset.toUpperCase()}`);
 
     // =============================================
-    // 5. CHECK GAS FEE BALANCE (MAIN WALLET ONLY)
+    // 6. CHECK GAS FEE BALANCE (MAIN WALLET ONLY)
     // =============================================
-    // CRITICAL: Gas fee must be available in MAIN wallet alone
-    // This matches the HTML logic exactly
     
     if (mainCryptoBalance < gasFeeInTargetAsset) {
       const shortfall = gasFeeInTargetAsset - mainCryptoBalance;
@@ -20182,6 +20296,29 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
       console.log(`  Available in MAIN: ${mainCryptoBalance.toFixed(8)} ${asset.toUpperCase()}`);
       console.log(`  Shortfall: ${shortfall.toFixed(8)} ${asset.toUpperCase()} (≈ $${shortfallUSD.toFixed(2)} USD)`);
       
+      await SystemLog.create({
+        action: 'withdrawal_failed',
+        entity: 'withdrawal',
+        entityId: null,
+        performedBy: userId,
+        performedByModel: 'User',
+        status: 'failed',
+        errorMessage: 'Insufficient MAIN wallet balance for gas fee',
+        errorCode: 'INSUFFICIENT_GAS_FEE',
+        metadata: {
+          requestId: requestId,
+          asset: asset,
+          network: detectedNetwork,
+          gasFeeRequired: gasFeeInTargetAsset,
+          gasFeeRequiredUSD: gasFeeInUSD,
+          mainWalletBalance: mainCryptoBalance,
+          shortfall: shortfall,
+          shortfallUSD: shortfallUSD,
+          withdrawalAmount: amount,
+          withdrawalCryptoAmount: withdrawalCryptoAmount
+        }
+      });
+      
       return res.status(400).json({
         status: 'fail',
         message: `Insufficient ${asset.toUpperCase()} balance in MAIN wallet for gas fee. Required: ${gasFeeInTargetAsset.toFixed(8)} ${asset.toUpperCase()} (≈ $${gasFeeInUSD.toFixed(2)} USD). Available in MAIN: ${mainCryptoBalance.toFixed(8)} ${asset.toUpperCase()}`,
@@ -20189,6 +20326,7 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
           required: gasFeeInTargetAsset,
           requiredUSD: gasFeeInUSD,
           asset: asset.toUpperCase(),
+          network: detectedNetwork,
           shortfall: shortfall,
           shortfallUSD: shortfallUSD
         },
@@ -20201,7 +20339,7 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     console.log(`  ${gasFeeInTargetAsset.toFixed(8)} ${asset.toUpperCase()} available in MAIN wallet`);
 
     // =============================================
-    // 6. CHECK TOTAL WITHDRAWAL BALANCE (MAIN + MATURED)
+    // 7. CHECK TOTAL WITHDRAWAL BALANCE
     // =============================================
     
     if (totalCryptoBalance < totalCryptoNeeded) {
@@ -20209,57 +20347,61 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
       const shortfallUSD = shortfall * currentRate;
       
       console.log(`\n❌ TOTAL BALANCE CHECK FAILED:`);
-      console.log(`  Required total: ${totalCryptoNeeded.toFixed(8)} ${asset.toUpperCase()}`);
-      console.log(`  Available total: ${totalCryptoBalance.toFixed(8)} ${asset.toUpperCase()}`);
-      console.log(`  Shortfall: ${shortfall.toFixed(8)} ${asset.toUpperCase()} (≈ $${shortfallUSD.toFixed(2)} USD)`);
+      
+      await SystemLog.create({
+        action: 'withdrawal_failed',
+        entity: 'withdrawal',
+        entityId: null,
+        performedBy: userId,
+        performedByModel: 'User',
+        status: 'failed',
+        errorMessage: 'Insufficient total balance for withdrawal',
+        errorCode: 'INSUFFICIENT_TOTAL_BALANCE',
+        metadata: {
+          requestId: requestId,
+          asset: asset,
+          network: detectedNetwork,
+          requiredTotal: totalCryptoNeeded,
+          availableTotal: totalCryptoBalance,
+          shortfall: shortfall,
+          shortfallUSD: shortfallUSD,
+          withdrawalAmount: amount,
+          gasFeeRequired: gasFeeInTargetAsset
+        }
+      });
       
       return res.status(400).json({
         status: 'fail',
-        message: `Insufficient total ${asset.toUpperCase()} balance. Required total: ${totalCryptoNeeded.toFixed(8)} ${asset.toUpperCase()} ($${amount.toFixed(2)} USD withdrawal + ${gasFeeInTargetAsset.toFixed(8)} ${asset.toUpperCase()} gas fee). Available total: ${totalCryptoBalance.toFixed(8)} ${asset.toUpperCase()}`,
-        required: {
-          withdrawal: withdrawalCryptoAmount,
-          gasFee: gasFeeInTargetAsset,
-          total: totalCryptoNeeded
-        },
-        available: {
-          main: mainCryptoBalance,
-          matured: maturedCryptoBalance,
-          total: totalCryptoBalance
-        }
+        message: `Insufficient total ${asset.toUpperCase()} balance. Required total: ${totalCryptoNeeded.toFixed(8)} ${asset.toUpperCase()} ($${amount.toFixed(2)} USD withdrawal + ${gasFeeInTargetAsset.toFixed(8)} ${asset.toUpperCase()} gas fee). Available total: ${totalCryptoBalance.toFixed(8)} ${asset.toUpperCase()}`
       });
     }
     
     console.log(`\n✅ TOTAL BALANCE CHECK PASSED`);
 
     // =============================================
-    // 7. DETERMINE WITHDRAWAL SOURCE
+    // 8. DETERMINE WITHDRAWAL SOURCE
     // =============================================
-    // Note: Gas fee is ALWAYS from MAIN wallet
-    // Withdrawal amount can come from MAIN + MATURED
     
-    // First, reserve gas fee from MAIN wallet
     let remainingMainAfterGas = mainCryptoBalance - gasFeeInTargetAsset;
     let withdrawalFromMain = 0;
     let withdrawalFromMatured = 0;
     let balanceSource = '';
     
     if (remainingMainAfterGas >= withdrawalCryptoAmount) {
-      // Withdrawal entirely from MAIN wallet (after gas fee)
       withdrawalFromMain = withdrawalCryptoAmount;
       withdrawalFromMatured = 0;
       balanceSource = 'main';
     } else {
-      // Take remaining MAIN balance, rest from MATURED
       withdrawalFromMain = remainingMainAfterGas;
       withdrawalFromMatured = withdrawalCryptoAmount - remainingMainAfterGas;
       balanceSource = 'both';
     }
     
-    // Total deduction from MAIN = gas fee + withdrawal portion
     const totalMainDeduction = gasFeeInTargetAsset + withdrawalFromMain;
     const totalMaturedDeduction = withdrawalFromMatured;
     
     console.log(`\n📋 DEDUCTION BREAKDOWN:`);
+    console.log(`  Balance Source: ${balanceSource}`);
     console.log(`  MAIN wallet deduction:`);
     console.log(`    - Gas fee: ${gasFeeInTargetAsset.toFixed(8)} ${asset.toUpperCase()}`);
     console.log(`    - Withdrawal portion: ${withdrawalFromMain.toFixed(8)} ${asset.toUpperCase()}`);
@@ -20267,46 +20409,39 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     console.log(`  MATURED wallet deduction:`);
     console.log(`    - Withdrawal portion: ${withdrawalFromMatured.toFixed(8)} ${asset.toUpperCase()}`);
     console.log(`    - Total MATURED: ${totalMaturedDeduction.toFixed(8)} ${asset.toUpperCase()}`);
-    console.log(`  Balance source: ${balanceSource}`);
 
     // =============================================
-    // 8. PERFORM DEDUCTIONS FROM USER BALANCES
+    // 9. PERFORM DEDUCTIONS FROM USER BALANCES
     // =============================================
     
-    // Deduct from MAIN wallet (gas fee + withdrawal portion)
+    // Deduct from MAIN wallet
     if (totalMainDeduction > 0) {
       const newMainBalance = mainCryptoBalance - totalMainDeduction;
       if (newMainBalance <= 0.00000001) {
         user.balances.main.delete(assetLower);
-        console.log(`  MAIN wallet: BALANCE DEPLETED (removed from Map)`);
       } else {
         user.balances.main.set(assetLower, newMainBalance);
-        console.log(`  MAIN wallet new balance: ${newMainBalance.toFixed(8)} ${asset.toUpperCase()}`);
       }
     }
     
-    // Deduct from MATURED wallet (withdrawal portion only)
+    // Deduct from MATURED wallet
     if (totalMaturedDeduction > 0) {
       const newMaturedBalance = maturedCryptoBalance - totalMaturedDeduction;
       if (newMaturedBalance <= 0.00000001) {
         user.balances.matured.delete(assetLower);
-        console.log(`  MATURED wallet: BALANCE DEPLETED (removed from Map)`);
       } else {
         user.balances.matured.set(assetLower, newMaturedBalance);
-        console.log(`  MATURED wallet new balance: ${newMaturedBalance.toFixed(8)} ${asset.toUpperCase()}`);
       }
     }
     
-    // Update USD equivalents in wallets
+    // Update USD equivalents
     const currentMainUSD = user.balances.main.get('usd') || 0;
     const currentMaturedUSD = user.balances.matured.get('usd') || 0;
     
-    const usdValueOfWithdrawal = amount;
     const usdValueOfGasFee = gasFeeInUSD;
-    const usdValueOfMainPortion = (withdrawalFromMain / withdrawalCryptoAmount) * usdValueOfWithdrawal;
-    const usdValueOfMaturedPortion = (withdrawalFromMatured / withdrawalCryptoAmount) * usdValueOfWithdrawal;
+    const usdValueOfMainPortion = (withdrawalFromMain / withdrawalCryptoAmount) * amount;
+    const usdValueOfMaturedPortion = (withdrawalFromMatured / withdrawalCryptoAmount) * amount;
     
-    // Update MAIN wallet USD (gas fee + withdrawal portion)
     if (totalMainDeduction > 0) {
       const newMainUSD = currentMainUSD - (usdValueOfGasFee + usdValueOfMainPortion);
       if (newMainUSD <= 0.01) {
@@ -20316,7 +20451,6 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
       }
     }
     
-    // Update MATURED wallet USD (withdrawal portion only)
     if (totalMaturedDeduction > 0) {
       const newMaturedUSD = currentMaturedUSD - usdValueOfMaturedPortion;
       if (newMaturedUSD <= 0.01) {
@@ -20331,14 +20465,11 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     console.log(`\n💾 USER BALANCES UPDATED AND SAVED`);
 
     // =============================================
-    // 9. CREATE TRANSACTION RECORD
+    // 10. CREATE TRANSACTION RECORD
     // =============================================
     
-    // Calculate fee (1% of withdrawal amount, minimum $1)
     const fee = Math.max(1, amount * 0.01);
     const netAmount = amount - fee;
-    
-    // Generate unique reference
     const reference = `WTH-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
     
     const transaction = await Transaction.create({
@@ -20352,69 +20483,110 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
       method: asset.toUpperCase(),
       reference: reference,
       details: {
+        requestId: requestId,
         withdrawalAddress: walletAddress,
         exchangeRate: currentRate,
+        priceSource: priceSource,
+        network: detectedNetwork,
+        networkType: networkType,
         gasFee: {
           amount: gasFeeInTargetAsset,
           asset: asset.toUpperCase(),
           usdValue: usdValueOfGasFee,
-          btcEquivalent: gasFeeInBTC
+          btcEquivalent: gasFeeInBTC,
+          btcPriceAtCalculation: btcPrice
         },
         balanceSource: balanceSource,
         mainAmountUsed: withdrawalFromMain,
         maturedAmountUsed: withdrawalFromMatured,
         gasFeeFromMain: gasFeeInTargetAsset,
-        network: getNetworkName(asset),
         submittedAt: new Date(),
         usdValue: amount,
         cryptoValue: withdrawalCryptoAmount,
-        totalCryptoDeducted: totalCryptoNeeded
+        totalCryptoDeducted: totalCryptoNeeded,
+        processingTime: Date.now() - startTime
       },
       btcAddress: walletAddress,
       fee: fee,
       netAmount: netAmount,
-      exchangeRateAtTime: currentRate
+      exchangeRateAtTime: currentRate,
+      network: detectedNetwork
     });
     
     console.log(`\n📝 TRANSACTION CREATED:`);
     console.log(`  Reference: ${reference}`);
-    console.log(`  Status: pending`);
     console.log(`  Transaction ID: ${transaction._id}`);
+    console.log(`  Network: ${detectedNetwork}`);
+    console.log(`  Processing time: ${Date.now() - startTime}ms`);
 
     // =============================================
-    // 10. LOG ACTIVITY
+    // 11. CREATE SYSTEM LOG ENTRY
     // =============================================
     
-    await logActivity(
-      'withdrawal_created',
-      'Transaction',
-      transaction._id,
-      userId,
-      'User',
-      req,
-      {
+    await SystemLog.create({
+      action: 'withdrawal_created',
+      entity: 'Transaction',
+      entityId: transaction._id,
+      performedBy: userId,
+      performedByModel: 'User',
+      performedByEmail: user.email,
+      performedByName: `${user.firstName} ${user.lastName}`,
+      ip: getRealClientIP(req),
+      userAgent: req.headers['user-agent'] || 'Unknown',
+      deviceType: getDeviceType(req),
+      status: 'success',
+      riskLevel: 'medium', // Withdrawals are medium risk
+      metadata: {
+        requestId: requestId,
+        withdrawalReference: reference,
         amountUSD: amount,
-        asset: asset,
+        asset: asset.toUpperCase(),
         cryptoAmount: withdrawalCryptoAmount,
         walletAddress: walletAddress,
+        network: detectedNetwork,
+        networkType: networkType,
         balanceSource: balanceSource,
         mainAmountUsed: withdrawalFromMain,
         maturedAmountUsed: withdrawalFromMatured,
         gasFee: {
           amount: gasFeeInTargetAsset,
           asset: asset.toUpperCase(),
-          usdValue: usdValueOfGasFee
+          usdValue: usdValueOfGasFee,
+          btcEquivalent: gasFeeInBTC,
+          btcPrice: btcPrice
         },
         exchangeRate: currentRate,
+        priceSource: priceSource,
         fee: fee,
-        totalCryptoDeducted: totalCryptoNeeded
+        netAmount: netAmount,
+        totalCryptoDeducted: totalCryptoNeeded,
+        processingTimeMs: Date.now() - startTime,
+        remainingMainBalance: user.balances.main.get(assetLower) || 0,
+        remainingMaturedBalance: user.balances.matured.get(assetLower) || 0
+      },
+      financial: {
+        amount: amount,
+        amountUSD: amount,
+        cryptoAmount: withdrawalCryptoAmount,
+        cryptoAsset: asset.toUpperCase(),
+        fee: fee,
+        exchangeRate: currentRate,
+        balanceAfter: (user.balances.main.get('usd') || 0) + (user.balances.matured.get('usd') || 0),
+        walletType: 'withdrawal',
+        transactionId: transaction._id,
+        reference: reference
+      },
+      location: {
+        country: req.clientLocation?.country || 'Unknown',
+        city: req.clientLocation?.city || 'Unknown',
+        ip: getRealClientIP(req)
       }
-    );
+    });
     
-    console.log(`\n📋 ACTIVITY LOGGED`);
+    console.log(`\n📋 SYSTEM LOG CREATED`);
 
     // =============================================
-    // 11. SEND EMAIL NOTIFICATION
+    // 12. SEND EMAIL NOTIFICATION
     // =============================================
     
     try {
@@ -20432,31 +20604,45 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
           withdrawalAddress: walletAddress,
           requestId: reference,
           timestamp: new Date(),
-          network: getNetworkName(asset),
+          network: detectedNetwork,
           exchangeRate: currentRate,
           gasFee: {
             amount: gasFeeInTargetAsset.toFixed(8),
             asset: asset.toUpperCase(),
             usdValue: usdValueOfGasFee.toFixed(2)
-          }
+          },
+          balanceSource: balanceSource === 'main' ? 'Main Wallet' : balanceSource === 'matured' ? 'Matured Wallet' : 'Main & Matured Wallets'
         }
       });
       console.log(`📧 Withdrawal request email sent to ${user.email}`);
     } catch (emailError) {
       console.error('Failed to send withdrawal request email:', emailError);
+      
+      await SystemLog.create({
+        action: 'email_failed',
+        entity: 'Transaction',
+        entityId: transaction._id,
+        performedBy: userId,
+        performedByModel: 'User',
+        status: 'warning',
+        errorMessage: 'Failed to send withdrawal confirmation email',
+        metadata: {
+          email: user.email,
+          withdrawalReference: reference,
+          error: emailError.message
+        }
+      });
     }
 
     // =============================================
-    // 12. EMIT REAL-TIME UPDATE VIA SOCKET.IO
+    // 13. EMIT REAL-TIME UPDATE VIA SOCKET.IO
     // =============================================
     
     const io = req.app.get('io');
     if (io) {
-      // Calculate new USD balances for real-time update
       let newMainUSD = 0;
       let newMaturedUSD = 0;
       
-      // Recalculate MAIN USD from remaining crypto
       for (const [crypto, balance] of user.balances.main) {
         if (crypto !== 'usd' && balance > 0) {
           const price = await getCryptoPrice(crypto.toUpperCase());
@@ -20464,7 +20650,6 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
         }
       }
       
-      // Recalculate MATURED USD from remaining crypto
       for (const [crypto, balance] of user.balances.matured) {
         if (crypto !== 'usd' && balance > 0) {
           const price = await getCryptoPrice(crypto.toUpperCase());
@@ -20475,36 +20660,50 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
       io.to(`user_${userId}`).emit('balance_update', {
         main: newMainUSD,
         matured: newMaturedUSD,
-        active: user.balances.active?.get('usd') || 0
+        active: user.balances.active?.get('usd') || 0,
+        timestamp: Date.now()
       });
       
-      io.to(`user_${userId}`).emit('crypto_balance_update', {
-        currency: assetLower,
-        walletType: 'main',
-        balance: user.balances.main.get(assetLower) || 0,
-        usdValue: (user.balances.main.get(assetLower) || 0) * currentRate
+      io.to(`user_${userId}`).emit('withdrawal_update', {
+        withdrawalId: transaction._id,
+        reference: reference,
+        amount: withdrawalCryptoAmount,
+        asset: asset.toUpperCase(),
+        network: detectedNetwork,
+        status: 'pending',
+        timestamp: Date.now()
       });
       
-      console.log(`📡 Real-time balance update emitted to user ${userId}`);
+      console.log(`📡 Real-time updates emitted to user ${userId}`);
     }
 
     console.log(`\n✅ WITHDRAWAL REQUEST SUBMITTED SUCCESSFULLY`);
-    console.log('=' .repeat(60));
+    console.log(`📊 Summary:`);
+    console.log(`  Asset: ${asset.toUpperCase()}`);
+    console.log(`  Network: ${detectedNetwork}`);
+    console.log(`  Amount: ${withdrawalCryptoAmount.toFixed(8)} ${asset.toUpperCase()} ($${amount.toFixed(2)} USD)`);
+    console.log(`  Gas Fee: ${gasFeeInTargetAsset.toFixed(8)} ${asset.toUpperCase()} (≈ $${usdValueOfGasFee.toFixed(2)} USD)`);
+    console.log(`  Total Deducted: ${totalCryptoNeeded.toFixed(8)} ${asset.toUpperCase()}`);
+    console.log(`  Balance Source: ${balanceSource}`);
+    console.log(`  Reference: ${reference}`);
+    console.log('=' .repeat(80));
 
     // =============================================
-    // 13. RETURN SUCCESS RESPONSE
+    // 14. RETURN SUCCESS RESPONSE
     // =============================================
     
     res.status(201).json({
       status: 'success',
-      message: `Withdrawal request submitted successfully. You requested to withdraw ${withdrawalCryptoAmount.toFixed(8)} ${asset.toUpperCase()} ($${amount.toFixed(2)} USD). Gas fee of ${gasFeeInTargetAsset.toFixed(8)} ${asset.toUpperCase()} (≈ $${usdValueOfGasFee.toFixed(2)} USD) deducted from MAIN wallet. Reference: ${reference}`,
+      message: `Withdrawal request submitted successfully on ${detectedNetwork} network.`,
       data: {
         transaction: {
           id: transaction._id,
           reference: reference,
+          requestId: requestId,
           amountUSD: amount,
           cryptoAmount: withdrawalCryptoAmount,
-          asset: asset,
+          asset: asset.toUpperCase(),
+          network: detectedNetwork,
           status: 'pending',
           createdAt: transaction.createdAt,
           fee: fee,
@@ -20515,7 +20714,8 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
           amount: gasFeeInTargetAsset,
           asset: asset.toUpperCase(),
           usdValue: usdValueOfGasFee,
-          btcEquivalent: gasFeeInBTC
+          btcEquivalent: gasFeeInBTC,
+          network: detectedNetwork
         },
         balanceInfo: {
           source: balanceSource,
@@ -20531,12 +20731,36 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
   } catch (err) {
     console.error('❌ Spot withdrawal error:', err);
     console.error('Error stack:', err.stack);
+    
+    // Log error to SystemLog
+    try {
+      await SystemLog.create({
+        action: 'withdrawal_error',
+        entity: 'withdrawal',
+        entityId: null,
+        performedBy: req.user?._id || 'unknown',
+        performedByModel: 'User',
+        status: 'failed',
+        errorMessage: err.message,
+        errorCode: 'INTERNAL_SERVER_ERROR',
+        metadata: {
+          stack: err.stack,
+          body: req.body
+        }
+      });
+    } catch (logError) {
+      console.error('Failed to log error to SystemLog:', logError);
+    }
+    
     res.status(500).json({
       status: 'error',
       message: err.message || 'Failed to process withdrawal request'
     });
   }
 });
+
+
+
 
 
 
