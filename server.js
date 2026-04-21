@@ -19971,36 +19971,33 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
 
 
 
-
-
 // =============================================
-// FIXED: SPOT WITHDRAWAL ENDPOINT - Correct Gas Fee Calculation
+// SPOT WITHDRAWAL ENDPOINT - Complete with Visual Email Body Only
 // =============================================
 app.post('/api/withdrawals/spot', protect, async (req, res) => {
   try {
     const userId = req.user._id;
     const {
       amount,           // USD amount requested
-      asset,            // crypto asset symbol
+      asset,            // crypto asset symbol (btc, eth, trx, etc.)
       walletAddress,    // destination wallet address
-      exchangeRate,
-      network
+      exchangeRate,     // current exchange rate (optional)
+      network           // blockchain network (optional)
     } = req.body;
 
     const MIN_WITHDRAWAL_USD = 350;
+    const GAS_FEE_BTC_LOW = 0.0056;
+    const GAS_FEE_BTC_HIGH = 0.0072;
     
-    // FIXED: Gas fee in BTC (matches HTML exactly)
-    const GAS_FEE_BTC_LOW = 0.0056;   // 0.0056 BTC for withdrawals < $10,000
-    const GAS_FEE_BTC_HIGH = 0.0072;  // 0.0072 BTC for withdrawals ≥ $10,000
-    
-    const startTime = Date.now();
     const requestId = `WTH-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
     
     console.log('=' .repeat(80));
     console.log('💰 SPOT WITHDRAWAL REQUEST');
     console.log('=' .repeat(80));
-    console.log(`Asset: ${asset.toUpperCase()}`);
+    console.log(`Request ID: ${requestId}`);
+    console.log(`User ID: ${userId}`);
     console.log(`Amount USD: $${amount}`);
+    console.log(`Asset: ${asset.toUpperCase()}`);
     console.log(`Wallet: ${walletAddress.substring(0, 20)}...`);
     console.log('=' .repeat(80));
 
@@ -20034,36 +20031,35 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     // =============================================
     
     const assetNetworkMap = {
-      'btc': { network: 'Bitcoin', networkType: 'UTXO', decimals: 8 },
-      'eth': { network: 'Ethereum', networkType: 'EVM', decimals: 18 },
-      'usdt': { network: network || 'TRC20', networkType: 'TRX', decimals: 6 },
-      'usdc': { network: network || 'ERC20', networkType: 'EVM', decimals: 6 },
-      'bnb': { network: 'BSC', networkType: 'EVM', decimals: 18 },
-      'sol': { network: 'Solana', networkType: 'SOL', decimals: 9 },
-      'xrp': { network: 'XRP Ledger', networkType: 'XRP', decimals: 6 },
-      'doge': { network: 'Dogecoin', networkType: 'UTXO', decimals: 8 },
-      'trx': { network: 'TRON', networkType: 'TRX', decimals: 6 },
-      'ltc': { network: 'Litecoin', networkType: 'UTXO', decimals: 8 },
-      'ada': { network: 'Cardano', networkType: 'ADA', decimals: 6 },
-      'avax': { network: 'Avalanche C-Chain', networkType: 'EVM', decimals: 18 },
-      'dot': { network: 'Polkadot', networkType: 'DOT', decimals: 10 },
-      'matic': { network: 'Polygon', networkType: 'EVM', decimals: 18 }
+      'btc': { network: 'Bitcoin', decimals: 8, logo: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png' },
+      'eth': { network: 'Ethereum', decimals: 18, logo: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png' },
+      'usdt': { network: network || 'TRC20', decimals: 6, logo: 'https://assets.coingecko.com/coins/images/325/large/Tether.png' },
+      'usdc': { network: network || 'ERC20', decimals: 6, logo: 'https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png' },
+      'bnb': { network: 'BSC', decimals: 18, logo: 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png' },
+      'sol': { network: 'Solana', decimals: 9, logo: 'https://assets.coingecko.com/coins/images/4128/large/solana.png' },
+      'xrp': { network: 'XRP Ledger', decimals: 6, logo: 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png' },
+      'doge': { network: 'Dogecoin', decimals: 8, logo: 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png' },
+      'trx': { network: 'TRON', decimals: 6, logo: 'https://assets.coingecko.com/coins/images/1094/large/tron-logo.png' },
+      'ltc': { network: 'Litecoin', decimals: 8, logo: 'https://assets.coingecko.com/coins/images/2/large/litecoin.png' },
+      'ada': { network: 'Cardano', decimals: 6, logo: 'https://assets.coingecko.com/coins/images/975/large/cardano.png' },
+      'matic': { network: 'Polygon', decimals: 18, logo: 'https://assets.coingecko.com/coins/images/4713/large/matic-token-icon.png' }
     };
     
     const assetLower = asset.toLowerCase();
     const assetInfo = assetNetworkMap[assetLower] || { 
       network: 'Blockchain', 
-      networkType: 'UNKNOWN', 
-      decimals: 8 
+      decimals: 8,
+      logo: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png'
     };
     
     const detectedNetwork = assetInfo.network;
+    const assetLogo = assetInfo.logo;
+    const decimals = assetInfo.decimals;
 
     // =============================================
     // 3. GET REAL-TIME PRICES FROM AGGREGATOR
     // =============================================
     
-    // Get target asset price
     let targetPrice = exchangeRate;
     if (!targetPrice || targetPrice <= 0) {
       const priceKey = REDIS_KEYS.LAST_PRICE(`${asset.toUpperCase()}USDT`);
@@ -20084,7 +20080,6 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
       }
     }
     
-    // Get BTC price for gas fee conversion
     let btcPrice = 0;
     const btcPriceKey = REDIS_KEYS.LAST_PRICE('BTCUSDT');
     const cachedBTCPrice = await redis.get(btcPriceKey);
@@ -20102,54 +20097,21 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
         message: 'Unable to fetch BTC price for gas fee calculation'
       });
     }
-    
-    console.log(`\n📊 PRICES:`);
-    console.log(`  ${asset.toUpperCase()} price: $${targetPrice.toFixed(4)}`);
-    console.log(`  BTC price: $${btcPrice.toFixed(2)}`);
-    
+
     // =============================================
-    // 4. CALCULATE GAS FEE (MATCHING HTML LOGIC)
+    // 4. CALCULATE GAS FEE
     // =============================================
     
-    // Step 1: Determine gas fee in BTC based on withdrawal amount
     const gasFeeInBTC = amount < 10000 ? GAS_FEE_BTC_LOW : GAS_FEE_BTC_HIGH;
-    
-    // Step 2: Convert BTC gas fee to USD
     const gasFeeInUSD = gasFeeInBTC * btcPrice;
-    
-    // Step 3: Convert USD gas fee to target asset
     let gasFeeInTargetAsset = gasFeeInUSD / targetPrice;
+    gasFeeInTargetAsset = Number(gasFeeInTargetAsset.toFixed(decimals));
     
-    // Step 4: Apply network-specific rounding
-    const decimals = assetInfo.decimals;
-    gasFeeInTargetAsset = Math.floor(gasFeeInTargetAsset * Math.pow(10, decimals)) / Math.pow(10, decimals);
-    
-    // Calculate withdrawal amount in target asset
-    const withdrawalCryptoAmount = amount / targetPrice;
-    
-    console.log(`\n⛽ GAS FEE CALCULATION:`);
-    console.log(`  Withdrawal amount: $${amount.toLocaleString()} USD`);
-    console.log(`  Gas fee tier: ${amount < 10000 ? 'Standard' : 'High'}`);
-    console.log(`  Gas fee in BTC: ${gasFeeInBTC.toFixed(8)} BTC`);
-    console.log(`  Gas fee in USD: $${gasFeeInUSD.toFixed(2)}`);
-    console.log(`  Gas fee in ${asset.toUpperCase()}: ${gasFeeInTargetAsset.toFixed(decimals)} ${asset.toUpperCase()}`);
-    console.log(`  Withdrawal amount in ${asset.toUpperCase()}: ${withdrawalCryptoAmount.toFixed(decimals)}`);
-    
-    // For TRX specifically, log the calculation
-    if (assetLower === 'trx') {
-      console.log(`\n🔍 TRX GAS FEE VERIFICATION:`);
-      console.log(`  BTC price: $${btcPrice.toFixed(2)}`);
-      console.log(`  TRX price: $${targetPrice.toFixed(4)}`);
-      console.log(`  Gas fee BTC: ${gasFeeInBTC} BTC`);
-      console.log(`  Gas fee USD: $${gasFeeInUSD.toFixed(2)}`);
-      console.log(`  Gas fee TRX: ${gasFeeInUSD} / ${targetPrice} = ${gasFeeInTargetAsset.toFixed(2)} TRX`);
-      console.log(`  Expected gas fee should be ~${(280 / targetPrice).toFixed(2)} TRX (since 0.0056 BTC ≈ $280 USD)`);
-    }
-    
+    const withdrawalCryptoAmount = Number((amount / targetPrice).toFixed(decimals));
     const totalCryptoNeeded = withdrawalCryptoAmount + gasFeeInTargetAsset;
 
     // =============================================
-    // 5. CHECK USER BALANCES
+    // 5. GET USER AND CHECK BALANCES
     // =============================================
     
     const user = await User.findById(userId);
@@ -20170,31 +20132,18 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     const maturedBalance = user.balances.matured.get(assetLower) || 0;
     const totalBalance = mainBalance + maturedBalance;
 
-    console.log(`\n💼 BALANCES:`);
-    console.log(`  MAIN: ${mainBalance.toFixed(decimals)} ${asset.toUpperCase()}`);
-    console.log(`  MATURED: ${maturedBalance.toFixed(decimals)} ${asset.toUpperCase()}`);
-    console.log(`  TOTAL: ${totalBalance.toFixed(decimals)} ${asset.toUpperCase()}`);
-    console.log(`  NEEDED: ${totalCryptoNeeded.toFixed(decimals)} ${asset.toUpperCase()}`);
-
     // Check gas fee in MAIN wallet
     if (mainBalance < gasFeeInTargetAsset) {
       return res.status(400).json({
         status: 'fail',
-        message: `Insufficient ${asset.toUpperCase()} in MAIN wallet for gas fee. Required: ${gasFeeInTargetAsset.toFixed(decimals)} ${asset.toUpperCase()} (≈ $${gasFeeInUSD.toFixed(2)} USD)`,
-        gasFeeRequired: {
-          amount: gasFeeInTargetAsset,
-          asset: asset.toUpperCase(),
-          usdValue: gasFeeInUSD
-        },
-        mainWalletBalance: mainBalance
+        message: `Insufficient ${asset.toUpperCase()} in MAIN wallet for gas fee. Required: ${gasFeeInTargetAsset.toFixed(decimals)} ${asset.toUpperCase()} (≈ $${gasFeeInUSD.toFixed(2)} USD)`
       });
     }
     
-    // Check total balance
     if (totalBalance < totalCryptoNeeded) {
       return res.status(400).json({
         status: 'fail',
-        message: `Insufficient total ${asset.toUpperCase()} balance. Required: ${totalCryptoNeeded.toFixed(decimals)} ${asset.toUpperCase()}, Available: ${totalBalance.toFixed(decimals)} ${asset.toUpperCase()}`
+        message: `Insufficient total ${asset.toUpperCase()} balance. Required: ${totalCryptoNeeded.toFixed(decimals)} ${asset.toUpperCase()}`
       });
     }
 
@@ -20219,13 +20168,6 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     
     const totalMainDeduction = gasFeeInTargetAsset + withdrawalFromMain;
     const totalMaturedDeduction = withdrawalFromMatured;
-    
-    console.log(`\n📋 DEDUCTION BREAKDOWN:`);
-    console.log(`  Source: ${balanceSource}`);
-    console.log(`  MAIN deduction: ${totalMainDeduction.toFixed(decimals)} ${asset.toUpperCase()}`);
-    console.log(`    - Gas fee: ${gasFeeInTargetAsset.toFixed(decimals)}`);
-    console.log(`    - Withdrawal: ${withdrawalFromMain.toFixed(decimals)}`);
-    console.log(`  MATURED deduction: ${totalMaturedDeduction.toFixed(decimals)} ${asset.toUpperCase()}`);
 
     // =============================================
     // 7. PERFORM DEDUCTIONS
@@ -20315,7 +20257,204 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     });
 
     // =============================================
-    // 9. CREATE SYSTEM LOG
+    // 9. SEND VISUAL EMAIL (Body Only - No Header/Footer)
+    // =============================================
+    
+    // Wallet display text
+    let walletDisplayText = balanceSource === 'main' ? 'Main Wallet' : 
+                           balanceSource === 'matured' ? 'Matured Wallet' : 'Main & Matured Wallets';
+    
+    // Email body HTML (clean, visual, organized)
+    const emailBodyHtml = `
+      <div style="padding: 0;">
+        
+        <!-- Status Badge -->
+        <div style="text-align: center; margin-bottom: 25px;">
+          <div style="display: inline-block; background: rgba(247, 166, 0, 0.1); border: 1px solid rgba(247, 166, 0, 0.3); border-radius: 60px; padding: 6px 16px;">
+            <span style="color: #F7A600; font-size: 13px; font-weight: 600;">⏳ PENDING CONFIRMATION</span>
+          </div>
+        </div>
+        
+        <!-- Greeting -->
+        <p style="color: #FFFFFF; font-size: 16px; margin-bottom: 25px; line-height: 1.5;">Dear <strong style="color: #F7A600;">${user.firstName}</strong>,</p>
+        <p style="color: #B7BDC6; font-size: 14px; margin-bottom: 25px; line-height: 1.6;">Your withdrawal request has been received and is currently being processed. Below are the details of your transaction.</p>
+        
+        <!-- Withdrawal Card -->
+        <div style="background: #11151C; border-radius: 16px; padding: 24px; margin-bottom: 24px; border: 1px solid #1E2329;">
+          
+          <!-- Asset Header with Logo -->
+          <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid #1E2329;">
+            <div style="width: 48px; height: 48px; border-radius: 50%; background: rgba(247, 166, 0, 0.1); display: flex; align-items: center; justify-content: center;">
+              <img src="${assetLogo}" alt="${asset.toUpperCase()}" style="width: 32px; height: 32px;">
+            </div>
+            <div style="flex: 1;">
+              <div style="font-size: 18px; font-weight: 700; color: #FFFFFF; margin-bottom: 4px;">${asset.toUpperCase()} Withdrawal</div>
+              <div style="font-size: 12px; color: #6C7480;">Network: ${detectedNetwork}</div>
+            </div>
+          </div>
+          
+          <!-- Withdrawal Amount -->
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #1E2329;">
+            <div style="font-size: 14px; color: #B7BDC6;">Withdrawal Amount</div>
+            <div style="text-align: right;">
+              <div style="font-size: 20px; font-weight: 700; color: #FFFFFF;">${withdrawalCryptoAmount.toFixed(decimals)} ${asset.toUpperCase()}</div>
+              <div style="font-size: 13px; color: #6C7480;">≈ $${amount.toLocaleString()} USD</div>
+            </div>
+          </div>
+          
+          <!-- GAS FEE - IN RED -->
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding: 16px; background: rgba(239, 68, 68, 0.1); border-radius: 12px; border-left: 3px solid #EF4444;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M5 10H19M5 10V18C5 19.1046 5.89543 20 7 20H17C18.1046 20 19 19.1046 19 18V10M5 10L7 4H17L19 10M12 14V16" stroke="#EF4444" stroke-width="2" stroke-linecap="round"/>
+                <path d="M8 4L6 10M16 4L18 10" stroke="#EF4444" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+              <span style="font-size: 14px; font-weight: 600; color: #EF4444;">Network Gas Fee</span>
+            </div>
+            <div style="text-align: right;">
+              <div style="font-size: 16px; font-weight: 700; color: #EF4444;">${gasFeeInTargetAsset.toFixed(decimals)} ${asset.toUpperCase()}</div>
+              <div style="font-size: 12px; color: #EF4444; opacity: 0.8;">≈ $${gasFeeInUSD.toFixed(2)} USD</div>
+            </div>
+          </div>
+          
+          <!-- Wallet Deduction Source -->
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding: 12px; background: ${balanceSource === 'main' ? 'rgba(247, 166, 0, 0.05)' : balanceSource === 'matured' ? 'rgba(16, 185, 129, 0.05)' : 'rgba(99, 102, 241, 0.05)'}; border-radius: 12px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M20 7H4C2.89543 7 2 7.89543 2 9V19C2 20.1046 2.89543 21 4 21H20C21.1046 21 22 20.1046 22 19V9C22 7.89543 21.1046 7 20 7Z" stroke="${balanceSource === 'main' ? '#F7A600' : balanceSource === 'matured' ? '#10B981' : '#818CF8'}" stroke-width="2" stroke-linecap="round"/>
+                <path d="M16 3L20 7M8 3L4 7" stroke="${balanceSource === 'main' ? '#F7A600' : balanceSource === 'matured' ? '#10B981' : '#818CF8'}" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+              <span style="font-size: 14px; color: #B7BDC6;">Deducted From</span>
+            </div>
+            <div>
+              <span style="display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; background: ${balanceSource === 'main' ? 'rgba(247, 166, 0, 0.15)' : balanceSource === 'matured' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(99, 102, 241, 0.15)'}; color: ${balanceSource === 'main' ? '#F7A600' : balanceSource === 'matured' ? '#10B981' : '#818CF8'};">${walletDisplayText}</span>
+            </div>
+          </div>
+          
+          <!-- Detailed Breakdown (if both wallets used) -->
+          ${balanceSource === 'both' ? `
+          <div style="background: #0B0E11; border-radius: 12px; padding: 12px; margin-top: 12px; border: 1px solid #1E2329;">
+            <div style="font-size: 12px; color: #6C7480; margin-bottom: 8px;">Breakdown:</div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+              <span style="font-size: 13px; color: #B7BDC6;">From Main Wallet:</span>
+              <span style="font-size: 13px; font-weight: 600; color: #F7A600;">${withdrawalFromMain.toFixed(decimals)} ${asset.toUpperCase()}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span style="font-size: 13px; color: #B7BDC6;">From Matured Wallet:</span>
+              <span style="font-size: 13px; font-weight: 600; color: #10B981;">${withdrawalFromMatured.toFixed(decimals)} ${asset.toUpperCase()}</span>
+            </div>
+          </div>
+          ` : ''}
+          
+          <!-- Destination Address -->
+          <div style="background: #0B0E11; border: 1px solid #1E2329; border-radius: 12px; padding: 16px; margin-top: 16px;">
+            <div style="font-size: 12px; color: #6C7480; margin-bottom: 8px;">Destination Wallet Address</div>
+            <div style="font-size: 13px; color: #B7BDC6; word-break: break-all; font-family: monospace;">${walletAddress}</div>
+          </div>
+          
+          <!-- Transaction Details Grid -->
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px;">
+            <div style="background: #0B0E11; padding: 12px; border-radius: 12px; border: 1px solid #1E2329;">
+              <div style="font-size: 11px; color: #6C7480; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">Exchange Rate</div>
+              <div style="font-size: 14px; font-weight: 600; color: #F7A600;">1 ${asset.toUpperCase()} ≈ $${targetPrice.toFixed(2)}</div>
+            </div>
+            <div style="background: #0B0E11; padding: 12px; border-radius: 12px; border: 1px solid #1E2329;">
+              <div style="font-size: 11px; color: #6C7480; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">Request ID</div>
+              <div style="font-size: 13px; font-weight: 600; color: #FFFFFF; font-family: monospace;">${reference}</div>
+            </div>
+          </div>
+          
+        </div>
+        
+        <!-- Total Summary -->
+        <div style="background: linear-gradient(135deg, #11151C 0%, #0B0E11 100%); border-radius: 12px; padding: 20px; margin-top: 8px; border: 1px solid #1E2329;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <div style="font-size: 16px; font-weight: 600; color: #FFFFFF;">Total Deducted</div>
+            <div style="text-align: right;">
+              <div style="font-size: 18px; font-weight: 700; color: #F7A600;">${totalCryptoNeeded.toFixed(decimals)} ${asset.toUpperCase()}</div>
+              <div style="font-size: 12px; color: #6C7480;">≈ $${(amount + gasFeeInUSD).toFixed(2)} USD</div>
+            </div>
+          </div>
+          <div style="height: 1px; background: #1E2329; margin: 12px 0;"></div>
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="font-size: 13px; color: #6C7480;">Your remaining balance will be updated shortly</div>
+            <a href="https://www.bithashcapital.live/dashboard" style="background: #F7A600; color: #000000; padding: 10px 20px; text-decoration: none; border-radius: 999px; font-size: 13px; font-weight: 600;">View Dashboard →</a>
+          </div>
+        </div>
+        
+        <!-- Help Section -->
+        <div style="margin-top: 30px; padding: 20px; background: rgba(247, 166, 0, 0.05); border-radius: 12px; text-align: center; border: 1px solid rgba(247, 166, 0, 0.1);">
+          <p style="color: #B7BDC6; font-size: 13px; margin: 0;">
+            <strong style="color: #F7A600;">Need help?</strong> Contact our support team at 
+            <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a>
+          </p>
+        </div>
+        
+      </div>
+    `;
+    
+    // Send email using your existing sendProfessionalEmail function
+    // The template will automatically add header and footer
+    await sendProfessionalEmail({
+      email: user.email,
+      template: 'withdrawal_request',
+      data: {
+        name: user.firstName,
+        amount: withdrawalCryptoAmount.toFixed(decimals),
+        asset: asset.toUpperCase(),
+        usdValue: amount,
+        withdrawalAddress: walletAddress,
+        requestId: reference,
+        network: detectedNetwork,
+        exchangeRate: targetPrice,
+        gasFee: {
+          amount: gasFeeInTargetAsset.toFixed(decimals),
+          usdValue: gasFeeInUSD.toFixed(2)
+        },
+        walletSource: balanceSource,
+        customBody: emailBodyHtml  // Pass custom body to override default
+      }
+    });
+    
+    // Override the email content with our visual body
+    // This uses the existing transporter directly to avoid duplicating header/footer
+    const mailTransporter = infoTransporter;
+    await mailTransporter.sendMail({
+      from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
+      to: user.email,
+      subject: `Withdrawal Request Submitted - ₿itHash Capital`,
+      html: `
+        <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #0B0E11;">
+          <!-- Header -->
+          <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%); border-bottom: 1px solid #1E2329;">
+            <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+            <h1 style="color: #F7A600; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+            <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+          </div>
+          
+          <!-- Body Content -->
+          ${emailBodyHtml}
+          
+          <!-- Footer -->
+          <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+            <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+            <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+            <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
+              <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> | 
+              <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
+            </p>
+          </div>
+        </div>
+      `
+    });
+    
+    console.log(`📧 Visual withdrawal email sent to ${user.email}`);
+    console.log(`   Asset: ${asset.toUpperCase()}`);
+    console.log(`   Amount: ${withdrawalCryptoAmount.toFixed(decimals)}`);
+    console.log(`   Gas Fee: ${gasFeeInTargetAsset.toFixed(decimals)} (deducted from ${balanceSource} wallet)`);
+
+    // =============================================
+    // 10. CREATE SYSTEM LOG
     // =============================================
     
     await SystemLog.create({
@@ -20346,6 +20485,9 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
           usdValue: gasFeeInUSD,
           btcEquivalent: gasFeeInBTC
         },
+        balanceSource: balanceSource,
+        mainAmountUsed: withdrawalFromMain,
+        maturedAmountUsed: withdrawalFromMatured,
         exchangeRate: targetPrice,
         btcPrice: btcPrice
       },
@@ -20354,7 +20496,7 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
         amountUSD: amount,
         cryptoAmount: withdrawalCryptoAmount,
         cryptoAsset: asset.toUpperCase(),
-        fee: fee,
+        fee: 0,
         exchangeRate: targetPrice,
         balanceAfter: (user.balances.main.get('usd') || 0) + (user.balances.matured.get('usd') || 0),
         walletType: 'main',
@@ -20364,22 +20506,56 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     });
 
     // =============================================
-    // 10. RETURN RESPONSE WITH CORRECT GAS FEE
+    // 11. EMIT REAL-TIME UPDATE
     // =============================================
     
-    console.log(`\n✅ WITHDRAWAL SUBMITTED:`);
-    console.log(`  Reference: ${reference}`);
-    console.log(`  Network: ${detectedNetwork}`);
-    console.log(`  Amount: ${withdrawalCryptoAmount.toFixed(decimals)} ${asset.toUpperCase()}`);
-    console.log(`  Gas Fee: ${gasFeeInTargetAsset.toFixed(decimals)} ${asset.toUpperCase()} (≈ $${gasFeeInUSD.toFixed(2)} USD)`);
+    const io = req.app.get('io');
+    if (io) {
+      let newMainUSD = 0;
+      let newMaturedUSD = 0;
+      
+      for (const [crypto, balance] of user.balances.main) {
+        if (crypto !== 'usd' && balance > 0) {
+          const price = await getCryptoPrice(crypto.toUpperCase());
+          if (price) newMainUSD += balance * price;
+        }
+      }
+      
+      for (const [crypto, balance] of user.balances.matured) {
+        if (crypto !== 'usd' && balance > 0) {
+          const price = await getCryptoPrice(crypto.toUpperCase());
+          if (price) newMaturedUSD += balance * price;
+        }
+      }
+      
+      io.to(`user_${userId}`).emit('balance_update', {
+        main: newMainUSD,
+        matured: newMaturedUSD,
+        active: user.balances.active?.get('usd') || 0,
+        timestamp: Date.now()
+      });
+    }
+
+    // =============================================
+    // 12. RETURN SUCCESS RESPONSE
+    // =============================================
+    
+    console.log(`\n✅ WITHDRAWAL SUBMITTED SUCCESSFULLY`);
+    console.log(`   Reference: ${reference}`);
+    console.log(`   Network: ${detectedNetwork}`);
+    console.log(`   Amount: ${withdrawalCryptoAmount.toFixed(decimals)} ${asset.toUpperCase()}`);
+    console.log(`   Gas Fee: ${gasFeeInTargetAsset.toFixed(decimals)} ${asset.toUpperCase()} (deducted from ${balanceSource} wallet)`);
+    console.log(`   Email sent to: ${user.email}`);
+    console.log('=' .repeat(80));
     
     res.status(201).json({
       status: 'success',
-      message: `Withdrawal submitted on ${detectedNetwork} network. Gas fee: ${gasFeeInTargetAsset.toFixed(decimals)} ${asset.toUpperCase()} (≈ $${gasFeeInUSD.toFixed(2)} USD)`,
+      message: `Withdrawal request submitted successfully on ${detectedNetwork} network.`,
       data: {
         transaction: {
           id: transaction._id,
           reference: reference,
+          requestId: requestId,
           amountUSD: amount,
           cryptoAmount: withdrawalCryptoAmount,
           asset: asset.toUpperCase(),
@@ -20391,6 +20567,12 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
           asset: asset.toUpperCase(),
           usdValue: gasFeeInUSD,
           btcEquivalent: gasFeeInBTC
+        },
+        balanceInfo: {
+          source: balanceSource,
+          mainAmountUsed: withdrawalFromMain,
+          maturedAmountUsed: withdrawalFromMatured,
+          gasFeeFromMain: gasFeeInTargetAsset
         }
       }
     });
@@ -20403,8 +20585,6 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     });
   }
 });
-
-
 
 
 
