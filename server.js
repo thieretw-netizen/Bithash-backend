@@ -7931,7 +7931,7 @@ app.post('/api/investments', protect, [
       currency: 'BTC',
       status: 'completed',
       method: 'INTERNAL',
-      reference: `INV-${Date.now()}-${Math.floor(Math.random()  * 1000)}`,
+      reference: `INV-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       details: {
         investmentId: investment._id,
         planName: plan.name,
@@ -8108,23 +8108,13 @@ app.post('/api/investments', protect, [
     }
 
     // =============================================
-    // SEND PROFESSIONAL INVESTMENT EMAIL (SISTER EMAIL TO DEPOSIT APPROVAL)
+    // SEND PROFESSIONAL INVESTMENT EMAIL (SISTER TO DEPOSIT APPROVAL)
+    // USING REAL COINGECKO BITCOIN LOGO
     // =============================================
     try {
-      // Get crypto logo URL
-      const getCryptoLogoUrl = (asset) => {
-        const logoMap = {
-          'BTC': 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png',
-          'ETH': 'https://assets.coingecko.com/coins/images/279/large/ethereum.png',
-          'USDT': 'https://assets.coingecko.com/coins/images/325/large/Tether.png',
-          'BNB': 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png',
-          'SOL': 'https://assets.coingecko.com/coins/images/4128/large/solana.png',
-          'USDC': 'https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png'
-        };
-        return logoMap[asset.toUpperCase()] || 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png';
-      };
+      // REAL Bitcoin logo from CoinGecko
+      const cryptoLogoUrl = 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png';
       
-      const cryptoLogoUrl = getCryptoLogoUrl('BTC');
       const formattedAmount = amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       const formattedBTCAmount = investmentAmountAfterFeeBTC.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
       const formattedExpectedReturn = expectedReturnUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -8175,9 +8165,7 @@ app.post('/api/investments', protect, [
             
             <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
               <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
-                <div style="background: #F7A600; width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center;">
-                  <span style="color: #000; font-weight: bold; font-size: 18px;">₿</span>
-                </div>
+                <img src="${cryptoLogoUrl}" width="40" height="40" style="border-radius: 50%;">
                 <div>
                   <div style="font-weight: bold; font-size: 18px;">${plan.name}</div>
                   <div style="color: #64748B; font-size: 12px;">${plan.percentage}% ROI • ${plan.duration} hours</div>
@@ -8199,29 +8187,29 @@ app.post('/api/investments', protect, [
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>Exchange Rate (Live):</strong></td>
                   <td style="padding: 8px 0; text-align: right;">1 BTC = $${formattedRate}</td>
-                </tr>
+                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>Expected Return:</strong></td>
                   <td style="padding: 8px 0; text-align: right; color: #10B981;">
                     <strong>${formattedExpectedBTC} BTC</strong><br>
                     <span style="font-size: 12px;">≈ $${formattedExpectedReturn} USD</span>
-                  </td>
-                </tr>
+                   </td>
+                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>Wallet Used:</strong></td>
                   <td style="padding: 8px 0; text-align: right;">
                     <span style="background: ${balanceType === 'main' ? '#F7A600' : '#D4AF37'}; color: ${balanceType === 'main' ? '#000' : '#fff'}; padding: 2px 10px; border-radius: 20px; font-size: 12px;">${balanceType === 'main' ? 'Main Wallet' : 'Matured Wallet'}</span>
-                  </td>
-                </tr>
+                   </td>
+                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>Start Date:</strong></td>
                   <td style="padding: 8px 0; text-align: right;">${formattedStartDate}</td>
-                </tr>
+                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>Expected Maturity:</strong></td>
                   <td style="padding: 8px 0; text-align: right;">${formattedEndDate}</td>
-                </tr>
-              </table>
+                 </tr>
+               </table>
             </div>
             
             <div style="text-align: center; margin: 30px 0;">
@@ -8732,18 +8720,12 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
       console.log(`✅ Investment ${investment._id} completed for user ${user.email}. Return: ${totalReturnBTC.toFixed(8)} BTC`);
 
       // =============================================
-      // SEND MATURITY EMAIL NOTIFICATION
+      // SEND MATURITY EMAIL NOTIFICATION WITH REAL COINGECKO BITCOIN LOGO
       // =============================================
       try {
-        const getCryptoLogoUrl = (asset) => {
-          const logoMap = {
-            'BTC': 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png',
-            'ETH': 'https://assets.coingecko.com/coins/images/279/large/ethereum.png'
-          };
-          return logoMap[asset.toUpperCase()] || 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png';
-        };
+        // REAL Bitcoin logo from CoinGecko
+        const cryptoLogoUrl = 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png';
         
-        const cryptoLogoUrl = getCryptoLogoUrl('BTC');
         const formattedReturnBTC = totalReturnBTC.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
         const formattedReturnUSD = totalReturnUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         const formattedProfitBTC = (totalReturnBTC - investment.amountBTC).toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
@@ -8778,9 +8760,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
               
               <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
                 <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
-                  <div style="background: #F7A600; width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center;">
-                    <span style="color: #000; font-weight: bold; font-size: 18px;">₿</span>
-                  </div>
+                  <img src="${cryptoLogoUrl}" width="40" height="40" style="border-radius: 50%;">
                   <div>
                     <div style="font-weight: bold; font-size: 18px;">${investment.plan.name}</div>
                     <div style="color: #64748B; font-size: 12px;">${investment.returnPercentage}% ROI • Completed</div>
