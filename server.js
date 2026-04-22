@@ -24629,7 +24629,6 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
 
 
 
-
 // =============================================
 // ENDPOINT 1: GET /api/admin/crypto/assets - Real-time crypto assets for donut chart
 // =============================================
@@ -24854,14 +24853,136 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
     
     const generateStatementForUser = async (user) => {
       try {
-        // Get all transactions
+        // =============================================
+        // FETCH ALL TRANSACTIONS
+        // =============================================
         const transactions = await Transaction.find({
           user: user._id,
           createdAt: { $gte: startDate, $lte: endDate },
           status: 'completed'
         }).sort({ createdAt: -1 });
         
-        // Get investments
+        // =============================================
+        // FETCH ALL BUY AND SELL TRANSACTIONS FOR P&L CALCULATION
+        // =============================================
+        const allBuyTransactions = await Transaction.find({
+          user: user._id,
+          type: 'buy',
+          status: 'completed'
+        }).sort({ createdAt: 1 });
+        
+        const allSellTransactions = await Transaction.find({
+          user: user._id,
+          type: 'sell',
+          status: 'completed'
+        }).sort({ createdAt: 1 });
+        
+        // =============================================
+        // COMPLEX PROFIT/LOSS CALCULATION (FIFO METHOD)
+        // Tracks each crypto's price at purchase vs sale
+        // =============================================
+        const assetInventory = new Map(); // asset -> [{ amount, price, date, remaining }]
+        const realizedPnLByAsset = new Map(); // asset -> total realized P&L
+        const unrealizedPnLByAsset = new Map(); // asset -> total unrealized P&L
+        
+        // Process all BUY transactions to build inventory
+        for (const buyTx of allBuyTransactions) {
+          const asset = (buyTx.asset || buyTx.buyDetails?.asset || '').toLowerCase();
+          const amount = buyTx.assetAmount || buyTx.buyDetails?.assetAmount || 0;
+          const price = buyTx.buyDetails?.buyingPrice || buyTx.exchangeRateAtTime || 0;
+          const date = buyTx.createdAt;
+          
+          if (asset && amount > 0 && price > 0) {
+            if (!assetInventory.has(asset)) {
+              assetInventory.set(asset, []);
+            }
+            assetInventory.get(asset).push({
+              amount: amount,
+              price: price,
+              date: date,
+              remaining: amount
+            });
+          }
+        }
+        
+        // Process all SELL transactions using FIFO to calculate realized P&L
+        for (const sellTx of allSellTransactions) {
+          const asset = (sellTx.asset || sellTx.sellDetails?.asset || '').toLowerCase();
+          const sellAmount = sellTx.assetAmount || sellTx.sellDetails?.assetAmount || 0;
+          const sellPrice = sellTx.sellDetails?.sellingPrice || sellTx.exchangeRateAtTime || 0;
+          
+          if (asset && sellAmount > 0 && sellPrice > 0) {
+            let remainingToSell = sellAmount;
+            let totalCostBasis = 0;
+            const inventory = assetInventory.get(asset);
+            
+            if (inventory && inventory.length > 0) {
+              for (let i = 0; i < inventory.length && remainingToSell > 0; i++) {
+                const lot = inventory[i];
+                if (lot.remaining > 0) {
+                  const sellFromLot = Math.min(lot.remaining, remainingToSell);
+                  const costBasis = sellFromLot * lot.price;
+                  totalCostBasis += costBasis;
+                  lot.remaining -= sellFromLot;
+                  remainingToSell -= sellFromLot;
+                }
+              }
+              
+              const totalProceeds = sellAmount * sellPrice;
+              const realizedPnL = totalProceeds - totalCostBasis;
+              
+              if (!realizedPnLByAsset.has(asset)) {
+                realizedPnLByAsset.set(asset, 0);
+              }
+              realizedPnLByAsset.set(asset, realizedPnLByAsset.get(asset) + realizedPnL);
+            }
+          }
+        }
+        
+        // Calculate unrealized P&L for remaining inventory using current prices
+        for (const [asset, inventory] of assetInventory.entries()) {
+          let totalRemainingAmount = 0;
+          let totalCostBasis = 0;
+          
+          for (const lot of inventory) {
+            if (lot.remaining > 0) {
+              totalRemainingAmount += lot.remaining;
+              totalCostBasis += lot.remaining * lot.price;
+            }
+          }
+          
+          if (totalRemainingAmount > 0) {
+            const currentPrice = await getCryptoPrice(asset.toUpperCase());
+            if (currentPrice && currentPrice > 0) {
+              const currentValue = totalRemainingAmount * currentPrice;
+              const unrealizedPnL = currentValue - totalCostBasis;
+              unrealizedPnLByAsset.set(asset, unrealizedPnL);
+            }
+          }
+        }
+        
+        // Calculate total realized and unrealized P&L
+        let totalRealizedPnL = 0;
+        let totalUnrealizedPnL = 0;
+        const assetPnLDetails = [];
+        
+        const allAssets = new Set([...realizedPnLByAsset.keys(), ...unrealizedPnLByAsset.keys()]);
+        for (const asset of allAssets) {
+          const realized = realizedPnLByAsset.get(asset) || 0;
+          const unrealized = unrealizedPnLByAsset.get(asset) || 0;
+          totalRealizedPnL += realized;
+          totalUnrealizedPnL += unrealized;
+          assetPnLDetails.push({
+            asset: asset.toUpperCase(),
+            realizedPnL: realized,
+            unrealizedPnL: unrealized,
+            totalPnL: realized + unrealized
+          });
+        }
+        
+        // =============================================
+        // FETCH INVESTMENTS
+        // =============================================
         const investmentsInPeriod = await Investment.find({ 
           user: user._id, 
           createdAt: { $gte: startDate, $lte: endDate } 
@@ -24873,29 +24994,32 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
           status: 'completed' 
         }).populate('plan');
         
-        // Calculate opening and closing balances
-        const openingBalances = await calculateOpeningBalancesWithTimestamp(user._id, startDate);
-        const closingBalances = await calculateClosingBalancesWithTimestamp(user._id, endDate);
+        // =============================================
+        // CALCULATE OPENING AND CLOSING BALANCES
+        // =============================================
+        const openingBalances = await calculateDetailedOpeningBalances(user._id, startDate);
+        const closingBalances = await calculateDetailedClosingBalances(user._id, endDate);
         
-        // Calculate detailed totals
+        // =============================================
+        // AGGREGATE TRANSACTION TOTALS
+        // =============================================
         let totalDeposits = 0, totalWithdrawals = 0, totalFees = 0;
-        let totalBuyVolume = 0, totalSellVolume = 0, netTradingPnL = 0;
+        let totalBuyVolume = 0, totalSellVolume = 0;
         
         for (const tx of transactions) {
           if (tx.type === 'deposit') totalDeposits += tx.amount || 0;
           if (tx.type === 'withdrawal') totalWithdrawals += tx.amount || 0;
           if (tx.fee) totalFees += tx.fee;
           if (tx.type === 'buy') totalBuyVolume += tx.amount || 0;
-          if (tx.type === 'sell') {
-            totalSellVolume += tx.amount || 0;
-            if (tx.sellDetails && tx.sellDetails.profitLoss) netTradingPnL += tx.sellDetails.profitLoss;
-          }
+          if (tx.type === 'sell') totalSellVolume += tx.amount || 0;
         }
         
         const netChange = closingBalances.totalUSD - openingBalances.totalUSD;
         const roi = openingBalances.totalUSD > 0 ? (netChange / openingBalances.totalUSD) * 100 : 0;
         
-        // Create statement record
+        // =============================================
+        // CREATE FINANCIAL STATEMENT RECORD
+        // =============================================
         const statement = new FinancialStatement({
           user: user._id,
           statementType: period,
@@ -24930,9 +25054,9 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
             summary: {
               totalBuyVolumeUSD: totalBuyVolume,
               totalSellVolumeUSD: totalSellVolume,
-              totalTradingProfitUSD: netTradingPnL > 0 ? netTradingPnL : 0,
-              totalTradingLossUSD: netTradingPnL < 0 ? Math.abs(netTradingPnL) : 0,
-              netTradingPnLUSD: netTradingPnL
+              totalTradingProfitUSD: totalRealizedPnL > 0 ? totalRealizedPnL : 0,
+              totalTradingLossUSD: totalRealizedPnL < 0 ? Math.abs(totalRealizedPnL) : 0,
+              netTradingPnLUSD: totalRealizedPnL
             }
           },
           investments: {
@@ -24985,7 +25109,10 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
             totalProfitUSD: netChange > 0 ? netChange : 0,
             totalLossUSD: netChange < 0 ? Math.abs(netChange) : 0,
             netProfitUSD: netChange,
-            roiPercentage: roi
+            roiPercentage: roi,
+            realizedPnL: totalRealizedPnL,
+            unrealizedPnL: totalUnrealizedPnL,
+            assetPnLDetails: assetPnLDetails
           },
           ipAddress: req.ip,
           userAgent: req.headers['user-agent'] || 'Unknown',
@@ -24996,7 +25123,7 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
         await statement.save();
         
         // =============================================
-        // PROFESSIONAL PDF GENERATION - DETAILED & ORGANIZED
+        // PROFESSIONAL PDF GENERATION WITH DETAILED P&L
         // =============================================
         const PDFDocument = require('pdfkit');
         const doc = new PDFDocument({ margin: 50, size: 'A4' });
@@ -25018,7 +25145,7 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
           return false;
         };
         
-        // ========== HEADER SECTION ==========
+        // ========== HEADER WITH LOGO ==========
         const logoUrl = 'https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png';
         try {
           const response = await axios.get(logoUrl, { responseType: 'arraybuffer', timeout: 5000 });
@@ -25052,18 +25179,17 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
         doc.text(`Statement Generated: ${new Date().toLocaleString()}`, leftMargin + 320, y + 32);
         y += 80;
         
-        // ========== BALANCE SUMMARY SECTION ==========
+        // ========== BALANCE SUMMARY ==========
         needNewPage(180);
         doc.fillColor('#0B0E11').fontSize(14).font('Helvetica-Bold').text('1. BALANCE SUMMARY', leftMargin, y);
         y += 22;
         
-        // Table Header - Fixed width columns so "Change" fits properly
         doc.fillColor('#1E3A8A').rect(leftMargin, y, contentWidth, 24).fill();
         doc.fillColor('#FFFFFF').fontSize(9).font('Helvetica-Bold');
         doc.text('Wallet Type', leftMargin + 12, y + 7);
         doc.text('Opening Balance (USD)', leftMargin + 200, y + 7);
-        doc.text('Closing Balance (USD)', leftMargin + 330, y + 7);
-        doc.text('Net Change (USD)', leftMargin + 460, y + 7);
+        doc.text('Closing Balance (USD)', leftMargin + 340, y + 7);
+        doc.text('Net Change (USD)', leftMargin + 480, y + 7);
         y += 24;
         
         const balanceRows = [
@@ -25082,25 +25208,68 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
           doc.fillColor('#374151').fontSize(9).font('Helvetica');
           doc.text(row.label, leftMargin + 12, y + 6);
           doc.text(formatUSD(row.open), leftMargin + 200, y + 6);
-          doc.text(formatUSD(row.close), leftMargin + 330, y + 6);
-          doc.fillColor(change >= 0 ? '#10B981' : '#EF4444').text(formatUSD(change), leftMargin + 460, y + 6);
+          doc.text(formatUSD(row.close), leftMargin + 340, y + 6);
+          doc.fillColor(change >= 0 ? '#10B981' : '#EF4444').text(formatUSD(change), leftMargin + 480, y + 6);
           y += 22;
         }
         
-        // Total Row
         const totalChangeValue = closingBalances.totalUSD - openingBalances.totalUSD;
         needNewPage(30);
         doc.fillColor('#E0E7FF').rect(leftMargin, y, contentWidth, 28).fill();
         doc.fillColor('#1E3A8A').fontSize(10).font('Helvetica-Bold');
         doc.text('TOTAL PORTFOLIO VALUE', leftMargin + 12, y + 9);
         doc.text(formatUSD(openingBalances.totalUSD), leftMargin + 200, y + 9);
-        doc.text(formatUSD(closingBalances.totalUSD), leftMargin + 330, y + 9);
-        doc.fillColor(totalChangeValue >= 0 ? '#10B981' : '#EF4444').text(formatUSD(totalChangeValue), leftMargin + 460, y + 9);
+        doc.text(formatUSD(closingBalances.totalUSD), leftMargin + 340, y + 9);
+        doc.fillColor(totalChangeValue >= 0 ? '#10B981' : '#EF4444').text(formatUSD(totalChangeValue), leftMargin + 480, y + 9);
         y += 40;
         
-        // ========== FINANCIAL METRICS SECTION ==========
+        // ========== PROFIT & LOSS ANALYSIS ==========
+        needNewPage(200);
+        doc.fillColor('#0B0E11').fontSize(14).font('Helvetica-Bold').text('2. PROFIT & LOSS ANALYSIS', leftMargin, y);
+        y += 22;
+        
+        // Realized P&L Card
+        doc.fillColor('#F0FDF4').rect(leftMargin, y, (contentWidth - 20) / 2, 70).fill();
+        doc.fillColor('#0B0E11').fontSize(10).font('Helvetica-Bold').text('REALIZED PROFIT / LOSS', leftMargin + 15, y + 12);
+        doc.fontSize(18).font('Helvetica-Bold').fillColor(totalRealizedPnL >= 0 ? '#10B981' : '#EF4444').text(formatUSD(totalRealizedPnL), leftMargin + 15, y + 38);
+        y += 80;
+        
+        // Unrealized P&L Card
+        needNewPage(90);
+        doc.fillColor('#EFF6FF').rect(leftMargin + (contentWidth - 20) / 2 + 20, y - 80, (contentWidth - 20) / 2, 70).fill();
+        doc.fillColor('#0B0E11').fontSize(10).font('Helvetica-Bold').text('UNREALIZED PROFIT / LOSS', leftMargin + (contentWidth - 20) / 2 + 35, y - 68);
+        doc.fontSize(18).font('Helvetica-Bold').fillColor(totalUnrealizedPnL >= 0 ? '#10B981' : '#EF4444').text(formatUSD(totalUnrealizedPnL), leftMargin + (contentWidth - 20) / 2 + 35, y - 42);
+        
+        // Asset-wise P&L Breakdown Table
         needNewPage(160);
-        doc.fillColor('#0B0E11').fontSize(14).font('Helvetica-Bold').text('2. FINANCIAL METRICS', leftMargin, y);
+        doc.fillColor('#0B0E11').fontSize(12).font('Helvetica-Bold').text('Asset-wise Profit & Loss Breakdown', leftMargin, y);
+        y += 20;
+        
+        doc.fillColor('#1E3A8A').rect(leftMargin, y, contentWidth, 22).fill();
+        doc.fillColor('#FFFFFF').fontSize(8).font('Helvetica-Bold');
+        doc.text('Asset', leftMargin + 12, y + 7);
+        doc.text('Realized P&L (USD)', leftMargin + 150, y + 7);
+        doc.text('Unrealized P&L (USD)', leftMargin + 300, y + 7);
+        doc.text('Total P&L (USD)', leftMargin + 450, y + 7);
+        y += 22;
+        
+        for (let i = 0; i < assetPnLDetails.length; i++) {
+          const detail = assetPnLDetails[i];
+          needNewPage(22);
+          const bgColor = i % 2 === 0 ? '#FFFFFF' : '#F8FAFC';
+          doc.fillColor(bgColor).rect(leftMargin, y, contentWidth, 22).fill();
+          doc.fillColor('#374151').fontSize(9).font('Helvetica');
+          doc.text(detail.asset, leftMargin + 12, y + 6);
+          doc.fillColor(detail.realizedPnL >= 0 ? '#10B981' : '#EF4444').text(formatUSD(detail.realizedPnL), leftMargin + 150, y + 6);
+          doc.fillColor(detail.unrealizedPnL >= 0 ? '#10B981' : '#EF4444').text(formatUSD(detail.unrealizedPnL), leftMargin + 300, y + 6);
+          doc.fillColor(detail.totalPnL >= 0 ? '#10B981' : '#EF4444').text(formatUSD(detail.totalPnL), leftMargin + 450, y + 6);
+          y += 22;
+        }
+        y += 15;
+        
+        // ========== FINANCIAL METRICS ==========
+        needNewPage(160);
+        doc.fillColor('#0B0E11').fontSize(14).font('Helvetica-Bold').text('3. FINANCIAL METRICS', leftMargin, y);
         y += 22;
         
         const metricsData = [
@@ -25108,7 +25277,7 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
           { label: 'Total Withdrawals (Outflow)', value: formatUSD(statement.summary.totalOutflowUSD), color: '#F59E0B' },
           { label: 'Network & Transaction Fees', value: formatUSD(statement.fees.summary.totalFeesUSD), color: '#EF4444' },
           { label: 'Net Cash Flow', value: formatUSD(statement.summary.netCashFlowUSD), color: '#3B82F6' },
-          { label: 'Net Profit / (Loss)', value: formatUSD(statement.summary.netProfitUSD), color: statement.summary.netProfitUSD >= 0 ? '#10B981' : '#EF4444' },
+          { label: 'Realized Trading P&L', value: formatUSD(totalRealizedPnL), color: totalRealizedPnL >= 0 ? '#10B981' : '#EF4444' },
           { label: 'Return on Investment (ROI)', value: `${statement.summary.roiPercentage.toFixed(2)}%`, color: '#8B5CF6' }
         ];
         
@@ -25135,13 +25304,12 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
         
         y += Math.ceil(metricsData.length / 3) * (metricCardHeight + 12) + 25;
         
-        // ========== TRANSACTION HISTORY SECTION ==========
+        // ========== TRANSACTION HISTORY ==========
         if (statement.transactions.list.length > 0) {
           needNewPage(200);
-          doc.fillColor('#0B0E11').fontSize(14).font('Helvetica-Bold').text('3. TRANSACTION HISTORY', leftMargin, y);
+          doc.fillColor('#0B0E11').fontSize(14).font('Helvetica-Bold').text('4. TRANSACTION HISTORY', leftMargin, y);
           y += 22;
           
-          // Transaction Summary Stats
           doc.fillColor('#F0FDF4').rect(leftMargin, y, contentWidth, 40).fill();
           doc.fillColor('#374151').fontSize(9).font('Helvetica');
           doc.text(`Total Transactions: ${statement.transactions.list.length}`, leftMargin + 15, y + 12);
@@ -25149,7 +25317,6 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
           doc.text(`Total Volume: ${formatUSD(statement.transactions.summary.totalDepositsUSD + statement.transactions.summary.totalWithdrawalsUSD)}`, leftMargin + 350, y + 12);
           y += 55;
           
-          // Transaction Table Header
           doc.fillColor('#1E3A8A').rect(leftMargin, y, contentWidth, 22).fill();
           doc.fillColor('#FFFFFF').fontSize(8).font('Helvetica-Bold');
           doc.text('Date', leftMargin + 8, y + 6);
@@ -25161,7 +25328,7 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
           doc.text('Status', leftMargin + 440, y + 6);
           y += 22;
           
-          const recentTransactions = statement.transactions.list.slice(0, 12);
+          const recentTransactions = statement.transactions.list.slice(0, 10);
           for (let i = 0; i < recentTransactions.length; i++) {
             const tx = recentTransactions[i];
             needNewPage(20);
@@ -25184,13 +25351,12 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
           y += 15;
         }
         
-        // ========== INVESTMENT ACTIVITY SECTION ==========
+        // ========== INVESTMENT ACTIVITY ==========
         if (statement.investments.started.length > 0 || statement.investments.matured.length > 0) {
           needNewPage(160);
-          doc.fillColor('#0B0E11').fontSize(14).font('Helvetica-Bold').text('4. INVESTMENT ACTIVITY', leftMargin, y);
+          doc.fillColor('#0B0E11').fontSize(14).font('Helvetica-Bold').text('5. INVESTMENT ACTIVITY', leftMargin, y);
           y += 22;
           
-          // Investment Summary
           doc.fillColor('#EFF6FF').rect(leftMargin, y, contentWidth, 50).fill();
           doc.fillColor('#374151').fontSize(9).font('Helvetica');
           doc.text(`Total Principal Invested: ${formatUSD(statement.investments.summary.totalPrincipalInvestedUSD)}`, leftMargin + 15, y + 12);
@@ -25242,7 +25408,7 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
         doc.fontSize(7).font('Helvetica').fillColor('#6B7280');
         doc.text('This is an official financial statement generated by Bit Hash Capital. All figures are in US Dollars (USD).', leftMargin, y, { align: 'center', width: contentWidth });
         y += 10;
-        doc.text('For any discrepancies or questions, please contact our support team at support@bithashcapital.live', leftMargin, y, { align: 'center', width: contentWidth });
+        doc.text('Profit/Loss calculations use FIFO (First-In-First-Out) method for accurate tracking.', leftMargin, y, { align: 'center', width: contentWidth });
         y += 10;
         doc.text(`© ${new Date().getFullYear()} Bit Hash Capital. All rights reserved.`, leftMargin, y, { align: 'center', width: contentWidth });
         
@@ -25281,6 +25447,10 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
                     <strong style="color: ${totalChangeValue >= 0 ? '#10B981' : '#EF4444'};">${formatUSD(totalChangeValue)}</strong>
                   </div>
                   <div style="display: flex; justify-content: space-between; margin-top: 10px;">
+                    <span style="color: #6B7280;">Realized Trading P&L:</span>
+                    <strong style="color: ${totalRealizedPnL >= 0 ? '#10B981' : '#EF4444'};">${formatUSD(totalRealizedPnL)}</strong>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; margin-top: 8px;">
                     <span style="color: #6B7280;">Return on Investment (ROI):</span>
                     <strong style="color: #8B5CF6;">${statement.summary.roiPercentage.toFixed(2)}%</strong>
                   </div>
@@ -25338,9 +25508,9 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
 });
 
 // =============================================
-// HELPER FUNCTIONS WITH TIMESTAMP
+// DETAILED HELPER FUNCTIONS WITH ACCURATE CRYPTO PRICES
 // =============================================
-async function calculateOpeningBalancesWithTimestamp(userId, startDate) {
+async function calculateDetailedOpeningBalances(userId, startDate) {
   const user = await User.findById(userId);
   if (!user) {
     return { totalUSD: 0, mainWalletUSD: 0, activeWalletUSD: 0, maturedWalletUSD: 0, cryptoDetails: [], timestamp: startDate };
@@ -25353,39 +25523,62 @@ async function calculateOpeningBalancesWithTimestamp(userId, startDate) {
     const entries = user.balances.main instanceof Map ? user.balances.main.entries() : Object.entries(user.balances.main);
     for (const [asset, balance] of entries) {
       if (balance > 0 && asset !== 'usd') {
-        const price = await getCryptoPrice(asset.toUpperCase());
-        if (price && price > 0) {
-          const usdValue = balance * price;
-          mainUSD += usdValue;
-          cryptoDetails.push({ asset, amount: balance, usdValue, walletType: 'main' });
-        }
+        const price = await getHistoricalCryptoPrice(asset.toUpperCase(), startDate);
+        const currentPrice = await getCryptoPrice(asset.toUpperCase());
+        const usdValue = balance * (price || currentPrice || 0);
+        mainUSD += usdValue;
+        cryptoDetails.push({ 
+          asset, 
+          amount: balance, 
+          usdValue, 
+          walletType: 'main',
+          priceAtPeriod: price || currentPrice,
+          currentPrice: currentPrice
+        });
       }
     }
   }
   
   if (user.balances && user.balances.active) {
     const entries = user.balances.active instanceof Map ? user.balances.active.entries() : Object.entries(user.balances.active);
-    for (const [asset, balance] of entries) if (balance > 0) activeUSD += balance;
+    for (const [asset, balance] of entries) {
+      if (balance > 0) {
+        activeUSD += balance;
+      }
+    }
   }
   
   if (user.balances && user.balances.matured) {
     const entries = user.balances.matured instanceof Map ? user.balances.matured.entries() : Object.entries(user.balances.matured);
     for (const [asset, balance] of entries) {
       if (balance > 0 && asset !== 'usd') {
-        const price = await getCryptoPrice(asset.toUpperCase());
-        if (price && price > 0) {
-          const usdValue = balance * price;
-          maturedUSD += usdValue;
-          cryptoDetails.push({ asset, amount: balance, usdValue, walletType: 'matured' });
-        }
+        const price = await getHistoricalCryptoPrice(asset.toUpperCase(), startDate);
+        const currentPrice = await getCryptoPrice(asset.toUpperCase());
+        const usdValue = balance * (price || currentPrice || 0);
+        maturedUSD += usdValue;
+        cryptoDetails.push({ 
+          asset, 
+          amount: balance, 
+          usdValue, 
+          walletType: 'matured',
+          priceAtPeriod: price || currentPrice,
+          currentPrice: currentPrice
+        });
       }
     }
   }
   
-  return { totalUSD: mainUSD + activeUSD + maturedUSD, mainWalletUSD: mainUSD, activeWalletUSD: activeUSD, maturedWalletUSD: maturedUSD, cryptoDetails, timestamp: startDate };
+  return { 
+    totalUSD: mainUSD + activeUSD + maturedUSD, 
+    mainWalletUSD: mainUSD, 
+    activeWalletUSD: activeUSD, 
+    maturedWalletUSD: maturedUSD, 
+    cryptoDetails, 
+    timestamp: startDate 
+  };
 }
 
-async function calculateClosingBalancesWithTimestamp(userId, endDate) {
+async function calculateDetailedClosingBalances(userId, endDate) {
   const user = await User.findById(userId);
   if (!user) {
     return { totalUSD: 0, mainWalletUSD: 0, activeWalletUSD: 0, maturedWalletUSD: 0, cryptoDetails: [], timestamp: endDate };
@@ -25398,38 +25591,95 @@ async function calculateClosingBalancesWithTimestamp(userId, endDate) {
     const entries = user.balances.main instanceof Map ? user.balances.main.entries() : Object.entries(user.balances.main);
     for (const [asset, balance] of entries) {
       if (balance > 0 && asset !== 'usd') {
-        const price = await getCryptoPrice(asset.toUpperCase());
-        if (price && price > 0) {
-          const usdValue = balance * price;
-          mainUSD += usdValue;
-          cryptoDetails.push({ asset, amount: balance, usdValue, walletType: 'main' });
-        }
+        const currentPrice = await getCryptoPrice(asset.toUpperCase());
+        const usdValue = balance * (currentPrice || 0);
+        mainUSD += usdValue;
+        cryptoDetails.push({ 
+          asset, 
+          amount: balance, 
+          usdValue, 
+          walletType: 'main',
+          currentPrice: currentPrice
+        });
       }
     }
   }
   
   if (user.balances && user.balances.active) {
     const entries = user.balances.active instanceof Map ? user.balances.active.entries() : Object.entries(user.balances.active);
-    for (const [asset, balance] of entries) if (balance > 0) activeUSD += balance;
+    for (const [asset, balance] of entries) {
+      if (balance > 0) {
+        activeUSD += balance;
+      }
+    }
   }
   
   if (user.balances && user.balances.matured) {
     const entries = user.balances.matured instanceof Map ? user.balances.matured.entries() : Object.entries(user.balances.matured);
     for (const [asset, balance] of entries) {
       if (balance > 0 && asset !== 'usd') {
-        const price = await getCryptoPrice(asset.toUpperCase());
-        if (price && price > 0) {
-          const usdValue = balance * price;
-          maturedUSD += usdValue;
-          cryptoDetails.push({ asset, amount: balance, usdValue, walletType: 'matured' });
-        }
+        const currentPrice = await getCryptoPrice(asset.toUpperCase());
+        const usdValue = balance * (currentPrice || 0);
+        maturedUSD += usdValue;
+        cryptoDetails.push({ 
+          asset, 
+          amount: balance, 
+          usdValue, 
+          walletType: 'matured',
+          currentPrice: currentPrice
+        });
       }
     }
   }
   
-  return { totalUSD: mainUSD + activeUSD + maturedUSD, mainWalletUSD: mainUSD, activeWalletUSD: activeUSD, maturedWalletUSD: maturedUSD, cryptoDetails, timestamp: endDate };
+  return { 
+    totalUSD: mainUSD + activeUSD + maturedUSD, 
+    mainWalletUSD: mainUSD, 
+    activeWalletUSD: activeUSD, 
+    maturedWalletUSD: maturedUSD, 
+    cryptoDetails, 
+    timestamp: endDate 
+  };
 }
 
+async function getHistoricalCryptoPrice(asset, targetDate) {
+  try {
+    const assetUpper = asset.toUpperCase();
+    const stablecoins = ['USDT', 'USDC', 'DAI', 'BUSD', 'TUSD', 'USDP'];
+    if (stablecoins.includes(assetUpper)) return 1;
+    
+    const assetMap = {
+      'BTC': 'bitcoin', 'ETH': 'ethereum', 'BNB': 'binancecoin', 'SOL': 'solana',
+      'XRP': 'ripple', 'DOGE': 'dogecoin', 'ADA': 'cardano', 'AVAX': 'avalanche-2',
+      'DOT': 'polkadot', 'TRX': 'tron', 'LINK': 'chainlink', 'MATIC': 'matic-network',
+      'LTC': 'litecoin', 'NEAR': 'near', 'UNI': 'uniswap', 'BCH': 'bitcoin-cash'
+    };
+    
+    const coinId = assetMap[assetUpper];
+    if (!coinId) return await getCryptoPrice(assetUpper);
+    
+    const timestamp = Math.floor(targetDate.getTime() / 1000);
+    
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    const response = await fetch(
+      `https://api.coingecko.com/api/v3/coins/${coinId}/market_chart/range?vs_currency=usd&from=${timestamp - 86400}&to=${timestamp}`,
+      { signal: controller.signal }
+    );
+    clearTimeout(timeoutId);
+    
+    if (response.ok) {
+      const data = await response.json();
+      if (data.prices && data.prices.length > 0) {
+        return data.prices[data.prices.length - 1][1];
+      }
+    }
+  } catch (err) {
+    console.warn(`Historical price fetch failed for ${asset}`);
+  }
+  
+  return await getCryptoPrice(asset);
+}
 
 
 
