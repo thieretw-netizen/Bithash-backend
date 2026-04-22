@@ -4986,34 +4986,34 @@ const initializePlans = async () => {
   try {
     const plans = [
       {
-        name: 'Starter Plan',
-        description: '12% After 10 hours',
-        percentage: 12,
+        name: 'Basic Plan',
+        description: '6.7% After 10 hours',
+        percentage: 7,
         duration: 10,
-        minAmount: 50,
+        minAmount: 100,
         maxAmount: 499,
         referralBonus: 5
       },
       {
-        name: 'Gold Plan',
-        description: '20% After 24 hours',
-        percentage: 20,
+        name: 'Standard Plan',
+        description: '12% After 24 hours',
+        percentage: 12,
         duration: 24,
         minAmount: 500,
         maxAmount: 1999,
         referralBonus: 5
       },
       {
-        name: 'Advance Plan',
-        description: '35% After 48 hours',
-        percentage: 35,
+        name: 'pro Plan',
+        description: '22% After 48 hours',
+        percentage: 22,
         duration: 48,
         minAmount: 2000,
         maxAmount: 9999,
         referralBonus: 5
       },
       {
-        name: 'Exclusive Plan',
+        name: 'Enterprise Plan',
         description: '40% After 72 hours',
         percentage: 40,
         duration: 72,
@@ -5022,7 +5022,7 @@ const initializePlans = async () => {
         referralBonus: 5
       },
       {
-        name: 'Expert Plan',
+        name: 'Ultimate Plan',
         description: '50% After 96 hours',
         percentage: 50,
         duration: 96,
