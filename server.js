@@ -7792,7 +7792,7 @@ app.post('/api/investments', protect, [
     if (!plan || !plan.isActive) {
       return res.status(400).json({
         status: 'fail',
-        message: 'Invalid or inactive mining plan'
+        message: 'Invalid or inactive investment plan'
       });
     }
 
@@ -7830,7 +7830,7 @@ app.post('/api/investments', protect, [
     console.log(`📊 BTC Balance Check for ${user.email}:`);
     console.log(`   Main Wallet BTC: ${mainBitcoinBalance} BTC`);
     console.log(`   Matured Wallet BTC: ${maturedBitcoinBalance} BTC`);
-    console.log(`   Mining Contract: $${amount} USD = ${amountInBTC.toFixed(8)} BTC`);
+    console.log(`   Investment: $${amount} USD = ${amountInBTC.toFixed(8)} BTC`);
     console.log(`   BTC Price from API: $${btcPrice}`);
     
     // Check balance based on selected wallet type
@@ -7863,7 +7863,7 @@ app.post('/api/investments', protect, [
       });
     }
     
-    // Store mining contract amounts
+    // Store investment amounts
     const investmentBTCAmount = amountInBTC;
     const investmentFeeUSD = amount * 0.03;
     const investmentAmountAfterFeeUSD = amount - investmentFeeUSD;
@@ -7895,7 +7895,7 @@ app.post('/api/investments', protect, [
     
     await user.save();
 
-    // Create investment record (using original field names for database compatibility)
+    // Create investment record
     const investment = await Investment.create({
       user: userId,
       plan: planId,
@@ -7940,8 +7940,7 @@ app.post('/api/investments', protect, [
         amountAfterFeeUSD: investmentAmountAfterFeeUSD,
         amountAfterFeeBTC: investmentAmountAfterFeeBTC,
         btcPrice: btcPrice,
-        transactionType: 'debit',
-        hashRate: `${(plan.percentage * 0.5).toFixed(2)} TH/s`
+        transactionType: 'debit'
       },
       fee: investmentFeeUSD,
       netAmount: investmentAmountAfterFeeUSD
@@ -7956,7 +7955,7 @@ app.post('/api/investments', protect, [
       transactionId: transaction._id,
       investmentId: investment._id,
       userId: userId,
-      description: `3% mining fee for ${plan.name} contract`,
+      description: `3% investment fee for ${plan.name} investment`,
       metadata: {
         planName: plan.name,
         originalAmountUSD: amount,
@@ -7964,19 +7963,18 @@ app.post('/api/investments', protect, [
         amountAfterFeeUSD: investmentAmountAfterFeeUSD,
         amountAfterFeeBTC: investmentAmountAfterFeeBTC,
         feePercentage: 3,
-        btcPrice: btcPrice,
-        hashRate: `${(plan.percentage * 0.5).toFixed(2)} TH/s`
+        btcPrice: btcPrice
       }
     });
 
-    // ✅ FIXED: Create user log with correct location object structure - USE ORIGINAL ENUM VALUE
+    // ✅ FIXED: Create user log with correct location object structure
     const deviceInfo = await getUserDeviceInfo(req);
     await UserLog.create({
       user: userId,
       username: user.email,
       email: user.email,
       userFullName: `${user.firstName} ${user.lastName}`,
-      action: 'investment_created',  // ← MUST use original enum value, not custom
+      action: 'investment_created',
       actionCategory: 'investment',
       ipAddress: getRealClientIP(req),
       userAgent: req.headers['user-agent'] || 'Unknown',
@@ -8027,19 +8025,17 @@ app.post('/api/investments', protect, [
         duration: plan.duration,
         roiPercentage: plan.percentage,
         endDate: endDate,
-        balanceTypeUsed: balanceType,
-        hashRate: `${(plan.percentage * 0.5).toFixed(2)} TH/s`,
-        contractType: 'mining'
+        balanceTypeUsed: balanceType
       },
       relatedEntity: investment._id,
       relatedEntityModel: 'Investment'
     });
 
     // =============================================
-    // CREATE SYSTEM LOG FOR INVESTMENT - USE ORIGINAL ACTION NAME
+    // CREATE SYSTEM LOG FOR INVESTMENT
     // =============================================
     await SystemLog.create({
-      action: 'investment_created',  // ← MUST use original enum value
+      action: 'investment_created',
       entity: 'investment',
       entityId: investment._id,
       performedBy: userId,
@@ -8074,9 +8070,7 @@ app.post('/api/investments', protect, [
         roiPercentage: plan.percentage,
         endDate: endDate,
         balanceTypeUsed: balanceType,
-        walletUsed: walletName,
-        hashRate: `${(plan.percentage * 0.5).toFixed(2)} TH/s`,
-        contractType: 'mining'
+        walletUsed: walletName
       },
       financial: {
         amount: amount,
@@ -8113,7 +8107,7 @@ app.post('/api/investments', protect, [
     }
 
     // =============================================
-    // SEND PROFESSIONAL MINING CONTRACT EMAIL (Display text only - no database impact)
+    // SEND EMAIL NOTIFICATION - TERMINOLOGY CHANGES ONLY IN EMAIL DISPLAY
     // =============================================
     try {
       const cryptoLogoUrl = 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png';
@@ -8140,9 +8134,10 @@ app.post('/api/investments', protect, [
         minute: '2-digit',
         timeZoneName: 'short'
       });
+      // Calculate hash rate for display only (not stored)
       const hashRate = (plan.percentage * 0.5).toFixed(2);
       
-      const miningEmailHtml = `
+      const investmentEmailHtml = `
         <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
           <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
             <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
@@ -8164,7 +8159,7 @@ app.post('/api/investments', protect, [
             </div>
             
             <p style="color: #333333; line-height: 1.6;">Dear <strong>${user.firstName}</strong>,</p>
-            <p style="color: #333333; line-height: 1.6;">Great news! Your mining contract has been successfully activated. Your hash rate is now working for you in our bitcoin mining Facilities.</p>
+            <p style="color: #333333; line-height: 1.6;">Great news! Your mining contract has been successfully activated. Your hash rate is now working for you in our bitcoin mining facilities.</p>
             
             <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
               <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
@@ -8245,12 +8240,12 @@ app.post('/api/investments', protect, [
         from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
         to: user.email,
         subject: `✅ Mining Contract Activated - ${plan.name} - ₿itHash Capital`,
-        html: miningEmailHtml
+        html: investmentEmailHtml
       });
       
       console.log(`📧 Mining contract activation email sent to ${user.email}`);
     } catch (emailError) {
-      console.error('Failed to send mining contract email:', emailError);
+      console.error('Failed to send investment email:', emailError);
     }
 
     res.status(201).json({
@@ -8268,17 +8263,16 @@ app.post('/api/investments', protect, [
           endDate: investment.endDate,
           status: investment.status,
           balanceType: balanceType,
-          btcPriceAtInvestment: btcPrice,
-          hashRate: `${hashRate} TH/s`
+          btcPriceAtInvestment: btcPrice
         }
       }
     });
     
   } catch (err) {
-    console.error('Mining contract creation error:', err);
+    console.error('Investment creation error:', err);
     res.status(500).json({
       status: 'error',
-      message: err.message || 'Failed to activate mining contract'
+      message: err.message || 'Failed to create investment'
     });
   }
 });
@@ -8522,7 +8516,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
     if (!investment) {
       return res.status(404).json({
         status: 'fail',
-        message: 'Active mining contract not found'
+        message: 'Active investment not found'
       });
     }
 
@@ -8530,7 +8524,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
     if (now < investment.endDate) {
       return res.status(400).json({
         status: 'fail',
-        message: 'Mining contract has not completed yet'
+        message: 'Investment has not matured yet'
       });
     }
 
@@ -8554,7 +8548,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
     if (currentActiveBTC < investment.amountBTC) {
       return res.status(400).json({
         status: 'fail',
-        message: `Insufficient active mining balance. Required: ${investment.amountBTC.toFixed(8)} BTC, Available: ${currentActiveBTC.toFixed(8)} BTC`
+        message: `Insufficient active Bitcoin balance. Required: ${investment.amountBTC.toFixed(8)} BTC, Available: ${currentActiveBTC.toFixed(8)} BTC`
       });
     }
 
@@ -8585,7 +8579,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
       await user.save({ session });
       await investment.save({ session });
 
-      // Create transaction with POSITIVE numbers
+      // ✅ FIXED: Create transaction with POSITIVE numbers
       await Transaction.create([{
         user: userId,
         type: 'interest',
@@ -8604,22 +8598,21 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
           interestBTC: totalReturnBTC - investment.amountBTC,
           btcPriceAtStart: investment.btcPriceAtInvestment,
           btcPriceAtCompletion: currentBTCPrice,
-          transactionType: 'credit',
-          hashRate: `${(investment.returnPercentage * 0.5).toFixed(2)} TH/s`
+          transactionType: 'credit'
         },
         fee: 0,
         netAmountUSD: totalReturnUSD - investment.amount,
         netAmountBTC: totalReturnBTC - investment.amountBTC
       }], { session });
 
-      // Create user log with correct location object structure - USE ORIGINAL ENUM VALUE
+      // ✅ FIXED: Create user log with correct location object structure
       const deviceInfo = await getUserDeviceInfo(req);
       await UserLog.create({
         user: userId,
         username: user.email,
         email: user.email,
         userFullName: `${user.firstName} ${user.lastName}`,
-        action: 'investment_matured',  // ← MUST use original enum value
+        action: 'investment_matured',
         actionCategory: 'investment',
         ipAddress: getRealClientIP(req),
         userAgent: req.headers['user-agent'] || 'Unknown',
@@ -8666,17 +8659,17 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
           btcPriceAtCompletion: currentBTCPrice,
           startDate: investment.startDate,
           endDate: investment.endDate,
-          completionDate: investment.completionDate,
-          hashRate: `${(investment.returnPercentage * 0.5).toFixed(2)} TH/s`,
-          contractType: 'mining'
+          completionDate: investment.completionDate
         },
         relatedEntity: investment._id,
         relatedEntityModel: 'Investment'
       });
 
-      // Create system log - USE ORIGINAL ACTION NAME
+      // =============================================
+      // CREATE SYSTEM LOG FOR INVESTMENT MATURITY
+      // =============================================
       await SystemLog.create({
-        action: 'investment_completed',  // ← MUST use original enum value
+        action: 'investment_completed',
         entity: 'investment',
         entityId: investment._id,
         performedBy: userId,
@@ -8712,9 +8705,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
           btcPriceAtCompletion: currentBTCPrice,
           startDate: investment.startDate,
           endDate: investment.endDate,
-          completionDate: investment.completionDate,
-          hashRate: `${(investment.returnPercentage * 0.5).toFixed(2)} TH/s`,
-          contractType: 'mining'
+          completionDate: investment.completionDate
         },
         financial: {
           amount: totalReturnUSD,
@@ -8730,9 +8721,11 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
 
       await session.commitTransaction();
       
-      console.log(`✅ Mining contract ${investment._id} completed for user ${user.email}. Reward: ${totalReturnBTC.toFixed(8)} BTC`);
+      console.log(`✅ Investment ${investment._id} completed for user ${user.email}. Return: ${totalReturnBTC.toFixed(8)} BTC`);
 
-      // SEND COMPLETION EMAIL NOTIFICATION (Display text only - uses mining terminology)
+      // =============================================
+      // SEND MATURITY EMAIL NOTIFICATION - TERMINOLOGY CHANGES ONLY IN EMAIL DISPLAY
+      // =============================================
       try {
         const cryptoLogoUrl = 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png';
         
@@ -8745,7 +8738,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
         const newMaturedBalanceUSD = (user.balances.matured?.get('usd') || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         const hashRate = (investment.returnPercentage * 0.5).toFixed(2);
         
-        const completionEmailHtml = `
+        const maturityEmailHtml = `
           <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
             <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
               <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
@@ -8860,12 +8853,12 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
           from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
           to: user.email,
           subject: `🎉 Mining Contract Completed - ${investment.plan.name} - ₿itHash Capital`,
-          html: completionEmailHtml
+          html: maturityEmailHtml
         });
         
         console.log(`📧 Mining contract completion email sent to ${user.email}`);
       } catch (emailError) {
-        console.error('Failed to send completion email:', emailError);
+        console.error('Failed to send maturity email:', emailError);
       }
 
       res.status(200).json({
@@ -8880,8 +8873,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
             profitBTC: totalReturnBTC - investment.amountBTC,
             profitUSD: totalReturnUSD - investment.amount,
             btcPriceAtStart: investment.btcPriceAtInvestment,
-            btcPriceAtCompletion: currentBTCPrice,
-            hashRate: `${hashRate} TH/s`
+            btcPriceAtCompletion: currentBTCPrice
           },
           balances: {
             bitcoin: {
@@ -8900,14 +8892,13 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
     }
 
   } catch (err) {
-    console.error('Complete mining contract error:', err);
+    console.error('Complete investment error:', err);
     res.status(500).json({
       status: 'error',
-      message: err.message || 'An error occurred while completing your mining contract'
+      message: err.message || 'An error occurred while completing the investment'
     });
   }
 });
-
 
 
 
