@@ -7731,7 +7731,6 @@ app.post('/api/auth/reset-password', [
 
 
 
-
 // =============================================
 // CREATE INVESTMENT / MINING CONTRACT ENDPOINT
 // =============================================
@@ -7846,7 +7845,7 @@ app.post('/api/investments', protect, [
       });
     }
 
-    // GET BTC PRICE
+    // GET BTC PRICE - USING YOUR EXISTING getRealTimeBitcoinPrice FUNCTION
     const btcPrice = await getRealTimeBitcoinPrice();
     const amountInBTC = amount / btcPrice;
     
@@ -7897,48 +7896,41 @@ app.post('/api/investments', protect, [
     // =============================================
     let calculatedHashRate = '';
     
-    // Get base hash rate based on plan name
     if (plan.name === 'Basic') {
       const baseHash = 68;
       const fluctuation = (Math.random() * 6) - 3;
       const finalValue = baseHash * (1 + fluctuation / 100);
       calculatedHashRate = finalValue.toFixed(1);
-      console.log(`Basic: 68 TH/s ±${Math.abs(fluctuation).toFixed(1)}% = ${calculatedHashRate} TH/s`);
     } 
     else if (plan.name === 'Standard') {
       const baseHash = 110;
       const fluctuation = (Math.random() * 6) - 3;
       const finalValue = baseHash * (1 + fluctuation / 100);
       calculatedHashRate = finalValue.toFixed(1);
-      console.log(`Standard: 110 TH/s ±${Math.abs(fluctuation).toFixed(1)}% = ${calculatedHashRate} TH/s`);
     } 
     else if (plan.name === 'Pro') {
       const baseHash = 150;
       const fluctuation = (Math.random() * 6) - 3;
       const finalValue = baseHash * (1 + fluctuation / 100);
       calculatedHashRate = finalValue.toFixed(1);
-      console.log(`Pro: 150 TH/s ±${Math.abs(fluctuation).toFixed(1)}% = ${calculatedHashRate} TH/s`);
     } 
     else if (plan.name === 'Enterprise') {
       const baseHash = 234;
       const fluctuation = (Math.random() * 6) - 3;
       const finalValue = baseHash * (1 + fluctuation / 100);
       calculatedHashRate = finalValue.toFixed(1);
-      console.log(`Enterprise: 234 TH/s ±${Math.abs(fluctuation).toFixed(1)}% = ${calculatedHashRate} TH/s`);
     } 
     else if (plan.name === 'Ultimate') {
       const baseHash = 255;
       const fluctuation = (Math.random() * 6) - 3;
       const finalValue = baseHash * (1 + fluctuation / 100);
       calculatedHashRate = finalValue.toFixed(1);
-      console.log(`Ultimate: 255 TH/s ±${Math.abs(fluctuation).toFixed(1)}% = ${calculatedHashRate} TH/s`);
     } 
     else {
       calculatedHashRate = '0.0';
-      console.log(`Unknown plan: ${plan.name}`);
     }
 
-    console.log(`✅ FINAL HASHRATE: ${calculatedHashRate} TH/s`);
+    console.log(`✅ HASHRATE: ${plan.name} = ${calculatedHashRate} TH/s`);
 
     // DEDUCT FROM WALLET
     if (balanceType === 'main') {
@@ -7958,7 +7950,7 @@ app.post('/api/investments', protect, [
     
     await user.save();
 
-    // CREATE INVESTMENT RECORD
+    // CREATE INVESTMENT RECORD WITH HASHRATE
     const investment = await Investment.create({
       user: userId,
       plan: planId,
@@ -7984,9 +7976,6 @@ app.post('/api/investments', protect, [
       btcPriceAtInvestment: btcPrice,
       hashRate: calculatedHashRate
     });
-
-    console.log(`✅ Investment created with ID: ${investment._id}`);
-    console.log(`✅ HashRate saved to DB: ${investment.hashRate} TH/s`);
 
     // CREATE TRANSACTION
     const transaction = await Transaction.create({
@@ -8167,9 +8156,7 @@ app.post('/api/investments', protect, [
       }
     }
 
-    // =============================================
     // SEND ACTIVATION EMAIL
-    // =============================================
     try {
       const cryptoLogoUrl = 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png';
       
@@ -8212,16 +8199,14 @@ app.post('/api/investments', protect, [
                   <td style="padding: 8px 0; text-align: right;">
                     <strong style="font-size: 20px; color: #F7A600;">${calculatedHashRate} TH/s</strong>
                    </span>
-                  </td>
-                </tr>
+                  <tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>Contract Amount:</strong></td>
                   <td style="padding: 8px 0; text-align: right;">
                     <strong>${investmentAmountAfterFeeBTC.toFixed(8)} BTC</strong><br>
                     <span style="font-size: 12px; color: #64748B;">≈ $${amount.toLocaleString()} USD</span>
                    </span>
-                  </td>
-                </tr>
+                  </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>Mining Fee (3%):</strong></td>
                   <td style="padding: 8px 0; text-align: right; color: #EF4444;">${investmentFeeBTC.toFixed(8)} BTC (≈ $${investmentFeeUSD.toFixed(2)})</span></td>
@@ -8236,8 +8221,7 @@ app.post('/api/investments', protect, [
                     <strong>${expectedReturnBTC.toFixed(8)} BTC</strong><br>
                     <span style="font-size: 12px;">≈ $${expectedReturnUSD.toLocaleString()} USD</span>
                    </span>
-                  </td>
-                </tr>
+                  </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>Mining Algorithm:</strong></td>
                   <td style="padding: 8px 0; text-align: right;">SHA-256</span></td>
@@ -8251,8 +8235,7 @@ app.post('/api/investments', protect, [
                   <td style="padding: 8px 0; text-align: right;">
                     <span style="background: ${balanceType === 'main' ? '#F7A600' : '#D4AF37'}; color: ${balanceType === 'main' ? '#000' : '#fff'}; padding: 2px 10px; border-radius: 20px; font-size: 12px;">${balanceType === 'main' ? 'Main Wallet' : 'Matured Wallet'}</span>
                    </span>
-                  </td>
-                </tr>
+                  </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>Activation Date:</strong></td>
                   <td style="padding: 8px 0; text-align: right;">${new Date().toLocaleString()}</span></td>
@@ -8289,12 +8272,11 @@ app.post('/api/investments', protect, [
         html: emailHtml
       });
       
-      console.log(`✅ EMAIL SENT: ${plan.name} (${calculatedHashRate} TH/s) to ${user.email}`);
+      console.log(`✅ EMAIL SENT: ${plan.name} (${calculatedHashRate} TH/s)`);
     } catch (emailError) {
       console.error('Failed to send email:', emailError);
     }
 
-    // RETURN SUCCESS RESPONSE
     res.status(201).json({
       status: 'success',
       message: `Your ${plan.name} cloud mining contract has been successfully activated with ${calculatedHashRate} TH/s hash rate.`,
@@ -8543,7 +8525,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
 
       await session.commitTransaction();
       
-      console.log(`✅ Investment ${investment._id} completed for user ${user.email}. Return: ${totalReturnBTC.toFixed(8)} BTC`);
+      console.log(`✅ Investment ${investment._id} completed for user ${user.email}`);
 
       // SEND COMPLETION EMAIL
       try {
@@ -8597,7 +8579,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
                       <span style="font-size: 12px; color: #64748B;">≈ $${investment.amount.toLocaleString()}</span>
                      </span>
                    </span>
-                  <tr>
+                  </tr>
                   <tr style="border-top: 1px solid #E2E8F0;">
                     <td style="padding: 8px 0;"><strong>Total Mining Reward:</strong></td>
                     <td style="padding: 8px 0; text-align: right; color: #10B981;">
@@ -8714,7 +8696,6 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
     });
   }
 });
-
 
 
 
