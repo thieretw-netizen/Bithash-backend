@@ -1795,6 +1795,11 @@ const InvestmentSchema = new mongoose.Schema({
     changedByModel: { type: String, enum: ['User', 'Admin', 'System'] },
     reason: String
   }],
+
+  hashRate: {
+  type: String,
+  default: '0.0'
+},
   referredBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -7888,39 +7893,52 @@ app.post('/api/investments', protect, [
     const endDate = new Date(Date.now() + plan.duration * 60 * 60 * 1000);
 
     // =============================================
-    // HASHRATE CALCULATION - FIXED AND TESTED
+    // HASHRATE CALCULATION WITH ±3% FLUCTUATION
     // =============================================
     let calculatedHashRate = '';
-    let baseHash = 0;
     
-    // Match plan name exactly as stored in database
-    const planType = plan.name;
-    
-    if (planType === 'Basic') {
-      baseHash = 68;
-    } else if (planType === 'Standard') {
-      baseHash = 110;
-    } else if (planType === 'Pro') {
-      baseHash = 150;
-    } else if (planType === 'Enterprise') {
-      baseHash = 234;
-    } else if (planType === 'Ultimate') {
-      baseHash = 255;
-    } else {
-      baseHash = 100; // fallback
+    // Get base hash rate based on plan name
+    if (plan.name === 'Basic') {
+      const baseHash = 68;
+      const fluctuation = (Math.random() * 6) - 3;
+      const finalValue = baseHash * (1 + fluctuation / 100);
+      calculatedHashRate = finalValue.toFixed(1);
+      console.log(`Basic: 68 TH/s ±${Math.abs(fluctuation).toFixed(1)}% = ${calculatedHashRate} TH/s`);
+    } 
+    else if (plan.name === 'Standard') {
+      const baseHash = 110;
+      const fluctuation = (Math.random() * 6) - 3;
+      const finalValue = baseHash * (1 + fluctuation / 100);
+      calculatedHashRate = finalValue.toFixed(1);
+      console.log(`Standard: 110 TH/s ±${Math.abs(fluctuation).toFixed(1)}% = ${calculatedHashRate} TH/s`);
+    } 
+    else if (plan.name === 'Pro') {
+      const baseHash = 150;
+      const fluctuation = (Math.random() * 6) - 3;
+      const finalValue = baseHash * (1 + fluctuation / 100);
+      calculatedHashRate = finalValue.toFixed(1);
+      console.log(`Pro: 150 TH/s ±${Math.abs(fluctuation).toFixed(1)}% = ${calculatedHashRate} TH/s`);
+    } 
+    else if (plan.name === 'Enterprise') {
+      const baseHash = 234;
+      const fluctuation = (Math.random() * 6) - 3;
+      const finalValue = baseHash * (1 + fluctuation / 100);
+      calculatedHashRate = finalValue.toFixed(1);
+      console.log(`Enterprise: 234 TH/s ±${Math.abs(fluctuation).toFixed(1)}% = ${calculatedHashRate} TH/s`);
+    } 
+    else if (plan.name === 'Ultimate') {
+      const baseHash = 255;
+      const fluctuation = (Math.random() * 6) - 3;
+      const finalValue = baseHash * (1 + fluctuation / 100);
+      calculatedHashRate = finalValue.toFixed(1);
+      console.log(`Ultimate: 255 TH/s ±${Math.abs(fluctuation).toFixed(1)}% = ${calculatedHashRate} TH/s`);
+    } 
+    else {
+      calculatedHashRate = '0.0';
+      console.log(`Unknown plan: ${plan.name}`);
     }
-    
-    // Apply ±3% fluctuation
-    const fluctuation = (Math.random() * 6) - 3; // -3 to +3
-    const finalHashValue = baseHash * (1 + fluctuation / 100);
-    calculatedHashRate = finalHashValue.toFixed(1);
-    
-    console.log(`========== HASHRATE CALCULATION ==========`);
-    console.log(`Plan: ${planType}`);
-    console.log(`Base Hashrate: ${baseHash} TH/s`);
-    console.log(`Fluctuation: ${fluctuation > 0 ? '+' : ''}${fluctuation.toFixed(2)}%`);
-    console.log(`Final Hashrate: ${calculatedHashRate} TH/s`);
-    console.log(`==========================================`);
+
+    console.log(`✅ FINAL HASHRATE: ${calculatedHashRate} TH/s`);
 
     // DEDUCT FROM WALLET
     if (balanceType === 'main') {
@@ -7967,7 +7985,8 @@ app.post('/api/investments', protect, [
       hashRate: calculatedHashRate
     });
 
-    console.log(`✅ Investment created with hash rate: ${investment.hashRate} TH/s`);
+    console.log(`✅ Investment created with ID: ${investment._id}`);
+    console.log(`✅ HashRate saved to DB: ${investment.hashRate} TH/s`);
 
     // CREATE TRANSACTION
     const transaction = await Transaction.create({
@@ -8149,13 +8168,10 @@ app.post('/api/investments', protect, [
     }
 
     // =============================================
-    // SEND EMAIL WITH HASHRATE
+    // SEND ACTIVATION EMAIL
     // =============================================
     try {
       const cryptoLogoUrl = 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png';
-      const emailHashRate = investment.hashRate;
-      
-      console.log(`📧 SENDING EMAIL WITH HASHRATE: ${emailHashRate} TH/s`);
       
       const emailHtml = `
         <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
@@ -8194,7 +8210,7 @@ app.post('/api/investments', protect, [
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>Hash Rate:</strong></td>
                   <td style="padding: 8px 0; text-align: right;">
-                    <strong style="font-size: 20px; color: #F7A600;">${emailHashRate} TH/s</strong>
+                    <strong style="font-size: 20px; color: #F7A600;">${calculatedHashRate} TH/s</strong>
                    </span>
                   </td>
                 </tr>
@@ -8269,11 +8285,11 @@ app.post('/api/investments', protect, [
       await infoTransporter.sendMail({
         from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
         to: user.email,
-        subject: `✅ Cloud Mining Contract Activated - ${plan.name} (${emailHashRate} TH/s) - ₿itHash Capital`,
+        subject: `✅ Cloud Mining Contract Activated - ${plan.name} (${calculatedHashRate} TH/s) - ₿itHash Capital`,
         html: emailHtml
       });
       
-      console.log(`✅ EMAIL SENT SUCCESSFULLY with hash rate ${emailHashRate} TH/s`);
+      console.log(`✅ EMAIL SENT: ${plan.name} (${calculatedHashRate} TH/s) to ${user.email}`);
     } catch (emailError) {
       console.error('Failed to send email:', emailError);
     }
@@ -8310,56 +8326,6 @@ app.post('/api/investments', protect, [
   }
 });
 
-// =============================================
-// REAL-TIME BITCOIN PRICE FUNCTION
-// =============================================
-async function getRealTimeBitcoinPrice() {
-  try {
-    const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd', {
-      signal: AbortSignal.timeout(5000)
-    });
-    if (response.ok) {
-      const data = await response.json();
-      if (data?.bitcoin?.usd && data.bitcoin.usd > 0) {
-        return data.bitcoin.usd;
-      }
-    }
-  } catch (err) {
-    console.log('CoinGecko failed, trying Binance...');
-  }
-  
-  try {
-    const response = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT', {
-      signal: AbortSignal.timeout(5000)
-    });
-    if (response.ok) {
-      const data = await response.json();
-      if (data?.price && parseFloat(data.price) > 0) {
-        return parseFloat(data.price);
-      }
-    }
-  } catch (err) {
-    console.log('Binance failed, trying Kraken...');
-  }
-  
-  try {
-    const response = await fetch('https://api.kraken.com/0/public/Ticker?pair=XBTUSD', {
-      signal: AbortSignal.timeout(5000)
-    });
-    if (response.ok) {
-      const data = await response.json();
-      if (data?.result?.XXBTZUSD?.c?.[0]) {
-        return parseFloat(data.result.XXBTZUSD.c[0]);
-      }
-    }
-  } catch (err) {
-    console.log('Kraken failed');
-  }
-  
-  // Fallback price
-  console.log('Using fallback BTC price');
-  return 50000;
-}
 
 // =============================================
 // COMPLETE INVESTMENT ENDPOINT
@@ -8577,12 +8543,11 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
 
       await session.commitTransaction();
       
-      console.log(`✅ Investment completed for user ${user.email}. Return: ${totalReturnBTC.toFixed(8)} BTC`);
+      console.log(`✅ Investment ${investment._id} completed for user ${user.email}. Return: ${totalReturnBTC.toFixed(8)} BTC`);
 
       // SEND COMPLETION EMAIL
       try {
         const cryptoLogoUrl = 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png';
-        const savedHashRate = investment.hashRate || '0.0';
         
         const completionEmailHtml = `
           <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
@@ -8621,11 +8586,10 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
                   <tr style="border-top: 1px solid #E2E8F0;">
                     <td style="padding: 8px 0;"><strong>Hash Rate (Average):</strong></td>
                     <td style="padding: 8px 0; text-align: right;">
-                      <strong style="font-size: 20px; color: #F7A600;">${savedHashRate} TH/s</strong>
+                      <strong style="font-size: 20px; color: #F7A600;">${investment.hashRate} TH/s</strong>
                     </span>
                    </span>
-                  </td>
-                </tr>
+                  <tr>
                   <tr style="border-top: 1px solid #E2E8F0;">
                     <td style="padding: 8px 0;"><strong>Initial Hash Power:</strong></td>
                     <td style="padding: 8px 0; text-align: right;">
@@ -8633,8 +8597,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
                       <span style="font-size: 12px; color: #64748B;">≈ $${investment.amount.toLocaleString()}</span>
                      </span>
                    </span>
-                  </td>
-                  </tr>
+                  <tr>
                   <tr style="border-top: 1px solid #E2E8F0;">
                     <td style="padding: 8px 0;"><strong>Total Mining Reward:</strong></td>
                     <td style="padding: 8px 0; text-align: right; color: #10B981;">
@@ -8702,11 +8665,11 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
         await infoTransporter.sendMail({
           from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
           to: user.email,
-          subject: `🎉 Cloud Mining Contract Completed - ${investment.plan.name} (${savedHashRate} TH/s) - ₿itHash Capital`,
+          subject: `🎉 Cloud Mining Contract Completed - ${investment.plan.name} (${investment.hashRate} TH/s) - ₿itHash Capital`,
           html: completionEmailHtml
         });
         
-        console.log(`✅ Completion email sent with hash rate ${savedHashRate} TH/s`);
+        console.log(`✅ Completion email sent with hash rate ${investment.hashRate} TH/s`);
       } catch (emailError) {
         console.error('Failed to send completion email:', emailError);
       }
