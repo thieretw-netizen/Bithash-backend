@@ -7724,7 +7724,6 @@ app.post('/api/auth/reset-password', [
 
 
 
-
 app.post('/api/investments', protect, [
   body('planId').notEmpty().withMessage('Plan ID is required').isMongoId().withMessage('Invalid Plan ID'),
   body('amount').isFloat({ min: 1 }).withMessage('Amount must be a positive number'),
@@ -7750,14 +7749,14 @@ app.post('/api/investments', protect, [
     });
 
     if (existingActiveInvestment) {
-      const plan = await Plan.findById(planId);
+      const existingPlan = await Plan.findById(planId);
       return res.status(400).json({
         status: 'fail',
-        message: `You already have an active ${plan ? plan.name : 'mining'} contract. Please wait for it to complete before starting a new one.`,
+        message: `You already have an active ${existingPlan ? existingPlan.name : 'mining'} contract. Please wait for it to complete before starting a new one.`,
         data: {
           existingInvestment: {
             id: existingActiveInvestment._id,
-            planName: plan ? plan.name : 'Unknown',
+            planName: existingPlan ? existingPlan.name : 'Unknown',
             endDate: existingActiveInvestment.endDate,
             remainingHours: Math.ceil((existingActiveInvestment.endDate - new Date()) / (1000 * 60 * 60))
           }
@@ -8129,7 +8128,7 @@ app.post('/api/investments', protect, [
     }
 
     // =============================================
-    // SEND PROFESSIONAL INVESTMENT EMAIL WITH EXACT HASH RATES
+    // SEND PROFESSIONAL INVESTMENT EMAIL WITH EXACT HASH RATES (±3% FLUCTUATION)
     // =============================================
     try {
       const cryptoLogoUrl = 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png';
@@ -8158,20 +8157,26 @@ app.post('/api/investments', protect, [
       });
       
       // =============================================
-      // EXACT HASH RATES - NO SIMULATION, NO FALLBACK
+      // EXACT HASH RATES WITH ±3% FLUCTUATION FOR REALISM (DISPLAY ONLY)
       // =============================================
-      let hashRate = '';
+      let baseHashRate = 0;
       if (plan.name === 'Basic') {
-        hashRate = '68 TH/s';
+        baseHashRate = 68;
       } else if (plan.name === 'Standard') {
-        hashRate = '110 TH/s';
+        baseHashRate = 110;
       } else if (plan.name === 'Pro') {
-        hashRate = '150 TH/s';
+        baseHashRate = 150;
       } else if (plan.name === 'Enterprise') {
-        hashRate = '234 TH/s';
+        baseHashRate = 234;
       } else if (plan.name === 'Ultimate') {
-        hashRate = '255 TH/s';
+        baseHashRate = 255;
       }
+      
+      // Apply ±3% fluctuation (display only - not stored in database)
+      const fluctuation = (Math.random() * 6) - 3; // -3% to +3%
+      const fluctuatedHashRate = baseHashRate * (1 + fluctuation / 100);
+      const hashRateDisplay = `${fluctuatedHashRate.toFixed(1)} TH/s`;
+      const baseHashRateDisplay = `${baseHashRate} TH/s`;
       
       const investmentEmailHtml = `
         <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
@@ -8208,14 +8213,19 @@ app.post('/api/investments', protect, [
               
               <table style="width: 100%; border-collapse: collapse;">
                 <tr style="border-top: 1px solid #E2E8F0;">
-                  <td style="padding: 8px 0;"><strong>Hash Rate:</strong></td>
-                  <td style="padding: 8px 0; text-align: right;"><strong>${hashRate}</strong></td>
+                  <td style="padding: 8px 0;"><strong>Hash Rate (Live):</strong></td>
+                  <td style="padding: 8px 0; text-align: right;">
+                    <strong style="font-size: 18px; color: #F7A600;">${hashRateDisplay}</strong><br>
+                    <span style="font-size: 11px; color: #64748B;">Base: ${baseHashRateDisplay} • ±3% network variance</span>
+                   </span>
+                  </td>
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>Contract Amount:</strong></td>
                   <td style="padding: 8px 0; text-align: right;">
                     <strong>${formattedBTCAmount} BTC</strong><br>
                     <span style="font-size: 12px; color: #64748B;">≈ $${formattedAmount} USD</span>
+                   </span>
                   </td>
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
@@ -8231,6 +8241,7 @@ app.post('/api/investments', protect, [
                   <td style="padding: 8px 0; text-align: right; color: #10B981;">
                     <strong>${formattedExpectedBTC} BTC</strong><br>
                     <span style="font-size: 12px;">≈ $${formattedExpectedReturn} USD</span>
+                   </span>
                   </td>
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
@@ -8246,7 +8257,8 @@ app.post('/api/investments', protect, [
                   <td style="padding: 8px 0; text-align: right;">
                     <span style="background: ${balanceType === 'main' ? '#F7A600' : '#D4AF37'}; color: ${balanceType === 'main' ? '#000' : '#fff'}; padding: 2px 10px; border-radius: 20px; font-size: 12px;">${balanceType === 'main' ? 'Main Wallet' : 'Matured Wallet'}</span>
                    </span>
-                  </tr>
+                  </td>
+                </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>Activation Date:</strong></td>
                   <td style="padding: 8px 0; text-align: right;">${formattedStartDate}</span></td>
@@ -8279,18 +8291,18 @@ app.post('/api/investments', protect, [
       await infoTransporter.sendMail({
         from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
         to: user.email,
-        subject: `✅ Cloud Mining Contract Activated - ${plan.name} (${hashRate}) - ₿itHash Capital`,
+        subject: `✅ Cloud Mining Contract Activated - ${plan.name} (${hashRateDisplay}) - ₿itHash Capital`,
         html: investmentEmailHtml
       });
       
-      console.log(`📧 Mining contract activation email sent to ${user.email} with hash rate ${hashRate}`);
+      console.log(`📧 Mining contract activation email sent to ${user.email} with hash rate ${hashRateDisplay} (base: ${baseHashRateDisplay})`);
     } catch (emailError) {
       console.error('Failed to send investment email:', emailError);
     }
 
     res.status(201).json({
       status: 'success',
-      message: `Your ${plan.name} cloud mining contract has been successfully activated with ${plan.name === 'Basic' ? '68' : plan.name === 'Standard' ? '110' : plan.name === 'Pro' ? '150' : plan.name === 'Enterprise' ? '234' : '255'} TH/s hash rate.`,
+      message: `Your ${plan.name} cloud mining contract has been successfully activated.`,
       data: {
         investment: {
           id: investment._id,
@@ -8765,7 +8777,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
       console.log(`✅ Investment ${investment._id} completed for user ${user.email}. Return: ${totalReturnBTC.toFixed(8)} BTC`);
 
       // =============================================
-      // SEND MATURITY EMAIL NOTIFICATION WITH EXACT HASH RATE
+      // SEND MATURITY EMAIL NOTIFICATION WITH HASH RATE (±3% FLUCTUATION)
       // =============================================
       try {
         const cryptoLogoUrl = 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png';
@@ -8779,20 +8791,26 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
         const newMaturedBalanceUSD = (user.balances.matured?.get('usd') || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         
         // =============================================
-        // EXACT HASH RATES - NO SIMULATION, NO FALLBACK
+        // EXACT HASH RATES WITH ±3% FLUCTUATION FOR REALISM (DISPLAY ONLY)
         // =============================================
-        let hashRate = '';
+        let baseHashRate = 0;
         if (investment.plan.name === 'Basic') {
-          hashRate = '68 TH/s';
+          baseHashRate = 68;
         } else if (investment.plan.name === 'Standard') {
-          hashRate = '110 TH/s';
+          baseHashRate = 110;
         } else if (investment.plan.name === 'Pro') {
-          hashRate = '150 TH/s';
+          baseHashRate = 150;
         } else if (investment.plan.name === 'Enterprise') {
-          hashRate = '234 TH/s';
+          baseHashRate = 234;
         } else if (investment.plan.name === 'Ultimate') {
-          hashRate = '255 TH/s';
+          baseHashRate = 255;
         }
+        
+        // Apply ±3% fluctuation (display only - not stored in database)
+        const fluctuation = (Math.random() * 6) - 3; // -3% to +3%
+        const fluctuatedHashRate = baseHashRate * (1 + fluctuation / 100);
+        const hashRateDisplay = `${fluctuatedHashRate.toFixed(1)} TH/s`;
+        const baseHashRateDisplay = `${baseHashRate} TH/s`;
         
         const maturityEmailHtml = `
           <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
@@ -8829,14 +8847,20 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
                 
                 <table style="width: 100%; border-collapse: collapse;">
                   <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Hash Rate:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;"><strong>${hashRate}</strong></span></td>
-                  </tr>
+                    <td style="padding: 8px 0;"><strong>Hash Rate (Average):</strong></td>
+                    <td style="padding: 8px 0; text-align: right;">
+                      <strong style="font-size: 18px; color: #F7A600;">${hashRateDisplay}</strong><br>
+                      <span style="font-size: 11px; color: #64748B;">Base: ${baseHashRateDisplay} • ±3% network variance</span>
+                    </span>
+                    </span>
+                  </td>
+                </tr>
                   <tr style="border-top: 1px solid #E2E8F0;">
                     <td style="padding: 8px 0;"><strong>Initial Hash Power:</strong></td>
                     <td style="padding: 8px 0; text-align: right;">
                       ${investment.amountBTC.toFixed(8)} BTC<br>
                       <span style="font-size: 12px; color: #64748B;">≈ $${investment.amount.toLocaleString()}</span>
+                     </span>
                     </td>
                   </tr>
                   <tr style="border-top: 1px solid #E2E8F0;">
@@ -8844,6 +8868,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
                     <td style="padding: 8px 0; text-align: right; color: #10B981;">
                       <strong>${formattedRewardBTC} BTC</strong><br>
                       <span style="font-size: 12px;">≈ $${formattedRewardUSD}</span>
+                     </span>
                     </td>
                   </tr>
                   <tr style="border-top: 1px solid #E2E8F0;">
@@ -8851,6 +8876,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
                     <td style="padding: 8px 0; text-align: right; color: #10B981;">
                       <strong>+${formattedProfitBTC} BTC</strong><br>
                       <span style="font-size: 12px;">≈ +$${formattedProfitUSD}</span>
+                     </span>
                     </td>
                   </tr>
                   <tr style="border-top: 1px solid #E2E8F0;">
@@ -8912,11 +8938,11 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
         await infoTransporter.sendMail({
           from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
           to: user.email,
-          subject: `🎉 Cloud Mining Contract Completed - ${investment.plan.name} (${hashRate}) - ₿itHash Capital`,
+          subject: `🎉 Cloud Mining Contract Completed - ${investment.plan.name} (${hashRateDisplay}) - ₿itHash Capital`,
           html: maturityEmailHtml
         });
         
-        console.log(`📧 Mining contract completion email sent to ${user.email} with hash rate ${hashRate}`);
+        console.log(`📧 Mining contract completion email sent to ${user.email} with hash rate ${hashRateDisplay} (base: ${baseHashRateDisplay})`);
       } catch (emailError) {
         console.error('Failed to send maturity email:', emailError);
       }
@@ -8960,8 +8986,6 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
     });
   }
 });
-
-
 
 
 
