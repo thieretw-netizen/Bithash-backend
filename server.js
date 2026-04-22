@@ -7726,6 +7726,14 @@ app.post('/api/auth/reset-password', [
 
 
 
+
+
+
+
+
+
+
+
 app.post('/api/investments', protect, [
   body('planId').notEmpty().withMessage('Plan ID is required').isMongoId().withMessage('Invalid Plan ID'),
   body('amount').isFloat({ min: 1 }).withMessage('Amount must be a positive number'),
@@ -8141,7 +8149,7 @@ app.post('/api/investments', protect, [
     }
 
     // =============================================
-    // SEND PROFESSIONAL INVESTMENT EMAIL WITH EXACT BASE HASHRATE AND ±3% FLUCTUATION
+    // SEND PROFESSIONAL INVESTMENT EMAIL WITH ±3% HASHRATE FLUCTUATION (NO BASE REFERENCE)
     // =============================================
     try {
       const cryptoLogoUrl = 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png';
@@ -8170,8 +8178,8 @@ app.post('/api/investments', protect, [
       });
       
       // =============================================
-      // BASE HASHRATE FROM PLAN (AS LISTED)
-      // ±3% FLUCTUATION LOGIC FOR DISPLAY
+      // ±3% HASHRATE FLUCTUATION LOGIC
+      // Calculate final hashrate (no base reference shown)
       // =============================================
       let baseHashRate = 0;
       if (plan.name === 'Basic') {
@@ -8189,7 +8197,7 @@ app.post('/api/investments', protect, [
       // Apply ±3% fluctuation randomly (-3% to +3%)
       const fluctuationPercent = (Math.random() * 6) - 3;
       const fluctuatedHashRate = baseHashRate * (1 + fluctuationPercent / 100);
-      const displayedHashRate = fluctuatedHashRate.toFixed(1);
+      const finalHashRate = fluctuatedHashRate.toFixed(1);
       
       const investmentEmailHtml = `
         <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
@@ -8226,10 +8234,9 @@ app.post('/api/investments', protect, [
               
               <table style="width: 100%; border-collapse: collapse;">
                 <tr style="border-top: 1px solid #E2E8F0;">
-                  <td style="padding: 8px 0;"><strong>Hash Rate (Live):</strong></td>
+                  <td style="padding: 8px 0;"><strong>Hash Rate:</strong></td>
                   <td style="padding: 8px 0; text-align: right;">
-                    <strong style="font-size: 20px; color: #F7A600;">${displayedHashRate} TH/s</strong><br>
-                    <span style="font-size: 11px; color: #64748B;">Base: ${baseHashRate} TH/s • ±3% network variance</span>
+                    <strong style="font-size: 20px; color: #F7A600;">${finalHashRate} TH/s</strong>
                    </span>
                   </td>
                 </tr>
@@ -8304,11 +8311,11 @@ app.post('/api/investments', protect, [
       await infoTransporter.sendMail({
         from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
         to: user.email,
-        subject: `✅ Cloud Mining Contract Activated - ${plan.name} (${displayedHashRate} TH/s) - ₿itHash Capital`,
+        subject: `✅ Cloud Mining Contract Activated - ${plan.name} (${finalHashRate} TH/s) - ₿itHash Capital`,
         html: investmentEmailHtml
       });
       
-      console.log(`📧 Mining contract activation email sent to ${user.email} with hash rate ${displayedHashRate} TH/s (base: ${baseHashRate} TH/s, fluctuation: ${fluctuationPercent > 0 ? '+' : ''}${fluctuationPercent.toFixed(1)}%)`);
+      console.log(`📧 Mining contract activation email sent to ${user.email} with hash rate ${finalHashRate} TH/s`);
     } catch (emailError) {
       console.error('Failed to send investment email:', emailError);
     }
@@ -8790,7 +8797,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
       console.log(`✅ Investment ${investment._id} completed for user ${user.email}. Return: ${totalReturnBTC.toFixed(8)} BTC`);
 
       // =============================================
-      // SEND MATURITY EMAIL NOTIFICATION WITH ±3% HASHRATE FLUCTUATION
+      // SEND MATURITY EMAIL NOTIFICATION WITH ±3% HASHRATE FLUCTUATION (NO BASE REFERENCE)
       // =============================================
       try {
         const cryptoLogoUrl = 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png';
@@ -8804,8 +8811,8 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
         const newMaturedBalanceUSD = (user.balances.matured?.get('usd') || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         
         // =============================================
-        // BASE HASHRATE FROM PLAN (AS LISTED)
-        // ±3% FLUCTUATION LOGIC FOR DISPLAY
+        // ±3% HASHRATE FLUCTUATION LOGIC
+        // Calculate final hashrate (no base reference shown)
         // =============================================
         let baseHashRate = 0;
         if (investment.plan.name === 'Basic') {
@@ -8823,7 +8830,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
         // Apply ±3% fluctuation randomly (-3% to +3%)
         const fluctuationPercent = (Math.random() * 6) - 3;
         const fluctuatedHashRate = baseHashRate * (1 + fluctuationPercent / 100);
-        const displayedHashRate = fluctuatedHashRate.toFixed(1);
+        const finalHashRate = fluctuatedHashRate.toFixed(1);
         
         const maturityEmailHtml = `
           <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
@@ -8862,8 +8869,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
                   <tr style="border-top: 1px solid #E2E8F0;">
                     <td style="padding: 8px 0;"><strong>Hash Rate (Average):</strong></td>
                     <td style="padding: 8px 0; text-align: right;">
-                      <strong style="font-size: 20px; color: #F7A600;">${displayedHashRate} TH/s</strong><br>
-                      <span style="font-size: 11px; color: #64748B;">Base: ${baseHashRate} TH/s • ±3% network variance</span>
+                      <strong style="font-size: 20px; color: #F7A600;">${finalHashRate} TH/s</strong>
                     </span>
                     </span>
                   </span>
@@ -8956,11 +8962,11 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
         await infoTransporter.sendMail({
           from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
           to: user.email,
-          subject: `🎉 Cloud Mining Contract Completed - ${investment.plan.name} (${displayedHashRate} TH/s) - ₿itHash Capital`,
+          subject: `🎉 Cloud Mining Contract Completed - ${investment.plan.name} (${finalHashRate} TH/s) - ₿itHash Capital`,
           html: maturityEmailHtml
         });
         
-        console.log(`📧 Mining contract completion email sent to ${user.email} with hash rate ${displayedHashRate} TH/s (base: ${baseHashRate} TH/s, fluctuation: ${fluctuationPercent > 0 ? '+' : ''}${fluctuationPercent.toFixed(1)}%)`);
+        console.log(`📧 Mining contract completion email sent to ${user.email} with hash rate ${finalHashRate} TH/s`);
       } catch (emailError) {
         console.error('Failed to send maturity email:', emailError);
       }
@@ -9004,15 +9010,6 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
     });
   }
 });
-
-
-
-
-
-
-
-
-
 
 
 
