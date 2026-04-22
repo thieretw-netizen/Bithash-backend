@@ -24623,7 +24623,6 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
 
 
 
-
 // =============================================
 // ENDPOINT 1: GET /api/admin/crypto/assets - Real-time crypto assets for donut chart
 // =============================================
@@ -24952,7 +24951,7 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
         }
         
         // =============================================
-        // INVESTMENTS WITH END DATE AND EXPECTED PROFIT
+        // INVESTMENTS WITH ALL REQUIRED FIELDS
         // =============================================
         const investmentsInPeriod = await Investment.find({ 
           user: user._id, 
@@ -24965,11 +24964,50 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
           status: 'completed' 
         }).populate('plan');
         
-        // Get active investments for display
+        // Get active investments for display with ALL required schema fields
         const activeInvestments = await Investment.find({ 
           user: user._id, 
           status: 'active' 
         }).populate('plan');
+        
+        // Format active investments with ALL required fields (principalUSD is required by schema)
+        const formattedActiveInvestments = activeInvestments.map(inv => ({
+          investmentId: inv._id,
+          planName: inv.plan?.name || 'Unknown Plan',
+          principalUSD: inv.amount || 0,
+          principalBTC: inv.amountBTC || 0,
+          startDate: inv.createdAt,
+          endDate: inv.endDate,
+          status: inv.status,
+          expectedReturnUSD: inv.expectedReturn || 0,
+          expectedProfitUSD: (inv.expectedReturn || 0) - (inv.amount || 0),
+          profitPercentage: inv.returnPercentage || 0,
+          daysRemaining: Math.max(0, Math.ceil((inv.endDate - new Date()) / (1000 * 60 * 60 * 24)))
+        }));
+        
+        // Format started investments with required fields
+        const formattedStartedInvestments = investmentsInPeriod.map(inv => ({
+          investmentId: inv._id,
+          planName: inv.plan?.name || 'Unknown Plan',
+          principalUSD: inv.amount || 0,
+          principalBTC: inv.amountBTC || 0,
+          startDate: inv.createdAt,
+          endDate: inv.endDate,
+          expectedReturnUSD: inv.expectedReturn || 0,
+          expectedProfitUSD: (inv.expectedReturn || 0) - (inv.amount || 0),
+          profitPercentage: inv.returnPercentage || 0
+        }));
+        
+        // Format matured investments with required fields
+        const formattedMaturedInvestments = maturedInvestments.map(inv => ({
+          investmentId: inv._id,
+          planName: inv.plan?.name || 'Unknown Plan',
+          initialAmountUSD: inv.originalAmount || inv.amount,
+          returnAmountUSD: inv.expectedReturn || inv.amount,
+          profitUSD: (inv.expectedReturn || inv.amount) - (inv.originalAmount || inv.amount),
+          profitPercentage: inv.returnPercentage || 0,
+          completionDate: inv.completionDate || inv.endDate
+        }));
         
         // =============================================
         // BALANCES
@@ -25017,58 +25055,58 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
         const netCashFlow = totalDeposits - totalWithdrawals;
         
         // =============================================
-        // CREATE FINANCIAL STATEMENT
+        // CREATE FINANCIAL STATEMENT WITH ALL REQUIRED FIELDS
         // =============================================
         const statement = new FinancialStatement({
-          user: user._id, statementType: period,
+          user: user._id,
+          statementType: period,
           period: { startDate, endDate, generationDate: new Date() },
           reference: `FS-${period.toUpperCase()}-${user._id.toString().slice(-6)}-${Date.now()}`,
-          openingBalances, closingBalances, netChangeUSD: netChange,
+          openingBalances,
+          closingBalances,
+          netChangeUSD: netChange,
           transactions: {
             list: transactions.map(tx => ({
-              transactionId: tx._id, type: tx.type, amountUSD: tx.amount,
-              asset: tx.asset, assetAmount: tx.assetAmount, status: tx.status,
-              method: tx.method, description: tx.details?.description || `${tx.type} transaction`,
-              reference: tx.reference, feeUSD: tx.fee || 0,
-              netAmountUSD: tx.netAmount || tx.amount, createdAt: tx.createdAt
+              transactionId: tx._id,
+              type: tx.type,
+              amountUSD: tx.amount,
+              asset: tx.asset,
+              assetAmount: tx.assetAmount,
+              status: tx.status,
+              method: tx.method,
+              description: tx.details?.description || `${tx.type} transaction`,
+              reference: tx.reference,
+              feeUSD: tx.fee || 0,
+              netAmountUSD: tx.netAmount || tx.amount,
+              createdAt: tx.createdAt
             })),
-            summary: { totalDepositsUSD: totalDeposits, totalWithdrawalsUSD: totalWithdrawals, totalFeesPaidUSD: totalFees, totalTransfersUSD: 0,
-              count: { deposits: transactions.filter(t => t.type === 'deposit').length, withdrawals: transactions.filter(t => t.type === 'withdrawal').length, transfers: 0 } }
+            summary: {
+              totalDepositsUSD: totalDeposits,
+              totalWithdrawalsUSD: totalWithdrawals,
+              totalFeesPaidUSD: totalFees,
+              totalTransfersUSD: 0,
+              count: {
+                deposits: transactions.filter(t => t.type === 'deposit').length,
+                withdrawals: transactions.filter(t => t.type === 'withdrawal').length,
+                transfers: 0
+              }
+            }
           },
-          trading: { buys: [], sells: [], summary: { totalBuyVolumeUSD: totalBuyVolume, totalSellVolumeUSD: totalSellVolume, totalTradingProfitUSD: totalRealizedPnL > 0 ? totalRealizedPnL : 0, totalTradingLossUSD: totalRealizedPnL < 0 ? Math.abs(totalRealizedPnL) : 0, netTradingPnLUSD: totalRealizedPnL } },
+          trading: {
+            buys: [],
+            sells: [],
+            summary: {
+              totalBuyVolumeUSD: totalBuyVolume,
+              totalSellVolumeUSD: totalSellVolume,
+              totalTradingProfitUSD: totalRealizedPnL > 0 ? totalRealizedPnL : 0,
+              totalTradingLossUSD: totalRealizedPnL < 0 ? Math.abs(totalRealizedPnL) : 0,
+              netTradingPnLUSD: totalRealizedPnL
+            }
+          },
           investments: {
-            started: investmentsInPeriod.map(inv => ({
-              investmentId: inv._id,
-              planName: inv.plan?.name || 'Unknown Plan',
-              amountUSD: inv.amount,
-              amountBTC: inv.amountBTC,
-              startDate: inv.createdAt,
-              endDate: inv.endDate,
-              expectedReturnUSD: inv.expectedReturn,
-              expectedProfitUSD: (inv.expectedReturn || 0) - (inv.amount || 0),
-              profitPercentage: inv.returnPercentage || 0
-            })),
-            active: activeInvestments.map(inv => ({
-              investmentId: inv._id,
-              planName: inv.plan?.name || 'Unknown Plan',
-              amountUSD: inv.amount,
-              amountBTC: inv.amountBTC,
-              startDate: inv.createdAt,
-              endDate: inv.endDate,
-              expectedReturnUSD: inv.expectedReturn,
-              expectedProfitUSD: (inv.expectedReturn || 0) - (inv.amount || 0),
-              profitPercentage: inv.returnPercentage || 0,
-              daysRemaining: Math.max(0, Math.ceil((inv.endDate - new Date()) / (1000 * 60 * 60 * 24)))
-            })),
-            matured: maturedInvestments.map(inv => ({
-              investmentId: inv._id,
-              planName: inv.plan?.name || 'Unknown Plan',
-              initialAmountUSD: inv.originalAmount || inv.amount,
-              returnAmountUSD: inv.expectedReturn || inv.amount,
-              profitUSD: (inv.expectedReturn || inv.amount) - (inv.originalAmount || inv.amount),
-              profitPercentage: inv.returnPercentage || 0,
-              completionDate: inv.completionDate || inv.endDate
-            })),
+            active: formattedActiveInvestments,
+            started: formattedStartedInvestments,
+            matured: formattedMaturedInvestments,
             summary: {
               totalPrincipalInvestedUSD: investmentsInPeriod.reduce((sum, i) => sum + (i.amount || 0), 0),
               totalReturnsEarnedUSD: maturedInvestments.reduce((sum, i) => sum + ((i.expectedReturn || 0) - (i.originalAmount || 0)), 0),
@@ -25077,36 +25115,39 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
               totalActivePrincipalUSD: activeInvestments.reduce((sum, i) => sum + (i.amount || 0), 0)
             }
           },
-          fees: { 
-            items: transactions.filter(t => t.fee > 0 && t.type !== 'withdrawal').map(tx => ({ 
-              source: `${tx.type}_fee`, 
-              amountUSD: tx.fee, 
-              transactionId: tx._id, 
-              description: `${tx.type} fee`, 
-              date: tx.createdAt 
+          fees: {
+            items: transactions.filter(t => t.fee > 0 && t.type !== 'withdrawal').map(tx => ({
+              source: `${tx.type}_fee`,
+              amountUSD: tx.fee,
+              transactionId: tx._id,
+              description: `${tx.type} fee`,
+              date: tx.createdAt
             })),
-            summary: { 
-              totalFeesUSD: totalFees, 
-              investmentFeesUSD: totalInvestmentFees, 
-              withdrawalFeesUSD: totalWithdrawalFees, 
-              tradingFeesUSD: totalTradingFees, 
-              conversionFeesUSD: 0, 
-              loanFeesUSD: 0 
-            } 
+            summary: {
+              totalFeesUSD: totalFees,
+              investmentFeesUSD: totalInvestmentFees,
+              withdrawalFeesUSD: totalWithdrawalFees,
+              tradingFeesUSD: totalTradingFees,
+              conversionFeesUSD: 0,
+              loanFeesUSD: 0
+            }
           },
-          summary: { 
-            totalInflowUSD: totalDeposits, 
-            totalOutflowUSD: totalWithdrawals, 
+          summary: {
+            totalInflowUSD: totalDeposits,
+            totalOutflowUSD: totalWithdrawals,
             netCashFlowUSD: netCashFlow,
-            totalProfitUSD: netChange > 0 ? netChange : 0, 
-            totalLossUSD: netChange < 0 ? Math.abs(netChange) : 0, 
-            netProfitUSD: netChange, 
-            roiPercentage: roi, 
-            realizedPnL: totalRealizedPnL, 
-            unrealizedPnL: totalUnrealizedPnL, 
-            assetPnLDetails: assetPnLDetails 
+            totalProfitUSD: netChange > 0 ? netChange : 0,
+            totalLossUSD: netChange < 0 ? Math.abs(netChange) : 0,
+            netProfitUSD: netChange,
+            roiPercentage: roi,
+            realizedPnL: totalRealizedPnL,
+            unrealizedPnL: totalUnrealizedPnL,
+            assetPnLDetails: assetPnLDetails
           },
-          ipAddress: req.ip, userAgent: req.headers['user-agent'] || 'Unknown', location: 'Unknown', isDelivered: false
+          ipAddress: req.ip,
+          userAgent: req.headers['user-agent'] || 'Unknown',
+          location: 'Unknown',
+          isDelivered: false
         });
         
         await statement.save();
@@ -25338,7 +25379,7 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
         }
         
         // ========== INVESTMENT ACTIVITY WITH END DATE AND PROFIT IN GREEN ==========
-        if (statement.investments.started.length > 0 || statement.investments.active.length > 0 || statement.investments.matured.length > 0) {
+        if (formattedActiveInvestments.length > 0 || formattedStartedInvestments.length > 0 || formattedMaturedInvestments.length > 0) {
           needNewPage(200);
           doc.fillColor('#0B0E11').fontSize(14).font('Helvetica-Bold').text('5. INVESTMENT ACTIVITY', leftMargin, y);
           y += 22;
@@ -25351,26 +25392,26 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
           y += 68;
           
           // Active Investments with End Date and Expected Profit in GREEN
-          if (statement.investments.active && statement.investments.active.length > 0) {
+          if (formattedActiveInvestments.length > 0) {
             doc.fillColor('#1E3A8A').fontSize(11).font('Helvetica-Bold').text('Active Investments:', leftMargin, y);
             y += 18;
             
             doc.fillColor('#1E3A8A').rect(leftMargin, y, contentWidth, 22).fill();
             doc.fillColor('#FFFFFF').fontSize(8).font('Helvetica-Bold');
             doc.text('Plan Name', leftMargin + 10, y + 7);
-            doc.text('Amount', leftMargin + 200, y + 7);
+            doc.text('Principal', leftMargin + 200, y + 7);
             doc.text('Start Date', leftMargin + 310, y + 7);
             doc.text('End Date', leftMargin + 420, y + 7);
             doc.text('Expected Profit', leftMargin + 530, y + 7);
             y += 22;
             
-            for (const inv of statement.investments.active.slice(0, 8)) {
+            for (const inv of formattedActiveInvestments.slice(0, 8)) {
               needNewPage(20);
-              const bgColor = statement.investments.active.indexOf(inv) % 2 === 0 ? '#FFFFFF' : '#F8FAFC';
+              const bgColor = formattedActiveInvestments.indexOf(inv) % 2 === 0 ? '#FFFFFF' : '#F8FAFC';
               doc.fillColor(bgColor).rect(leftMargin, y, contentWidth, 20).fill();
               doc.fillColor('#374151').fontSize(9).font('Helvetica');
               doc.text(inv.planName.substring(0, 20), leftMargin + 10, y + 6);
-              doc.text(formatUSD(inv.amountUSD), leftMargin + 200, y + 6);
+              doc.text(formatUSD(inv.principalUSD), leftMargin + 200, y + 6);
               doc.text(formatShortDate(inv.startDate), leftMargin + 310, y + 6);
               doc.text(formatShortDate(inv.endDate), leftMargin + 420, y + 6);
               doc.fillColor('#10B981').text(formatUSD(inv.expectedProfitUSD), leftMargin + 530, y + 6);
@@ -25380,26 +25421,26 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
           }
           
           // New Investments Started
-          if (statement.investments.started.length > 0) {
+          if (formattedStartedInvestments.length > 0) {
             doc.fillColor('#1E3A8A').fontSize(11).font('Helvetica-Bold').text('New Investments Initiated:', leftMargin, y);
             y += 18;
-            for (const inv of statement.investments.started.slice(0, 5)) {
+            for (const inv of formattedStartedInvestments.slice(0, 5)) {
               needNewPage(18);
               doc.fillColor('#374151').fontSize(9).font('Helvetica');
               doc.text(`• ${inv.planName}`, leftMargin + 15, y);
-              doc.text(formatUSD(inv.amountUSD), leftMargin + 280, y);
+              doc.text(formatUSD(inv.principalUSD), leftMargin + 280, y);
               doc.fillColor('#6B7280').text(`Started: ${formatShortDate(inv.startDate)}`, leftMargin + 400, y);
-              doc.fillColor('#10B981').text(`Expected Profit: ${formatUSD(inv.expectedProfitUSD)}`, leftMargin + 550, y);
+              doc.fillColor('#10B981').text(`Expected: ${formatUSD(inv.expectedProfitUSD)}`, leftMargin + 550, y);
               y += 16;
             }
             y += 10;
           }
           
           // Matured Investments
-          if (statement.investments.matured.length > 0) {
+          if (formattedMaturedInvestments.length > 0) {
             doc.fillColor('#1E3A8A').fontSize(11).font('Helvetica-Bold').text('Matured / Completed Investments:', leftMargin, y);
             y += 18;
-            for (const inv of statement.investments.matured.slice(0, 5)) {
+            for (const inv of formattedMaturedInvestments.slice(0, 5)) {
               needNewPage(18);
               doc.fillColor('#374151').fontSize(9).font('Helvetica');
               doc.text(`• ${inv.planName}`, leftMargin + 15, y);
@@ -25602,7 +25643,6 @@ async function calculateAccurateClosingBalances(userId, endDate) {
   
   return { totalUSD: mainUSD + activeUSD + maturedUSD, mainWalletUSD: mainUSD, activeWalletUSD: activeUSD, maturedWalletUSD: maturedUSD, cryptoDetails, timestamp: endDate };
 }
-
 
 
 
