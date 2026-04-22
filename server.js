@@ -7742,6 +7742,29 @@ app.post('/api/investments', protect, [
     const { planId, amount, balanceType } = req.body;
     const userId = req.user._id;
 
+    // ✅ CHECK IF USER ALREADY HAS ACTIVE INVESTMENT IN THE SAME PLAN
+    const existingActiveInvestment = await Investment.findOne({
+      user: userId,
+      plan: planId,
+      status: 'active'
+    });
+
+    if (existingActiveInvestment) {
+      const plan = await Plan.findById(planId);
+      return res.status(400).json({
+        status: 'fail',
+        message: `You already have an active ${plan ? plan.name : 'mining'} contract. Please wait for it to complete before starting a new one.`,
+        data: {
+          existingInvestment: {
+            id: existingActiveInvestment._id,
+            planName: plan ? plan.name : 'Unknown',
+            endDate: existingActiveInvestment.endDate,
+            remainingHours: Math.ceil((existingActiveInvestment.endDate - new Date()) / (1000 * 60 * 60))
+          }
+        }
+      });
+    }
+
     // ✅ CHECK RESTRICTIONS BEFORE ALLOWING INVESTMENT
     const restrictions = await AccountRestrictions.getInstance();
     const userRestrictionStatus = await UserRestrictionStatus.findOne({ user: userId });
@@ -8106,7 +8129,7 @@ app.post('/api/investments', protect, [
     }
 
     // =============================================
-    // SEND PROFESSIONAL INVESTMENT EMAIL WITH CORRECT HASH RATES
+    // SEND PROFESSIONAL INVESTMENT EMAIL WITH EXACT HASH RATES
     // =============================================
     try {
       const cryptoLogoUrl = 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png';
@@ -8135,9 +8158,9 @@ app.post('/api/investments', protect, [
       });
       
       // =============================================
-      // CORRECT HASH RATE MAPPING BASED ON PLAN NAME
+      // EXACT HASH RATES - NO SIMULATION, NO FALLBACK
       // =============================================
-      let hashRate = '0 TH/s';
+      let hashRate = '';
       if (plan.name === 'Basic') {
         hashRate = '68 TH/s';
       } else if (plan.name === 'Standard') {
@@ -8148,9 +8171,6 @@ app.post('/api/investments', protect, [
         hashRate = '234 TH/s';
       } else if (plan.name === 'Ultimate') {
         hashRate = '255 TH/s';
-      } else {
-        // Fallback for any other plan names
-        hashRate = `${Math.floor(plan.percentage * 5)} TH/s`;
       }
       
       const investmentEmailHtml = `
@@ -8170,12 +8190,12 @@ app.post('/api/investments', protect, [
                   <path d="M8 12L11 15L16 9" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
               </div>
-              <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">MINING CONTRACT ACTIVATED!</h2>
-              <p style="color: #065F46; font-size: 13px; margin: 0;">Your cloud mining contract has been successfully activated</p>
+              <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">CLOUD MINING CONTRACT ACTIVATED!</h2>
+              <p style="color: #065F46; font-size: 13px; margin: 0;">Your SHA-256 ASIC mining contract has been successfully activated</p>
             </div>
             
             <p style="color: #333333; line-height: 1.6;">Dear <strong>${user.firstName}</strong>,</p>
-            <p style="color: #333333; line-height: 1.6;">Great news! Your cloud mining contract has been successfully activated. Your hash rate is now working for you in our bitcoin mining facilities with SHA-256 ASIC miners.</p>
+            <p style="color: #333333; line-height: 1.6;">Great news! Your cloud mining contract has been successfully activated. Your hash rate is now working for you in our bitcoin mining facilities.</p>
             
             <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
               <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
@@ -8270,6 +8290,7 @@ app.post('/api/investments', protect, [
 
     res.status(201).json({
       status: 'success',
+      message: `Your ${plan.name} cloud mining contract has been successfully activated with ${plan.name === 'Basic' ? '68' : plan.name === 'Standard' ? '110' : plan.name === 'Pro' ? '150' : plan.name === 'Enterprise' ? '234' : '255'} TH/s hash rate.`,
       data: {
         investment: {
           id: investment._id,
@@ -8744,7 +8765,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
       console.log(`✅ Investment ${investment._id} completed for user ${user.email}. Return: ${totalReturnBTC.toFixed(8)} BTC`);
 
       // =============================================
-      // SEND MATURITY EMAIL NOTIFICATION WITH CORRECT HASH RATE
+      // SEND MATURITY EMAIL NOTIFICATION WITH EXACT HASH RATE
       // =============================================
       try {
         const cryptoLogoUrl = 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png';
@@ -8758,9 +8779,9 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
         const newMaturedBalanceUSD = (user.balances.matured?.get('usd') || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         
         // =============================================
-        // CORRECT HASH RATE MAPPING FOR MATURITY EMAIL
+        // EXACT HASH RATES - NO SIMULATION, NO FALLBACK
         // =============================================
-        let hashRate = '0 TH/s';
+        let hashRate = '';
         if (investment.plan.name === 'Basic') {
           hashRate = '68 TH/s';
         } else if (investment.plan.name === 'Standard') {
@@ -8771,8 +8792,6 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
           hashRate = '234 TH/s';
         } else if (investment.plan.name === 'Ultimate') {
           hashRate = '255 TH/s';
-        } else {
-          hashRate = `${Math.floor(investment.returnPercentage * 5)} TH/s`;
         }
         
         const maturityEmailHtml = `
@@ -8904,6 +8923,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
 
       res.status(200).json({
         status: 'success',
+        message: `Your ${investment.plan.name} cloud mining contract has completed. ${(totalReturnBTC - investment.amountBTC).toFixed(8)} BTC profit has been credited to your Matured Wallet.`,
         data: {
           investment: {
             id: investment._id,
