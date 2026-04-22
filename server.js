@@ -7725,304 +7725,6 @@ app.post('/api/auth/reset-password', [
 
 
 
-
-// =============================================
-// REAL-TIME BITCOIN PRICE WITH MULTIPLE API FALLBACKS
-// ALL FALLBACKS FETCH FROM ONLINE APIs - NO HARDCODED VALUES
-// =============================================
-async function getRealTimeBitcoinPrice() {
-  const errors = [];
-  
-  // API 1: CoinGecko
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-    const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd', {
-      signal: controller.signal
-    });
-    clearTimeout(timeoutId);
-    if (response.ok) {
-      const data = await response.json();
-      if (data?.bitcoin?.usd && data.bitcoin.usd > 0) {
-        console.log(`✅ BTC price from CoinGecko: $${data.bitcoin.usd}`);
-        return data.bitcoin.usd;
-      }
-    }
-    errors.push('CoinGecko: Invalid response');
-  } catch (err) {
-    errors.push(`CoinGecko: ${err.message}`);
-  }
-  
-  // API 2: Binance
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-    const response = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT', {
-      signal: controller.signal
-    });
-    clearTimeout(timeoutId);
-    if (response.ok) {
-      const data = await response.json();
-      if (data?.price && parseFloat(data.price) > 0) {
-        const price = parseFloat(data.price);
-        console.log(`✅ BTC price from Binance: $${price}`);
-        return price;
-      }
-    }
-    errors.push('Binance: Invalid response');
-  } catch (err) {
-    errors.push(`Binance: ${err.message}`);
-  }
-  
-  // API 3: Kraken
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-    const response = await fetch('https://api.kraken.com/0/public/Ticker?pair=XBTUSD', {
-      signal: controller.signal
-    });
-    clearTimeout(timeoutId);
-    if (response.ok) {
-      const data = await response.json();
-      if (data?.result?.XXBTZUSD?.c?.[0]) {
-        const price = parseFloat(data.result.XXBTZUSD.c[0]);
-        if (price > 0) {
-          console.log(`✅ BTC price from Kraken: $${price}`);
-          return price;
-        }
-      }
-    }
-    errors.push('Kraken: Invalid response');
-  } catch (err) {
-    errors.push(`Kraken: ${err.message}`);
-  }
-  
-  // API 4: CryptoCompare
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-    const response = await fetch('https://min-api.cryptocompare.com/data/price?fsym=BTC&tsyms=USD', {
-      signal: controller.signal
-    });
-    clearTimeout(timeoutId);
-    if (response.ok) {
-      const data = await response.json();
-      if (data?.USD && data.USD > 0) {
-        console.log(`✅ BTC price from CryptoCompare: $${data.USD}`);
-        return data.USD;
-      }
-    }
-    errors.push('CryptoCompare: Invalid response');
-  } catch (err) {
-    errors.push(`CryptoCompare: ${err.message}`);
-  }
-  
-  // API 5: Coinbase
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-    const response = await fetch('https://api.coinbase.com/v2/prices/BTC-USD/spot', {
-      signal: controller.signal
-    });
-    clearTimeout(timeoutId);
-    if (response.ok) {
-      const data = await response.json();
-      if (data?.data?.amount && parseFloat(data.data.amount) > 0) {
-        const price = parseFloat(data.data.amount);
-        console.log(`✅ BTC price from Coinbase: $${price}`);
-        return price;
-      }
-    }
-    errors.push('Coinbase: Invalid response');
-  } catch (err) {
-    errors.push(`Coinbase: ${err.message}`);
-  }
-  
-  // API 6: KuCoin
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-    const response = await fetch('https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=BTC-USDT', {
-      signal: controller.signal
-    });
-    clearTimeout(timeoutId);
-    if (response.ok) {
-      const data = await response.json();
-      if (data?.data?.price && parseFloat(data.data.price) > 0) {
-        const price = parseFloat(data.data.price);
-        console.log(`✅ BTC price from KuCoin: $${price}`);
-        return price;
-      }
-    }
-    errors.push('KuCoin: Invalid response');
-  } catch (err) {
-    errors.push(`KuCoin: ${err.message}`);
-  }
-  
-  // API 7: Bybit
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-    const response = await fetch('https://api.bybit.com/v5/market/tickers?category=spot&symbol=BTCUSDT', {
-      signal: controller.signal
-    });
-    clearTimeout(timeoutId);
-    if (response.ok) {
-      const data = await response.json();
-      if (data?.result?.list?.[0]?.lastPrice) {
-        const price = parseFloat(data.result.list[0].lastPrice);
-        if (price > 0) {
-          console.log(`✅ BTC price from Bybit: $${price}`);
-          return price;
-        }
-      }
-    }
-    errors.push('Bybit: Invalid response');
-  } catch (err) {
-    errors.push(`Bybit: ${err.message}`);
-  }
-  
-  // API 8: OKX
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-    const response = await fetch('https://www.okx.com/api/v5/market/ticker?instId=BTC-USDT', {
-      signal: controller.signal
-    });
-    clearTimeout(timeoutId);
-    if (response.ok) {
-      const data = await response.json();
-      if (data?.data?.[0]?.last && parseFloat(data.data[0].last) > 0) {
-        const price = parseFloat(data.data[0].last);
-        console.log(`✅ BTC price from OKX: $${price}`);
-        return price;
-      }
-    }
-    errors.push('OKX: Invalid response');
-  } catch (err) {
-    errors.push(`OKX: ${err.message}`);
-  }
-  
-  // API 9: Huobi
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-    const response = await fetch('https://api.huobi.pro/market/detail/merged?symbol=btcusdt', {
-      signal: controller.signal
-    });
-    clearTimeout(timeoutId);
-    if (response.ok) {
-      const data = await response.json();
-      if (data?.tick?.close && parseFloat(data.tick.close) > 0) {
-        const price = parseFloat(data.tick.close);
-        console.log(`✅ BTC price from Huobi: $${price}`);
-        return price;
-      }
-    }
-    errors.push('Huobi: Invalid response');
-  } catch (err) {
-    errors.push(`Huobi: ${err.message}`);
-  }
-  
-  // API 10: Gemini
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-    const response = await fetch('https://api.gemini.com/v1/pubticker/btcusd', {
-      signal: controller.signal
-    });
-    clearTimeout(timeoutId);
-    if (response.ok) {
-      const data = await response.json();
-      if (data?.last && parseFloat(data.last) > 0) {
-        const price = parseFloat(data.last);
-        console.log(`✅ BTC price from Gemini: $${price}`);
-        return price;
-      }
-    }
-    errors.push('Gemini: Invalid response');
-  } catch (err) {
-    errors.push(`Gemini: ${err.message}`);
-  }
-  
-  // If all APIs failed, log error and throw
-  console.error('❌ All BTC price APIs failed. Errors:', errors);
-  throw new Error('Unable to fetch current BTC price. Please try again later.');
-}
-
-// =============================================
-// HASH RATE CALCULATION WITH BACKGROUND FLUCTUATION
-// =============================================
-
-// Base hashrate per plan (TH/s)
-const PLAN_BASE_HASHRATES = {
-  'Basic': 68,
-  'Standard': 110,
-  'Pro': 150,
-  'Enterprise': 234,
-  'Ultimate': 255
-};
-
-// Cache for current fluctuating hashrates (refreshed every minute)
-let currentHashrates = {};
-let lastHashrateUpdate = 0;
-const HASHRATE_UPDATE_INTERVAL = 60000; // 60 seconds
-
-// Function to get current hashrate with -+4% fluctuation
-function getFluctuatingHashrate(planName, planId) {
-  const now = Date.now();
-  
-  // Refresh all hashrates every interval
-  if (now - lastHashrateUpdate > HASHRATE_UPDATE_INTERVAL) {
-    for (const [name, baseRate] of Object.entries(PLAN_BASE_HASHRATES)) {
-      // Calculate fluctuation between -4% and +4%
-      const fluctuation = (Math.random() * 8) - 4;
-      const fluctuatedRate = baseRate * (1 + (fluctuation / 100));
-      currentHashrates[name] = Math.round(fluctuatedRate * 10) / 10;
-    }
-    lastHashrateUpdate = now;
-  }
-  
-  // Return cached fluctuated rate or calculate new one
-  if (currentHashrates[planName]) {
-    return currentHashrates[planName];
-  }
-  
-  // Fallback: calculate on the fly
-  const baseRate = PLAN_BASE_HASHRATES[planName] || 68;
-  const fluctuation = (Math.random() * 8) - 4;
-  const fluctuatedRate = baseRate * (1 + (fluctuation / 100));
-  return Math.round(fluctuatedRate * 10) / 10;
-}
-
-// Helper function to get BTC logo URL
-function getBTCLogoUrl() {
-  return 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png';
-}
-
-// Helper function to format BTC amount
-function formatBTCAmount(amount) {
-  return amount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
-}
-
-// Helper function to format USD amount
-function formatUSDAmount(amount) {
-  return amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-// Helper function to check if user has active investment in same plan
-async function hasActiveInvestmentInPlan(userId, planId) {
-  const activeInvestment = await Investment.findOne({
-    user: userId,
-    plan: planId,
-    status: 'active'
-  });
-  return !!activeInvestment;
-}
-
-// =============================================
-// INVESTMENT ENDPOINT - COMPLETE REWRITE
-// =============================================
 app.post('/api/investments', protect, [
   body('planId').notEmpty().withMessage('Plan ID is required').isMongoId().withMessage('Invalid Plan ID'),
   body('amount').isFloat({ min: 1 }).withMessage('Amount must be a positive number'),
@@ -8100,16 +7802,25 @@ app.post('/api/investments', protect, [
       });
     }
 
-    // CHECK IF USER ALREADY HAS ACTIVE INVESTMENT IN SAME PLAN
-    const hasActiveInPlan = await hasActiveInvestmentInPlan(userId, planId);
-    if (hasActiveInPlan) {
+    // =============================================
+    // CHECK IF USER HAS ACTIVE INVESTMENT IN SAME PLAN
+    // =============================================
+    const existingActiveInvestment = await Investment.findOne({
+      user: userId,
+      plan: planId,
+      status: 'active'
+    });
+
+    if (existingActiveInvestment) {
       return res.status(400).json({
         status: 'fail',
-        message: `You already have an active investment in the ${plan.name} plan. Please wait until it matures before investing again in the same plan.`
+        message: `You already have an active investment in the ${plan.name} plan. Please wait until it matures before investing again.`
       });
     }
 
+    // =============================================
     // REAL-TIME BTC PRICE WITH MULTIPLE API FALLBACKS
+    // =============================================
     const btcPrice = await getRealTimeBitcoinPrice();
     const amountInBTC = amount / btcPrice;
     
@@ -8125,7 +7836,10 @@ app.post('/api/investments', protect, [
       };
     }
     
+    // Get Bitcoin balance from main wallet using .get('btc')
     const mainBitcoinBalance = user.balances.main?.get('btc') || 0;
+    
+    // Get Bitcoin balance from matured wallet using .get('btc')
     const maturedBitcoinBalance = user.balances.matured?.get('btc') || 0;
     
     console.log(`📊 BTC Balance Check for ${user.email}:`);
@@ -8173,10 +7887,22 @@ app.post('/api/investments', protect, [
     const expectedReturnUSD = investmentAmountAfterFeeUSD + (investmentAmountAfterFeeUSD * plan.percentage / 100);
     const expectedReturnBTC = investmentAmountAfterFeeBTC + (investmentAmountAfterFeeBTC * plan.percentage / 100);
     const endDate = new Date(Date.now() + plan.duration * 60 * 60 * 1000);
+
+    // =============================================
+    // CALCULATE HASH RATE WITH RANDOM FLUCTUATION ±4%
+    // =============================================
+    const baseHashrates = {
+      'Basic': 68,
+      'Standard': 110,
+      'Pro': 150,
+      'Enterprise': 234,
+      'Ultimate': 255
+    };
     
-    // GET CURRENT FLUCTUATING HASHRATE FOR THIS PLAN
-    const currentHashrate = getFluctuatingHashrate(plan.name, planId);
-    const hashrateValue = `${currentHashrate} TH/s`;
+    const baseHashrate = baseHashrates[plan.name] || 50;
+    const fluctuation = (Math.random() * 8) - 4;
+    const calculatedHashrate = baseHashrate * (1 + fluctuation / 100);
+    const hashrateValue = calculatedHashrate.toFixed(2);
 
     // Deduct Bitcoin from the selected wallet using Map.set()
     if (balanceType === 'main') {
@@ -8227,7 +7953,7 @@ app.post('/api/investments', protect, [
       hashRate: hashrateValue
     });
 
-    // Create transaction record with POSITIVE numbers
+    // Create transaction record with POSITIVE numbers (not negative)
     const transaction = await Transaction.create({
       user: userId,
       type: 'investment',
@@ -8246,7 +7972,8 @@ app.post('/api/investments', protect, [
         amountAfterFeeUSD: investmentAmountAfterFeeUSD,
         amountAfterFeeBTC: investmentAmountAfterFeeBTC,
         btcPrice: btcPrice,
-        transactionType: 'debit'
+        transactionType: 'debit',
+        hashrate: hashrateValue
       },
       fee: investmentFeeUSD,
       netAmount: investmentAmountAfterFeeUSD
@@ -8269,7 +7996,8 @@ app.post('/api/investments', protect, [
         amountAfterFeeUSD: investmentAmountAfterFeeUSD,
         amountAfterFeeBTC: investmentAmountAfterFeeBTC,
         feePercentage: 3,
-        btcPrice: btcPrice
+        btcPrice: btcPrice,
+        hashrate: hashrateValue
       }
     });
 
@@ -8338,7 +8066,9 @@ app.post('/api/investments', protect, [
       relatedEntityModel: 'Investment'
     });
 
-    // CREATE SYSTEM LOG FOR INVESTMENT CREATION
+    // =============================================
+    // CREATE SYSTEM LOG FOR INVESTMENT
+    // =============================================
     await SystemLog.create({
       action: 'investment_created',
       entity: 'investment',
@@ -8353,31 +8083,17 @@ app.post('/api/investments', protect, [
       os: getOSFromUserAgent(req.headers['user-agent']),
       browser: getBrowserFromUserAgent(req.headers['user-agent']),
       location: deviceInfo.location,
+      countryCode: deviceInfo.locationDetails?.country,
       city: deviceInfo.locationDetails?.city,
       region: deviceInfo.locationDetails?.region,
-      countryCode: deviceInfo.locationDetails?.country,
       latitude: deviceInfo.locationDetails?.latitude,
       longitude: deviceInfo.locationDetails?.longitude,
       status: 'success',
       riskLevel: 'low',
-      metadata: {
-        planName: plan.name,
-        investmentAmountUSD: amount,
-        investmentAmountBTC: investmentBTCAmount,
-        amountAfterFeeUSD: investmentAmountAfterFeeUSD,
-        amountAfterFeeBTC: investmentAmountAfterFeeBTC,
-        expectedReturnUSD: expectedReturnUSD,
-        expectedReturnBTC: expectedReturnBTC,
-        btcPriceAtInvestment: btcPrice,
-        duration: plan.duration,
-        roiPercentage: plan.percentage,
-        balanceType: balanceType,
-        hashrate: hashrateValue
-      },
       financial: {
         amount: amount,
         amountUSD: amount,
-        cryptoAmount: investmentBTCAmount,
+        cryptoAmount: investmentAmountAfterFeeBTC,
         cryptoAsset: 'BTC',
         fee: investmentFeeUSD,
         exchangeRate: btcPrice,
@@ -8385,6 +8101,20 @@ app.post('/api/investments', protect, [
         walletType: 'active',
         transactionId: transaction._id,
         reference: transaction.reference
+      },
+      metadata: {
+        planName: plan.name,
+        planPercentage: plan.percentage,
+        planDuration: plan.duration,
+        investmentAmountUSD: amount,
+        investmentAmountBTC: investmentBTCAmount,
+        amountAfterFeeUSD: investmentAmountAfterFeeUSD,
+        amountAfterFeeBTC: investmentAmountAfterFeeBTC,
+        expectedReturnUSD: expectedReturnUSD,
+        expectedReturnBTC: expectedReturnBTC,
+        balanceType: balanceType,
+        hashrate: hashrateValue,
+        endDate: endDate
       }
     });
 
@@ -8409,206 +8139,75 @@ app.post('/api/investments', protect, [
       }
     }
 
-    // SEND INVESTMENT EMAIL - SISTER EMAIL TO DEPOSIT APPROVAL EMAIL
-    const btcLogoUrl = getBTCLogoUrl();
-    const formattedAmountBTC = formatBTCAmount(investmentBTCAmount);
-    const formattedAmountUSD = formatUSDAmount(amount);
-    const formattedExpectedReturnBTC = formatBTCAmount(expectedReturnBTC);
-    const formattedExpectedReturnUSD = formatUSDAmount(expectedReturnUSD);
-    const formattedInvestmentFeeBTC = formatBTCAmount(investmentFeeBTC);
-    const formattedInvestmentFeeUSD = formatUSDAmount(investmentFeeUSD);
-    const formattedAmountAfterFeeBTC = formatBTCAmount(investmentAmountAfterFeeBTC);
-    const formattedAmountAfterFeeUSD = formatUSDAmount(investmentAmountAfterFeeUSD);
-    const formattedBTCRate = formatUSDAmount(btcPrice);
-    const durationHours = plan.duration;
-    const roiPercentage = plan.percentage;
-    
-    // Calculate new active wallet balance
-    const newActiveBalance = (user.balances.active?.get('usd') || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    
-    const investmentEmailHtml = `
-      <div style="padding: 0;">
-        
-        <!-- Status Badge -->
-        <div style="text-align: center; margin-bottom: 25px;">
-          <div style="display: inline-block; background: rgba(247, 166, 0, 0.1); border: 1px solid rgba(247, 166, 0, 0.3); border-radius: 60px; padding: 6px 16px;">
-            <span style="color: #F7A600; font-size: 13px; font-weight: 600;">ACTIVE INVESTMENT</span>
-          </div>
-        </div>
-        
-        <!-- Greeting -->
-        <p style="color: #FFFFFF; font-size: 16px; margin-bottom: 25px; line-height: 1.5;">Dear <strong style="color: #F7A600;">${user.firstName}</strong>,</p>
-        <p style="color: #B7BDC6; font-size: 14px; margin-bottom: 25px; line-height: 1.6;">Your investment has been successfully activated. Below are the details of your mining contract.</p>
-        
-        <!-- Investment Card -->
-        <div style="background: #11151C; border-radius: 16px; padding: 24px; margin-bottom: 24px; border: 1px solid #1E2329;">
-          
-          <!-- Asset Header with Logo -->
-          <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid #1E2329;">
-            <div style="width: 48px; height: 48px; border-radius: 50%; background: rgba(247, 166, 0, 0.1); display: flex; align-items: center; justify-content: center;">
-              <img src="${btcLogoUrl}" alt="BTC" style="width: 32px; height: 32px;">
-            </div>
-            <div style="flex: 1;">
-              <div style="font-size: 18px; font-weight: 700; color: #FFFFFF; margin-bottom: 4px;">Bitcoin Cloud Mining</div>
-              <div style="font-size: 12px; color: #6C7480;">Plan: ${plan.name}</div>
-            </div>
-          </div>
-          
-          <!-- Investment Amount -->
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #1E2329;">
-            <div style="font-size: 14px; color: #B7BDC6;">Investment Amount</div>
-            <div style="text-align: right;">
-              <div style="font-size: 20px; font-weight: 700; color: #FFFFFF;">${formattedAmountBTC} BTC</div>
-              <div style="font-size: 13px; color: #6C7480;">≈ $${formattedAmountUSD} USD</div>
-            </div>
-          </div>
-          
-          <!-- Expected Return -->
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #1E2329;">
-            <div style="font-size: 14px; color: #B7BDC6;">Expected Return</div>
-            <div style="text-align: right;">
-              <div style="font-size: 20px; font-weight: 700; color: #10B981;">${formattedExpectedReturnBTC} BTC</div>
-              <div style="font-size: 13px; color: #6C7480;">≈ $${formattedExpectedReturnUSD} USD</div>
-            </div>
-          </div>
-          
-          <!-- ROI Percentage -->
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #1E2329;">
-            <div style="font-size: 14px; color: #B7BDC6;">Return on Investment</div>
-            <div style="font-size: 18px; font-weight: 700; color: #F7A600;">+${roiPercentage}%</div>
-          </div>
-          
-          <!-- Duration -->
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #1E2329;">
-            <div style="font-size: 14px; color: #B7BDC6;">Contract Duration</div>
-            <div style="font-size: 16px; font-weight: 600; color: #FFFFFF;">${durationHours} hours</div>
-          </div>
-          
-          <!-- Hashrate -->
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #1E2329;">
-            <div style="font-size: 14px; color: #B7BDC6;">Hashrate</div>
-            <div style="font-size: 16px; font-weight: 600; color: #FFFFFF;">${hashrateValue}</div>
-          </div>
-          
-          <!-- Fee Section -->
-          <div style="background: rgba(239, 68, 68, 0.1); border-radius: 12px; padding: 16px; margin: 16px 0; border-left: 3px solid #EF4444;">
-            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-              <span style="font-size: 13px; color: #EF4444;">Processing Fee (3%):</span>
-              <span style="font-size: 13px; font-weight: 600; color: #EF4444;">${formattedInvestmentFeeBTC} BTC (≈ $${formattedInvestmentFeeUSD})</span>
-            </div>
-            <div style="display: flex; justify-content: space-between;">
-              <span style="font-size: 13px; color: #B7BDC6;">Amount Invested (After Fee):</span>
-              <span style="font-size: 13px; font-weight: 600; color: #F7A600;">${formattedAmountAfterFeeBTC} BTC (≈ $${formattedAmountAfterFeeUSD})</span>
-            </div>
-          </div>
-          
-          <!-- Wallet Deduction Source -->
-          <div style="background: ${balanceType === 'main' ? 'rgba(247, 166, 0, 0.05)' : 'rgba(16, 185, 129, 0.05)'}; border-radius: 12px; padding: 12px; margin-top: 12px;">
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M20 7H4C2.89543 7 2 7.89543 2 9V19C2 20.1046 2.89543 21 4 21H20C21.1046 21 22 20.1046 22 19V9C22 7.89543 21.1046 7 20 7Z" stroke="${balanceType === 'main' ? '#F7A600' : '#10B981'}" stroke-width="2" stroke-linecap="round"/>
-                <path d="M16 3L20 7M8 3L4 7" stroke="${balanceType === 'main' ? '#F7A600' : '#10B981'}" stroke-width="2" stroke-linecap="round"/>
-              </svg>
-              <span style="font-size: 13px; color: #B7BDC6;">Deducted From:</span>
-              <span style="display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; background: ${balanceType === 'main' ? 'rgba(247, 166, 0, 0.15)' : 'rgba(16, 185, 129, 0.15)'}; color: ${balanceType === 'main' ? '#F7A600' : '#10B981'};">${balanceType === 'main' ? 'Main Wallet' : 'Matured Wallet'}</span>
-            </div>
-          </div>
-          
-          <!-- Transaction Details Grid -->
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px;">
-            <div style="background: #0B0E11; padding: 12px; border-radius: 12px; border: 1px solid #1E2329;">
-              <div style="font-size: 11px; color: #6C7480; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">Exchange Rate</div>
-              <div style="font-size: 14px; font-weight: 600; color: #F7A600;">1 BTC ≈ $${formattedBTCRate}</div>
-            </div>
-            <div style="background: #0B0E11; padding: 12px; border-radius: 12px; border: 1px solid #1E2329;">
-              <div style="font-size: 11px; color: #6C7480; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">Transaction ID</div>
-              <div style="font-size: 13px; font-weight: 600; color: #FFFFFF; font-family: monospace;">${transaction.reference}</div>
-            </div>
-          </div>
-          
-        </div>
-        
-        <!-- New Active Balance Summary -->
-        <div style="background: linear-gradient(135deg, #11151C 0%, #0B0E11 100%); border-radius: 12px; padding: 20px; margin-top: 8px; border: 1px solid #1E2329;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-            <div style="font-size: 16px; font-weight: 600; color: #FFFFFF;">Active Mining Balance</div>
-            <div style="text-align: right;">
-              <div style="font-size: 18px; font-weight: 700; color: #F7A600;">$${newActiveBalance}</div>
-            </div>
-          </div>
-          <div style="height: 1px; background: #1E2329; margin: 12px 0;"></div>
-          <div style="display: flex; justify-content: space-between; align-items: center;">
-            <div style="font-size: 13px; color: #6C7480;">Your mining contract is now active</div>
-            <a href="https://www.bithashcapital.live/dashboard" style="background: #F7A600; color: #000000; padding: 10px 20px; text-decoration: none; border-radius: 999px; font-size: 13px; font-weight: 600;">View Dashboard →</a>
-          </div>
-        </div>
-        
-        <!-- Help Section -->
-        <div style="margin-top: 30px; padding: 20px; background: rgba(247, 166, 0, 0.05); border-radius: 12px; text-align: center; border: 1px solid rgba(247, 166, 0, 0.1);">
-          <p style="color: #B7BDC6; font-size: 13px; margin: 0;">
-            <strong style="color: #F7A600;">Need help?</strong> Contact our support team at 
-            <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a>
-          </p>
-        </div>
-        
-      </div>
-    `;
-    
-    // Send investment email with professional template
-    const mailTransporter = infoTransporter;
-    await mailTransporter.sendMail({
-      from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
-      to: user.email,
-      subject: `Investment Confirmed - ${plan.name} Plan - ₿itHash Capital`,
-      html: `
-        <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #0B0E11;">
-          <!-- Header -->
-          <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%); border-bottom: 1px solid #1E2329;">
-            <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-            <h1 style="color: #F7A600; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
-            <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
-          </div>
-          
-          <!-- Body Content -->
-          ${investmentEmailHtml}
-          
-          <!-- Footer -->
-          <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-            <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-            <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-            <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
-              <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> | 
-              <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
-            </p>
-          </div>
-        </div>
-      `
-    });
-    
-    console.log(`📧 Investment email sent to ${user.email}`);
-    console.log(`   Plan: ${plan.name}`);
-    console.log(`   Amount: ${formattedAmountBTC} BTC`);
-    console.log(`   Hashrate: ${hashrateValue}`);
-    console.log(`   Expected Return: ${formattedExpectedReturnBTC} BTC`);
+    // =============================================
+    // SEND SISTER EMAIL (identical to deposit approved email style)
+    // No emojis, clean visual, real BTC logo
+    // =============================================
+    const cryptoLogoUrl = getCryptoLogo('BTC');
+    const formattedAmount = amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const formattedBTCAmount = investmentAmountAfterFeeBTC.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
+    const formattedExpectedReturnBTC = expectedReturnBTC.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
+    const formattedExpectedReturnUSD = expectedReturnUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const formattedFee = investmentFeeUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const formattedBtcPrice = btcPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const formattedHashrate = hashrateValue;
 
-    // Emit real-time updates via Socket.IO
-    const io = req.app.get('io');
-    if (io) {
-      io.to(`user_${userId}`).emit('balance_update', {
-        main: user.balances.main?.get('usd') || 0,
-        active: user.balances.active?.get('usd') || 0,
-        matured: user.balances.matured?.get('usd') || 0
-      });
-      
-      io.to(`user_${userId}`).emit('investment_created', {
-        investmentId: investment._id,
-        planName: plan.name,
-        amountBTC: investmentAmountAfterFeeBTC,
-        expectedReturnBTC: expectedReturnBTC,
-        endDate: endDate,
-        hashrate: hashrateValue
-      });
-    }
+    await sendProfessionalEmail({
+      email: user.email,
+      template: 'deposit_approved',
+      data: {
+        name: user.firstName,
+        amount: formattedAmount,
+        cryptoAmount: formattedBTCAmount,
+        cryptoAsset: 'BTC',
+        cryptoLogoUrl: cryptoLogoUrl,
+        method: 'Bitcoin Mining Investment',
+        reference: transaction.reference,
+        newBalance: (user.balances.active?.get('usd') || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+        processedAt: new Date().toLocaleString(),
+        exchangeRate: formattedBtcPrice,
+        walletType: 'Active Mining Wallet',
+        walletColor: '#F7A600',
+        description: `Investment in ${plan.name} Plan`,
+        customDetails: `
+          <div style="background: #0B0E11; border-radius: 12px; padding: 16px; margin-top: 16px; border: 1px solid #1E2329;">
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr>
+                <td style="padding: 8px 0; color: #6C7480;">Investment Plan:</td>
+                <td style="padding: 8px 0; text-align: right; color: #F7A600; font-weight: 600;">${plan.name}</td>
+              </tr>
+              <tr style="border-top: 1px solid #1E2329;">
+                <td style="padding: 8px 0; color: #6C7480;">Hash Rate:</td>
+                <td style="padding: 8px 0; text-align: right; color: #FFFFFF; font-weight: 600;">${formattedHashrate} TH/s</td>
+              </tr>
+              <tr style="border-top: 1px solid #1E2329;">
+                <td style="padding: 8px 0; color: #6C7480;">ROI Percentage:</td>
+                <td style="padding: 8px 0; text-align: right; color: #10B981; font-weight: 600;">+${plan.percentage}%</td>
+              </tr>
+              <tr style="border-top: 1px solid #1E2329;">
+                <td style="padding: 8px 0; color: #6C7480;">Investment Duration:</td>
+                <td style="padding: 8px 0; text-align: right; color: #FFFFFF; font-weight: 600;">${plan.duration} hours</td>
+              </tr>
+              <tr style="border-top: 1px solid #1E2329;">
+                <td style="padding: 8px 0; color: #6C7480;">Investment Fee (3%):</td>
+                <td style="padding: 8px 0; text-align: right; color: #EF4444;">$${formattedFee} USD</td>
+              </tr>
+              <tr style="border-top: 1px solid #1E2329;">
+                <td style="padding: 8px 0; color: #6C7480;">Expected Return:</td>
+                <td style="padding: 8px 0; text-align: right; color: #10B981; font-weight: 600;">
+                  ${formattedExpectedReturnBTC} BTC<br>
+                  <span style="font-size: 11px; color: #6C7480;">≈ $${formattedExpectedReturnUSD} USD</span>
+                </td>
+              </tr>
+              <tr style="border-top: 1px solid #1E2329;">
+                <td style="padding: 8px 0; color: #6C7480;">Expected Maturity:</td>
+                <td style="padding: 8px 0; text-align: right; color: #FFFFFF;">${new Date(endDate).toLocaleString()}</td>
+              </tr>
+            </table>
+          </div>
+        `
+      }
+    });
 
     res.status(201).json({
       status: 'success',
@@ -8642,7 +8241,6 @@ app.post('/api/investments', protect, [
 
 // =============================================
 // COMPLETE INVESTMENT - PROCEEDS ADDED TO MATURED BITCOIN WALLET
-// WITH PRICE AGGREGATOR CONVERSION AND SISTER EMAIL
 // =============================================
 app.post('/api/investments/:id/complete', protect, async (req, res) => {
   try {
@@ -8678,15 +8276,12 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
       });
     }
 
-    // Get current BTC price from price aggregator
+    // Get current BTC price from API aggregator
     const currentBTCPrice = await getRealTimeBitcoinPrice();
     
-    // Calculate total return in BTC using the current price to convert proceeds to BTC
-    const totalReturnUSD = investment.expectedReturn;
-    const totalReturnBTC = totalReturnUSD / currentBTCPrice;
-    const principalBTC = investment.amountBTC;
-    const profitBTC = totalReturnBTC - principalBTC;
-    const profitUSD = totalReturnUSD - investment.amount;
+    const totalReturnBTC = investment.expectedReturnBTC || 
+      (investment.amountBTC + (investment.amountBTC * investment.returnPercentage / 100));
+    const totalReturnUSD = totalReturnBTC * currentBTCPrice;
 
     // Check active balance
     const currentActiveBTC = user.balances.active?.get('btc') || 0;
@@ -8717,8 +8312,8 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
       
       investment.status = 'completed';
       investment.completionDate = now;
-      investment.actualReturnBTC = profitBTC;
-      investment.actualReturnUSD = profitUSD;
+      investment.actualReturnBTC = totalReturnBTC - investment.amountBTC;
+      investment.actualReturnUSD = totalReturnUSD - investment.amount;
       investment.btcPriceAtCompletion = currentBTCPrice;
 
       await user.save({ session });
@@ -8728,8 +8323,8 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
       await Transaction.create([{
         user: userId,
         type: 'interest',
-        amount: profitUSD,
-        amountBTC: profitBTC,
+        amount: totalReturnUSD - investment.amount,
+        amountBTC: totalReturnBTC - investment.amountBTC,
         currency: 'BTC',
         status: 'completed',
         method: 'INTERNAL',
@@ -8739,15 +8334,15 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
           planName: investment.plan.name,
           principalUSD: investment.amount,
           principalBTC: investment.amountBTC,
-          interestUSD: profitUSD,
-          interestBTC: profitBTC,
+          interestUSD: totalReturnUSD - investment.amount,
+          interestBTC: totalReturnBTC - investment.amountBTC,
           btcPriceAtStart: investment.btcPriceAtInvestment,
           btcPriceAtCompletion: currentBTCPrice,
           transactionType: 'credit'
         },
         fee: 0,
-        netAmountUSD: profitUSD,
-        netAmountBTC: profitBTC
+        netAmountUSD: totalReturnUSD - investment.amount,
+        netAmountBTC: totalReturnBTC - investment.amountBTC
       }], { session });
 
       // Create user log with correct location object structure
@@ -8798,8 +8393,8 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
           investmentFeeBTC: investment.investmentFeeBTC,
           expectedReturnBTC: investment.expectedReturnBTC,
           actualReturnBTC: totalReturnBTC,
-          profitBTC: profitBTC,
-          profitUSD: profitUSD,
+          profitBTC: totalReturnBTC - investment.amountBTC,
+          profitUSD: totalReturnUSD - investment.amount,
           btcPriceAtStart: investment.btcPriceAtInvestment,
           btcPriceAtCompletion: currentBTCPrice,
           startDate: investment.startDate,
@@ -8810,9 +8405,11 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
         relatedEntityModel: 'Investment'
       });
 
-      // CREATE SYSTEM LOG FOR INVESTMENT MATURATION
+      // =============================================
+      // CREATE SYSTEM LOG FOR MATURED INVESTMENT
+      // =============================================
       await SystemLog.create({
-        action: 'investment_matured',
+        action: 'investment_completed',
         entity: 'investment',
         entityId: investment._id,
         performedBy: userId,
@@ -8825,36 +8422,114 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
         os: getOSFromUserAgent(req.headers['user-agent']),
         browser: getBrowserFromUserAgent(req.headers['user-agent']),
         location: deviceInfo.location,
+        countryCode: deviceInfo.locationDetails?.country,
         city: deviceInfo.locationDetails?.city,
         region: deviceInfo.locationDetails?.region,
-        countryCode: deviceInfo.locationDetails?.country,
-        latitude: deviceInfo.locationDetails?.latitude,
-        longitude: deviceInfo.locationDetails?.longitude,
         status: 'success',
         riskLevel: 'low',
-        metadata: {
-          planName: investment.plan.name,
-          originalAmountUSD: investment.originalAmount,
-          originalAmountBTC: investment.originalAmountBTC,
-          expectedReturnBTC: investment.expectedReturnBTC,
-          actualReturnBTC: totalReturnBTC,
-          profitBTC: profitBTC,
-          profitUSD: profitUSD,
-          btcPriceAtStart: investment.btcPriceAtInvestment,
-          btcPriceAtCompletion: currentBTCPrice,
-          startDate: investment.startDate,
-          endDate: investment.endDate,
-          completionDate: investment.completionDate
-        },
         financial: {
-          amount: profitUSD,
-          amountUSD: profitUSD,
-          cryptoAmount: totalReturnBTC,
+          amount: totalReturnUSD - investment.amount,
+          amountUSD: totalReturnUSD - investment.amount,
+          cryptoAmount: totalReturnBTC - investment.amountBTC,
           cryptoAsset: 'BTC',
           fee: 0,
           exchangeRate: currentBTCPrice,
           balanceAfter: user.balances.matured?.get('usd') || 0,
-          walletType: 'matured'
+          walletType: 'matured',
+          transactionId: investment._id
+        },
+        metadata: {
+          planName: investment.plan.name,
+          principalUSD: investment.amount,
+          principalBTC: investment.amountBTC,
+          interestUSD: totalReturnUSD - investment.amount,
+          interestBTC: totalReturnBTC - investment.amountBTC,
+          totalReturnUSD: totalReturnUSD,
+          totalReturnBTC: totalReturnBTC,
+          btcPriceAtStart: investment.btcPriceAtInvestment,
+          btcPriceAtCompletion: currentBTCPrice,
+          durationHours: investment.plan.duration,
+          roiPercentage: investment.returnPercentage
+        }
+      });
+
+      // =============================================
+      // SEND MATURED INVESTMENT EMAIL (Sister email to deposit approved)
+      // =============================================
+      const cryptoLogoUrl = getCryptoLogo('BTC');
+      const formattedProfitUSD = (totalReturnUSD - investment.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const formattedProfitBTC = (totalReturnBTC - investment.amountBTC).toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
+      const formattedTotalReturnUSD = totalReturnUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const formattedTotalReturnBTC = totalReturnBTC.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
+      const formattedPrincipalUSD = investment.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const formattedPrincipalBTC = investment.amountBTC.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
+      const formattedBtcPriceStart = investment.btcPriceAtInvestment.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const formattedBtcPriceEnd = currentBTCPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+      await sendProfessionalEmail({
+        email: user.email,
+        template: 'deposit_approved',
+        data: {
+          name: user.firstName,
+          amount: formattedProfitUSD,
+          cryptoAmount: formattedProfitBTC,
+          cryptoAsset: 'BTC',
+          cryptoLogoUrl: cryptoLogoUrl,
+          method: 'Mining Contract Maturity',
+          reference: investment._id.toString(),
+          newBalance: user.balances.matured?.get('usd')?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00',
+          processedAt: new Date().toLocaleString(),
+          exchangeRate: formattedBtcPriceEnd,
+          walletType: 'Matured Wallet',
+          walletColor: '#10B981',
+          description: `Your ${investment.plan.name} mining contract has matured`,
+          customDetails: `
+            <div style="background: #0B0E11; border-radius: 12px; padding: 16px; margin-top: 16px; border: 1px solid #1E2329;">
+              <table style="width: 100%; border-collapse: collapse;">
+                <tr>
+                  <td style="padding: 8px 0; color: #6C7480;">Investment Plan:</td>
+                  <td style="padding: 8px 0; text-align: right; color: #F7A600; font-weight: 600;">${investment.plan.name}</td>
+                </tr>
+                <tr style="border-top: 1px solid #1E2329;">
+                  <td style="padding: 8px 0; color: #6C7480;">Principal Invested:</td>
+                  <td style="padding: 8px 0; text-align: right; color: #FFFFFF;">
+                    ${formattedPrincipalBTC} BTC<br>
+                    <span style="font-size: 11px; color: #6C7480;">≈ $${formattedPrincipalUSD} USD</span>
+                  </td>
+                </tr>
+                <tr style="border-top: 1px solid #1E2329;">
+                  <td style="padding: 8px 0; color: #6C7480;">Total Return:</td>
+                  <td style="padding: 8px 0; text-align: right; color: #10B981; font-weight: 600;">
+                    ${formattedTotalReturnBTC} BTC<br>
+                    <span style="font-size: 11px; color: #6C7480;">≈ $${formattedTotalReturnUSD} USD</span>
+                  </td>
+                </tr>
+                <tr style="border-top: 1px solid #1E2329;">
+                  <td style="padding: 8px 0; color: #6C7480;">Profit Earned:</td>
+                  <td style="padding: 8px 0; text-align: right; color: #10B981; font-weight: 600;">
+                    +${formattedProfitBTC} BTC<br>
+                    <span style="font-size: 11px; color: #6C7480;">≈ +$${formattedProfitUSD} USD</span>
+                  </td>
+                </tr>
+                <tr style="border-top: 1px solid #1E2329;">
+                  <td style="padding: 8px 0; color: #6C7480;">ROI Percentage:</td>
+                  <td style="padding: 8px 0; text-align: right; color: #10B981; font-weight: 600;">+${investment.returnPercentage}%</td>
+                </tr>
+                <tr style="border-top: 1px solid #1E2329;">
+                  <td style="padding: 8px 0; color: #6C7480;">Investment Duration:</td>
+                  <td style="padding: 8px 0; text-align: right; color: #FFFFFF;">${investment.plan.duration} hours</td>
+                </tr>
+                <tr style="border-top: 1px solid #1E2329;">
+                  <td style="padding: 8px 0; color: #6C7480;">BTC Price at Start:</td>
+                  <td style="padding: 8px 0; text-align: right; color: #FFFFFF;">$${formattedBtcPriceStart}</td>
+                </tr>
+                <tr style="border-top: 1px solid #1E2329;">
+                  <td style="padding: 8px 0; color: #6C7480;">BTC Price at Maturity:</td>
+                  <td style="padding: 8px 0; text-align: right; color: #FFFFFF;">$${formattedBtcPriceEnd}</td>
+                </tr>
+              </table>
+            </div>
+          `
         }
       });
 
@@ -8862,168 +8537,13 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
       
       console.log(`✅ Investment ${investment._id} completed for user ${user.email}. Return: ${totalReturnBTC.toFixed(8)} BTC`);
 
-      // SEND MATURITY EMAIL - SISTER EMAIL TO DEPOSIT APPROVAL EMAIL
-      const btcLogoUrl = getBTCLogoUrl();
-      const formattedPrincipalBTC = formatBTCAmount(investment.amountBTC);
-      const formattedPrincipalUSD = formatUSDAmount(investment.amount);
-      const formattedReturnBTC = formatBTCAmount(totalReturnBTC);
-      const formattedReturnUSD = formatUSDAmount(totalReturnUSD);
-      const formattedProfitBTC = formatBTCAmount(profitBTC);
-      const formattedProfitUSD = formatUSDAmount(profitUSD);
-      const formattedStartPrice = formatUSDAmount(investment.btcPriceAtInvestment);
-      const formattedEndPrice = formatUSDAmount(currentBTCPrice);
-      const formattedNewMaturedBalance = (user.balances.matured?.get('usd') || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      const planName = investment.plan.name;
-      
-      const maturityEmailHtml = `
-        <div style="padding: 0;">
-          
-          <!-- Status Badge -->
-          <div style="text-align: center; margin-bottom: 25px;">
-            <div style="display: inline-block; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 60px; padding: 6px 16px;">
-              <span style="color: #10B981; font-size: 13px; font-weight: 600;">INVESTMENT MATURED</span>
-            </div>
-          </div>
-          
-          <!-- Greeting -->
-          <p style="color: #FFFFFF; font-size: 16px; margin-bottom: 25px; line-height: 1.5;">Dear <strong style="color: #F7A600;">${user.firstName}</strong>,</p>
-          <p style="color: #B7BDC6; font-size: 14px; margin-bottom: 25px; line-height: 1.6;">Congratulations! Your cloud mining contract has matured and the proceeds have been credited to your matured wallet.</p>
-          
-          <!-- Investment Card -->
-          <div style="background: #11151C; border-radius: 16px; padding: 24px; margin-bottom: 24px; border: 1px solid #1E2329;">
-            
-            <!-- Asset Header with Logo -->
-            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid #1E2329;">
-              <div style="width: 48px; height: 48px; border-radius: 50%; background: rgba(16, 185, 129, 0.1); display: flex; align-items: center; justify-content: center;">
-                <img src="${btcLogoUrl}" alt="BTC" style="width: 32px; height: 32px;">
-              </div>
-              <div style="flex: 1;">
-                <div style="font-size: 18px; font-weight: 700; color: #FFFFFF; margin-bottom: 4px;">Bitcoin Cloud Mining</div>
-                <div style="font-size: 12px; color: #6C7480;">Plan: ${planName}</div>
-              </div>
-            </div>
-            
-            <!-- Principal Amount -->
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #1E2329;">
-              <div style="font-size: 14px; color: #B7BDC6;">Initial Investment</div>
-              <div style="text-align: right;">
-                <div style="font-size: 18px; font-weight: 700; color: #FFFFFF;">${formattedPrincipalBTC} BTC</div>
-                <div style="font-size: 13px; color: #6C7480;">≈ $${formattedPrincipalUSD} USD</div>
-              </div>
-            </div>
-            
-            <!-- Total Return -->
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding: 16px; background: rgba(16, 185, 129, 0.1); border-radius: 12px; border-left: 3px solid #10B981;">
-              <div style="font-size: 14px; font-weight: 600; color: #10B981;">Total Return</div>
-              <div style="text-align: right;">
-                <div style="font-size: 20px; font-weight: 700; color: #10B981;">+ ${formattedReturnBTC} BTC</div>
-                <div style="font-size: 13px; color: #10B981;">≈ $${formattedReturnUSD} USD</div>
-              </div>
-            </div>
-            
-            <!-- Profit -->
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #1E2329;">
-              <div style="font-size: 14px; color: #B7BDC6;">Profit Earned</div>
-              <div style="text-align: right;">
-                <div style="font-size: 18px; font-weight: 700; color: #F7A600;">+ ${formattedProfitBTC} BTC</div>
-                <div style="font-size: 13px; color: #6C7480;">≈ $${formattedProfitUSD} USD</div>
-              </div>
-            </div>
-            
-            <!-- BTC Price Change -->
-            <div style="background: #0B0E11; border-radius: 12px; padding: 16px; margin-top: 16px;">
-              <div style="font-size: 12px; color: #6C7480; margin-bottom: 12px;">Bitcoin Price at Key Dates</div>
-              <div style="display: flex; justify-content: space-between;">
-                <div>
-                  <div style="font-size: 11px; color: #6C7480;">At Investment</div>
-                  <div style="font-size: 14px; font-weight: 600; color: #FFFFFF;">$${formattedStartPrice}</div>
-                </div>
-                <div style="text-align: right;">
-                  <div style="font-size: 11px; color: #6C7480;">At Maturity</div>
-                  <div style="font-size: 14px; font-weight: 600; color: #F7A600;">$${formattedEndPrice}</div>
-                </div>
-              </div>
-            </div>
-            
-          </div>
-          
-          <!-- New Matured Balance Summary -->
-          <div style="background: linear-gradient(135deg, #11151C 0%, #0B0E11 100%); border-radius: 12px; padding: 20px; margin-top: 8px; border: 1px solid #1E2329;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-              <div style="font-size: 16px; font-weight: 600; color: #FFFFFF;">New Matured Balance</div>
-              <div style="text-align: right;">
-                <div style="font-size: 18px; font-weight: 700; color: #10B981;">$${formattedNewMaturedBalance}</div>
-              </div>
-            </div>
-            <div style="height: 1px; background: #1E2329; margin: 12px 0;"></div>
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <div style="font-size: 13px; color: #6C7480;">Your funds are now available in your matured wallet</div>
-              <a href="https://www.bithashcapital.live/dashboard" style="background: #F7A600; color: #000000; padding: 10px 20px; text-decoration: none; border-radius: 999px; font-size: 13px; font-weight: 600;">View Dashboard →</a>
-            </div>
-          </div>
-          
-          <!-- Help Section -->
-          <div style="margin-top: 30px; padding: 20px; background: rgba(247, 166, 0, 0.05); border-radius: 12px; text-align: center; border: 1px solid rgba(247, 166, 0, 0.1);">
-            <p style="color: #B7BDC6; font-size: 13px; margin: 0;">
-              <strong style="color: #F7A600;">Need help?</strong> Contact our support team at 
-              <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a>
-            </p>
-          </div>
-          
-        </div>
-      `;
-      
-      // Send maturity email with professional template
-      const mailTransporter = infoTransporter;
-      await mailTransporter.sendMail({
-        from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
-        to: user.email,
-        subject: `Investment Matured - ${planName} - ₿itHash Capital`,
-        html: `
-          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #0B0E11;">
-            <!-- Header -->
-            <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%); border-bottom: 1px solid #1E2329;">
-              <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-              <h1 style="color: #F7A600; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
-              <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
-            </div>
-            
-            <!-- Body Content -->
-            ${maturityEmailHtml}
-            
-            <!-- Footer -->
-            <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-              <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-              <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-              <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
-                <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> | 
-                <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
-              </p>
-            </div>
-          </div>
-        `
-      });
-      
-      console.log(`📧 Maturity email sent to ${user.email}`);
-      console.log(`   Plan: ${planName}`);
-      console.log(`   Profit: ${formattedProfitBTC} BTC ($${formattedProfitUSD})`);
-
-      // Emit real-time updates via Socket.IO
+      // Emit real-time update via Socket.IO
       const io = req.app.get('io');
       if (io) {
         io.to(`user_${userId}`).emit('balance_update', {
           main: user.balances.main?.get('usd') || 0,
           active: user.balances.active?.get('usd') || 0,
           matured: user.balances.matured?.get('usd') || 0
-        });
-        
-        io.to(`user_${userId}`).emit('investment_matured', {
-          investmentId: investment._id,
-          planName: planName,
-          profitBTC: profitBTC,
-          profitUSD: profitUSD,
-          totalReturnBTC: totalReturnBTC,
-          totalReturnUSD: totalReturnUSD
         });
       }
 
@@ -9036,8 +8556,8 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
             completionDate: investment.completionDate,
             amountReturnedBTC: totalReturnBTC,
             amountReturnedUSD: totalReturnUSD,
-            profitBTC: profitBTC,
-            profitUSD: profitUSD,
+            profitBTC: totalReturnBTC - investment.amountBTC,
+            profitUSD: totalReturnUSD - investment.amount,
             btcPriceAtStart: investment.btcPriceAtInvestment,
             btcPriceAtCompletion: currentBTCPrice
           },
@@ -9067,40 +8587,23 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
 });
 
 // =============================================
-// GET CURRENT HASHRATE FOR A PLAN (API endpoint for frontend)
+// HELPER: Get crypto logo URL (real BTC logo)
 // =============================================
-app.get('/api/plans/:planId/hashrate', protect, async (req, res) => {
-  try {
-    const { planId } = req.params;
-    const plan = await Plan.findById(planId);
-    
-    if (!plan) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Plan not found'
-      });
-    }
-    
-    const hashrate = getFluctuatingHashrate(plan.name, planId);
-    
-    res.status(200).json({
-      status: 'success',
-      data: {
-        planName: plan.name,
-        hashrate: `${hashrate} TH/s`,
-        baseHashrate: PLAN_BASE_HASHRATES[plan.name] || 68,
-        fluctuationPercentage: ((hashrate - (PLAN_BASE_HASHRATES[plan.name] || 68)) / (PLAN_BASE_HASHRATES[plan.name] || 68) * 100).toFixed(1)
-      }
-    });
-    
-  } catch (err) {
-    console.error('Error fetching hashrate:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch hashrate'
-    });
-  }
-});
+function getCryptoLogo(asset) {
+  const logoMap = {
+    'BTC': 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png',
+    'ETH': 'https://assets.coingecko.com/coins/images/279/large/ethereum.png',
+    'USDT': 'https://assets.coingecko.com/coins/images/325/large/Tether.png',
+    'BNB': 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png',
+    'SOL': 'https://assets.coingecko.com/coins/images/4128/large/solana.png',
+    'USDC': 'https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png',
+    'XRP': 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png',
+    'DOGE': 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png',
+    'ADA': 'https://assets.coingecko.com/coins/images/975/large/cardano.png',
+    'SHIB': 'https://assets.coingecko.com/coins/images/11939/large/shiba.png'
+  };
+  return logoMap[asset.toUpperCase()] || 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png';
+}
 
 
 
