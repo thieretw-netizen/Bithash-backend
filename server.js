@@ -7728,12 +7728,6 @@ app.post('/api/auth/reset-password', [
 
 
 
-
-
-
-
-
-
 app.post('/api/investments', protect, [
   body('planId').notEmpty().withMessage('Plan ID is required').isMongoId().withMessage('Invalid Plan ID'),
   body('amount').isFloat({ min: 1 }).withMessage('Amount must be a positive number'),
@@ -7915,6 +7909,32 @@ app.post('/api/investments', protect, [
     const expectedReturnBTC = investmentAmountAfterFeeBTC + (investmentAmountAfterFeeBTC * plan.percentage / 100);
     const endDate = new Date(Date.now() + plan.duration * 60 * 60 * 1000);
 
+    // =============================================
+    // CALCULATE HASHRATE WITH ±3% FLUCTUATION (SAVE TO DATABASE)
+    // =============================================
+    let baseHashRate = 0;
+    if (plan.name === 'Basic') {
+      baseHashRate = 68;
+    } else if (plan.name === 'Standard') {
+      baseHashRate = 110;
+    } else if (plan.name === 'Pro') {
+      baseHashRate = 150;
+    } else if (plan.name === 'Enterprise') {
+      baseHashRate = 234;
+    } else if (plan.name === 'Ultimate') {
+      baseHashRate = 255;
+    }
+    
+    // Apply ±3% fluctuation randomly (-3% to +3%)
+    const fluctuationPercent = (Math.random() * 6) - 3;
+    const fluctuatedHashRate = baseHashRate * (1 + fluctuationPercent / 100);
+    const finalHashRate = fluctuatedHashRate.toFixed(1);
+    
+    console.log(`📊 Hashrate calculation for ${plan.name}:`);
+    console.log(`   Base: ${baseHashRate} TH/s`);
+    console.log(`   Fluctuation: ${fluctuationPercent > 0 ? '+' : ''}${fluctuationPercent.toFixed(2)}%`);
+    console.log(`   Final: ${finalHashRate} TH/s`);
+
     // ✅ CORRECT: Deduct Bitcoin from the selected wallet using Map.set()
     if (balanceType === 'main') {
       const newMainBTCBalance = mainBitcoinBalance - investmentBTCAmount;
@@ -7937,7 +7957,7 @@ app.post('/api/investments', protect, [
     
     await user.save();
 
-    // Create investment record
+    // Create investment record WITH HASHRATE SAVED
     const investment = await Investment.create({
       user: userId,
       plan: planId,
@@ -7960,7 +7980,8 @@ app.post('/api/investments', protect, [
       investmentFee: investmentFeeUSD,
       investmentFeeBTC: investmentFeeBTC,
       balanceType: balanceType,
-      btcPriceAtInvestment: btcPrice
+      btcPriceAtInvestment: btcPrice,
+      hashRate: finalHashRate  // ✅ SAVE HASHRATE TO DATABASE
     });
 
     // ✅ FIXED: Create transaction record with POSITIVE numbers (not negative)
@@ -7982,7 +8003,8 @@ app.post('/api/investments', protect, [
         amountAfterFeeUSD: investmentAmountAfterFeeUSD,
         amountAfterFeeBTC: investmentAmountAfterFeeBTC,
         btcPrice: btcPrice,
-        transactionType: 'debit'
+        transactionType: 'debit',
+        hashRate: finalHashRate
       },
       fee: investmentFeeUSD,
       netAmount: investmentAmountAfterFeeUSD
@@ -8005,7 +8027,8 @@ app.post('/api/investments', protect, [
         amountAfterFeeUSD: investmentAmountAfterFeeUSD,
         amountAfterFeeBTC: investmentAmountAfterFeeBTC,
         feePercentage: 3,
-        btcPrice: btcPrice
+        btcPrice: btcPrice,
+        hashRate: finalHashRate
       }
     });
 
@@ -8067,7 +8090,8 @@ app.post('/api/investments', protect, [
         duration: plan.duration,
         roiPercentage: plan.percentage,
         endDate: endDate,
-        balanceTypeUsed: balanceType
+        balanceTypeUsed: balanceType,
+        hashRate: finalHashRate
       },
       relatedEntity: investment._id,
       relatedEntityModel: 'Investment'
@@ -8112,7 +8136,8 @@ app.post('/api/investments', protect, [
         roiPercentage: plan.percentage,
         endDate: endDate,
         balanceTypeUsed: balanceType,
-        walletUsed: walletName
+        walletUsed: walletName,
+        hashRate: finalHashRate
       },
       financial: {
         amount: amount,
@@ -8149,7 +8174,7 @@ app.post('/api/investments', protect, [
     }
 
     // =============================================
-    // SEND PROFESSIONAL INVESTMENT EMAIL WITH ±3% HASHRATE FLUCTUATION (NO BASE REFERENCE)
+    // SEND PROFESSIONAL INVESTMENT EMAIL WITH SAVED HASHRATE
     // =============================================
     try {
       const cryptoLogoUrl = 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png';
@@ -8176,28 +8201,6 @@ app.post('/api/investments', protect, [
         minute: '2-digit',
         timeZoneName: 'short'
       });
-      
-      // =============================================
-      // ±3% HASHRATE FLUCTUATION LOGIC
-      // Calculate final hashrate (no base reference shown)
-      // =============================================
-      let baseHashRate = 0;
-      if (plan.name === 'Basic') {
-        baseHashRate = 68;
-      } else if (plan.name === 'Standard') {
-        baseHashRate = 110;
-      } else if (plan.name === 'Pro') {
-        baseHashRate = 150;
-      } else if (plan.name === 'Enterprise') {
-        baseHashRate = 234;
-      } else if (plan.name === 'Ultimate') {
-        baseHashRate = 255;
-      }
-      
-      // Apply ±3% fluctuation randomly (-3% to +3%)
-      const fluctuationPercent = (Math.random() * 6) - 3;
-      const fluctuatedHashRate = baseHashRate * (1 + fluctuationPercent / 100);
-      const finalHashRate = fluctuatedHashRate.toFixed(1);
       
       const investmentEmailHtml = `
         <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
@@ -8322,7 +8325,7 @@ app.post('/api/investments', protect, [
 
     res.status(201).json({
       status: 'success',
-      message: `Your ${plan.name} cloud mining contract has been successfully activated.`,
+      message: `Your ${plan.name} cloud mining contract has been successfully activated with ${finalHashRate} TH/s hash rate.`,
       data: {
         investment: {
           id: investment._id,
@@ -8336,7 +8339,8 @@ app.post('/api/investments', protect, [
           endDate: investment.endDate,
           status: investment.status,
           balanceType: balanceType,
-          btcPriceAtInvestment: btcPrice
+          btcPriceAtInvestment: btcPrice,
+          hashRate: finalHashRate
         }
       }
     });
@@ -8671,7 +8675,8 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
           interestBTC: totalReturnBTC - investment.amountBTC,
           btcPriceAtStart: investment.btcPriceAtInvestment,
           btcPriceAtCompletion: currentBTCPrice,
-          transactionType: 'credit'
+          transactionType: 'credit',
+          hashRate: investment.hashRate
         },
         fee: 0,
         netAmountUSD: totalReturnUSD - investment.amount,
@@ -8732,7 +8737,8 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
           btcPriceAtCompletion: currentBTCPrice,
           startDate: investment.startDate,
           endDate: investment.endDate,
-          completionDate: investment.completionDate
+          completionDate: investment.completionDate,
+          hashRate: investment.hashRate
         },
         relatedEntity: investment._id,
         relatedEntityModel: 'Investment'
@@ -8778,7 +8784,8 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
           btcPriceAtCompletion: currentBTCPrice,
           startDate: investment.startDate,
           endDate: investment.endDate,
-          completionDate: investment.completionDate
+          completionDate: investment.completionDate,
+          hashRate: investment.hashRate
         },
         financial: {
           amount: totalReturnUSD,
@@ -8797,7 +8804,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
       console.log(`✅ Investment ${investment._id} completed for user ${user.email}. Return: ${totalReturnBTC.toFixed(8)} BTC`);
 
       // =============================================
-      // SEND MATURITY EMAIL NOTIFICATION WITH ±3% HASHRATE FLUCTUATION (NO BASE REFERENCE)
+      // SEND MATURITY EMAIL NOTIFICATION WITH SAVED HASHRATE
       // =============================================
       try {
         const cryptoLogoUrl = 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png';
@@ -8810,27 +8817,8 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
         const formattedEndPrice = currentBTCPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         const newMaturedBalanceUSD = (user.balances.matured?.get('usd') || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         
-        // =============================================
-        // ±3% HASHRATE FLUCTUATION LOGIC
-        // Calculate final hashrate (no base reference shown)
-        // =============================================
-        let baseHashRate = 0;
-        if (investment.plan.name === 'Basic') {
-          baseHashRate = 68;
-        } else if (investment.plan.name === 'Standard') {
-          baseHashRate = 110;
-        } else if (investment.plan.name === 'Pro') {
-          baseHashRate = 150;
-        } else if (investment.plan.name === 'Enterprise') {
-          baseHashRate = 234;
-        } else if (investment.plan.name === 'Ultimate') {
-          baseHashRate = 255;
-        }
-        
-        // Apply ±3% fluctuation randomly (-3% to +3%)
-        const fluctuationPercent = (Math.random() * 6) - 3;
-        const fluctuatedHashRate = baseHashRate * (1 + fluctuationPercent / 100);
-        const finalHashRate = fluctuatedHashRate.toFixed(1);
+        // Get the saved hash rate from the investment record
+        const savedHashRate = investment.hashRate || '0.0';
         
         const maturityEmailHtml = `
           <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
@@ -8869,10 +8857,9 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
                   <tr style="border-top: 1px solid #E2E8F0;">
                     <td style="padding: 8px 0;"><strong>Hash Rate (Average):</strong></td>
                     <td style="padding: 8px 0; text-align: right;">
-                      <strong style="font-size: 20px; color: #F7A600;">${finalHashRate} TH/s</strong>
+                      <strong style="font-size: 20px; color: #F7A600;">${savedHashRate} TH/s</strong>
                     </span>
-                    </span>
-                  </span>
+                   </span>
                   </td>
                 </tr>
                   <tr style="border-top: 1px solid #E2E8F0;">
@@ -8881,8 +8868,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
                       ${investment.amountBTC.toFixed(8)} BTC<br>
                       <span style="font-size: 12px; color: #64748B;">≈ $${investment.amount.toLocaleString()}</span>
                      </span>
-                     </span>
-                  </span>
+                   </span>
                   </td>
                   </tr>
                   <tr style="border-top: 1px solid #E2E8F0;">
@@ -8891,8 +8877,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
                       <strong>${formattedRewardBTC} BTC</strong><br>
                       <span style="font-size: 12px;">≈ $${formattedRewardUSD}</span>
                      </span>
-                     </span>
-                  </span>
+                   </span>
                   </tr>
                   <tr style="border-top: 1px solid #E2E8F0;">
                     <td style="padding: 8px 0;"><strong>Profit Earned:</strong></td>
@@ -8900,8 +8885,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
                       <strong>+${formattedProfitBTC} BTC</strong><br>
                       <span style="font-size: 12px;">≈ +$${formattedProfitUSD}</span>
                      </span>
-                     </span>
-                  </span>
+                   </span>
                   </tr>
                   <tr style="border-top: 1px solid #E2E8F0;">
                     <td style="padding: 8px 0;"><strong>Mining Algorithm:</strong></td>
@@ -8962,11 +8946,11 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
         await infoTransporter.sendMail({
           from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
           to: user.email,
-          subject: `🎉 Cloud Mining Contract Completed - ${investment.plan.name} (${finalHashRate} TH/s) - ₿itHash Capital`,
+          subject: `🎉 Cloud Mining Contract Completed - ${investment.plan.name} (${savedHashRate} TH/s) - ₿itHash Capital`,
           html: maturityEmailHtml
         });
         
-        console.log(`📧 Mining contract completion email sent to ${user.email} with hash rate ${finalHashRate} TH/s`);
+        console.log(`📧 Mining contract completion email sent to ${user.email} with hash rate ${savedHashRate} TH/s`);
       } catch (emailError) {
         console.error('Failed to send maturity email:', emailError);
       }
@@ -8984,7 +8968,8 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
             profitBTC: totalReturnBTC - investment.amountBTC,
             profitUSD: totalReturnUSD - investment.amount,
             btcPriceAtStart: investment.btcPriceAtInvestment,
-            btcPriceAtCompletion: currentBTCPrice
+            btcPriceAtCompletion: currentBTCPrice,
+            hashRate: investment.hashRate
           },
           balances: {
             bitcoin: {
@@ -9010,6 +8995,20 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
     });
   }
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
