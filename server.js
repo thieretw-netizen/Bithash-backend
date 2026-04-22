@@ -24848,7 +24848,6 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
     
     const formatDate = (date) => new Date(date).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
     const formatShortDate = (date) => new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-    const formatDateTime = (date) => new Date(date).toLocaleString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
     
     const generateStatementForUser = async (user) => {
       try {
@@ -24951,7 +24950,7 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
         }
         
         // =============================================
-        // INVESTMENTS WITH ALL REQUIRED FIELDS
+        // INVESTMENTS WITH EXACT SCHEMA FIELD NAMES
         // =============================================
         const investmentsInPeriod = await Investment.find({ 
           user: user._id, 
@@ -24964,49 +24963,42 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
           status: 'completed' 
         }).populate('plan');
         
-        // Get active investments for display with ALL required schema fields
         const activeInvestments = await Investment.find({ 
           user: user._id, 
           status: 'active' 
         }).populate('plan');
         
-        // Format active investments with ALL required fields (principalUSD is required by schema)
-        const formattedActiveInvestments = activeInvestments.map(inv => ({
-          investmentId: inv._id,
-          planName: inv.plan?.name || 'Unknown Plan',
-          principalUSD: inv.amount || 0,
-          principalBTC: inv.amountBTC || 0,
-          startDate: inv.createdAt,
-          endDate: inv.endDate,
-          status: inv.status,
-          expectedReturnUSD: inv.expectedReturn || 0,
-          expectedProfitUSD: (inv.expectedReturn || 0) - (inv.amount || 0),
-          profitPercentage: inv.returnPercentage || 0,
-          daysRemaining: Math.max(0, Math.ceil((inv.endDate - new Date()) / (1000 * 60 * 60 * 24)))
-        }));
-        
-        // Format started investments with required fields
+        // STARTED investments - using EXACT field names from schema: amountUSD (NOT amountUSD)
         const formattedStartedInvestments = investmentsInPeriod.map(inv => ({
           investmentId: inv._id,
           planName: inv.plan?.name || 'Unknown Plan',
-          principalUSD: inv.amount || 0,
+          amountUSD: inv.amount || 0,           // ← REQUIRED by schema
+          amountBTC: inv.amountBTC || 0,
+          startDate: inv.createdAt,
+          expectedReturnUSD: inv.expectedReturn || 0
+        }));
+        
+        // ACTIVE investments - using EXACT field names from schema: principalUSD (NOT principalUSD)
+        const formattedActiveInvestments = activeInvestments.map(inv => ({
+          investmentId: inv._id,
+          planName: inv.plan?.name || 'Unknown Plan',
+          principalUSD: inv.amount || 0,        // ← REQUIRED by schema
           principalBTC: inv.amountBTC || 0,
           startDate: inv.createdAt,
           endDate: inv.endDate,
-          expectedReturnUSD: inv.expectedReturn || 0,
-          expectedProfitUSD: (inv.expectedReturn || 0) - (inv.amount || 0),
-          profitPercentage: inv.returnPercentage || 0
+          status: inv.status
         }));
         
-        // Format matured investments with required fields
+        // MATURED investments - using EXACT field names from schema
         const formattedMaturedInvestments = maturedInvestments.map(inv => ({
           investmentId: inv._id,
           planName: inv.plan?.name || 'Unknown Plan',
-          initialAmountUSD: inv.originalAmount || inv.amount,
-          returnAmountUSD: inv.expectedReturn || inv.amount,
-          profitUSD: (inv.expectedReturn || inv.amount) - (inv.originalAmount || inv.amount),
+          initialAmountUSD: inv.originalAmount || inv.amount || 0,
+          returnAmountUSD: inv.expectedReturn || inv.amount || 0,
+          profitUSD: (inv.expectedReturn || inv.amount || 0) - (inv.originalAmount || inv.amount || 0),
           profitPercentage: inv.returnPercentage || 0,
-          completionDate: inv.completionDate || inv.endDate
+          completionDate: inv.completionDate || inv.endDate || new Date(),
+          btcPriceAtCompletion: inv.btcPriceAtCompletion || 0
         }));
         
         // =============================================
@@ -25016,7 +25008,7 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
         const closingBalances = await calculateAccurateClosingBalances(user._id, endDate);
         
         // =============================================
-        // CORRECT METRICS CALCULATION - NO FAKE WITHDRAWALS
+        // CORRECT METRICS CALCULATION
         // =============================================
         let totalDeposits = 0;
         let totalWithdrawals = 0;
@@ -25047,15 +25039,13 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
           }
         }
         
-        // Total fees = investment fees + trading fees ONLY (withdrawal fees are part of withdrawal amount)
         const totalFees = totalInvestmentFees + totalTradingFees;
-        
         const netChange = closingBalances.totalUSD - openingBalances.totalUSD;
         const roi = openingBalances.totalUSD > 0 ? (netChange / openingBalances.totalUSD) * 100 : 0;
         const netCashFlow = totalDeposits - totalWithdrawals;
         
         // =============================================
-        // CREATE FINANCIAL STATEMENT WITH ALL REQUIRED FIELDS
+        // CREATE FINANCIAL STATEMENT WITH EXACT SCHEMA FIELDS
         // =============================================
         const statement = new FinancialStatement({
           user: user._id,
@@ -25090,17 +25080,6 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
                 withdrawals: transactions.filter(t => t.type === 'withdrawal').length,
                 transfers: 0
               }
-            }
-          },
-          trading: {
-            buys: [],
-            sells: [],
-            summary: {
-              totalBuyVolumeUSD: totalBuyVolume,
-              totalSellVolumeUSD: totalSellVolume,
-              totalTradingProfitUSD: totalRealizedPnL > 0 ? totalRealizedPnL : 0,
-              totalTradingLossUSD: totalRealizedPnL < 0 ? Math.abs(totalRealizedPnL) : 0,
-              netTradingPnLUSD: totalRealizedPnL
             }
           },
           investments: {
@@ -25298,7 +25277,7 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
           y += 15;
         }
         
-        // ========== FINANCIAL METRICS - CORRECTED ==========
+        // ========== FINANCIAL METRICS ==========
         needNewPage(150);
         doc.fillColor('#0B0E11').fontSize(14).font('Helvetica-Bold').text('3. FINANCIAL METRICS', leftMargin, y);
         y += 22;
@@ -25331,7 +25310,7 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
         
         y += Math.ceil(metricsData.length / 3) * (metricCardHeight + 15) + 25;
         
-        // ========== TRANSACTION HISTORY - FULL WORDS ==========
+        // ========== TRANSACTION HISTORY ==========
         if (statement.transactions.list.length > 0) {
           needNewPage(200);
           doc.fillColor('#0B0E11').fontSize(14).font('Helvetica-Bold').text('4. TRANSACTION HISTORY', leftMargin, y);
@@ -25363,7 +25342,6 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
             doc.fillColor(rowBg).rect(leftMargin, y, contentWidth, 22).fill();
             doc.fillColor('#374151').fontSize(9).font('Helvetica');
             doc.text(formatShortDate(tx.createdAt), leftMargin + 8, y + 6);
-            // Show full "Investment" instead of "investme"
             const displayType = tx.type === 'investment' ? 'Investment' : tx.type.substring(0, 10);
             doc.text(displayType, leftMargin + 110, y + 6);
             doc.text((tx.asset || 'USD').substring(0, 6), leftMargin + 195, y + 6);
@@ -25378,7 +25356,7 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
           y += 15;
         }
         
-        // ========== INVESTMENT ACTIVITY WITH END DATE AND PROFIT IN GREEN ==========
+        // ========== INVESTMENT ACTIVITY ==========
         if (formattedActiveInvestments.length > 0 || formattedStartedInvestments.length > 0 || formattedMaturedInvestments.length > 0) {
           needNewPage(200);
           doc.fillColor('#0B0E11').fontSize(14).font('Helvetica-Bold').text('5. INVESTMENT ACTIVITY', leftMargin, y);
@@ -25391,7 +25369,7 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
           doc.text(`Active Investments: ${statement.investments.summary.totalActiveInvestmentsCount}`, leftMargin + 450, y + 12);
           y += 68;
           
-          // Active Investments with End Date and Expected Profit in GREEN
+          // Active Investments
           if (formattedActiveInvestments.length > 0) {
             doc.fillColor('#1E3A8A').fontSize(11).font('Helvetica-Bold').text('Active Investments:', leftMargin, y);
             y += 18;
@@ -25402,7 +25380,6 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
             doc.text('Principal', leftMargin + 200, y + 7);
             doc.text('Start Date', leftMargin + 310, y + 7);
             doc.text('End Date', leftMargin + 420, y + 7);
-            doc.text('Expected Profit', leftMargin + 530, y + 7);
             y += 22;
             
             for (const inv of formattedActiveInvestments.slice(0, 8)) {
@@ -25414,13 +25391,12 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
               doc.text(formatUSD(inv.principalUSD), leftMargin + 200, y + 6);
               doc.text(formatShortDate(inv.startDate), leftMargin + 310, y + 6);
               doc.text(formatShortDate(inv.endDate), leftMargin + 420, y + 6);
-              doc.fillColor('#10B981').text(formatUSD(inv.expectedProfitUSD), leftMargin + 530, y + 6);
               y += 20;
             }
             y += 10;
           }
           
-          // New Investments Started
+          // New Investments
           if (formattedStartedInvestments.length > 0) {
             doc.fillColor('#1E3A8A').fontSize(11).font('Helvetica-Bold').text('New Investments Initiated:', leftMargin, y);
             y += 18;
@@ -25428,9 +25404,8 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
               needNewPage(18);
               doc.fillColor('#374151').fontSize(9).font('Helvetica');
               doc.text(`• ${inv.planName}`, leftMargin + 15, y);
-              doc.text(formatUSD(inv.principalUSD), leftMargin + 280, y);
+              doc.text(formatUSD(inv.amountUSD), leftMargin + 280, y);
               doc.fillColor('#6B7280').text(`Started: ${formatShortDate(inv.startDate)}`, leftMargin + 400, y);
-              doc.fillColor('#10B981').text(`Expected: ${formatUSD(inv.expectedProfitUSD)}`, leftMargin + 550, y);
               y += 16;
             }
             y += 10;
@@ -25463,8 +25438,6 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
         y += 16;
         doc.fontSize(8).font('Helvetica').fillColor('#6B7280');
         doc.text('This is an official financial statement generated by Bit Hash Capital. All figures are in US Dollars (USD).', leftMargin, y, { align: 'center', width: contentWidth });
-        y += 12;
-        doc.text('Profit/Loss calculations use FIFO (First-In-First-Out) method for accurate transaction tracking.', leftMargin, y, { align: 'center', width: contentWidth });
         y += 12;
         doc.text(`© ${new Date().getFullYear()} Bit Hash Capital. All rights reserved.`, leftMargin, y, { align: 'center', width: contentWidth });
         
@@ -25643,10 +25616,6 @@ async function calculateAccurateClosingBalances(userId, endDate) {
   
   return { totalUSD: mainUSD + activeUSD + maturedUSD, mainWalletUSD: mainUSD, activeWalletUSD: activeUSD, maturedWalletUSD: maturedUSD, cryptoDetails, timestamp: endDate };
 }
-
-
-
-
 
 
 
