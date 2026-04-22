@@ -25007,72 +25007,74 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
         await statement.save();
         
         // =============================================
-        // PDF GENERATION - LANDSCAPE ORIENTATION
+        // PDF GENERATION - LANDSCAPE WITH PROFESSIONAL FONT SIZES
         // =============================================
         const PDFDocument = require('pdfkit');
-        const doc = new PDFDocument({ margin: 30, size: 'A4', layout: 'landscape' });
+        const doc = new PDFDocument({ margin: 40, size: 'A4', layout: 'landscape' });
         
         const chunks = [];
         doc.on('data', chunk => chunks.push(chunk));
         
-        let y = 30;
+        let y = 40;
         const pageWidth = doc.page.width;
-        const leftMargin = 30;
-        const contentWidth = pageWidth - 60;
+        const leftMargin = 40;
+        const contentWidth = pageWidth - 80;
         
         const needNewPage = (spaceNeeded) => {
-          if (y + spaceNeeded > doc.page.height - 50) {
+          if (y + spaceNeeded > doc.page.height - 60) {
             doc.addPage();
-            y = 30;
+            y = 40;
             return true;
           }
           return false;
         };
         
-        // ========== HEADER ==========
+        // ========== HEADER WITH LOGO ==========
         const logoUrl = 'https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png';
         try {
           const response = await axios.get(logoUrl, { responseType: 'arraybuffer', timeout: 5000 });
           const logoBuffer = Buffer.from(response.data, 'binary');
-          doc.image(logoBuffer, (pageWidth - 45) / 2, y, { width: 45, height: 45 });
-          y += 50;
-        } catch (err) { y += 10; }
+          doc.image(logoBuffer, (pageWidth - 60) / 2, y, { width: 60, height: 60 });
+          y += 68;
+        } catch (err) {
+          y += 20;
+        }
         
-        doc.fontSize(18).font('Helvetica-Bold').fillColor('#0B0E11').text('BIT HASH CAPITAL', leftMargin, y, { align: 'center', width: contentWidth });
-        y = doc.y + 6;
-        doc.fontSize(9).font('Helvetica').fillColor('#6C7480').text('Financial Statement', leftMargin, y, { align: 'center', width: contentWidth });
-        y = doc.y + 15;
+        doc.fontSize(24).font('Helvetica-Bold').fillColor('#0B0E11').text('BIT HASH CAPITAL', leftMargin, y, { align: 'center', width: contentWidth });
+        y = doc.y + 12;
+        doc.fontSize(11).font('Helvetica').fillColor('#6C7480').text('Financial Statement', leftMargin, y, { align: 'center', width: contentWidth });
+        y = doc.y + 25;
         
-        doc.strokeColor('#F7A600').lineWidth(1.5).moveTo(leftMargin + 100, y).lineTo(pageWidth - leftMargin - 100, y).stroke();
-        y += 12;
-        
-        doc.fontSize(13).font('Helvetica-Bold').fillColor('#1E3A8A').text(`${period.toUpperCase()} FINANCIAL STATEMENT`, leftMargin, y, { align: 'center', width: contentWidth });
-        y = doc.y + 8;
-        doc.fontSize(8).font('Helvetica').fillColor('#64748B').text(`Period: ${formatDate(startDate)} - ${formatDate(endDate)}`, leftMargin, y, { align: 'center', width: contentWidth });
-        y = doc.y + 18;
-        
-        // ========== ACCOUNT INFO ==========
-        needNewPage(55);
-        doc.fillColor('#F8FAFC').rect(leftMargin, y, contentWidth, 50).fill();
-        doc.fillColor('#0B0E11').fontSize(9).font('Helvetica-Bold').text('ACCOUNT INFORMATION', leftMargin + 8, y + 6);
-        doc.fontSize(8).font('Helvetica').fillColor('#374151');
-        doc.text(`Account Holder: ${user.firstName} ${user.lastName}`, leftMargin + 8, y + 22);
-        doc.text(`Email: ${user.email}`, leftMargin + 8, y + 36);
-        doc.text(`Generated: ${new Date().toLocaleString()}`, leftMargin + 350, y + 22);
-        y += 62;
-        
-        // ========== BALANCE SUMMARY - WIDE TABLE ==========
-        needNewPage(130);
-        doc.fillColor('#0B0E11').fontSize(12).font('Helvetica-Bold').text('1. BALANCE SUMMARY', leftMargin, y);
-        y += 16;
-        
-        doc.fillColor('#1E3A8A').rect(leftMargin, y, contentWidth, 20).fill();
-        doc.fillColor('#FFFFFF').fontSize(8).font('Helvetica-Bold');
-        doc.text('Wallet Type', leftMargin + 8, y + 5);
-        doc.text('Opening Balance (USD)', leftMargin + 250, y + 5);
-        doc.text('Closing Balance (USD)', leftMargin + 440, y + 5);
-        doc.text('Net Change (USD)', leftMargin + 610, y + 5);
+        doc.strokeColor('#F7A600').lineWidth(2).moveTo(leftMargin + 120, y).lineTo(pageWidth - leftMargin - 120, y).stroke();
         y += 20;
+        
+        doc.fontSize(16).font('Helvetica-Bold').fillColor('#1E3A8A').text(`${period.toUpperCase()} FINANCIAL STATEMENT`, leftMargin, y, { align: 'center', width: contentWidth });
+        y = doc.y + 12;
+        doc.fontSize(10).font('Helvetica').fillColor('#64748B').text(`For the period ${formatDate(startDate)} - ${formatDate(endDate)}`, leftMargin, y, { align: 'center', width: contentWidth });
+        y = doc.y + 25;
+        
+        // ========== ACCOUNT INFORMATION ==========
+        needNewPage(80);
+        doc.fillColor('#F8FAFC').rect(leftMargin, y, contentWidth, 70).fill();
+        doc.fillColor('#0B0E11').fontSize(12).font('Helvetica-Bold').text('ACCOUNT INFORMATION', leftMargin + 12, y + 10);
+        doc.fontSize(10).font('Helvetica').fillColor('#374151');
+        doc.text(`Account Holder: ${user.firstName} ${user.lastName}`, leftMargin + 12, y + 32);
+        doc.text(`Email Address: ${user.email}`, leftMargin + 12, y + 50);
+        doc.text(`Statement Generated: ${new Date().toLocaleString()}`, leftMargin + 400, y + 32);
+        y += 82;
+        
+        // ========== BALANCE SUMMARY - PROFESSIONAL TABLE ==========
+        needNewPage(160);
+        doc.fillColor('#0B0E11').fontSize(14).font('Helvetica-Bold').text('1. BALANCE SUMMARY', leftMargin, y);
+        y += 22;
+        
+        doc.fillColor('#1E3A8A').rect(leftMargin, y, contentWidth, 26).fill();
+        doc.fillColor('#FFFFFF').fontSize(10).font('Helvetica-Bold');
+        doc.text('Wallet Type', leftMargin + 12, y + 8);
+        doc.text('Opening Balance (USD)', leftMargin + 280, y + 8);
+        doc.text('Closing Balance (USD)', leftMargin + 480, y + 8);
+        doc.text('Net Change (USD)', leftMargin + 660, y + 8);
+        y += 26;
         
         const balanceRows = [
           { label: 'Main Wallet (Digital Assets)', open: openingBalances.mainWalletUSD, close: closingBalances.mainWalletUSD },
@@ -25084,74 +25086,76 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
           const row = balanceRows[i];
           const change = row.close - row.open;
           const bgColor = i % 2 === 0 ? '#FFFFFF' : '#F8FAFC';
-          needNewPage(18);
-          doc.fillColor(bgColor).rect(leftMargin, y, contentWidth, 18).fill();
-          doc.fillColor('#374151').fontSize(8).font('Helvetica');
-          doc.text(row.label, leftMargin + 8, y + 4);
-          doc.text(formatUSD(row.open), leftMargin + 250, y + 4);
-          doc.text(formatUSD(row.close), leftMargin + 440, y + 4);
-          doc.fillColor(change >= 0 ? '#10B981' : '#EF4444').text(formatUSD(change), leftMargin + 610, y + 4);
-          y += 18;
+          needNewPage(24);
+          doc.fillColor(bgColor).rect(leftMargin, y, contentWidth, 24).fill();
+          doc.fillColor('#374151').fontSize(10).font('Helvetica');
+          doc.text(row.label, leftMargin + 12, y + 7);
+          doc.text(formatUSD(row.open), leftMargin + 280, y + 7);
+          doc.text(formatUSD(row.close), leftMargin + 480, y + 7);
+          doc.fillColor(change >= 0 ? '#10B981' : '#EF4444').text(formatUSD(change), leftMargin + 660, y + 7);
+          y += 24;
         }
         
         const totalChangeValue = closingBalances.totalUSD - openingBalances.totalUSD;
-        needNewPage(24);
-        doc.fillColor('#E0E7FF').rect(leftMargin, y, contentWidth, 24).fill();
-        doc.fillColor('#1E3A8A').fontSize(9).font('Helvetica-Bold');
-        doc.text('TOTAL PORTFOLIO VALUE', leftMargin + 8, y + 7);
-        doc.text(formatUSD(openingBalances.totalUSD), leftMargin + 250, y + 7);
-        doc.text(formatUSD(closingBalances.totalUSD), leftMargin + 440, y + 7);
-        doc.fillColor(totalChangeValue >= 0 ? '#10B981' : '#EF4444').text(formatUSD(totalChangeValue), leftMargin + 610, y + 7);
-        y += 32;
+        needNewPage(32);
+        doc.fillColor('#E0E7FF').rect(leftMargin, y, contentWidth, 32).fill();
+        doc.fillColor('#1E3A8A').fontSize(11).font('Helvetica-Bold');
+        doc.text('TOTAL PORTFOLIO VALUE', leftMargin + 12, y + 10);
+        doc.text(formatUSD(openingBalances.totalUSD), leftMargin + 280, y + 10);
+        doc.text(formatUSD(closingBalances.totalUSD), leftMargin + 480, y + 10);
+        doc.fillColor(totalChangeValue >= 0 ? '#10B981' : '#EF4444').text(formatUSD(totalChangeValue), leftMargin + 660, y + 10);
+        y += 42;
         
-        // ========== PROFIT & LOSS ==========
-        needNewPage(100);
-        doc.fillColor('#0B0E11').fontSize(12).font('Helvetica-Bold').text('2. PROFIT & LOSS ANALYSIS', leftMargin, y);
-        y += 16;
+        // ========== PROFIT & LOSS ANALYSIS ==========
+        needNewPage(140);
+        doc.fillColor('#0B0E11').fontSize(14).font('Helvetica-Bold').text('2. PROFIT & LOSS ANALYSIS', leftMargin, y);
+        y += 22;
         
-        const cardWidth = (contentWidth - 30) / 2;
-        doc.fillColor('#F0FDF4').rect(leftMargin, y, cardWidth, 50).fill();
-        doc.fillColor('#0B0E11').fontSize(9).font('Helvetica-Bold').text('REALIZED PROFIT / LOSS', leftMargin + 10, y + 8);
-        doc.fontSize(14).font('Helvetica-Bold').fillColor(totalRealizedPnL >= 0 ? '#10B981' : '#EF4444').text(formatUSD(totalRealizedPnL), leftMargin + 10, y + 28);
+        const cardWidth = (contentWidth - 40) / 2;
+        const cardHeight = 80;
         
-        doc.fillColor('#EFF6FF').rect(leftMargin + cardWidth + 30, y, cardWidth, 50).fill();
-        doc.fillColor('#0B0E11').fontSize(9).font('Helvetica-Bold').text('UNREALIZED PROFIT / LOSS', leftMargin + cardWidth + 40, y + 8);
-        doc.fontSize(14).font('Helvetica-Bold').fillColor(totalUnrealizedPnL >= 0 ? '#10B981' : '#EF4444').text(formatUSD(totalUnrealizedPnL), leftMargin + cardWidth + 40, y + 28);
-        y += 62;
+        doc.fillColor('#F0FDF4').rect(leftMargin, y, cardWidth, cardHeight).fill();
+        doc.fillColor('#0B0E11').fontSize(11).font('Helvetica-Bold').text('REALIZED PROFIT / LOSS', leftMargin + 15, y + 15);
+        doc.fontSize(18).font('Helvetica-Bold').fillColor(totalRealizedPnL >= 0 ? '#10B981' : '#EF4444').text(formatUSD(totalRealizedPnL), leftMargin + 15, y + 45);
         
-        // ========== ASSET P&L TABLE ==========
+        doc.fillColor('#EFF6FF').rect(leftMargin + cardWidth + 40, y, cardWidth, cardHeight).fill();
+        doc.fillColor('#0B0E11').fontSize(11).font('Helvetica-Bold').text('UNREALIZED PROFIT / LOSS', leftMargin + cardWidth + 55, y + 15);
+        doc.fontSize(18).font('Helvetica-Bold').fillColor(totalUnrealizedPnL >= 0 ? '#10B981' : '#EF4444').text(formatUSD(totalUnrealizedPnL), leftMargin + cardWidth + 55, y + 45);
+        y += cardHeight + 25;
+        
+        // ========== ASSET-WISE P&L TABLE ==========
         if (assetPnLDetails.length > 0) {
-          needNewPage(100);
-          doc.fillColor('#0B0E11').fontSize(11).font('Helvetica-Bold').text('Asset-wise Profit & Loss Breakdown', leftMargin, y);
-          y += 14;
+          needNewPage(140);
+          doc.fillColor('#0B0E11').fontSize(13).font('Helvetica-Bold').text('Asset-wise Profit & Loss Breakdown', leftMargin, y);
+          y += 20;
           
-          doc.fillColor('#1E3A8A').rect(leftMargin, y, contentWidth, 18).fill();
-          doc.fillColor('#FFFFFF').fontSize(7).font('Helvetica-Bold');
-          doc.text('Asset', leftMargin + 8, y + 5);
-          doc.text('Realized P&L (USD)', leftMargin + 200, y + 5);
-          doc.text('Unrealized P&L (USD)', leftMargin + 400, y + 5);
-          doc.text('Total P&L (USD)', leftMargin + 600, y + 5);
-          y += 18;
+          doc.fillColor('#1E3A8A').rect(leftMargin, y, contentWidth, 24).fill();
+          doc.fillColor('#FFFFFF').fontSize(9).font('Helvetica-Bold');
+          doc.text('Cryptocurrency', leftMargin + 12, y + 7);
+          doc.text('Realized P&L (USD)', leftMargin + 220, y + 7);
+          doc.text('Unrealized P&L (USD)', leftMargin + 420, y + 7);
+          doc.text('Total P&L (USD)', leftMargin + 620, y + 7);
+          y += 24;
           
           for (let i = 0; i < assetPnLDetails.length; i++) {
             const detail = assetPnLDetails[i];
-            needNewPage(18);
+            needNewPage(22);
             const bgColor = i % 2 === 0 ? '#FFFFFF' : '#F8FAFC';
-            doc.fillColor(bgColor).rect(leftMargin, y, contentWidth, 18).fill();
-            doc.fillColor('#374151').fontSize(8).font('Helvetica');
-            doc.text(detail.asset, leftMargin + 8, y + 4);
-            doc.fillColor(detail.realizedPnL >= 0 ? '#10B981' : '#EF4444').text(formatUSD(detail.realizedPnL), leftMargin + 200, y + 4);
-            doc.fillColor(detail.unrealizedPnL >= 0 ? '#10B981' : '#EF4444').text(formatUSD(detail.unrealizedPnL), leftMargin + 400, y + 4);
-            doc.fillColor(detail.totalPnL >= 0 ? '#10B981' : '#EF4444').text(formatUSD(detail.totalPnL), leftMargin + 600, y + 4);
-            y += 18;
+            doc.fillColor(bgColor).rect(leftMargin, y, contentWidth, 22).fill();
+            doc.fillColor('#374151').fontSize(9).font('Helvetica');
+            doc.text(detail.asset, leftMargin + 12, y + 6);
+            doc.fillColor(detail.realizedPnL >= 0 ? '#10B981' : '#EF4444').text(formatUSD(detail.realizedPnL), leftMargin + 220, y + 6);
+            doc.fillColor(detail.unrealizedPnL >= 0 ? '#10B981' : '#EF4444').text(formatUSD(detail.unrealizedPnL), leftMargin + 420, y + 6);
+            doc.fillColor(detail.totalPnL >= 0 ? '#10B981' : '#EF4444').text(formatUSD(detail.totalPnL), leftMargin + 620, y + 6);
+            y += 22;
           }
-          y += 10;
+          y += 15;
         }
         
         // ========== FINANCIAL METRICS ==========
-        needNewPage(120);
-        doc.fillColor('#0B0E11').fontSize(12).font('Helvetica-Bold').text('3. FINANCIAL METRICS', leftMargin, y);
-        y += 16;
+        needNewPage(150);
+        doc.fillColor('#0B0E11').fontSize(14).font('Helvetica-Bold').text('3. FINANCIAL METRICS', leftMargin, y);
+        y += 22;
         
         const metricsData = [
           { label: 'Total Deposits', value: formatUSD(statement.summary.totalInflowUSD), color: '#10B981' },
@@ -25159,129 +25163,129 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
           { label: 'Transaction Fees', value: formatUSD(statement.fees.summary.totalFeesUSD), color: '#EF4444' },
           { label: 'Net Cash Flow', value: formatUSD(statement.summary.netCashFlowUSD), color: '#3B82F6' },
           { label: 'Realized Trading P&L', value: formatUSD(totalRealizedPnL), color: totalRealizedPnL >= 0 ? '#10B981' : '#EF4444' },
-          { label: 'ROI', value: `${statement.summary.roiPercentage.toFixed(2)}%`, color: '#8B5CF6' }
+          { label: 'Return on Investment', value: `${statement.summary.roiPercentage.toFixed(2)}%`, color: '#8B5CF6' }
         ];
         
-        const metricCardWidth = (contentWidth - 40) / 3;
-        const metricCardHeight = 50;
+        const metricCardWidth = (contentWidth - 50) / 3;
+        const metricCardHeight = 70;
         
         for (let i = 0; i < metricsData.length; i++) {
           const metric = metricsData[i];
           const col = i % 3;
           const row = Math.floor(i / 3);
-          const cardX = leftMargin + (col * (metricCardWidth + 20));
-          const cardY = y + (row * (metricCardHeight + 10));
+          const cardX = leftMargin + (col * (metricCardWidth + 25));
+          const cardY = y + (row * (metricCardHeight + 15));
           
-          if (cardY + metricCardHeight > doc.page.height - 80) { doc.addPage(); y = 30; break; }
+          if (cardY + metricCardHeight > doc.page.height - 100) { doc.addPage(); y = 40; break; }
           
           doc.fillColor('#FFFFFF').rect(cardX, cardY, metricCardWidth, metricCardHeight).fill();
-          doc.fillColor('#6B7280').fontSize(7).font('Helvetica').text(metric.label, cardX + 6, cardY + 8);
-          doc.fillColor(metric.color).fontSize(10).font('Helvetica-Bold').text(metric.value, cardX + 6, cardY + 30);
+          doc.fillColor('#6B7280').fontSize(9).font('Helvetica').text(metric.label, cardX + 12, cardY + 14);
+          doc.fillColor(metric.color).fontSize(13).font('Helvetica-Bold').text(metric.value, cardX + 12, cardY + 44);
         }
         
-        y += Math.ceil(metricsData.length / 3) * (metricCardHeight + 10) + 15;
+        y += Math.ceil(metricsData.length / 3) * (metricCardHeight + 15) + 25;
         
         // ========== TRANSACTION HISTORY ==========
         if (statement.transactions.list.length > 0) {
-          needNewPage(150);
-          doc.fillColor('#0B0E11').fontSize(12).font('Helvetica-Bold').text('4. TRANSACTION HISTORY', leftMargin, y);
-          y += 16;
+          needNewPage(200);
+          doc.fillColor('#0B0E11').fontSize(14).font('Helvetica-Bold').text('4. TRANSACTION HISTORY', leftMargin, y);
+          y += 22;
           
-          doc.fillColor('#F0FDF4').rect(leftMargin, y, contentWidth, 32).fill();
-          doc.fillColor('#374151').fontSize(8).font('Helvetica');
-          doc.text(`Total Transactions: ${statement.transactions.list.length}`, leftMargin + 8, y + 8);
-          doc.text(`Deposits: ${statement.transactions.summary.count.deposits} | Withdrawals: ${statement.transactions.summary.count.withdrawals}`, leftMargin + 8, y + 20);
-          doc.text(`Total Volume: ${formatUSD(statement.transactions.summary.totalDepositsUSD + statement.transactions.summary.totalWithdrawalsUSD)}`, leftMargin + 350, y + 8);
-          y += 44;
+          doc.fillColor('#F0FDF4').rect(leftMargin, y, contentWidth, 48).fill();
+          doc.fillColor('#374151').fontSize(10).font('Helvetica');
+          doc.text(`Total Transactions: ${statement.transactions.list.length}`, leftMargin + 15, y + 12);
+          doc.text(`Deposits: ${statement.transactions.summary.count.deposits} | Withdrawals: ${statement.transactions.summary.count.withdrawals}`, leftMargin + 15, y + 30);
+          doc.text(`Total Volume: ${formatUSD(statement.transactions.summary.totalDepositsUSD + statement.transactions.summary.totalWithdrawalsUSD)}`, leftMargin + 450, y + 12);
+          y += 60;
           
-          doc.fillColor('#1E3A8A').rect(leftMargin, y, contentWidth, 18).fill();
-          doc.fillColor('#FFFFFF').fontSize(7).font('Helvetica-Bold');
-          doc.text('Date', leftMargin + 6, y + 5);
-          doc.text('Type', leftMargin + 100, y + 5);
-          doc.text('Asset', leftMargin + 160, y + 5);
-          doc.text('Amount', leftMargin + 230, y + 5);
-          doc.text('Fee', leftMargin + 330, y + 5);
-          doc.text('Net', leftMargin + 410, y + 5);
-          doc.text('Status', leftMargin + 500, y + 5);
-          y += 18;
+          doc.fillColor('#1E3A8A').rect(leftMargin, y, contentWidth, 24).fill();
+          doc.fillColor('#FFFFFF').fontSize(9).font('Helvetica-Bold');
+          doc.text('Date', leftMargin + 8, y + 7);
+          doc.text('Type', leftMargin + 110, y + 7);
+          doc.text('Asset', leftMargin + 180, y + 7);
+          doc.text('Amount', leftMargin + 260, y + 7);
+          doc.text('Fee', leftMargin + 360, y + 7);
+          doc.text('Net', leftMargin + 450, y + 7);
+          doc.text('Status', leftMargin + 540, y + 7);
+          y += 24;
           
           const recentTxs = statement.transactions.list.slice(0, 12);
           for (let i = 0; i < recentTxs.length; i++) {
             const tx = recentTxs[i];
-            needNewPage(16);
+            needNewPage(22);
             const rowBg = i % 2 === 0 ? '#FFFFFF' : '#F8FAFC';
-            doc.fillColor(rowBg).rect(leftMargin, y, contentWidth, 16).fill();
-            doc.fillColor('#374151').fontSize(7).font('Helvetica');
-            doc.text(formatShortDate(tx.createdAt), leftMargin + 6, y + 4);
-            doc.text(tx.type.substring(0, 6), leftMargin + 100, y + 4);
-            doc.text((tx.asset || 'USD').substring(0, 5), leftMargin + 160, y + 4);
-            doc.text(formatUSD(tx.amountUSD), leftMargin + 230, y + 4);
-            doc.text(formatUSD(tx.feeUSD), leftMargin + 330, y + 4);
-            doc.text(formatUSD(tx.netAmountUSD), leftMargin + 410, y + 4);
-            if (tx.status === 'completed') doc.fillColor('#10B981').text('Complete', leftMargin + 500, y + 4);
-            else if (tx.status === 'pending') doc.fillColor('#F59E0B').text('Pending', leftMargin + 500, y + 4);
-            else doc.fillColor('#EF4444').text('Failed', leftMargin + 500, y + 4);
-            y += 16;
+            doc.fillColor(rowBg).rect(leftMargin, y, contentWidth, 22).fill();
+            doc.fillColor('#374151').fontSize(9).font('Helvetica');
+            doc.text(formatShortDate(tx.createdAt), leftMargin + 8, y + 6);
+            doc.text(tx.type.substring(0, 8), leftMargin + 110, y + 6);
+            doc.text((tx.asset || 'USD').substring(0, 6), leftMargin + 180, y + 6);
+            doc.text(formatUSD(tx.amountUSD), leftMargin + 260, y + 6);
+            doc.text(formatUSD(tx.feeUSD), leftMargin + 360, y + 6);
+            doc.text(formatUSD(tx.netAmountUSD), leftMargin + 450, y + 6);
+            if (tx.status === 'completed') doc.fillColor('#10B981').text('Complete', leftMargin + 540, y + 6);
+            else if (tx.status === 'pending') doc.fillColor('#F59E0B').text('Pending', leftMargin + 540, y + 6);
+            else doc.fillColor('#EF4444').text('Failed', leftMargin + 540, y + 6);
+            y += 22;
           }
-          y += 10;
+          y += 15;
         }
         
         // ========== INVESTMENT ACTIVITY ==========
         if (statement.investments.started.length > 0 || statement.investments.matured.length > 0) {
-          needNewPage(140);
-          doc.fillColor('#0B0E11').fontSize(12).font('Helvetica-Bold').text('5. INVESTMENT ACTIVITY', leftMargin, y);
-          y += 16;
+          needNewPage(180);
+          doc.fillColor('#0B0E11').fontSize(14).font('Helvetica-Bold').text('5. INVESTMENT ACTIVITY', leftMargin, y);
+          y += 22;
           
-          doc.fillColor('#EFF6FF').rect(leftMargin, y, contentWidth, 38).fill();
-          doc.fillColor('#374151').fontSize(8).font('Helvetica');
-          doc.text(`Total Principal Invested: ${formatUSD(statement.investments.summary.totalPrincipalInvestedUSD)}`, leftMargin + 8, y + 8);
-          doc.text(`Total Returns Earned: ${formatUSD(statement.investments.summary.totalReturnsEarnedUSD)}`, leftMargin + 8, y + 22);
-          doc.text(`Active Investments: ${statement.investments.summary.totalActiveInvestmentsCount}`, leftMargin + 380, y + 8);
-          y += 52;
+          doc.fillColor('#EFF6FF').rect(leftMargin, y, contentWidth, 55).fill();
+          doc.fillColor('#374151').fontSize(10).font('Helvetica');
+          doc.text(`Total Principal Invested: ${formatUSD(statement.investments.summary.totalPrincipalInvestedUSD)}`, leftMargin + 15, y + 12);
+          doc.text(`Total Returns Earned: ${formatUSD(statement.investments.summary.totalReturnsEarnedUSD)}`, leftMargin + 15, y + 32);
+          doc.text(`Active Investments: ${statement.investments.summary.totalActiveInvestmentsCount}`, leftMargin + 450, y + 12);
+          y += 68;
           
           if (statement.investments.started.length > 0) {
-            doc.fillColor('#1E3A8A').fontSize(9).font('Helvetica-Bold').text('New Investments:', leftMargin, y);
-            y += 14;
+            doc.fillColor('#1E3A8A').fontSize(11).font('Helvetica-Bold').text('New Investments Initiated:', leftMargin, y);
+            y += 18;
             for (const inv of statement.investments.started.slice(0, 5)) {
-              needNewPage(14);
-              doc.fillColor('#374151').fontSize(8).font('Helvetica');
-              doc.text(`• ${inv.planName}`, leftMargin + 10, y);
-              doc.text(formatUSD(inv.amountUSD), leftMargin + 280, y);
-              doc.fillColor('#6B7280').text(`Started: ${formatShortDate(inv.startDate)}`, leftMargin + 400, y);
-              y += 12;
+              needNewPage(18);
+              doc.fillColor('#374151').fontSize(9).font('Helvetica');
+              doc.text(`• ${inv.planName}`, leftMargin + 15, y);
+              doc.text(formatUSD(inv.amountUSD), leftMargin + 320, y);
+              doc.fillColor('#6B7280').text(`Started: ${formatShortDate(inv.startDate)}`, leftMargin + 480, y);
+              y += 16;
             }
-            y += 6;
+            y += 10;
           }
           
           if (statement.investments.matured.length > 0) {
-            doc.fillColor('#1E3A8A').fontSize(9).font('Helvetica-Bold').text('Completed Investments:', leftMargin, y);
-            y += 14;
+            doc.fillColor('#1E3A8A').fontSize(11).font('Helvetica-Bold').text('Matured / Completed Investments:', leftMargin, y);
+            y += 18;
             for (const inv of statement.investments.matured.slice(0, 5)) {
-              needNewPage(14);
-              doc.fillColor('#374151').fontSize(8).font('Helvetica');
-              doc.text(`• ${inv.planName}`, leftMargin + 10, y);
-              doc.text(`${formatUSD(inv.initialAmountUSD)} → ${formatUSD(inv.returnAmountUSD)}`, leftMargin + 230, y);
+              needNewPage(18);
+              doc.fillColor('#374151').fontSize(9).font('Helvetica');
+              doc.text(`• ${inv.planName}`, leftMargin + 15, y);
+              doc.text(`${formatUSD(inv.initialAmountUSD)} → ${formatUSD(inv.returnAmountUSD)}`, leftMargin + 250, y);
               const profitColor = inv.profitUSD >= 0 ? '#10B981' : '#EF4444';
-              doc.fillColor(profitColor).text(`(${inv.profitUSD >= 0 ? 'Profit' : 'Loss'}: ${formatUSD(Math.abs(inv.profitUSD))})`, leftMargin + 480, y);
-              y += 12;
+              doc.fillColor(profitColor).text(`(${inv.profitUSD >= 0 ? 'Profit' : 'Loss'}: ${formatUSD(Math.abs(inv.profitUSD))})`, leftMargin + 520, y);
+              y += 16;
             }
-            y += 8;
+            y += 12;
           }
         }
         
         // ========== FOOTER ==========
-        if (y > doc.page.height - 80) { doc.addPage(); y = 30; }
+        if (y > doc.page.height - 100) { doc.addPage(); y = 40; }
         
         doc.strokeColor('#E5E7EB').lineWidth(1).moveTo(leftMargin, y).lineTo(pageWidth - leftMargin, y).stroke();
-        y += 12;
+        y += 20;
         
-        doc.fontSize(8).font('Helvetica-Bold').fillColor('#0B0E11').text('BIT HASH CAPITAL', leftMargin, y, { align: 'center', width: contentWidth });
-        y += 10;
-        doc.fontSize(6).font('Helvetica').fillColor('#6B7280');
-        doc.text('Official financial statement generated by Bit Hash Capital. All figures in USD.', leftMargin, y, { align: 'center', width: contentWidth });
-        y += 8;
-        doc.text('Profit/Loss calculated using FIFO (First-In-First-Out) method.', leftMargin, y, { align: 'center', width: contentWidth });
-        y += 8;
+        doc.fontSize(10).font('Helvetica-Bold').fillColor('#0B0E11').text('BIT HASH CAPITAL', leftMargin, y, { align: 'center', width: contentWidth });
+        y += 16;
+        doc.fontSize(8).font('Helvetica').fillColor('#6B7280');
+        doc.text('This is an official financial statement generated by Bit Hash Capital. All figures are in US Dollars (USD).', leftMargin, y, { align: 'center', width: contentWidth });
+        y += 12;
+        doc.text('Profit/Loss calculations use FIFO (First-In-First-Out) method for accurate transaction tracking.', leftMargin, y, { align: 'center', width: contentWidth });
+        y += 12;
         doc.text(`© ${new Date().getFullYear()} Bit Hash Capital. All rights reserved.`, leftMargin, y, { align: 'center', width: contentWidth });
         
         doc.end();
@@ -25295,25 +25299,47 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
           to: user.email,
           subject: `Your ${period.toUpperCase()} Financial Statement - Bit Hash Capital`,
           html: `
-            <div style="font-family: 'Inter', sans-serif; max-width: 580px; margin: 0 auto; background: #FFFFFF;">
-              <div style="text-align: center; padding: 25px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-                <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="Bit Hash Capital" style="width: 50px; height: 50px; margin-bottom: 10px;">
-                <h1 style="color: #F7A600; font-size: 20px; margin: 0;">BIT HASH CAPITAL</h1>
-                <p style="color: #B7BDC6; font-size: 10px; margin: 8px 0 0;">Financial Statement</p>
+            <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+              <div style="text-align: center; padding: 30px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+                <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="Bit Hash Capital" style="width: 60px; height: 60px; margin-bottom: 12px;">
+                <h1 style="color: #F7A600; font-size: 24px; margin: 0; letter-spacing: 1px;">BIT HASH CAPITAL</h1>
+                <p style="color: #B7BDC6; font-size: 12px; margin: 12px 0 0;">Financial Statement</p>
               </div>
-              <div style="padding: 25px;">
-                <p style="color: #374151; margin-bottom: 12px;">Dear <strong>${user.firstName} ${user.lastName}</strong>,</p>
-                <p style="color: #4B5563; margin-bottom: 20px;">Please find attached your ${period} financial statement for <strong>${formatDate(startDate)} - ${formatDate(endDate)}</strong>.</p>
-                <div style="background: #F8FAFC; border-radius: 10px; padding: 15px; margin: 20px 0;">
-                  <div style="display: flex; justify-content: space-between; margin-bottom: 8px;"><span>Opening Balance:</span><strong>${formatUSD(openingBalances.totalUSD)}</strong></div>
-                  <div style="display: flex; justify-content: space-between; margin-bottom: 8px;"><span>Closing Balance:</span><strong>${formatUSD(closingBalances.totalUSD)}</strong></div>
-                  <div style="display: flex; justify-content: space-between; padding-top: 8px; border-top: 1px solid #E5E7EB;"><span>Net Change:</span><strong style="color: ${totalChangeValue >= 0 ? '#10B981' : '#EF4444'}">${formatUSD(totalChangeValue)}</strong></div>
-                  <div style="display: flex; justify-content: space-between; margin-top: 8px;"><span>Realized P&L:</span><strong style="color: ${totalRealizedPnL >= 0 ? '#10B981' : '#EF4444'}">${formatUSD(totalRealizedPnL)}</strong></div>
-                  <div style="display: flex; justify-content: space-between; margin-top: 8px;"><span>ROI:</span><strong>${statement.summary.roiPercentage.toFixed(2)}%</strong></div>
+              <div style="padding: 30px;">
+                <p style="color: #374151; margin-bottom: 15px; font-size: 15px;">Dear <strong>${user.firstName} ${user.lastName}</strong>,</p>
+                <p style="color: #4B5563; margin-bottom: 25px; font-size: 14px; line-height: 1.5;">Please find attached your ${period} financial statement for the period <strong>${formatDate(startDate)} - ${formatDate(endDate)}</strong>.</p>
+                
+                <div style="background: #F8FAFC; border-radius: 12px; padding: 20px; margin: 25px 0; border: 1px solid #E5E7EB;">
+                  <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+                    <span style="color: #6B7280; font-size: 14px;">Opening Balance:</span>
+                    <strong style="color: #0B0E11; font-size: 14px;">${formatUSD(openingBalances.totalUSD)}</strong>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+                    <span style="color: #6B7280; font-size: 14px;">Closing Balance:</span>
+                    <strong style="color: #0B0E11; font-size: 14px;">${formatUSD(closingBalances.totalUSD)}</strong>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; padding-top: 12px; border-top: 1px solid #E5E7EB;">
+                    <span style="color: #6B7280; font-size: 14px;">Net Change:</span>
+                    <strong style="color: ${totalChangeValue >= 0 ? '#10B981' : '#EF4444'}; font-size: 14px;">${formatUSD(totalChangeValue)}</strong>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; margin-top: 12px;">
+                    <span style="color: #6B7280; font-size: 14px;">Realized Trading P&L:</span>
+                    <strong style="color: ${totalRealizedPnL >= 0 ? '#10B981' : '#EF4444'}; font-size: 14px;">${formatUSD(totalRealizedPnL)}</strong>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; margin-top: 12px;">
+                    <span style="color: #6B7280; font-size: 14px;">Return on Investment (ROI):</span>
+                    <strong style="color: #8B5CF6; font-size: 14px;">${statement.summary.roiPercentage.toFixed(2)}%</strong>
+                  </div>
                 </div>
-                <div style="text-align: center;"><a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #0B0E11; padding: 8px 24px; text-decoration: none; border-radius: 40px; font-weight: 600; font-size: 13px;">Access Dashboard</a></div>
+                
+                <div style="text-align: center; margin-top: 30px;">
+                  <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #0B0E11; padding: 12px 32px; text-decoration: none; border-radius: 40px; font-weight: 600; font-size: 14px; display: inline-block;">Access Your Dashboard</a>
+                </div>
               </div>
-              <div style="text-align: center; padding: 15px; background: #0B0E11;"><p style="color: #6C7480; font-size: 8px;">&copy; ${new Date().getFullYear()} Bit Hash Capital. All rights reserved.</p></div>
+              <div style="text-align: center; padding: 20px; background: #0B0E11;">
+                <p style="color: #6C7480; font-size: 10px;">&copy; ${new Date().getFullYear()} Bit Hash Capital. All rights reserved.</p>
+                <p style="color: #6C7480; font-size: 10px; margin-top: 6px;">800 Plant Street, Wilmington, DE 19801, United States</p>
+              </div>
             </div>
           `,
           attachments: [{ filename: `Financial_Statement_${period.toUpperCase()}_${formatShortDate(endDate)}.pdf`, content: pdfBuffer, contentType: 'application/pdf' }]
