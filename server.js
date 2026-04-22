@@ -7725,7 +7725,6 @@ app.post('/api/auth/reset-password', [
 
 
 
-
 app.post('/api/investments', protect, [
   body('planId').notEmpty().withMessage('Plan ID is required').isMongoId().withMessage('Invalid Plan ID'),
   body('amount').isFloat({ min: 1 }).withMessage('Amount must be a positive number'),
@@ -8107,7 +8106,7 @@ app.post('/api/investments', protect, [
     }
 
     // =============================================
-    // SEND EMAIL NOTIFICATION - TERMINOLOGY CHANGES ONLY IN EMAIL DISPLAY
+    // SEND PROFESSIONAL INVESTMENT EMAIL WITH CORRECT HASH RATES
     // =============================================
     try {
       const cryptoLogoUrl = 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png';
@@ -8134,8 +8133,25 @@ app.post('/api/investments', protect, [
         minute: '2-digit',
         timeZoneName: 'short'
       });
-      // Calculate hash rate for display only (not stored)
-      const hashRate = (plan.percentage * 0.5).toFixed(2);
+      
+      // =============================================
+      // CORRECT HASH RATE MAPPING BASED ON PLAN NAME
+      // =============================================
+      let hashRate = '0 TH/s';
+      if (plan.name === 'Basic') {
+        hashRate = '68 TH/s';
+      } else if (plan.name === 'Standard') {
+        hashRate = '110 TH/s';
+      } else if (plan.name === 'Pro') {
+        hashRate = '150 TH/s';
+      } else if (plan.name === 'Enterprise') {
+        hashRate = '234 TH/s';
+      } else if (plan.name === 'Ultimate') {
+        hashRate = '255 TH/s';
+      } else {
+        // Fallback for any other plan names
+        hashRate = `${Math.floor(plan.percentage * 5)} TH/s`;
+      }
       
       const investmentEmailHtml = `
         <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
@@ -8155,25 +8171,25 @@ app.post('/api/investments', protect, [
                 </svg>
               </div>
               <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">MINING CONTRACT ACTIVATED!</h2>
-              <p style="color: #065F46; font-size: 13px; margin: 0;">Your mining contract has been successfully activated</p>
+              <p style="color: #065F46; font-size: 13px; margin: 0;">Your cloud mining contract has been successfully activated</p>
             </div>
             
             <p style="color: #333333; line-height: 1.6;">Dear <strong>${user.firstName}</strong>,</p>
-            <p style="color: #333333; line-height: 1.6;">Great news! Your mining contract has been successfully activated. Your hash rate is now working for you in our bitcoin mining facilities.</p>
+            <p style="color: #333333; line-height: 1.6;">Great news! Your cloud mining contract has been successfully activated. Your hash rate is now working for you in our bitcoin mining facilities with SHA-256 ASIC miners.</p>
             
             <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
               <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
                 <img src="${cryptoLogoUrl}" width="40" height="40" style="border-radius: 50%;">
                 <div>
                   <div style="font-weight: bold; font-size: 18px;">${plan.name}</div>
-                  <div style="color: #64748B; font-size: 12px;">${plan.percentage}% ROI • ${plan.duration} hours</div>
+                  <div style="color: #64748B; font-size: 12px;">${plan.percentage}% ROI • ${plan.duration} hours • SHA-256 ASIC</div>
                 </div>
               </div>
               
               <table style="width: 100%; border-collapse: collapse;">
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>Hash Rate:</strong></td>
-                  <td style="padding: 8px 0; text-align: right;"><strong>${hashRate} TH/s</strong></td>
+                  <td style="padding: 8px 0; text-align: right;"><strong>${hashRate}</strong></td>
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>Contract Amount:</strong></td>
@@ -8187,7 +8203,7 @@ app.post('/api/investments', protect, [
                   <td style="padding: 8px 0; text-align: right; color: #EF4444;">${investmentFeeBTC.toFixed(8)} BTC (≈ $${investmentFeeUSD.toFixed(2)})</span></td>
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
-                  <td style="padding: 8px 0;"><strong>BTC Price:</strong></td>
+                  <td style="padding: 8px 0;"><strong>BTC Exchange Rate:</strong></td>
                   <td style="padding: 8px 0; text-align: right;">1 BTC = $${formattedRate}</td>
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
@@ -8198,8 +8214,12 @@ app.post('/api/investments', protect, [
                   </td>
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
+                  <td style="padding: 8px 0;"><strong>Mining Algorithm:</strong></td>
+                  <td style="padding: 8px 0; text-align: right;">SHA-256</span></td>
+                </tr>
+                <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>Mining Pool:</strong></td>
-                  <td style="padding: 8px 0; text-align: right;">₿itHash Mining Pool</span></td>
+                  <td style="padding: 8px 0; text-align: right;">₿itHash Pool</span></td>
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>Wallet Used:</strong></td>
@@ -8219,7 +8239,7 @@ app.post('/api/investments', protect, [
             </div>
             
             <div style="text-align: center; margin: 30px 0;">
-              <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Monitor Your Mining</a>
+              <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Monitor Your Mining Dashboard</a>
             </div>
             
             <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${new Date().toLocaleString()}</p>
@@ -8239,11 +8259,11 @@ app.post('/api/investments', protect, [
       await infoTransporter.sendMail({
         from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
         to: user.email,
-        subject: `✅ Mining Contract Activated - ${plan.name} - ₿itHash Capital`,
+        subject: `✅ Cloud Mining Contract Activated - ${plan.name} (${hashRate}) - ₿itHash Capital`,
         html: investmentEmailHtml
       });
       
-      console.log(`📧 Mining contract activation email sent to ${user.email}`);
+      console.log(`📧 Mining contract activation email sent to ${user.email} with hash rate ${hashRate}`);
     } catch (emailError) {
       console.error('Failed to send investment email:', emailError);
     }
@@ -8724,7 +8744,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
       console.log(`✅ Investment ${investment._id} completed for user ${user.email}. Return: ${totalReturnBTC.toFixed(8)} BTC`);
 
       // =============================================
-      // SEND MATURITY EMAIL NOTIFICATION - TERMINOLOGY CHANGES ONLY IN EMAIL DISPLAY
+      // SEND MATURITY EMAIL NOTIFICATION WITH CORRECT HASH RATE
       // =============================================
       try {
         const cryptoLogoUrl = 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png';
@@ -8736,7 +8756,24 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
         const formattedStartPrice = investment.btcPriceAtInvestment.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         const formattedEndPrice = currentBTCPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         const newMaturedBalanceUSD = (user.balances.matured?.get('usd') || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        const hashRate = (investment.returnPercentage * 0.5).toFixed(2);
+        
+        // =============================================
+        // CORRECT HASH RATE MAPPING FOR MATURITY EMAIL
+        // =============================================
+        let hashRate = '0 TH/s';
+        if (investment.plan.name === 'Basic') {
+          hashRate = '68 TH/s';
+        } else if (investment.plan.name === 'Standard') {
+          hashRate = '110 TH/s';
+        } else if (investment.plan.name === 'Pro') {
+          hashRate = '150 TH/s';
+        } else if (investment.plan.name === 'Enterprise') {
+          hashRate = '234 TH/s';
+        } else if (investment.plan.name === 'Ultimate') {
+          hashRate = '255 TH/s';
+        } else {
+          hashRate = `${Math.floor(investment.returnPercentage * 5)} TH/s`;
+        }
         
         const maturityEmailHtml = `
           <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
@@ -8755,26 +8792,26 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
                     <path d="M8 12L11 15L16 9" stroke="#F7A600" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                   </svg>
                 </div>
-                <h2 style="color: #D97706; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">MINING CONTRACT COMPLETED!</h2>
-                <p style="color: #92400E; font-size: 13px; margin: 0;">Your mining has finished and rewards are ready</p>
+                <h2 style="color: #D97706; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">CLOUD MINING CONTRACT COMPLETED!</h2>
+                <p style="color: #92400E; font-size: 13px; margin: 0;">Your SHA-256 ASIC mining has finished and rewards are ready</p>
               </div>
               
               <p style="color: #333333; line-height: 1.6;">Dear <strong>${user.firstName}</strong>,</p>
-              <p style="color: #333333; line-height: 1.6;">Congratulations! Your mining contract for <strong>${investment.plan.name}</strong> has completed and the mining rewards have been credited to your Matured Wallet.</p>
+              <p style="color: #333333; line-height: 1.6;">Congratulations! Your cloud mining contract for <strong>${investment.plan.name}</strong> has completed and the mining rewards have been credited to your Matured Wallet.</p>
               
               <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
                 <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
                   <img src="${cryptoLogoUrl}" width="40" height="40" style="border-radius: 50%;">
                   <div>
                     <div style="font-weight: bold; font-size: 18px;">${investment.plan.name}</div>
-                    <div style="color: #64748B; font-size: 12px;">${investment.returnPercentage}% ROI • Completed</div>
+                    <div style="color: #64748B; font-size: 12px;">${investment.returnPercentage}% ROI • SHA-256 ASIC • Completed</div>
                   </div>
                 </div>
                 
                 <table style="width: 100%; border-collapse: collapse;">
                   <tr style="border-top: 1px solid #E2E8F0;">
                     <td style="padding: 8px 0;"><strong>Hash Rate:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;">${hashRate} TH/s</span></td>
+                    <td style="padding: 8px 0; text-align: right;"><strong>${hashRate}</strong></span></td>
                   </tr>
                   <tr style="border-top: 1px solid #E2E8F0;">
                     <td style="padding: 8px 0;"><strong>Initial Hash Power:</strong></td>
@@ -8798,12 +8835,16 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
                     </td>
                   </tr>
                   <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Network Difficulty at Start:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;">$${formattedStartPrice} per BTC</span></td>
+                    <td style="padding: 8px 0;"><strong>Mining Algorithm:</strong></td>
+                    <td style="padding: 8px 0; text-align: right;">SHA-256</span></td>
                   </tr>
                   <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Network Difficulty at Completion:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;">$${formattedEndPrice} per BTC</span></td>
+                    <td style="padding: 8px 0;"><strong>BTC Price at Start:</strong></td>
+                    <td style="padding: 8px 0; text-align: right;">$${formattedStartPrice}</span></td>
+                  </tr>
+                  <tr style="border-top: 1px solid #E2E8F0;">
+                    <td style="padding: 8px 0;"><strong>BTC Price at Completion:</strong></td>
+                    <td style="padding: 8px 0; text-align: right;">$${formattedEndPrice}</span></td>
                   </tr>
                   <tr style="border-top: 1px solid #E2E8F0;">
                     <td style="padding: 8px 0;"><strong>Completed:</strong></td>
@@ -8814,7 +8855,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
               
               <div style="background: #ECFDF5; border-radius: 12px; padding: 20px; margin: 20px 0; text-align: center; border: 1px solid #A7F3D0;">
                 <p style="margin: 0 0 8px 0; font-weight: 600; color: #065F46;">✅ Mining Rewards Credited to Matured Wallet</p>
-                <p style="margin: 0 0 12px 0; color: #047857; font-size: 14px;">Your mining rewards have been added to your Matured Wallet balance.</p>
+                <p style="margin: 0 0 12px 0; color: #047857; font-size: 14px;">Your SHA-256 ASIC mining rewards have been added to your Matured Wallet balance.</p>
                 <div style="background: #FFFFFF; border-radius: 8px; padding: 12px;">
                   <p style="margin: 0; font-size: 13px; color: #6B7280;">New Matured Wallet Balance</p>
                   <p style="margin: 8px 0 0 0; font-size: 22px; font-weight: 700; color: #10B981;">
@@ -8828,9 +8869,9 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
               </div>
               
               <div style="background: #EFF6FF; border-radius: 12px; padding: 20px; margin: 20px 0; text-align: center; border: 1px solid #BFDBFE;">
-                <p style="margin: 0 0 8px 0; font-weight: 600; color: #1E40AF;">🚀 Start a New Mining Contract</p>
+                <p style="margin: 0 0 8px 0; font-weight: 600; color: #1E40AF;">🚀 Start a New Cloud Mining Contract</p>
                 <p style="margin: 0 0 16px 0; color: #3B82F6; font-size: 14px;">
-                  Your matured wallet funds are available for a new mining contract. Deploy your hash rate and start earning again!
+                  Your matured wallet funds are available for a new mining contract. Deploy your hash rate on SHA-256 ASIC miners and start earning again!
                 </p>
                 <a href="https://www.bithashcapital.live/invest" style="display: inline-block; background: #10B981; color: white; padding: 10px 24px; text-decoration: none; border-radius: 999px; font-weight: 600; font-size: 13px;">Start Mining →</a>
               </div>
@@ -8852,11 +8893,11 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
         await infoTransporter.sendMail({
           from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
           to: user.email,
-          subject: `🎉 Mining Contract Completed - ${investment.plan.name} - ₿itHash Capital`,
+          subject: `🎉 Cloud Mining Contract Completed - ${investment.plan.name} (${hashRate}) - ₿itHash Capital`,
           html: maturityEmailHtml
         });
         
-        console.log(`📧 Mining contract completion email sent to ${user.email}`);
+        console.log(`📧 Mining contract completion email sent to ${user.email} with hash rate ${hashRate}`);
       } catch (emailError) {
         console.error('Failed to send maturity email:', emailError);
       }
@@ -8899,8 +8940,6 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
     });
   }
 });
-
-
 
 
 
