@@ -24625,9 +24625,6 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, async (req, res) => 
 
 
 
-
-
-
 // =============================================
 // ENDPOINT 1: GET /api/admin/crypto/assets - Real-time crypto assets for donut chart
 // =============================================
@@ -24857,7 +24854,7 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
     const generateStatementForUser = async (user) => {
       try {
         // =============================================
-        // FETCH ALL TRANSACTIONS IN PERIOD
+        // FETCH ALL TRANSACTIONS
         // =============================================
         const transactions = await Transaction.find({
           user: user._id,
@@ -24866,7 +24863,7 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
         }).sort({ createdAt: -1 });
         
         // =============================================
-        // FETCH ALL BUY AND SELL TRANSACTIONS FOR P&L
+        // FETCH BUY/SELL FOR P&L
         // =============================================
         const allBuyTransactions = await Transaction.find({
           user: user._id,
@@ -24881,33 +24878,23 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
         }).sort({ createdAt: 1 });
         
         // =============================================
-        // ACCURATE FIFO PROFIT/LOSS CALCULATION
+        // FIFO PROFIT/LOSS CALCULATION
         // =============================================
         const assetInventory = new Map();
         const realizedPnLByAsset = new Map();
         const unrealizedPnLByAsset = new Map();
         
-        // Process all BUY transactions to build inventory
         for (const buyTx of allBuyTransactions) {
           const asset = (buyTx.asset || buyTx.buyDetails?.asset || '').toLowerCase();
           const amount = buyTx.assetAmount || buyTx.buyDetails?.assetAmount || 0;
           const price = buyTx.buyDetails?.buyingPrice || buyTx.exchangeRateAtTime || 0;
-          const date = buyTx.createdAt;
           
           if (asset && amount > 0 && price > 0) {
-            if (!assetInventory.has(asset)) {
-              assetInventory.set(asset, []);
-            }
-            assetInventory.get(asset).push({
-              amount: amount,
-              price: price,
-              date: date,
-              remaining: amount
-            });
+            if (!assetInventory.has(asset)) assetInventory.set(asset, []);
+            assetInventory.get(asset).push({ amount, price, remaining: amount });
           }
         }
         
-        // Process all SELL transactions using FIFO
         for (const sellTx of allSellTransactions) {
           const asset = (sellTx.asset || sellTx.sellDetails?.asset || '').toLowerCase();
           const sellAmount = sellTx.assetAmount || sellTx.sellDetails?.assetAmount || 0;
@@ -24923,8 +24910,7 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
                 const lot = inventory[i];
                 if (lot.remaining > 0) {
                   const sellFromLot = Math.min(lot.remaining, remainingToSell);
-                  const costBasis = sellFromLot * lot.price;
-                  totalCostBasis += costBasis;
+                  totalCostBasis += sellFromLot * lot.price;
                   lot.remaining -= sellFromLot;
                   remainingToSell -= sellFromLot;
                 }
@@ -24932,78 +24918,51 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
               
               const totalProceeds = sellAmount * sellPrice;
               const realizedPnL = totalProceeds - totalCostBasis;
-              
-              if (!realizedPnLByAsset.has(asset)) {
-                realizedPnLByAsset.set(asset, 0);
-              }
-              realizedPnLByAsset.set(asset, realizedPnLByAsset.get(asset) + realizedPnL);
+              realizedPnLByAsset.set(asset, (realizedPnLByAsset.get(asset) || 0) + realizedPnL);
             }
           }
         }
         
-        // Calculate unrealized P&L for remaining inventory
         for (const [asset, inventory] of assetInventory.entries()) {
-          let totalRemainingAmount = 0;
-          let totalCostBasis = 0;
-          
+          let totalRemaining = 0, totalCostBasis = 0;
           for (const lot of inventory) {
             if (lot.remaining > 0) {
-              totalRemainingAmount += lot.remaining;
+              totalRemaining += lot.remaining;
               totalCostBasis += lot.remaining * lot.price;
             }
           }
-          
-          if (totalRemainingAmount > 0.00000001) {
+          if (totalRemaining > 0.00000001) {
             const currentPrice = await getCryptoPrice(asset.toUpperCase());
             if (currentPrice && currentPrice > 0) {
-              const currentValue = totalRemainingAmount * currentPrice;
-              const unrealizedPnL = currentValue - totalCostBasis;
-              unrealizedPnLByAsset.set(asset, unrealizedPnL);
+              const currentValue = totalRemaining * currentPrice;
+              unrealizedPnLByAsset.set(asset, currentValue - totalCostBasis);
             }
           }
         }
         
-        let totalRealizedPnL = 0;
-        let totalUnrealizedPnL = 0;
+        let totalRealizedPnL = 0, totalUnrealizedPnL = 0;
         const assetPnLDetails = [];
-        
-        const allAssets = new Set([...realizedPnLByAsset.keys(), ...unrealizedPnLByAsset.keys()]);
-        for (const asset of allAssets) {
+        const allAssetsSet = new Set([...realizedPnLByAsset.keys(), ...unrealizedPnLByAsset.keys()]);
+        for (const asset of allAssetsSet) {
           const realized = realizedPnLByAsset.get(asset) || 0;
           const unrealized = unrealizedPnLByAsset.get(asset) || 0;
           totalRealizedPnL += realized;
           totalUnrealizedPnL += unrealized;
-          assetPnLDetails.push({
-            asset: asset.toUpperCase(),
-            realizedPnL: realized,
-            unrealizedPnL: unrealized,
-            totalPnL: realized + unrealized
-          });
+          assetPnLDetails.push({ asset: asset.toUpperCase(), realizedPnL: realized, unrealizedPnL: unrealized, totalPnL: realized + unrealized });
         }
         
         // =============================================
-        // FETCH INVESTMENTS
+        // INVESTMENTS
         // =============================================
-        const investmentsInPeriod = await Investment.find({ 
-          user: user._id, 
-          createdAt: { $gte: startDate, $lte: endDate } 
-        }).populate('plan');
-        
-        const maturedInvestments = await Investment.find({ 
-          user: user._id, 
-          completionDate: { $gte: startDate, $lte: endDate }, 
-          status: 'completed' 
-        }).populate('plan');
+        const investmentsInPeriod = await Investment.find({ user: user._id, createdAt: { $gte: startDate, $lte: endDate } }).populate('plan');
+        const maturedInvestments = await Investment.find({ user: user._id, completionDate: { $gte: startDate, $lte: endDate }, status: 'completed' }).populate('plan');
         
         // =============================================
-        // CALCULATE OPENING AND CLOSING BALANCES
+        // BALANCES
         // =============================================
         const openingBalances = await calculateAccurateOpeningBalances(user._id, startDate);
         const closingBalances = await calculateAccurateClosingBalances(user._id, endDate);
         
-        // =============================================
-        // AGGREGATE TRANSACTION TOTALS
-        // =============================================
         let totalDeposits = 0, totalWithdrawals = 0, totalFees = 0;
         let totalBuyVolume = 0, totalSellVolume = 0;
         
@@ -25018,17 +24977,11 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
         const netChange = closingBalances.totalUSD - openingBalances.totalUSD;
         const roi = openingBalances.totalUSD > 0 ? (netChange / openingBalances.totalUSD) * 100 : 0;
         
-        // =============================================
-        // CREATE FINANCIAL STATEMENT
-        // =============================================
         const statement = new FinancialStatement({
-          user: user._id,
-          statementType: period,
+          user: user._id, statementType: period,
           period: { startDate, endDate, generationDate: new Date() },
           reference: `FS-${period.toUpperCase()}-${user._id.toString().slice(-6)}-${Date.now()}`,
-          openingBalances,
-          closingBalances,
-          netChangeUSD: netChange,
+          openingBalances, closingBalances, netChangeUSD: netChange,
           transactions: {
             list: transactions.map(tx => ({
               transactionId: tx._id, type: tx.type, amountUSD: tx.amount,
@@ -25037,161 +24990,89 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
               reference: tx.reference, feeUSD: tx.fee || 0,
               netAmountUSD: tx.netAmount || tx.amount, createdAt: tx.createdAt
             })),
-            summary: {
-              totalDepositsUSD: totalDeposits,
-              totalWithdrawalsUSD: totalWithdrawals,
-              totalFeesPaidUSD: totalFees,
-              totalTransfersUSD: 0,
-              count: {
-                deposits: transactions.filter(t => t.type === 'deposit').length,
-                withdrawals: transactions.filter(t => t.type === 'withdrawal').length,
-                transfers: 0
-              }
-            }
+            summary: { totalDepositsUSD: totalDeposits, totalWithdrawalsUSD: totalWithdrawals, totalFeesPaidUSD: totalFees, totalTransfersUSD: 0,
+              count: { deposits: transactions.filter(t => t.type === 'deposit').length, withdrawals: transactions.filter(t => t.type === 'withdrawal').length, transfers: 0 } }
           },
-          trading: {
-            buys: [],
-            sells: [],
-            summary: {
-              totalBuyVolumeUSD: totalBuyVolume,
-              totalSellVolumeUSD: totalSellVolume,
-              totalTradingProfitUSD: totalRealizedPnL > 0 ? totalRealizedPnL : 0,
-              totalTradingLossUSD: totalRealizedPnL < 0 ? Math.abs(totalRealizedPnL) : 0,
-              netTradingPnLUSD: totalRealizedPnL
-            }
-          },
+          trading: { buys: [], sells: [], summary: { totalBuyVolumeUSD: totalBuyVolume, totalSellVolumeUSD: totalSellVolume, totalTradingProfitUSD: totalRealizedPnL > 0 ? totalRealizedPnL : 0, totalTradingLossUSD: totalRealizedPnL < 0 ? Math.abs(totalRealizedPnL) : 0, netTradingPnLUSD: totalRealizedPnL } },
           investments: {
-            started: investmentsInPeriod.map(inv => ({
-              investmentId: inv._id,
-              planName: inv.plan?.name || 'Unknown Plan',
-              amountUSD: inv.amount,
-              amountBTC: inv.amountBTC,
-              startDate: inv.createdAt,
-              expectedReturnUSD: inv.expectedReturn
-            })),
-            matured: maturedInvestments.map(inv => ({
-              investmentId: inv._id,
-              planName: inv.plan?.name || 'Unknown Plan',
-              initialAmountUSD: inv.originalAmount || inv.amount,
-              returnAmountUSD: inv.expectedReturn || inv.amount,
-              profitUSD: (inv.expectedReturn || inv.amount) - (inv.originalAmount || inv.amount),
-              profitPercentage: inv.returnPercentage || 0,
-              completionDate: inv.completionDate || inv.endDate
-            })),
-            summary: {
-              totalPrincipalInvestedUSD: investmentsInPeriod.reduce((sum, i) => sum + (i.amount || 0), 0),
-              totalReturnsEarnedUSD: maturedInvestments.reduce((sum, i) => sum + ((i.expectedReturn || 0) - (i.originalAmount || 0)), 0),
-              totalProfitUSD: maturedInvestments.reduce((sum, i) => sum + ((i.expectedReturn || 0) - (i.originalAmount || 0)), 0),
-              totalActiveInvestmentsCount: await Investment.countDocuments({ user: user._id, status: 'active' }),
-              totalActivePrincipalUSD: 0
-            }
+            started: investmentsInPeriod.map(inv => ({ investmentId: inv._id, planName: inv.plan?.name || 'Unknown Plan', amountUSD: inv.amount, amountBTC: inv.amountBTC, startDate: inv.createdAt, expectedReturnUSD: inv.expectedReturn })),
+            matured: maturedInvestments.map(inv => ({ investmentId: inv._id, planName: inv.plan?.name || 'Unknown Plan', initialAmountUSD: inv.originalAmount || inv.amount, returnAmountUSD: inv.expectedReturn || inv.amount, profitUSD: (inv.expectedReturn || inv.amount) - (inv.originalAmount || inv.amount), profitPercentage: inv.returnPercentage || 0, completionDate: inv.completionDate || inv.endDate })),
+            summary: { totalPrincipalInvestedUSD: investmentsInPeriod.reduce((sum, i) => sum + (i.amount || 0), 0), totalReturnsEarnedUSD: maturedInvestments.reduce((sum, i) => sum + ((i.expectedReturn || 0) - (i.originalAmount || 0)), 0), totalProfitUSD: maturedInvestments.reduce((sum, i) => sum + ((i.expectedReturn || 0) - (i.originalAmount || 0)), 0), totalActiveInvestmentsCount: await Investment.countDocuments({ user: user._id, status: 'active' }), totalActivePrincipalUSD: 0 }
           },
-          fees: {
-            items: transactions.filter(t => t.fee > 0).map(tx => ({
-              source: `${tx.type}_fee`,
-              amountUSD: tx.fee,
-              transactionId: tx._id,
-              description: `${tx.type} fee`,
-              date: tx.createdAt
-            })),
-            summary: {
-              totalFeesUSD: totalFees,
-              investmentFeesUSD: 0,
-              withdrawalFeesUSD: transactions.filter(t => t.type === 'withdrawal').reduce((sum, t) => sum + (t.fee || 0), 0),
-              tradingFeesUSD: 0,
-              conversionFeesUSD: 0,
-              loanFeesUSD: 0
-            }
-          },
-          summary: {
-            totalInflowUSD: totalDeposits,
-            totalOutflowUSD: totalWithdrawals + totalFees,
-            netCashFlowUSD: totalDeposits - totalWithdrawals,
-            totalProfitUSD: netChange > 0 ? netChange : 0,
-            totalLossUSD: netChange < 0 ? Math.abs(netChange) : 0,
-            netProfitUSD: netChange,
-            roiPercentage: roi,
-            realizedPnL: totalRealizedPnL,
-            unrealizedPnL: totalUnrealizedPnL,
-            assetPnLDetails: assetPnLDetails
-          },
-          ipAddress: req.ip,
-          userAgent: req.headers['user-agent'] || 'Unknown',
-          location: 'Unknown',
-          isDelivered: false
+          fees: { items: transactions.filter(t => t.fee > 0).map(tx => ({ source: `${tx.type}_fee`, amountUSD: tx.fee, transactionId: tx._id, description: `${tx.type} fee`, date: tx.createdAt })), summary: { totalFeesUSD: totalFees, investmentFeesUSD: 0, withdrawalFeesUSD: transactions.filter(t => t.type === 'withdrawal').reduce((sum, t) => sum + (t.fee || 0), 0), tradingFeesUSD: 0, conversionFeesUSD: 0, loanFeesUSD: 0 } },
+          summary: { totalInflowUSD: totalDeposits, totalOutflowUSD: totalWithdrawals + totalFees, netCashFlowUSD: totalDeposits - totalWithdrawals, totalProfitUSD: netChange > 0 ? netChange : 0, totalLossUSD: netChange < 0 ? Math.abs(netChange) : 0, netProfitUSD: netChange, roiPercentage: roi, realizedPnL: totalRealizedPnL, unrealizedPnL: totalUnrealizedPnL, assetPnLDetails: assetPnLDetails },
+          ipAddress: req.ip, userAgent: req.headers['user-agent'] || 'Unknown', location: 'Unknown', isDelivered: false
         });
         
         await statement.save();
         
         // =============================================
-        // PROFESSIONAL PDF GENERATION - WIDER CONTENT AREA
+        // PDF GENERATION - LANDSCAPE ORIENTATION
         // =============================================
         const PDFDocument = require('pdfkit');
-        const doc = new PDFDocument({ margin: 40, size: 'A4' });
+        const doc = new PDFDocument({ margin: 30, size: 'A4', layout: 'landscape' });
         
         const chunks = [];
         doc.on('data', chunk => chunks.push(chunk));
         
-        let y = 40;
+        let y = 30;
         const pageWidth = doc.page.width;
-        const leftMargin = 40;
-        const contentWidth = pageWidth - 80;
+        const leftMargin = 30;
+        const contentWidth = pageWidth - 60;
         
         const needNewPage = (spaceNeeded) => {
-          if (y + spaceNeeded > doc.page.height - 60) {
+          if (y + spaceNeeded > doc.page.height - 50) {
             doc.addPage();
-            y = 40;
+            y = 30;
             return true;
           }
           return false;
         };
         
-        // ========== HEADER WITH LOGO ==========
+        // ========== HEADER ==========
         const logoUrl = 'https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png';
         try {
           const response = await axios.get(logoUrl, { responseType: 'arraybuffer', timeout: 5000 });
           const logoBuffer = Buffer.from(response.data, 'binary');
-          doc.image(logoBuffer, (pageWidth - 50) / 2, y, { width: 50, height: 50 });
-          y += 55;
-        } catch (err) {
-          y += 15;
-        }
+          doc.image(logoBuffer, (pageWidth - 45) / 2, y, { width: 45, height: 45 });
+          y += 50;
+        } catch (err) { y += 10; }
         
-        doc.fontSize(20).font('Helvetica-Bold').fillColor('#0B0E11').text('BIT HASH CAPITAL', leftMargin, y, { align: 'center', width: contentWidth });
-        y = doc.y + 8;
+        doc.fontSize(18).font('Helvetica-Bold').fillColor('#0B0E11').text('BIT HASH CAPITAL', leftMargin, y, { align: 'center', width: contentWidth });
+        y = doc.y + 6;
         doc.fontSize(9).font('Helvetica').fillColor('#6C7480').text('Financial Statement', leftMargin, y, { align: 'center', width: contentWidth });
+        y = doc.y + 15;
+        
+        doc.strokeColor('#F7A600').lineWidth(1.5).moveTo(leftMargin + 100, y).lineTo(pageWidth - leftMargin - 100, y).stroke();
+        y += 12;
+        
+        doc.fontSize(13).font('Helvetica-Bold').fillColor('#1E3A8A').text(`${period.toUpperCase()} FINANCIAL STATEMENT`, leftMargin, y, { align: 'center', width: contentWidth });
+        y = doc.y + 8;
+        doc.fontSize(8).font('Helvetica').fillColor('#64748B').text(`Period: ${formatDate(startDate)} - ${formatDate(endDate)}`, leftMargin, y, { align: 'center', width: contentWidth });
         y = doc.y + 18;
         
-        doc.strokeColor('#F7A600').lineWidth(1.5).moveTo(leftMargin + 80, y).lineTo(pageWidth - leftMargin - 80, y).stroke();
-        y += 15;
+        // ========== ACCOUNT INFO ==========
+        needNewPage(55);
+        doc.fillColor('#F8FAFC').rect(leftMargin, y, contentWidth, 50).fill();
+        doc.fillColor('#0B0E11').fontSize(9).font('Helvetica-Bold').text('ACCOUNT INFORMATION', leftMargin + 8, y + 6);
+        doc.fontSize(8).font('Helvetica').fillColor('#374151');
+        doc.text(`Account Holder: ${user.firstName} ${user.lastName}`, leftMargin + 8, y + 22);
+        doc.text(`Email: ${user.email}`, leftMargin + 8, y + 36);
+        doc.text(`Generated: ${new Date().toLocaleString()}`, leftMargin + 350, y + 22);
+        y += 62;
         
-        doc.fontSize(14).font('Helvetica-Bold').fillColor('#1E3A8A').text(`${period.toUpperCase()} FINANCIAL STATEMENT`, leftMargin, y, { align: 'center', width: contentWidth });
-        y = doc.y + 8;
-        doc.fontSize(9).font('Helvetica').fillColor('#64748B').text(`For the period ${formatDate(startDate)} - ${formatDate(endDate)}`, leftMargin, y, { align: 'center', width: contentWidth });
-        y = doc.y + 22;
+        // ========== BALANCE SUMMARY - WIDE TABLE ==========
+        needNewPage(130);
+        doc.fillColor('#0B0E11').fontSize(12).font('Helvetica-Bold').text('1. BALANCE SUMMARY', leftMargin, y);
+        y += 16;
         
-        // ========== ACCOUNT INFORMATION ==========
-        needNewPage(70);
-        doc.fillColor('#F8FAFC').rect(leftMargin, y, contentWidth, 60).fill();
-        doc.fillColor('#0B0E11').fontSize(10).font('Helvetica-Bold').text('ACCOUNT INFORMATION', leftMargin + 10, y + 8);
-        doc.fontSize(9).font('Helvetica').fillColor('#374151');
-        doc.text(`Account Holder: ${user.firstName} ${user.lastName}`, leftMargin + 10, y + 28);
-        doc.text(`Email Address: ${user.email}`, leftMargin + 10, y + 44);
-        doc.text(`Statement Generated: ${new Date().toLocaleString()}`, leftMargin + 320, y + 28);
-        y += 75;
-        
-        // ========== BALANCE SUMMARY - WIDER COLUMNS ==========
-        needNewPage(160);
-        doc.fillColor('#0B0E11').fontSize(13).font('Helvetica-Bold').text('1. BALANCE SUMMARY', leftMargin, y);
+        doc.fillColor('#1E3A8A').rect(leftMargin, y, contentWidth, 20).fill();
+        doc.fillColor('#FFFFFF').fontSize(8).font('Helvetica-Bold');
+        doc.text('Wallet Type', leftMargin + 8, y + 5);
+        doc.text('Opening Balance (USD)', leftMargin + 250, y + 5);
+        doc.text('Closing Balance (USD)', leftMargin + 440, y + 5);
+        doc.text('Net Change (USD)', leftMargin + 610, y + 5);
         y += 20;
-        
-        doc.fillColor('#1E3A8A').rect(leftMargin, y, contentWidth, 24).fill();
-        doc.fillColor('#FFFFFF').fontSize(9).font('Helvetica-Bold');
-        doc.text('Wallet Type', leftMargin + 10, y + 7);
-        doc.text('Opening Balance (USD)', leftMargin + 200, y + 7);
-        doc.text('Closing Balance (USD)', leftMargin + 360, y + 7);
-        doc.text('Net Change (USD)', leftMargin + 510, y + 7);
-        y += 24;
         
         const balanceRows = [
           { label: 'Main Wallet (Digital Assets)', open: openingBalances.mainWalletUSD, close: closingBalances.mainWalletUSD },
@@ -25203,215 +25084,204 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
           const row = balanceRows[i];
           const change = row.close - row.open;
           const bgColor = i % 2 === 0 ? '#FFFFFF' : '#F8FAFC';
-          
-          needNewPage(22);
-          doc.fillColor(bgColor).rect(leftMargin, y, contentWidth, 22).fill();
-          doc.fillColor('#374151').fontSize(9).font('Helvetica');
-          doc.text(row.label, leftMargin + 10, y + 6);
-          doc.text(formatUSD(row.open), leftMargin + 200, y + 6);
-          doc.text(formatUSD(row.close), leftMargin + 360, y + 6);
-          doc.fillColor(change >= 0 ? '#10B981' : '#EF4444').text(formatUSD(change), leftMargin + 510, y + 6);
-          y += 22;
+          needNewPage(18);
+          doc.fillColor(bgColor).rect(leftMargin, y, contentWidth, 18).fill();
+          doc.fillColor('#374151').fontSize(8).font('Helvetica');
+          doc.text(row.label, leftMargin + 8, y + 4);
+          doc.text(formatUSD(row.open), leftMargin + 250, y + 4);
+          doc.text(formatUSD(row.close), leftMargin + 440, y + 4);
+          doc.fillColor(change >= 0 ? '#10B981' : '#EF4444').text(formatUSD(change), leftMargin + 610, y + 4);
+          y += 18;
         }
         
         const totalChangeValue = closingBalances.totalUSD - openingBalances.totalUSD;
-        needNewPage(30);
-        doc.fillColor('#E0E7FF').rect(leftMargin, y, contentWidth, 28).fill();
-        doc.fillColor('#1E3A8A').fontSize(10).font('Helvetica-Bold');
-        doc.text('TOTAL PORTFOLIO VALUE', leftMargin + 10, y + 9);
-        doc.text(formatUSD(openingBalances.totalUSD), leftMargin + 200, y + 9);
-        doc.text(formatUSD(closingBalances.totalUSD), leftMargin + 360, y + 9);
-        doc.fillColor(totalChangeValue >= 0 ? '#10B981' : '#EF4444').text(formatUSD(totalChangeValue), leftMargin + 510, y + 9);
-        y += 38;
+        needNewPage(24);
+        doc.fillColor('#E0E7FF').rect(leftMargin, y, contentWidth, 24).fill();
+        doc.fillColor('#1E3A8A').fontSize(9).font('Helvetica-Bold');
+        doc.text('TOTAL PORTFOLIO VALUE', leftMargin + 8, y + 7);
+        doc.text(formatUSD(openingBalances.totalUSD), leftMargin + 250, y + 7);
+        doc.text(formatUSD(closingBalances.totalUSD), leftMargin + 440, y + 7);
+        doc.fillColor(totalChangeValue >= 0 ? '#10B981' : '#EF4444').text(formatUSD(totalChangeValue), leftMargin + 610, y + 7);
+        y += 32;
         
-        // ========== PROFIT & LOSS ANALYSIS ==========
-        needNewPage(180);
-        doc.fillColor('#0B0E11').fontSize(13).font('Helvetica-Bold').text('2. PROFIT & LOSS ANALYSIS', leftMargin, y);
-        y += 20;
+        // ========== PROFIT & LOSS ==========
+        needNewPage(100);
+        doc.fillColor('#0B0E11').fontSize(12).font('Helvetica-Bold').text('2. PROFIT & LOSS ANALYSIS', leftMargin, y);
+        y += 16;
         
-        // Realized P&L Card
-        doc.fillColor('#F0FDF4').rect(leftMargin, y, (contentWidth - 20) / 2, 65).fill();
-        doc.fillColor('#0B0E11').fontSize(10).font('Helvetica-Bold').text('REALIZED PROFIT / LOSS', leftMargin + 15, y + 10);
-        doc.fontSize(16).font('Helvetica-Bold').fillColor(totalRealizedPnL >= 0 ? '#10B981' : '#EF4444').text(formatUSD(totalRealizedPnL), leftMargin + 15, y + 35);
+        const cardWidth = (contentWidth - 30) / 2;
+        doc.fillColor('#F0FDF4').rect(leftMargin, y, cardWidth, 50).fill();
+        doc.fillColor('#0B0E11').fontSize(9).font('Helvetica-Bold').text('REALIZED PROFIT / LOSS', leftMargin + 10, y + 8);
+        doc.fontSize(14).font('Helvetica-Bold').fillColor(totalRealizedPnL >= 0 ? '#10B981' : '#EF4444').text(formatUSD(totalRealizedPnL), leftMargin + 10, y + 28);
         
-        // Unrealized P&L Card
-        doc.fillColor('#EFF6FF').rect(leftMargin + (contentWidth - 20) / 2 + 20, y, (contentWidth - 20) / 2, 65).fill();
-        doc.fillColor('#0B0E11').fontSize(10).font('Helvetica-Bold').text('UNREALIZED PROFIT / LOSS', leftMargin + (contentWidth - 20) / 2 + 35, y + 10);
-        doc.fontSize(16).font('Helvetica-Bold').fillColor(totalUnrealizedPnL >= 0 ? '#10B981' : '#EF4444').text(formatUSD(totalUnrealizedPnL), leftMargin + (contentWidth - 20) / 2 + 35, y + 35);
-        y += 80;
+        doc.fillColor('#EFF6FF').rect(leftMargin + cardWidth + 30, y, cardWidth, 50).fill();
+        doc.fillColor('#0B0E11').fontSize(9).font('Helvetica-Bold').text('UNREALIZED PROFIT / LOSS', leftMargin + cardWidth + 40, y + 8);
+        doc.fontSize(14).font('Helvetica-Bold').fillColor(totalUnrealizedPnL >= 0 ? '#10B981' : '#EF4444').text(formatUSD(totalUnrealizedPnL), leftMargin + cardWidth + 40, y + 28);
+        y += 62;
         
-        // Asset-wise P&L Table
+        // ========== ASSET P&L TABLE ==========
         if (assetPnLDetails.length > 0) {
-          needNewPage(140);
+          needNewPage(100);
           doc.fillColor('#0B0E11').fontSize(11).font('Helvetica-Bold').text('Asset-wise Profit & Loss Breakdown', leftMargin, y);
-          y += 18;
+          y += 14;
           
-          doc.fillColor('#1E3A8A').rect(leftMargin, y, contentWidth, 22).fill();
-          doc.fillColor('#FFFFFF').fontSize(8).font('Helvetica-Bold');
-          doc.text('Asset', leftMargin + 10, y + 7);
-          doc.text('Realized P&L (USD)', leftMargin + 160, y + 7);
-          doc.text('Unrealized P&L (USD)', leftMargin + 320, y + 7);
-          doc.text('Total P&L (USD)', leftMargin + 480, y + 7);
-          y += 22;
+          doc.fillColor('#1E3A8A').rect(leftMargin, y, contentWidth, 18).fill();
+          doc.fillColor('#FFFFFF').fontSize(7).font('Helvetica-Bold');
+          doc.text('Asset', leftMargin + 8, y + 5);
+          doc.text('Realized P&L (USD)', leftMargin + 200, y + 5);
+          doc.text('Unrealized P&L (USD)', leftMargin + 400, y + 5);
+          doc.text('Total P&L (USD)', leftMargin + 600, y + 5);
+          y += 18;
           
           for (let i = 0; i < assetPnLDetails.length; i++) {
             const detail = assetPnLDetails[i];
-            needNewPage(22);
+            needNewPage(18);
             const bgColor = i % 2 === 0 ? '#FFFFFF' : '#F8FAFC';
-            doc.fillColor(bgColor).rect(leftMargin, y, contentWidth, 22).fill();
-            doc.fillColor('#374151').fontSize(9).font('Helvetica');
-            doc.text(detail.asset, leftMargin + 10, y + 6);
-            doc.fillColor(detail.realizedPnL >= 0 ? '#10B981' : '#EF4444').text(formatUSD(detail.realizedPnL), leftMargin + 160, y + 6);
-            doc.fillColor(detail.unrealizedPnL >= 0 ? '#10B981' : '#EF4444').text(formatUSD(detail.unrealizedPnL), leftMargin + 320, y + 6);
-            doc.fillColor(detail.totalPnL >= 0 ? '#10B981' : '#EF4444').text(formatUSD(detail.totalPnL), leftMargin + 480, y + 6);
-            y += 22;
+            doc.fillColor(bgColor).rect(leftMargin, y, contentWidth, 18).fill();
+            doc.fillColor('#374151').fontSize(8).font('Helvetica');
+            doc.text(detail.asset, leftMargin + 8, y + 4);
+            doc.fillColor(detail.realizedPnL >= 0 ? '#10B981' : '#EF4444').text(formatUSD(detail.realizedPnL), leftMargin + 200, y + 4);
+            doc.fillColor(detail.unrealizedPnL >= 0 ? '#10B981' : '#EF4444').text(formatUSD(detail.unrealizedPnL), leftMargin + 400, y + 4);
+            doc.fillColor(detail.totalPnL >= 0 ? '#10B981' : '#EF4444').text(formatUSD(detail.totalPnL), leftMargin + 600, y + 4);
+            y += 18;
           }
-          y += 15;
+          y += 10;
         }
         
         // ========== FINANCIAL METRICS ==========
-        needNewPage(140);
-        doc.fillColor('#0B0E11').fontSize(13).font('Helvetica-Bold').text('3. FINANCIAL METRICS', leftMargin, y);
-        y += 20;
+        needNewPage(120);
+        doc.fillColor('#0B0E11').fontSize(12).font('Helvetica-Bold').text('3. FINANCIAL METRICS', leftMargin, y);
+        y += 16;
         
         const metricsData = [
-          { label: 'Total Deposits (Inflow)', value: formatUSD(statement.summary.totalInflowUSD), color: '#10B981' },
-          { label: 'Total Withdrawals (Outflow)', value: formatUSD(statement.summary.totalOutflowUSD), color: '#F59E0B' },
-          { label: 'Network & Transaction Fees', value: formatUSD(statement.fees.summary.totalFeesUSD), color: '#EF4444' },
+          { label: 'Total Deposits', value: formatUSD(statement.summary.totalInflowUSD), color: '#10B981' },
+          { label: 'Total Withdrawals', value: formatUSD(statement.summary.totalOutflowUSD), color: '#F59E0B' },
+          { label: 'Transaction Fees', value: formatUSD(statement.fees.summary.totalFeesUSD), color: '#EF4444' },
           { label: 'Net Cash Flow', value: formatUSD(statement.summary.netCashFlowUSD), color: '#3B82F6' },
           { label: 'Realized Trading P&L', value: formatUSD(totalRealizedPnL), color: totalRealizedPnL >= 0 ? '#10B981' : '#EF4444' },
-          { label: 'Return on Investment (ROI)', value: `${statement.summary.roiPercentage.toFixed(2)}%`, color: '#8B5CF6' }
+          { label: 'ROI', value: `${statement.summary.roiPercentage.toFixed(2)}%`, color: '#8B5CF6' }
         ];
         
-        const metricCardWidth = (contentWidth - 30) / 3;
-        const metricCardHeight = 60;
+        const metricCardWidth = (contentWidth - 40) / 3;
+        const metricCardHeight = 50;
         
         for (let i = 0; i < metricsData.length; i++) {
           const metric = metricsData[i];
           const col = i % 3;
           const row = Math.floor(i / 3);
-          const cardX = leftMargin + (col * (metricCardWidth + 15));
-          const cardY = y + (row * (metricCardHeight + 12));
+          const cardX = leftMargin + (col * (metricCardWidth + 20));
+          const cardY = y + (row * (metricCardHeight + 10));
           
-          if (cardY + metricCardHeight > doc.page.height - 100) {
-            doc.addPage();
-            y = 40;
-            break;
-          }
+          if (cardY + metricCardHeight > doc.page.height - 80) { doc.addPage(); y = 30; break; }
           
           doc.fillColor('#FFFFFF').rect(cardX, cardY, metricCardWidth, metricCardHeight).fill();
-          doc.fillColor('#6B7280').fontSize(8).font('Helvetica').text(metric.label, cardX + 8, cardY + 10);
-          doc.fillColor(metric.color).fontSize(11).font('Helvetica-Bold').text(metric.value, cardX + 8, cardY + 35);
+          doc.fillColor('#6B7280').fontSize(7).font('Helvetica').text(metric.label, cardX + 6, cardY + 8);
+          doc.fillColor(metric.color).fontSize(10).font('Helvetica-Bold').text(metric.value, cardX + 6, cardY + 30);
         }
         
-        y += Math.ceil(metricsData.length / 3) * (metricCardHeight + 12) + 20;
+        y += Math.ceil(metricsData.length / 3) * (metricCardHeight + 10) + 15;
         
         // ========== TRANSACTION HISTORY ==========
         if (statement.transactions.list.length > 0) {
-          needNewPage(180);
-          doc.fillColor('#0B0E11').fontSize(13).font('Helvetica-Bold').text('4. TRANSACTION HISTORY', leftMargin, y);
-          y += 20;
+          needNewPage(150);
+          doc.fillColor('#0B0E11').fontSize(12).font('Helvetica-Bold').text('4. TRANSACTION HISTORY', leftMargin, y);
+          y += 16;
           
-          doc.fillColor('#F0FDF4').rect(leftMargin, y, contentWidth, 38).fill();
-          doc.fillColor('#374151').fontSize(9).font('Helvetica');
-          doc.text(`Total Transactions: ${statement.transactions.list.length}`, leftMargin + 12, y + 10);
-          doc.text(`Deposits: ${statement.transactions.summary.count.deposits} | Withdrawals: ${statement.transactions.summary.count.withdrawals}`, leftMargin + 12, y + 25);
-          doc.text(`Total Volume: ${formatUSD(statement.transactions.summary.totalDepositsUSD + statement.transactions.summary.totalWithdrawalsUSD)}`, leftMargin + 350, y + 10);
-          y += 52;
+          doc.fillColor('#F0FDF4').rect(leftMargin, y, contentWidth, 32).fill();
+          doc.fillColor('#374151').fontSize(8).font('Helvetica');
+          doc.text(`Total Transactions: ${statement.transactions.list.length}`, leftMargin + 8, y + 8);
+          doc.text(`Deposits: ${statement.transactions.summary.count.deposits} | Withdrawals: ${statement.transactions.summary.count.withdrawals}`, leftMargin + 8, y + 20);
+          doc.text(`Total Volume: ${formatUSD(statement.transactions.summary.totalDepositsUSD + statement.transactions.summary.totalWithdrawalsUSD)}`, leftMargin + 350, y + 8);
+          y += 44;
           
-          doc.fillColor('#1E3A8A').rect(leftMargin, y, contentWidth, 22).fill();
-          doc.fillColor('#FFFFFF').fontSize(8).font('Helvetica-Bold');
-          doc.text('Date', leftMargin + 8, y + 6);
-          doc.text('Type', leftMargin + 95, y + 6);
-          doc.text('Asset', leftMargin + 150, y + 6);
-          doc.text('Amount (USD)', leftMargin + 210, y + 6);
-          doc.text('Fee (USD)', leftMargin + 310, y + 6);
-          doc.text('Net (USD)', leftMargin + 390, y + 6);
-          doc.text('Status', leftMargin + 470, y + 6);
-          y += 22;
+          doc.fillColor('#1E3A8A').rect(leftMargin, y, contentWidth, 18).fill();
+          doc.fillColor('#FFFFFF').fontSize(7).font('Helvetica-Bold');
+          doc.text('Date', leftMargin + 6, y + 5);
+          doc.text('Type', leftMargin + 100, y + 5);
+          doc.text('Asset', leftMargin + 160, y + 5);
+          doc.text('Amount', leftMargin + 230, y + 5);
+          doc.text('Fee', leftMargin + 330, y + 5);
+          doc.text('Net', leftMargin + 410, y + 5);
+          doc.text('Status', leftMargin + 500, y + 5);
+          y += 18;
           
-          const recentTransactions = statement.transactions.list.slice(0, 10);
-          for (let i = 0; i < recentTransactions.length; i++) {
-            const tx = recentTransactions[i];
-            needNewPage(20);
+          const recentTxs = statement.transactions.list.slice(0, 12);
+          for (let i = 0; i < recentTxs.length; i++) {
+            const tx = recentTxs[i];
+            needNewPage(16);
             const rowBg = i % 2 === 0 ? '#FFFFFF' : '#F8FAFC';
-            doc.fillColor(rowBg).rect(leftMargin, y, contentWidth, 20).fill();
-            doc.fillColor('#374151').fontSize(8).font('Helvetica');
-            doc.text(formatShortDate(tx.createdAt), leftMargin + 8, y + 5);
-            doc.text(tx.type.substring(0, 8), leftMargin + 95, y + 5);
-            doc.text((tx.asset || 'USD').substring(0, 6), leftMargin + 150, y + 5);
-            doc.text(formatUSD(tx.amountUSD), leftMargin + 210, y + 5);
-            doc.text(formatUSD(tx.feeUSD), leftMargin + 310, y + 5);
-            doc.text(formatUSD(tx.netAmountUSD), leftMargin + 390, y + 5);
-            
-            if (tx.status === 'completed') doc.fillColor('#10B981').text('Complete', leftMargin + 470, y + 5);
-            else if (tx.status === 'pending') doc.fillColor('#F59E0B').text('Pending', leftMargin + 470, y + 5);
-            else doc.fillColor('#EF4444').text('Failed', leftMargin + 470, y + 5);
-            doc.fillColor('#374151');
-            y += 20;
+            doc.fillColor(rowBg).rect(leftMargin, y, contentWidth, 16).fill();
+            doc.fillColor('#374151').fontSize(7).font('Helvetica');
+            doc.text(formatShortDate(tx.createdAt), leftMargin + 6, y + 4);
+            doc.text(tx.type.substring(0, 6), leftMargin + 100, y + 4);
+            doc.text((tx.asset || 'USD').substring(0, 5), leftMargin + 160, y + 4);
+            doc.text(formatUSD(tx.amountUSD), leftMargin + 230, y + 4);
+            doc.text(formatUSD(tx.feeUSD), leftMargin + 330, y + 4);
+            doc.text(formatUSD(tx.netAmountUSD), leftMargin + 410, y + 4);
+            if (tx.status === 'completed') doc.fillColor('#10B981').text('Complete', leftMargin + 500, y + 4);
+            else if (tx.status === 'pending') doc.fillColor('#F59E0B').text('Pending', leftMargin + 500, y + 4);
+            else doc.fillColor('#EF4444').text('Failed', leftMargin + 500, y + 4);
+            y += 16;
           }
-          y += 15;
+          y += 10;
         }
         
         // ========== INVESTMENT ACTIVITY ==========
         if (statement.investments.started.length > 0 || statement.investments.matured.length > 0) {
-          needNewPage(160);
-          doc.fillColor('#0B0E11').fontSize(13).font('Helvetica-Bold').text('5. INVESTMENT ACTIVITY', leftMargin, y);
-          y += 20;
+          needNewPage(140);
+          doc.fillColor('#0B0E11').fontSize(12).font('Helvetica-Bold').text('5. INVESTMENT ACTIVITY', leftMargin, y);
+          y += 16;
           
-          doc.fillColor('#EFF6FF').rect(leftMargin, y, contentWidth, 48).fill();
-          doc.fillColor('#374151').fontSize(9).font('Helvetica');
-          doc.text(`Total Principal Invested: ${formatUSD(statement.investments.summary.totalPrincipalInvestedUSD)}`, leftMargin + 12, y + 10);
-          doc.text(`Total Returns Earned: ${formatUSD(statement.investments.summary.totalReturnsEarnedUSD)}`, leftMargin + 12, y + 25);
-          doc.text(`Active Investments: ${statement.investments.summary.totalActiveInvestmentsCount}`, leftMargin + 350, y + 10);
-          y += 62;
+          doc.fillColor('#EFF6FF').rect(leftMargin, y, contentWidth, 38).fill();
+          doc.fillColor('#374151').fontSize(8).font('Helvetica');
+          doc.text(`Total Principal Invested: ${formatUSD(statement.investments.summary.totalPrincipalInvestedUSD)}`, leftMargin + 8, y + 8);
+          doc.text(`Total Returns Earned: ${formatUSD(statement.investments.summary.totalReturnsEarnedUSD)}`, leftMargin + 8, y + 22);
+          doc.text(`Active Investments: ${statement.investments.summary.totalActiveInvestmentsCount}`, leftMargin + 380, y + 8);
+          y += 52;
           
           if (statement.investments.started.length > 0) {
-            doc.fillColor('#1E3A8A').fontSize(10).font('Helvetica-Bold').text('New Investments Initiated:', leftMargin, y);
-            y += 16;
+            doc.fillColor('#1E3A8A').fontSize(9).font('Helvetica-Bold').text('New Investments:', leftMargin, y);
+            y += 14;
             for (const inv of statement.investments.started.slice(0, 5)) {
-              needNewPage(16);
-              doc.fillColor('#374151').fontSize(9).font('Helvetica');
-              doc.text(`• ${inv.planName}`, leftMargin + 12, y);
-              doc.text(formatUSD(inv.amountUSD), leftMargin + 250, y);
-              doc.fillColor('#6B7280').text(`Started: ${formatShortDate(inv.startDate)}`, leftMargin + 350, y);
-              y += 14;
+              needNewPage(14);
+              doc.fillColor('#374151').fontSize(8).font('Helvetica');
+              doc.text(`• ${inv.planName}`, leftMargin + 10, y);
+              doc.text(formatUSD(inv.amountUSD), leftMargin + 280, y);
+              doc.fillColor('#6B7280').text(`Started: ${formatShortDate(inv.startDate)}`, leftMargin + 400, y);
+              y += 12;
             }
-            y += 8;
+            y += 6;
           }
           
           if (statement.investments.matured.length > 0) {
-            doc.fillColor('#1E3A8A').fontSize(10).font('Helvetica-Bold').text('Matured / Completed Investments:', leftMargin, y);
-            y += 16;
+            doc.fillColor('#1E3A8A').fontSize(9).font('Helvetica-Bold').text('Completed Investments:', leftMargin, y);
+            y += 14;
             for (const inv of statement.investments.matured.slice(0, 5)) {
-              needNewPage(16);
-              doc.fillColor('#374151').fontSize(9).font('Helvetica');
-              doc.text(`• ${inv.planName}`, leftMargin + 12, y);
-              doc.text(`${formatUSD(inv.initialAmountUSD)} → ${formatUSD(inv.returnAmountUSD)}`, leftMargin + 200, y);
+              needNewPage(14);
+              doc.fillColor('#374151').fontSize(8).font('Helvetica');
+              doc.text(`• ${inv.planName}`, leftMargin + 10, y);
+              doc.text(`${formatUSD(inv.initialAmountUSD)} → ${formatUSD(inv.returnAmountUSD)}`, leftMargin + 230, y);
               const profitColor = inv.profitUSD >= 0 ? '#10B981' : '#EF4444';
-              doc.fillColor(profitColor).text(`(${inv.profitUSD >= 0 ? 'Profit' : 'Loss'}: ${formatUSD(Math.abs(inv.profitUSD))})`, leftMargin + 420, y);
-              y += 14;
+              doc.fillColor(profitColor).text(`(${inv.profitUSD >= 0 ? 'Profit' : 'Loss'}: ${formatUSD(Math.abs(inv.profitUSD))})`, leftMargin + 480, y);
+              y += 12;
             }
-            y += 10;
+            y += 8;
           }
         }
         
         // ========== FOOTER ==========
-        if (y > doc.page.height - 90) {
-          doc.addPage();
-          y = 40;
-        }
+        if (y > doc.page.height - 80) { doc.addPage(); y = 30; }
         
         doc.strokeColor('#E5E7EB').lineWidth(1).moveTo(leftMargin, y).lineTo(pageWidth - leftMargin, y).stroke();
-        y += 15;
-        
-        doc.fontSize(9).font('Helvetica-Bold').fillColor('#0B0E11').text('BIT HASH CAPITAL', leftMargin, y, { align: 'center', width: contentWidth });
         y += 12;
-        doc.fontSize(7).font('Helvetica').fillColor('#6B7280');
-        doc.text('This is an official financial statement generated by Bit Hash Capital. All figures are in US Dollars (USD).', leftMargin, y, { align: 'center', width: contentWidth });
-        y += 9;
-        doc.text('Profit/Loss calculations use FIFO (First-In-First-Out) method for accurate transaction tracking.', leftMargin, y, { align: 'center', width: contentWidth });
-        y += 9;
+        
+        doc.fontSize(8).font('Helvetica-Bold').fillColor('#0B0E11').text('BIT HASH CAPITAL', leftMargin, y, { align: 'center', width: contentWidth });
+        y += 10;
+        doc.fontSize(6).font('Helvetica').fillColor('#6B7280');
+        doc.text('Official financial statement generated by Bit Hash Capital. All figures in USD.', leftMargin, y, { align: 'center', width: contentWidth });
+        y += 8;
+        doc.text('Profit/Loss calculated using FIFO (First-In-First-Out) method.', leftMargin, y, { align: 'center', width: contentWidth });
+        y += 8;
         doc.text(`© ${new Date().getFullYear()} Bit Hash Capital. All rights reserved.`, leftMargin, y, { align: 'center', width: contentWidth });
         
         doc.end();
@@ -25426,46 +25296,24 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
           subject: `Your ${period.toUpperCase()} Financial Statement - Bit Hash Capital`,
           html: `
             <div style="font-family: 'Inter', sans-serif; max-width: 580px; margin: 0 auto; background: #FFFFFF;">
-              <div style="text-align: center; padding: 28px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-                <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="Bit Hash Capital" style="width: 55px; height: 55px; margin-bottom: 12px;">
-                <h1 style="color: #F7A600; font-size: 22px; margin: 0; letter-spacing: 1px;">BIT HASH CAPITAL</h1>
-                <p style="color: #B7BDC6; font-size: 11px; margin: 10px 0 0;">Financial Statement</p>
+              <div style="text-align: center; padding: 25px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+                <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="Bit Hash Capital" style="width: 50px; height: 50px; margin-bottom: 10px;">
+                <h1 style="color: #F7A600; font-size: 20px; margin: 0;">BIT HASH CAPITAL</h1>
+                <p style="color: #B7BDC6; font-size: 10px; margin: 8px 0 0;">Financial Statement</p>
               </div>
-              <div style="padding: 28px 25px;">
-                <p style="color: #374151; margin-bottom: 12px; font-size: 14px;">Dear <strong>${user.firstName} ${user.lastName}</strong>,</p>
-                <p style="color: #4B5563; margin-bottom: 22px; font-size: 13px; line-height: 1.5;">Please find attached your ${period} financial statement for the period <strong>${formatDate(startDate)} - ${formatDate(endDate)}</strong>.</p>
-                
-                <div style="background: #F8FAFC; border-radius: 12px; padding: 18px 20px; margin: 22px 0; border: 1px solid #E5E7EB;">
-                  <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
-                    <span style="color: #6B7280;">Opening Balance:</span>
-                    <strong style="color: #0B0E11;">${formatUSD(openingBalances.totalUSD)}</strong>
-                  </div>
-                  <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
-                    <span style="color: #6B7280;">Closing Balance:</span>
-                    <strong style="color: #0B0E11;">${formatUSD(closingBalances.totalUSD)}</strong>
-                  </div>
-                  <div style="display: flex; justify-content: space-between; padding-top: 10px; border-top: 1px solid #E5E7EB;">
-                    <span style="color: #6B7280;">Net Change:</span>
-                    <strong style="color: ${totalChangeValue >= 0 ? '#10B981' : '#EF4444'};">${formatUSD(totalChangeValue)}</strong>
-                  </div>
-                  <div style="display: flex; justify-content: space-between; margin-top: 10px;">
-                    <span style="color: #6B7280;">Realized Trading P&L:</span>
-                    <strong style="color: ${totalRealizedPnL >= 0 ? '#10B981' : '#EF4444'};">${formatUSD(totalRealizedPnL)}</strong>
-                  </div>
-                  <div style="display: flex; justify-content: space-between; margin-top: 8px;">
-                    <span style="color: #6B7280;">Return on Investment (ROI):</span>
-                    <strong style="color: #8B5CF6;">${statement.summary.roiPercentage.toFixed(2)}%</strong>
-                  </div>
+              <div style="padding: 25px;">
+                <p style="color: #374151; margin-bottom: 12px;">Dear <strong>${user.firstName} ${user.lastName}</strong>,</p>
+                <p style="color: #4B5563; margin-bottom: 20px;">Please find attached your ${period} financial statement for <strong>${formatDate(startDate)} - ${formatDate(endDate)}</strong>.</p>
+                <div style="background: #F8FAFC; border-radius: 10px; padding: 15px; margin: 20px 0;">
+                  <div style="display: flex; justify-content: space-between; margin-bottom: 8px;"><span>Opening Balance:</span><strong>${formatUSD(openingBalances.totalUSD)}</strong></div>
+                  <div style="display: flex; justify-content: space-between; margin-bottom: 8px;"><span>Closing Balance:</span><strong>${formatUSD(closingBalances.totalUSD)}</strong></div>
+                  <div style="display: flex; justify-content: space-between; padding-top: 8px; border-top: 1px solid #E5E7EB;"><span>Net Change:</span><strong style="color: ${totalChangeValue >= 0 ? '#10B981' : '#EF4444'}">${formatUSD(totalChangeValue)}</strong></div>
+                  <div style="display: flex; justify-content: space-between; margin-top: 8px;"><span>Realized P&L:</span><strong style="color: ${totalRealizedPnL >= 0 ? '#10B981' : '#EF4444'}">${formatUSD(totalRealizedPnL)}</strong></div>
+                  <div style="display: flex; justify-content: space-between; margin-top: 8px;"><span>ROI:</span><strong>${statement.summary.roiPercentage.toFixed(2)}%</strong></div>
                 </div>
-                
-                <div style="text-align: center; margin-top: 25px;">
-                  <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #0B0E11; padding: 10px 28px; text-decoration: none; border-radius: 40px; font-weight: 600; font-size: 13px; display: inline-block;">Access Your Dashboard</a>
-                </div>
+                <div style="text-align: center;"><a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #0B0E11; padding: 8px 24px; text-decoration: none; border-radius: 40px; font-weight: 600; font-size: 13px;">Access Dashboard</a></div>
               </div>
-              <div style="text-align: center; padding: 18px; background: #0B0E11;">
-                <p style="color: #6C7480; font-size: 9px;">&copy; ${new Date().getFullYear()} Bit Hash Capital. All rights reserved.</p>
-                <p style="color: #6C7480; font-size: 9px; margin-top: 5px;">800 Plant Street, Wilmington, DE 19801, United States</p>
-              </div>
+              <div style="text-align: center; padding: 15px; background: #0B0E11;"><p style="color: #6C7480; font-size: 8px;">&copy; ${new Date().getFullYear()} Bit Hash Capital. All rights reserved.</p></div>
             </div>
           `,
           attachments: [{ filename: `Financial_Statement_${period.toUpperCase()}_${formatShortDate(endDate)}.pdf`, content: pdfBuffer, contentType: 'application/pdf' }]
@@ -25510,13 +25358,11 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
 });
 
 // =============================================
-// ACCURATE BALANCE CALCULATION FUNCTIONS
+// BALANCE CALCULATION FUNCTIONS
 // =============================================
 async function calculateAccurateOpeningBalances(userId, startDate) {
   const user = await User.findById(userId);
-  if (!user) {
-    return { totalUSD: 0, mainWalletUSD: 0, activeWalletUSD: 0, maturedWalletUSD: 0, cryptoDetails: [], timestamp: startDate };
-  }
+  if (!user) return { totalUSD: 0, mainWalletUSD: 0, activeWalletUSD: 0, maturedWalletUSD: 0, cryptoDetails: [], timestamp: startDate };
   
   let mainUSD = 0, activeUSD = 0, maturedUSD = 0;
   const cryptoDetails = [];
@@ -25535,11 +25381,7 @@ async function calculateAccurateOpeningBalances(userId, startDate) {
   
   if (user.balances && user.balances.active) {
     const entries = user.balances.active instanceof Map ? user.balances.active.entries() : Object.entries(user.balances.active);
-    for (const [asset, balance] of entries) {
-      if (balance > 0) {
-        activeUSD += balance;
-      }
-    }
+    for (const [asset, balance] of entries) if (balance > 0) activeUSD += balance;
   }
   
   if (user.balances && user.balances.matured) {
@@ -25559,9 +25401,7 @@ async function calculateAccurateOpeningBalances(userId, startDate) {
 
 async function calculateAccurateClosingBalances(userId, endDate) {
   const user = await User.findById(userId);
-  if (!user) {
-    return { totalUSD: 0, mainWalletUSD: 0, activeWalletUSD: 0, maturedWalletUSD: 0, cryptoDetails: [], timestamp: endDate };
-  }
+  if (!user) return { totalUSD: 0, mainWalletUSD: 0, activeWalletUSD: 0, maturedWalletUSD: 0, cryptoDetails: [], timestamp: endDate };
   
   let mainUSD = 0, activeUSD = 0, maturedUSD = 0;
   const cryptoDetails = [];
@@ -25580,11 +25420,7 @@ async function calculateAccurateClosingBalances(userId, endDate) {
   
   if (user.balances && user.balances.active) {
     const entries = user.balances.active instanceof Map ? user.balances.active.entries() : Object.entries(user.balances.active);
-    for (const [asset, balance] of entries) {
-      if (balance > 0) {
-        activeUSD += balance;
-      }
-    }
+    for (const [asset, balance] of entries) if (balance > 0) activeUSD += balance;
   }
   
   if (user.balances && user.balances.matured) {
@@ -25601,6 +25437,8 @@ async function calculateAccurateClosingBalances(userId, endDate) {
   
   return { totalUSD: mainUSD + activeUSD + maturedUSD, mainWalletUSD: mainUSD, activeWalletUSD: activeUSD, maturedWalletUSD: maturedUSD, cryptoDetails, timestamp: endDate };
 }
+
+
 
 
 
