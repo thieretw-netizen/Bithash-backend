@@ -8153,7 +8153,7 @@ app.post('/api/investments', protect, [
                   <td style="padding: 8px 0; text-align: right;">${formattedOriginalBTC} BTC (≈ $${formattedAmount} USD)</td>
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
-                  <td style="padding: 8px 0;"><strong style="color: #EF4444;">Investment Fee (3%):</strong></td>
+                  <td style="padding: 8px 0;"><strong style="color: #EF4444;">Contract Initiation Fee (3%):</strong></td>
                   <td style="padding: 8px 0; text-align: right;"><strong style="color: #EF4444;">- ${formattedFeeBTC} BTC (≈ $${formattedFeeUSD} USD)</strong></td>
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
@@ -8173,7 +8173,7 @@ app.post('/api/investments', protect, [
                   <td style="padding: 8px 0; text-align: right;">${plan.duration} hours</td>
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
-                  <td style="padding: 8px 0;"><strong>Hashrate:</strong></td>
+                  <td style="padding: 8px 0;"><strong>Hashrate (TH/s):</strong></td>
                   <td style="padding: 8px 0; text-align: right;">${plan.duration === 10 ? '68' : plan.duration === 24 ? '110' : plan.duration === 48 ? '150' : plan.duration === 72 ? '234' : '255'} TH/s</td>
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
