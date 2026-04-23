@@ -8227,17 +8227,17 @@ app.post('/api/investments', protect, [
             </div>
           </div>
           
-          <!-- Investment Fee -->
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding: 16px; background: rgba(247, 166, 0, 0.05); border-radius: 12px;">
+          <!-- 🔴 INVESTMENT FEE - CHANGED TO RED ONLY -->
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding: 16px; background: rgba(239, 68, 68, 0.1); border-radius: 12px; border-left: 3px solid #EF4444;">
             <div style="display: flex; align-items: center; gap: 8px;">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M12 8V12M12 16H12.01M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="#F7A600" stroke-width="2" stroke-linecap="round"/>
+                <path d="M12 8V12M12 16H12.01M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="#EF4444" stroke-width="2" stroke-linecap="round"/>
               </svg>
-              <span style="font-size: 14px; font-weight: 600; color: #F7A600;">3% Investment Fee</span>
+              <span style="font-size: 14px; font-weight: 600; color: #EF4444;">3% Investment Fee</span>
             </div>
             <div style="text-align: right;">
-              <div style="font-size: 14px; color: #F7A600;">${investmentFeeBTC.toFixed(8)} BTC</div>
-              <div style="font-size: 12px; color: #6C7480;">≈ $${formattedFee} USD</div>
+              <div style="font-size: 14px; font-weight: 700; color: #EF4444;">${investmentFeeBTC.toFixed(8)} BTC</div>
+              <div style="font-size: 12px; color: #EF4444; opacity: 0.8;">≈ $${formattedFee} USD</div>
             </div>
           </div>
           
@@ -8809,8 +8809,6 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
     });
   }
 });
-
-
 
 
 
