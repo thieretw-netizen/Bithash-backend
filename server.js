@@ -24107,7 +24107,137 @@ app.delete('/api/admin/investment/plans/:id', adminProtect, async (req, res) => 
 
 
 
+// =============================================
+// GET ACTIVE INVESTMENTS - LIVE CALCULATIONS based on startDate + plan duration
+// =============================================
+app.get('/api/admin/investments/active', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
 
+    // Fetch active investments with user and plan details
+    const investments = await Investment.find({ status: 'active' })
+      .populate('user', 'firstName lastName email')
+      .populate('plan', 'name percentage duration minAmount maxAmount')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const total = await Investment.countDocuments({ status: 'active' });
+    const totalPages = Math.ceil(total / limit);
+
+    // Format investments with LIVE calculations
+    const formattedInvestments = investments.map(inv => {
+      // Safe user data extraction with fallbacks
+      const user = inv.user || {};
+      const firstName = user.firstName || 'Deleted';
+      const lastName = user.lastName || 'User';
+      const userEmail = user.email || 'unknown@deleted.com';
+      
+      // Safe plan data extraction
+      const plan = inv.plan || {};
+      const planName = plan.name || 'Unknown Plan';
+      const planPercentage = plan.percentage || 0;
+      const planDurationHours = plan.duration || 0;
+      
+      // =============================================
+      // LIVE CALCULATION - Calculate everything from startDate + plan duration
+      // =============================================
+      const now = new Date();
+      const startDate = new Date(inv.startDate || inv.createdAt);
+      
+      // Calculate end date based on plan duration (in hours)
+      const endDate = new Date(startDate.getTime() + (planDurationHours * 60 * 60 * 1000));
+      
+      // Calculate time remaining
+      const timeLeftMs = Math.max(0, endDate - now);
+      const hoursLeft = Math.floor(timeLeftMs / (1000 * 60 * 60));
+      const daysLeft = Math.floor(hoursLeft / 24);
+      const remainingHours = hoursLeft % 24;
+      
+      // Format time remaining display
+      let timeRemainingDisplay;
+      if (timeLeftMs <= 0) {
+        timeRemainingDisplay = '0h';
+      } else if (daysLeft > 0) {
+        timeRemainingDisplay = `${daysLeft}d ${remainingHours}h`;
+      } else {
+        timeRemainingDisplay = `${hoursLeft}h`;
+      }
+      
+      // Calculate progress percentage
+      const totalDurationMs = planDurationHours * 60 * 60 * 1000;
+      const elapsedMs = Math.min(totalDurationMs, Math.max(0, now - startDate));
+      const progressPercentage = totalDurationMs > 0 ? (elapsedMs / totalDurationMs) * 100 : 0;
+      
+      // Calculate expected profit (if investment completes)
+      const expectedProfit = (inv.amount * planPercentage) / 100;
+      
+      // Calculate profit earned so far (pro-rated based on time elapsed)
+      const profitEarnedSoFar = progressPercentage > 0 ? (expectedProfit * (progressPercentage / 100)) : 0;
+      
+      console.log(`Investment ${inv._id}:`);
+      console.log(`  Start: ${startDate}`);
+      console.log(`  Plan duration: ${planDurationHours}h`);
+      console.log(`  End: ${endDate}`);
+      console.log(`  Time remaining: ${timeRemainingDisplay}`);
+      console.log(`  Progress: ${progressPercentage.toFixed(2)}%`);
+      
+      return {
+        _id: inv._id,
+        user: {
+          _id: user._id || null,
+          firstName: firstName,
+          lastName: lastName,
+          email: userEmail,
+          fullName: `${firstName} ${lastName}`.trim()
+        },
+        plan: {
+          _id: plan._id || null,
+          name: planName,
+          percentage: planPercentage,
+          duration: planDurationHours
+        },
+        amount: inv.amount || 0,
+        startDate: startDate,
+        endDate: endDate,
+        dailyProfit: expectedProfit,
+        totalProfit: profitEarnedSoFar,
+        progressPercentage: progressPercentage,
+        timeRemaining: {
+          hours: hoursLeft,
+          days: daysLeft,
+          display: timeRemainingDisplay
+        },
+        status: inv.status || 'active'
+      };
+    });
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        investments: formattedInvestments,
+        pagination: {
+          currentPage: page,
+          totalPages: totalPages,
+          totalItems: total,
+          itemsPerPage: limit,
+          hasNextPage: page < totalPages,
+          hasPrevPage: page > 1
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Error fetching active investments:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch active investments'
+    });
+  }
+});
 
 
 
