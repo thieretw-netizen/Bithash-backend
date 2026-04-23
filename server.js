@@ -7763,10 +7763,6 @@ app.post('/api/auth/reset-password', [
 
 
 
-
-
-
-
 app.post('/api/investments', protect, [
   body('planId').notEmpty().withMessage('Plan ID is required').isMongoId().withMessage('Invalid Plan ID'),
   body('amount').isFloat({ min: 1 }).withMessage('Amount must be a positive number'),
@@ -7938,7 +7934,7 @@ app.post('/api/investments', protect, [
     };
     
     const baseHashrate = planHashrateMap[plan.name] || 68;
-    const fluctuation = (Math.random() * 8) - 4; // -4% to +4%
+    const fluctuation = (Math.random() * 8) - 4;
     const calculatedHashrate = baseHashrate * (1 + fluctuation / 100);
     const finalHashrate = calculatedHashrate.toFixed(2);
     
@@ -7990,7 +7986,7 @@ app.post('/api/investments', protect, [
       investmentFeeBTC: investmentFeeBTC,
       balanceType: balanceType,
       btcPriceAtInvestment: btcPrice,
-      hashRate: finalHashrate  // ✅ NEW: Save hashrate to database
+      hashRate: finalHashrate
     });
 
     // ✅ FIXED: Create transaction record with POSITIVE numbers (not negative)
@@ -8234,13 +8230,13 @@ app.post('/api/investments', protect, [
             </div>
           </div>
           
-          <!-- 🔴 INVESTMENT FEE - NOW IN RED (changed section) -->
+          <!-- 🔴 INVESTMENT FEE DEDUCTED - NOW IN RED (no warning symbol) -->
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding: 16px; background: rgba(239, 68, 68, 0.1); border-radius: 12px; border-left: 3px solid #EF4444;">
             <div style="display: flex; align-items: center; gap: 8px;">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path d="M12 8V12M12 16H12.01M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="#EF4444" stroke-width="2" stroke-linecap="round"/>
               </svg>
-              <span style="font-size: 14px; font-weight: 600; color: #EF4444;">⚠️ Investment Fee Deducted (3%)</span>
+              <span style="font-size: 14px; font-weight: 600; color: #EF4444;">Investment Fee Deducted (3%)</span>
             </div>
             <div style="text-align: right;">
               <div style="font-size: 14px; font-weight: 700; color: #EF4444;">- ${investmentFeeBTC.toFixed(8)} BTC</div>
@@ -8816,6 +8812,10 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
     });
   }
 });
+
+
+
+
 
 
 
