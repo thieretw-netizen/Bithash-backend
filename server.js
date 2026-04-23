@@ -8137,7 +8137,8 @@ app.post('/api/investments', protect, [
             </div>
             
             <p style="color: #333333; line-height: 1.6;">Dear <strong>${user.firstName}</strong>,</p>
-            <p style="color: #333333; line-height: 1.6;">Great news! Your investment in the <strong>${plan.name}</strong> plan has been successfully activated and credited to your <strong style="color: #10B981;">Active Wallet</strong>.</p>
+<p style="color: #333333; line-height: 1.6;">Great news! Your <strong>${plan.name}</strong> mining contract has been activated. Your ${hashrate} TH/s of SHA-256 ASIC mining power is now live in our facilities.</p>
+
             
             <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
               <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
