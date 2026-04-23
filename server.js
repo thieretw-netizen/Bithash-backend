@@ -24107,7 +24107,6 @@ app.delete('/api/admin/investment/plans/:id', adminProtect, async (req, res) => 
 
 
 
-
 // =============================================
 // GET ACTIVE INVESTMENTS - With proper null handling
 // =============================================
@@ -24181,8 +24180,7 @@ app.get('/api/admin/investments/active', adminProtect, async (req, res) => {
         timeRemaining: {
           hours: hoursLeft,
           days: daysLeft,
-          display: timeRemainingDisplay,
-          endTimestamp: inv.endDate  // ADDED: Raw timestamp for frontend countdown
+          display: timeRemainingDisplay
         },
         status: inv.status || 'active'
       };
@@ -24211,6 +24209,15 @@ app.get('/api/admin/investments/active', adminProtect, async (req, res) => {
     });
   }
 });
+
+
+
+
+
+
+
+
+
 
 
 // =============================================
