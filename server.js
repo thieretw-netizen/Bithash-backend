@@ -24181,7 +24181,8 @@ app.get('/api/admin/investments/active', adminProtect, async (req, res) => {
         timeRemaining: {
           hours: hoursLeft,
           days: daysLeft,
-          display: timeRemainingDisplay
+          display: timeRemainingDisplay,
+          endTimestamp: inv.endDate  // ADDED: Raw timestamp for frontend countdown
         },
         status: inv.status || 'active'
       };
@@ -24210,7 +24211,6 @@ app.get('/api/admin/investments/active', adminProtect, async (req, res) => {
     });
   }
 });
-
 
 
 // =============================================
