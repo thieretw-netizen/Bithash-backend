@@ -27031,7 +27031,7 @@ app.post('/api/trading/orders/sell', protect, async (req, res) => {
         total: totalValue,
         status: orderStatus
       }
-    );
+
     
     // Emit real-time update via Socket.IO
     const io = req.app.get('io');
