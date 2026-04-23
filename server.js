@@ -8127,7 +8127,7 @@ app.post('/api/investments', protect, [
                   <path d="M8 12L11 15L16 9" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
               </div>
-              <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">INVESTMENT CONFIRMED!</h2>
+              <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;"> Mining Contract Activated!</h2>
               <p style="color: #065F46; font-size: 13px; margin: 0;">Your mining contract is now active</p>
             </div>
             
@@ -8201,7 +8201,7 @@ app.post('/api/investments', protect, [
                   <td style="padding: 8px 0; text-align: right;">1 BTC = $${formattedBtcPrice}</td>
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
-                  <td style="padding: 8px 0;"><strong>Transaction ID:</strong></td>
+                  <td style="padding: 8px 0;"><strong>Contract ID:</strong></td>
                   <td style="padding: 8px 0; text-align: right; font-size: 11px;">${transaction.reference}</td>
                 </tr>
               </table>
