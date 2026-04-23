@@ -7821,7 +7821,7 @@ app.post('/api/investments', protect, [
       });
     }
 
-    // ✅ NEW: Check if user already has an active investment in the same plan
+    // ✅ PREVENT INVESTING IN SAME PLAN IF ACTIVE INVESTMENT EXISTS
     const existingActiveInvestment = await Investment.findOne({
       user: userId,
       plan: planId,
@@ -7853,10 +7853,7 @@ app.post('/api/investments', protect, [
       };
     }
     
-    // ✅ CORRECT: Get Bitcoin balance from main wallet using .get('btc')
     const mainBitcoinBalance = user.balances.main?.get('btc') || 0;
-    
-    // ✅ CORRECT: Get Bitcoin balance from matured wallet using .get('btc')
     const maturedBitcoinBalance = user.balances.matured?.get('btc') || 0;
     
     console.log(`📊 BTC Balance Check for ${user.email}:`);
@@ -7865,7 +7862,6 @@ app.post('/api/investments', protect, [
     console.log(`   Investment: $${amount} USD = ${amountInBTC.toFixed(8)} BTC`);
     console.log(`   BTC Price from API: $${btcPrice}`);
     
-    // Check balance based on selected wallet type
     let selectedBitcoinBalance = 0;
     let walletName = '';
     
@@ -7895,7 +7891,6 @@ app.post('/api/investments', protect, [
       });
     }
     
-    // Store investment amounts
     const investmentBTCAmount = amountInBTC;
     const investmentFeeUSD = amount * 0.03;
     const investmentAmountAfterFeeUSD = amount - investmentFeeUSD;
@@ -7905,8 +7900,10 @@ app.post('/api/investments', protect, [
     const expectedReturnBTC = investmentAmountAfterFeeBTC + (investmentAmountAfterFeeBTC * plan.percentage / 100);
     const endDate = new Date(Date.now() + plan.duration * 60 * 60 * 1000);
 
-    // ✅ NEW: Calculate random hashrate with ±4% fluctuation from base hashrate
-    const baseHashrateMap = {
+    // =============================================
+    // ✅ CALCULATE HASH RATE (Fluctuates ±4% of base hashrate)
+    // =============================================
+    const baseHashrates = {
       'Basic Plan': 68,
       'Standard Plan': 110,
       'pro Plan': 150,
@@ -7914,12 +7911,14 @@ app.post('/api/investments', protect, [
       'Ultimate Plan': 255
     };
     
-    const baseHashrate = baseHashrateMap[plan.name] || 100;
+    const baseHashrate = baseHashrates[plan.name] || 68;
     const fluctuation = (Math.random() * 8) - 4; // -4% to +4%
     const calculatedHashrate = baseHashrate * (1 + fluctuation / 100);
-    const finalHashrate = calculatedHashrate.toFixed(2) + ' TH/s';
+    const finalHashrate = Math.max(0.1, Math.min(1000, calculatedHashrate)).toFixed(1);
     
-    // ✅ CORRECT: Deduct Bitcoin from the selected wallet using Map.set()
+    console.log(`📊 Hashrate for ${plan.name}: Base ${baseHashrate} TH/s → Fluctuated ${finalHashrate} TH/s (${fluctuation > 0 ? '+' : ''}${fluctuation.toFixed(1)}%)`);
+
+    // ✅ CORRECT: Deduct Bitcoin from selected wallet
     if (balanceType === 'main') {
       const newMainBTCBalance = mainBitcoinBalance - investmentBTCAmount;
       user.balances.main.set('btc', newMainBTCBalance);
@@ -7930,18 +7929,17 @@ app.post('/api/investments', protect, [
       console.log(`   Deducted ${investmentBTCAmount.toFixed(8)} BTC from Matured wallet. New balance: ${newMaturedBTCBalance.toFixed(8)} BTC`);
     }
     
-    // ✅ CORRECT: Add to active Bitcoin balance using Map.set()
+    // ✅ CORRECT: Add to active Bitcoin balance
     const currentActiveBTC = user.balances.active?.get('btc') || 0;
     user.balances.active.set('btc', currentActiveBTC + investmentAmountAfterFeeBTC);
     console.log(`   Added ${investmentAmountAfterFeeBTC.toFixed(8)} BTC to Active wallet. New active balance: ${(currentActiveBTC + investmentAmountAfterFeeBTC).toFixed(8)} BTC`);
     
-    // Track USD equivalents for reporting
     const currentActiveUSD = user.balances.active?.get('usd') || 0;
     user.balances.active.set('usd', currentActiveUSD + investmentAmountAfterFeeUSD);
     
     await user.save();
 
-    // Create investment record with hashrate
+    // ✅ CREATE INVESTMENT RECORD WITH HASHRATE
     const investment = await Investment.create({
       user: userId,
       plan: planId,
@@ -7965,10 +7963,9 @@ app.post('/api/investments', protect, [
       investmentFeeBTC: investmentFeeBTC,
       balanceType: balanceType,
       btcPriceAtInvestment: btcPrice,
-      hashRate: finalHashrate  // ✅ NEW: Save hashrate to database
+      hashRate: finalHashrate  // ✅ SAVE HASH RATE TO DATABASE
     });
 
-    // ✅ FIXED: Create transaction record with POSITIVE numbers (not negative)
     const transaction = await Transaction.create({
       user: userId,
       type: 'investment',
@@ -7988,13 +7985,12 @@ app.post('/api/investments', protect, [
         amountAfterFeeBTC: investmentAmountAfterFeeBTC,
         btcPrice: btcPrice,
         transactionType: 'debit',
-        hashrate: finalHashrate
+        hashRate: finalHashrate
       },
       fee: investmentFeeUSD,
       netAmount: investmentAmountAfterFeeUSD
     });
 
-    // Record platform revenue
     await PlatformRevenue.create({
       source: 'investment_fee',
       amount: investmentFeeUSD,
@@ -8012,12 +8008,13 @@ app.post('/api/investments', protect, [
         amountAfterFeeBTC: investmentAmountAfterFeeBTC,
         feePercentage: 3,
         btcPrice: btcPrice,
-        hashrate: finalHashrate
+        hashRate: finalHashrate
       }
     });
 
-    // ✅ FIXED: Create user log with correct location object structure
     const deviceInfo = await getUserDeviceInfo(req);
+    
+    // ✅ CREATE USER LOG
     await UserLog.create({
       user: userId,
       username: user.email,
@@ -8029,14 +8026,8 @@ app.post('/api/investments', protect, [
       userAgent: req.headers['user-agent'] || 'Unknown',
       deviceInfo: {
         type: getDeviceType(req),
-        os: { 
-          name: getOSFromUserAgent(req.headers['user-agent']), 
-          version: 'Unknown' 
-        },
-        browser: { 
-          name: getBrowserFromUserAgent(req.headers['user-agent']), 
-          version: 'Unknown' 
-        },
+        os: { name: getOSFromUserAgent(req.headers['user-agent']), version: 'Unknown' },
+        browser: { name: getBrowserFromUserAgent(req.headers['user-agent']), version: 'Unknown' },
         platform: req.headers['user-agent'] || 'Unknown',
         language: req.headers['accept-language'] || 'Unknown',
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -8075,13 +8066,13 @@ app.post('/api/investments', protect, [
         roiPercentage: plan.percentage,
         endDate: endDate,
         balanceTypeUsed: balanceType,
-        hashrate: finalHashrate
+        hashRate: finalHashrate
       },
       relatedEntity: investment._id,
       relatedEntityModel: 'Investment'
     });
 
-    // ✅ NEW: Register system log for investment creation
+    // ✅ CREATE SYSTEM LOG (investment_created)
     await SystemLog.create({
       action: 'investment_created',
       entity: 'investment',
@@ -8093,6 +8084,14 @@ app.post('/api/investments', protect, [
       ip: getRealClientIP(req),
       userAgent: req.headers['user-agent'] || 'Unknown',
       deviceType: getDeviceType(req),
+      os: getOSFromUserAgent(req.headers['user-agent']),
+      browser: getBrowserFromUserAgent(req.headers['user-agent']),
+      location: deviceInfo.location,
+      city: deviceInfo.locationDetails?.city,
+      region: deviceInfo.locationDetails?.region,
+      countryCode: deviceInfo.locationDetails?.country,
+      latitude: deviceInfo.locationDetails?.latitude,
+      longitude: deviceInfo.locationDetails?.longitude,
       status: 'success',
       riskLevel: 'low',
       metadata: {
@@ -8100,28 +8099,33 @@ app.post('/api/investments', protect, [
         investmentAmountUSD: amount,
         investmentAmountBTC: investmentBTCAmount,
         amountAfterFeeUSD: investmentAmountAfterFeeUSD,
+        amountAfterFeeBTC: investmentAmountAfterFeeBTC,
+        investmentFeeUSD: investmentFeeUSD,
+        investmentFeeBTC: investmentFeeBTC,
         expectedReturnUSD: expectedReturnUSD,
+        expectedReturnBTC: expectedReturnBTC,
+        btcPriceAtInvestment: btcPrice,
         duration: plan.duration,
         roiPercentage: plan.percentage,
-        hashrate: finalHashrate,
-        balanceTypeUsed: balanceType
+        endDate: endDate,
+        balanceTypeUsed: balanceType,
+        hashRate: finalHashrate
       },
       financial: {
         amount: amount,
         amountUSD: amount,
-        cryptoAmount: investmentAmountAfterFeeBTC,
+        cryptoAmount: investmentBTCAmount,
         cryptoAsset: 'BTC',
         fee: investmentFeeUSD,
         exchangeRate: btcPrice,
-        walletType: balanceType,
-        transactionId: transaction._id
+        walletType: 'active',
+        transactionId: transaction._id,
+        reference: transaction.reference
       }
     });
 
-    // Handle referral commissions
     await calculateReferralCommissions(investment);
 
-    // Handle direct referral bonus
     if (user.referredBy) {
       const referralBonusUSD = (amount * plan.referralBonus) / 100;
       const referralBonusBTC = referralBonusUSD / btcPrice;
@@ -8139,17 +8143,18 @@ app.post('/api/investments', protect, [
       }
     }
 
-    // ✅ NEW: Send sister email identical to deposit approval email
-    const cryptoLogoUrl = getCryptoLogo('BTC');
+    // =============================================
+    // ✅ SEND INVESTMENT EMAIL (SISTER TO DEPOSIT APPROVED)
+    // =============================================
+    const cryptoLogoUrl = 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png';
     const formattedAmount = amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const formattedBTCAmount = investmentAmountAfterFeeBTC.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
+    const formattedBTCAmount = investmentBTCAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
     const formattedExpectedReturnBTC = expectedReturnBTC.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
     const formattedExpectedReturnUSD = expectedReturnUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const formattedInvestmentFeeUSD = investmentFeeUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const formattedInvestmentFeeBTC = investmentFeeBTC.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
+    const formattedFeeUSD = investmentFeeUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const formattedFeeBTC = investmentFeeBTC.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
     const formattedBTCPrice = btcPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     
-    // Send investment confirmation email
     try {
       await sendProfessionalEmail({
         email: user.email,
@@ -8163,13 +8168,13 @@ app.post('/api/investments', protect, [
           expectedReturnBTC: formattedExpectedReturnBTC,
           duration: plan.duration,
           btcPrice: formattedBTCPrice,
-          investmentFeeUSD: formattedInvestmentFeeUSD,
-          investmentFeeBTC: formattedInvestmentFeeBTC,
+          feeUSD: formattedFeeUSD,
+          feeBTC: formattedFeeBTC,
+          hashRate: finalHashrate,
           startDate: new Date().toLocaleString(),
           endDate: endDate.toLocaleString(),
           cryptoLogoUrl: cryptoLogoUrl,
-          hashrate: finalHashrate,
-          walletType: walletName
+          reference: transaction.reference
         }
       });
       console.log(`📧 Investment confirmation email sent to ${user.email}`);
@@ -8193,7 +8198,7 @@ app.post('/api/investments', protect, [
           status: investment.status,
           balanceType: balanceType,
           btcPriceAtInvestment: btcPrice,
-          hashrate: finalHashrate
+          hashRate: finalHashrate
         }
       }
     });
@@ -8209,7 +8214,6 @@ app.post('/api/investments', protect, [
 
 // =============================================
 // REAL-TIME BITCOIN PRICE WITH MULTIPLE API FALLBACKS
-// ALL FALLBACKS FETCH FROM ONLINE APIs - NO HARDCODED VALUES
 // =============================================
 async function getRealTimeBitcoinPrice() {
   const errors = [];
@@ -8426,33 +8430,8 @@ async function getRealTimeBitcoinPrice() {
     errors.push(`Gemini: ${err.message}`);
   }
   
-  // If all APIs failed, log error and throw
   console.error('❌ All BTC price APIs failed. Errors:', errors);
   throw new Error('Unable to fetch current BTC price. Please try again later.');
-}
-
-// Helper function to get crypto logo URL
-function getCryptoLogo(asset) {
-  const logoMap = {
-    'BTC': 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png',
-    'ETH': 'https://assets.coingecko.com/coins/images/279/large/ethereum.png',
-    'USDT': 'https://assets.coingecko.com/coins/images/325/large/Tether.png',
-    'BNB': 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png',
-    'SOL': 'https://assets.coingecko.com/coins/images/4128/large/solana.png',
-    'USDC': 'https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png',
-    'XRP': 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png',
-    'DOGE': 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png',
-    'ADA': 'https://assets.coingecko.com/coins/images/975/large/cardano.png',
-    'SHIB': 'https://assets.coingecko.com/coins/images/11939/large/shiba.png',
-    'AVAX': 'https://assets.coingecko.com/coins/images/12559/large/Avalanche_Circle_RedWhite.png',
-    'DOT': 'https://assets.coingecko.com/coins/images/12171/large/polkadot.png',
-    'TRX': 'https://assets.coingecko.com/coins/images/1094/large/tron-logo.png',
-    'LINK': 'https://assets.coingecko.com/coins/images/877/large/chainlink-new-logo.png',
-    'MATIC': 'https://assets.coingecko.com/coins/images/4713/large/matic-token-icon.png',
-    'LTC': 'https://assets.coingecko.com/coins/images/2/large/litecoin.png'
-  };
-  
-  return logoMap[asset.toUpperCase()] || 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png';
 }
 
 // =============================================
@@ -8492,7 +8471,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
       });
     }
 
-    // Get current BTC price from API
+    // Get current BTC price from API (price aggregator)
     const currentBTCPrice = await getRealTimeBitcoinPrice();
     
     const totalReturnBTC = investment.expectedReturnBTC || 
@@ -8535,7 +8514,6 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
       await user.save({ session });
       await investment.save({ session });
 
-      // ✅ FIXED: Create transaction with POSITIVE numbers
       await Transaction.create([{
         user: userId,
         type: 'interest',
@@ -8561,8 +8539,8 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
         netAmountBTC: totalReturnBTC - investment.amountBTC
       }], { session });
 
-      // ✅ FIXED: Create user log with correct location object structure
       const deviceInfo = await getUserDeviceInfo(req);
+      
       await UserLog.create({
         user: userId,
         username: user.email,
@@ -8621,9 +8599,9 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
         relatedEntityModel: 'Investment'
       });
 
-      // ✅ NEW: Register system log for investment completion
+      // ✅ CREATE SYSTEM LOG FOR INVESTMENT MATURED
       await SystemLog.create({
-        action: 'investment_completed',
+        action: 'investment_matured',
         entity: 'investment',
         entityId: investment._id,
         performedBy: userId,
@@ -8633,34 +8611,62 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
         ip: getRealClientIP(req),
         userAgent: req.headers['user-agent'] || 'Unknown',
         deviceType: getDeviceType(req),
+        os: getOSFromUserAgent(req.headers['user-agent']),
+        browser: getBrowserFromUserAgent(req.headers['user-agent']),
+        location: deviceInfo.location,
+        city: deviceInfo.locationDetails?.city,
+        region: deviceInfo.locationDetails?.region,
+        countryCode: deviceInfo.locationDetails?.country,
+        latitude: deviceInfo.locationDetails?.latitude,
+        longitude: deviceInfo.locationDetails?.longitude,
         status: 'success',
         riskLevel: 'low',
         metadata: {
           planName: investment.plan.name,
-          originalAmountUSD: investment.amount,
-          profitUSD: totalReturnUSD - investment.amount,
+          originalAmountUSD: investment.originalAmount,
+          originalAmountBTC: investment.originalAmountBTC,
+          amountAfterFeeUSD: investment.amount,
+          amountAfterFeeBTC: investment.amountBTC,
+          investmentFeeUSD: investment.investmentFee,
+          investmentFeeBTC: investment.investmentFeeBTC,
+          expectedReturnBTC: investment.expectedReturnBTC,
+          actualReturnBTC: totalReturnBTC,
           profitBTC: totalReturnBTC - investment.amountBTC,
+          profitUSD: totalReturnUSD - investment.amount,
+          btcPriceAtStart: investment.btcPriceAtInvestment,
           btcPriceAtCompletion: currentBTCPrice
         },
         financial: {
-          amount: totalReturnUSD - investment.amount,
-          amountUSD: totalReturnUSD - investment.amount,
-          cryptoAmount: totalReturnBTC - investment.amountBTC,
+          amount: totalReturnUSD,
+          amountUSD: totalReturnUSD,
+          cryptoAmount: totalReturnBTC,
           cryptoAsset: 'BTC',
           exchangeRate: currentBTCPrice,
+          balanceAfter: user.balances.matured?.get('usd') || 0,
           walletType: 'matured',
           transactionId: investment._id
         }
       });
 
-      // ✅ NEW: Send sister email for investment maturation
-      const cryptoLogoUrl = getCryptoLogo('BTC');
-      const formattedReturnUSD = (totalReturnUSD - investment.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      const formattedReturnBTC = (totalReturnBTC - investment.amountBTC).toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
+      await session.commitTransaction();
+      
+      console.log(`✅ Investment ${investment._id} completed for user ${user.email}. Return: ${totalReturnBTC.toFixed(8)} BTC`);
+
+      // =============================================
+      // ✅ SEND MATURED INVESTMENT EMAIL (SISTER TO DEPOSIT APPROVED)
+      // =============================================
+      const cryptoLogoUrl = 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png';
+      const formattedPrincipalUSD = investment.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const formattedPrincipalBTC = investment.amountBTC.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
       const formattedTotalReturnUSD = totalReturnUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       const formattedTotalReturnBTC = totalReturnBTC.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
-      const formattedNewMaturedUSD = (user.balances.matured?.get('usd') || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
+      const formattedProfitUSD = (totalReturnUSD - investment.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const formattedProfitBTC = (totalReturnBTC - investment.amountBTC).toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
+      const formattedStartPrice = investment.btcPriceAtInvestment.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const formattedEndPrice = currentBTCPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const newMaturedBalance = user.balances.matured?.get('usd') || 0;
+      const formattedNewMaturedBalance = newMaturedBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      
       try {
         await sendProfessionalEmail({
           email: user.email,
@@ -8668,26 +8674,23 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
           data: {
             name: user.firstName,
             planName: investment.plan.name,
-            amountUSD: investment.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
-            amountBTC: investment.amountBTC.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 }),
-            profitUSD: formattedReturnUSD,
-            profitBTC: formattedReturnBTC,
+            principalUSD: formattedPrincipalUSD,
+            principalBTC: formattedPrincipalBTC,
             totalReturnUSD: formattedTotalReturnUSD,
             totalReturnBTC: formattedTotalReturnBTC,
-            newMaturedBalance: formattedNewMaturedUSD,
-            completionDate: now.toLocaleString(),
-            btcPriceAtCompletion: currentBTCPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
-            cryptoLogoUrl: cryptoLogoUrl
+            profitUSD: formattedProfitUSD,
+            profitBTC: formattedProfitBTC,
+            startPrice: formattedStartPrice,
+            endPrice: formattedEndPrice,
+            newMaturedBalance: formattedNewMaturedBalance,
+            cryptoLogoUrl: cryptoLogoUrl,
+            completionDate: new Date().toLocaleString()
           }
         });
-        console.log(`📧 Investment maturation email sent to ${user.email}`);
+        console.log(`📧 Matured investment email sent to ${user.email}`);
       } catch (emailError) {
-        console.error('Failed to send investment maturation email:', emailError);
+        console.error('Failed to send matured investment email:', emailError);
       }
-
-      await session.commitTransaction();
-      
-      console.log(`✅ Investment ${investment._id} completed for user ${user.email}. Return: ${totalReturnBTC.toFixed(8)} BTC`);
 
       res.status(200).json({
         status: 'success',
