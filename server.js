@@ -8763,8 +8763,6 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
 
 
 
-
-
 // OTP Verification Endpoint
 app.post('/api/auth/verify-otp', [
   body('email').isEmail().withMessage('Please provide a valid email'),
