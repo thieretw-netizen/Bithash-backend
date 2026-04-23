@@ -8230,7 +8230,7 @@ app.post('/api/investments', protect, [
       await mailTransporter.sendMail({
         from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
         to: user.email,
-        subject: ``✅ ${hashrate} TH/s SHA-256 Mining Contract Activated - ₿itHash Capital`,
+        subject: `✅ ${hashrate} TH/s SHA-256 Mining Contract Activated - ₿itHash Capital`,
         html: emailHtml
       });
       
