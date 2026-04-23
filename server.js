@@ -8233,7 +8233,7 @@ app.post('/api/investments', protect, [
       await mailTransporter.sendMail({
         from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
         to: user.email,
-        subject: `✅ Investment Confirmed - ₿itHash Capital`,
+        subject: `✅ Mining Contract Activated - ₿itHash Capital`,
         html: emailHtml
       });
       
@@ -8822,7 +8822,7 @@ app.post('/api/investments/:id/complete', protect, async (req, res) => {
         await mailTransporter.sendMail({
           from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
           to: user.email,
-          subject: `✅ Investment Matured - ₿itHash Capital`,
+          subject: `💰 Mining Rewards Received - ₿itHash Capital`,
           html: emailHtml
         });
         
