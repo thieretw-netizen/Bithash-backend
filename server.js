@@ -24108,7 +24108,7 @@ app.delete('/api/admin/investment/plans/:id', adminProtect, async (req, res) => 
 
 
 // =============================================
-// GET ACTIVE INVESTMENTS - With proper null handling
+// GET ACTIVE INVESTMENTS - With proper null handling and LIVE countdown
 // =============================================
 app.get('/api/admin/investments/active', adminProtect, async (req, res) => {
   try {
@@ -24142,14 +24142,81 @@ app.get('/api/admin/investments/active', adminProtect, async (req, res) => {
       const planPercentage = plan.percentage || 0;
       const planDuration = plan.duration || 0;
       
-      // Calculate remaining time
+      // CRITICAL FIX: Calculate remaining time using endDate from database
       const now = new Date();
       const endDate = new Date(inv.endDate);
+      
+      // Debug logging to see what's happening
+      console.log(`Investment ${inv._id}: endDate=${endDate}, now=${now}, diff=${endDate - now}`);
+      
+      // Check if endDate is valid
+      if (isNaN(endDate.getTime())) {
+        console.error(`Invalid endDate for investment ${inv._id}: ${inv.endDate}`);
+        // Fallback: calculate endDate from startDate + plan duration
+        const startDate = new Date(inv.startDate || inv.createdAt);
+        const calculatedEndDate = new Date(startDate.getTime() + (planDuration * 60 * 60 * 1000));
+        console.log(`Recalculated endDate: ${calculatedEndDate}`);
+        
+        const timeLeftMs = Math.max(0, calculatedEndDate - now);
+        const hoursLeft = Math.floor(timeLeftMs / (1000 * 60 * 60));
+        const daysLeft = Math.floor(hoursLeft / 24);
+        const remainingHours = hoursLeft % 24;
+        const timeRemainingDisplay = daysLeft > 0 ? `${daysLeft}d ${remainingHours}h` : 
+                                      (hoursLeft > 0 ? `${hoursLeft}h` : 'Expiring soon');
+        
+        // Calculate daily profit (percentage-based)
+        const dailyProfit = (inv.amount * planPercentage) / 100;
+        const totalProfit = (inv.expectedReturn || 0) - (inv.amount || 0);
+        
+        return {
+          _id: inv._id,
+          user: {
+            _id: user._id || null,
+            firstName: firstName,
+            lastName: lastName,
+            email: userEmail,
+            fullName: `${firstName} ${lastName}`.trim()
+          },
+          plan: {
+            _id: plan._id || null,
+            name: planName,
+            percentage: planPercentage,
+            duration: planDuration
+          },
+          amount: inv.amount || 0,
+          startDate: inv.startDate || inv.createdAt,
+          endDate: calculatedEndDate,
+          dailyProfit: dailyProfit,
+          totalProfit: totalProfit,
+          timeRemaining: {
+            hours: hoursLeft,
+            days: daysLeft,
+            display: timeRemainingDisplay
+          },
+          status: inv.status || 'active'
+        };
+      }
+      
+      // Normal case: use stored endDate
       const timeLeftMs = Math.max(0, endDate - now);
       const hoursLeft = Math.floor(timeLeftMs / (1000 * 60 * 60));
       const daysLeft = Math.floor(hoursLeft / 24);
       const remainingHours = hoursLeft % 24;
-      const timeRemainingDisplay = daysLeft > 0 ? `${daysLeft}d ${remainingHours}h` : `${hoursLeft}h`;
+      
+      // Format display - NEVER show "Matured" for active investments
+      let timeRemainingDisplay;
+      if (timeLeftMs <= 0) {
+        // Investment should have been marked completed by cron job, but if not...
+        timeRemainingDisplay = 'Processing...';
+        console.warn(`Active investment ${inv._id} has endDate in the past: ${endDate}`);
+      } else if (daysLeft > 0) {
+        timeRemainingDisplay = `${daysLeft}d ${remainingHours}h`;
+      } else if (hoursLeft > 0) {
+        timeRemainingDisplay = `${hoursLeft}h`;
+      } else {
+        const minutesLeft = Math.floor(timeLeftMs / (1000 * 60));
+        timeRemainingDisplay = minutesLeft > 0 ? `${minutesLeft}m` : 'Less than minute';
+      }
       
       // Calculate daily profit (percentage-based)
       const dailyProfit = (inv.amount * planPercentage) / 100;
@@ -24209,10 +24276,6 @@ app.get('/api/admin/investments/active', adminProtect, async (req, res) => {
     });
   }
 });
-
-
-
-
 
 
 
