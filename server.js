@@ -24108,7 +24108,7 @@ app.delete('/api/admin/investment/plans/:id', adminProtect, async (req, res) => 
 
 
 // =============================================
-// GET ACTIVE INVESTMENTS - LIVE CALCULATIONS based on startDate + plan duration
+// GET ACTIVE INVESTMENTS - Backend does ALL calculations
 // =============================================
 app.get('/api/admin/investments/active', adminProtect, async (req, res) => {
   try {
@@ -24128,22 +24128,21 @@ app.get('/api/admin/investments/active', adminProtect, async (req, res) => {
     const total = await Investment.countDocuments({ status: 'active' });
     const totalPages = Math.ceil(total / limit);
 
-    // Format investments with LIVE calculations
+    // Format investments with ALL calculations done on backend
     const formattedInvestments = investments.map(inv => {
-      // Safe user data extraction with fallbacks
+      // Safe data extraction
       const user = inv.user || {};
       const firstName = user.firstName || 'Deleted';
       const lastName = user.lastName || 'User';
       const userEmail = user.email || 'unknown@deleted.com';
       
-      // Safe plan data extraction
       const plan = inv.plan || {};
       const planName = plan.name || 'Unknown Plan';
       const planPercentage = plan.percentage || 0;
       const planDurationHours = plan.duration || 0;
       
       // =============================================
-      // LIVE CALCULATION - Calculate everything from startDate + plan duration
+      // BACKEND CALCULATIONS - Everything computed here
       // =============================================
       const now = new Date();
       const startDate = new Date(inv.startDate || inv.createdAt);
@@ -24151,39 +24150,40 @@ app.get('/api/admin/investments/active', adminProtect, async (req, res) => {
       // Calculate end date based on plan duration (in hours)
       const endDate = new Date(startDate.getTime() + (planDurationHours * 60 * 60 * 1000));
       
-      // Calculate time remaining
+      // Calculate time remaining in milliseconds
       const timeLeftMs = Math.max(0, endDate - now);
+      
+      // Format as HH:MM:SS countdown string
       const hoursLeft = Math.floor(timeLeftMs / (1000 * 60 * 60));
+      const minutesLeft = Math.floor((timeLeftMs % (1000 * 60 * 60)) / (1000 * 60));
+      const secondsLeft = Math.floor((timeLeftMs % (1000 * 60)) / 1000);
+      
+      // Format countdown display (HH:MM:SS)
+      const countdownDisplay = timeLeftMs <= 0 ? '00:00:00' : 
+        `${hoursLeft.toString().padStart(2, '0')}:${minutesLeft.toString().padStart(2, '0')}:${secondsLeft.toString().padStart(2, '0')}`;
+      
+      // Format human-readable display
       const daysLeft = Math.floor(hoursLeft / 24);
       const remainingHours = hoursLeft % 24;
-      
-      // Format time remaining display
-      let timeRemainingDisplay;
-      if (timeLeftMs <= 0) {
-        timeRemainingDisplay = '0h';
-      } else if (daysLeft > 0) {
-        timeRemainingDisplay = `${daysLeft}d ${remainingHours}h`;
-      } else {
-        timeRemainingDisplay = `${hoursLeft}h`;
-      }
+      const humanReadableDisplay = timeLeftMs <= 0 ? 'Matured' :
+        (daysLeft > 0 ? `${daysLeft}d ${remainingHours}h` : `${hoursLeft}h ${minutesLeft}m`);
       
       // Calculate progress percentage
       const totalDurationMs = planDurationHours * 60 * 60 * 1000;
       const elapsedMs = Math.min(totalDurationMs, Math.max(0, now - startDate));
       const progressPercentage = totalDurationMs > 0 ? (elapsedMs / totalDurationMs) * 100 : 0;
       
-      // Calculate expected profit (if investment completes)
-      const expectedProfit = (inv.amount * planPercentage) / 100;
+      // Calculate daily profit (percentage-based)
+      const dailyProfit = (inv.amount * planPercentage) / 100;
       
-      // Calculate profit earned so far (pro-rated based on time elapsed)
-      const profitEarnedSoFar = progressPercentage > 0 ? (expectedProfit * (progressPercentage / 100)) : 0;
+      // Calculate total profit so far (pro-rated)
+      const totalProfit = progressPercentage > 0 ? (dailyProfit * (progressPercentage / 100)) : 0;
       
-      console.log(`Investment ${inv._id}:`);
-      console.log(`  Start: ${startDate}`);
-      console.log(`  Plan duration: ${planDurationHours}h`);
-      console.log(`  End: ${endDate}`);
-      console.log(`  Time remaining: ${timeRemainingDisplay}`);
-      console.log(`  Progress: ${progressPercentage.toFixed(2)}%`);
+      // Calculate expected return
+      const expectedReturn = inv.expectedReturn || (inv.amount + dailyProfit);
+      
+      // Check if investment is actually matured
+      const isMatured = timeLeftMs <= 0;
       
       return {
         _id: inv._id,
@@ -24203,14 +24203,22 @@ app.get('/api/admin/investments/active', adminProtect, async (req, res) => {
         amount: inv.amount || 0,
         startDate: startDate,
         endDate: endDate,
-        dailyProfit: expectedProfit,
-        totalProfit: profitEarnedSoFar,
-        progressPercentage: progressPercentage,
+        // Time remaining data (for frontend countdown)
         timeRemaining: {
+          milliseconds: timeLeftMs,
+          seconds: secondsLeft,
+          minutes: minutesLeft,
           hours: hoursLeft,
           days: daysLeft,
-          display: timeRemainingDisplay
+          countdown: countdownDisplay,        // HH:MM:SS format
+          humanReadable: humanReadableDisplay, // "2d 5h" or "Matured"
+          isMatured: isMatured
         },
+        // Financial data
+        dailyProfit: dailyProfit,
+        totalProfit: totalProfit,
+        expectedReturn: expectedReturn,
+        progressPercentage: progressPercentage.toFixed(2),
         status: inv.status || 'active'
       };
     });
@@ -24238,7 +24246,6 @@ app.get('/api/admin/investments/active', adminProtect, async (req, res) => {
     });
   }
 });
-
 
 
 
