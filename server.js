@@ -7722,14 +7722,6 @@ app.post('/api/auth/reset-password', [
 
 
 
-
-
-
-
-
-
-
-
 // =============================================
 // CREATE INVESTMENT ENDPOINT
 // =============================================
@@ -7911,12 +7903,12 @@ app.post('/api/investments', protect, [
     
     await user.save();
 
-    // Create investment record
+    // CREATE INVESTMENT RECORD - WITH ALL REQUIRED FIELDS
     const investment = await Investment.create({
       user: userId,
       plan: planId,
       amount: investmentAmountAfterFeeUSD,
-      amountBTC: investmentAmountAfterFeeBTC,
+      amountBTC: investmentAmountAfterFeeBTC,  // ← CRITICAL: Must be set
       originalAmount: amount,
       originalAmountBTC: investmentBTCAmount,
       originalCurrency: 'USD',
@@ -7934,7 +7926,8 @@ app.post('/api/investments', protect, [
       investmentFee: investmentFeeUSD,
       investmentFeeBTC: investmentFeeBTC,
       balanceType: balanceType,
-      btcPriceAtInvestment: btcPrice
+      btcPriceAtInvestment: btcPrice,
+      startDate: new Date()  // ← CRITICAL: Set start date
     });
 
     // Create transaction record
@@ -8328,8 +8321,7 @@ async function getRealTimeBitcoinPrice() {
 }
 
 // =============================================
-// AUTOMATED INVESTMENT MATURATION JOB
-// Runs every minute to check and complete matured investments
+// FIXED AUTOMATED INVESTMENT MATURATION JOB
 // =============================================
 async function checkMaturedInvestments() {
   try {
@@ -8378,75 +8370,92 @@ async function checkMaturedInvestments() {
           continue;
         }
         
-        const expectedReturnUSD = investment.expectedReturn;
+        // SAFE EXTRACTION - Use fallback values if properties don't exist
+        const expectedReturnUSD = investment.expectedReturn || 0;
         const totalReturnBTC = expectedReturnUSD / currentBTCPrice;
+        
+        // CRITICAL: Safely get amountBTC with fallback
+        const investmentAmountBTC = investment.amountBTC || 0;
+        const investmentAmountUSD = investment.amount || 0;
         
         console.log(`   Expected Return USD: $${expectedReturnUSD}`);
         console.log(`   Total Return BTC: ${totalReturnBTC.toFixed(8)} BTC`);
         
-        // Check active balance
-        const currentActiveBTC = user.balances.active?.get('btc') || 0;
-        console.log(`   Current Active BTC Balance: ${currentActiveBTC.toFixed(8)} BTC`);
-        console.log(`   Investment Amount BTC: ${investment.amountBTC.toFixed(8)} BTC`);
+        // Initialize balances if needed
+        if (!user.balances) {
+          user.balances = { main: new Map(), active: new Map(), matured: new Map() };
+        }
+        if (!user.balances.active) user.balances.active = new Map();
+        if (!user.balances.matured) user.balances.matured = new Map();
         
-        if (currentActiveBTC < investment.amountBTC) {
+        // Check active balance
+        const currentActiveBTC = user.balances.active.get('btc') || 0;
+        console.log(`   Current Active BTC Balance: ${currentActiveBTC.toFixed(8)} BTC`);
+        console.log(`   Investment Amount BTC: ${investmentAmountBTC.toFixed(8)} BTC`);
+        
+        if (currentActiveBTC < investmentAmountBTC) {
           console.error(`   ❌ Insufficient active balance for investment ${investment._id}`);
+          console.error(`      Required: ${investmentAmountBTC.toFixed(8)} BTC, Available: ${currentActiveBTC.toFixed(8)} BTC`);
           await session.abortTransaction();
           continue;
         }
         
         // Transfer from active to matured
-        const newActiveBTC = currentActiveBTC - investment.amountBTC;
+        const newActiveBTC = currentActiveBTC - investmentAmountBTC;
         user.balances.active.set('btc', newActiveBTC);
         console.log(`   New Active BTC Balance: ${newActiveBTC.toFixed(8)} BTC`);
         
-        const currentMaturedBTC = user.balances.matured?.get('btc') || 0;
+        const currentMaturedBTC = user.balances.matured.get('btc') || 0;
         user.balances.matured.set('btc', currentMaturedBTC + totalReturnBTC);
         console.log(`   New Matured BTC Balance: ${(currentMaturedBTC + totalReturnBTC).toFixed(8)} BTC`);
         
         // Update USD equivalents
-        const currentActiveUSD = user.balances.active?.get('usd') || 0;
-        user.balances.active.set('usd', currentActiveUSD - investment.amount);
+        const currentActiveUSD = user.balances.active.get('usd') || 0;
+        user.balances.active.set('usd', currentActiveUSD - investmentAmountUSD);
         
-        const currentMaturedUSD = user.balances.matured?.get('usd') || 0;
+        const currentMaturedUSD = user.balances.matured.get('usd') || 0;
         user.balances.matured.set('usd', currentMaturedUSD + expectedReturnUSD);
         
         // Update investment record
         investment.status = 'completed';
         investment.completionDate = now;
-        investment.actualReturnBTC = totalReturnBTC - investment.amountBTC;
-        investment.actualReturnUSD = expectedReturnUSD - investment.amount;
+        investment.actualReturnBTC = totalReturnBTC - investmentAmountBTC;
+        investment.actualReturnUSD = expectedReturnUSD - investmentAmountUSD;
         investment.btcPriceAtCompletion = currentBTCPrice;
         
         await user.save({ session });
         await investment.save({ session });
         console.log(`   ✅ Investment record updated to completed`);
         
+        // Calculate profit
+        const profitUSD = expectedReturnUSD - investmentAmountUSD;
+        const profitBTC = totalReturnBTC - investmentAmountBTC;
+        
         // Create transaction record
         await Transaction.create([{
           user: investment.user,
           type: 'interest',
-          amount: expectedReturnUSD - investment.amount,
-          amountBTC: totalReturnBTC - investment.amountBTC,
+          amount: profitUSD,
+          amountBTC: profitBTC,
           currency: 'BTC',
           status: 'completed',
           method: 'INTERNAL',
           reference: `AUTO-RET-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
           details: {
             investmentId: investment._id,
-            planName: investment.plan.name,
-            principalUSD: investment.amount,
-            principalBTC: investment.amountBTC,
-            interestUSD: expectedReturnUSD - investment.amount,
-            interestBTC: totalReturnBTC - investment.amountBTC,
-            btcPriceAtStart: investment.btcPriceAtInvestment,
+            planName: investment.plan?.name || 'Unknown Plan',
+            principalUSD: investmentAmountUSD,
+            principalBTC: investmentAmountBTC,
+            interestUSD: profitUSD,
+            interestBTC: profitBTC,
+            btcPriceAtStart: investment.btcPriceAtInvestment || currentBTCPrice,
             btcPriceAtCompletion: currentBTCPrice,
             transactionType: 'credit',
             autoCompleted: true
           },
           fee: 0,
-          netAmountUSD: expectedReturnUSD - investment.amount,
-          netAmountBTC: totalReturnBTC - investment.amountBTC
+          netAmountUSD: profitUSD,
+          netAmountBTC: profitBTC
         }], { session });
         console.log(`   ✅ Transaction record created`);
         
@@ -8482,20 +8491,20 @@ async function checkMaturedInvestments() {
           },
           status: 'success',
           metadata: {
-            planName: investment.plan.name,
-            originalAmountUSD: investment.originalAmount,
-            originalAmountBTC: investment.originalAmountBTC,
-            amountAfterFeeUSD: investment.amount,
-            amountAfterFeeBTC: investment.amountBTC,
-            investmentFeeUSD: investment.investmentFee,
-            investmentFeeBTC: investment.investmentFeeBTC,
-            expectedReturnBTC: investment.expectedReturnBTC,
+            planName: investment.plan?.name || 'Unknown Plan',
+            originalAmountUSD: investment.originalAmount || investmentAmountUSD,
+            originalAmountBTC: investment.originalAmountBTC || investmentAmountBTC,
+            amountAfterFeeUSD: investmentAmountUSD,
+            amountAfterFeeBTC: investmentAmountBTC,
+            investmentFeeUSD: investment.investmentFee || 0,
+            investmentFeeBTC: investment.investmentFeeBTC || 0,
+            expectedReturnBTC: investment.expectedReturnBTC || totalReturnBTC,
             actualReturnBTC: totalReturnBTC,
-            profitBTC: totalReturnBTC - investment.amountBTC,
-            profitUSD: expectedReturnUSD - investment.amount,
-            btcPriceAtStart: investment.btcPriceAtInvestment,
+            profitBTC: profitBTC,
+            profitUSD: profitUSD,
+            btcPriceAtStart: investment.btcPriceAtInvestment || currentBTCPrice,
             btcPriceAtCompletion: currentBTCPrice,
-            startDate: investment.startDate,
+            startDate: investment.startDate || investment.createdAt,
             endDate: investment.endDate,
             completionDate: now,
             autoCompleted: true
@@ -8508,7 +8517,23 @@ async function checkMaturedInvestments() {
         await session.commitTransaction();
         
         console.log(`✅✅✅ Auto-completed investment ${investment._id} for user ${user.email}`);
-        console.log(`   Profit: +${(totalReturnBTC - investment.amountBTC).toFixed(8)} BTC (≈ $${(expectedReturnUSD - investment.amount).toFixed(2)} USD)`);
+        console.log(`   Profit: +${profitBTC.toFixed(8)} BTC (≈ $${profitUSD.toFixed(2)} USD)`);
+        
+        // Emit real-time balance update via Socket.IO if available
+        if (global.io) {
+          global.io.to(`user_${user._id}`).emit('balance_update', {
+            main: user.balances.main?.get('usd') || 0,
+            active: user.balances.active?.get('usd') || 0,
+            matured: user.balances.matured?.get('usd') || 0
+          });
+          
+          global.io.to(`user_${user._id}`).emit('investment_matured', {
+            investmentId: investment._id,
+            profitUSD: profitUSD,
+            profitBTC: profitBTC,
+            newMaturedBalance: user.balances.matured.get('usd') || 0
+          });
+        }
         
         // Send email outside transaction
         try {
@@ -8521,6 +8546,7 @@ async function checkMaturedInvestments() {
       } catch (error) {
         await session.abortTransaction();
         console.error(`   ❌ Error processing investment ${investment._id}:`, error);
+        console.error(`   Error stack:`, error.stack);
       } finally {
         session.endSession();
       }
@@ -8705,8 +8731,8 @@ async function sendMaturationEmail(user, investment, totalReturnBTC, expectedRet
   };
 
   const cryptoLogoUrl = getCryptoLogoUrl('BTC');
-  const profitBTC = totalReturnBTC - investment.amountBTC;
-  const profitUSD = expectedReturnUSD - investment.amount;
+  const profitBTC = totalReturnBTC - (investment.amountBTC || 0);
+  const profitUSD = expectedReturnUSD - (investment.amount || 0);
   const formattedCompletionDate = new Date().toLocaleString('en-US', {
     year: 'numeric',
     month: 'long',
@@ -8741,7 +8767,7 @@ async function sendMaturationEmail(user, investment, totalReturnBTC, expectedRet
         </div>
         
         <p style="color: #333333; line-height: 1.6;">Dear <strong>${user.firstName}</strong>,</p>
-        <p style="color: #333333; line-height: 1.6;">Congratulations! Your <strong>${investment.plan.name}</strong> mining contract has matured. Your returns have been automatically credited to your <strong style="color: #10B981;">Matured Wallet</strong>.</p>
+        <p style="color: #333333; line-height: 1.6;">Congratulations! Your <strong>${investment.plan?.name || 'mining'}</strong> mining contract has matured. Your returns have been automatically credited to your <strong style="color: #10B981;">Matured Wallet</strong>.</p>
         
         <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
           <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
@@ -8755,32 +8781,32 @@ async function sendMaturationEmail(user, investment, totalReturnBTC, expectedRet
           <table style="width: 100%; border-collapse: collapse;">
             <tr>
               <td style="padding: 8px 0;"><strong>Plan Name:</strong></td>
-              <td style="padding: 8px 0; text-align: right;">${investment.plan.name}</td>
+              <td style="padding: 8px 0; text-align: right;">${investment.plan?.name || 'Unknown Plan'}</td>
             </tr>
             <tr style="border-top: 1px solid #E2E8F0;">
               <td style="padding: 8px 0;"><strong>Principal Investment:</strong></td>
-              <td style="padding: 8px 0; text-align: right;">${investment.amountBTC.toFixed(8)} BTC (≈ $${investment.amount.toLocaleString()} USD)</td>
-             </tr>
+              <td style="padding: 8px 0; text-align: right;">${(investment.amountBTC || 0).toFixed(8)} BTC (≈ $${(investment.amount || 0).toLocaleString()} USD)</td>
+            </tr>
             <tr style="border-top: 1px solid #E2E8F0;">
               <td style="padding: 8px 0;"><strong>Total Return:</strong></td>
               <td style="padding: 8px 0; text-align: right; font-weight: bold; color: #10B981;">${totalReturnBTC.toFixed(8)} BTC (≈ $${expectedReturnUSD.toLocaleString()} USD)</td>
-             </tr>
+            </tr>
             <tr style="border-top: 1px solid #E2E8F0;">
               <td style="padding: 8px 0;"><strong>Profit Earned:</strong></td>
               <td style="padding: 8px 0; text-align: right; color: #F7A600;">+ ${profitBTC.toFixed(8)} BTC (≈ $${profitUSD.toLocaleString()} USD)</td>
-             </tr>
+            </tr>
             <tr style="border-top: 1px solid #E2E8F0;">
               <td style="padding: 8px 0;"><strong>ROI Percentage:</strong></td>
-              <td style="padding: 8px 0; text-align: right; color: #F7A600;">+${investment.returnPercentage}%</td>
-             </tr>
+              <td style="padding: 8px 0; text-align: right; color: #F7A600;">+${investment.returnPercentage || 0}%</td>
+            </tr>
             <tr style="border-top: 1px solid #E2E8F0;">
               <td style="padding: 8px 0;"><strong>Duration:</strong></td>
-              <td style="padding: 8px 0; text-align: right;">${investment.plan.duration} hours</td>
-             </tr>
+              <td style="padding: 8px 0; text-align: right;">${investment.plan?.duration || 0} hours</td>
+            </tr>
             <tr style="border-top: 1px solid #E2E8F0;">
               <td style="padding: 8px 0;"><strong>Completion Date:</strong></td>
               <td style="padding: 8px 0; text-align: right;">${formattedCompletionDate}</td>
-             </tr>
+            </tr>
           </table>
         </div>
         
@@ -8816,11 +8842,9 @@ async function sendMaturationEmail(user, investment, totalReturnBTC, expectedRet
 
 // =============================================
 // START AUTOMATED MATURATION JOB
-// Runs every 10 seconds for more responsive completion
-// Your investment should complete within 10 seconds of maturity
 // =============================================
 function startMaturationJob() {
-  // Run every 10 SECONDS (not 60 seconds) for faster maturation detection
+  // Run every 10 seconds for faster maturation detection
   setInterval(checkMaturedInvestments, 10 * 1000);
   console.log('✅ Automated investment maturation job started (runs every 10 seconds)');
   
@@ -8837,35 +8861,20 @@ startMaturationJob();
 
 
 
-// Add this temporarily to debug
-app.get('/api/debug/investment/:id', protect, async (req, res) => {
-  try {
-    const investment = await Investment.findById(req.params.id)
-      .populate('plan');
-    
-    if (!investment) {
-      return res.status(404).json({ error: 'Investment not found' });
-    }
-    
-    const now = new Date();
-    const endDate = new Date(investment.endDate);
-    
-    res.json({
-      id: investment._id,
-      status: investment.status,
-      endDate: endDate,
-      currentTime: now,
-      isMatured: now >= endDate,
-      timeUntilMaturity: Math.max(0, endDate - now),
-      minutesUntilMaturity: Math.max(0, (endDate - now) / 60000),
-      plan: investment.plan?.name,
-      amountBTC: investment.amountBTC,
-      expectedReturnBTC: investment.expectedReturnBTC
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
