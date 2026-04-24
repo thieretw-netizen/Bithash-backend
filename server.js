@@ -1725,38 +1725,70 @@ const InvestmentSchema = new mongoose.Schema({
   amount: { 
     type: Number, 
     required: [true, 'Amount is required'], 
-    min: [0, 'Amount cannot be negative'],
-    set: v => parseFloat(v.toFixed(8))
+    min: [0, 'Amount cannot be negative']
   },
-  currency: {
-    type: String,
-    enum: ['USD', 'BTC', 'ETH', 'USDT'],
-    default: 'USD',
-    index: true
+  // CRITICAL: These fields MUST exist for cron job
+  amountBTC: {
+    type: Number,
+    default: 0,
+    min: [0, 'Amount cannot be negative']
   },
   originalAmount: {
     type: Number,
-    required: true
+    default: 0
+  },
+  originalAmountBTC: {
+    type: Number,
+    default: 0
   },
   originalCurrency: {
     type: String,
-    required: true
+    default: 'USD'
   },
   expectedReturn: { 
     type: Number, 
-    required: [true, 'Expected return is required'], 
-    min: [0, 'Expected return cannot be negative'] 
+    required: true,
+    default: 0
+  },
+  expectedReturnBTC: {
+    type: Number,
+    default: 0
   },
   actualReturn: {
     type: Number,
-    default: 0,
-    min: [0, 'Actual return cannot be negative']
+    default: 0
+  },
+  actualReturnBTC: {
+    type: Number,
+    default: 0
   },
   returnPercentage: {
     type: Number,
     required: true,
-    min: [0, 'Return percentage cannot be negative'],
-    max: [1000, 'Return percentage too high']
+    default: 0
+  },
+  // CRITICAL: Fee fields for accurate accounting
+  investmentFee: {
+    type: Number,
+    default: 0
+  },
+  investmentFeeBTC: {
+    type: Number,
+    default: 0
+  },
+  // CRITICAL: BTC price tracking
+  btcPriceAtInvestment: {
+    type: Number,
+    default: 0
+  },
+  btcPriceAtCompletion: {
+    type: Number,
+    default: 0
+  },
+  balanceType: {
+    type: String,
+    enum: ['main', 'matured'],
+    default: 'main'
   },
   dailyEarnings: [{
     date: { type: Date, required: true },
@@ -1795,8 +1827,6 @@ const InvestmentSchema = new mongoose.Schema({
     changedByModel: { type: String, enum: ['User', 'Admin', 'System'] },
     reason: String
   }],
-
-
   referredBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -1835,7 +1865,7 @@ const InvestmentSchema = new mongoose.Schema({
   payoutSchedule: {
     type: String,
     enum: ['daily', 'weekly', 'monthly', 'end_term'],
-    required: true
+    default: 'end_term'
   },
   totalPayouts: {
     type: Number,
@@ -1891,7 +1921,7 @@ const InvestmentSchema = new mongoose.Schema({
 InvestmentSchema.index({ user: 1, status: 1 });
 InvestmentSchema.index({ status: 1, endDate: 1 });
 InvestmentSchema.index({ referredBy: 1, status: 1 });
-InvestmentSchema.index({ 'dailyEarnings.date': 1 });
+InvestmentSchema.index({ dailyEarnings: 1 });
 InvestmentSchema.index({ createdAt: -1 });
 
 InvestmentSchema.virtual('daysRemaining').get(function() {
@@ -1901,17 +1931,11 @@ InvestmentSchema.virtual('daysRemaining').get(function() {
 });
 
 InvestmentSchema.virtual('totalValue').get(function() {
-  return this.amount + this.actualReturn;
+  return this.amount + (this.actualReturn || 0);
 });
 
 InvestmentSchema.virtual('isActive').get(function() {
   return this.status === 'active';
-});
-
-InvestmentSchema.virtual('payoutFrequency').get(function() {
-  return this.payoutSchedule === 'daily' ? 1 : 
-         this.payoutSchedule === 'weekly' ? 7 :
-         this.payoutSchedule === 'monthly' ? 30 : 0;
 });
 
 InvestmentSchema.pre('save', function(next) {
@@ -1930,7 +1954,7 @@ InvestmentSchema.pre('save', function(next) {
   
   if (this.isNew && !this.originalAmount) {
     this.originalAmount = this.amount;
-    this.originalCurrency = this.currency;
+    this.originalCurrency = this.currency || 'USD';
   }
   
   next();
@@ -1954,14 +1978,8 @@ InvestmentSchema.methods.addDailyEarning = function(amount, btcValue) {
     amount,
     btcValue
   });
-  this.actualReturn += amount;
+  this.actualReturn = (this.actualReturn || 0) + amount;
   this.lastPayoutDate = new Date();
-  
-  if (this.payoutFrequency > 0) {
-    const nextDate = new Date(this.lastPayoutDate);
-    nextDate.setDate(nextDate.getDate() + this.payoutFrequency);
-    this.nextPayoutDate = nextDate;
-  }
   
   return this.save();
 };
@@ -7920,32 +7938,31 @@ app.post('/api/investments', protect, [
     
     await user.save();
 
-    // Create investment record
-    const investment = await Investment.create({
-      user: userId,
-      plan: planId,
-      amount: investmentAmountAfterFeeUSD,
-      amountBTC: investmentAmountAfterFeeBTC,
-      originalAmount: amount,
-      originalAmountBTC: investmentBTCAmount,
-      originalCurrency: 'USD',
-      currency: 'BTC',
-      expectedReturn: expectedReturnUSD,
-      expectedReturnBTC: expectedReturnBTC,
-      returnPercentage: plan.percentage,
-      endDate,
-      payoutSchedule: 'end_term',
-      status: 'active',
-      ipAddress: req.ip,
-      userAgent: req.headers['user-agent'],
-      deviceInfo: getDeviceType(req),
-      termsAccepted: true,
-      investmentFee: investmentFeeUSD,
-      investmentFeeBTC: investmentFeeBTC,
-      balanceType: balanceType,
-      btcPriceAtInvestment: btcPrice
-    });
-
+    // At the investment creation section (around line 11500 in your file)
+const investment = await Investment.create({
+  user: userId,
+  plan: planId,
+  amount: investmentAmountAfterFeeUSD,
+  amountBTC: investmentAmountAfterFeeBTC,        // ADD THIS
+  originalAmount: amount,
+  originalAmountBTC: investmentBTCAmount,       // ADD THIS
+  originalCurrency: 'USD',
+  currency: 'BTC',
+  expectedReturn: expectedReturnUSD,
+  expectedReturnBTC: expectedReturnBTC,          // ADD THIS
+  returnPercentage: plan.percentage,
+  endDate,
+  payoutSchedule: 'end_term',
+  status: 'active',
+  ipAddress: req.ip,
+  userAgent: req.headers['user-agent'],
+  deviceInfo: getDeviceType(req),
+  termsAccepted: true,
+  investmentFee: investmentFeeUSD,               // ADD THIS
+  investmentFeeBTC: investmentFeeBTC,            // ADD THIS
+  balanceType: balanceType,
+  btcPriceAtInvestment: btcPrice                // ADD THIS
+});
     // ✅ FIXED: Create transaction record with POSITIVE numbers (not negative)
     const transaction = await Transaction.create({
       user: userId,
@@ -8508,10 +8525,6 @@ async function getRealTimeBitcoinPrice() {
   throw new Error('Unable to fetch current BTC price. Please try again later.');
 }
 
-// =============================================
-// AUTOMATIC INVESTMENT COMPLETION CRON JOB (every 60 seconds)
-// REPLACES the manual /api/investments/:id/complete endpoint
-// =============================================
 const completeMaturedInvestmentsCron = async () => {
   const startTime = Date.now();
   console.log('🔄 [CRON] Running automatic investment maturity check...');
@@ -8546,95 +8559,120 @@ const completeMaturedInvestmentsCron = async () => {
           continue;
         }
 
-        // Get current BTC price using the aggregator
+        // Get current BTC price
         let currentBTCPrice;
         try {
           currentBTCPrice = await getRealTimeBitcoinPrice();
           console.log(`📊 [CRON] BTC price for ${investment._id}: $${currentBTCPrice}`);
         } catch (priceError) {
           console.error(`❌ [CRON] Failed to get BTC price for ${investment._id}:`, priceError.message);
-          // Use the stored price from creation time as fallback
-          currentBTCPrice = investment.btcPriceAtInvestment;
+          currentBTCPrice = investment.btcPriceAtInvestment || 50000;
           console.log(`⚠️ [CRON] Using fallback BTC price: $${currentBTCPrice}`);
         }
 
-        // Calculate total return in BTC using current price
-        const expectedReturnUSD = investment.expectedReturn;
-        const totalReturnBTC = expectedReturnUSD / currentBTCPrice;
-        const profitBTC = totalReturnBTC - investment.amountBTC;
-        const profitUSD = expectedReturnUSD - investment.amount;
+        // CRITICAL: Use existing fields with fallbacks
+        const principalBTC = investment.amountBTC || 0;
+        const principalUSD = investment.amount || 0;
+        const expectedReturnUSD = investment.expectedReturn || principalUSD;
+        const expectedReturnBTC = investment.expectedReturnBTC || (expectedReturnUSD / currentBTCPrice);
+        
+        // Calculate total return
+        const totalReturnBTC = expectedReturnBTC;
+        const totalReturnUSD = expectedReturnUSD;
+        const profitBTC = totalReturnBTC - principalBTC;
+        const profitUSD = totalReturnUSD - principalUSD;
 
-        // Initialize balances Maps if they don't exist
+        console.log(`📊 [CRON] Investment ${investment._id}:`);
+        console.log(`   Principal: ${principalBTC} BTC ($${principalUSD})`);
+        console.log(`   Expected Return: ${totalReturnBTC} BTC ($${totalReturnUSD})`);
+        console.log(`   Profit: ${profitBTC} BTC ($${profitUSD})`);
+
+        // Initialize balances Maps
         if (!user.balances) {
           user.balances = { main: new Map(), active: new Map(), matured: new Map() };
         }
+        if (!user.balances.active) user.balances.active = new Map();
+        if (!user.balances.matured) user.balances.matured = new Map();
 
         // Check active balance
-        const currentActiveBTC = user.balances.active?.get('btc') || 0;
+        const currentActiveBTC = user.balances.active.get('btc') || 0;
         
-        if (currentActiveBTC < investment.amountBTC) {
-          console.error(`❌ [CRON] Insufficient active BTC balance for ${investment._id}. Required: ${investment.amountBTC}, Available: ${currentActiveBTC}`);
+        if (currentActiveBTC < principalBTC - 0.00000001) {
+          console.error(`❌ [CRON] Insufficient active BTC balance for ${investment._id}. Required: ${principalBTC}, Available: ${currentActiveBTC}`);
           failedCount++;
           continue;
         }
 
-        // Start transaction session for atomic operation
+        // CRITICAL: Use session for atomic operation
         const session = await mongoose.startSession();
         session.startTransaction();
 
         try {
           // Transfer from active wallet to matured wallet
-          const newActiveBTC = currentActiveBTC - investment.amountBTC;
-          user.balances.active.set('btc', newActiveBTC);
+          const newActiveBTC = currentActiveBTC - principalBTC;
+          if (newActiveBTC <= 0.00000001) {
+            user.balances.active.delete('btc');
+          } else {
+            user.balances.active.set('btc', newActiveBTC);
+          }
 
-          const currentMaturedBTC = user.balances.matured?.get('btc') || 0;
+          const currentMaturedBTC = user.balances.matured.get('btc') || 0;
           user.balances.matured.set('btc', currentMaturedBTC + totalReturnBTC);
 
           // Update USD equivalents
-          const currentActiveUSD = user.balances.active?.get('usd') || 0;
-          user.balances.active.set('usd', currentActiveUSD - investment.amount);
+          const currentActiveUSD = user.balances.active.get('usd') || 0;
+          if (currentActiveUSD - principalUSD <= 0.01) {
+            user.balances.active.delete('usd');
+          } else {
+            user.balances.active.set('usd', currentActiveUSD - principalUSD);
+          }
 
-          const currentMaturedUSD = user.balances.matured?.get('usd') || 0;
-          user.balances.matured.set('usd', currentMaturedUSD + expectedReturnUSD);
+          const currentMaturedUSD = user.balances.matured.get('usd') || 0;
+          user.balances.matured.set('usd', currentMaturedUSD + totalReturnUSD);
 
           // Update investment record
           investment.status = 'completed';
           investment.completionDate = now;
-          investment.actualReturnBTC = totalReturnBTC - investment.amountBTC;
-          investment.actualReturnUSD = expectedReturnUSD - investment.amount;
+          investment.actualReturn = profitUSD;
+          investment.actualReturnBTC = profitBTC;
           investment.btcPriceAtCompletion = currentBTCPrice;
 
           await user.save({ session });
           await investment.save({ session });
 
-          // Create transaction record with POSITIVE numbers
+          // Create transaction record with valid reference
+          const transactionRef = `AUTO-MAT-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+          
           await Transaction.create([{
             user: userId,
             type: 'interest',
-            amount: expectedReturnUSD - investment.amount,
-            amountBTC: totalReturnBTC - investment.amountBTC,
+            amount: profitUSD,
+            amountBTC: profitBTC,
             currency: 'BTC',
             status: 'completed',
             method: 'INTERNAL',
-            reference: `AUTO-RET-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+            reference: transactionRef,
             details: {
               investmentId: investment._id,
-              planName: investment.plan.name,
-              principalUSD: investment.amount,
-              principalBTC: investment.amountBTC,
-              interestUSD: expectedReturnUSD - investment.amount,
-              interestBTC: totalReturnBTC - investment.amountBTC,
+              planName: investment.plan?.name || 'Unknown Plan',
+              principalUSD: principalUSD,
+              principalBTC: principalBTC,
+              interestUSD: profitUSD,
+              interestBTC: profitBTC,
               btcPriceAtStart: investment.btcPriceAtInvestment,
               btcPriceAtCompletion: currentBTCPrice,
               transactionType: 'credit',
               completedBy: 'system_cron'
             },
             fee: 0,
-            netAmountUSD: expectedReturnUSD - investment.amount,
-            netAmountBTC: totalReturnBTC - investment.amountBTC
+            netAmount: profitUSD,
+            netAmountBTC: profitBTC,
+            exchangeRateAtTime: currentBTCPrice,
+            processedAt: new Date(),
+            processedBy: null
           }], { session });
 
-          // Create user log for automatic completion (without req object)
+          // Create user log
           await UserLog.create([{
             user: userId,
             username: user.email,
@@ -8642,41 +8680,33 @@ const completeMaturedInvestmentsCron = async () => {
             userFullName: `${user.firstName} ${user.lastName}`,
             action: 'investment_matured',
             actionCategory: 'investment',
-            ipAddress: 'system',
+            ipAddress: 'system.cron',
             userAgent: 'system_cron_job',
             deviceInfo: {
               type: 'system',
               os: { name: 'System', version: '1.0' },
               browser: { name: 'CronJob', version: '1.0' },
-              platform: 'server',
-              language: 'en',
-              timezone: 'UTC'
+              platform: 'server'
             },
             location: {
               ip: 'system.cron',
               country: { name: 'System', code: 'SY' },
               region: { name: 'System', code: 'SY' },
-              city: 'System',
-              postalCode: '00000',
-              latitude: null,
-              longitude: null,
-              timezone: 'UTC',
-              isp: 'Internal',
-              exactLocation: false
+              city: 'System'
             },
             status: 'success',
             metadata: {
-              planName: investment.plan.name,
-              originalAmountUSD: investment.originalAmount,
-              originalAmountBTC: investment.originalAmountBTC,
-              amountAfterFeeUSD: investment.amount,
-              amountAfterFeeBTC: investment.amountBTC,
-              investmentFeeUSD: investment.investmentFee,
-              investmentFeeBTC: investment.investmentFeeBTC,
-              expectedReturnBTC: investment.expectedReturnBTC,
+              planName: investment.plan?.name,
+              originalAmountUSD: investment.originalAmount || principalUSD,
+              originalAmountBTC: investment.originalAmountBTC || principalBTC,
+              amountAfterFeeUSD: principalUSD,
+              amountAfterFeeBTC: principalBTC,
+              investmentFeeUSD: investment.investmentFee || 0,
+              investmentFeeBTC: investment.investmentFeeBTC || 0,
+              expectedReturnBTC: expectedReturnBTC,
               actualReturnBTC: totalReturnBTC,
-              profitBTC: totalReturnBTC - investment.amountBTC,
-              profitUSD: expectedReturnUSD - investment.amount,
+              profitBTC: profitBTC,
+              profitUSD: profitUSD,
               btcPriceAtStart: investment.btcPriceAtInvestment,
               btcPriceAtCompletion: currentBTCPrice,
               startDate: investment.startDate,
@@ -8690,7 +8720,7 @@ const completeMaturedInvestmentsCron = async () => {
 
           await session.commitTransaction();
 
-          console.log(`✅ [CRON] Completed investment ${investment._id} for user ${user.email}. Return: ${totalReturnBTC.toFixed(8)} BTC ($${expectedReturnUSD.toFixed(2)} USD)`);
+          console.log(`✅ [CRON] Completed investment ${investment._id} for user ${user.email}. Return: ${totalReturnBTC.toFixed(8)} BTC ($${totalReturnUSD.toFixed(2)} USD)`);
           completedCount++;
 
           // =============================================
@@ -8707,15 +8737,15 @@ const completeMaturedInvestmentsCron = async () => {
             };
 
             const cryptoLogoUrl = getCryptoLogoUrl('BTC');
-            const formattedPrincipalUSD = investment.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-            const formattedPrincipalBTC = investment.amountBTC.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
-            const formattedReturnUSD = expectedReturnUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            const formattedPrincipalUSD = principalUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            const formattedPrincipalBTC = principalBTC.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
+            const formattedReturnUSD = totalReturnUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
             const formattedReturnBTC = totalReturnBTC.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
             const formattedProfitUSD = profitUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
             const formattedProfitBTC = profitBTC.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
-            const formattedStartPrice = investment.btcPriceAtInvestment.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            const formattedStartPrice = (investment.btcPriceAtInvestment || 50000).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
             const formattedEndPrice = currentBTCPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-            const priceChangePercent = ((currentBTCPrice - investment.btcPriceAtInvestment) / investment.btcPriceAtInvestment * 100).toFixed(2);
+            const priceChangePercent = ((currentBTCPrice - (investment.btcPriceAtInvestment || 50000)) / (investment.btcPriceAtInvestment || 50000) * 100).toFixed(2);
             const formattedCompletionDate = now.toLocaleString('en-US', {
               year: 'numeric',
               month: 'long',
@@ -8755,7 +8785,7 @@ const completeMaturedInvestmentsCron = async () => {
                   </div>
                   
                   <p style="color: #333333; line-height: 1.6;">Dear <strong>${user.firstName}</strong>,</p>
-                  <p style="color: #333333; line-height: 1.6;">Congratulations! Your <strong>${investment.plan.name}</strong> mining contract has matured. Your returns have been credited to your <strong style="color: #10B981;">Matured Wallet</strong>.</p>
+                  <p style="color: #333333; line-height: 1.6;">Congratulations! Your <strong>${investment.plan?.name || 'Investment'}</strong> mining contract has matured. Your returns have been credited to your <strong style="color: #10B981;">Matured Wallet</strong>.</p>
                   
                   <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
                     <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
@@ -8769,7 +8799,7 @@ const completeMaturedInvestmentsCron = async () => {
                     <table style="width: 100%; border-collapse: collapse;">
                       <tr>
                         <td style="padding: 8px 0;"><strong>Plan Name:</strong></td>
-                        <td style="padding: 8px 0; text-align: right;">${investment.plan.name}</td>
+                        <td style="padding: 8px 0; text-align: right;">${investment.plan?.name || 'Investment Plan'}</td>
                       </tr>
                       <tr style="border-top: 1px solid #E2E8F0;">
                         <td style="padding: 8px 0;"><strong>Principal Investment:</strong></td>
@@ -8785,19 +8815,11 @@ const completeMaturedInvestmentsCron = async () => {
                       </tr>
                       <tr style="border-top: 1px solid #E2E8F0;">
                         <td style="padding: 8px 0;"><strong>ROI Percentage:</strong></td>
-                        <td style="padding: 8px 0; text-align: right; color: #F7A600;">+${investment.returnPercentage}%</td>
+                        <td style="padding: 8px 0; text-align: right; color: #F7A600;">+${investment.returnPercentage || 0}%</td>
                       </tr>
                       <tr style="border-top: 1px solid #E2E8F0;">
                         <td style="padding: 8px 0;"><strong>Duration:</strong></td>
-                        <td style="padding: 8px 0; text-align: right;">${investment.plan.duration} hours</td>
-                      </tr>
-                      <tr style="border-top: 1px solid #E2E8F0;">
-                        <td style="padding: 8px 0;"><strong>Hashrate:</strong></td>
-                        <td style="padding: 8px 0; text-align: right;">${investment.plan.duration === 10 ? '68' : investment.plan.duration === 24 ? '110' : investment.plan.duration === 48 ? '150' : investment.plan.duration === 72 ? '234' : '255'} TH/s</td>
-                      </tr>
-                      <tr style="border-top: 1px solid #E2E8F0;">
-                        <td style="padding: 8px 0;"><strong>Mining Type:</strong></td>
-                        <td style="padding: 8px 0; text-align: right;">SHA-256 ASIC mining</td>
+                        <td style="padding: 8px 0; text-align: right;">${investment.plan?.duration || 0} hours</td>
                       </tr>
                       <tr style="border-top: 1px solid #E2E8F0;">
                         <td style="padding: 8px 0;"><strong>Completion Date:</strong></td>
@@ -8806,14 +8828,6 @@ const completeMaturedInvestmentsCron = async () => {
                       <tr style="border-top: 1px solid #E2E8F0;">
                         <td style="padding: 8px 0;"><strong>New Matured Wallet Balance:</strong></td>
                         <td style="padding: 8px 0; text-align: right; font-weight: bold; color: #10B981;">${formattedNewMaturedBTC} BTC (≈ $${formattedNewMaturedUSD} USD)</td>
-                      </tr>
-                      <tr style="border-top: 1px solid #E2E8F0;">
-                        <td style="padding: 8px 0;"><strong>BTC Price at Investment:</strong></td>
-                        <td style="padding: 8px 0; text-align: right;">$${formattedStartPrice}</td>
-                      </tr>
-                      <tr style="border-top: 1px solid #E2E8F0;">
-                        <td style="padding: 8px 0;"><strong>BTC Price at Maturity:</strong></td>
-                        <td style="padding: 8px 0; text-align: right; color: ${priceChangePercent >= 0 ? '#10B981' : '#EF4444'};">$${formattedEndPrice} (${priceChangePercent >= 0 ? '+' : ''}${priceChangePercent}%)</td>
                       </tr>
                     </table>
                   </div>
@@ -8855,7 +8869,7 @@ const completeMaturedInvestmentsCron = async () => {
           }
 
           // Emit real-time balance update via Socket.IO
-          const io = global.io || (req && req.app ? req.app.get('io') : null);
+          const io = global.io;
           if (io) {
             io.to(`user_${userId}`).emit('balance_update', {
               main: user.balances.main?.get('usd') || 0,
@@ -8887,20 +8901,6 @@ const completeMaturedInvestmentsCron = async () => {
     console.error('❌ [CRON] Fatal error in investment maturity cron job:', error);
   }
 };
-
-// =============================================
-// START THE AUTOMATIC INVESTMENT COMPLETION CRON JOB
-// Runs every 60 seconds (milliseconds precision)
-// =============================================
-setInterval(completeMaturedInvestmentsCron, 60 * 1000); // 60 seconds
-
-// Initial run at startup to catch any missed investments
-setTimeout(() => {
-  console.log('🚀 [CRON] Running initial investment maturity check on startup...');
-  completeMaturedInvestmentsCron();
-}, 5000); // Run 5 seconds after server starts
-
-
 
 
 
