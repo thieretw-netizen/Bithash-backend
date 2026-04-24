@@ -8902,7 +8902,11 @@ const completeMaturedInvestmentsCron = async () => {
   }
 };
 
-
+// AUTO INVESTMENT MATURITY CHECK - EVERY 15 SECONDS
+setInterval(() => {
+    console.log(`🔍 [${new Date().toISOString()}] Running investment maturity check...`);
+    completeMaturedInvestmentsCron();
+}, 15000);
 
 
 
