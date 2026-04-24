@@ -6140,7 +6140,29 @@ async function startHealthMonitoring() {
             timestamp: now
         };
         
-        await redis.set(REDIS_KEYS.AGGREGATOR_STATUS, JSON.stringify(status));
+
+
+await redis.hset(REDIS_KEYS.AGGREGATOR_STATUS, {
+  websocket: binanceCombinedWs ? binanceCombinedWs.readyState : -1,
+  subscribed_symbols: subscribedSymbols.size,
+  last_update: await redis.hgetall(REDIS_KEYS.AGGREGATOR_STATUS),
+  uptime: process.uptime(),
+  memory_usage: JSON.stringify(process.memoryUsage()),
+  timestamp: now
+});
+
+
+
+
+
+
+
+
+
+
+
+
+      
         
         // Check for stale symbols
         for (const symbol of subscribedSymbols) {
