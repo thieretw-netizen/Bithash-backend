@@ -706,7 +706,7 @@ const UserLogSchema = new mongoose.Schema({
   deviceInfo: {
     type: {
       type: String,
-      enum: ['desktop', 'mobile', 'tablet', 'unknown'],
+      enum: ['desktop', 'mobile', 'tablet', 'unknown''system'],
       required: true
     },
     os: {
