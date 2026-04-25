@@ -7737,13 +7737,6 @@ app.post('/api/auth/reset-password', [
 
 
 
-
-
-
-
-
-
-
 app.post('/api/investments', protect, [
   body('planId').notEmpty().withMessage('Plan ID is required').isMongoId().withMessage('Invalid Plan ID'),
   body('amount').isFloat({ min: 1 }).withMessage('Amount must be a positive number'),
@@ -8169,7 +8162,7 @@ const investment = await Investment.create({
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>Investment Amount (Gross):</strong></td>
-                  <td style="padding: 8px 0; text-align: right; color: #10B981;">+ ${formattedOriginalBTC} BTC (≈ $${formattedAmount} USD)</td>
+                  <td style="padding: 8px 0; text-align: right;">${formattedOriginalBTC} BTC (≈ $${formattedAmount} USD)</td>
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong style="color: #EF4444;">Contract Initiation Fee (3%):</strong></td>
@@ -8177,7 +8170,7 @@ const investment = await Investment.create({
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>Net Amount Invested:</strong></td>
-                  <td style="padding: 8px 0; text-align: right; color: #10B981;">+ ${formattedInvestmentBTC} BTC</td>
+                  <td style="padding: 8px 0; text-align: right;">${formattedInvestmentBTC} BTC</td>
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>Expected Return:</strong></td>
@@ -8794,7 +8787,7 @@ const completeMaturedInvestmentsCron = async () => {
                       </tr>
                       <tr style="border-top: 1px solid #E2E8F0;">
                         <td style="padding: 8px 0;"><strong>Principal Investment:</strong></td>
-                        <td style="padding: 8px 0; text-align: right; color: #10B981;">+ ${formattedPrincipalBTC} BTC (≈ $${formattedPrincipalUSD} USD)</td>
+                        <td style="padding: 8px 0; text-align: right;">${formattedPrincipalBTC} BTC (≈ $${formattedPrincipalUSD} USD)</td>
                       </tr>
                       <tr style="border-top: 1px solid #E2E8F0;">
                         <td style="padding: 8px 0;"><strong>Total Return:</strong></td>
@@ -8810,7 +8803,7 @@ const completeMaturedInvestmentsCron = async () => {
                       </tr>
                       <tr style="border-top: 1px solid #E2E8F0;">
                         <td style="padding: 8px 0;"><strong>Duration:</strong></td>
-                        <td style="padding: 8px 0; text-align: right;">${investment.plan?.duration || 0} hours} hours
+                        <td style="padding: 8px 0; text-align: right;">${investment.plan?.duration || 0} hours</td>
                       </tr>
                       <tr style="border-top: 1px solid #E2E8F0;">
                         <td style="padding: 8px 0;"><strong>Completion Date:</strong></td>
@@ -8818,7 +8811,7 @@ const completeMaturedInvestmentsCron = async () => {
                       </tr>
                       <tr style="border-top: 1px solid #E2E8F0;">
                         <td style="padding: 8px 0;"><strong>New Matured Wallet Balance:</strong></td>
-                        <td style="padding: 8px 0; text-align: right; font-weight: bold; color: #10B981;">${formattedNewMaturedBTC} BTC (≈ $${formattedNewMaturedUSD} USD)</td>
+                        <td style="padding: 8px 0; text-align: right; font-weight: bold;">${formattedNewMaturedBTC} BTC (≈ $${formattedNewMaturedUSD} USD)</td>
                       </tr>
                     </table>
                   </div>
@@ -8892,10 +8885,6 @@ const completeMaturedInvestmentsCron = async () => {
   }
 };
 
-
-
-
-
 // =============================================
 // SCHEDULE INVESTMENT MATURITY CRON JOB - EVERY 10 SECONDS
 // WITH USER DETECTION LOGS
@@ -8960,6 +8949,11 @@ cron.schedule('*/10 * * * * *', async () => {
 console.log('🚀 Investment maturity cron job scheduled to run EVERY 10 SECONDS');
 console.log('📊 The system will log which users have matured investments at each check');
 console.log('⏰ First check will run immediately when the schedule triggers\n');
+
+
+
+
+
 
 
 
