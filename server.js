@@ -7744,9 +7744,6 @@ app.post('/api/auth/reset-password', [
 
 
 
-
-
-
 app.post('/api/investments', protect, [
   body('planId').notEmpty().withMessage('Plan ID is required').isMongoId().withMessage('Invalid Plan ID'),
   body('amount').isFloat({ min: 1 }).withMessage('Amount must be a positive number'),
@@ -8160,7 +8157,7 @@ const investment = await Investment.create({
               <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
                 <img src="${cryptoLogoUrl}" width="32" height="32" style="border-radius: 50%;">
                 <div>
-                  <div style="font-weight: bold; font-size: 18px;">+ ${formattedInvestmentBTC} BTC</div>
+                  <div style="font-weight: bold; font-size: 18px; color: #10B981;">+ ${formattedInvestmentBTC} BTC</div>
                   <div style="color: #64748B; font-size: 12px;">≈ $${(investmentAmountAfterFeeUSD).toLocaleString()} USD credited to Active Wallet</div>
                 </div>
               </div>
@@ -8172,7 +8169,7 @@ const investment = await Investment.create({
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>Investment Amount (Gross):</strong></td>
-                  <td style="padding: 8px 0; text-align: right;">${formattedOriginalBTC} BTC (≈ $${formattedAmount} USD)</td>
+                  <td style="padding: 8px 0; text-align: right; color: #10B981;">+ ${formattedOriginalBTC} BTC (≈ $${formattedAmount} USD)</td>
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong style="color: #EF4444;">Contract Initiation Fee (3%):</strong></td>
@@ -8180,15 +8177,15 @@ const investment = await Investment.create({
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>Net Amount Invested:</strong></td>
-                  <td style="padding: 8px 0; text-align: right;">${formattedInvestmentBTC} BTC</td>
+                  <td style="padding: 8px 0; text-align: right; color: #10B981;">+ ${formattedInvestmentBTC} BTC</td>
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>Expected Return:</strong></td>
-                  <td style="padding: 8px 0; text-align: right; font-weight: bold; color: #10B981;">${formattedExpectedReturnBTC} BTC (≈ $${formattedExpectedReturnUSD} USD)</td>
+                  <td style="padding: 8px 0; text-align: right; font-weight: bold; color: #10B981;">+ ${formattedExpectedReturnBTC} BTC (≈ $${formattedExpectedReturnUSD} USD)</td>
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>ROI Percentage:</strong></td>
-                  <td style="padding: 8px 0; text-align: right; color: #F7A600;">+${plan.percentage}%</td>
+                  <td style="padding: 8px 0; text-align: right; color: #10B981;">+${plan.percentage}%</td>
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>Duration:</strong></td>
@@ -8785,7 +8782,7 @@ const completeMaturedInvestmentsCron = async () => {
                     <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
                       <img src="${cryptoLogoUrl}" width="32" height="32" style="border-radius: 50%;">
                       <div>
-                        <div style="font-weight: bold; font-size: 18px;">+ ${formattedReturnBTC} BTC</div>
+                        <div style="font-weight: bold; font-size: 18px; color: #10B981;">+ ${formattedReturnBTC} BTC</div>
                         <div style="color: #64748B; font-size: 12px;">≈ $${formattedReturnUSD} USD credited to Matured Wallet</div>
                       </div>
                     </div>
@@ -8797,23 +8794,23 @@ const completeMaturedInvestmentsCron = async () => {
                       </tr>
                       <tr style="border-top: 1px solid #E2E8F0;">
                         <td style="padding: 8px 0;"><strong>Principal Investment:</strong></td>
-                        <td style="padding: 8px 0; text-align: right;">${formattedPrincipalBTC} BTC (≈ $${formattedPrincipalUSD} USD)</td>
+                        <td style="padding: 8px 0; text-align: right; color: #10B981;">+ ${formattedPrincipalBTC} BTC (≈ $${formattedPrincipalUSD} USD)</td>
                       </tr>
                       <tr style="border-top: 1px solid #E2E8F0;">
                         <td style="padding: 8px 0;"><strong>Total Return:</strong></td>
-                        <td style="padding: 8px 0; text-align: right; font-weight: bold; color: #10B981;">${formattedReturnBTC} BTC (≈ $${formattedReturnUSD} USD)</td>
+                        <td style="padding: 8px 0; text-align: right; font-weight: bold; color: #10B981;">+ ${formattedReturnBTC} BTC (≈ $${formattedReturnUSD} USD)</td>
                       </tr>
                       <tr style="border-top: 1px solid #E2E8F0;">
                         <td style="padding: 8px 0;"><strong>Profit Earned:</strong></td>
-                        <td style="padding: 8px 0; text-align: right; color: #F7A600;">+ ${formattedProfitBTC} BTC (≈ $${formattedProfitUSD} USD)</td>
+                        <td style="padding: 8px 0; text-align: right; color: #10B981;">+ ${formattedProfitBTC} BTC (≈ $${formattedProfitUSD} USD)</td>
                       </tr>
                       <tr style="border-top: 1px solid #E2E8F0;">
                         <td style="padding: 8px 0;"><strong>ROI Percentage:</strong></td>
-                        <td style="padding: 8px 0; text-align: right; color: #F7A600;">+${investment.returnPercentage || 0}%</td>
+                        <td style="padding: 8px 0; text-align: right; color: #10B981;">+${investment.returnPercentage || 0}%</td>
                       </tr>
                       <tr style="border-top: 1px solid #E2E8F0;">
                         <td style="padding: 8px 0;"><strong>Duration:</strong></td>
-                        <td style="padding: 8px 0; text-align: right;">${investment.plan?.duration || 0} hours</td>
+                        <td style="padding: 8px 0; text-align: right;">${investment.plan?.duration || 0} hours} hours
                       </tr>
                       <tr style="border-top: 1px solid #E2E8F0;">
                         <td style="padding: 8px 0;"><strong>Completion Date:</strong></td>
@@ -8827,13 +8824,12 @@ const completeMaturedInvestmentsCron = async () => {
                   </div>
                   
                   <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
-                    <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">💰 Funds Available in Matured Wallet</p>
+                    <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;"> Funds Available in Matured Wallet</p>
                     <p style="color: #78350F; margin: 0; font-size: 14px;">Your matured funds are now available. You can reinvest into a new mining contract, withdraw to your external wallet, or convert to other cryptocurrencies.</p>
                   </div>
                   
                   <div style="text-align: center; margin: 30px 0;">
-                    <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block; margin-right: 12px;">View Dashboard</a>
-                    <a href="https://www.bithashcapital.live/invest" style="background-color: #10B981; color: #FFFFFF; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Reinvest Now</a>
+                    <a href="https://www.bithashcapital.live/dashboard" style="background-color: #10B981; color: #FFFFFF; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Reinvest Now</a>
                   </div>
                   
                   <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${formattedCompletionDate}</p>
@@ -8853,7 +8849,7 @@ const completeMaturedInvestmentsCron = async () => {
             await mailTransporter.sendMail({
               from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
               to: user.email,
-              subject: `Congratulations!! 🥳🥳 Your Mining Rewards Are Here - ₿itHash Capital`,
+              subject: `Congratulations!!!Your Mining Rewards Are Here - ₿itHash Capital`,
               html: emailHtml
             });
             
@@ -8964,6 +8960,8 @@ cron.schedule('*/10 * * * * *', async () => {
 console.log('🚀 Investment maturity cron job scheduled to run EVERY 10 SECONDS');
 console.log('📊 The system will log which users have matured investments at each check');
 console.log('⏰ First check will run immediately when the schedule triggers\n');
+
+
 
 
 
