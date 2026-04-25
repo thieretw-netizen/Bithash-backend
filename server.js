@@ -8897,19 +8897,73 @@ const completeMaturedInvestmentsCron = async () => {
 };
 
 
+
+
+
+// =============================================
+// SCHEDULE INVESTMENT MATURITY CRON JOB - EVERY 10 SECONDS
+// WITH USER DETECTION LOGS
+// =============================================
+
+// Schedule the cron job to run every 10 seconds
 cron.schedule('*/10 * * * * *', async () => {
-  console.log('⏰ [CRON SCHEDULER] Running investment maturity check (every 10 seconds)...');
-  await completeMaturedInvestmentsCron();
+  const runTime = new Date().toISOString();
+  console.log(`\n${'='.repeat(70)}`);
+  console.log(`⏰ [CRON SCHEDULER] Investment maturity check STARTED at ${runTime}`);
+  console.log(`⏰ [CRON SCHEDULER] Next check scheduled in 10 seconds`);
+  console.log(`${'='.repeat(70)}`);
+  
+  try {
+    // Find matured investments first to log which users were found
+    const now = new Date();
+    const maturedInvestments = await Investment.find({
+      status: 'active',
+      endDate: { $lte: now }
+    }).populate('user plan');
+    
+    if (maturedInvestments.length > 0) {
+      console.log(`\n🔍 [CRON SCHEDULER] FOUND ${maturedInvestments.length} USER(S) WITH MATURED INVESTMENTS:`);
+      console.log(`${'─'.repeat(70)}`);
+      
+      for (const investment of maturedInvestments) {
+        const userEmail = investment.user?.email || 'Unknown User';
+        const userName = investment.user ? `${investment.user.firstName || ''} ${investment.user.lastName || ''}`.trim() || 'Unknown' : 'Unknown';
+        const planName = investment.plan?.name || 'Unknown Plan';
+        const investmentAmount = investment.amount || 0;
+        const expectedReturn = investment.expectedReturn || 0;
+        
+        console.log(`\n👤 USER FOUND: ${userEmail} (${userName})`);
+        console.log(`   ├─ Investment ID: ${investment._id}`);
+        console.log(`   ├─ Plan: ${planName}`);
+        console.log(`   ├─ Amount: $${investmentAmount.toLocaleString()}`);
+        console.log(`   ├─ Expected Return: $${expectedReturn.toLocaleString()}`);
+        console.log(`   ├─ Profit: $${(expectedReturn - investmentAmount).toLocaleString()}`);
+        console.log(`   └─ End Date: ${investment.endDate}`);
+      }
+      console.log(`\n${'─'.repeat(70)}`);
+      console.log(`🔄 [CRON SCHEDULER] Processing ${maturedInvestments.length} matured investment(s)...\n`);
+    } else {
+      console.log(`📭 [CRON SCHEDULER] No users with matured investments found at ${runTime}`);
+    }
+    
+    // Run the actual cron job to process them
+    await completeMaturedInvestmentsCron();
+    
+    const endTime = new Date().toISOString();
+    console.log(`✅ [CRON SCHEDULER] Investment maturity check COMPLETED at ${endTime}`);
+    console.log(`✅ [CRON SCHEDULER] Duration: ${Date.now() - new Date(runTime).getTime()}ms`);
+    console.log(`${'='.repeat(70)}\n`);
+    
+  } catch (error) {
+    console.error(`❌ [CRON SCHEDULER] Investment maturity check FAILED at ${new Date().toISOString()}`);
+    console.error(`❌ [CRON SCHEDULER] Error:`, error.message);
+    console.log(`${'='.repeat(70)}\n`);
+  }
 });
 
-console.log('✅ Investment maturity cron job scheduled to run every 10 seconds');
-
-
-
-
-
-
-
+console.log('🚀 Investment maturity cron job scheduled to run EVERY 10 SECONDS');
+console.log('📊 The system will log which users have matured investments at each check');
+console.log('⏰ First check will run immediately when the schedule triggers\n');
 
 
 
