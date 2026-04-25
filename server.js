@@ -7747,14 +7747,6 @@ app.post('/api/auth/reset-password', [
 
 
 
-
-
-
-
-
-
-
-
 app.post('/api/investments', protect, [
   body('planId').notEmpty().withMessage('Plan ID is required').isMongoId().withMessage('Invalid Plan ID'),
   body('amount').isFloat({ min: 1 }).withMessage('Amount must be a positive number'),
@@ -8225,16 +8217,16 @@ const investment = await Investment.create({
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>Deducted From:</strong></td>
                   <td style="padding: 8px 0; text-align: right;"><span style="background: #F7A600; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">${walletName} Wallet</span></td>
-                 </tr>
+                </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>Exchange Rate (BTC/USD):</strong></td>
                   <td style="padding: 8px 0; text-align: right;">1 BTC = $${formattedBtcPrice}</td>
-                 </tr>
+                </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>Contract ID:</strong></td>
                   <td style="padding: 8px 0; text-align: right; font-size: 11px;">${transaction.reference}</td>
-                 </tr>
-               </table>
+                </tr>
+              </table>
             </div>
             
             <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
@@ -8594,9 +8586,10 @@ const completeMaturedInvestmentsCron = async () => {
         if (!user.balances.active) user.balances.active = new Map();
         if (!user.balances.matured) user.balances.matured = new Map();
 
-        // Check active balance
+        // FIXED: CORRECTLY check active balance using Map.get()
         const currentActiveBTC = user.balances.active.get('btc') || 0;
         
+        // Check if there's enough balance in active wallet (with small tolerance for floating point)
         if (currentActiveBTC < principalBTC - 0.00000001) {
           console.error(`❌ [CRON] Insufficient active BTC balance for ${investment._id}. Required: ${principalBTC}, Available: ${currentActiveBTC}`);
           failedCount++;
@@ -8608,7 +8601,7 @@ const completeMaturedInvestmentsCron = async () => {
         session.startTransaction();
 
         try {
-          // Transfer from active wallet to matured wallet
+          // FIXED: Use Map.set() to update active wallet
           const newActiveBTC = currentActiveBTC - principalBTC;
           if (newActiveBTC <= 0.00000001) {
             user.balances.active.delete('btc');
@@ -8616,10 +8609,11 @@ const completeMaturedInvestmentsCron = async () => {
             user.balances.active.set('btc', newActiveBTC);
           }
 
+          // FIXED: Use Map.set() to update matured wallet
           const currentMaturedBTC = user.balances.matured.get('btc') || 0;
           user.balances.matured.set('btc', currentMaturedBTC + totalReturnBTC);
 
-          // Update USD equivalents
+          // Update USD equivalents using Map.set()
           const currentActiveUSD = user.balances.active.get('usd') || 0;
           if (currentActiveUSD - principalUSD <= 0.01) {
             user.balances.active.delete('usd');
@@ -8901,6 +8895,18 @@ const completeMaturedInvestmentsCron = async () => {
     console.error('❌ [CRON] Fatal error in investment maturity cron job:', error);
   }
 };
+
+
+cron.schedule('*/10 * * * * *', async () => {
+  console.log('⏰ [CRON SCHEDULER] Running investment maturity check (every 10 seconds)...');
+  await completeMaturedInvestmentsCron();
+});
+
+console.log('✅ Investment maturity cron job scheduled to run every 10 seconds');
+
+
+
+
 
 
 
