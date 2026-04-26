@@ -5471,7 +5471,6 @@ const recalculateAllUserBalances = async (io) => {
 
 
 
-
 // =============================================
 // PRICE AGGREGATOR WORKER - SINGLE SOURCE OF TRUTH
 // ENHANCED: ALWAYS HOT - ALL PAIRS SUBSCRIBED
@@ -5725,9 +5724,6 @@ function connectBinanceWebSocket() {
     
     // Ensure all pairs are subscribed - HOT AGGREGATOR
     await ensureAllPairsSubscribed();
-    
-    // Preload initial prices AFTER WebSocket is connected
-    await preloadInitialPrices();
     
     // Start heartbeat monitor
     startHeartbeatMonitor();
@@ -6049,10 +6045,6 @@ async function initializePriceAggregator() {
 }
 
 initializePriceAggregator();
-
-
-
-
 
 
 
