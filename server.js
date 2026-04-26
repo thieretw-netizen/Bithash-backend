@@ -9717,6 +9717,11 @@ app.get('/api/convert/assets', protect, async (req, res) => {
   }
 });
 
+
+
+
+
+
 // =============================================
 // CONVERT ENDPOINT - Execute crypto conversion using Map balances
 // =============================================
@@ -9780,13 +9785,13 @@ app.post('/api/convert', protect, async (req, res) => {
       });
     }
     
-    // Get real current prices from CoinGecko
-    const fromPrice = await getRealCryptoPrice(fromAsset);
-    const toPrice = await getRealCryptoPrice(toAsset);
+    // Get real current prices using getCryptoPrice function
+    const fromPrice = await getCryptoPrice(fromAsset);
+    const toPrice = await getCryptoPrice(toAsset);
     
     console.log(`Prices - ${fromAsset}: $${fromPrice}, ${toAsset}: $${toPrice}`);
     
-    if (!fromPrice || !toPrice) {
+    if (!fromPrice || !toPrice || fromPrice <= 0 || toPrice <= 0) {
       return res.status(503).json({ status: 'fail', message: 'Unable to fetch current prices. Please try again.' });
     }
     
@@ -9863,8 +9868,8 @@ app.post('/api/convert', protect, async (req, res) => {
     // Iterate over main wallet Map
     for (const [asset, balance] of user.balances.main) {
       if (balance > 0) {
-        const assetPrice = await getRealCryptoPrice(asset);
-        if (assetPrice) {
+        const assetPrice = await getCryptoPrice(asset);
+        if (assetPrice && assetPrice > 0) {
           totalMainBalanceUSD += balance * assetPrice;
         }
       }
@@ -9873,8 +9878,8 @@ app.post('/api/convert', protect, async (req, res) => {
     // Also include matured wallet assets in total
     for (const [asset, balance] of user.balances.matured) {
       if (balance > 0) {
-        const assetPrice = await getRealCryptoPrice(asset);
-        if (assetPrice) {
+        const assetPrice = await getCryptoPrice(asset);
+        if (assetPrice && assetPrice > 0) {
           totalMainBalanceUSD += balance * assetPrice;
         }
       }
@@ -9888,9 +9893,9 @@ app.post('/api/convert', protect, async (req, res) => {
       matured: Array.from(user.balances.matured.entries())
     });
     
-    // FIXED: Use valid enum value 'sell_fee' for conversion fee (allowed values: 'investment_fee', 'withdrawal_fee', 'buy_fee', 'sell_fee', 'other')
+    // Use valid enum value 'sell_fee' for conversion fee
     await PlatformRevenue.create({
-      source: 'sell_fee',  // Valid enum value
+      source: 'sell_fee',
       amount: feeAmount,
       currency: 'USD',
       transactionId: null,
@@ -10000,7 +10005,7 @@ app.post('/api/convert', protect, async (req, res) => {
         const maturedBal = user.balances.matured.get(asset) || 0;
         const totalBal = mainBal + maturedBal;
         if (totalBal > 0) {
-          const currentPrice = await getRealCryptoPrice(asset);
+          const currentPrice = await getCryptoPrice(asset);
           const usdValueAsset = totalBal * (currentPrice || 0);
           assetBalances.push({
             symbol: asset,
@@ -10042,83 +10047,6 @@ app.post('/api/convert', protect, async (req, res) => {
     res.status(500).json({ status: 'error', message: err.message || 'Conversion failed' });
   }
 });
-
-// =============================================
-// HELPER: Get REAL cryptocurrency price from CoinGecko
-// =============================================
-async function getRealCryptoPrice(assetSymbol) {
-  try {
-    const symbol = assetSymbol.toLowerCase();
-    
-    // Real-time mapping to CoinGecko IDs
-    const coinIdMap = {
-      'btc': 'bitcoin',
-      'eth': 'ethereum',
-      'usdt': 'tether',
-      'bnb': 'binancecoin',
-      'sol': 'solana',
-      'usdc': 'usd-coin',
-      'xrp': 'xrp',
-      'doge': 'dogecoin',
-      'ada': 'cardano',
-      'shib': 'shiba-inu',
-      'avax': 'avalanche-2',
-      'dot': 'polkadot',
-      'trx': 'tron',
-      'link': 'chainlink',
-      'matic': 'polygon',
-      'ltc': 'litecoin',
-      'near': 'near',
-      'uni': 'uniswap',
-      'bch': 'bitcoin-cash'
-    };
-    
-    const coinId = coinIdMap[symbol];
-    if (!coinId) {
-      console.log(`No CoinGecko ID found for ${symbol}, using fallback`);
-      const fallbackPrices = {
-        'btc': 43000,
-        'eth': 2200,
-        'usdt': 1,
-        'bnb': 300,
-        'sol': 80,
-        'usdc': 1
-      };
-      return fallbackPrices[symbol] || 0;
-    }
-    
-    const response = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd`);
-    
-    if (!response.ok) {
-      throw new Error(`CoinGecko API error: ${response.status}`);
-    }
-    
-    const data = await response.json();
-    const price = data[coinId]?.usd;
-    
-    if (!price || price <= 0) {
-      throw new Error(`Invalid price received for ${assetSymbol}`);
-    }
-    
-    return price;
-  } catch (error) {
-    console.error(`Error fetching real price for ${assetSymbol}:`, error);
-    const fallbackPrices = {
-      'btc': 43000,
-      'eth': 2200,
-      'usdt': 1,
-      'bnb': 300,
-      'sol': 80,
-      'usdc': 1
-    };
-    return fallbackPrices[assetSymbol.toLowerCase()] || 0;
-  }
-}
-
-
-
-
-
 
 
 
