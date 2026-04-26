@@ -28884,389 +28884,31 @@ app.post('/api/user/settings', protect, async (req, res) => {
   }
 });
 
-// =============================================
-// SPOT MARKET WEBSOCKET - PRODUCTION READY
-// Real-time orderbook, trades, ticker, candles via Redis Pub/Sub
-// =============================================
 
-const setupSpotMarketWebSocket = (server) => {
-  const wss = new WebSocket.Server({ 
-    server, 
-    path: '/ws/spotmarket',
-    clientTracking: true,
-    perMessageDeflate: {
-      zlibDeflateOptions: { chunkSize: 1024, memLevel: 7, level: 3 },
-      zlibInflateOptions: { chunkSize: 10 * 1024 },
-      clientNoContextTakeover: true,
-      serverNoContextTakeover: true,
-      serverMaxWindowBits: 10,
-      concurrencyLimit: 10,
-      threshold: 1024
-    }
-  });
-
-  const clients = new Map();
-  const subscriptions = new Map();
-  const HEARTBEAT_INTERVAL = 30000;
-  const HEARTBEAT_VALUE = '--heartbeat--';
-
-  const sendToClient = (clientId, data) => {
-    const client = clients.get(clientId);
-    if (client && client.readyState === WebSocket.OPEN) {
-      client.send(JSON.stringify(data));
-    }
-  };
-
-  const broadcastToSymbol = (symbol, data) => {
-    for (const [clientId, client] of clients) {
-      const clientSubs = subscriptions.get(clientId);
-      if (clientSubs && (clientSubs.has(symbol) || clientSubs.has('*'))) {
-        if (client.readyState === WebSocket.OPEN) {
-          client.send(JSON.stringify(data));
-        }
-      }
-    }
-  };
-
-  const broadcastToAll = (data) => {
-    for (const [clientId, client] of clients) {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(JSON.stringify(data));
-      }
-    }
-  };
-
-  const subscribeClient = (clientId, symbol, channels) => {
-    let clientSubs = subscriptions.get(clientId);
-    if (!clientSubs) {
-      clientSubs = new Map();
-      subscriptions.set(clientId, clientSubs);
-    }
-    
-    if (!clientSubs.has(symbol)) {
-      clientSubs.set(symbol, new Set());
-    }
-    
-    channels.forEach(channel => {
-      clientSubs.get(symbol).add(channel);
-    });
-    
-    return Array.from(clientSubs.get(symbol));
-  };
-
-  const unsubscribeClient = (clientId, symbol, channels) => {
-    const clientSubs = subscriptions.get(clientId);
-    if (!clientSubs) return [];
-    
-    if (symbol === '*') {
-      subscriptions.delete(clientId);
-      return [];
-    }
-    
-    const symbolSubs = clientSubs.get(symbol);
-    if (symbolSubs) {
-      channels.forEach(channel => symbolSubs.delete(channel));
-      if (symbolSubs.size === 0) {
-        clientSubs.delete(symbol);
-      }
-    }
-    
-    return clientSubs.get(symbol) ? Array.from(clientSubs.get(symbol)) : [];
-  };
-
-  const sendInitialData = async (clientId, symbol) => {
-    const initialData = { type: 'initial', symbol: symbol, data: {} };
-    
-    const tickerKey = REDIS_KEYS.TICKER(symbol);
-    const tickerRaw = await redis.get(tickerKey);
-    if (tickerRaw) {
-      const ticker = JSON.parse(tickerRaw);
-      initialData.data.ticker = {
-        price: ticker.lastPrice,
-        priceChangePercent: ticker.priceChangePercent,
-        highPrice: ticker.highPrice,
-        lowPrice: ticker.lowPrice,
-        volume: ticker.volume,
-        quoteVolume: ticker.quoteVolume,
-        bidPrice: ticker.bidPrice,
-        askPrice: ticker.askPrice
-      };
-    }
-    
-    const orderbookKey = REDIS_KEYS.ORDERBOOK(symbol);
-    const orderbookRaw = await redis.get(orderbookKey);
-    if (orderbookRaw) {
-      const orderbook = JSON.parse(orderbookRaw);
-      initialData.data.orderbook = {
-        bids: orderbook.bids.slice(0, 20),
-        asks: orderbook.asks.slice(0, 20),
-        lastUpdateId: orderbook.lastUpdateId
-      };
-    }
-    
-    const tradesKey = REDIS_KEYS.TRADES(symbol);
-    const tradesRaw = await redis.get(tradesKey);
-    if (tradesRaw) {
-      const trades = JSON.parse(tradesRaw);
-      initialData.data.trades = trades.slice(0, 50);
-    }
-    
-    const candlesKey = REDIS_KEYS.CANDLES(symbol, '15m');
-    const candlesRaw = await redis.zrevrange(candlesKey, 0, 199);
-    if (candlesRaw && candlesRaw.length > 0) {
-      initialData.data.candles = candlesRaw.map(c => JSON.parse(c)).reverse();
-    }
-    
-    sendToClient(clientId, initialData);
-  };
-
-  const startRedisSubscriber = () => {
-    const subscriber = redis.duplicate();
-    
-    subscriber.subscribe('market:ticker', 'market:orderbook', 'market:trade', 'market:candles');
-    
-    subscriber.on('message', (channel, message) => {
-      try {
-        const data = JSON.parse(message);
-        
-        if (channel === 'market:ticker') {
-          broadcastToSymbol(data.symbol, {
-            type: 'ticker',
-            symbol: data.symbol,
-            price: data.price,
-            priceChangePercent: data.priceChangePercent,
-            highPrice: data.highPrice,
-            lowPrice: data.lowPrice,
-            volume: data.volume,
-            quoteVolume: data.quoteVolume,
-            stats: data.stats,
-            timestamp: Date.now()
-          });
-        }
-        
-        if (channel === 'market:orderbook') {
-          broadcastToSymbol(data.symbol, {
-            type: 'orderbook',
-            symbol: data.symbol,
-            bids: data.bids,
-            asks: data.asks,
-            timestamp: Date.now()
-          });
-        }
-        
-        if (channel === 'market:trade') {
-          broadcastToSymbol(data.symbol, {
-            type: 'trade',
-            symbol: data.symbol,
-            price: data.price,
-            amount: data.amount,
-            time: data.time,
-            isBuyerMaker: data.isBuyerMaker,
-            timestamp: Date.now()
-          });
-        }
-        
-        if (channel === 'market:candles') {
-          broadcastToSymbol(data.symbol, {
-            type: 'candles',
-            symbol: data.symbol,
-            interval: data.interval,
-            candles: data.candles,
-            timestamp: Date.now()
-          });
-        }
-      } catch (err) {
-        console.error('Redis subscriber error:', err);
-      }
-    });
-    
-    return subscriber;
-  };
-
-  wss.on('connection', async (ws, req) => {
-    const clientId = uuidv4();
-    let heartbeatInterval;
-    let isAlive = true;
-    
-    clients.set(clientId, ws);
-    subscriptions.set(clientId, new Map());
-    ws.clientId = clientId;
-    
-    ws.on('pong', () => { isAlive = true; });
-    
-    heartbeatInterval = setInterval(() => {
-      if (!isAlive) {
-        clearInterval(heartbeatInterval);
-        ws.terminate();
-        clients.delete(clientId);
-        subscriptions.delete(clientId);
-        return;
-      }
-      isAlive = false;
-      ws.ping();
-    }, HEARTBEAT_INTERVAL);
-    
-    ws.on('message', async (message) => {
-      try {
-        if (message === HEARTBEAT_VALUE) {
-          ws.pong();
-          return;
-        }
-        
-        const data = JSON.parse(message);
-        
-        switch (data.type) {
-          case 'subscribe':
-            const symbol = data.pair || data.symbol;
-            const channels = data.channels || ['ticker', 'orderbook', 'trades', 'candles'];
-            
-            if (!symbol) {
-              ws.send(JSON.stringify({ type: 'error', message: 'Symbol required for subscription' }));
-              return;
-            }
-            
-            const subscribedChannels = subscribeClient(clientId, symbol.toUpperCase(), channels);
-            
-            await sendInitialData(clientId, symbol.toUpperCase());
-            
-            ws.send(JSON.stringify({
-              type: 'subscribed',
-              symbol: symbol.toUpperCase(),
-              channels: subscribedChannels,
-              timestamp: Date.now()
-            }));
-            break;
-            
-          case 'unsubscribe':
-            const unsubSymbol = data.symbol;
-            const unsubChannels = data.channels || ['ticker', 'orderbook', 'trades', 'candles'];
-            
-            const remainingChannels = unsubscribeClient(clientId, unsubSymbol.toUpperCase(), unsubChannels);
-            
-            ws.send(JSON.stringify({
-              type: 'unsubscribed',
-              symbol: unsubSymbol,
-              channels: unsubChannels,
-              remainingChannels: remainingChannels,
-              timestamp: Date.now()
-            }));
-            break;
-            
-          case 'get_orderbook':
-            const orderbookKey = REDIS_KEYS.ORDERBOOK(data.symbol);
-            const orderbookRaw = await redis.get(orderbookKey);
-            if (orderbookRaw) {
-              const orderbook = JSON.parse(orderbookRaw);
-              ws.send(JSON.stringify({
-                type: 'orderbook',
-                symbol: data.symbol,
-                bids: orderbook.bids.slice(0, data.limit || 100),
-                asks: orderbook.asks.slice(0, data.limit || 100),
-                timestamp: Date.now()
-              }));
-            }
-            break;
-            
-          case 'get_ticker':
-            const tickerKey = REDIS_KEYS.TICKER(data.symbol);
-            const tickerRaw = await redis.get(tickerKey);
-            if (tickerRaw) {
-              const ticker = JSON.parse(tickerRaw);
-              ws.send(JSON.stringify({
-                type: 'ticker',
-                symbol: data.symbol,
-                price: ticker.lastPrice,
-                priceChangePercent: ticker.priceChangePercent,
-                highPrice: ticker.highPrice,
-                lowPrice: ticker.lowPrice,
-                volume: ticker.volume,
-                timestamp: Date.now()
-              }));
-            }
-            break;
-            
-          case 'get_trades':
-            const tradesKey = REDIS_KEYS.TRADES(data.symbol);
-            const tradesRaw = await redis.get(tradesKey);
-            if (tradesRaw) {
-              const trades = JSON.parse(tradesRaw);
-              ws.send(JSON.stringify({
-                type: 'trades',
-                symbol: data.symbol,
-                trades: trades.slice(0, data.limit || 50),
-                timestamp: Date.now()
-              }));
-            }
-            break;
-            
-          case 'ping':
-            ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
-            break;
-            
-          default:
-            console.log('Unknown message type:', data.type);
-        }
-      } catch (err) {
-        console.error('WebSocket message error:', err);
-        ws.send(JSON.stringify({ type: 'error', message: 'Invalid message format' }));
-      }
-    });
-    
-    ws.on('close', () => {
-      clearInterval(heartbeatInterval);
-      clients.delete(clientId);
-      subscriptions.delete(clientId);
-      console.log(`Spot market client ${clientId} disconnected. Total: ${clients.size}`);
-    });
-    
-    ws.on('error', (err) => {
-      console.error(`WebSocket error for ${clientId}:`, err);
-      clearInterval(heartbeatInterval);
-      clients.delete(clientId);
-      subscriptions.delete(clientId);
-    });
-    
-    console.log(`Spot market client ${clientId} connected. Total: ${clients.size}`);
-    
-    ws.send(JSON.stringify({
-      type: 'connected',
-      clientId: clientId,
-      timestamp: Date.now()
-    }));
-  });
-  
-  const redisSubscriber = startRedisSubscriber();
-  
-  wss.on('close', () => {
-    if (redisSubscriber) redisSubscriber.quit();
-  });
-  
-  return wss;
-};
 
 // =============================================
-// TICKER WEBSOCKET - Footer ticker updates
+// TICKER WEBSOCKET - For footer ticker in trading.html
+// Add this to server.js (after existing WebSocket setups)
 // =============================================
 
 const setupTickerWebSocket = (server) => {
   const wss = new WebSocket.Server({ 
     server, 
     path: '/ws/ticker',
-    clientTracking: true
+    clientTracking: true,
+    perMessageDeflate: false
   });
-  
-  const clients = new Map();
+
+  const clients = new Set();
   let broadcastInterval = null;
-  let lastTickerData = [];
   
-  const fetchAllTickers = async () => {
+  const getTickerData = async () => {
     const cachedPairs = await redis.get(REDIS_KEYS.ALL_PAIRS);
     if (!cachedPairs) return [];
     
     const pairs = JSON.parse(cachedPairs);
     const tickers = [];
-    
-    const topPairs = pairs.slice(0, 50);
+    const topPairs = pairs.slice(0, 30);
     
     for (const pair of topPairs) {
       const tickerKey = REDIS_KEYS.TICKER(pair.symbol);
@@ -29277,110 +28919,80 @@ const setupTickerWebSocket = (server) => {
           symbol: `${pair.baseAsset}/${pair.quoteAsset}`,
           price: ticker.lastPrice,
           change24h: ticker.priceChangePercent,
-          volume: ticker.volume,
           high: ticker.highPrice,
-          low: ticker.lowPrice
+          low: ticker.lowPrice,
+          volume: ticker.volume
         });
       }
     }
-    
     return tickers;
   };
-  
+
   const broadcastTickers = async () => {
     if (clients.size === 0) return;
     
     try {
-      const tickers = await fetchAllTickers();
+      const tickers = await getTickerData();
       if (tickers.length > 0) {
-        lastTickerData = tickers;
         const message = JSON.stringify({
           type: 'tickers',
           data: tickers,
           timestamp: Date.now()
         });
         
-        for (const [clientId, client] of clients) {
+        for (const client of clients) {
           if (client.readyState === WebSocket.OPEN) {
             client.send(message);
           }
         }
       }
     } catch (err) {
-      console.error('Broadcast tickers error:', err);
+      console.error('Ticker broadcast error:', err);
     }
   };
-  
-  wss.on('connection', async (ws) => {
-    const clientId = uuidv4();
-    let heartbeatInterval;
-    let isAlive = true;
+
+  wss.on('connection', async (ws, req) => {
+    clients.add(ws);
     
-    clients.set(clientId, ws);
-    ws.clientId = clientId;
-    
-    ws.on('pong', () => { isAlive = true; });
-    
-    heartbeatInterval = setInterval(() => {
-      if (!isAlive) {
-        clearInterval(heartbeatInterval);
-        ws.terminate();
-        clients.delete(clientId);
-        return;
+    let heartbeatInterval = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.ping();
       }
-      isAlive = false;
-      ws.ping();
     }, 30000);
-    
-    if (lastTickerData.length > 0) {
+
+    const initialTickers = await getTickerData();
+    if (initialTickers.length > 0) {
       ws.send(JSON.stringify({
         type: 'tickers',
-        data: lastTickerData,
+        data: initialTickers,
         timestamp: Date.now()
       }));
-    } else {
-      const initialTickers = await fetchAllTickers();
-      if (initialTickers.length > 0) {
-        ws.send(JSON.stringify({
-          type: 'tickers',
-          data: initialTickers,
-          timestamp: Date.now()
-        }));
-      }
     }
+
+    ws.on('pong', () => {});
     
-    ws.on('message', async (message) => {
+    ws.on('message', (message) => {
       try {
-        if (message === '--heartbeat--') {
-          ws.pong();
-          return;
-        }
-        
         const data = JSON.parse(message);
-        
         if (data.type === 'ping') {
           ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
         }
-      } catch (err) {
-        // Ignore invalid messages
-      }
+      } catch (err) {}
     });
-    
+
     ws.on('close', () => {
       clearInterval(heartbeatInterval);
-      clients.delete(clientId);
-      console.log(`Ticker client ${clientId} disconnected. Total: ${clients.size}`);
+      clients.delete(ws);
     });
-    
-    console.log(`Ticker client ${clientId} connected. Total: ${clients.size}`);
   });
-  
+
   if (!broadcastInterval) {
     broadcastInterval = setInterval(broadcastTickers, 2000);
   }
   
   return wss;
 };
+
 
 
 
@@ -30430,6 +30042,7 @@ const setupAllWebSockets = (server) => {
   setupSpotMarketWebSocket(server);
   setupTickerWebSocket(server);
   return setupMarketWebSocket(server);
+  setupTickerWebSocket(httpServer);
 };
 
 process.on('SIGTERM', gracefulShutdown);
