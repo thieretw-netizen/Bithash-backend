@@ -10050,339 +10050,100 @@ app.post('/api/convert', protect, async (req, res) => {
 
 
 
+// =============================================
+// MARKET DATA ENDPOINT - Prices by Market Cap
+// =============================================
 
-// =============================================
-// GET MARKET ASSETS - For Prices by Market Cap and Trending sections
-// =============================================
-app.get('/api/market/assets', async (req, res) => {
+// Cache with 30-second TTL
+let marketDataCache = {
+  data: null,
+  lastUpdated: null
+};
+
+async function fetchMarketData() {
   try {
-    // Get all trading pairs from Redis (from your HOT price aggregator)
-    const allPairs = await redis.get(REDIS_KEYS.ALL_PAIRS);
-    
-    if (!allPairs) {
-      // If Redis doesn't have pairs, fetch from Binance directly
-      const response = await axios.get('https://api.binance.com/api/v3/exchangeInfo', { timeout: 10000 });
-      const tradingPairs = response.data.symbols.filter(s => s.status === 'TRADING');
-      
-      // Get market data for top 200 pairs (or all)
-      const symbols = tradingPairs.slice(0, 200).map(p => p.symbol);
-      
-      // Fetch ticker data in batches
-      const marketData = [];
-      const batchSize = 50;
-      
-      for (let i = 0; i < symbols.length; i += batchSize) {
-        const batch = symbols.slice(i, i + batchSize);
-        try {
-          const tickerResponse = await axios.get('https://api.binance.com/api/v3/ticker/24hr', {
-            params: { symbols: JSON.stringify(batch) },
-            timeout: 5000
-          });
-          
-          if (tickerResponse.data && Array.isArray(tickerResponse.data)) {
-            for (const ticker of tickerResponse.data) {
-              marketData.push({
-                id: ticker.symbol.toLowerCase(),
-                symbol: ticker.symbol.toLowerCase(),
-                name: ticker.symbol.replace(/USDT|BTC|ETH|BUSD$/, '').toUpperCase(),
-                current_price: parseFloat(ticker.lastPrice),
-                market_cap: parseFloat(ticker.quoteVolume) * parseFloat(ticker.lastPrice) || 0,
-                total_volume: parseFloat(ticker.volume),
-                price_change_percentage_24h: parseFloat(ticker.priceChangePercent),
-                price_change_percentage_1h_in_currency: parseFloat(ticker.priceChangePercent) * 0.3,
-                price_change_percentage_7d_in_currency: parseFloat(ticker.priceChangePercent) * 0.8,
-                image: getAssetLogo(ticker.symbol.toLowerCase()),
-                sparkline_in_7d: { price: generateSparklineData(parseFloat(ticker.lastPrice)) }
-              });
-            }
-          }
-        } catch (err) {
-          console.warn(`Failed to fetch batch ${i}:`, err.message);
-        }
-        
-        // Small delay to avoid rate limiting
-        await new Promise(resolve => setTimeout(resolve, 100));
+    const response = await axios.get(
+      'https://api.coingecko.com/api/v3/coins/markets',
+      {
+        params: {
+          vs_currency: 'usd',
+          order: 'market_cap_desc',
+          per_page: 50,
+          page: 1,
+          sparkline: true,
+          price_change_percentage: '1h,24h,7d'
+        },
+        timeout: 10000
       }
-      
-      // Sort by market cap (using quote volume as proxy)
-      marketData.sort((a, b) => b.total_volume - a.total_volume);
-      
-      return res.status(200).json({
-        status: 'success',
-        data: marketData.slice(0, 100) // Return top 100
-      });
-    }
-    
-    // Parse pairs from Redis
-    const pairs = JSON.parse(allPairs);
-    
-    // Fetch real-time data for each pair from Redis cache
-    const marketData = [];
-    const batchSize = 50;
-    
-    for (let i = 0; i < pairs.length; i += batchSize) {
-      const batch = pairs.slice(i, i + batchSize);
-      
-      for (const pair of batch) {
-        const tickerKey = REDIS_KEYS.TICKER(pair.symbol);
-        const tickerRaw = await redis.get(tickerKey);
-        
-        if (tickerRaw) {
-          const ticker = JSON.parse(tickerRaw);
-          marketData.push({
-            id: pair.symbol.toLowerCase(),
-            symbol: pair.symbol.toLowerCase(),
-            name: pair.symbol.replace(/USDT|BTC|ETH|BUSD$/, '').toUpperCase(),
-            current_price: ticker.lastPrice,
-            market_cap: ticker.quoteVolume * ticker.lastPrice,
-            total_volume: ticker.volume,
-            price_change_percentage_24h: ticker.priceChangePercent,
-            price_change_percentage_1h_in_currency: ticker.priceChangePercent * 0.3,
-            price_change_percentage_7d_in_currency: ticker.priceChangePercent * 0.8,
-            image: getAssetLogo(pair.symbol.toLowerCase()),
-            sparkline_in_7d: { price: generateSparklineData(ticker.lastPrice) }
-          });
-        }
-      }
-    }
-    
-    // Sort by market cap
-    marketData.sort((a, b) => b.market_cap - a.market_cap);
-    
-    // Cache the result in Redis for 30 seconds
-    await redis.setex('market:assets:cache', 30, JSON.stringify(marketData.slice(0, 100)));
-    
-    res.status(200).json({
-      status: 'success',
-      data: marketData.slice(0, 100) // Return top 100 assets
-    });
-    
-  } catch (err) {
-    console.error('Error fetching market assets:', err);
-    
-    // Try to return cached data if available
-    const cachedData = await redis.get('market:assets:cache');
-    if (cachedData) {
-      return res.status(200).json({
-        status: 'success',
-        data: JSON.parse(cachedData),
-        fromCache: true
-      });
-    }
-    
-    // Last resort: fetch from CoinGecko
-    try {
-      const response = await axios.get(
-        'https://api.coingecko.com/api/v3/coins/markets',
-        {
-          params: {
-            vs_currency: 'usd',
-            order: 'market_cap_desc',
-            per_page: 100,
-            page: 1,
-            sparkline: true,
-            price_change_percentage: '1h,24h,7d'
-          },
-          timeout: 10000
-        }
-      );
-      
-      const formattedData = response.data.map(coin => ({
+    );
+
+    if (response.data) {
+      const transformed = response.data.map(coin => ({
         id: coin.id,
         symbol: coin.symbol,
         name: coin.name,
+        image: coin.image,
         current_price: coin.current_price,
         market_cap: coin.market_cap,
+        market_cap_rank: coin.market_cap_rank,
         total_volume: coin.total_volume,
-        price_change_percentage_24h: coin.price_change_percentage_24h,
-        price_change_percentage_1h_in_currency: coin.price_change_percentage_1h_in_currency,
-        price_change_percentage_7d_in_currency: coin.price_change_percentage_7d_in_currency,
-        image: coin.image,  // CoinGecko already provides the correct logo URL!
-        sparkline_in_7d: coin.sparkline_in_7d
+        price_change_percentage_24h: coin.price_change_percentage_24h || 0,
+        price_change_percentage_1h_in_currency: coin.price_change_percentage_1h_in_currency || 0,
+        price_change_percentage_7d_in_currency: coin.price_change_percentage_7d_in_currency || 0,
+        sparkline_in_7d: {
+          price: coin.sparkline_in_7d?.price || []
+        }
       }));
+
+      marketDataCache = {
+        data: transformed,
+        lastUpdated: new Date()
+      };
       
-      return res.status(200).json({
-        status: 'success',
-        data: formattedData
-      });
-    } catch (coingeckoErr) {
-      console.error('CoinGecko fallback failed:', coingeckoErr.message);
+      return transformed;
     }
     
-    res.status(503).json({
+    return marketDataCache.data || [];
+    
+  } catch (error) {
+    console.error('Market data fetch error:', error);
+    return marketDataCache.data || [];
+  }
+}
+
+// Endpoint for Prices by Market Cap table
+app.get('/api/market/assets', async (req, res) => {
+  try {
+    let assets = marketDataCache.data;
+    
+    // Refresh if cache is older than 30 seconds or empty
+    if (!assets || !marketDataCache.lastUpdated || 
+        (new Date() - marketDataCache.lastUpdated) > 30000) {
+      assets = await fetchMarketData();
+    }
+    
+    res.json({
+      status: 'success',
+      data: assets || []
+    });
+    
+  } catch (error) {
+    console.error('Market assets error:', error);
+    res.json({
       status: 'error',
-      message: 'Market data temporarily unavailable. Please try again later.'
+      data: []
     });
   }
 });
 
-// Helper function to generate sparkline data
-function generateSparklineData(currentPrice) {
-  const prices = [];
-  let price = currentPrice;
-  
-  // Generate 7 days of mock data (168 hours)
-  for (let i = 0; i < 168; i++) {
-    const change = (Math.random() - 0.5) * 0.02; // ±1% change
-    price = price * (1 + change);
-    prices.push(price);
-  }
-  
-  return prices;
-}
+// Refresh cache every 30 seconds in background
+setInterval(async () => {
+  await fetchMarketData();
+}, 30000);
 
-// =============================================
-// FIXED: Comprehensive asset logo mapping for 200+ cryptocurrencies
-// =============================================
-function getAssetLogo(symbol) {
-  // Remove the quote asset (USDT, BTC, ETH, BUSD, etc.)
-  let cleanSymbol = symbol.toLowerCase();
-  cleanSymbol = cleanSymbol.replace(/usdt|btc|eth|busd|usdc|dai|try|rub|uah|pln|czk|sek|nok|dkk|huf|ron|bgn|zar|inr|idr|php|thb|vnd|krw|jpy|cny|aud|cad|chf|gbp|eur/g, '');
-  cleanSymbol = cleanSymbol.replace(/[^a-z0-9]/g, '');
-  
-  // Complete logo map for top 200+ cryptocurrencies
-  const logoMap = {
-    // Top 10
-    'btc': 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png',
-    'eth': 'https://assets.coingecko.com/coins/images/279/large/ethereum.png',
-    'usdt': 'https://assets.coingecko.com/coins/images/325/large/Tether.png',
-    'bnb': 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png',
-    'sol': 'https://assets.coingecko.com/coins/images/4128/large/solana.png',
-    'usdc': 'https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png',
-    'xrp': 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png',
-    'doge': 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png',
-    'ada': 'https://assets.coingecko.com/coins/images/975/large/cardano.png',
-    'trx': 'https://assets.coingecko.com/coins/images/1094/large/tron-logo.png',
-    
-    // Layer 1 Blockchains
-    'avax': 'https://assets.coingecko.com/coins/images/12559/large/Avalanche_Circle_RedWhite.png',
-    'dot': 'https://assets.coingecko.com/coins/images/12171/large/polkadot.png',
-    'matic': 'https://assets.coingecko.com/coins/images/4713/large/matic-token-icon.png',
-    'atom': 'https://assets.coingecko.com/coins/images/1481/large/cosmos_hub.png',
-    'near': 'https://assets.coingecko.com/coins/images/10365/large/near_icon.png',
-    'algo': 'https://assets.coingecko.com/coins/images/4380/large/download.png',
-    'vet': 'https://assets.coingecko.com/coins/images/1167/large/VET_Token_Icon.png',
-    'icp': 'https://assets.coingecko.com/coins/images/14495/large/Internet_Computer_logo.png',
-    'ftm': 'https://assets.coingecko.com/coins/images/4001/large/Fantom_round.png',
-    'egld': 'https://assets.coingecko.com/coins/images/12335/large/egld.png',
-    'klay': 'https://assets.coingecko.com/coins/images/9672/large/klaytn.png',
-    'hbar': 'https://assets.coingecko.com/coins/images/3688/large/hbar.png',
-    'eos': 'https://assets.coingecko.com/coins/images/738/large/eos-eos-logo.png',
-    'neo': 'https://assets.coingecko.com/coins/images/480/large/NEO_512_512.png',
-    'xtz': 'https://assets.coingecko.com/coins/images/976/large/Tezos-logo.png',
-    
-    // DeFi & Oracles
-    'link': 'https://assets.coingecko.com/coins/images/877/large/chainlink-new-logo.png',
-    'uni': 'https://assets.coingecko.com/coins/images/12504/large/uni.jpg',
-    'aave': 'https://assets.coingecko.com/coins/images/12645/large/AAVE.png',
-    'crypto': 'https://assets.coingecko.com/coins/images/7310/large/crypto_com_icon.png',
-    'mkr': 'https://assets.coingecko.com/coins/images/1364/large/Mark_Maker.png',
-    'comp': 'https://assets.coingecko.com/coins/images/10775/large/compound.png',
-    'snx': 'https://assets.coingecko.com/coins/images/3406/large/SNX.png',
-    'lido': 'https://assets.coingecko.com/coins/images/13573/large/Lido_DAO.png',
-    
-    // Meme Coins
-    'shib': 'https://assets.coingecko.com/coins/images/11939/large/shiba.png',
-    'pepe': 'https://assets.coingecko.com/coins/images/29850/large/pepe-token.jpeg',
-    'floki': 'https://assets.coingecko.com/coins/images/16746/large/PNG.png',
-    'bonk': 'https://assets.coingecko.com/coins/images/28600/large/bonk.jpg',
-    'wif': 'https://assets.coingecko.com/coins/images/32101/large/dogwifhat.png',
-    
-    // Gaming & Metaverse
-    'sand': 'https://assets.coingecko.com/coins/images/12129/large/sandbox_logo.jpg',
-    'mana': 'https://assets.coingecko.com/coins/images/878/large/decentraland-mana.png',
-    'axs': 'https://assets.coingecko.com/coins/images/13029/large/axie_infinity_logo.png',
-    'gala': 'https://assets.coingecko.com/coins/images/12493/large/GALA-COINGECKO.png',
-    'enj': 'https://assets.coingecko.com/coins/images/2130/large/enjin-coin-logo.png',
-    
-    // Layer 2 Solutions
-    'op': 'https://assets.coingecko.com/coins/images/25244/large/Optimism.png',
-    'arb': 'https://assets.coingecko.com/coins/images/16547/large/photo_2023-04-17_21.04.36.jpeg',
-    'zksync': 'https://assets.coingecko.com/coins/images/34708/large/zksync.png',
-    'immutablex': 'https://assets.coingecko.com/coins/images/17233/large/immutableX.png',
-    
-    // PoW Coins
-    'ltc': 'https://assets.coingecko.com/coins/images/2/large/litecoin.png',
-    'bch': 'https://assets.coingecko.com/coins/images/780/large/bitcoin-cash-circle.png',
-    'xmr': 'https://assets.coingecko.com/coins/images/69/large/monero_logo.png',
-    'dash': 'https://assets.coingecko.com/coins/images/19/large/dash-logo.png',
-    'zec': 'https://assets.coingecko.com/coins/images/130/large/zcash.png',
-    'kda': 'https://assets.coingecko.com/coins/images/12813/large/kadena.png',
-    
-    // Exchange Tokens
-    'cro': 'https://assets.coingecko.com/coins/images/7310/large/crypto_com_icon.png',
-    'bgb': 'https://assets.coingecko.com/coins/images/21810/large/Bitget.png',
-    'leo': 'https://assets.coingecko.com/coins/images/8418/large/leo-token.png',
-    'okb': 'https://assets.coingecko.com/coins/images/4463/large/WeChat_Image_20220117142630.png',
-    'gmx': 'https://assets.coingecko.com/coins/images/18323/large/arbitrum.png',
-    
-    // Storage & Infrastructure
-    'fil': 'https://assets.coingecko.com/coins/images/12817/large/filecoin.png',
-    'theta': 'https://assets.coingecko.com/coins/images/2538/large/theta-token-logo.png',
-    'ar': 'https://assets.coingecko.com/coins/images/12354/large/ar.png',
-    'blur': 'https://assets.coingecko.com/coins/images/28453/large/blur.png',
-    
-    // Utility Tokens
-    'qnt': 'https://assets.coingecko.com/coins/images/3370/large/5ZOu7brX_400x400.jpg',
-    'grt': 'https://assets.coingecko.com/coins/images/13397/large/Graph_Token.png',
-    'rndr': 'https://assets.coingecko.com/coins/images/11636/large/rndr.png',
-    'agix': 'https://assets.coingecko.com/coins/images/11605/large/agix.png',
-    'fet': 'https://assets.coingecko.com/coins/images/5681/large/Fetch.png',
-    'ocean': 'https://assets.coingecko.com/coins/images/3685/large/ocean-protocol.png',
-    
-    // Additional Popular Tokens
-    '1inch': 'https://assets.coingecko.com/coins/images/13469/large/1inch-token.png',
-    'chz': 'https://assets.coingecko.com/coins/images/8834/large/chiliz.png',
-    'gno': 'https://assets.coingecko.com/coins/images/662/large/gnosis.png',
-    'gt': 'https://assets.coingecko.com/coins/images/23503/large/gate.png',
-    'iota': 'https://assets.coingecko.com/coins/images/892/large/iota.png',
-    'rose': 'https://assets.coingecko.com/coins/images/14566/large/rose.png',
-    'xdc': 'https://assets.coingecko.com/coins/images/2912/large/xdc.png',
-    'zil': 'https://assets.coingecko.com/coins/images/2913/large/zilliqa.png',
-    'hot': 'https://assets.coingecko.com/coins/images/2685/large/hot.png',
-    'btg': 'https://assets.coingecko.com/coins/images/1041/large/bitcoin-gold.png',
-    'flux': 'https://assets.coingecko.com/coins/images/13920/large/flux.png',
-    'rvn': 'https://assets.coingecko.com/coins/images/3064/large/ravencoin.png',
-    'sc': 'https://assets.coingecko.com/coins/images/215/large/siacoin.png',
-    'stx': 'https://assets.coingecko.com/coins/images/2069/large/Stacks.png',
-    'waves': 'https://assets.coingecko.com/coins/images/425/large/waves.png',
-    'tfuel': 'https://assets.coingecko.com/coins/images/5549/large/theta-fuel.png',
-    'celo': 'https://assets.coingecko.com/coins/images/11860/large/celo.png',
-    'mina': 'https://assets.coingecko.com/coins/images/15628/large/mina.png',
-    'kas': 'https://assets.coingecko.com/coins/images/23915/large/kaspa.png',
-    'tia': 'https://assets.coingecko.com/coins/images/32619/large/tia.png',
-    'sei': 'https://assets.coingecko.com/coins/images/28205/large/Sei_Logo_-_Transparent.png',
-    'apt': 'https://assets.coingecko.com/coins/images/26455/large/aptos_round.png',
-    'sui': 'https://assets.coingecko.com/coins/images/26375/large/sui_asset.jpeg',
-    'injective': 'https://assets.coingecko.com/coins/images/12882/large/Injective_Logo.png',
-    'runebase': 'https://assets.coingecko.com/coins/images/1746/large/runebase.png'
-  };
-  
-  // Try exact match first
-  if (logoMap[cleanSymbol]) {
-    return logoMap[cleanSymbol];
-  }
-  
-  // Try to find a partial match (e.g., "bitcoin" from "btc")
-  for (const [key, url] of Object.entries(logoMap)) {
-    if (cleanSymbol.includes(key) || key.includes(cleanSymbol)) {
-      return url;
-    }
-  }
-  
-  // If Bitcoin Cash, return BCH logo
-  if (cleanSymbol.includes('bch') || cleanSymbol === 'bitcoincash') {
-    return 'https://assets.coingecko.com/coins/images/780/large/bitcoin-cash-circle.png';
-  }
-  
-  // If Litecoin, return LTC logo
-  if (cleanSymbol.includes('ltc') || cleanSymbol === 'litecoin') {
-    return 'https://assets.coingecko.com/coins/images/2/large/litecoin.png';
-  }
-  
-  // Default to a generic crypto icon rather than Bitcoin (so users know it's not BTC)
-  return 'https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/icon/generic.png';
-}
+// Initial cache on startup
+fetchMarketData();
+
 
 
 
