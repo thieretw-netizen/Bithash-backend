@@ -25807,13 +25807,3580 @@ async function calculateAccurateClosingBalances(userId, endDate) {
 
 
 
+app.get('/api/market/all-pairs', async (req, res) => {
+  const startTime = process.hrtime.bigint();
+  
+  try {
+    const cachedPairs = await redis.get(REDIS_KEYS.ALL_PAIRS);
+    const cachedQuoteAssets = await redis.get(REDIS_KEYS.QUOTE_ASSETS);
+    
+    if (!cachedPairs || !cachedQuoteAssets) {
+      const response = await axios.get('https://api.binance.com/api/v3/exchangeInfo', {
+        timeout: 10000,
+        timeoutErrorMessage: 'Binance API timeout'
+      });
+      
+      if (!response.data?.symbols) {
+        throw new Error('Invalid response from Binance');
+      }
+      
+      const activePairs = response.data.symbols.filter(s => 
+        s.status === 'TRADING' && 
+        ['USDT', 'USDC', 'BUSD', 'BTC', 'ETH', 'BNB', 'SOL', 'XRP'].includes(s.quoteAsset)
+      );
+      
+      const pairs = [];
+      for (const pair of activePairs) {
+        const lotSizeFilter = pair.filters.find(f => f.filterType === 'LOT_SIZE');
+        const priceFilter = pair.filters.find(f => f.filterType === 'PRICE_FILTER');
+        const minNotionalFilter = pair.filters.find(f => f.filterType === 'MIN_NOTIONAL');
+        
+        const tickerKey = REDIS_KEYS.TICKER(pair.symbol);
+        const tickerRaw = await redis.get(tickerKey);
+        let price = null, change = null, volume = null;
+        
+        if (tickerRaw) {
+          const ticker = JSON.parse(tickerRaw);
+          price = ticker.lastPrice;
+          change = ticker.priceChangePercent;
+          volume = ticker.volume;
+        } else {
+          const priceKey = REDIS_KEYS.LAST_PRICE(pair.symbol);
+          const priceRaw = await redis.get(priceKey);
+          if (priceRaw) {
+            price = JSON.parse(priceRaw).price;
+          }
+        }
+        
+        pairs.push({
+          symbol: pair.symbol,
+          baseAsset: pair.baseAsset,
+          quoteAsset: pair.quoteAsset,
+          basePrecision: pair.baseAssetPrecision,
+          quotePrecision: pair.quoteAssetPrecision,
+          minQty: lotSizeFilter ? parseFloat(lotSizeFilter.minQty) : 0.00001,
+          maxQty: lotSizeFilter ? parseFloat(lotSizeFilter.maxQty) : 10000,
+          tickSize: priceFilter ? parseFloat(priceFilter.tickSize) : 0.01,
+          minNotional: minNotionalFilter ? parseFloat(minNotionalFilter.minNotional) : 10,
+          status: 'active',
+          currentPrice: price,
+          change24h: change,
+          volume24h: volume
+        });
+      }
+      
+      const quoteAssetsSet = [...new Set(pairs.map(p => p.quoteAsset))];
+      
+      await redis.setex(REDIS_KEYS.ALL_PAIRS, 60, JSON.stringify(pairs));
+      await redis.setex(REDIS_KEYS.QUOTE_ASSETS, 60, JSON.stringify(quoteAssetsSet));
+      
+      const endTime = process.hrtime.bigint();
+      const responseTime = Number(endTime - startTime) / 1000000;
+      
+      res.set({
+        'Cache-Control': 'public, max-age=30',
+        'X-Response-Time-ms': responseTime.toFixed(2),
+        'X-Cache-Status': 'MISS'
+      });
+      
+      return res.status(200).json({
+        status: 'success',
+        timestamp: Date.now(),
+        responseTimeMs: responseTime,
+        data: {
+          pairs,
+          quoteAssets: quoteAssetsSet,
+          totalPairs: pairs.length
+        }
+      });
+    }
+    
+    const pairs = JSON.parse(cachedPairs);
+    const quoteAssets = JSON.parse(cachedQuoteAssets);
+    
+    const priceUpdatePromises = pairs.slice(0, 100).map(async (pair) => {
+      const tickerKey = REDIS_KEYS.TICKER(pair.symbol);
+      const tickerRaw = await redis.get(tickerKey);
+      if (tickerRaw) {
+        const ticker = JSON.parse(tickerRaw);
+        pair.currentPrice = ticker.lastPrice;
+        pair.change24h = ticker.priceChangePercent;
+        pair.volume24h = ticker.volume;
+        pair.high24h = ticker.highPrice;
+        pair.low24h = ticker.lowPrice;
+      } else {
+        const priceKey = REDIS_KEYS.LAST_PRICE(pair.symbol);
+        const priceRaw = await redis.get(priceKey);
+        if (priceRaw) {
+          pair.currentPrice = JSON.parse(priceRaw).price;
+        }
+      }
+      return pair;
+    });
+    
+    await Promise.all(priceUpdatePromises);
+    
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    res.set({
+      'Cache-Control': 'public, max-age=30',
+      'X-Response-Time-ms': responseTime.toFixed(2),
+      'X-Cache-Status': 'HIT',
+      'X-Total-Pairs': pairs.length
+    });
+    
+    return res.status(200).json({
+      status: 'success',
+      timestamp: Date.now(),
+      responseTimeMs: responseTime,
+      data: {
+        pairs,
+        quoteAssets,
+        totalPairs: pairs.length,
+        source: 'redis'
+      }
+    });
+    
+  } catch (err) {
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    console.error('All pairs endpoint error:', err.message);
+    
+    res.set({
+      'Cache-Control': 'no-cache',
+      'X-Response-Time-ms': responseTime.toFixed(2),
+      'X-Error': err.message
+    });
+    
+    return res.status(503).json({
+      status: 'error',
+      message: 'Unable to fetch trading pairs',
+      timestamp: Date.now(),
+      responseTimeMs: responseTime
+    });
+  }
+});
+
+app.get('/api/market/ticker/24hr', async (req, res) => {
+  const startTime = process.hrtime.bigint();
+  
+  try {
+    const { symbol } = req.query;
+    
+    if (symbol) {
+      const tickerKey = REDIS_KEYS.TICKER(symbol.toUpperCase());
+      const tickerRaw = await redis.get(tickerKey);
+      
+      if (!tickerRaw) {
+        const endTime = process.hrtime.bigint();
+        const responseTime = Number(endTime - startTime) / 1000000;
+        
+        res.set({
+          'Cache-Control': 'no-cache',
+          'X-Response-Time-ms': responseTime.toFixed(2)
+        });
+        
+        return res.status(404).json({
+          status: 'fail',
+          message: `Ticker data not found for symbol: ${symbol}`,
+          timestamp: Date.now(),
+          responseTimeMs: responseTime
+        });
+      }
+      
+      const ticker = JSON.parse(tickerRaw);
+      const endTime = process.hrtime.bigint();
+      const responseTime = Number(endTime - startTime) / 1000000;
+      
+      res.set({
+        'Cache-Control': 'public, max-age=5',
+        'X-Response-Time-ms': responseTime.toFixed(2),
+        'X-Cache-Status': 'HIT'
+      });
+      
+      return res.status(200).json({
+        symbol: ticker.symbol,
+        priceChange: ticker.priceChange,
+        priceChangePercent: ticker.priceChangePercent,
+        weightedAvgPrice: ticker.weightedAvgPrice,
+        prevClosePrice: ticker.prevClosePrice,
+        lastPrice: ticker.lastPrice,
+        lastQty: ticker.lastQty,
+        bidPrice: ticker.bidPrice,
+        askPrice: ticker.askPrice,
+        openPrice: ticker.openPrice,
+        highPrice: ticker.highPrice,
+        lowPrice: ticker.lowPrice,
+        volume: ticker.volume,
+        quoteVolume: ticker.quoteVolume,
+        openTime: ticker.openTime,
+        closeTime: ticker.closeTime,
+        firstId: ticker.firstId,
+        lastId: ticker.lastId,
+        count: ticker.count,
+        timestamp: Date.now()
+      });
+    }
+    
+    const cachedPairs = await redis.get(REDIS_KEYS.ALL_PAIRS);
+    if (!cachedPairs) {
+      throw new Error('No pair data available');
+    }
+    
+    const pairs = JSON.parse(cachedPairs);
+    const tickers = [];
+    const tickerPromises = pairs.slice(0, 200).map(async (pair) => {
+      const tickerKey = REDIS_KEYS.TICKER(pair.symbol);
+      const tickerRaw = await redis.get(tickerKey);
+      if (tickerRaw) {
+        const ticker = JSON.parse(tickerRaw);
+        tickers.push({
+          symbol: ticker.symbol,
+          priceChange: ticker.priceChange,
+          priceChangePercent: ticker.priceChangePercent,
+          weightedAvgPrice: ticker.weightedAvgPrice,
+          prevClosePrice: ticker.prevClosePrice,
+          lastPrice: ticker.lastPrice,
+          lastQty: ticker.lastQty,
+          bidPrice: ticker.bidPrice,
+          askPrice: ticker.askPrice,
+          openPrice: ticker.openPrice,
+          highPrice: ticker.highPrice,
+          lowPrice: ticker.lowPrice,
+          volume: ticker.volume,
+          quoteVolume: ticker.quoteVolume
+        });
+      }
+    });
+    
+    await Promise.all(tickerPromises);
+    
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    res.set({
+      'Cache-Control': 'public, max-age=5',
+      'X-Response-Time-ms': responseTime.toFixed(2),
+      'X-Cache-Status': 'HIT',
+      'X-Total-Tickers': tickers.length
+    });
+    
+    return res.status(200).json(tickers);
+    
+  } catch (err) {
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    console.error('Ticker 24hr error:', err.message);
+    
+    res.set({
+      'Cache-Control': 'no-cache',
+      'X-Response-Time-ms': responseTime.toFixed(2)
+    });
+    
+    return res.status(503).json({
+      status: 'error',
+      message: 'Unable to fetch ticker data',
+      timestamp: Date.now(),
+      responseTimeMs: responseTime
+    });
+  }
+});
+
+app.get('/api/market/orderbook', async (req, res) => {
+  const startTime = process.hrtime.bigint();
+  
+  try {
+    const { symbol, limit = 100 } = req.query;
+    
+    if (!symbol) {
+      const endTime = process.hrtime.bigint();
+      const responseTime = Number(endTime - startTime) / 1000000;
+      
+      res.set({
+        'Cache-Control': 'no-cache',
+        'X-Response-Time-ms': responseTime.toFixed(2)
+      });
+      
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Symbol parameter is required',
+        timestamp: Date.now(),
+        responseTimeMs: responseTime
+      });
+    }
+    
+    const parsedLimit = Math.min(parseInt(limit) || 100, 1000);
+    const orderbookKey = REDIS_KEYS.ORDERBOOK(symbol.toUpperCase());
+    const orderbookRaw = await redis.get(orderbookKey);
+    
+    if (!orderbookRaw) {
+      const endTime = process.hrtime.bigint();
+      const responseTime = Number(endTime - startTime) / 1000000;
+      
+      res.set({
+        'Cache-Control': 'no-cache',
+        'X-Response-Time-ms': responseTime.toFixed(2)
+      });
+      
+      return res.status(404).json({
+        status: 'fail',
+        message: `Orderbook not found for symbol: ${symbol}`,
+        timestamp: Date.now(),
+        responseTimeMs: responseTime
+      });
+    }
+    
+    const orderbook = JSON.parse(orderbookRaw);
+    
+    const bids = orderbook.bids.slice(0, parsedLimit);
+    const asks = orderbook.asks.slice(0, parsedLimit);
+    
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    res.set({
+      'Cache-Control': 'public, max-age=1',
+      'X-Response-Time-ms': responseTime.toFixed(2),
+      'X-Cache-Status': 'HIT',
+      'X-Bids-Count': bids.length,
+      'X-Asks-Count': asks.length
+    });
+    
+    return res.status(200).json({
+      lastUpdateId: orderbook.lastUpdateId,
+      bids: bids,
+      asks: asks,
+      symbol: symbol.toUpperCase(),
+      timestamp: Date.now()
+    });
+    
+  } catch (err) {
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    console.error('Orderbook error:', err.message);
+    
+    res.set({
+      'Cache-Control': 'no-cache',
+      'X-Response-Time-ms': responseTime.toFixed(2)
+    });
+    
+    return res.status(503).json({
+      status: 'error',
+      message: 'Unable to fetch orderbook data',
+      timestamp: Date.now(),
+      responseTimeMs: responseTime
+    });
+  }
+});
+
+app.get('/api/market/trades', async (req, res) => {
+  const startTime = process.hrtime.bigint();
+  
+  try {
+    const { symbol, limit = 50 } = req.query;
+    
+    if (!symbol) {
+      const endTime = process.hrtime.bigint();
+      const responseTime = Number(endTime - startTime) / 1000000;
+      
+      res.set({
+        'Cache-Control': 'no-cache',
+        'X-Response-Time-ms': responseTime.toFixed(2)
+      });
+      
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Symbol parameter is required',
+        timestamp: Date.now(),
+        responseTimeMs: responseTime
+      });
+    }
+    
+    const parsedLimit = Math.min(parseInt(limit) || 50, 500);
+    const tradesKey = REDIS_KEYS.TRADES(symbol.toUpperCase());
+    const tradesRaw = await redis.get(tradesKey);
+    
+    if (!tradesRaw) {
+      const endTime = process.hrtime.bigint();
+      const responseTime = Number(endTime - startTime) / 1000000;
+      
+      res.set({
+        'Cache-Control': 'no-cache',
+        'X-Response-Time-ms': responseTime.toFixed(2)
+      });
+      
+      return res.status(200).json([]);
+    }
+    
+    const allTrades = JSON.parse(tradesRaw);
+    const recentTrades = allTrades.slice(0, parsedLimit);
+    
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    res.set({
+      'Cache-Control': 'public, max-age=2',
+      'X-Response-Time-ms': responseTime.toFixed(2),
+      'X-Cache-Status': 'HIT',
+      'X-Trades-Count': recentTrades.length
+    });
+    
+    return res.status(200).json(recentTrades);
+    
+  } catch (err) {
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    console.error('Trades error:', err.message);
+    
+    res.set({
+      'Cache-Control': 'no-cache',
+      'X-Response-Time-ms': responseTime.toFixed(2)
+    });
+    
+    return res.status(503).json({
+      status: 'error',
+      message: 'Unable to fetch trades data',
+      timestamp: Date.now(),
+      responseTimeMs: responseTime
+    });
+  }
+});
+
+app.get('/api/market/candles', async (req, res) => {
+  const startTime = process.hrtime.bigint();
+  
+  try {
+    const { symbol, interval = '15m', limit = 200 } = req.query;
+    const token = req.headers.authorization?.split(' ')[1];
+    
+    if (!symbol) {
+      const endTime = process.hrtime.bigint();
+      const responseTime = Number(endTime - startTime) / 1000000;
+      
+      res.set({
+        'Cache-Control': 'no-cache',
+        'X-Response-Time-ms': responseTime.toFixed(2)
+      });
+      
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Symbol parameter is required',
+        timestamp: Date.now(),
+        responseTimeMs: responseTime
+      });
+    }
+    
+    const validIntervals = ['1m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d', '3d', '1w', '1M'];
+    const normalizedInterval = validIntervals.includes(interval) ? interval : '15m';
+    const parsedLimit = Math.min(parseInt(limit) || 200, 1000);
+    
+    const candlesKey = REDIS_KEYS.CANDLES(symbol.toUpperCase(), normalizedInterval);
+    const candlesRaw = await redis.zrevrange(candlesKey, 0, parsedLimit - 1);
+    
+    let candles = [];
+    
+    if (candlesRaw && candlesRaw.length > 0) {
+      candles = candlesRaw.map(candleRaw => JSON.parse(candleRaw)).reverse();
+    } else {
+      const response = await axios.get(`https://api.binance.com/api/v3/klines`, {
+        params: {
+          symbol: symbol.toUpperCase(),
+          interval: normalizedInterval,
+          limit: parsedLimit
+        },
+        timeout: 5000
+      });
+      
+      if (response.data && response.data.length > 0) {
+        candles = response.data.map(kline => ({
+          openTime: kline[0],
+          open: parseFloat(kline[1]),
+          high: parseFloat(kline[2]),
+          low: parseFloat(kline[3]),
+          close: parseFloat(kline[4]),
+          volume: parseFloat(kline[5]),
+          closeTime: kline[6],
+          quoteVolume: parseFloat(kline[7]),
+          trades: kline[8],
+          interval: normalizedInterval,
+          symbol: symbol.toUpperCase()
+        }));
+        
+        for (const candle of candles) {
+          await redis.zadd(candlesKey, candle.openTime, JSON.stringify(candle));
+        }
+        await redis.expire(candlesKey, 3600);
+      }
+    }
+    
+    let userOrders = [];
+    let userTrades = [];
+    let userPositions = [];
+    
+    if (token) {
+      try {
+        const decoded = verifyJWT(token);
+        if (decoded && !decoded.isAdmin) {
+          const userId = decoded.id;
+          
+          const orders = await Order.find({
+            user: userId,
+            symbol: symbol.toUpperCase(),
+            status: { $in: ['filled', 'partial', 'open'] }
+          }).select('price amount executedQty side status createdAt').lean();
+          
+          const trades = await Trade.find({
+            user: userId,
+            symbol: symbol.toUpperCase()
+          }).select('price qty side time').sort({ time: -1 }).limit(50).lean();
+          
+          const positions = await Position.find({
+            user: userId,
+            symbol: symbol.toUpperCase(),
+            status: 'open'
+          }).select('entryPrice quantity side takeProfit stopLoss').lean();
+          
+          userOrders = orders.map(order => ({
+            price: order.price,
+            amount: order.amount,
+            executedQty: order.executedQty || 0,
+            side: order.side,
+            status: order.status,
+            time: order.createdAt ? new Date(order.createdAt).getTime() : Date.now(),
+            type: 'order'
+          }));
+          
+          userTrades = trades.map(trade => ({
+            price: trade.price,
+            amount: trade.qty,
+            side: trade.side,
+            time: trade.time,
+            type: 'trade'
+          }));
+          
+          userPositions = positions.map(pos => ({
+            entryPrice: pos.entryPrice,
+            quantity: pos.quantity,
+            side: pos.side,
+            takeProfit: pos.takeProfit,
+            stopLoss: pos.stopLoss,
+            type: 'position'
+          }));
+        }
+      } catch (authErr) {
+        console.error('Auth error in candles:', authErr.message);
+      }
+    }
+    
+    const chartData = {
+      candles: candles,
+      userOrders: userOrders,
+      userTrades: userTrades,
+      userPositions: userPositions,
+      metadata: {
+        symbol: symbol.toUpperCase(),
+        interval: normalizedInterval,
+        limit: parsedLimit,
+        hasUserData: !!(token && (userOrders.length || userTrades.length || userPositions.length))
+      }
+    };
+    
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    res.set({
+      'Cache-Control': 'public, max-age=10',
+      'X-Response-Time-ms': responseTime.toFixed(2),
+      'X-Cache-Status': candlesRaw && candlesRaw.length > 0 ? 'HIT' : 'MISS',
+      'X-Candles-Count': candles.length,
+      'X-User-Orders': userOrders.length,
+      'X-User-Trades': userTrades.length,
+      'X-User-Positions': userPositions.length
+    });
+    
+    return res.status(200).json({
+      status: 'success',
+      timestamp: Date.now(),
+      responseTimeMs: responseTime,
+      data: chartData
+    });
+    
+  } catch (err) {
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    console.error('Candles error:', err.message);
+    
+    res.set({
+      'Cache-Control': 'no-cache',
+      'X-Response-Time-ms': responseTime.toFixed(2)
+    });
+    
+    return res.status(503).json({
+      status: 'error',
+      message: 'Unable to fetch candle data',
+      timestamp: Date.now(),
+      responseTimeMs: responseTime
+    });
+  }
+});
+
+app.post('/api/trading/orders/buy', protect, async (req, res) => {
+  const startTime = process.hrtime.bigint();
+  
+  try {
+    const { symbol, type, price, amount } = req.body;
+    const userId = req.user._id;
+    
+    if (!symbol || !type || !amount || amount <= 0) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Symbol, type, and valid amount are required'
+      });
+    }
+    
+    if (type === 'limit' && (!price || price <= 0)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Valid price is required for limit orders'
+      });
+    }
+    
+    const baseAsset = symbol.replace(/USDT|USDC|BUSD|BTC|ETH|BNB|SOL|XRP|DOGE|ADA$/, '');
+    const quoteAsset = symbol.slice(baseAsset.length);
+    const orderPrice = type === 'market' ? await getCurrentPrice(symbol) : price;
+    const totalCost = amount * orderPrice;
+    const TRADE_FEE_PERCENT = 0.5;
+    const feeAmount = totalCost * (TRADE_FEE_PERCENT / 100);
+    const totalWithFee = totalCost + feeAmount;
+    
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+    
+    if (!user.balances) {
+      user.balances = { main: new Map(), active: new Map(), matured: new Map() };
+    }
+    if (!user.balances.main) user.balances.main = new Map();
+    
+    const quoteAssetLower = quoteAsset.toLowerCase();
+    const userQuoteBalance = user.balances.main.get(quoteAssetLower) || 0;
+    
+    if (userQuoteBalance < totalWithFee) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Insufficient ${quoteAsset} balance. Required: ${totalWithFee.toFixed(8)} ${quoteAsset} (includes ${TRADE_FEE_PERCENT}% fee), Available: ${userQuoteBalance.toFixed(8)} ${quoteAsset}`
+      });
+    }
+    
+    const orderId = `BUY-${Date.now()}-${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
+    
+    let executedQty = 0;
+    let executedCost = 0;
+    let orderStatus = 'open';
+    let filledPrice = orderPrice;
+    
+    if (type === 'market') {
+      executedQty = amount;
+      executedCost = totalCost;
+      orderStatus = 'filled';
+      
+      const newQuoteBalance = userQuoteBalance - totalWithFee;
+      if (newQuoteBalance <= 0.00000001) {
+        user.balances.main.delete(quoteAssetLower);
+      } else {
+        user.balances.main.set(quoteAssetLower, newQuoteBalance);
+      }
+      
+      const baseAssetLower = baseAsset.toLowerCase();
+      const currentBaseBalance = user.balances.main.get(baseAssetLower) || 0;
+      user.balances.main.set(baseAssetLower, currentBaseBalance + amount);
+      
+      const currentUsdBalance = user.balances.main.get('usd') || 0;
+      user.balances.main.set('usd', currentUsdBalance - totalCost);
+      
+      await user.save();
+    }
+    
+    const order = await Order.create({
+      user: userId,
+      symbol: symbol,
+      orderId: orderId,
+      side: 'buy',
+      type: type,
+      price: type === 'market' ? filledPrice : price,
+      originalQty: amount,
+      executedQty: executedQty,
+      remainingQty: type === 'market' ? 0 : amount,
+      quoteOrderQty: totalCost,
+      status: orderStatus,
+      timeInForce: 'GTC',
+      total: totalCost,
+      fee: feeAmount,
+      feeAsset: quoteAsset,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    });
+    
+    const transaction = await Transaction.create({
+      user: userId,
+      type: 'buy',
+      amount: totalCost,
+      asset: baseAsset,
+      assetAmount: amount,
+      currency: 'USD',
+      status: 'completed',
+      method: quoteAsset,
+      reference: orderId,
+      details: {
+        orderId: orderId,
+        symbol: symbol,
+        orderType: type,
+        price: filledPrice,
+        fee: feeAmount,
+        feePercentage: TRADE_FEE_PERCENT
+      },
+      buyDetails: {
+        asset: baseAsset,
+        amountUSD: totalCost,
+        assetAmount: amount,
+        buyingPrice: filledPrice,
+        currentPrice: filledPrice,
+        profitLoss: 0,
+        profitLossPercentage: 0
+      },
+      fee: feeAmount,
+      netAmount: totalCost,
+      exchangeRateAtTime: filledPrice
+    });
+    
+    await PlatformRevenue.create({
+      source: 'buy_fee',
+      amount: feeAmount,
+      currency: 'USD',
+      transactionId: transaction._id,
+      orderId: order._id,
+      userId: userId,
+      description: `${TRADE_FEE_PERCENT}% trading fee on ${symbol} buy order`,
+      metadata: {
+        symbol: symbol,
+        orderType: type,
+        amount: amount,
+        price: filledPrice,
+        totalCost: totalCost,
+        feePercentage: TRADE_FEE_PERCENT,
+        orderId: orderId
+      }
+    });
+    
+    await logActivity('buy_order_placed', 'Order', order._id, userId, 'User', req, {
+      symbol: symbol,
+      amount: amount,
+      price: filledPrice,
+      type: type,
+      totalCost: totalCost,
+      fee: feeAmount,
+      status: orderStatus
+    });
+    
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${userId}`).emit('order_placed', {
+        orderId: orderId,
+        symbol: symbol,
+        side: 'buy',
+        amount: amount,
+        price: filledPrice,
+        fee: feeAmount,
+        status: orderStatus,
+        timestamp: Date.now()
+      });
+      
+      let totalMainUSD = 0;
+      for (const [asset, balance] of user.balances.main) {
+        if (balance > 0 && asset !== 'usd') {
+          const assetPrice = await getCryptoPrice(asset);
+          if (assetPrice) totalMainUSD += balance * assetPrice;
+        }
+      }
+      
+      io.to(`user_${userId}`).emit('balance_update', {
+        main: totalMainUSD,
+        active: user.balances.active?.get('usd') || 0,
+        matured: user.balances.matured?.get('usd') || 0
+      });
+    }
+    
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    res.set({
+      'X-Response-Time-ms': responseTime.toFixed(2)
+    });
+    
+    return res.status(201).json({
+      status: 'success',
+      data: {
+        order: {
+          id: order._id,
+          orderId: orderId,
+          symbol: symbol,
+          side: 'buy',
+          type: type,
+          price: type === 'market' ? filledPrice : price,
+          amount: amount,
+          executedQty: executedQty,
+          remainingQty: type === 'market' ? 0 : amount,
+          totalCost: totalCost,
+          fee: feeAmount,
+          feePercentage: TRADE_FEE_PERCENT,
+          status: orderStatus,
+          createdAt: order.createdAt
+        },
+        balances: {
+          [quoteAsset]: user.balances.main.get(quoteAssetLower) || 0,
+          [baseAsset]: user.balances.main.get(baseAsset.toLowerCase()) || 0
+        }
+      }
+    });
+    
+  } catch (err) {
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    console.error('Buy order error:', err);
+    
+    res.set({
+      'X-Response-Time-ms': responseTime.toFixed(2)
+    });
+    
+    return res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to place buy order'
+    });
+  }
+});
 
 
+app.post('/api/trading/orders/sell', protect, async (req, res) => {
+  const startTime = process.hrtime.bigint();
+  
+  try {
+    const { symbol, type, price, amount } = req.body;
+    const userId = req.user._id;
+    
+    if (!symbol || !type || !amount || amount <= 0) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Symbol, type, and valid amount are required'
+      });
+    }
+    
+    if (type === 'limit' && (!price || price <= 0)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Valid price is required for limit orders'
+      });
+    }
+    
+    const baseAsset = symbol.replace(/USDT|USDC|BUSD|BTC|ETH|BNB|SOL|XRP|DOGE|ADA$/, '');
+    const quoteAsset = symbol.slice(baseAsset.length);
+    const orderPrice = type === 'market' ? await getCurrentPrice(symbol) : price;
+    const totalProceeds = amount * orderPrice;
+    const TRADE_FEE_PERCENT = 0.5;
+    const feeAmount = totalProceeds * (TRADE_FEE_PERCENT / 100);
+    const netProceeds = totalProceeds - feeAmount;
+    
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+    
+    if (!user.balances) {
+      user.balances = { main: new Map(), active: new Map(), matured: new Map() };
+    }
+    if (!user.balances.main) user.balances.main = new Map();
+    
+    const baseAssetLower = baseAsset.toLowerCase();
+    const userBaseBalance = user.balances.main.get(baseAssetLower) || 0;
+    
+    if (userBaseBalance < amount) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Insufficient ${baseAsset} balance. Required: ${amount.toFixed(8)} ${baseAsset}, Available: ${userBaseBalance.toFixed(8)} ${baseAsset}`
+      });
+    }
+    
+    const orderId = `SELL-${Date.now()}-${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
+    
+    let executedQty = 0;
+    let executedProceeds = 0;
+    let orderStatus = 'open';
+    let filledPrice = orderPrice;
+    
+    if (type === 'market') {
+      executedQty = amount;
+      executedProceeds = netProceeds;
+      orderStatus = 'filled';
+      
+      const newBaseBalance = userBaseBalance - amount;
+      if (newBaseBalance <= 0.00000001) {
+        user.balances.main.delete(baseAssetLower);
+      } else {
+        user.balances.main.set(baseAssetLower, newBaseBalance);
+      }
+      
+      const quoteAssetLower = quoteAsset.toLowerCase();
+      const currentQuoteBalance = user.balances.main.get(quoteAssetLower) || 0;
+      user.balances.main.set(quoteAssetLower, currentQuoteBalance + netProceeds);
+      
+      const currentUsdBalance = user.balances.main.get('usd') || 0;
+      user.balances.main.set('usd', currentUsdBalance + netProceeds);
+      
+      await user.save();
+    }
+    
+    const order = await Order.create({
+      user: userId,
+      symbol: symbol,
+      orderId: orderId,
+      side: 'sell',
+      type: type,
+      price: type === 'market' ? filledPrice : price,
+      originalQty: amount,
+      executedQty: executedQty,
+      remainingQty: type === 'market' ? 0 : amount,
+      quoteOrderQty: totalProceeds,
+      status: orderStatus,
+      timeInForce: 'GTC',
+      total: totalProceeds,
+      fee: feeAmount,
+      feeAsset: quoteAsset,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    });
+    
+    const transaction = await Transaction.create({
+      user: userId,
+      type: 'sell',
+      amount: totalProceeds,
+      asset: baseAsset,
+      assetAmount: amount,
+      currency: 'USD',
+      status: 'completed',
+      method: quoteAsset,
+      reference: orderId,
+      details: {
+        orderId: orderId,
+        symbol: symbol,
+        orderType: type,
+        price: filledPrice,
+        fee: feeAmount,
+        feePercentage: TRADE_FEE_PERCENT,
+        netProceeds: netProceeds
+      },
+      sellDetails: {
+        asset: baseAsset,
+        amountUSD: totalProceeds,
+        assetAmount: amount,
+        sellingPrice: filledPrice,
+        buyingPrice: filledPrice,
+        profitLoss: 0,
+        profitLossPercentage: 0
+      },
+      fee: feeAmount,
+      netAmount: netProceeds,
+      exchangeRateAtTime: filledPrice
+    });
+    
+    await PlatformRevenue.create({
+      source: 'sell_fee',
+      amount: feeAmount,
+      currency: 'USD',
+      transactionId: transaction._id,
+      orderId: order._id,
+      userId: userId,
+      description: `${TRADE_FEE_PERCENT}% trading fee on ${symbol} sell order`,
+      metadata: {
+        symbol: symbol,
+        orderType: type,
+        amount: amount,
+        price: filledPrice,
+        totalProceeds: totalProceeds,
+        netProceeds: netProceeds,
+        feePercentage: TRADE_FEE_PERCENT,
+        orderId: orderId
+      }
+    });
+    
+    await logActivity('sell_order_placed', 'Order', order._id, userId, 'User', req, {
+      symbol: symbol,
+      amount: amount,
+      price: filledPrice,
+      type: type,
+      totalProceeds: totalProceeds,
+      fee: feeAmount,
+      netProceeds: netProceeds,
+      status: orderStatus
+    });
+    
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${userId}`).emit('order_placed', {
+        orderId: orderId,
+        symbol: symbol,
+        side: 'sell',
+        amount: amount,
+        price: filledPrice,
+        fee: feeAmount,
+        netProceeds: netProceeds,
+        status: orderStatus,
+        timestamp: Date.now()
+      });
+      
+      let totalMainUSD = 0;
+      for (const [asset, balance] of user.balances.main) {
+        if (balance > 0 && asset !== 'usd') {
+          const assetPrice = await getCryptoPrice(asset);
+          if (assetPrice) totalMainUSD += balance * assetPrice;
+        }
+      }
+      
+      io.to(`user_${userId}`).emit('balance_update', {
+        main: totalMainUSD,
+        active: user.balances.active?.get('usd') || 0,
+        matured: user.balances.matured?.get('usd') || 0
+      });
+    }
+    
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    res.set({
+      'X-Response-Time-ms': responseTime.toFixed(2)
+    });
+    
+    return res.status(201).json({
+      status: 'success',
+      data: {
+        order: {
+          id: order._id,
+          orderId: orderId,
+          symbol: symbol,
+          side: 'sell',
+          type: type,
+          price: type === 'market' ? filledPrice : price,
+          amount: amount,
+          executedQty: executedQty,
+          remainingQty: type === 'market' ? 0 : amount,
+          totalProceeds: totalProceeds,
+          fee: feeAmount,
+          feePercentage: TRADE_FEE_PERCENT,
+          netProceeds: netProceeds,
+          status: orderStatus,
+          createdAt: order.createdAt
+        },
+        balances: {
+          [baseAsset]: user.balances.main.get(baseAssetLower) || 0,
+          [quoteAsset]: user.balances.main.get(quoteAsset.toLowerCase()) || 0
+        }
+      }
+    });
+    
+  } catch (err) {
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    console.error('Sell order error:', err);
+    
+    res.set({
+      'X-Response-Time-ms': responseTime.toFixed(2)
+    });
+    
+    return res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to place sell order'
+    });
+  }
+});
 
 
+app.get('/api/trading/orders', protect, async (req, res) => {
+  const startTime = process.hrtime.bigint();
+  
+  try {
+    const { symbol, status, limit = 50, page = 1 } = req.query;
+    const userId = req.user._id;
+    
+    const parsedLimit = Math.min(parseInt(limit) || 50, 200);
+    const parsedPage = parseInt(page) || 1;
+    const skip = (parsedPage - 1) * parsedLimit;
+    
+    const query = { user: userId };
+    if (symbol) query.symbol = symbol.toUpperCase();
+    if (status && status !== 'all') {
+      if (status === 'open') {
+        query.status = { $in: ['open', 'partial', 'pending'] };
+      } else if (status === 'filled') {
+        query.status = { $in: ['filled', 'completed'] };
+      } else {
+        query.status = status;
+      }
+    }
+    
+    const [orders, totalCount] = await Promise.all([
+      Order.find(query)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parsedLimit)
+        .lean(),
+      Order.countDocuments(query)
+    ]);
+    
+    const currentPrices = new Map();
+    for (const order of orders) {
+      if (!currentPrices.has(order.symbol)) {
+        const priceKey = REDIS_KEYS.LAST_PRICE(order.symbol);
+        const priceRaw = await redis.get(priceKey);
+        if (priceRaw) {
+          const priceData = JSON.parse(priceRaw);
+          currentPrices.set(order.symbol, priceData.price);
+        } else {
+          const tickerKey = REDIS_KEYS.TICKER(order.symbol);
+          const tickerRaw = await redis.get(tickerKey);
+          if (tickerRaw) {
+            const ticker = JSON.parse(tickerRaw);
+            currentPrices.set(order.symbol, ticker.lastPrice);
+          } else {
+            currentPrices.set(order.symbol, order.price);
+          }
+        }
+      }
+    }
+    
+    const formattedOrders = orders.map(order => {
+      const currentPrice = currentPrices.get(order.symbol) || order.price;
+      let pnl = null;
+      let pnlPercent = null;
+      
+      if (order.status === 'filled' && order.side === 'buy') {
+        const currentValue = order.executedQty * currentPrice;
+        const costBasis = order.executedQty * order.price;
+        pnl = currentValue - costBasis;
+        pnlPercent = costBasis > 0 ? (pnl / costBasis) * 100 : 0;
+      } else if (order.status === 'filled' && order.side === 'sell') {
+        const proceeds = order.executedQty * order.price;
+        const currentValue = order.executedQty * currentPrice;
+        pnl = proceeds - currentValue;
+        pnlPercent = currentValue > 0 ? (pnl / currentValue) * 100 : 0;
+      }
+      
+      return {
+        _id: order._id,
+        orderId: order.orderId,
+        symbol: order.symbol,
+        side: order.side,
+        type: order.type,
+        price: order.price,
+        amount: order.originalQty,
+        executedQty: order.executedQty,
+        remainingQty: order.remainingQty,
+        total: order.total,
+        fee: order.fee,
+        feeAsset: order.feeAsset,
+        status: order.status,
+        timeInForce: order.timeInForce,
+        createdAt: order.createdAt,
+        updatedAt: order.updatedAt,
+        currentPrice: currentPrice,
+        pnl: pnl,
+        pnlPercent: pnlPercent
+      };
+    });
+    
+    const totalPages = Math.ceil(totalCount / parsedLimit);
+    
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    res.set({
+      'Cache-Control': 'private, max-age=2',
+      'X-Response-Time-ms': responseTime.toFixed(2),
+      'X-Total-Count': totalCount,
+      'X-Page': parsedPage,
+      'X-Limit': parsedLimit
+    });
+    
+    return res.status(200).json({
+      status: 'success',
+      timestamp: Date.now(),
+      responseTimeMs: responseTime,
+      data: {
+        orders: formattedOrders,
+        pagination: {
+          currentPage: parsedPage,
+          limit: parsedLimit,
+          totalCount: totalCount,
+          totalPages: totalPages,
+          hasNext: parsedPage < totalPages,
+          hasPrev: parsedPage > 1
+        }
+      }
+    });
+    
+  } catch (err) {
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    console.error('Get orders error:', err.message);
+    
+    res.set({
+      'Cache-Control': 'no-cache',
+      'X-Response-Time-ms': responseTime.toFixed(2)
+    });
+    
+    return res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to fetch orders',
+      timestamp: Date.now(),
+      responseTimeMs: responseTime
+    });
+  }
+});
 
 
+app.get('/api/trading/trades', protect, async (req, res) => {
+  const startTime = process.hrtime.bigint();
+  
+  try {
+    const { symbol, limit = 50, page = 1 } = req.query;
+    const userId = req.user._id;
+    
+    const parsedLimit = Math.min(parseInt(limit) || 50, 200);
+    const parsedPage = parseInt(page) || 1;
+    const skip = (parsedPage - 1) * parsedLimit;
+    
+    const query = { user: userId };
+    if (symbol) query.symbol = symbol.toUpperCase();
+    
+    const [trades, totalCount] = await Promise.all([
+      Trade.find(query)
+        .sort({ time: -1 })
+        .skip(skip)
+        .limit(parsedLimit)
+        .lean(),
+      Trade.countDocuments(query)
+    ]);
+    
+    const orderIds = [...new Set(trades.map(t => t.orderId).filter(Boolean))];
+    const orders = await Order.find({ orderId: { $in: orderIds } }).lean();
+    const orderMap = new Map(orders.map(o => [o.orderId, o]));
+    
+    const currentPrices = new Map();
+    for (const trade of trades) {
+      if (!currentPrices.has(trade.symbol)) {
+        const priceKey = REDIS_KEYS.LAST_PRICE(trade.symbol);
+        const priceRaw = await redis.get(priceKey);
+        if (priceRaw) {
+          const priceData = JSON.parse(priceRaw);
+          currentPrices.set(trade.symbol, priceData.price);
+        } else {
+          const tickerKey = REDIS_KEYS.TICKER(trade.symbol);
+          const tickerRaw = await redis.get(tickerKey);
+          if (tickerRaw) {
+            const ticker = JSON.parse(tickerRaw);
+            currentPrices.set(trade.symbol, ticker.lastPrice);
+          }
+        }
+      }
+    }
+    
+    const baseAssetMap = new Map();
+    for (const trade of trades) {
+      if (!baseAssetMap.has(trade.symbol)) {
+        const match = trade.symbol.match(/^(BTC|ETH|BNB|SOL|XRP|DOGE|ADA|AVAX|DOT|LINK|MATIC|LTC|NEAR|UNI|ATOM|XLM|SHIB|TRX|USDT|USDC)/);
+        baseAssetMap.set(trade.symbol, match ? match[1] : trade.symbol);
+      }
+    }
+    
+    const formattedTrades = trades.map(trade => {
+      const order = orderMap.get(trade.orderId);
+      const currentPrice = currentPrices.get(trade.symbol) || trade.price;
+      const baseAsset = baseAssetMap.get(trade.symbol) || trade.symbol;
+      
+      let pnl = null;
+      let pnlPercent = null;
+      
+      if (trade.side === 'buy') {
+        const currentValue = trade.qty * currentPrice;
+        const costBasis = trade.qty * trade.price;
+        pnl = currentValue - costBasis;
+        pnlPercent = costBasis > 0 ? (pnl / costBasis) * 100 : 0;
+      } else if (trade.side === 'sell') {
+        const proceeds = trade.qty * trade.price;
+        const currentValue = trade.qty * currentPrice;
+        pnl = proceeds - currentValue;
+        pnlPercent = currentValue > 0 ? (pnl / currentValue) * 100 : 0;
+      }
+      
+      return {
+        _id: trade._id,
+        tradeId: trade.tradeId,
+        orderId: trade.orderId,
+        symbol: trade.symbol,
+        side: trade.side,
+        price: trade.price,
+        qty: trade.qty,
+        quoteQty: trade.quoteQty,
+        commission: trade.commission,
+        commissionAsset: trade.commissionAsset,
+        isBuyerMaker: trade.isBuyerMaker,
+        time: trade.time,
+        currentPrice: currentPrice,
+        pnl: pnl,
+        pnlPercent: pnlPercent,
+        baseAsset: baseAsset
+      };
+    });
+    
+    const totalPages = Math.ceil(totalCount / parsedLimit);
+    
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    res.set({
+      'Cache-Control': 'private, max-age=5',
+      'X-Response-Time-ms': responseTime.toFixed(2),
+      'X-Total-Count': totalCount,
+      'X-Page': parsedPage,
+      'X-Limit': parsedLimit
+    });
+    
+    return res.status(200).json({
+      status: 'success',
+      timestamp: Date.now(),
+      responseTimeMs: responseTime,
+      data: {
+        trades: formattedTrades,
+        pagination: {
+          currentPage: parsedPage,
+          limit: parsedLimit,
+          totalCount: totalCount,
+          totalPages: totalPages,
+          hasNext: parsedPage < totalPages,
+          hasPrev: parsedPage > 1
+        }
+      }
+    });
+    
+  } catch (err) {
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    console.error('Get trades error:', err.message);
+    
+    res.set({
+      'Cache-Control': 'no-cache',
+      'X-Response-Time-ms': responseTime.toFixed(2)
+    });
+    
+    return res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to fetch trades',
+      timestamp: Date.now(),
+      responseTimeMs: responseTime
+    });
+  }
+});
 
+app.get('/api/trading/positions', protect, async (req, res) => {
+  const startTime = process.hrtime.bigint();
+  
+  try {
+    const { symbol } = req.query;
+    const userId = req.user._id;
+    
+    const query = { user: userId, status: 'open' };
+    if (symbol) query.symbol = symbol.toUpperCase();
+    
+    const positions = await Position.find(query).lean();
+    
+    const currentPrices = new Map();
+    for (const pos of positions) {
+      if (!currentPrices.has(pos.symbol)) {
+        const priceKey = REDIS_KEYS.LAST_PRICE(pos.symbol);
+        const priceRaw = await redis.get(priceKey);
+        if (priceRaw) {
+          const priceData = JSON.parse(priceRaw);
+          currentPrices.set(pos.symbol, priceData.price);
+        } else {
+          const tickerKey = REDIS_KEYS.TICKER(pos.symbol);
+          const tickerRaw = await redis.get(tickerKey);
+          if (tickerRaw) {
+            const ticker = JSON.parse(tickerRaw);
+            currentPrices.set(pos.symbol, ticker.lastPrice);
+          } else {
+            currentPrices.set(pos.symbol, pos.entryPrice);
+          }
+        }
+      }
+    }
+    
+    let totalPnl = 0;
+    
+    const formattedPositions = positions.map(pos => {
+      const currentPrice = currentPrices.get(pos.symbol) || pos.entryPrice;
+      let unrealizedPnl = 0;
+      let roe = 0;
+      
+      if (pos.side === 'long') {
+        unrealizedPnl = (currentPrice - pos.entryPrice) * pos.quantity;
+      } else {
+        unrealizedPnl = (pos.entryPrice - currentPrice) * pos.quantity;
+      }
+      
+      roe = pos.margin > 0 ? (unrealizedPnl / pos.margin) * 100 : 0;
+      totalPnl += unrealizedPnl;
+      
+      let liquidationPrice = pos.liquidationPrice;
+      if (!liquidationPrice) {
+        if (pos.side === 'long') {
+          liquidationPrice = pos.entryPrice * (1 - (1 / pos.leverage));
+        } else {
+          liquidationPrice = pos.entryPrice * (1 + (1 / pos.leverage));
+        }
+      }
+      
+      return {
+        _id: pos._id,
+        symbol: pos.symbol,
+        side: pos.side,
+        quantity: pos.quantity,
+        entryPrice: pos.entryPrice,
+        markPrice: currentPrice,
+        liquidationPrice: liquidationPrice,
+        margin: pos.margin,
+        leverage: pos.leverage,
+        unrealizedPnl: unrealizedPnl,
+        roe: roe,
+        takeProfit: pos.takeProfit,
+        stopLoss: pos.stopLoss,
+        openedAt: pos.openedAt,
+        status: pos.status
+      };
+    });
+    
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    res.set({
+      'Cache-Control': 'private, max-age=1',
+      'X-Response-Time-ms': responseTime.toFixed(2),
+      'X-Positions-Count': formattedPositions.length,
+      'X-Total-Pnl': totalPnl.toFixed(2)
+    });
+    
+    return res.status(200).json({
+      status: 'success',
+      timestamp: Date.now(),
+      responseTimeMs: responseTime,
+      data: {
+        positions: formattedPositions,
+        totalUnrealizedPnl: totalPnl,
+        totalPositions: formattedPositions.length
+      }
+    });
+    
+  } catch (err) {
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    console.error('Get positions error:', err.message);
+    
+    res.set({
+      'Cache-Control': 'no-cache',
+      'X-Response-Time-ms': responseTime.toFixed(2)
+    });
+    
+    return res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to fetch positions',
+      timestamp: Date.now(),
+      responseTimeMs: responseTime
+    });
+  }
+});
+
+app.get('/api/trading/user-limits', protect, async (req, res) => {
+  const startTime = process.hrtime.bigint();
+  
+  try {
+    const { symbol, side } = req.query;
+    const userId = req.user._id;
+    
+    if (!symbol || !side) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Symbol and side are required'
+      });
+    }
+    
+    const baseAsset = symbol.replace(/USDT|USDC|BUSD|BTC|ETH|BNB|SOL|XRP|DOGE|ADA$/, '');
+    const quoteAsset = symbol.slice(baseAsset.length);
+    
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+    
+    if (!user.balances) {
+      user.balances = { main: new Map(), active: new Map(), matured: new Map() };
+    }
+    if (!user.balances.main) user.balances.main = new Map();
+    
+    const priceKey = REDIS_KEYS.LAST_PRICE(symbol);
+    const priceRaw = await redis.get(priceKey);
+    let currentPrice = 0;
+    
+    if (priceRaw) {
+      const priceData = JSON.parse(priceRaw);
+      currentPrice = priceData.price;
+    } else {
+      const tickerKey = REDIS_KEYS.TICKER(symbol);
+      const tickerRaw = await redis.get(tickerKey);
+      if (tickerRaw) {
+        const ticker = JSON.parse(tickerRaw);
+        currentPrice = ticker.lastPrice;
+      }
+    }
+    
+    if (currentPrice <= 0) {
+      const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`, { timeout: 3000 });
+      if (response.data && response.data.price) {
+        currentPrice = parseFloat(response.data.price);
+      }
+    }
+    
+    const TRADE_FEE_PERCENT = 0.5;
+    let maxAmount = 0;
+    let availableBalance = 0;
+    let asset = '';
+    
+    if (side === 'buy') {
+      const quoteAssetLower = quoteAsset.toLowerCase();
+      availableBalance = user.balances.main.get(quoteAssetLower) || 0;
+      asset = quoteAsset;
+      
+      const maxCostWithoutFee = availableBalance / (1 + TRADE_FEE_PERCENT / 100);
+      maxAmount = currentPrice > 0 ? maxCostWithoutFee / currentPrice : 0;
+    } else {
+      const baseAssetLower = baseAsset.toLowerCase();
+      availableBalance = user.balances.main.get(baseAssetLower) || 0;
+      asset = baseAsset;
+      maxAmount = availableBalance;
+    }
+    
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    res.set({
+      'Cache-Control': 'private, max-age=1',
+      'X-Response-Time-ms': responseTime.toFixed(2)
+    });
+    
+    return res.status(200).json({
+      status: 'success',
+      timestamp: Date.now(),
+      responseTimeMs: responseTime,
+      data: {
+        symbol: symbol,
+        side: side,
+        maxAmount: Math.max(0, maxAmount),
+        availableBalance: availableBalance,
+        asset: asset,
+        currentPrice: currentPrice,
+        feePercent: TRADE_FEE_PERCENT
+      }
+    });
+    
+  } catch (err) {
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    console.error('User limits error:', err.message);
+    
+    res.set({
+      'Cache-Control': 'no-cache',
+      'X-Response-Time-ms': responseTime.toFixed(2)
+    });
+    
+    return res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to fetch user limits',
+      timestamp: Date.now(),
+      responseTimeMs: responseTime
+    });
+  }
+});
+
+app.post('/api/trading/orders/cancel', protect, async (req, res) => {
+  const startTime = process.hrtime.bigint();
+  
+  try {
+    const { orderId } = req.body;
+    const userId = req.user._id;
+    
+    if (!orderId) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Order ID is required'
+      });
+    }
+    
+    const order = await Order.findOne({ orderId: orderId, user: userId });
+    
+    if (!order) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Order not found'
+      });
+    }
+    
+    if (order.status !== 'open' && order.status !== 'pending' && order.status !== 'partial') {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Cannot cancel order with status: ${order.status}`
+      });
+    }
+    
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+    
+    if (!user.balances) {
+      user.balances = { main: new Map(), active: new Map(), matured: new Map() };
+    }
+    if (!user.balances.main) user.balances.main = new Map();
+    
+    const baseAsset = order.symbol.replace(/USDT|USDC|BUSD|BTC|ETH|BNB|SOL|XRP|DOGE|ADA$/, '');
+    const quoteAsset = order.symbol.slice(baseAsset.length);
+    const remainingQty = order.remainingQty;
+    const reservedAmount = order.type === 'limit' ? order.price * remainingQty : order.total;
+    const TRADE_FEE_PERCENT = 0.5;
+    const reservedWithFee = order.side === 'buy' ? reservedAmount * (1 + TRADE_FEE_PERCENT / 100) : reservedAmount;
+    
+    if (order.side === 'buy') {
+      const quoteAssetLower = quoteAsset.toLowerCase();
+      const currentQuoteBalance = user.balances.main.get(quoteAssetLower) || 0;
+      user.balances.main.set(quoteAssetLower, currentQuoteBalance + reservedWithFee);
+      
+      const currentUsdBalance = user.balances.main.get('usd') || 0;
+      user.balances.main.set('usd', currentUsdBalance + reservedAmount);
+    } else {
+      const baseAssetLower = baseAsset.toLowerCase();
+      const currentBaseBalance = user.balances.main.get(baseAssetLower) || 0;
+      user.balances.main.set(baseAssetLower, currentBaseBalance + remainingQty);
+      
+      const currentPrice = await getCurrentPrice(order.symbol);
+      const currentUsdBalance = user.balances.main.get('usd') || 0;
+      user.balances.main.set('usd', currentUsdBalance + (remainingQty * currentPrice));
+    }
+    
+    await user.save();
+    
+    order.status = 'cancelled';
+    order.updatedAt = new Date();
+    await order.save();
+    
+    await logActivity('order_cancelled', 'Order', order._id, userId, 'User', req, {
+      orderId: orderId,
+      symbol: order.symbol,
+      side: order.side,
+      cancelledQty: remainingQty,
+      refundedAmount: reservedWithFee
+    });
+    
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${userId}`).emit('order_cancelled', {
+        orderId: orderId,
+        symbol: order.symbol,
+        side: order.side,
+        status: 'cancelled',
+        refundedAmount: reservedWithFee,
+        timestamp: Date.now()
+      });
+      
+      let totalMainUSD = 0;
+      for (const [asset, balance] of user.balances.main) {
+        if (balance > 0 && asset !== 'usd') {
+          const assetPrice = await getCryptoPrice(asset);
+          if (assetPrice) totalMainUSD += balance * assetPrice;
+        }
+      }
+      
+      io.to(`user_${userId}`).emit('balance_update', {
+        main: totalMainUSD,
+        active: user.balances.active?.get('usd') || 0,
+        matured: user.balances.matured?.get('usd') || 0
+      });
+    }
+    
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    res.set({
+      'X-Response-Time-ms': responseTime.toFixed(2)
+    });
+    
+    return res.status(200).json({
+      status: 'success',
+      message: 'Order cancelled successfully',
+      data: {
+        orderId: order.orderId,
+        symbol: order.symbol,
+        side: order.side,
+        status: 'cancelled',
+        refundedAmount: reservedWithFee,
+        refundedAsset: order.side === 'buy' ? quoteAsset : baseAsset
+      }
+    });
+    
+  } catch (err) {
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    console.error('Cancel order error:', err);
+    
+    res.set({
+      'X-Response-Time-ms': responseTime.toFixed(2)
+    });
+    
+    return res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to cancel order',
+      timestamp: Date.now(),
+      responseTimeMs: responseTime
+    });
+  }
+});
+
+
+app.post('/api/trading/orders/cancel-all', protect, async (req, res) => {
+  const startTime = process.hrtime.bigint();
+  
+  try {
+    const { symbol } = req.body;
+    const userId = req.user._id;
+    
+    const query = { 
+      user: userId, 
+      status: { $in: ['open', 'pending', 'partial'] }
+    };
+    if (symbol) query.symbol = symbol.toUpperCase();
+    
+    const openOrders = await Order.find(query);
+    
+    if (openOrders.length === 0) {
+      return res.status(200).json({
+        status: 'success',
+        message: 'No open orders to cancel',
+        data: { cancelledCount: 0 }
+      });
+    }
+    
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+    
+    if (!user.balances) {
+      user.balances = { main: new Map(), active: new Map(), matured: new Map() };
+    }
+    if (!user.balances.main) user.balances.main = new Map();
+    
+    let totalRefunded = 0;
+    const cancelledOrderIds = [];
+    const TRADE_FEE_PERCENT = 0.5;
+    
+    for (const order of openOrders) {
+      const baseAsset = order.symbol.replace(/USDT|USDC|BUSD|BTC|ETH|BNB|SOL|XRP|DOGE|ADA$/, '');
+      const quoteAsset = order.symbol.slice(baseAsset.length);
+      const remainingQty = order.remainingQty;
+      const reservedAmount = order.type === 'limit' ? order.price * remainingQty : order.total;
+      const reservedWithFee = order.side === 'buy' ? reservedAmount * (1 + TRADE_FEE_PERCENT / 100) : reservedAmount;
+      
+      if (order.side === 'buy') {
+        const quoteAssetLower = quoteAsset.toLowerCase();
+        const currentQuoteBalance = user.balances.main.get(quoteAssetLower) || 0;
+        user.balances.main.set(quoteAssetLower, currentQuoteBalance + reservedWithFee);
+        
+        const currentUsdBalance = user.balances.main.get('usd') || 0;
+        user.balances.main.set('usd', currentUsdBalance + reservedAmount);
+        totalRefunded += reservedWithFee;
+      } else {
+        const baseAssetLower = baseAsset.toLowerCase();
+        const currentBaseBalance = user.balances.main.get(baseAssetLower) || 0;
+        user.balances.main.set(baseAssetLower, currentBaseBalance + remainingQty);
+        
+        const currentPrice = await getCurrentPrice(order.symbol);
+        const currentUsdBalance = user.balances.main.get('usd') || 0;
+        user.balances.main.set('usd', currentUsdBalance + (remainingQty * currentPrice));
+        totalRefunded += remainingQty;
+      }
+      
+      order.status = 'cancelled';
+      order.updatedAt = new Date();
+      await order.save();
+      
+      cancelledOrderIds.push(order.orderId);
+    }
+    
+    await user.save();
+    
+    await logActivity('all_orders_cancelled', 'Order', null, userId, 'User', req, {
+      symbol: symbol || 'all',
+      cancelledCount: cancelledOrderIds.length,
+      refundedAmount: totalRefunded,
+      orderIds: cancelledOrderIds
+    });
+    
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${userId}`).emit('all_orders_cancelled', {
+        symbol: symbol || 'all',
+        cancelledCount: cancelledOrderIds.length,
+        timestamp: Date.now()
+      });
+      
+      let totalMainUSD = 0;
+      for (const [asset, balance] of user.balances.main) {
+        if (balance > 0 && asset !== 'usd') {
+          const assetPrice = await getCryptoPrice(asset);
+          if (assetPrice) totalMainUSD += balance * assetPrice;
+        }
+      }
+      
+      io.to(`user_${userId}`).emit('balance_update', {
+        main: totalMainUSD,
+        active: user.balances.active?.get('usd') || 0,
+        matured: user.balances.matured?.get('usd') || 0
+      });
+    }
+    
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    res.set({
+      'X-Response-Time-ms': responseTime.toFixed(2)
+    });
+    
+    return res.status(200).json({
+      status: 'success',
+      message: `${cancelledOrderIds.length} order(s) cancelled successfully`,
+      data: {
+        cancelledCount: cancelledOrderIds.length,
+        cancelledOrderIds: cancelledOrderIds,
+        refundedAmount: totalRefunded,
+        symbol: symbol || 'all'
+      }
+    });
+    
+  } catch (err) {
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    console.error('Cancel all orders error:', err);
+    
+    res.set({
+      'X-Response-Time-ms': responseTime.toFixed(2)
+    });
+    
+    return res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to cancel orders',
+      timestamp: Date.now(),
+      responseTimeMs: responseTime
+    });
+  }
+});
+
+app.post('/api/trading/positions/close', protect, async (req, res) => {
+  const startTime = process.hrtime.bigint();
+  
+  try {
+    const { positionId } = req.body;
+    const userId = req.user._id;
+    
+    if (!positionId) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Position ID is required'
+      });
+    }
+    
+    const position = await Position.findOne({ _id: positionId, user: userId, status: 'open' });
+    
+    if (!position) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Open position not found'
+      });
+    }
+    
+    const currentPriceKey = REDIS_KEYS.LAST_PRICE(position.symbol);
+    const priceRaw = await redis.get(currentPriceKey);
+    let currentPrice = 0;
+    
+    if (priceRaw) {
+      const priceData = JSON.parse(priceRaw);
+      currentPrice = priceData.price;
+    } else {
+      const tickerKey = REDIS_KEYS.TICKER(position.symbol);
+      const tickerRaw = await redis.get(tickerKey);
+      if (tickerRaw) {
+        const ticker = JSON.parse(tickerRaw);
+        currentPrice = ticker.lastPrice;
+      }
+    }
+    
+    if (currentPrice <= 0) {
+      const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${position.symbol}`, { timeout: 3000 });
+      if (response.data && response.data.price) {
+        currentPrice = parseFloat(response.data.price);
+      } else {
+        currentPrice = position.entryPrice;
+      }
+    }
+    
+    let pnl = 0;
+    let closeAmount = 0;
+    const baseAsset = position.symbol.replace(/USDT|USDC|BUSD|BTC|ETH|BNB|SOL|XRP|DOGE|ADA$/, '');
+    const quoteAsset = position.symbol.slice(baseAsset.length);
+    const TRADE_FEE_PERCENT = 0.5;
+    
+    if (position.side === 'long') {
+      pnl = (currentPrice - position.entryPrice) * position.quantity;
+      closeAmount = position.quantity * currentPrice;
+    } else {
+      pnl = (position.entryPrice - currentPrice) * position.quantity;
+      closeAmount = position.quantity * currentPrice;
+    }
+    
+    const feeAmount = Math.abs(closeAmount) * (TRADE_FEE_PERCENT / 100);
+    const netAmount = closeAmount - feeAmount;
+    
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+    
+    if (!user.balances) {
+      user.balances = { main: new Map(), active: new Map(), matured: new Map() };
+    }
+    if (!user.balances.main) user.balances.main = new Map();
+    
+    const quoteAssetLower = quoteAsset.toLowerCase();
+    const currentQuoteBalance = user.balances.main.get(quoteAssetLower) || 0;
+    user.balances.main.set(quoteAssetLower, currentQuoteBalance + netAmount);
+    
+    const currentUsdBalance = user.balances.main.get('usd') || 0;
+    user.balances.main.set('usd', currentUsdBalance + netAmount);
+    
+    await user.save();
+    
+    position.status = 'closed';
+    position.closedAt = new Date();
+    position.realizedPnL = pnl;
+    await position.save();
+    
+    const orderId = `CLS-${Date.now()}-${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
+    
+    const order = await Order.create({
+      user: userId,
+      symbol: position.symbol,
+      orderId: orderId,
+      side: position.side === 'long' ? 'sell' : 'buy',
+      type: 'market',
+      price: currentPrice,
+      originalQty: position.quantity,
+      executedQty: position.quantity,
+      remainingQty: 0,
+      quoteOrderQty: closeAmount,
+      status: 'filled',
+      timeInForce: 'IOC',
+      total: closeAmount,
+      fee: feeAmount,
+      feeAsset: quoteAsset,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    });
+    
+    const tradeId = `TRD-${Date.now()}-${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
+    
+    await Trade.create({
+      user: userId,
+      orderId: orderId,
+      symbol: position.symbol,
+      tradeId: tradeId,
+      side: position.side === 'long' ? 'sell' : 'buy',
+      price: currentPrice,
+      qty: position.quantity,
+      quoteQty: closeAmount,
+      commission: feeAmount,
+      commissionAsset: quoteAsset,
+      isBuyerMaker: position.side === 'short',
+      time: new Date()
+    });
+    
+    const transaction = await Transaction.create({
+      user: userId,
+      type: position.side === 'long' ? 'sell' : 'buy',
+      amount: closeAmount,
+      asset: baseAsset,
+      assetAmount: position.quantity,
+      currency: 'USD',
+      status: 'completed',
+      method: quoteAsset,
+      reference: orderId,
+      details: {
+        positionId: positionId,
+        positionSide: position.side,
+        entryPrice: position.entryPrice,
+        closePrice: currentPrice,
+        pnl: pnl,
+        fee: feeAmount,
+        feePercentage: TRADE_FEE_PERCENT
+      },
+      sellDetails: position.side === 'long' ? {
+        asset: baseAsset,
+        amountUSD: closeAmount,
+        assetAmount: position.quantity,
+        sellingPrice: currentPrice,
+        buyingPrice: position.entryPrice,
+        profitLoss: pnl,
+        profitLossPercentage: position.entryPrice > 0 ? (pnl / (position.entryPrice * position.quantity)) * 100 : 0
+      } : undefined,
+      buyDetails: position.side === 'short' ? {
+        asset: baseAsset,
+        amountUSD: closeAmount,
+        assetAmount: position.quantity,
+        buyingPrice: currentPrice,
+        currentPrice: currentPrice,
+        profitLoss: pnl,
+        profitLossPercentage: position.entryPrice > 0 ? (Math.abs(pnl) / (position.entryPrice * position.quantity)) * 100 : 0
+      } : undefined,
+      fee: feeAmount,
+      netAmount: netAmount,
+      exchangeRateAtTime: currentPrice
+    });
+    
+    await PlatformRevenue.create({
+      source: position.side === 'long' ? 'sell_fee' : 'buy_fee',
+      amount: feeAmount,
+      currency: 'USD',
+      transactionId: transaction._id,
+      orderId: order._id,
+      userId: userId,
+      description: `${TRADE_FEE_PERCENT}% trading fee on position close (${position.side})`,
+      metadata: {
+        symbol: position.symbol,
+        positionId: positionId,
+        quantity: position.quantity,
+        entryPrice: position.entryPrice,
+        closePrice: currentPrice,
+        pnl: pnl,
+        feePercentage: TRADE_FEE_PERCENT
+      }
+    });
+    
+    await logActivity('position_closed', 'Position', position._id, userId, 'User', req, {
+      symbol: position.symbol,
+      side: position.side,
+      quantity: position.quantity,
+      entryPrice: position.entryPrice,
+      closePrice: currentPrice,
+      pnl: pnl,
+      fee: feeAmount
+    });
+    
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${userId}`).emit('position_closed', {
+        positionId: positionId,
+        symbol: position.symbol,
+        side: position.side,
+        pnl: pnl,
+        closePrice: currentPrice,
+        timestamp: Date.now()
+      });
+      
+      let totalMainUSD = 0;
+      for (const [asset, balance] of user.balances.main) {
+        if (balance > 0 && asset !== 'usd') {
+          const assetPrice = await getCryptoPrice(asset);
+          if (assetPrice) totalMainUSD += balance * assetPrice;
+        }
+      }
+      
+      io.to(`user_${userId}`).emit('balance_update', {
+        main: totalMainUSD,
+        active: user.balances.active?.get('usd') || 0,
+        matured: user.balances.matured?.get('usd') || 0
+      });
+    }
+    
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    res.set({
+      'X-Response-Time-ms': responseTime.toFixed(2)
+    });
+    
+    return res.status(200).json({
+      status: 'success',
+      message: `Position closed successfully`,
+      data: {
+        positionId: position._id,
+        symbol: position.symbol,
+        side: position.side,
+        quantity: position.quantity,
+        entryPrice: position.entryPrice,
+        closePrice: currentPrice,
+        pnl: pnl,
+        fee: feeAmount,
+        netAmount: netAmount,
+        orderId: orderId
+      }
+    });
+    
+  } catch (err) {
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    console.error('Close position error:', err);
+    
+    res.set({
+      'X-Response-Time-ms': responseTime.toFixed(2)
+    });
+    
+    return res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to close position',
+      timestamp: Date.now(),
+      responseTimeMs: responseTime
+    });
+  }
+});
+
+app.post('/api/trading/orders/tpsl', protect, async (req, res) => {
+  const startTime = process.hrtime.bigint();
+  
+  try {
+    const { symbol, takeProfit, stopLoss } = req.body;
+    const userId = req.user._id;
+    
+    if (!symbol) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Symbol is required'
+      });
+    }
+    
+    if (!takeProfit && !stopLoss) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'At least one of takeProfit or stopLoss is required'
+      });
+    }
+    
+    const position = await Position.findOne({ user: userId, symbol: symbol.toUpperCase(), status: 'open' });
+    
+    if (!position) {
+      return res.status(404).json({
+        status: 'fail',
+        message: `No open position found for ${symbol}`
+      });
+    }
+    
+    const priceKey = REDIS_KEYS.LAST_PRICE(symbol.toUpperCase());
+    const priceRaw = await redis.get(priceKey);
+    let currentPrice = 0;
+    
+    if (priceRaw) {
+      const priceData = JSON.parse(priceRaw);
+      currentPrice = priceData.price;
+    } else {
+      const tickerKey = REDIS_KEYS.TICKER(symbol.toUpperCase());
+      const tickerRaw = await redis.get(tickerKey);
+      if (tickerRaw) {
+        const ticker = JSON.parse(tickerRaw);
+        currentPrice = ticker.lastPrice;
+      } else {
+        currentPrice = position.entryPrice;
+      }
+    }
+    
+    const baseAsset = symbol.replace(/USDT|USDC|BUSD|BTC|ETH|BNB|SOL|XRP|DOGE|ADA$/, '');
+    const quoteAsset = symbol.slice(baseAsset.length);
+    
+    let tpOrder = null;
+    let slOrder = null;
+    
+    if (takeProfit && takeProfit > 0) {
+      const tpTriggerPrice = position.side === 'long' ? takeProfit : takeProfit;
+      const tpOrderPrice = position.side === 'long' ? takeProfit : takeProfit;
+      
+      tpOrder = await Order.create({
+        user: userId,
+        symbol: symbol.toUpperCase(),
+        orderId: `TP-${Date.now()}-${Math.random().toString(36).substr(2, 8).toUpperCase()}`,
+        side: position.side === 'long' ? 'sell' : 'buy',
+        type: 'limit',
+        price: tpOrderPrice,
+        originalQty: position.quantity,
+        executedQty: 0,
+        remainingQty: position.quantity,
+        quoteOrderQty: position.quantity * tpOrderPrice,
+        status: 'open',
+        timeInForce: 'GTC',
+        total: position.quantity * tpOrderPrice,
+        fee: 0,
+        feeAsset: quoteAsset,
+        takeProfitTrigger: tpTriggerPrice,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      });
+    }
+    
+    if (stopLoss && stopLoss > 0) {
+      const slTriggerPrice = position.side === 'long' ? stopLoss : stopLoss;
+      const slOrderPrice = position.side === 'long' ? stopLoss : stopLoss;
+      
+      slOrder = await Order.create({
+        user: userId,
+        symbol: symbol.toUpperCase(),
+        orderId: `SL-${Date.now()}-${Math.random().toString(36).substr(2, 8).toUpperCase()}`,
+        side: position.side === 'long' ? 'sell' : 'buy',
+        type: 'stop_limit',
+        price: slOrderPrice,
+        stopPrice: slTriggerPrice,
+        originalQty: position.quantity,
+        executedQty: 0,
+        remainingQty: position.quantity,
+        quoteOrderQty: position.quantity * slOrderPrice,
+        status: 'open',
+        timeInForce: 'GTC',
+        total: position.quantity * slOrderPrice,
+        fee: 0,
+        feeAsset: quoteAsset,
+        stopLossTrigger: slTriggerPrice,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      });
+    }
+    
+    if (takeProfit) position.takeProfit = takeProfit;
+    if (stopLoss) position.stopLoss = stopLoss;
+    await position.save();
+    
+    await logActivity('tpsl_set', 'Position', position._id, userId, 'User', req, {
+      symbol: symbol,
+      takeProfit: takeProfit || null,
+      stopLoss: stopLoss || null,
+      positionSide: position.side,
+      quantity: position.quantity
+    });
+    
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${userId}`).emit('tpsl_updated', {
+        symbol: symbol,
+        takeProfit: takeProfit || position.takeProfit,
+        stopLoss: stopLoss || position.stopLoss,
+        timestamp: Date.now()
+      });
+    }
+    
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    res.set({
+      'X-Response-Time-ms': responseTime.toFixed(2)
+    });
+    
+    return res.status(200).json({
+      status: 'success',
+      message: `TP/SL ${takeProfit ? 'TP ' + takeProfit : ''}${takeProfit && stopLoss ? 'and ' : ''}${stopLoss ? 'SL ' + stopLoss : ''} set successfully`,
+      data: {
+        symbol: symbol.toUpperCase(),
+        positionSide: position.side,
+        quantity: position.quantity,
+        currentPrice: currentPrice,
+        takeProfit: takeProfit || position.takeProfit,
+        stopLoss: stopLoss || position.stopLoss,
+        takeProfitOrderId: tpOrder ? tpOrder.orderId : null,
+        stopLossOrderId: slOrder ? slOrder.orderId : null
+      }
+    });
+    
+  } catch (err) {
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    console.error('Set TP/SL error:', err);
+    
+    res.set({
+      'X-Response-Time-ms': responseTime.toFixed(2)
+    });
+    
+    return res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to set TP/SL',
+      timestamp: Date.now(),
+      responseTimeMs: responseTime
+    });
+  }
+});
+
+app.get('/api/asset/logos', async (req, res) => {
+  const startTime = process.hrtime.bigint();
+  
+  try {
+    const { base, quote } = req.query;
+    
+    const logosKey = 'asset:logos:all';
+    let logosCache = await redis.get(logosKey);
+    let logos = {};
+    
+    if (logosCache) {
+      logos = JSON.parse(logosCache);
+    } else {
+      const defaultLogos = {
+        'BTC': 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png',
+        'ETH': 'https://assets.coingecko.com/coins/images/279/large/ethereum.png',
+        'USDT': 'https://assets.coingecko.com/coins/images/325/large/Tether.png',
+        'BNB': 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png',
+        'SOL': 'https://assets.coingecko.com/coins/images/4128/large/solana.png',
+        'USDC': 'https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png',
+        'XRP': 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png',
+        'DOGE': 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png',
+        'ADA': 'https://assets.coingecko.com/coins/images/975/large/cardano.png',
+        'SHIB': 'https://assets.coingecko.com/coins/images/11939/large/shiba.png',
+        'AVAX': 'https://assets.coingecko.com/coins/images/12559/large/Avalanche_Circle_RedWhite.png',
+        'DOT': 'https://assets.coingecko.com/coins/images/12171/large/polkadot.png',
+        'TRX': 'https://assets.coingecko.com/coins/images/1094/large/tron-logo.png',
+        'LINK': 'https://assets.coingecko.com/coins/images/877/large/chainlink-new-logo.png',
+        'MATIC': 'https://assets.coingecko.com/coins/images/4713/large/matic-token-icon.png',
+        'LTC': 'https://assets.coingecko.com/coins/images/2/large/litecoin.png',
+        'NEAR': 'https://assets.coingecko.com/coins/images/10365/large/near_icon.png',
+        'UNI': 'https://assets.coingecko.com/coins/images/12504/large/uni.jpg',
+        'ATOM': 'https://assets.coingecko.com/coins/images/1481/large/cosmos_hub.png',
+        'XLM': 'https://assets.coingecko.com/coins/images/100/large/Stellar_symbol_black_RGB.png',
+        'BCH': 'https://assets.coingecko.com/coins/images/780/large/bitcoin-cash-circle.png',
+        'XMR': 'https://assets.coingecko.com/coins/images/69/large/monero_logo.png',
+        'ETC': 'https://assets.coingecko.com/coins/images/453/large/etc-logo.png',
+        'VET': 'https://assets.coingecko.com/coins/images/1167/large/VET_Token_Icon.png',
+        'FIL': 'https://assets.coingecko.com/coins/images/12817/large/filecoin.png',
+        'THETA': 'https://assets.coingecko.com/coins/images/2538/large/theta-token-logo.png',
+        'HBAR': 'https://assets.coingecko.com/coins/images/3688/large/hbar.png',
+        'FTM': 'https://assets.coingecko.com/coins/images/4001/large/Fantom_round.png',
+        'XTZ': 'https://assets.coingecko.com/coins/images/976/large/Tezos-logo.png',
+        'ALGO': 'https://assets.coingecko.com/coins/images/4380/large/algo.png',
+        'EGLD': 'https://assets.coingecko.com/coins/images/12335/large/egld.png',
+        'EOS': 'https://assets.coingecko.com/coins/images/738/large/eos-logo.png',
+        'AAVE': 'https://assets.coingecko.com/coins/images/12645/large/aave.png',
+        'MKR': 'https://assets.coingecko.com/coins/images/1364/large/MKR.png',
+        'QNT': 'https://assets.coingecko.com/coins/images/9449/large/quant.png',
+        'SNX': 'https://assets.coingecko.com/coins/images/3406/large/SNX.png',
+        'GRT': 'https://assets.coingecko.com/coins/images/13397/large/Graph_Token.png',
+        'SAND': 'https://assets.coingecko.com/coins/images/13429/large/sand.png',
+        'MANA': 'https://assets.coingecko.com/coins/images/878/large/decentraland-mana.png',
+        'AXS': 'https://assets.coingecko.com/coins/images/13029/large/axs.png',
+        'FLOW': 'https://assets.coingecko.com/coins/images/13446/large/flow.png',
+        'ICP': 'https://assets.coingecko.com/coins/images/14495/large/Internet_Computer_logo.png',
+        'APT': 'https://assets.coingecko.com/coins/images/26455/large/aptos.png',
+        'ARB': 'https://assets.coingecko.com/coins/images/16547/large/arb.png',
+        'OP': 'https://assets.coingecko.com/coins/images/25244/large/Optimism.png',
+        'SUI': 'https://assets.coingecko.com/coins/images/26375/large/sui_logo.png',
+        'SEI': 'https://assets.coingecko.com/coins/images/28205/large/Sei_Logo.png',
+        'TIA': 'https://assets.coingecko.com/coins/images/28888/large/tia.png',
+        'INJ': 'https://assets.coingecko.com/coins/images/12882/large/injective.png',
+        'RNDR': 'https://assets.coingecko.com/coins/images/11683/large/render.png',
+        'USDP': 'https://assets.coingecko.com/coins/images/19075/large/USDP.png',
+        'BUSD': 'https://assets.coingecko.com/coins/images/9576/large/BUSD.png',
+        'DAI': 'https://assets.coingecko.com/coins/images/9956/large/dai.png'
+      };
+      
+      logos = defaultLogos;
+      await redis.setex(logosKey, 86400, JSON.stringify(logos));
+    }
+    
+    const result = {};
+    if (base) {
+      const baseUpper = base.toUpperCase();
+      result.baseLogo = logos[baseUpper] || `https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/color/${base.toLowerCase()}.png`;
+    }
+    if (quote) {
+      const quoteUpper = quote.toUpperCase();
+      result.quoteLogo = logos[quoteUpper] || `https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/color/${quote.toLowerCase()}.png`;
+    }
+    
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    res.set({
+      'Cache-Control': 'public, max-age=86400',
+      'X-Response-Time-ms': responseTime.toFixed(2),
+      'X-Cache-Status': logosCache ? 'HIT' : 'MISS'
+    });
+    
+    return res.status(200).json({
+      status: 'success',
+      timestamp: Date.now(),
+      responseTimeMs: responseTime,
+      data: result
+    });
+    
+  } catch (err) {
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    console.error('Asset logos error:', err.message);
+    
+    res.set({
+      'Cache-Control': 'no-cache',
+      'X-Response-Time-ms': responseTime.toFixed(2)
+    });
+    
+    return res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to fetch logos',
+      timestamp: Date.now(),
+      responseTimeMs: responseTime
+    });
+  }
+});
+
+app.get('/api/asset/info', async (req, res) => {
+  const startTime = process.hrtime.bigint();
+  
+  try {
+    const { symbol } = req.query;
+    
+    if (!symbol) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Symbol parameter is required'
+      });
+    }
+    
+    const symbolUpper = symbol.toUpperCase();
+    const assetInfoKey = `asset:info:${symbolUpper}`;
+    let assetInfo = await redis.get(assetInfoKey);
+    
+    if (!assetInfo) {
+      const allAssetsKey = 'asset:info:all';
+      const allAssets = await redis.get(allAssetsKey);
+      
+      if (allAssets) {
+        const assetsMap = JSON.parse(allAssets);
+        if (assetsMap[symbolUpper]) {
+          assetInfo = JSON.stringify(assetsMap[symbolUpper]);
+        }
+      }
+    }
+    
+    if (!assetInfo) {
+      const defaultInfo = {
+        symbol: symbolUpper,
+        name: symbolUpper === 'BTC' ? 'Bitcoin' :
+              symbolUpper === 'ETH' ? 'Ethereum' :
+              symbolUpper === 'BNB' ? 'BNB' :
+              symbolUpper === 'SOL' ? 'Solana' :
+              symbolUpper === 'XRP' ? 'Ripple' :
+              symbolUpper === 'DOGE' ? 'Dogecoin' :
+              symbolUpper === 'ADA' ? 'Cardano' : symbolUpper,
+        rank: 0,
+        marketCap: 0,
+        fdMarketCap: 0,
+        marketDominance: 0,
+        volume24h: 0,
+        circulatingSupply: 0,
+        maxSupply: 0,
+        totalSupply: 0,
+        description: '',
+        website: '',
+        explorer: '',
+        twitter: '',
+        reddit: ''
+      };
+      
+      assetInfo = JSON.stringify(defaultInfo);
+    }
+    
+    const parsedInfo = JSON.parse(assetInfo);
+    
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    res.set({
+      'Cache-Control': 'public, max-age=3600',
+      'X-Response-Time-ms': responseTime.toFixed(2),
+      'X-Cache-Status': assetInfo ? 'HIT' : 'MISS'
+    });
+    
+    return res.status(200).json({
+      status: 'success',
+      timestamp: Date.now(),
+      responseTimeMs: responseTime,
+      data: {
+        symbol: parsedInfo.symbol,
+        name: parsedInfo.name,
+        rank: parsedInfo.rank,
+        marketCap: parsedInfo.marketCap,
+        fdMarketCap: parsedInfo.fdMarketCap,
+        marketDominance: parsedInfo.marketDominance,
+        volume24h: parsedInfo.volume24h,
+        circulatingSupply: parsedInfo.circulatingSupply,
+        maxSupply: parsedInfo.maxSupply,
+        totalSupply: parsedInfo.totalSupply,
+        description: parsedInfo.description,
+        website: parsedInfo.website,
+        explorer: parsedInfo.explorer,
+        twitter: parsedInfo.twitter,
+        reddit: parsedInfo.reddit,
+        lastUpdated: parsedInfo.lastUpdated || new Date().toISOString()
+      }
+    });
+    
+  } catch (err) {
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    console.error('Asset info error:', err.message);
+    
+    res.set({
+      'Cache-Control': 'no-cache',
+      'X-Response-Time-ms': responseTime.toFixed(2)
+    });
+    
+    return res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to fetch asset info',
+      timestamp: Date.now(),
+      responseTimeMs: responseTime
+    });
+  }
+});
+
+app.get('/api/asset/extra', async (req, res) => {
+  const startTime = process.hrtime.bigint();
+  
+  try {
+    const { symbol } = req.query;
+    
+    if (!symbol) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Symbol parameter is required'
+      });
+    }
+    
+    const symbolUpper = symbol.toUpperCase();
+    const extraInfoKey = `asset:extra:${symbolUpper}`;
+    let extraInfo = await redis.get(extraInfoKey);
+    
+    if (!extraInfo) {
+      const defaultExtra = {
+        symbol: symbolUpper,
+        tags: getDefaultTags(symbolUpper),
+        networks: getDefaultNetworks(symbolUpper),
+        website: '',
+        explorer: '',
+        twitter: '',
+        reddit: ''
+      };
+      
+      extraInfo = JSON.stringify(defaultExtra);
+    }
+    
+    const parsedExtra = JSON.parse(extraInfo);
+    
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    res.set({
+      'Cache-Control': 'public, max-age=86400',
+      'X-Response-Time-ms': responseTime.toFixed(2),
+      'X-Cache-Status': extraInfo ? 'HIT' : 'MISS'
+    });
+    
+    return res.status(200).json({
+      status: 'success',
+      timestamp: Date.now(),
+      responseTimeMs: responseTime,
+      data: {
+        symbol: parsedExtra.symbol,
+        tags: parsedExtra.tags,
+        networks: parsedExtra.networks,
+        website: parsedExtra.website,
+        explorer: parsedExtra.explorer,
+        twitter: parsedExtra.twitter,
+        reddit: parsedExtra.reddit
+      }
+    });
+    
+  } catch (err) {
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    console.error('Asset extra info error:', err.message);
+    
+    res.set({
+      'Cache-Control': 'no-cache',
+      'X-Response-Time-ms': responseTime.toFixed(2)
+    });
+    
+    return res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to fetch asset extra info',
+      timestamp: Date.now(),
+      responseTimeMs: responseTime
+    });
+  }
+});
+
+function getDefaultTags(symbol) {
+  const tagsMap = {
+    'BTC': ['Store of Value', 'POW', 'Digital Gold', 'Payments', 'Layer 1'],
+    'ETH': ['Smart Contracts', 'DeFi', 'NFT', 'Layer 1', 'Staking'],
+    'BNB': ['Exchange Token', 'Layer 1', 'DeFi', 'BSC'],
+    'SOL': ['High Performance', 'Layer 1', 'DeFi', 'NFT'],
+    'XRP': ['Payments', 'Enterprise', 'Layer 1'],
+    'DOGE': ['Meme Coin', 'Payments', 'POW'],
+    'ADA': ['Smart Contracts', 'Research', 'Layer 1', 'Staking'],
+    'AVAX': ['Layer 1', 'Subnets', 'DeFi', 'High Performance'],
+    'DOT': ['Parachains', 'Layer 0', 'Interoperability'],
+    'LINK': ['Oracle', 'DeFi', 'Infrastructure'],
+    'MATIC': ['Layer 2', 'Scaling', 'DeFi', 'Polygon'],
+    'LTC': ['Payments', 'Digital Silver', 'POW'],
+    'SHIB': ['Meme Coin', 'Ecosystem', 'DeFi'],
+    'ATOM': ['Interoperability', 'Layer 0', 'IBC'],
+    'UNI': ['DeFi', 'DEX', 'Governance'],
+    'ALGO': ['Pure Proof of Stake', 'Layer 1', 'Fast Finality'],
+    'VET': ['Supply Chain', 'Enterprise', 'IoT'],
+    'FIL': ['Storage', 'Decentralized Storage', 'Web3'],
+    'THETA': ['Streaming', 'Video', 'Web3'],
+    'HBAR': ['Enterprise', 'Hashgraph', 'Fast'],
+    'FTM': ['DAG', 'DeFi', 'Layer 1'],
+    'XTZ': ['Self-Amending', 'Staking', 'Layer 1'],
+    'EGLD': ['Adaptive State Sharding', 'Layer 1', 'DeFi'],
+    'EOS': ['DPOS', 'Scalable', 'Layer 1'],
+    'AAVE': ['Lending', 'DeFi', 'Money Market'],
+    'MKR': ['Stablecoin', 'Governance', 'DeFi'],
+    'QNT': ['Interoperability', 'Enterprise', 'Overledger'],
+    'GRT': ['Indexing', 'Query', 'DeFi'],
+    'SAND': ['Metaverse', 'Gaming', 'NFT'],
+    'MANA': ['Metaverse', 'Virtual Land', 'Gaming'],
+    'AXS': ['Gaming', 'Play to Earn', 'NFT'],
+    'FLOW': ['Gaming', 'NFT', 'Consumer']
+  };
+  
+  return tagsMap[symbol] || ['Cryptocurrency', 'Digital Asset', 'Layer 1'];
+}
+
+function getDefaultNetworks(symbol) {
+  const networksMap = {
+    'BTC': ['Bitcoin', 'Lightning Network'],
+    'ETH': ['Ethereum', 'ERC-20', 'Arbitrum', 'Optimism', 'Base'],
+    'BNB': ['BSC', 'BNB Beacon Chain'],
+    'SOL': ['Solana'],
+    'XRP': ['XRP Ledger'],
+    'DOGE': ['Dogecoin'],
+    'ADA': ['Cardano'],
+    'AVAX': ['Avalanche C-Chain', 'Avalanche X-Chain', 'Avalanche P-Chain'],
+    'DOT': ['Polkadot Relay Chain', 'Parachains'],
+    'LINK': ['Ethereum', 'BNB Chain', 'Polygon'],
+    'MATIC': ['Polygon PoS', 'Polygon zkEVM'],
+    'LTC': ['Litecoin'],
+    'USDT': ['Ethereum', 'TRON', 'BNB Chain', 'Solana', 'Avalanche', 'Polygon'],
+    'USDC': ['Ethereum', 'Solana', 'BNB Chain', 'Avalanche', 'Polygon', 'Arbitrum', 'Optimism', 'Base']
+  };
+  
+  return networksMap[symbol] || ['Blockchain'];
+}
+
+
+app.get('/api/user/chart-settings', protect, async (req, res) => {
+  const startTime = process.hrtime.bigint();
+  
+  try {
+    const userId = req.user._id;
+    const cacheKey = `user:${userId}:chart_settings`;
+    
+    let chartSettings = await redis.get(cacheKey);
+    
+    if (!chartSettings) {
+      const userPref = await UserPreference.findOne({ user: userId });
+      
+      const defaultSettings = {
+        style: 'candlestick',
+        backgroundColor: '#0B0E11',
+        bullishColor: '#228B22',
+        bearishColor: '#FF0000',
+        solidCandles: false,
+        showBorders: true,
+        showWick: true,
+        tradeMarker: 'both',
+        gridLines: true,
+        volumeEnabled: true,
+        timeframe: '15m'
+      };
+      
+      if (userPref && userPref.chartSettings) {
+        chartSettings = JSON.stringify({ ...defaultSettings, ...userPref.chartSettings });
+      } else {
+        chartSettings = JSON.stringify(defaultSettings);
+      }
+      
+      await redis.setex(cacheKey, 3600, chartSettings);
+    }
+    
+    const settings = JSON.parse(chartSettings);
+    
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    res.set({
+      'Cache-Control': 'private, max-age=300',
+      'X-Response-Time-ms': responseTime.toFixed(2)
+    });
+    
+    return res.status(200).json({
+      status: 'success',
+      timestamp: Date.now(),
+      responseTimeMs: responseTime,
+      data: {
+        chartSettings: settings
+      }
+    });
+    
+  } catch (err) {
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    console.error('Get chart settings error:', err.message);
+    
+    return res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to fetch chart settings',
+      timestamp: Date.now(),
+      responseTimeMs: responseTime
+    });
+  }
+});
+
+app.post('/api/user/chart-settings', protect, async (req, res) => {
+  const startTime = process.hrtime.bigint();
+  
+  try {
+    const userId = req.user._id;
+    const {
+      style,
+      backgroundColor,
+      bullishColor,
+      bearishColor,
+      solidCandles,
+      showBorders,
+      showWick,
+      tradeMarker,
+      gridLines,
+      volumeEnabled,
+      timeframe
+    } = req.body;
+    
+    const settings = {
+      style: style || 'candlestick',
+      backgroundColor: backgroundColor || '#0B0E11',
+      bullishColor: bullishColor || '#228B22',
+      bearishColor: bearishColor || '#FF0000',
+      solidCandles: solidCandles !== undefined ? solidCandles : false,
+      showBorders: showBorders !== undefined ? showBorders : true,
+      showWick: showWick !== undefined ? showWick : true,
+      tradeMarker: tradeMarker || 'both',
+      gridLines: gridLines !== undefined ? gridLines : true,
+      volumeEnabled: volumeEnabled !== undefined ? volumeEnabled : true,
+      timeframe: timeframe || '15m'
+    };
+    
+    const cacheKey = `user:${userId}:chart_settings`;
+    await redis.setex(cacheKey, 3600, JSON.stringify(settings));
+    
+    await UserPreference.findOneAndUpdate(
+      { user: userId },
+      { 
+        $set: { 
+          chartSettings: settings,
+          updatedAt: new Date()
+        }
+      },
+      { upsert: true, new: true }
+    );
+    
+    await logActivity('chart_settings_updated', 'User', userId, userId, 'User', req, {
+      settings: settings
+    });
+    
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${userId}`).emit('chart_settings_updated', {
+        settings: settings,
+        timestamp: Date.now()
+      });
+    }
+    
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    res.set({
+      'X-Response-Time-ms': responseTime.toFixed(2)
+    });
+    
+    return res.status(200).json({
+      status: 'success',
+      message: 'Chart settings saved successfully',
+      timestamp: Date.now(),
+      responseTimeMs: responseTime,
+      data: {
+        chartSettings: settings
+      }
+    });
+    
+  } catch (err) {
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    console.error('Save chart settings error:', err);
+    
+    return res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to save chart settings',
+      timestamp: Date.now(),
+      responseTimeMs: responseTime
+    });
+  }
+});
+
+app.get('/api/user/settings', protect, async (req, res) => {
+  const startTime = process.hrtime.bigint();
+  
+  try {
+    const userId = req.user._id;
+    const cacheKey = `user:${userId}:trading_settings`;
+    
+    let settings = await redis.get(cacheKey);
+    
+    if (!settings) {
+      const userPref = await UserPreference.findOne({ user: userId });
+      
+      const defaultSettings = {
+        orderBookSettings: {
+          precision: 0.01,
+          depthSize: 20,
+          showCumulativeTotal: false,
+          colorMode: 'default',
+          displaySize: 'compact'
+        },
+        notificationSettings: {
+          email: true,
+          push: true,
+          sms: false,
+          orderFilled: true,
+          priceAlerts: false,
+          liquidationWarning: true
+        },
+        tradingSettings: {
+          defaultLeverage: 1,
+          defaultOrderType: 'limit',
+          confirmBeforeTrade: true,
+          showTradingView: true
+        }
+      };
+      
+      if (userPref && userPref.tradingSettings) {
+        settings = JSON.stringify({ ...defaultSettings, ...userPref.tradingSettings });
+      } else {
+        settings = JSON.stringify(defaultSettings);
+      }
+      
+      await redis.setex(cacheKey, 3600, settings);
+    }
+    
+    const parsedSettings = JSON.parse(settings);
+    
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    res.set({
+      'Cache-Control': 'private, max-age=300',
+      'X-Response-Time-ms': responseTime.toFixed(2)
+    });
+    
+    return res.status(200).json({
+      status: 'success',
+      timestamp: Date.now(),
+      responseTimeMs: responseTime,
+      data: parsedSettings
+    });
+    
+  } catch (err) {
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    console.error('Get user settings error:', err.message);
+    
+    return res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to fetch user settings',
+      timestamp: Date.now(),
+      responseTimeMs: responseTime
+    });
+  }
+});
+
+
+app.post('/api/user/settings', protect, async (req, res) => {
+  const startTime = process.hrtime.bigint();
+  
+  try {
+    const userId = req.user._id;
+    const {
+      orderBookSettings,
+      notificationSettings,
+      tradingSettings
+    } = req.body;
+    
+    let existingPref = await UserPreference.findOne({ user: userId });
+    
+    const updatedSettings = {};
+    
+    if (orderBookSettings) {
+      updatedSettings.orderBookSettings = {
+        precision: orderBookSettings.precision || 0.01,
+        depthSize: orderBookSettings.depthSize || 20,
+        showCumulativeTotal: orderBookSettings.showCumulativeTotal !== undefined ? orderBookSettings.showCumulativeTotal : false,
+        colorMode: orderBookSettings.colorMode || 'default',
+        displaySize: orderBookSettings.displaySize || 'compact'
+      };
+    }
+    
+    if (notificationSettings) {
+      updatedSettings.notificationSettings = {
+        email: notificationSettings.email !== undefined ? notificationSettings.email : true,
+        push: notificationSettings.push !== undefined ? notificationSettings.push : true,
+        sms: notificationSettings.sms !== undefined ? notificationSettings.sms : false,
+        orderFilled: notificationSettings.orderFilled !== undefined ? notificationSettings.orderFilled : true,
+        priceAlerts: notificationSettings.priceAlerts !== undefined ? notificationSettings.priceAlerts : false,
+        liquidationWarning: notificationSettings.liquidationWarning !== undefined ? notificationSettings.liquidationWarning : true
+      };
+    }
+    
+    if (tradingSettings) {
+      updatedSettings.tradingSettings = {
+        defaultLeverage: tradingSettings.defaultLeverage || 1,
+        defaultOrderType: tradingSettings.defaultOrderType || 'limit',
+        confirmBeforeTrade: tradingSettings.confirmBeforeTrade !== undefined ? tradingSettings.confirmBeforeTrade : true,
+        showTradingView: tradingSettings.showTradingView !== undefined ? tradingSettings.showTradingView : true
+      };
+    }
+    
+    if (existingPref) {
+      existingPref.tradingSettings = { ...existingPref.tradingSettings, ...updatedSettings };
+      await existingPref.save();
+    } else {
+      await UserPreference.create({
+        user: userId,
+        tradingSettings: updatedSettings
+      });
+    }
+    
+    const cacheKey = `user:${userId}:trading_settings`;
+    let currentCache = await redis.get(cacheKey);
+    let cachedSettings = currentCache ? JSON.parse(currentCache) : {};
+    
+    const mergedSettings = {
+      orderBookSettings: { ...cachedSettings.orderBookSettings, ...updatedSettings.orderBookSettings },
+      notificationSettings: { ...cachedSettings.notificationSettings, ...updatedSettings.notificationSettings },
+      tradingSettings: { ...cachedSettings.tradingSettings, ...updatedSettings.tradingSettings }
+    };
+    
+    await redis.setex(cacheKey, 3600, JSON.stringify(mergedSettings));
+    
+    await logActivity('trading_settings_updated', 'User', userId, userId, 'User', req, {
+      settings: updatedSettings
+    });
+    
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${userId}`).emit('settings_updated', {
+        settings: updatedSettings,
+        timestamp: Date.now()
+      });
+    }
+    
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    res.set({
+      'X-Response-Time-ms': responseTime.toFixed(2)
+    });
+    
+    return res.status(200).json({
+      status: 'success',
+      message: 'Settings saved successfully',
+      timestamp: Date.now(),
+      responseTimeMs: responseTime,
+      data: updatedSettings
+    });
+    
+  } catch (err) {
+    const endTime = process.hrtime.bigint();
+    const responseTime = Number(endTime - startTime) / 1000000;
+    
+    console.error('Save user settings error:', err);
+    
+    return res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to save settings',
+      timestamp: Date.now(),
+      responseTimeMs: responseTime
+    });
+  }
+});
+
+// =============================================
+// SPOT MARKET WEBSOCKET - PRODUCTION READY
+// Real-time orderbook, trades, ticker, candles via Redis Pub/Sub
+// =============================================
+
+const setupSpotMarketWebSocket = (server) => {
+  const wss = new WebSocket.Server({ 
+    server, 
+    path: '/ws/spotmarket',
+    clientTracking: true,
+    perMessageDeflate: {
+      zlibDeflateOptions: { chunkSize: 1024, memLevel: 7, level: 3 },
+      zlibInflateOptions: { chunkSize: 10 * 1024 },
+      clientNoContextTakeover: true,
+      serverNoContextTakeover: true,
+      serverMaxWindowBits: 10,
+      concurrencyLimit: 10,
+      threshold: 1024
+    }
+  });
+
+  const clients = new Map();
+  const subscriptions = new Map();
+  const HEARTBEAT_INTERVAL = 30000;
+  const HEARTBEAT_VALUE = '--heartbeat--';
+
+  const sendToClient = (clientId, data) => {
+    const client = clients.get(clientId);
+    if (client && client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify(data));
+    }
+  };
+
+  const broadcastToSymbol = (symbol, data) => {
+    for (const [clientId, client] of clients) {
+      const clientSubs = subscriptions.get(clientId);
+      if (clientSubs && (clientSubs.has(symbol) || clientSubs.has('*'))) {
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(JSON.stringify(data));
+        }
+      }
+    }
+  };
+
+  const broadcastToAll = (data) => {
+    for (const [clientId, client] of clients) {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify(data));
+      }
+    }
+  };
+
+  const subscribeClient = (clientId, symbol, channels) => {
+    let clientSubs = subscriptions.get(clientId);
+    if (!clientSubs) {
+      clientSubs = new Map();
+      subscriptions.set(clientId, clientSubs);
+    }
+    
+    if (!clientSubs.has(symbol)) {
+      clientSubs.set(symbol, new Set());
+    }
+    
+    channels.forEach(channel => {
+      clientSubs.get(symbol).add(channel);
+    });
+    
+    return Array.from(clientSubs.get(symbol));
+  };
+
+  const unsubscribeClient = (clientId, symbol, channels) => {
+    const clientSubs = subscriptions.get(clientId);
+    if (!clientSubs) return [];
+    
+    if (symbol === '*') {
+      subscriptions.delete(clientId);
+      return [];
+    }
+    
+    const symbolSubs = clientSubs.get(symbol);
+    if (symbolSubs) {
+      channels.forEach(channel => symbolSubs.delete(channel));
+      if (symbolSubs.size === 0) {
+        clientSubs.delete(symbol);
+      }
+    }
+    
+    return clientSubs.get(symbol) ? Array.from(clientSubs.get(symbol)) : [];
+  };
+
+  const sendInitialData = async (clientId, symbol) => {
+    const initialData = { type: 'initial', symbol: symbol, data: {} };
+    
+    const tickerKey = REDIS_KEYS.TICKER(symbol);
+    const tickerRaw = await redis.get(tickerKey);
+    if (tickerRaw) {
+      const ticker = JSON.parse(tickerRaw);
+      initialData.data.ticker = {
+        price: ticker.lastPrice,
+        priceChangePercent: ticker.priceChangePercent,
+        highPrice: ticker.highPrice,
+        lowPrice: ticker.lowPrice,
+        volume: ticker.volume,
+        quoteVolume: ticker.quoteVolume,
+        bidPrice: ticker.bidPrice,
+        askPrice: ticker.askPrice
+      };
+    }
+    
+    const orderbookKey = REDIS_KEYS.ORDERBOOK(symbol);
+    const orderbookRaw = await redis.get(orderbookKey);
+    if (orderbookRaw) {
+      const orderbook = JSON.parse(orderbookRaw);
+      initialData.data.orderbook = {
+        bids: orderbook.bids.slice(0, 20),
+        asks: orderbook.asks.slice(0, 20),
+        lastUpdateId: orderbook.lastUpdateId
+      };
+    }
+    
+    const tradesKey = REDIS_KEYS.TRADES(symbol);
+    const tradesRaw = await redis.get(tradesKey);
+    if (tradesRaw) {
+      const trades = JSON.parse(tradesRaw);
+      initialData.data.trades = trades.slice(0, 50);
+    }
+    
+    const candlesKey = REDIS_KEYS.CANDLES(symbol, '15m');
+    const candlesRaw = await redis.zrevrange(candlesKey, 0, 199);
+    if (candlesRaw && candlesRaw.length > 0) {
+      initialData.data.candles = candlesRaw.map(c => JSON.parse(c)).reverse();
+    }
+    
+    sendToClient(clientId, initialData);
+  };
+
+  const startRedisSubscriber = () => {
+    const subscriber = redis.duplicate();
+    
+    subscriber.subscribe('market:ticker', 'market:orderbook', 'market:trade', 'market:candles');
+    
+    subscriber.on('message', (channel, message) => {
+      try {
+        const data = JSON.parse(message);
+        
+        if (channel === 'market:ticker') {
+          broadcastToSymbol(data.symbol, {
+            type: 'ticker',
+            symbol: data.symbol,
+            price: data.price,
+            priceChangePercent: data.priceChangePercent,
+            highPrice: data.highPrice,
+            lowPrice: data.lowPrice,
+            volume: data.volume,
+            quoteVolume: data.quoteVolume,
+            stats: data.stats,
+            timestamp: Date.now()
+          });
+        }
+        
+        if (channel === 'market:orderbook') {
+          broadcastToSymbol(data.symbol, {
+            type: 'orderbook',
+            symbol: data.symbol,
+            bids: data.bids,
+            asks: data.asks,
+            timestamp: Date.now()
+          });
+        }
+        
+        if (channel === 'market:trade') {
+          broadcastToSymbol(data.symbol, {
+            type: 'trade',
+            symbol: data.symbol,
+            price: data.price,
+            amount: data.amount,
+            time: data.time,
+            isBuyerMaker: data.isBuyerMaker,
+            timestamp: Date.now()
+          });
+        }
+        
+        if (channel === 'market:candles') {
+          broadcastToSymbol(data.symbol, {
+            type: 'candles',
+            symbol: data.symbol,
+            interval: data.interval,
+            candles: data.candles,
+            timestamp: Date.now()
+          });
+        }
+      } catch (err) {
+        console.error('Redis subscriber error:', err);
+      }
+    });
+    
+    return subscriber;
+  };
+
+  wss.on('connection', async (ws, req) => {
+    const clientId = uuidv4();
+    let heartbeatInterval;
+    let isAlive = true;
+    
+    clients.set(clientId, ws);
+    subscriptions.set(clientId, new Map());
+    ws.clientId = clientId;
+    
+    ws.on('pong', () => { isAlive = true; });
+    
+    heartbeatInterval = setInterval(() => {
+      if (!isAlive) {
+        clearInterval(heartbeatInterval);
+        ws.terminate();
+        clients.delete(clientId);
+        subscriptions.delete(clientId);
+        return;
+      }
+      isAlive = false;
+      ws.ping();
+    }, HEARTBEAT_INTERVAL);
+    
+    ws.on('message', async (message) => {
+      try {
+        if (message === HEARTBEAT_VALUE) {
+          ws.pong();
+          return;
+        }
+        
+        const data = JSON.parse(message);
+        
+        switch (data.type) {
+          case 'subscribe':
+            const symbol = data.pair || data.symbol;
+            const channels = data.channels || ['ticker', 'orderbook', 'trades', 'candles'];
+            
+            if (!symbol) {
+              ws.send(JSON.stringify({ type: 'error', message: 'Symbol required for subscription' }));
+              return;
+            }
+            
+            const subscribedChannels = subscribeClient(clientId, symbol.toUpperCase(), channels);
+            
+            await sendInitialData(clientId, symbol.toUpperCase());
+            
+            ws.send(JSON.stringify({
+              type: 'subscribed',
+              symbol: symbol.toUpperCase(),
+              channels: subscribedChannels,
+              timestamp: Date.now()
+            }));
+            break;
+            
+          case 'unsubscribe':
+            const unsubSymbol = data.symbol;
+            const unsubChannels = data.channels || ['ticker', 'orderbook', 'trades', 'candles'];
+            
+            const remainingChannels = unsubscribeClient(clientId, unsubSymbol.toUpperCase(), unsubChannels);
+            
+            ws.send(JSON.stringify({
+              type: 'unsubscribed',
+              symbol: unsubSymbol,
+              channels: unsubChannels,
+              remainingChannels: remainingChannels,
+              timestamp: Date.now()
+            }));
+            break;
+            
+          case 'get_orderbook':
+            const orderbookKey = REDIS_KEYS.ORDERBOOK(data.symbol);
+            const orderbookRaw = await redis.get(orderbookKey);
+            if (orderbookRaw) {
+              const orderbook = JSON.parse(orderbookRaw);
+              ws.send(JSON.stringify({
+                type: 'orderbook',
+                symbol: data.symbol,
+                bids: orderbook.bids.slice(0, data.limit || 100),
+                asks: orderbook.asks.slice(0, data.limit || 100),
+                timestamp: Date.now()
+              }));
+            }
+            break;
+            
+          case 'get_ticker':
+            const tickerKey = REDIS_KEYS.TICKER(data.symbol);
+            const tickerRaw = await redis.get(tickerKey);
+            if (tickerRaw) {
+              const ticker = JSON.parse(tickerRaw);
+              ws.send(JSON.stringify({
+                type: 'ticker',
+                symbol: data.symbol,
+                price: ticker.lastPrice,
+                priceChangePercent: ticker.priceChangePercent,
+                highPrice: ticker.highPrice,
+                lowPrice: ticker.lowPrice,
+                volume: ticker.volume,
+                timestamp: Date.now()
+              }));
+            }
+            break;
+            
+          case 'get_trades':
+            const tradesKey = REDIS_KEYS.TRADES(data.symbol);
+            const tradesRaw = await redis.get(tradesKey);
+            if (tradesRaw) {
+              const trades = JSON.parse(tradesRaw);
+              ws.send(JSON.stringify({
+                type: 'trades',
+                symbol: data.symbol,
+                trades: trades.slice(0, data.limit || 50),
+                timestamp: Date.now()
+              }));
+            }
+            break;
+            
+          case 'ping':
+            ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
+            break;
+            
+          default:
+            console.log('Unknown message type:', data.type);
+        }
+      } catch (err) {
+        console.error('WebSocket message error:', err);
+        ws.send(JSON.stringify({ type: 'error', message: 'Invalid message format' }));
+      }
+    });
+    
+    ws.on('close', () => {
+      clearInterval(heartbeatInterval);
+      clients.delete(clientId);
+      subscriptions.delete(clientId);
+      console.log(`Spot market client ${clientId} disconnected. Total: ${clients.size}`);
+    });
+    
+    ws.on('error', (err) => {
+      console.error(`WebSocket error for ${clientId}:`, err);
+      clearInterval(heartbeatInterval);
+      clients.delete(clientId);
+      subscriptions.delete(clientId);
+    });
+    
+    console.log(`Spot market client ${clientId} connected. Total: ${clients.size}`);
+    
+    ws.send(JSON.stringify({
+      type: 'connected',
+      clientId: clientId,
+      timestamp: Date.now()
+    }));
+  });
+  
+  const redisSubscriber = startRedisSubscriber();
+  
+  wss.on('close', () => {
+    if (redisSubscriber) redisSubscriber.quit();
+  });
+  
+  return wss;
+};
+
+// =============================================
+// TICKER WEBSOCKET - Footer ticker updates
+// =============================================
+
+const setupTickerWebSocket = (server) => {
+  const wss = new WebSocket.Server({ 
+    server, 
+    path: '/ws/ticker',
+    clientTracking: true
+  });
+  
+  const clients = new Map();
+  let broadcastInterval = null;
+  let lastTickerData = [];
+  
+  const fetchAllTickers = async () => {
+    const cachedPairs = await redis.get(REDIS_KEYS.ALL_PAIRS);
+    if (!cachedPairs) return [];
+    
+    const pairs = JSON.parse(cachedPairs);
+    const tickers = [];
+    
+    const topPairs = pairs.slice(0, 50);
+    
+    for (const pair of topPairs) {
+      const tickerKey = REDIS_KEYS.TICKER(pair.symbol);
+      const tickerRaw = await redis.get(tickerKey);
+      if (tickerRaw) {
+        const ticker = JSON.parse(tickerRaw);
+        tickers.push({
+          symbol: `${pair.baseAsset}/${pair.quoteAsset}`,
+          price: ticker.lastPrice,
+          change24h: ticker.priceChangePercent,
+          volume: ticker.volume,
+          high: ticker.highPrice,
+          low: ticker.lowPrice
+        });
+      }
+    }
+    
+    return tickers;
+  };
+  
+  const broadcastTickers = async () => {
+    if (clients.size === 0) return;
+    
+    try {
+      const tickers = await fetchAllTickers();
+      if (tickers.length > 0) {
+        lastTickerData = tickers;
+        const message = JSON.stringify({
+          type: 'tickers',
+          data: tickers,
+          timestamp: Date.now()
+        });
+        
+        for (const [clientId, client] of clients) {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(message);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Broadcast tickers error:', err);
+    }
+  };
+  
+  wss.on('connection', async (ws) => {
+    const clientId = uuidv4();
+    let heartbeatInterval;
+    let isAlive = true;
+    
+    clients.set(clientId, ws);
+    ws.clientId = clientId;
+    
+    ws.on('pong', () => { isAlive = true; });
+    
+    heartbeatInterval = setInterval(() => {
+      if (!isAlive) {
+        clearInterval(heartbeatInterval);
+        ws.terminate();
+        clients.delete(clientId);
+        return;
+      }
+      isAlive = false;
+      ws.ping();
+    }, 30000);
+    
+    if (lastTickerData.length > 0) {
+      ws.send(JSON.stringify({
+        type: 'tickers',
+        data: lastTickerData,
+        timestamp: Date.now()
+      }));
+    } else {
+      const initialTickers = await fetchAllTickers();
+      if (initialTickers.length > 0) {
+        ws.send(JSON.stringify({
+          type: 'tickers',
+          data: initialTickers,
+          timestamp: Date.now()
+        }));
+      }
+    }
+    
+    ws.on('message', async (message) => {
+      try {
+        if (message === '--heartbeat--') {
+          ws.pong();
+          return;
+        }
+        
+        const data = JSON.parse(message);
+        
+        if (data.type === 'ping') {
+          ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
+        }
+      } catch (err) {
+        // Ignore invalid messages
+      }
+    });
+    
+    ws.on('close', () => {
+      clearInterval(heartbeatInterval);
+      clients.delete(clientId);
+      console.log(`Ticker client ${clientId} disconnected. Total: ${clients.size}`);
+    });
+    
+    console.log(`Ticker client ${clientId} connected. Total: ${clients.size}`);
+  });
+  
+  if (!broadcastInterval) {
+    broadcastInterval = setInterval(broadcastTickers, 2000);
+  }
+  
+  return wss;
+};
 
 
 
