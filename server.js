@@ -10068,21 +10068,24 @@ async function fetchMarketData() {
         params: {
           vs_currency: 'usd',
           order: 'market_cap_desc',
-          per_page: 50,
+          per_page: 100,  // Increased to 100 for more coins
           page: 1,
           sparkline: true,
           price_change_percentage: '1h,24h,7d'
         },
-        timeout: 10000
+        timeout: 10000,
+        headers: {
+          'Accept': 'application/json'
+        }
       }
     );
 
-    if (response.data) {
+    if (response.data && Array.isArray(response.data)) {
       const transformed = response.data.map(coin => ({
         id: coin.id,
         symbol: coin.symbol,
         name: coin.name,
-        image: coin.image,
+        image: coin.image,  // ← Correct logo URL from CoinGecko!
         current_price: coin.current_price,
         market_cap: coin.market_cap,
         market_cap_rank: coin.market_cap_rank,
@@ -10100,13 +10103,14 @@ async function fetchMarketData() {
         lastUpdated: new Date()
       };
       
+      console.log(`✅ Market data updated: ${transformed.length} assets, ${new Date().toLocaleTimeString()}`);
       return transformed;
     }
     
     return marketDataCache.data || [];
     
   } catch (error) {
-    console.error('Market data fetch error:', error);
+    console.error('Market data fetch error:', error.message);
     return marketDataCache.data || [];
   }
 }
@@ -10143,7 +10147,6 @@ setInterval(async () => {
 
 // Initial cache on startup
 fetchMarketData();
-
 
 
 
