@@ -10055,104 +10055,102 @@ app.post('/api/convert', protect, async (req, res) => {
 
 
 
-
 // =============================================
-// MARKET ASSETS ENDPOINT - Working version
+// MARKET ASSETS ENDPOINT - For "Prices by Market Cap" table
+// Fetches top cryptocurrencies with real-time prices from CoinGecko
 // =============================================
-
-// Simple in-memory cache
-let cachedMarketData = null;
-let cacheTimestamp = null;
-const CACHE_TTL = 30000; // 30 seconds
-
 app.get('/api/market/assets', async (req, res) => {
-    try {
-        // Return cached data if still fresh
-        if (cachedMarketData && cacheTimestamp && (Date.now() - cacheTimestamp) < CACHE_TTL) {
-            console.log('Returning cached market data');
-            return res.json({
-                status: 'success',
-                data: cachedMarketData
-            });
+  try {
+    // Fetch real-time cryptocurrency data from CoinGecko
+    const response = await axios.get(
+      'https://api.coingecko.com/api/v3/coins/markets',
+      {
+        params: {
+          vs_currency: 'usd',
+          order: 'market_cap_desc',
+          per_page: 100,
+          page: 1,
+          sparkline: true,
+          price_change_percentage: '1h,24h,7d'
+        },
+        timeout: 10000,
+        headers: {
+          'Accept': 'application/json',
+          'User-Agent': 'BitHash-Capital/1.0'
         }
-        
-        console.log('Fetching fresh market data from CoinGecko...');
-        
-        // Fetch from CoinGecko
-        const response = await axios.get(
-            'https://api.coingecko.com/api/v3/coins/markets',
-            {
-                params: {
-                    vs_currency: 'usd',
-                    order: 'market_cap_desc',
-                    per_page: 100,
-                    page: 1,
-                    sparkline: true,
-                    price_change_percentage: '1h,24h,7d'
-                },
-                timeout: 10000,
-                headers: {
-                    'Accept': 'application/json',
-                    'User-Agent': 'BitHash/1.0'
-                }
-            }
-        );
-        
-        if (response.data && Array.isArray(response.data) && response.data.length > 0) {
-            // Format exactly as frontend expects
-            const formattedData = response.data.map(coin => ({
-                id: coin.id,
-                symbol: coin.symbol,
-                name: coin.name,
-                image: coin.image,
-                current_price: coin.current_price || 0,
-                market_cap: coin.market_cap || 0,
-                total_volume: coin.total_volume || 0,
-                price_change_percentage_24h: coin.price_change_percentage_24h || 0,
-                price_change_percentage_1h_in_currency: coin.price_change_percentage_1h_in_currency || 0,
-                price_change_percentage_7d_in_currency: coin.price_change_percentage_7d_in_currency || 0,
-                sparkline_in_7d: {
-                    price: coin.sparkline_in_7d?.price || []
-                }
-            }));
-            
-            // Update cache
-            cachedMarketData = formattedData;
-            cacheTimestamp = Date.now();
-            
-            console.log(`✅ Market data cached: ${formattedData.length} assets`);
-            
-            return res.json({
-                status: 'success',
-                data: formattedData
-            });
-        }
-        
-        throw new Error('No data received from CoinGecko');
-        
-    } catch (error) {
-        console.error('Market assets error:', error.message);
-        
-        // Return cached data if available (even if expired)
-        if (cachedMarketData) {
-            console.log('Returning expired cache due to error');
-            return res.json({
-                status: 'success',
-                data: cachedMarketData,
-                fromCache: true
-            });
-        }
-        
-        // Return empty array as last resort
-        return res.json({
-            status: 'success',
-            data: []
-        });
+      }
+    );
+
+    if (!response.data || !Array.isArray(response.data)) {
+      throw new Error('Invalid response from CoinGecko');
     }
+
+    // Format the data to match what your frontend expects
+    const formattedAssets = response.data.map(coin => ({
+      id: coin.id,
+      symbol: coin.symbol,
+      name: coin.name,
+      image: coin.image,
+      current_price: coin.current_price,
+      market_cap: coin.market_cap,
+      market_cap_rank: coin.market_cap_rank,
+      total_volume: coin.total_volume,
+      high_24h: coin.high_24h,
+      low_24h: coin.low_24h,
+      price_change_24h: coin.price_change_24h,
+      price_change_percentage_24h: coin.price_change_percentage_24h,
+      price_change_percentage_1h_in_currency: coin.price_change_percentage_1h_in_currency || 0,
+      price_change_percentage_7d_in_currency: coin.price_change_percentage_7d_in_currency || 0,
+      sparkline_in_7d: coin.sparkline_in_7d,
+      circulating_supply: coin.circulating_supply,
+      total_supply: coin.total_supply,
+      ath: coin.ath,
+      ath_change_percentage: coin.ath_change_percentage,
+      ath_date: coin.ath_date,
+      atl: coin.atl,
+      atl_change_percentage: coin.atl_change_percentage,
+      atl_date: coin.atl_date
+    }));
+
+    // Cache the response in Redis for 30 seconds (since prices change frequently)
+    await redis.setex('market:assets:cached', 30, JSON.stringify(formattedAssets));
+
+    res.status(200).json({
+      status: 'success',
+      data: formattedAssets,
+      timestamp: Date.now(),
+      source: 'coingecko'
+    });
+
+  } catch (error) {
+    console.error('Error fetching market assets from CoinGecko:', error.message);
+    
+    // Try fallback to cached data
+    try {
+      const cachedData = await redis.get('market:assets:cached');
+      if (cachedData) {
+        const parsed = JSON.parse(cachedData);
+        return res.status(200).json({
+          status: 'success',
+          data: parsed,
+          timestamp: Date.now(),
+          source: 'cache',
+          cached: true
+        });
+      }
+    } catch (cacheErr) {
+      console.error('Cache fallback failed:', cacheErr.message);
+    }
+    
+    // If all fails, return empty array (frontend shows "refreshing soon" message)
+    res.status(200).json({
+      status: 'success',
+      data: [],
+      timestamp: Date.now(),
+      error: 'Unable to fetch live market data'
+    });
+  }
 });
-
-
-
 
 
 
