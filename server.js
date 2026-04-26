@@ -10050,103 +10050,107 @@ app.post('/api/convert', protect, async (req, res) => {
 
 
 
+
+
+
+
+
+
 // =============================================
-// MARKET DATA ENDPOINT - Prices by Market Cap
+// MARKET ASSETS ENDPOINT - Working version
 // =============================================
 
-// Cache with 30-second TTL
-let marketDataCache = {
-  data: null,
-  lastUpdated: null
-};
+// Simple in-memory cache
+let cachedMarketData = null;
+let cacheTimestamp = null;
+const CACHE_TTL = 30000; // 30 seconds
 
-async function fetchMarketData() {
-  try {
-    const response = await axios.get(
-      'https://api.coingecko.com/api/v3/coins/markets',
-      {
-        params: {
-          vs_currency: 'usd',
-          order: 'market_cap_desc',
-          per_page: 100,  // Increased to 100 for more coins
-          page: 1,
-          sparkline: true,
-          price_change_percentage: '1h,24h,7d'
-        },
-        timeout: 10000,
-        headers: {
-          'Accept': 'application/json'
-        }
-      }
-    );
-
-    if (response.data && Array.isArray(response.data)) {
-      const transformed = response.data.map(coin => ({
-        id: coin.id,
-        symbol: coin.symbol,
-        name: coin.name,
-        image: coin.image,  // ← Correct logo URL from CoinGecko!
-        current_price: coin.current_price,
-        market_cap: coin.market_cap,
-        market_cap_rank: coin.market_cap_rank,
-        total_volume: coin.total_volume,
-        price_change_percentage_24h: coin.price_change_percentage_24h || 0,
-        price_change_percentage_1h_in_currency: coin.price_change_percentage_1h_in_currency || 0,
-        price_change_percentage_7d_in_currency: coin.price_change_percentage_7d_in_currency || 0,
-        sparkline_in_7d: {
-          price: coin.sparkline_in_7d?.price || []
-        }
-      }));
-
-      marketDataCache = {
-        data: transformed,
-        lastUpdated: new Date()
-      };
-      
-      console.log(`✅ Market data updated: ${transformed.length} assets, ${new Date().toLocaleTimeString()}`);
-      return transformed;
-    }
-    
-    return marketDataCache.data || [];
-    
-  } catch (error) {
-    console.error('Market data fetch error:', error.message);
-    return marketDataCache.data || [];
-  }
-}
-
-// Endpoint for Prices by Market Cap table
 app.get('/api/market/assets', async (req, res) => {
-  try {
-    let assets = marketDataCache.data;
-    
-    // Refresh if cache is older than 30 seconds or empty
-    if (!assets || !marketDataCache.lastUpdated || 
-        (new Date() - marketDataCache.lastUpdated) > 30000) {
-      assets = await fetchMarketData();
+    try {
+        // Return cached data if still fresh
+        if (cachedMarketData && cacheTimestamp && (Date.now() - cacheTimestamp) < CACHE_TTL) {
+            console.log('Returning cached market data');
+            return res.json({
+                status: 'success',
+                data: cachedMarketData
+            });
+        }
+        
+        console.log('Fetching fresh market data from CoinGecko...');
+        
+        // Fetch from CoinGecko
+        const response = await axios.get(
+            'https://api.coingecko.com/api/v3/coins/markets',
+            {
+                params: {
+                    vs_currency: 'usd',
+                    order: 'market_cap_desc',
+                    per_page: 100,
+                    page: 1,
+                    sparkline: true,
+                    price_change_percentage: '1h,24h,7d'
+                },
+                timeout: 10000,
+                headers: {
+                    'Accept': 'application/json',
+                    'User-Agent': 'BitHash/1.0'
+                }
+            }
+        );
+        
+        if (response.data && Array.isArray(response.data) && response.data.length > 0) {
+            // Format exactly as frontend expects
+            const formattedData = response.data.map(coin => ({
+                id: coin.id,
+                symbol: coin.symbol,
+                name: coin.name,
+                image: coin.image,
+                current_price: coin.current_price || 0,
+                market_cap: coin.market_cap || 0,
+                total_volume: coin.total_volume || 0,
+                price_change_percentage_24h: coin.price_change_percentage_24h || 0,
+                price_change_percentage_1h_in_currency: coin.price_change_percentage_1h_in_currency || 0,
+                price_change_percentage_7d_in_currency: coin.price_change_percentage_7d_in_currency || 0,
+                sparkline_in_7d: {
+                    price: coin.sparkline_in_7d?.price || []
+                }
+            }));
+            
+            // Update cache
+            cachedMarketData = formattedData;
+            cacheTimestamp = Date.now();
+            
+            console.log(`✅ Market data cached: ${formattedData.length} assets`);
+            
+            return res.json({
+                status: 'success',
+                data: formattedData
+            });
+        }
+        
+        throw new Error('No data received from CoinGecko');
+        
+    } catch (error) {
+        console.error('Market assets error:', error.message);
+        
+        // Return cached data if available (even if expired)
+        if (cachedMarketData) {
+            console.log('Returning expired cache due to error');
+            return res.json({
+                status: 'success',
+                data: cachedMarketData,
+                fromCache: true
+            });
+        }
+        
+        // Return empty array as last resort
+        return res.json({
+            status: 'success',
+            data: []
+        });
     }
-    
-    res.json({
-      status: 'success',
-      data: assets || []
-    });
-    
-  } catch (error) {
-    console.error('Market assets error:', error);
-    res.json({
-      status: 'error',
-      data: []
-    });
-  }
 });
 
-// Refresh cache every 30 seconds in background
-setInterval(async () => {
-  await fetchMarketData();
-}, 30000);
-
-// Initial cache on startup
-fetchMarketData();
 
 
 
