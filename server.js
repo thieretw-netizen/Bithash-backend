@@ -10205,8 +10205,6 @@ app.post('/api/convert', protect, async (req, res) => {
 
 
 
-
-
 // =============================================
 // MARKET DATA ENDPOINT - Prices by Market Cap
 // =============================================
@@ -10219,7 +10217,9 @@ let marketDataCache = {
 
 async function fetchFromBinance() {
   try {
-    const response = await axios.get('https://api.binance.com/api/v3/ticker/24hr');
+    const response = await axios.get('https://api.binance.com/api/v3/ticker/24hr', {
+      timeout: 10000
+    });
     
     if (response.data && response.data.length > 0) {
       // Get top 50 by quote volume (equivalent to market cap ranking)
@@ -10340,6 +10340,17 @@ app.get('/api/market/assets', async (req, res) => {
       assets = await fetchMarketData();
     }
     
+    // If still no assets, try Binance directly
+    if (!assets || assets.length === 0) {
+      assets = await fetchFromBinance();
+      if (assets && assets.length > 0) {
+        marketDataCache = {
+          data: assets,
+          lastUpdated: new Date()
+        };
+      }
+    }
+    
     res.json({
       status: 'success',
       data: assets || []
@@ -10347,10 +10358,19 @@ app.get('/api/market/assets', async (req, res) => {
     
   } catch (error) {
     console.error('Market assets error:', error);
-    res.json({
-      status: 'error',
-      data: []
-    });
+    // Last resort - try Binance one more time
+    try {
+      const binanceData = await fetchFromBinance();
+      res.json({
+        status: 'success',
+        data: binanceData || []
+      });
+    } catch (finalError) {
+      res.json({
+        status: 'error',
+        data: []
+      });
+    }
   }
 });
 
@@ -10361,7 +10381,6 @@ setInterval(async () => {
 
 // Initial cache on startup
 fetchMarketData();
-
 
 
 
