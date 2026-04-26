@@ -25877,8 +25877,154 @@ async function calculateAccurateClosingBalances(userId, endDate) {
 
 
 
+// =============================================
+// GET /api/market/all-pairs - Dynamic pairs from Binance (NO HARDCODING)
+// =============================================
+app.get('/api/market/all-pairs', async (req, res) => {
+  try {
+    // Fetch pairs from Redis cache (updated by price aggregator)
+    let pairs = await redis.get(REDIS_KEYS.ALL_PAIRS);
+    let quoteAssets = await redis.get(REDIS_KEYS.QUOTE_ASSETS);
+    
+    // If Redis cache is empty, fetch fresh from Binance
+    if (!pairs) {
+      console.log('No cached pairs, fetching from Binance...');
+      
+      const response = await axios.get('https://api.binance.com/api/v3/exchangeInfo', {
+        timeout: 10000,
+        headers: { 'User-Agent': 'Mozilla/5.0' }
+      });
+      
+      const tradingPairs = response.data.symbols.filter(s => 
+        s.status === 'TRADING' && 
+        (s.quoteAsset === 'USDT' || s.quoteAsset === 'USDC' || s.quoteAsset === 'BTC' || s.quoteAsset === 'ETH')
+      );
+      
+      pairs = tradingPairs.map(pair => ({
+        symbol: pair.symbol,
+        base: pair.baseAsset,
+        quote: pair.quoteAsset,
+        status: 'active'
+      }));
+      
+      quoteAssets = ['USDT', 'USDC', 'BTC', 'ETH'];
+      
+      // Cache for 5 minutes
+      await redis.setex(REDIS_KEYS.ALL_PAIRS, 300, JSON.stringify(pairs));
+      await redis.setex(REDIS_KEYS.QUOTE_ASSETS, 300, JSON.stringify(quoteAssets));
+    } else {
+      pairs = JSON.parse(pairs);
+      quoteAssets = quoteAssets ? JSON.parse(quoteAssets) : ['USDT', 'USDC', 'BTC', 'ETH'];
+    }
+    
+    // Get current prices for each pair
+    const pairsWithPrices = [];
+    for (const pair of pairs.slice(0, 100)) {
+      const tickerKey = REDIS_KEYS.TICKER(pair.symbol);
+      const tickerRaw = await redis.get(tickerKey);
+      
+      if (tickerRaw) {
+        const ticker = JSON.parse(tickerRaw);
+        pairsWithPrices.push({
+          ...pair,
+          price: ticker.lastPrice || 0,
+          priceChangePercent: ticker.priceChangePercent || 0,
+          volume: ticker.volume || 0
+        });
+      } else {
+        pairsWithPrices.push({
+          ...pair,
+          price: 0,
+          priceChangePercent: 0,
+          volume: 0
+        });
+      }
+    }
+    
+    res.status(200).json({
+      status: 'success',
+      pairs: pairsWithPrices,
+      quoteAssets: quoteAssets
+    });
+    
+  } catch (err) {
+    console.error('Error fetching all pairs:', err);
+    
+    // Return empty array on error - frontend will handle gracefully
+    res.status(200).json({
+      status: 'success',
+      pairs: [],
+      quoteAssets: ['USDT']
+    });
+  }
+});
 
 
+// =============================================
+// GET /api/market/pairs - For trading page market pairs listing
+// =============================================
+app.get('/api/market/pairs', async (req, res) => {
+  try {
+    // Get all trading pairs from Redis cache
+    const allPairsRaw = await redis.get(REDIS_KEYS.ALL_PAIRS);
+    
+    if (!allPairsRaw) {
+      // Return empty array if no data - frontend handles gracefully
+      return res.status(200).json({
+        status: 'success',
+        data: []
+      });
+    }
+    
+    const allPairs = JSON.parse(allPairsRaw);
+    const pairsWithData = [];
+    
+    // Get current market data for each pair
+    for (const pair of allPairs.slice(0, 100)) {
+      const tickerKey = REDIS_KEYS.TICKER(pair.symbol);
+      const tickerRaw = await redis.get(tickerKey);
+      
+      if (tickerRaw) {
+        const ticker = JSON.parse(tickerRaw);
+        pairsWithData.push({
+          base: pair.base,
+          quote: pair.quote,
+          symbol: pair.symbol,
+          price: ticker.lastPrice || 0,
+          priceChangePercent: ticker.priceChangePercent || 0,
+          volume: ticker.volume || 0,
+          quoteVolume: ticker.quoteVolume || 0,
+          highPrice: ticker.highPrice || 0,
+          lowPrice: ticker.lowPrice || 0
+        });
+      } else {
+        pairsWithData.push({
+          base: pair.base,
+          quote: pair.quote,
+          symbol: pair.symbol,
+          price: 0,
+          priceChangePercent: 0,
+          volume: 0,
+          quoteVolume: 0,
+          highPrice: 0,
+          lowPrice: 0
+        });
+      }
+    }
+    
+    res.status(200).json({
+      status: 'success',
+      data: pairsWithData
+    });
+    
+  } catch (err) {
+    console.error('Error fetching market pairs:', err);
+    res.status(200).json({
+      status: 'success',
+      data: []
+    });
+  }
+});
 
 
 
