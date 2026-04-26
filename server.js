@@ -10204,6 +10204,9 @@ app.post('/api/convert', protect, async (req, res) => {
 
 
 
+
+
+
 // =============================================
 // MARKET DATA ENDPOINT - Prices by Market Cap
 // =============================================
@@ -10213,6 +10216,43 @@ let marketDataCache = {
   data: null,
   lastUpdated: null
 };
+
+async function fetchFromBinance() {
+  try {
+    const response = await axios.get('https://api.binance.com/api/v3/ticker/24hr');
+    
+    if (response.data && response.data.length > 0) {
+      // Get top 50 by quote volume (equivalent to market cap ranking)
+      const sorted = response.data
+        .filter(item => item.symbol.endsWith('USDT'))
+        .sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume))
+        .slice(0, 50);
+      
+      const transformed = sorted.map((item, index) => ({
+        id: item.symbol.replace('USDT', '').toLowerCase(),
+        symbol: item.symbol.replace('USDT', '').toLowerCase(),
+        name: item.symbol.replace('USDT', ''),
+        image: `https://cryptologos.cc/logos/${item.symbol.replace('USDT', '').toLowerCase()}-${item.symbol.replace('USDT', '').toLowerCase()}-logo.png`,
+        current_price: parseFloat(item.lastPrice),
+        market_cap: parseFloat(item.quoteVolume) * parseFloat(item.lastPrice),
+        market_cap_rank: index + 1,
+        total_volume: parseFloat(item.quoteVolume),
+        price_change_percentage_24h: parseFloat(item.priceChangePercent),
+        price_change_percentage_1h_in_currency: 0,
+        price_change_percentage_7d_in_currency: 0,
+        sparkline_in_7d: {
+          price: []
+        }
+      }));
+      
+      return transformed;
+    }
+    return [];
+  } catch (error) {
+    console.error('Binance fetch error:', error);
+    return [];
+  }
+}
 
 async function fetchMarketData() {
   try {
@@ -10257,20 +10297,35 @@ async function fetchMarketData() {
       return transformed;
     }
     
-    // Wait and retry if data is empty - ensures we never return empty
-    if (!response.data || response.data.length === 0) {
-      console.log('Received empty data, retrying in 1 second...');
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      return await fetchMarketData();
+    // If CoinGecko has no data, fetch from Binance
+    console.log('CoinGecko returned empty data, fetching from Binance...');
+    const binanceData = await fetchFromBinance();
+    
+    if (binanceData && binanceData.length > 0) {
+      marketDataCache = {
+        data: binanceData,
+        lastUpdated: new Date()
+      };
+      return binanceData;
     }
     
     return marketDataCache.data || [];
     
   } catch (error) {
     console.error('Market data fetch error:', error);
-    // Retry on error after 1 second
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    return await fetchMarketData();
+    // If CoinGecko fails, try Binance as fallback
+    console.log('CoinGecko failed, trying Binance...');
+    const binanceData = await fetchFromBinance();
+    
+    if (binanceData && binanceData.length > 0) {
+      marketDataCache = {
+        data: binanceData,
+        lastUpdated: new Date()
+      };
+      return binanceData;
+    }
+    
+    return marketDataCache.data || [];
   }
 }
 
@@ -10285,11 +10340,6 @@ app.get('/api/market/assets', async (req, res) => {
       assets = await fetchMarketData();
     }
     
-    // Guarantee we never send empty data - retry once if still empty
-    if (!assets || assets.length === 0) {
-      assets = await fetchMarketData();
-    }
-    
     res.json({
       status: 'success',
       data: assets || []
@@ -10297,19 +10347,10 @@ app.get('/api/market/assets', async (req, res) => {
     
   } catch (error) {
     console.error('Market assets error:', error);
-    // Retry one more time before giving up
-    try {
-      const retryData = await fetchMarketData();
-      res.json({
-        status: 'success',
-        data: retryData || []
-      });
-    } catch (retryError) {
-      res.json({
-        status: 'error',
-        data: []
-      });
-    }
+    res.json({
+      status: 'error',
+      data: []
+    });
   }
 });
 
@@ -10320,6 +10361,14 @@ setInterval(async () => {
 
 // Initial cache on startup
 fetchMarketData();
+
+
+
+
+
+
+
+
 
 
 
