@@ -25800,6 +25800,169 @@ async function calculateAccurateClosingBalances(userId, endDate) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+app.get('/api/market/pairs', async (req, res) => {
+  try {
+    const cachedPairs = await redis.get(REDIS_KEYS.ALL_PAIRS);
+    if (!cachedPairs) {
+      return res.status(503).json({
+        status: 'error',
+        message: 'Market data unavailable'
+      });
+    }
+
+    const allPairs = JSON.parse(cachedPairs);
+    const quoteAssetsRaw = await redis.get(REDIS_KEYS.QUOTE_ASSETS);
+    const quoteAssets = quoteAssetsRaw ? JSON.parse(quoteAssetsRaw) : ['USDT'];
+
+    const marketData = [];
+    const batchSize = 50;
+
+    for (let i = 0; i < allPairs.length; i += batchSize) {
+      const batch = allPairs.slice(i, i + batchSize);
+      const tickerPromises = batch.map(async (pair) => {
+        const tickerRaw = await redis.get(REDIS_KEYS.TICKER(pair.symbol));
+        if (!tickerRaw) return null;
+
+        const ticker = JSON.parse(tickerRaw);
+        return {
+          symbol: pair.base,
+          base: pair.base,
+          quote: pair.quote,
+          price: ticker.lastPrice,
+          change24h: ticker.priceChangePercent,
+          volume: ticker.volume,
+          quoteVolume: ticker.quoteVolume,
+          high24h: ticker.highPrice,
+          low24h: ticker.lowPrice,
+          open24h: ticker.openPrice,
+          logoUrl: `https://assets.coingecko.com/coins/images/1/large/${pair.base.toLowerCase()}.png`
+        };
+      });
+
+      const batchResults = await Promise.all(tickerPromises);
+      for (const result of batchResults) {
+        if (result && result.price > 0) {
+          marketData.push(result);
+        }
+      }
+    }
+
+    marketData.sort((a, b) => (b.quoteVolume || 0) - (a.quoteVolume || 0));
+
+    res.status(200).json({
+      status: 'success',
+      data: marketData,
+      quoteAssets: quoteAssets
+    });
+
+  } catch (err) {
+    console.error('Market pairs error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch market pairs'
+    });
+  }
+});
+
+app.get('/api/market/orderbook', async (req, res) => {
+  const { symbol, limit = 100 } = req.query;
+  
+  if (!symbol) {
+    return res.status(400).json({ status: 'fail', message: 'Symbol required' });
+  }
+
+  const orderbookKey = REDIS_KEYS.ORDERBOOK(symbol);
+  const orderbookRaw = await redis.get(orderbookKey);
+  
+  if (!orderbookRaw) {
+    return res.status(404).json({ status: 'fail', message: 'Orderbook not found' });
+  }
+
+  const orderbook = JSON.parse(orderbookRaw);
+  
+  res.json({
+    lastUpdateId: orderbook.lastUpdateId,
+    bids: orderbook.bids.slice(0, limit),
+    asks: orderbook.asks.slice(0, limit)
+  });
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // SNIPPET C - COMPLETE REWRITE
 // Error handling middleware
 app.use((err, req, res, next) => {
