@@ -10203,302 +10203,18 @@ app.post('/api/convert', protect, async (req, res) => {
 
 
 
+
 // =============================================
 // MARKET DATA ENDPOINT - Prices by Market Cap
-// SELF-CONTAINED with MULTIPLE REAL API FALLBACKS
-// Refreshes every 10 seconds
 // =============================================
 
-// Cache with 10-second TTL
+// Cache with 30-second TTL
 let marketDataCache = {
   data: null,
   lastUpdated: null
 };
 
-// =============================================
-// FALLBACK CHAIN FOR PRICE FETCHING (ALL REAL APIS - NO HARDCODED)
-// =============================================
-
-// FALLBACK 1: Binance API (fastest, most reliable)
-async function fetchPriceFromBinance(symbol) {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-    const response = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}USDT`, {
-      signal: controller.signal
-    });
-    clearTimeout(timeoutId);
-    
-    if (response.ok) {
-      const data = await response.json();
-      if (data && data.price && parseFloat(data.price) > 0) {
-        return parseFloat(data.price);
-      }
-    }
-    return null;
-  } catch (err) {
-    return null;
-  }
-}
-
-// FALLBACK 2: CoinGecko API
-async function fetchPriceFromCoinGecko(symbol) {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-    const response = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${symbol.toLowerCase()}&vs_currencies=usd`, {
-      signal: controller.signal
-    });
-    clearTimeout(timeoutId);
-    
-    if (response.ok) {
-      const data = await response.json();
-      const price = data[symbol.toLowerCase()]?.usd;
-      if (price && price > 0) {
-        return price;
-      }
-    }
-    return null;
-  } catch (err) {
-    return null;
-  }
-}
-
-// FALLBACK 3: CryptoCompare API
-async function fetchPriceFromCryptoCompare(symbol) {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-    const response = await fetch(`https://min-api.cryptocompare.com/data/price?fsym=${symbol}&tsyms=USD`, {
-      signal: controller.signal
-    });
-    clearTimeout(timeoutId);
-    
-    if (response.ok) {
-      const data = await response.json();
-      if (data && data.USD && data.USD > 0) {
-        return data.USD;
-      }
-    }
-    return null;
-  } catch (err) {
-    return null;
-  }
-}
-
-// FALLBACK 4: Kraken API
-async function fetchPriceFromKraken(symbol) {
-  const krakenSymbolMap = {
-    'BTC': 'XBTUSD',
-    'ETH': 'ETHUSD',
-    'XRP': 'XRPUSD',
-    'LTC': 'LTCUSD',
-    'ADA': 'ADAUSD',
-    'DOT': 'DOTUSD',
-    'LINK': 'LINKUSD',
-    'SOL': 'SOLUSD',
-    'DOGE': 'DOGEUSD',
-    'MATIC': 'MATICUSD'
-  };
-  
-  const krakenSymbol = krakenSymbolMap[symbol];
-  if (!krakenSymbol) return null;
-  
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-    const response = await fetch(`https://api.kraken.com/0/public/Ticker?pair=${krakenSymbol}`, {
-      signal: controller.signal
-    });
-    clearTimeout(timeoutId);
-    
-    if (response.ok) {
-      const data = await response.json();
-      if (data && data.result && data.result[krakenSymbol]) {
-        const price = parseFloat(data.result[krakenSymbol].c[0]);
-        if (price > 0) return price;
-      }
-    }
-    return null;
-  } catch (err) {
-    return null;
-  }
-}
-
-// FALLBACK 5: KuCoin API
-async function fetchPriceFromKuCoin(symbol) {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-    const response = await fetch(`https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=${symbol}-USDT`, {
-      signal: controller.signal
-    });
-    clearTimeout(timeoutId);
-    
-    if (response.ok) {
-      const data = await response.json();
-      if (data && data.data && data.data.price && parseFloat(data.data.price) > 0) {
-        return parseFloat(data.data.price);
-      }
-    }
-    return null;
-  } catch (err) {
-    return null;
-  }
-}
-
-// FALLBACK 6: Bybit API
-async function fetchPriceFromBybit(symbol) {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-    const response = await fetch(`https://api.bybit.com/v5/market/tickers?category=spot&symbol=${symbol}USDT`, {
-      signal: controller.signal
-    });
-    clearTimeout(timeoutId);
-    
-    if (response.ok) {
-      const data = await response.json();
-      if (data && data.result && data.result.list && data.result.list[0] && data.result.list[0].lastPrice) {
-        return parseFloat(data.result.list[0].lastPrice);
-      }
-    }
-    return null;
-  } catch (err) {
-    return null;
-  }
-}
-
-// FALLBACK 7: OKX API
-async function fetchPriceFromOKX(symbol) {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-    const response = await fetch(`https://www.okx.com/api/v5/market/ticker?instId=${symbol}-USDT`, {
-      signal: controller.signal
-    });
-    clearTimeout(timeoutId);
-    
-    if (response.ok) {
-      const data = await response.json();
-      if (data && data.data && data.data[0] && data.data[0].last && parseFloat(data.data[0].last) > 0) {
-        return parseFloat(data.data[0].last);
-      }
-    }
-    return null;
-  } catch (err) {
-    return null;
-  }
-}
-
-// FALLBACK 8: Gate.io API
-async function fetchPriceFromGateIO(symbol) {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-    const response = await fetch(`https://api.gateio.ws/api/v4/spot/tickers?currency_pair=${symbol}_USDT`, {
-      signal: controller.signal
-    });
-    clearTimeout(timeoutId);
-    
-    if (response.ok) {
-      const data = await response.json();
-      if (data && data[0] && data[0].last && parseFloat(data[0].last) > 0) {
-        return parseFloat(data[0].last);
-      }
-    }
-    return null;
-  } catch (err) {
-    return null;
-  }
-}
-
-// FALLBACK 9: Coinbase API
-async function fetchPriceFromCoinbase(symbol) {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-    const response = await fetch(`https://api.coinbase.com/v2/prices/${symbol}-USD/spot`, {
-      signal: controller.signal
-    });
-    clearTimeout(timeoutId);
-    
-    if (response.ok) {
-      const data = await response.json();
-      if (data && data.data && data.data.amount && parseFloat(data.data.amount) > 0) {
-        return parseFloat(data.data.amount);
-      }
-    }
-    return null;
-  } catch (err) {
-    return null;
-  }
-}
-
-// FALLBACK 10: Huobi API
-async function fetchPriceFromHuobi(symbol) {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-    const response = await fetch(`https://api.huobi.pro/market/detail/merged?symbol=${symbol.toLowerCase()}usdt`, {
-      signal: controller.signal
-    });
-    clearTimeout(timeoutId);
-    
-    if (response.ok) {
-      const data = await response.json();
-      if (data && data.tick && data.tick.close && parseFloat(data.tick.close) > 0) {
-        return parseFloat(data.tick.close);
-      }
-    }
-    return null;
-  } catch (err) {
-    return null;
-  }
-}
-
-// MASTER PRICE FETCHER - Chains all fallbacks
-async function getPriceWithFallbacks(symbol) {
-  // First check if it's a stablecoin
-  const stablecoins = ['USDT', 'USDC', 'DAI', 'BUSD', 'TUSD', 'USDP'];
-  if (stablecoins.includes(symbol)) {
-    return 1;
-  }
-  
-  // Try ALL fallbacks in order
-  const fallbacks = [
-    { name: 'Binance', fn: () => fetchPriceFromBinance(symbol) },
-    { name: 'CoinGecko', fn: () => fetchPriceFromCoinGecko(symbol) },
-    { name: 'CryptoCompare', fn: () => fetchPriceFromCryptoCompare(symbol) },
-    { name: 'Kraken', fn: () => fetchPriceFromKraken(symbol) },
-    { name: 'KuCoin', fn: () => fetchPriceFromKuCoin(symbol) },
-    { name: 'Bybit', fn: () => fetchPriceFromBybit(symbol) },
-    { name: 'OKX', fn: () => fetchPriceFromOKX(symbol) },
-    { name: 'Gate.io', fn: () => fetchPriceFromGateIO(symbol) },
-    { name: 'Coinbase', fn: () => fetchPriceFromCoinbase(symbol) },
-    { name: 'Huobi', fn: () => fetchPriceFromHuobi(symbol) }
-  ];
-  
-  for (const fallback of fallbacks) {
-    try {
-      const price = await fallback.fn();
-      if (price !== null && price > 0) {
-        console.log(`✅ ${symbol} price from ${fallback.name}: $${price}`);
-        return price;
-      }
-    } catch (err) {
-      // Continue to next fallback
-    }
-  }
-  
-  console.error(`❌ All 10 APIs failed to fetch price for ${symbol}`);
-  return null;
-}
-
-// =============================================
-// Get list of top cryptocurrencies (metadata only)
-// =============================================
-async function getTopCryptoSymbols() {
+async function fetchMarketData() {
   try {
     const response = await axios.get(
       'https://api.coingecko.com/api/v3/coins/markets',
@@ -10508,95 +10224,40 @@ async function getTopCryptoSymbols() {
           order: 'market_cap_desc',
           per_page: 50,
           page: 1,
-          sparkline: false,
-          price_change_percentage: '24h'
+          sparkline: true,
+          price_change_percentage: '1h,24h,7d'
         },
         timeout: 10000
       }
     );
 
-    if (response.data && response.data.length > 0) {
-      return response.data.map(coin => ({
+    if (response.data) {
+      const transformed = response.data.map(coin => ({
         id: coin.id,
-        symbol: coin.symbol.toUpperCase(),
+        symbol: coin.symbol,
         name: coin.name,
         image: coin.image,
+        current_price: coin.current_price,
         market_cap: coin.market_cap,
         market_cap_rank: coin.market_cap_rank,
         total_volume: coin.total_volume,
-        price_change_percentage_24h: coin.price_change_percentage_24h || 0
-      }));
-    }
-    return [];
-  } catch (error) {
-    console.error('Error fetching crypto symbols:', error.message);
-    return [];
-  }
-}
-
-// =============================================
-// Fetch market data using self-contained price fetching
-// =============================================
-async function fetchMarketData() {
-  try {
-    console.log('🔄 Fetching market data with 10 API fallbacks...');
-    
-    const topCryptos = await getTopCryptoSymbols();
-    
-    if (!topCryptos || topCryptos.length === 0) {
-      console.warn('No crypto symbols found, returning cached data');
-      return marketDataCache.data || [];
-    }
-    
-    // Fetch prices for ALL cryptos using the fallback chain
-    const pricePromises = topCryptos.map(async (crypto) => {
-      try {
-        const price = await getPriceWithFallbacks(crypto.symbol);
-        
-        if (price && price > 0) {
-          return {
-            id: crypto.id,
-            symbol: crypto.symbol.toLowerCase(),
-            name: crypto.name,
-            image: crypto.image,
-            current_price: price,
-            market_cap: crypto.market_cap,
-            market_cap_rank: crypto.market_cap_rank,
-            total_volume: crypto.total_volume,
-            price_change_percentage_24h: crypto.price_change_percentage_24h,
-            price_change_percentage_1h_in_currency: 0,
-            price_change_percentage_7d_in_currency: 0,
-            sparkline_in_7d: { price: [] }
-          };
+        price_change_percentage_24h: coin.price_change_percentage_24h || 0,
+        price_change_percentage_1h_in_currency: coin.price_change_percentage_1h_in_currency || 0,
+        price_change_percentage_7d_in_currency: coin.price_change_percentage_7d_in_currency || 0,
+        sparkline_in_7d: {
+          price: coin.sparkline_in_7d?.price || []
         }
-        return null;
-      } catch (err) {
-        console.warn(`Failed to fetch price for ${crypto.symbol}:`, err.message);
-        return null;
-      }
-    });
-    
-    const results = await Promise.all(pricePromises);
-    const transformed = results.filter(result => result !== null);
-    
-    if (transformed.length > 0) {
+      }));
+
       marketDataCache = {
         data: transformed,
         lastUpdated: new Date()
       };
       
-      console.log(`✅ Market data updated: ${transformed.length}/${topCryptos.length} cryptocurrencies with prices`);
       return transformed;
     }
     
-    // If no prices fetched but we have cached data, return cached
-    if (marketDataCache.data && marketDataCache.data.length > 0) {
-      console.warn('No new prices, returning cached data from', marketDataCache.lastUpdated);
-      return marketDataCache.data;
-    }
-    
-    console.error('❌ Failed to fetch any prices from all 10 API fallbacks');
-    return [];
+    return marketDataCache.data || [];
     
   } catch (error) {
     console.error('Market data fetch error:', error);
@@ -10604,42 +10265,35 @@ async function fetchMarketData() {
   }
 }
 
-// =============================================
 // Endpoint for Prices by Market Cap table
-// =============================================
 app.get('/api/market/assets', async (req, res) => {
   try {
     let assets = marketDataCache.data;
     
-    // Refresh if cache is older than 10 seconds or empty
-    if (!assets || assets.length === 0 || !marketDataCache.lastUpdated || 
-        (new Date() - marketDataCache.lastUpdated) > 10000) {
+    // Refresh if cache is older than 30 seconds or empty
+    if (!assets || !marketDataCache.lastUpdated || 
+        (new Date() - marketDataCache.lastUpdated) > 30000) {
       assets = await fetchMarketData();
     }
     
-    // If still no assets after fetch, return what we have (might be empty)
     res.json({
-      status: assets && assets.length > 0 ? 'success' : 'warning',
-      data: assets || [],
-      message: assets && assets.length > 0 ? undefined : 'Market data is refreshing soon'
+      status: 'success',
+      data: assets || []
     });
     
   } catch (error) {
     console.error('Market assets error:', error);
     res.json({
       status: 'error',
-      data: [],
-      message: 'Error fetching market data'
+      data: []
     });
   }
 });
 
-// =============================================
-// Refresh cache every 10 seconds in background
-// =============================================
+// Refresh cache every 30 seconds in background
 setInterval(async () => {
   await fetchMarketData();
-}, 10000);
+}, 30000);
 
 // Initial cache on startup
 fetchMarketData();
