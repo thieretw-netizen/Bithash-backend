@@ -4169,6 +4169,12 @@ const detectAndSetIPPreferences = async (userId, req) => {
   }
 };
 
+
+
+
+
+
+
 const getCryptoPrice = async (asset) => {
   try {
     const assetUpper = asset.toUpperCase();
@@ -4180,63 +4186,73 @@ const getCryptoPrice = async (asset) => {
       return 1;
     }
     
-    const assetMap = {
-      'BTC': 'bitcoin',
-      'ETH': 'ethereum',
-      'BNB': 'binancecoin',
-      'SOL': 'solana',
-      'XRP': 'ripple',
-      'DOGE': 'dogecoin',
-      'ADA': 'cardano',
-      'SHIB': 'shiba-inu',
-      'AVAX': 'avalanche-2',
-      'DOT': 'polkadot',
-      'TRX': 'tron',
-      'LINK': 'chainlink',
-      'MATIC': 'matic-network',
-      'LTC': 'litecoin',
-      'NEAR': 'near',
-      'UNI': 'uniswap',
-      'BCH': 'bitcoin-cash',
-      'XLM': 'stellar',
-      'ATOM': 'cosmos',
-      'XMR': 'monero',
-      'VET': 'vechain',
-      'FIL': 'filecoin',
-      'THETA': 'theta-token',
-      'HBAR': 'hedera-hashgraph',
-      'FTM': 'fantom',
-      'XTZ': 'tezos'
-    };
+    // No hardcoded asset map - fetch all trading cryptos dynamically from Binance
+    let allSymbols = [];
+    let assetFound = false;
+    let coinId = null;
     
-    const coinId = assetMap[assetUpper];
-    if (!coinId) {
-      console.error(`No mapping found for ${assetUpper}`);
-      return null;
-    }
-    
-    // Try CoinGecko first
+    // Fetch all trading symbols from Binance to find matching asset
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
-      const response = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd`, {
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+      const exchangeInfoResponse = await fetch('https://api.binance.com/api/v3/exchangeInfo', {
         signal: controller.signal
       });
       clearTimeout(timeoutId);
       
-      if (response.ok) {
-        const data = await response.json();
-        if (data && data[coinId] && data[coinId].usd && data[coinId].usd > 0) {
-          const price = data[coinId].usd;
-          console.log(`✅ ${asset} price from CoinGecko: $${price}`);
-          return price;
+      if (exchangeInfoResponse.ok) {
+        const exchangeInfo = await exchangeInfoResponse.json();
+        const tradingPairs = exchangeInfo.symbols.filter(s => s.status === 'TRADING');
+        
+        // Try to find the asset in trading pairs (as base asset)
+        const matchingPair = tradingPairs.find(p => 
+          p.baseAsset.toUpperCase() === assetUpper || 
+          p.quoteAsset.toUpperCase() === assetUpper
+        );
+        
+        if (matchingPair) {
+          assetFound = true;
+          allSymbols = tradingPairs.map(p => p.symbol);
         }
       }
     } catch (err) {
-      console.log(`CoinGecko failed for ${asset}:`, err.message);
+      console.log(`Failed to fetch exchange info: ${err.message}`);
     }
     
-    // Try Binance
+    // If asset not found in Binance, try CoinGecko to get coin ID
+    if (!assetFound) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8000);
+        const coinsListResponse = await fetch('https://api.coingecko.com/api/v3/coins/list', {
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        
+        if (coinsListResponse.ok) {
+          const coinsList = await coinsListResponse.json();
+          const matchingCoin = coinsList.find(c => 
+            c.symbol.toUpperCase() === assetUpper || 
+            c.id.toUpperCase() === assetUpper ||
+            c.name.toUpperCase() === assetUpper
+          );
+          
+          if (matchingCoin) {
+            coinId = matchingCoin.id;
+            assetFound = true;
+          }
+        }
+      } catch (err) {
+        console.log(`Failed to fetch coins list: ${err.message}`);
+      }
+    }
+    
+    // If asset still not found, try direct API calls without mapping
+    if (!assetFound) {
+      console.log(`No mapping found for ${assetUpper}, trying direct API calls...`);
+    }
+    
+    // Try direct price fetch using Binance (works for any USD pair)
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -4254,10 +4270,86 @@ const getCryptoPrice = async (asset) => {
         }
       }
     } catch (err) {
-      console.log(`Binance failed for ${asset}:`, err.message);
+      console.log(`Binance direct failed for ${asset}:`, err.message);
     }
     
-    // Try CryptoCompare
+    // Try Binance direct with different pair format (USD)
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const response = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${assetUpper}USD`, {
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data && data.price && parseFloat(data.price) > 0) {
+          const price = parseFloat(data.price);
+          console.log(`✅ ${asset} price from Binance (USD pair): $${price}`);
+          return price;
+        }
+      }
+    } catch (err) {
+      console.log(`Binance USD direct failed for ${asset}:`, err.message);
+    }
+    
+    // Try CoinGecko with dynamic coin ID lookup
+    if (coinId) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        const response = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd`, {
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        
+        if (response.ok) {
+          const data = await response.json();
+          if (data && data[coinId] && data[coinId].usd && data[coinId].usd > 0) {
+            const price = data[coinId].usd;
+            console.log(`✅ ${asset} price from CoinGecko: $${price}`);
+            return price;
+          }
+        }
+      } catch (err) {
+        console.log(`CoinGecko failed for ${asset}:`, err.message);
+      }
+    }
+    
+    // Try CoinGecko search endpoint for unknown coins
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const searchResponse = await fetch(`https://api.coingecko.com/api/v3/search?query=${assetUpper}`, {
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      
+      if (searchResponse.ok) {
+        const searchData = await searchResponse.json();
+        if (searchData.coins && searchData.coins.length > 0) {
+          const foundCoinId = searchData.coins[0].id;
+          const priceResponse = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${foundCoinId}&vs_currencies=usd`, {
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+          
+          if (priceResponse.ok) {
+            const priceData = await priceResponse.json();
+            if (priceData && priceData[foundCoinId] && priceData[foundCoinId].usd && priceData[foundCoinId].usd > 0) {
+              const price = priceData[foundCoinId].usd;
+              console.log(`✅ ${asset} price from CoinGecko search: $${price}`);
+              return price;
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.log(`CoinGecko search failed for ${asset}:`, err.message);
+    }
+    
+    // Try CryptoCompare (works with any crypto symbol)
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -4278,36 +4370,40 @@ const getCryptoPrice = async (asset) => {
       console.log(`CryptoCompare failed for ${asset}:`, err.message);
     }
     
-    // Try Kraken
+    // Try Kraken with dynamic symbol lookup
     try {
-      const krakenMap = {
-        'BTC': 'XBTUSD',
-        'ETH': 'ETHUSD',
-        'SOL': 'SOLUSD',
-        'XRP': 'XRPUSD',
-        'DOGE': 'DOGEUSD',
-        'ADA': 'ADAUSD',
-        'LTC': 'LTCUSD',
-        'DOT': 'DOTUSD',
-        'LINK': 'LINKUSD',
-        'MATIC': 'MATICUSD'
-      };
-      const pair = krakenMap[assetUpper];
-      if (pair) {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000);
-        const response = await fetch(`https://api.kraken.com/0/public/Ticker?pair=${pair}`, {
-          signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-        
-        if (response.ok) {
-          const data = await response.json();
-          if (data && data.result && data.result[pair] && data.result[pair].c && data.result[pair].c[0]) {
-            const price = parseFloat(data.result[pair].c[0]);
-            if (price > 0) {
-              console.log(`✅ ${asset} price from Kraken: $${price}`);
-              return price;
+      // Fetch available pairs from Kraken
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const pairsResponse = await fetch('https://api.kraken.com/0/public/AssetPairs', {
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      
+      if (pairsResponse.ok) {
+        const pairsData = await pairsResponse.json();
+        if (pairsData && pairsData.result) {
+          // Find matching pair
+          const matchingPair = Object.keys(pairsData.result).find(key => 
+            key.includes(assetUpper) && (key.includes('USD') || key.includes('USDT'))
+          );
+          
+          if (matchingPair) {
+            const tickerResponse = await fetch(`https://api.kraken.com/0/public/Ticker?pair=${matchingPair}`, {
+              signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+            
+            if (tickerResponse.ok) {
+              const tickerData = await tickerResponse.json();
+              if (tickerData && tickerData.result && tickerData.result[matchingPair] && 
+                  tickerData.result[matchingPair].c && tickerData.result[matchingPair].c[0]) {
+                const price = parseFloat(tickerData.result[matchingPair].c[0]);
+                if (price > 0) {
+                  console.log(`✅ ${asset} price from Kraken: $${price}`);
+                  return price;
+                }
+              }
             }
           }
         }
@@ -4316,7 +4412,7 @@ const getCryptoPrice = async (asset) => {
       console.log(`Kraken failed for ${asset}:`, err.message);
     }
     
-    // Try KuCoin
+    // Try KuCoin (works with any USDT pair)
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -4337,7 +4433,7 @@ const getCryptoPrice = async (asset) => {
       console.log(`KuCoin failed for ${asset}:`, err.message);
     }
     
-    // Try Bybit
+    // Try Bybit (works with any USDT pair)
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -4360,7 +4456,7 @@ const getCryptoPrice = async (asset) => {
       console.log(`Bybit failed for ${asset}:`, err.message);
     }
     
-    // Try OKX
+    // Try OKX (works with any USDT pair)
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -4381,7 +4477,7 @@ const getCryptoPrice = async (asset) => {
       console.log(`OKX failed for ${asset}:`, err.message);
     }
     
-    // Try Gate.io
+    // Try Gate.io (works with any USDT pair)
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -4402,6 +4498,69 @@ const getCryptoPrice = async (asset) => {
       console.log(`Gate.io failed for ${asset}:`, err.message);
     }
     
+    // Try Coinbase (works with any USD pair)
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const response = await fetch(`https://api.coinbase.com/v2/prices/${assetUpper}-USD/spot`, {
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data && data.data && data.data.amount && parseFloat(data.data.amount) > 0) {
+          const price = parseFloat(data.data.amount);
+          console.log(`✅ ${asset} price from Coinbase: $${price}`);
+          return price;
+        }
+      }
+    } catch (err) {
+      console.log(`Coinbase failed for ${asset}:`, err.message);
+    }
+    
+    // Try Huobi (works with any USDT pair)
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const response = await fetch(`https://api.huobi.pro/market/detail/merged?symbol=${assetUpper.toLowerCase()}usdt`, {
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data && data.tick && data.tick.close && parseFloat(data.tick.close) > 0) {
+          const price = parseFloat(data.tick.close);
+          console.log(`✅ ${asset} price from Huobi: $${price}`);
+          return price;
+        }
+      }
+    } catch (err) {
+      console.log(`Huobi failed for ${asset}:`, err.message);
+    }
+    
+    // Try Bitfinex (works with any USD pair)
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const response = await fetch(`https://api.bitfinex.com/v2/ticker/t${assetUpper}USD`, {
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data && data[6] && parseFloat(data[6]) > 0) {
+          const price = parseFloat(data[6]);
+          console.log(`✅ ${asset} price from Bitfinex: $${price}`);
+          return price;
+        }
+      }
+    } catch (err) {
+      console.log(`Bitfinex failed for ${asset}:`, err.message);
+    }
+    
     // If all APIs failed, return null (no fake fallback)
     console.error(`❌ All APIs failed to fetch price for ${asset}`);
     return null;
@@ -4411,6 +4570,14 @@ const getCryptoPrice = async (asset) => {
     return null;
   }
 };
+
+
+
+
+
+
+
+
 
 const getExchangeRate = async (asset, fiat = 'usd') => {
   try {
@@ -10036,20 +10203,25 @@ app.post('/api/convert', protect, async (req, res) => {
 
 
 
-
-
-
 // =============================================
 // MARKET DATA ENDPOINT - Prices by Market Cap
+// Fetches all trading cryptos dynamically using getCryptoPrice
+// Refreshes every 10 seconds
 // =============================================
 
-// Cache with 30-second TTL
+// Cache with 10-second TTL
 let marketDataCache = {
   data: null,
   lastUpdated: null
 };
 
-async function fetchMarketData() {
+// List of top cryptocurrencies by market cap (fetched dynamically from API)
+// This list is fetched from CoinGecko to get all available cryptos,
+// but prices are then fetched using our getCryptoPrice function
+let availableCryptos = [];
+
+// Function to fetch the list of available cryptocurrencies (symbols only)
+async function fetchAvailableCryptos() {
   try {
     const response = await axios.get(
       'https://api.coingecko.com/api/v3/coins/markets',
@@ -10057,38 +10229,131 @@ async function fetchMarketData() {
         params: {
           vs_currency: 'usd',
           order: 'market_cap_desc',
-          per_page: 50,
+          per_page: 100,
           page: 1,
-          sparkline: true,
-          price_change_percentage: '1h,24h,7d'
+          sparkline: false
         },
         timeout: 10000
       }
     );
 
-    if (response.data) {
-      const transformed = response.data.map(coin => ({
+    if (response.data && response.data.length > 0) {
+      availableCryptos = response.data.map(coin => ({
         id: coin.id,
-        symbol: coin.symbol,
+        symbol: coin.symbol.toUpperCase(),
         name: coin.name,
         image: coin.image,
-        current_price: coin.current_price,
-        market_cap: coin.market_cap,
-        market_cap_rank: coin.market_cap_rank,
-        total_volume: coin.total_volume,
-        price_change_percentage_24h: coin.price_change_percentage_24h || 0,
-        price_change_percentage_1h_in_currency: coin.price_change_percentage_1h_in_currency || 0,
-        price_change_percentage_7d_in_currency: coin.price_change_percentage_7d_in_currency || 0,
-        sparkline_in_7d: {
-          price: coin.sparkline_in_7d?.price || []
-        }
+        market_cap_rank: coin.market_cap_rank
       }));
+      
+      console.log(`✅ Fetched ${availableCryptos.length} available cryptocurrencies for price tracking`);
+      return availableCryptos;
+    }
+    
+    return availableCryptos;
+    
+  } catch (error) {
+    console.error('Error fetching available cryptos:', error.message);
+    return availableCryptos;
+  }
+}
 
+async function fetchMarketData() {
+  try {
+    // First, ensure we have the list of available cryptos
+    if (availableCryptos.length === 0) {
+      await fetchAvailableCryptos();
+    }
+    
+    // If still no cryptos available, return cached data
+    if (availableCryptos.length === 0) {
+      console.warn('No cryptocurrencies available for price fetching');
+      return marketDataCache.data || [];
+    }
+    
+    // Fetch prices for ALL cryptos using getCryptoPrice
+    // Limit to top 50 for performance (can be adjusted)
+    const topCryptos = availableCryptos.slice(0, 50);
+    const pricePromises = topCryptos.map(async (crypto) => {
+      try {
+        const price = await getCryptoPrice(crypto.symbol);
+        // Also fetch 24h change from separate API call (getCryptoPrice doesn't provide change)
+        let priceChange24h = 0;
+        let priceChange1h = 0;
+        let priceChange7d = 0;
+        let marketCap = 0;
+        let totalVolume = 0;
+        let sparklineData = [];
+        
+        // Try to get additional data from CoinGecko for the same crypto
+        try {
+          const detailResponse = await axios.get(
+            `https://api.coingecko.com/api/v3/coins/${crypto.id}`,
+            {
+              params: {
+                localization: false,
+                tickers: false,
+                market_data: true,
+                community_data: false,
+                developer_data: false,
+                sparkline: true
+              },
+              timeout: 5000
+            }
+          );
+          
+          if (detailResponse.data && detailResponse.data.market_data) {
+            const marketData = detailResponse.data.market_data;
+            priceChange24h = marketData.price_change_percentage_24h || 0;
+            priceChange1h = marketData.price_change_percentage_1h || 0;
+            priceChange7d = marketData.price_change_percentage_7d || 0;
+            marketCap = marketData.market_cap?.usd || 0;
+            totalVolume = marketData.total_volume?.usd || 0;
+            
+            if (detailResponse.data.market_data.sparkline_7d?.price) {
+              sparklineData = detailResponse.data.market_data.sparkline_7d.price;
+            }
+          }
+        } catch (detailError) {
+          // If detail fetch fails, use fallback values
+          console.warn(`Could not fetch details for ${crypto.symbol}:`, detailError.message);
+        }
+        
+        return {
+          id: crypto.id,
+          symbol: crypto.symbol.toLowerCase(),
+          name: crypto.name,
+          image: crypto.image,
+          current_price: price || 0,
+          market_cap: marketCap,
+          market_cap_rank: crypto.market_cap_rank || 0,
+          total_volume: totalVolume,
+          price_change_percentage_24h: priceChange24h,
+          price_change_percentage_1h_in_currency: priceChange1h,
+          price_change_percentage_7d_in_currency: priceChange7d,
+          sparkline_in_7d: {
+            price: sparklineData
+          }
+        };
+      } catch (err) {
+        console.warn(`Failed to fetch price for ${crypto.symbol}:`, err.message);
+        return null;
+      }
+    });
+    
+    const results = await Promise.all(pricePromises);
+    const transformed = results.filter(result => result !== null && result.current_price > 0);
+    
+    // Sort by market cap rank
+    transformed.sort((a, b) => (a.market_cap_rank || 999) - (b.market_cap_rank || 999));
+    
+    if (transformed.length > 0) {
       marketDataCache = {
         data: transformed,
         lastUpdated: new Date()
       };
       
+      console.log(`✅ Market data updated: ${transformed.length} cryptocurrencies with prices`);
       return transformed;
     }
     
@@ -10105,9 +10370,9 @@ app.get('/api/market/assets', async (req, res) => {
   try {
     let assets = marketDataCache.data;
     
-    // Refresh if cache is older than 30 seconds or empty
+    // Refresh if cache is older than 10 seconds or empty
     if (!assets || !marketDataCache.lastUpdated || 
-        (new Date() - marketDataCache.lastUpdated) > 30000) {
+        (new Date() - marketDataCache.lastUpdated) > 10000) {
       assets = await fetchMarketData();
     }
     
@@ -10125,13 +10390,21 @@ app.get('/api/market/assets', async (req, res) => {
   }
 });
 
-// Refresh cache every 30 seconds in background
+// Refresh cache every 10 seconds in background
 setInterval(async () => {
   await fetchMarketData();
-}, 30000);
+}, 10000);
 
-// Initial cache on startup
-fetchMarketData();
+// Refresh available cryptos list every hour (to catch new listings)
+setInterval(async () => {
+  await fetchAvailableCryptos();
+}, 3600000);
+
+// Initial load on startup
+(async () => {
+  await fetchAvailableCryptos();
+  await fetchMarketData();
+})();
 
 
 
