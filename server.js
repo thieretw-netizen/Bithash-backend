@@ -10202,7 +10202,156 @@ app.post('/api/convert', protect, async (req, res) => {
 
 
 
+// =============================================
+// MARKET ASSETS ENDPOINT - Real-time cryptocurrency data from CoinGecko
+// =============================================
+app.get('/api/market/assets', async (req, res) => {
+  try {
+    // Fetch real-time cryptocurrency market data from CoinGecko
+    const response = await axios.get(
+      'https://api.coingecko.com/api/v3/coins/markets',
+      {
+        params: {
+          vs_currency: 'usd',
+          order: 'market_cap_desc',
+          per_page: 250,
+          page: 1,
+          sparkline: true,
+          price_change_percentage: '1h,24h,7d',
+          locale: 'en'
+        },
+        timeout: 10000,
+        headers: {
+          'Accept': 'application/json',
+          'User-Agent': 'BitHash-Capital/1.0'
+        }
+      }
+    );
 
+    if (!response.data || !Array.isArray(response.data)) {
+      throw new Error('Invalid response from CoinGecko API');
+    }
+
+    // Format the data for the frontend
+    const formattedAssets = response.data.map(coin => ({
+      id: coin.id,
+      symbol: coin.symbol,
+      name: coin.name,
+      image: coin.image,
+      current_price: coin.current_price,
+      market_cap: coin.market_cap,
+      market_cap_rank: coin.market_cap_rank,
+      fully_diluted_valuation: coin.fully_diluted_valuation,
+      total_volume: coin.total_volume,
+      high_24h: coin.high_24h,
+      low_24h: coin.low_24h,
+      price_change_24h: coin.price_change_24h,
+      price_change_percentage_24h: coin.price_change_percentage_24h,
+      price_change_percentage_1h_in_currency: coin.price_change_percentage_1h_in_currency || 0,
+      price_change_percentage_7d_in_currency: coin.price_change_percentage_7d_in_currency || 0,
+      sparkline_in_7d: coin.sparkline_in_7d || { price: [] },
+      total_supply: coin.total_supply,
+      max_supply: coin.max_supply,
+      circulating_supply: coin.circulating_supply,
+      last_updated: coin.last_updated
+    }));
+
+    // Cache the response in Redis for 15 seconds (reduces API calls while keeping data fresh)
+    await redis.setex('market:assets:cached', 15, JSON.stringify(formattedAssets));
+
+    res.status(200).json({
+      status: 'success',
+      data: formattedAssets,
+      timestamp: Date.now(),
+      source: 'coingecko'
+    });
+
+  } catch (error) {
+    console.error('Market assets API error:', error.message);
+
+    // Try to serve cached data if available
+    try {
+      const cachedData = await redis.get('market:assets:cached');
+      if (cachedData) {
+        const parsedData = JSON.parse(cachedData);
+        return res.status(200).json({
+          status: 'success',
+          data: parsedData,
+          timestamp: Date.now(),
+          source: 'cache',
+          message: 'Using cached data - API temporarily unavailable'
+        });
+      }
+    } catch (cacheError) {
+      console.error('Cache read error:', cacheError);
+    }
+
+    // Fallback: Try alternative API (Binance as backup)
+    try {
+      const binanceResponse = await axios.get(
+        'https://api.binance.com/api/v3/ticker/24hr',
+        { timeout: 5000 }
+      );
+
+      // Convert Binance data to similar format
+      const binanceAssets = binanceResponse.data
+        .filter(ticker => ticker.symbol.endsWith('USDT'))
+        .slice(0, 100)
+        .map(ticker => ({
+          id: ticker.symbol.toLowerCase().replace('usdt', ''),
+          symbol: ticker.symbol.toLowerCase().replace('usdt', ''),
+          name: ticker.symbol.replace('USDT', ''),
+          image: `https://assets.coingecko.com/coins/images/1/large/bitcoin.png`, // Placeholder
+          current_price: parseFloat(ticker.lastPrice),
+          market_cap: parseFloat(ticker.quoteVolume) * parseFloat(ticker.lastPrice),
+          total_volume: parseFloat(ticker.quoteVolume),
+          price_change_percentage_24h: parseFloat(ticker.priceChangePercent),
+          high_24h: parseFloat(ticker.highPrice),
+          low_24h: parseFloat(ticker.lowPrice),
+          sparkline_in_7d: { price: [] },
+          last_updated: new Date().toISOString()
+        }));
+
+      return res.status(200).json({
+        status: 'success',
+        data: binanceAssets,
+        timestamp: Date.now(),
+        source: 'binance',
+        message: 'Using Binance data as fallback'
+      });
+    } catch (binanceError) {
+      console.error('Binance fallback error:', binanceError.message);
+    }
+
+    // If all fails, return error
+    res.status(503).json({
+      status: 'error',
+      message: 'Unable to fetch market data. Please try again later.',
+      retryAfter: 30
+    });
+  }
+});
+
+// Optional: Add a simple health check for market data
+app.get('/api/market/health', async (req, res) => {
+  try {
+    const response = await axios.get(
+      'https://api.coingecko.com/api/v3/ping',
+      { timeout: 5000 }
+    );
+    res.status(200).json({
+      status: 'healthy',
+      gecko_says: response.data?.gecko_says || 'API is operational',
+      timestamp: Date.now()
+    });
+  } catch (error) {
+    res.status(503).json({
+      status: 'degraded',
+      message: 'CoinGecko API is currently unavailable',
+      timestamp: Date.now()
+    });
+  }
+});
 
 
 
