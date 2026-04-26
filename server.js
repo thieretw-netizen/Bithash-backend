@@ -10205,7 +10205,7 @@ app.post('/api/convert', protect, async (req, res) => {
 
 // =============================================
 // MARKET DATA ENDPOINT - Prices by Market Cap
-// Fetches all trading cryptos dynamically using getCryptoPrice
+// Fetches ALL trading cryptos using getCryptoPrice()
 // Refreshes every 10 seconds
 // =============================================
 
@@ -10215,13 +10215,8 @@ let marketDataCache = {
   lastUpdated: null
 };
 
-// List of top cryptocurrencies by market cap (fetched dynamically from API)
-// This list is fetched from CoinGecko to get all available cryptos,
-// but prices are then fetched using our getCryptoPrice function
-let availableCryptos = [];
-
-// Function to fetch the list of available cryptocurrencies (symbols only)
-async function fetchAvailableCryptos() {
+// Get list of top cryptocurrencies by market cap (for symbols only, prices come from getCryptoPrice)
+async function getTopCryptoSymbols() {
   try {
     const response = await axios.get(
       'https://api.coingecko.com/api/v3/coins/markets',
@@ -10229,112 +10224,68 @@ async function fetchAvailableCryptos() {
         params: {
           vs_currency: 'usd',
           order: 'market_cap_desc',
-          per_page: 100,
+          per_page: 50,
           page: 1,
-          sparkline: false
+          sparkline: false,
+          price_change_percentage: '24h'
         },
         timeout: 10000
       }
     );
 
     if (response.data && response.data.length > 0) {
-      availableCryptos = response.data.map(coin => ({
+      return response.data.map(coin => ({
         id: coin.id,
         symbol: coin.symbol.toUpperCase(),
         name: coin.name,
         image: coin.image,
-        market_cap_rank: coin.market_cap_rank
+        market_cap: coin.market_cap,
+        market_cap_rank: coin.market_cap_rank,
+        total_volume: coin.total_volume,
+        price_change_percentage_24h: coin.price_change_percentage_24h || 0
       }));
-      
-      console.log(`✅ Fetched ${availableCryptos.length} available cryptocurrencies for price tracking`);
-      return availableCryptos;
     }
-    
-    return availableCryptos;
-    
+    return [];
   } catch (error) {
-    console.error('Error fetching available cryptos:', error.message);
-    return availableCryptos;
+    console.error('Error fetching crypto symbols:', error.message);
+    return [];
   }
 }
 
 async function fetchMarketData() {
   try {
-    // First, ensure we have the list of available cryptos
-    if (availableCryptos.length === 0) {
-      await fetchAvailableCryptos();
-    }
+    console.log('🔄 Fetching market data using getCryptoPrice...');
     
-    // If still no cryptos available, return cached data
-    if (availableCryptos.length === 0) {
-      console.warn('No cryptocurrencies available for price fetching');
+    // Get list of top cryptos (for metadata)
+    const topCryptos = await getTopCryptoSymbols();
+    
+    if (!topCryptos || topCryptos.length === 0) {
+      console.warn('No crypto symbols found, returning cached data');
       return marketDataCache.data || [];
     }
     
     // Fetch prices for ALL cryptos using getCryptoPrice
-    // Limit to top 50 for performance (can be adjusted)
-    const topCryptos = availableCryptos.slice(0, 50);
     const pricePromises = topCryptos.map(async (crypto) => {
       try {
         const price = await getCryptoPrice(crypto.symbol);
-        // Also fetch 24h change from separate API call (getCryptoPrice doesn't provide change)
-        let priceChange24h = 0;
-        let priceChange1h = 0;
-        let priceChange7d = 0;
-        let marketCap = 0;
-        let totalVolume = 0;
-        let sparklineData = [];
         
-        // Try to get additional data from CoinGecko for the same crypto
-        try {
-          const detailResponse = await axios.get(
-            `https://api.coingecko.com/api/v3/coins/${crypto.id}`,
-            {
-              params: {
-                localization: false,
-                tickers: false,
-                market_data: true,
-                community_data: false,
-                developer_data: false,
-                sparkline: true
-              },
-              timeout: 5000
-            }
-          );
-          
-          if (detailResponse.data && detailResponse.data.market_data) {
-            const marketData = detailResponse.data.market_data;
-            priceChange24h = marketData.price_change_percentage_24h || 0;
-            priceChange1h = marketData.price_change_percentage_1h || 0;
-            priceChange7d = marketData.price_change_percentage_7d || 0;
-            marketCap = marketData.market_cap?.usd || 0;
-            totalVolume = marketData.total_volume?.usd || 0;
-            
-            if (detailResponse.data.market_data.sparkline_7d?.price) {
-              sparklineData = detailResponse.data.market_data.sparkline_7d.price;
-            }
-          }
-        } catch (detailError) {
-          // If detail fetch fails, use fallback values
-          console.warn(`Could not fetch details for ${crypto.symbol}:`, detailError.message);
+        if (price && price > 0) {
+          return {
+            id: crypto.id,
+            symbol: crypto.symbol.toLowerCase(),
+            name: crypto.name,
+            image: crypto.image,
+            current_price: price,
+            market_cap: crypto.market_cap,
+            market_cap_rank: crypto.market_cap_rank,
+            total_volume: crypto.total_volume,
+            price_change_percentage_24h: crypto.price_change_percentage_24h,
+            price_change_percentage_1h_in_currency: 0,
+            price_change_percentage_7d_in_currency: 0,
+            sparkline_in_7d: { price: [] }
+          };
         }
-        
-        return {
-          id: crypto.id,
-          symbol: crypto.symbol.toLowerCase(),
-          name: crypto.name,
-          image: crypto.image,
-          current_price: price || 0,
-          market_cap: marketCap,
-          market_cap_rank: crypto.market_cap_rank || 0,
-          total_volume: totalVolume,
-          price_change_percentage_24h: priceChange24h,
-          price_change_percentage_1h_in_currency: priceChange1h,
-          price_change_percentage_7d_in_currency: priceChange7d,
-          sparkline_in_7d: {
-            price: sparklineData
-          }
-        };
+        return null;
       } catch (err) {
         console.warn(`Failed to fetch price for ${crypto.symbol}:`, err.message);
         return null;
@@ -10342,10 +10293,7 @@ async function fetchMarketData() {
     });
     
     const results = await Promise.all(pricePromises);
-    const transformed = results.filter(result => result !== null && result.current_price > 0);
-    
-    // Sort by market cap rank
-    transformed.sort((a, b) => (a.market_cap_rank || 999) - (b.market_cap_rank || 999));
+    const transformed = results.filter(result => result !== null);
     
     if (transformed.length > 0) {
       marketDataCache = {
@@ -10353,11 +10301,17 @@ async function fetchMarketData() {
         lastUpdated: new Date()
       };
       
-      console.log(`✅ Market data updated: ${transformed.length} cryptocurrencies with prices`);
+      console.log(`✅ Market data updated: ${transformed.length} cryptocurrencies with prices from getCryptoPrice`);
       return transformed;
     }
     
-    return marketDataCache.data || [];
+    // If no prices fetched but we have cached data, return cached
+    if (marketDataCache.data && marketDataCache.data.length > 0) {
+      console.warn('No new prices, returning cached data');
+      return marketDataCache.data;
+    }
+    
+    return [];
     
   } catch (error) {
     console.error('Market data fetch error:', error);
@@ -10371,7 +10325,7 @@ app.get('/api/market/assets', async (req, res) => {
     let assets = marketDataCache.data;
     
     // Refresh if cache is older than 10 seconds or empty
-    if (!assets || !marketDataCache.lastUpdated || 
+    if (!assets || assets.length === 0 || !marketDataCache.lastUpdated || 
         (new Date() - marketDataCache.lastUpdated) > 10000) {
       assets = await fetchMarketData();
     }
@@ -10395,19 +10349,8 @@ setInterval(async () => {
   await fetchMarketData();
 }, 10000);
 
-// Refresh available cryptos list every hour (to catch new listings)
-setInterval(async () => {
-  await fetchAvailableCryptos();
-}, 3600000);
-
-// Initial load on startup
-(async () => {
-  await fetchAvailableCryptos();
-  await fetchMarketData();
-})();
-
-
-
+// Initial cache on startup
+fetchMarketData();
 
 
 
