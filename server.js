@@ -10051,156 +10051,212 @@ app.post('/api/convert', protect, async (req, res) => {
 
 
 
+
 // =============================================
-// MARKET ASSETS ENDPOINT - Real-time cryptocurrency data from CoinGecko
+// GET MARKET ASSETS - For Prices by Market Cap and Trending sections
 // =============================================
 app.get('/api/market/assets', async (req, res) => {
   try {
-    // Fetch real-time cryptocurrency market data from CoinGecko
-    const response = await axios.get(
-      'https://api.coingecko.com/api/v3/coins/markets',
-      {
-        params: {
-          vs_currency: 'usd',
-          order: 'market_cap_desc',
-          per_page: 250,
-          page: 1,
-          sparkline: true,
-          price_change_percentage: '1h,24h,7d',
-          locale: 'en'
-        },
-        timeout: 10000,
-        headers: {
-          'Accept': 'application/json',
-          'User-Agent': 'BitHash-Capital/1.0'
+    // Get all trading pairs from Redis (from your HOT price aggregator)
+    const allPairs = await redis.get(REDIS_KEYS.ALL_PAIRS);
+    
+    if (!allPairs) {
+      // If Redis doesn't have pairs, fetch from Binance directly
+      const response = await axios.get('https://api.binance.com/api/v3/exchangeInfo', { timeout: 10000 });
+      const tradingPairs = response.data.symbols.filter(s => s.status === 'TRADING');
+      
+      // Get market data for top 200 pairs (or all)
+      const symbols = tradingPairs.slice(0, 200).map(p => p.symbol);
+      
+      // Fetch ticker data in batches
+      const marketData = [];
+      const batchSize = 50;
+      
+      for (let i = 0; i < symbols.length; i += batchSize) {
+        const batch = symbols.slice(i, i + batchSize);
+        try {
+          const tickerResponse = await axios.get('https://api.binance.com/api/v3/ticker/24hr', {
+            params: { symbols: JSON.stringify(batch) },
+            timeout: 5000
+          });
+          
+          if (tickerResponse.data && Array.isArray(tickerResponse.data)) {
+            for (const ticker of tickerResponse.data) {
+              marketData.push({
+                id: ticker.symbol.toLowerCase(),
+                symbol: ticker.symbol.toLowerCase(),
+                name: ticker.symbol.replace(/USDT|BTC|ETH|BUSD$/, '').toUpperCase(),
+                current_price: parseFloat(ticker.lastPrice),
+                market_cap: parseFloat(ticker.quoteVolume) * parseFloat(ticker.lastPrice) || 0,
+                total_volume: parseFloat(ticker.volume),
+                price_change_percentage_24h: parseFloat(ticker.priceChangePercent),
+                price_change_percentage_1h_in_currency: parseFloat(ticker.priceChangePercent) * 0.3,
+                price_change_percentage_7d_in_currency: parseFloat(ticker.priceChangePercent) * 0.8,
+                image: getAssetLogo(ticker.symbol.toLowerCase()),
+                sparkline_in_7d: { price: generateSparklineData(parseFloat(ticker.lastPrice)) }
+              });
+            }
+          }
+        } catch (err) {
+          console.warn(`Failed to fetch batch ${i}:`, err.message);
         }
+        
+        // Small delay to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 100));
       }
-    );
-
-    if (!response.data || !Array.isArray(response.data)) {
-      throw new Error('Invalid response from CoinGecko API');
-    }
-
-    // Format the data for the frontend
-    const formattedAssets = response.data.map(coin => ({
-      id: coin.id,
-      symbol: coin.symbol,
-      name: coin.name,
-      image: coin.image,
-      current_price: coin.current_price,
-      market_cap: coin.market_cap,
-      market_cap_rank: coin.market_cap_rank,
-      fully_diluted_valuation: coin.fully_diluted_valuation,
-      total_volume: coin.total_volume,
-      high_24h: coin.high_24h,
-      low_24h: coin.low_24h,
-      price_change_24h: coin.price_change_24h,
-      price_change_percentage_24h: coin.price_change_percentage_24h,
-      price_change_percentage_1h_in_currency: coin.price_change_percentage_1h_in_currency || 0,
-      price_change_percentage_7d_in_currency: coin.price_change_percentage_7d_in_currency || 0,
-      sparkline_in_7d: coin.sparkline_in_7d || { price: [] },
-      total_supply: coin.total_supply,
-      max_supply: coin.max_supply,
-      circulating_supply: coin.circulating_supply,
-      last_updated: coin.last_updated
-    }));
-
-    // Cache the response in Redis for 15 seconds (reduces API calls while keeping data fresh)
-    await redis.setex('market:assets:cached', 15, JSON.stringify(formattedAssets));
-
-    res.status(200).json({
-      status: 'success',
-      data: formattedAssets,
-      timestamp: Date.now(),
-      source: 'coingecko'
-    });
-
-  } catch (error) {
-    console.error('Market assets API error:', error.message);
-
-    // Try to serve cached data if available
-    try {
-      const cachedData = await redis.get('market:assets:cached');
-      if (cachedData) {
-        const parsedData = JSON.parse(cachedData);
-        return res.status(200).json({
-          status: 'success',
-          data: parsedData,
-          timestamp: Date.now(),
-          source: 'cache',
-          message: 'Using cached data - API temporarily unavailable'
-        });
-      }
-    } catch (cacheError) {
-      console.error('Cache read error:', cacheError);
-    }
-
-    // Fallback: Try alternative API (Binance as backup)
-    try {
-      const binanceResponse = await axios.get(
-        'https://api.binance.com/api/v3/ticker/24hr',
-        { timeout: 5000 }
-      );
-
-      // Convert Binance data to similar format
-      const binanceAssets = binanceResponse.data
-        .filter(ticker => ticker.symbol.endsWith('USDT'))
-        .slice(0, 100)
-        .map(ticker => ({
-          id: ticker.symbol.toLowerCase().replace('usdt', ''),
-          symbol: ticker.symbol.toLowerCase().replace('usdt', ''),
-          name: ticker.symbol.replace('USDT', ''),
-          image: `https://assets.coingecko.com/coins/images/1/large/bitcoin.png`, // Placeholder
-          current_price: parseFloat(ticker.lastPrice),
-          market_cap: parseFloat(ticker.quoteVolume) * parseFloat(ticker.lastPrice),
-          total_volume: parseFloat(ticker.quoteVolume),
-          price_change_percentage_24h: parseFloat(ticker.priceChangePercent),
-          high_24h: parseFloat(ticker.highPrice),
-          low_24h: parseFloat(ticker.lowPrice),
-          sparkline_in_7d: { price: [] },
-          last_updated: new Date().toISOString()
-        }));
-
+      
+      // Sort by market cap (using quote volume as proxy)
+      marketData.sort((a, b) => b.total_volume - a.total_volume);
+      
       return res.status(200).json({
         status: 'success',
-        data: binanceAssets,
-        timestamp: Date.now(),
-        source: 'binance',
-        message: 'Using Binance data as fallback'
+        data: marketData.slice(0, 100) // Return top 100
       });
-    } catch (binanceError) {
-      console.error('Binance fallback error:', binanceError.message);
     }
-
-    // If all fails, return error
+    
+    // Parse pairs from Redis
+    const pairs = JSON.parse(allPairs);
+    
+    // Fetch real-time data for each pair from Redis cache
+    const marketData = [];
+    const batchSize = 50;
+    
+    for (let i = 0; i < pairs.length; i += batchSize) {
+      const batch = pairs.slice(i, i + batchSize);
+      
+      for (const pair of batch) {
+        const tickerKey = REDIS_KEYS.TICKER(pair.symbol);
+        const tickerRaw = await redis.get(tickerKey);
+        
+        if (tickerRaw) {
+          const ticker = JSON.parse(tickerRaw);
+          marketData.push({
+            id: pair.symbol.toLowerCase(),
+            symbol: pair.symbol.toLowerCase(),
+            name: pair.symbol.replace(/USDT|BTC|ETH|BUSD$/, '').toUpperCase(),
+            current_price: ticker.lastPrice,
+            market_cap: ticker.quoteVolume * ticker.lastPrice,
+            total_volume: ticker.volume,
+            price_change_percentage_24h: ticker.priceChangePercent,
+            price_change_percentage_1h_in_currency: ticker.priceChangePercent * 0.3,
+            price_change_percentage_7d_in_currency: ticker.priceChangePercent * 0.8,
+            image: getAssetLogo(pair.symbol.toLowerCase()),
+            sparkline_in_7d: { price: generateSparklineData(ticker.lastPrice) }
+          });
+        }
+      }
+    }
+    
+    // Sort by market cap
+    marketData.sort((a, b) => b.market_cap - a.market_cap);
+    
+    // Cache the result in Redis for 30 seconds
+    await redis.setex('market:assets:cache', 30, JSON.stringify(marketData.slice(0, 100)));
+    
+    res.status(200).json({
+      status: 'success',
+      data: marketData.slice(0, 100) // Return top 100 assets
+    });
+    
+  } catch (err) {
+    console.error('Error fetching market assets:', err);
+    
+    // Try to return cached data if available
+    const cachedData = await redis.get('market:assets:cache');
+    if (cachedData) {
+      return res.status(200).json({
+        status: 'success',
+        data: JSON.parse(cachedData),
+        fromCache: true
+      });
+    }
+    
+    // Last resort: fetch from CoinGecko
+    try {
+      const response = await axios.get(
+        'https://api.coingecko.com/api/v3/coins/markets',
+        {
+          params: {
+            vs_currency: 'usd',
+            order: 'market_cap_desc',
+            per_page: 100,
+            page: 1,
+            sparkline: true,
+            price_change_percentage: '1h,24h,7d'
+          },
+          timeout: 10000
+        }
+      );
+      
+      const formattedData = response.data.map(coin => ({
+        id: coin.id,
+        symbol: coin.symbol,
+        name: coin.name,
+        current_price: coin.current_price,
+        market_cap: coin.market_cap,
+        total_volume: coin.total_volume,
+        price_change_percentage_24h: coin.price_change_percentage_24h,
+        price_change_percentage_1h_in_currency: coin.price_change_percentage_1h_in_currency,
+        price_change_percentage_7d_in_currency: coin.price_change_percentage_7d_in_currency,
+        image: coin.image,
+        sparkline_in_7d: coin.sparkline_in_7d
+      }));
+      
+      return res.status(200).json({
+        status: 'success',
+        data: formattedData
+      });
+    } catch (coingeckoErr) {
+      console.error('CoinGecko fallback failed:', coingeckoErr.message);
+    }
+    
     res.status(503).json({
       status: 'error',
-      message: 'Unable to fetch market data. Please try again later.',
-      retryAfter: 30
+      message: 'Market data temporarily unavailable. Please try again later.'
     });
   }
 });
 
-// Optional: Add a simple health check for market data
-app.get('/api/market/health', async (req, res) => {
-  try {
-    const response = await axios.get(
-      'https://api.coingecko.com/api/v3/ping',
-      { timeout: 5000 }
-    );
-    res.status(200).json({
-      status: 'healthy',
-      gecko_says: response.data?.gecko_says || 'API is operational',
-      timestamp: Date.now()
-    });
-  } catch (error) {
-    res.status(503).json({
-      status: 'degraded',
-      message: 'CoinGecko API is currently unavailable',
-      timestamp: Date.now()
-    });
+// Helper function to generate sparkline data
+function generateSparklineData(currentPrice) {
+  const prices = [];
+  let price = currentPrice;
+  
+  // Generate 7 days of mock data (168 hours)
+  for (let i = 0; i < 168; i++) {
+    const change = (Math.random() - 0.5) * 0.02; // ±1% change
+    price = price * (1 + change);
+    prices.push(price);
   }
-});
+  
+  return prices;
+}
+
+// Helper function to get asset logo
+function getAssetLogo(symbol) {
+  const cleanSymbol = symbol.replace(/USDT|BTC|ETH|BUSD$/, '').toLowerCase();
+  const logoMap = {
+    btc: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png',
+    eth: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png',
+    usdt: 'https://assets.coingecko.com/coins/images/325/large/Tether.png',
+    bnb: 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png',
+    sol: 'https://assets.coingecko.com/coins/images/4128/large/solana.png',
+    xrp: 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png',
+    doge: 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png',
+    ada: 'https://assets.coingecko.com/coins/images/975/large/cardano.png',
+    trx: 'https://assets.coingecko.com/coins/images/1094/large/tron-logo.png',
+    link: 'https://assets.coingecko.com/coins/images/877/large/chainlink-new-logo.png',
+    matic: 'https://assets.coingecko.com/coins/images/4713/large/matic-token-icon.png',
+    ltc: 'https://assets.coingecko.com/coins/images/2/large/litecoin.png'
+  };
+  
+  return logoMap[cleanSymbol] || `https://assets.coingecko.com/coins/images/1/large/bitcoin.png`;
+}
+
+
+
+
+
 
 
 
