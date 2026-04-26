@@ -5636,11 +5636,8 @@ const recalculateAllUserBalances = async (io) => {
 
 
 
-
-
 // =============================================
 // PRICE AGGREGATOR WORKER - SINGLE SOURCE OF TRUTH
-// ENHANCED: ALWAYS HOT - ALL PAIRS SUBSCRIBED
 // =============================================
 
 let binanceWs = null;
@@ -5650,10 +5647,6 @@ let updateSequenceMap = new Map();
 let lastUpdateTimeMap = new Map();
 const MAX_STALENESS_MS = 500;
 let activeSubscriptions = new Map();
-let allBinanceSymbols = [];
-let aggregationInterval = null;
-let heartbeatCheckInterval = null;
-let lastHeartbeatTime = Date.now();
 
 const REDIS_KEYS = {
   TICKER: (symbol) => `ticker:${symbol}`,
@@ -5667,11 +5660,7 @@ const REDIS_KEYS = {
   TRADING_DATA: (symbol) => `trading:data:${symbol}`,
   ANALYSIS: (symbol) => `analysis:${symbol}`,
   ALL_PAIRS: 'market:all:pairs',
-  QUOTE_ASSETS: 'market:quote:assets',
-  AGGREGATOR_STATUS: 'price:aggregator:status',
-  AGGREGATOR_HEARTBEAT: 'price:aggregator:heartbeat',
-  SUBSCRIBED_SYMBOLS: 'price:aggregator:subscribed',
-  DATA_FRESHNESS: (symbol) => `freshness:${symbol}`
+  QUOTE_ASSETS: 'market:quote:assets'
 };
 
 const INTERVALS = ['1s', '15m', '1h', '4h', '1d', '1w'];
@@ -5688,33 +5677,55 @@ async function fetchAllTradingPairs() {
   try {
     const response = await axios.get('https://api.binance.com/api/v3/exchangeInfo', { timeout: 10000 });
     
-    // Get ALL active trading pairs (no filtering by quote asset)
-    const allActivePairs = response.data.symbols.filter(s => s.status === 'TRADING');
+    const usdtPairs = response.data.symbols.filter(s => 
+      s.quoteAsset === 'USDT' && s.status === 'TRADING'
+    );
     
-    // Dynamically collect ALL unique quote assets from Binance
-    const quoteAssetsSet = new Set();
-    allActivePairs.forEach(pair => {
-      quoteAssetsSet.add(pair.quoteAsset);
-    });
+    const usdcPairs = response.data.symbols.filter(s => 
+      s.quoteAsset === 'USDC' && s.status === 'TRADING'
+    );
+    
+    const eurcPairs = response.data.symbols.filter(s => 
+      s.quoteAsset === 'EURC' && s.status === 'TRADING'
+    );
+    
+    const usdPairs = response.data.symbols.filter(s => 
+      s.quoteAsset === 'USD' && s.status === 'TRADING'
+    );
+    
+    const bnbPairs = response.data.symbols.filter(s => 
+      s.quoteAsset === 'BNB' && s.status === 'TRADING'
+    );
+    
+    const btcPairs = response.data.symbols.filter(s => 
+      s.quoteAsset === 'BTC' && s.status === 'TRADING'
+    );
     
     const allPairs = [];
-    allBinanceSymbols = [];
+    const quoteAssetsSet = new Set(['USDT', 'USDC', 'EURC', 'USD', 'BNB', 'BTC']);
     
-    allActivePairs.forEach(pair => {
-      allPairs.push({
-        symbol: pair.symbol,
-        base: pair.baseAsset,
-        quote: pair.quoteAsset,
-        status: 'active'
+    const processPairs = (pairs, quote) => {
+      pairs.forEach(pair => {
+        allPairs.push({
+          symbol: pair.symbol,
+          base: pair.baseAsset,
+          quote: quote,
+          status: 'active'
+        });
       });
-      allBinanceSymbols.push(pair.symbol);
-    });
+    };
+    
+    processPairs(usdtPairs, 'USDT');
+    processPairs(usdcPairs, 'USDC');
+    processPairs(eurcPairs, 'EURC');
+    processPairs(usdPairs, 'USD');
+    processPairs(bnbPairs, 'BNB');
+    processPairs(btcPairs, 'BTC');
     
     await redis.set(REDIS_KEYS.ALL_PAIRS, JSON.stringify(allPairs));
     await redis.set(REDIS_KEYS.QUOTE_ASSETS, JSON.stringify(Array.from(quoteAssetsSet)));
-    await redis.set(REDIS_KEYS.SUBSCRIBED_SYMBOLS, JSON.stringify([]));
     
-    console.log(`🔥 PRICE AGGREGATOR: Loaded ${allPairs.length} total trading pairs across ${quoteAssetsSet.size} quotes: ${Array.from(quoteAssetsSet).join(', ')}`);
+    console.log(`Loaded ${allPairs.length} total trading pairs across quotes: ${Array.from(quoteAssetsSet).join(', ')}`);
     
     return { pairs: allPairs, quoteAssets: Array.from(quoteAssetsSet) };
   } catch (err) {
@@ -5734,13 +5745,8 @@ function getBinanceStreamName(symbol, channel) {
 }
 
 async function subscribeToSymbol(symbol) {
-  if (!binanceWs || binanceWs.readyState !== WebSocket.OPEN) {
-    console.log(`WS not open, cannot subscribe to ${symbol}`);
-    return false;
-  }
-  if (subscribedSymbols.has(symbol)) {
-    return true;
-  }
+  if (!binanceWs || binanceWs.readyState !== WebSocket.OPEN) return;
+  if (subscribedSymbols.has(symbol)) return;
   
   const streams = [];
   
@@ -5752,135 +5758,47 @@ async function subscribeToSymbol(symbol) {
     streams.push(getBinanceStreamName(symbol, `kline_${BINANCE_INTERVAL_MAP[interval]}`));
   }
   
-  // Batch subscribe to avoid overwhelming the connection
-  const batchSize = 100;
-  for (let i = 0; i < streams.length; i += batchSize) {
-    const batch = streams.slice(i, i + batchSize);
-    const subscribeMsg = {
-      method: 'SUBSCRIBE',
-      params: batch,
-      id: Date.now() + Math.random()
-    };
-    
-    try {
-      binanceWs.send(JSON.stringify(subscribeMsg));
-      await new Promise(resolve => setTimeout(resolve, 50));
-    } catch (err) {
-      console.error(`Failed to subscribe batch for ${symbol}:`, err);
-      return false;
-    }
-  }
+  const subscribeMsg = {
+    method: 'SUBSCRIBE',
+    params: streams,
+    id: Date.now()
+  };
   
+  binanceWs.send(JSON.stringify(subscribeMsg));
   subscribedSymbols.add(symbol);
-  activeSubscriptions.set(symbol, Date.now());
-  
-  // Track subscribed symbols in Redis
-  const subscribedList = JSON.parse(await redis.get(REDIS_KEYS.SUBSCRIBED_SYMBOLS) || '[]');
-  if (!subscribedList.includes(symbol)) {
-    subscribedList.push(symbol);
-    await redis.set(REDIS_KEYS.SUBSCRIBED_SYMBOLS, JSON.stringify(subscribedList));
-  }
-  
-  console.log(`✅ Subscribed to ${symbol} with ${streams.length} streams (${subscribedSymbols.size}/${allBinanceSymbols.length} total)`);
-  return true;
+  console.log(`Subscribed to ${symbol} with ${streams.length} streams`);
 }
 
-async function ensureAllPairsSubscribed() {
-  const { pairs } = await fetchAllTradingPairs();
-  const allSymbols = pairs.map(p => p.symbol);
+async function initializePriceAggregator() {
+  console.log('🚀 Starting Price Aggregator Worker...');
   
-  console.log(`📊 Ensuring all ${allSymbols.length} trading pairs are subscribed...`);
+  const { pairs, quoteAssets } = await fetchAllTradingPairs();
   
-  let subscribed = 0;
-  let failed = 0;
+  console.log(`📊 Will subscribe to ${pairs.length} trading pairs`);
   
-  // Process in batches to avoid overwhelming WebSocket
-  const BATCH_SIZE = 5;
-  const DELAY_BETWEEN_BATCHES = 1000;
-  
-  for (let i = 0; i < allSymbols.length; i += BATCH_SIZE) {
-    const batch = allSymbols.slice(i, i + BATCH_SIZE);
+  for (const pair of pairs) {
+    const symbol = pair.symbol;
+    const priceKey = REDIS_KEYS.LAST_PRICE(symbol);
+    const cachedPrice = await redis.get(priceKey);
     
-    for (const symbol of batch) {
-      const success = await subscribeToSymbol(symbol);
-      if (success) {
-        subscribed++;
-      } else {
-        failed++;
+    if (!cachedPrice) {
+      try {
+        const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`, { timeout: 3000 });
+        if (response.data && response.data.price) {
+          const price = parseFloat(response.data.price);
+          await redis.set(priceKey, JSON.stringify({ price, timestamp: Date.now() }));
+          await redis.set(REDIS_KEYS.TICKER(symbol), JSON.stringify({
+            symbol, lastPrice: price, priceChangePercent: 0, volume: 0, quoteVolume: 0
+          }));
+          console.log(`Preloaded initial price for ${symbol}: $${price}`);
+        }
+      } catch (err) {
+        console.log(`Could not preload ${symbol}, will wait for WebSocket`);
       }
-    }
-    
-    if (i + BATCH_SIZE < allSymbols.length) {
-      await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_BATCHES));
     }
   }
   
-  console.log(`🔥 PRICE AGGREGATOR HOT: ${subscribed} symbols subscribed, ${failed} failed`);
-  
-  await redis.set(REDIS_KEYS.AGGREGATOR_STATUS, JSON.stringify({
-    status: 'hot',
-    subscribedCount: subscribed,
-    totalPairs: allSymbols.length,
-    lastUpdate: Date.now(),
-    wsState: binanceWs ? binanceWs.readyState : 'closed'
-  }));
-}
-
-async function preloadInitialPrices() {
-  const { pairs } = await fetchAllTradingPairs();
-  
-  console.log(`📊 Preloading initial prices for ${pairs.length} pairs...`);
-  
-  let loaded = 0;
-  const batchSize = 50;
-  
-  for (let i = 0; i < pairs.length; i += batchSize) {
-    const batch = pairs.slice(i, i + batchSize);
-    const symbols = batch.map(p => p.symbol);
-    
-    try {
-      const response = await axios.get(`https://api.binance.com/api/v3/ticker/price`, {
-        params: { symbols: JSON.stringify(symbols) },
-        timeout: 5000
-      });
-      
-      if (response.data && Array.isArray(response.data)) {
-        for (const ticker of response.data) {
-          const symbol = ticker.symbol;
-          const price = parseFloat(ticker.price);
-          
-          if (price > 0) {
-            await redis.set(REDIS_KEYS.LAST_PRICE(symbol), JSON.stringify({
-              price: price,
-              timestamp: Date.now()
-            }));
-            loaded++;
-          }
-        }
-      }
-    } catch (err) {
-      // If batch fails, try individually
-      for (const pair of batch) {
-        try {
-          const singleResponse = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${pair.symbol}`, { timeout: 3000 });
-          if (singleResponse.data && singleResponse.data.price) {
-            const price = parseFloat(singleResponse.data.price);
-            await redis.set(REDIS_KEYS.LAST_PRICE(pair.symbol), JSON.stringify({
-              price: price,
-              timestamp: Date.now()
-            }));
-            loaded++;
-          }
-        } catch (e) {
-          console.log(`Could not preload ${pair.symbol}, will wait for WebSocket`);
-        }
-      }
-    }
-    
-    console.log(`Preloaded ${loaded}/${pairs.length} pairs...`);
-  }
-  
-  console.log(`✅ Initial price preload complete: ${loaded}/${pairs.length} pairs loaded`);
+  connectBinanceWebSocket();
 }
 
 function connectBinanceWebSocket() {
@@ -5894,31 +5812,26 @@ function connectBinanceWebSocket() {
   binanceWs.on('open', async () => {
     console.log('✅ Binance WebSocket connected');
     wsReconnectAttempts = 0;
-    lastHeartbeatTime = Date.now();
     
-    // Ensure all pairs are subscribed - HOT AGGREGATOR
-    await ensureAllPairsSubscribed();
+    const { pairs } = await fetchAllTradingPairs();
     
-    // Preload initial prices AFTER WebSocket is connected
-    setTimeout(async () => {
-      await preloadInitialPrices();
-    }, 2000);
+    const allSymbols = pairs.map(p => p.symbol);
+    const batchSize = 200;
     
-    // Start heartbeat monitor
-    startHeartbeatMonitor();
+    for (let i = 0; i < allSymbols.length; i += batchSize) {
+      const batch = allSymbols.slice(i, i + batchSize);
+      for (const symbol of batch) {
+        await subscribeToSymbol(symbol);
+      }
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    
+    console.log(`Subscribed to ${subscribedSymbols.size} symbols`);
   });
   
   binanceWs.on('message', async (data) => {
     try {
       const parsed = JSON.parse(data);
-      
-      // Handle ping/pong for connection health
-      if (parsed.ping) {
-        binanceWs.send(JSON.stringify({ pong: parsed.ping }));
-        lastHeartbeatTime = Date.now();
-        await redis.set(REDIS_KEYS.AGGREGATOR_HEARTBEAT, Date.now().toString());
-        return;
-      }
       
       if (parsed.result === null && parsed.id) {
         return;
@@ -5937,43 +5850,11 @@ function connectBinanceWebSocket() {
   });
   
   binanceWs.on('close', () => {
-    console.log('⚠️ Binance WebSocket closed, reconnecting...');
+    console.log('Binance WebSocket closed, reconnecting...');
     const delay = Math.min(5000 * Math.pow(2, wsReconnectAttempts), 60000);
     wsReconnectAttempts++;
     setTimeout(connectBinanceWebSocket, delay);
   });
-}
-
-function startHeartbeatMonitor() {
-  if (heartbeatCheckInterval) clearInterval(heartbeatCheckInterval);
-  
-  heartbeatCheckInterval = setInterval(async () => {
-    const timeSinceLastHeartbeat = Date.now() - lastHeartbeatTime;
-    
-    if (timeSinceLastHeartbeat > 30000) {
-      console.log('⚠️ WebSocket heartbeat timeout, reconnecting...');
-      connectBinanceWebSocket();
-    } else {
-      await redis.set(REDIS_KEYS.AGGREGATOR_HEARTBEAT, Date.now().toString());
-    }
-    
-    // Update aggregator status in Redis for monitoring
-    const status = {
-      status: 'hot',
-      subscribedCount: subscribedSymbols.size,
-      totalPairs: allBinanceSymbols.length,
-      lastHeartbeat: lastHeartbeatTime,
-      wsState: binanceWs ? binanceWs.readyState : 'closed',
-      uptime: Date.now() - lastHeartbeatTime,
-      timestamp: Date.now()
-    };
-    await redis.set(REDIS_KEYS.AGGREGATOR_STATUS, JSON.stringify(status));
-    
-    // Log status every minute
-    if (Math.floor(Date.now() / 60000) % 5 === 0) {
-      console.log(`🔥 HOT AGGREGATOR STATUS: ${subscribedSymbols.size}/${allBinanceSymbols.length} symbols active`);
-    }
-  }, 10000);
 }
 
 async function processStreamMessage(message) {
@@ -6002,7 +5883,6 @@ async function processStreamMessage(message) {
   }
   
   lastUpdateTimeMap.set(`${symbol}:${channel}`, now);
-  await redis.set(REDIS_KEYS.DATA_FRESHNESS(symbol), Date.now().toString());
   
   if (channel === 'ticker') {
     await processTickerUpdate(symbol, data);
@@ -6039,12 +5919,21 @@ async function processTickerUpdate(symbol, data) {
     updatedAt: Date.now()
   };
   
-  await Promise.all([
-    redis.set(REDIS_KEYS.TICKER(symbol), JSON.stringify(tickerData)),
-    redis.set(REDIS_KEYS.LAST_PRICE(symbol), JSON.stringify({ price: tickerData.lastPrice, timestamp: Date.now() })),
-    redis.set(REDIS_KEYS.PRICE_CHANGE(symbol), JSON.stringify({ change: tickerData.priceChange, changePercent: tickerData.priceChangePercent, timestamp: Date.now() })),
-    redis.set(REDIS_KEYS.VOLUME_24H(symbol), JSON.stringify({ volume: tickerData.volume, quoteVolume: tickerData.quoteVolume, timestamp: Date.now() }))
-  ]);
+  await redis.set(REDIS_KEYS.TICKER(symbol), JSON.stringify(tickerData));
+  await redis.set(REDIS_KEYS.LAST_PRICE(symbol), JSON.stringify({
+    price: tickerData.lastPrice,
+    timestamp: Date.now()
+  }));
+  await redis.set(REDIS_KEYS.PRICE_CHANGE(symbol), JSON.stringify({
+    change: tickerData.priceChange,
+    changePercent: tickerData.priceChangePercent,
+    timestamp: Date.now()
+  }));
+  await redis.set(REDIS_KEYS.VOLUME_24H(symbol), JSON.stringify({
+    volume: tickerData.volume,
+    quoteVolume: tickerData.quoteVolume,
+    timestamp: Date.now()
+  }));
   
   const pubSubData = {
     type: 'ticker',
@@ -6180,47 +6069,7 @@ async function getQuoteAssetsFromRedis() {
   if (cached) {
     return JSON.parse(cached);
   }
-  return ['USDT'];
-}
-
-// Start the HOT price aggregator - ensures ALL pairs are subscribed and data is always in Redis
-async function initializePriceAggregator() {
-  console.log('🚀🔥 Starting HOT PRICE AGGREGATOR Worker - All pairs will be subscribed and kept hot...');
-  
-  // Fetch all pairs first
-  const { pairs, quoteAssets } = await fetchAllTradingPairs();
-  
-  console.log(`📊 HOT AGGREGATOR will subscribe to ${pairs.length} trading pairs`);
-  
-  // Connect WebSocket and subscribe to ALL pairs
-  connectBinanceWebSocket();
-  
-  // Start periodic health check and resubscription for any missed symbols
-  const resubscribeInterval = setInterval(async () => {
-    if (binanceWs && binanceWs.readyState === WebSocket.OPEN) {
-      const { pairs: currentPairs } = await fetchAllTradingPairs();
-      const allSymbols = currentPairs.map(p => p.symbol);
-      
-      let missingSubscriptions = 0;
-      for (const symbol of allSymbols) {
-        if (!subscribedSymbols.has(symbol)) {
-          await subscribeToSymbol(symbol);
-          missingSubscriptions++;
-          await new Promise(resolve => setTimeout(resolve, 10));
-        }
-      }
-      
-      if (missingSubscriptions > 0) {
-        console.log(`🔄 Resubscribed to ${missingSubscriptions} missing symbols`);
-      }
-    }
-  }, 60000); // Check every minute
-  
-  // Keep the interval reference for cleanup
-  process.on('SIGTERM', () => {
-    clearInterval(resubscribeInterval);
-    if (heartbeatCheckInterval) clearInterval(heartbeatCheckInterval);
-  });
+  return ['USDT', 'USDC', 'EURC', 'USD', 'BNB', 'BTC'];
 }
 
 initializePriceAggregator();
