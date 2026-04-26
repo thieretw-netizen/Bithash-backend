@@ -10231,7 +10231,7 @@ async function fetchMarketData() {
       }
     );
 
-    if (response.data) {
+    if (response.data && response.data.length > 0) {
       const transformed = response.data.map(coin => ({
         id: coin.id,
         symbol: coin.symbol,
@@ -10257,11 +10257,20 @@ async function fetchMarketData() {
       return transformed;
     }
     
+    // Wait and retry if data is empty - ensures we never return empty
+    if (!response.data || response.data.length === 0) {
+      console.log('Received empty data, retrying in 1 second...');
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      return await fetchMarketData();
+    }
+    
     return marketDataCache.data || [];
     
   } catch (error) {
     console.error('Market data fetch error:', error);
-    return marketDataCache.data || [];
+    // Retry on error after 1 second
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    return await fetchMarketData();
   }
 }
 
@@ -10276,6 +10285,11 @@ app.get('/api/market/assets', async (req, res) => {
       assets = await fetchMarketData();
     }
     
+    // Guarantee we never send empty data - retry once if still empty
+    if (!assets || assets.length === 0) {
+      assets = await fetchMarketData();
+    }
+    
     res.json({
       status: 'success',
       data: assets || []
@@ -10283,10 +10297,19 @@ app.get('/api/market/assets', async (req, res) => {
     
   } catch (error) {
     console.error('Market assets error:', error);
-    res.json({
-      status: 'error',
-      data: []
-    });
+    // Retry one more time before giving up
+    try {
+      const retryData = await fetchMarketData();
+      res.json({
+        status: 'success',
+        data: retryData || []
+      });
+    } catch (retryError) {
+      res.json({
+        status: 'error',
+        data: []
+      });
+    }
   }
 });
 
@@ -10297,7 +10320,6 @@ setInterval(async () => {
 
 // Initial cache on startup
 fetchMarketData();
-
 
 
 
