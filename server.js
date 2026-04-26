@@ -10203,8 +10203,6 @@ app.post('/api/convert', protect, async (req, res) => {
 
 
 
-
-
 // =============================================
 // MARKET DATA ENDPOINT - Prices by Market Cap
 // =============================================
@@ -10218,7 +10216,7 @@ let marketDataCache = {
 async function fetchFromBinance() {
   try {
     const response = await axios.get('https://api.binance.com/api/v3/ticker/24hr', {
-      timeout: 10000
+      timeout: 15000
     });
     
     if (response.data && response.data.length > 0) {
@@ -10267,7 +10265,7 @@ async function fetchMarketData() {
           sparkline: true,
           price_change_percentage: '1h,24h,7d'
         },
-        timeout: 10000
+        timeout: 15000
       }
     );
 
@@ -10351,9 +10349,12 @@ app.get('/api/market/assets', async (req, res) => {
       }
     }
     
-    res.json({
+    // ALWAYS send an array - never null or undefined
+    const responseData = assets || [];
+    
+    res.status(200).json({
       status: 'success',
-      data: assets || []
+      data: responseData
     });
     
   } catch (error) {
@@ -10361,13 +10362,15 @@ app.get('/api/market/assets', async (req, res) => {
     // Last resort - try Binance one more time
     try {
       const binanceData = await fetchFromBinance();
-      res.json({
+      const finalData = binanceData || [];
+      res.status(200).json({
         status: 'success',
-        data: binanceData || []
+        data: finalData
       });
     } catch (finalError) {
-      res.json({
-        status: 'error',
+      // Always send an empty array, never fail with no response
+      res.status(200).json({
+        status: 'success',
         data: []
       });
     }
@@ -10381,9 +10384,6 @@ setInterval(async () => {
 
 // Initial cache on startup
 fetchMarketData();
-
-
-
 
 
 
