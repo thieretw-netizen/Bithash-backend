@@ -26077,7 +26077,150 @@ app.get('/api/market/orderbook', async (req, res) => {
 
 
 
+const REDIS_KEYS = {
+  CANDLES: (symbol, interval) => `kline:${symbol}:${interval}`,
+  ALL_PAIRS: 'market:all:pairs',
+  QUOTE_ASSETS: 'market:quote:assets',
+  TICKER: (symbol) => `ticker:${symbol}`,
+  ORDERBOOK: (symbol) => `orderbook:${symbol}`,
+  TRADES: (symbol) => `trades:${symbol}:recent`
+};
 
+app.get('/api/market/all-pairs', async (req, res) => {
+  const cachedPairs = await redis.get(REDIS_KEYS.ALL_PAIRS);
+  
+  if (!cachedPairs) {
+    return res.status(503).json({ status: 'error', message: 'Market data unavailable' });
+  }
+
+  const allPairs = JSON.parse(cachedPairs);
+  const quoteAssets = await redis.get(REDIS_KEYS.QUOTE_ASSETS);
+  
+  res.json({
+    pairs: allPairs,
+    quoteAssets: quoteAssets ? JSON.parse(quoteAssets) : ['USDT']
+  });
+});
+
+app.get('/api/market/candles', async (req, res) => {
+  const { symbol, interval = '15m', limit = 200 } = req.query;
+  
+  if (!symbol) {
+    return res.status(400).json({ status: 'fail', message: 'Symbol required' });
+  }
+
+  const candlesKey = REDIS_KEYS.CANDLES(symbol, interval);
+  const candlesRaw = await redis.zrevrange(candlesKey, 0, parseInt(limit) - 1);
+  
+  const candles = candlesRaw.map(c => JSON.parse(c)).reverse();
+  
+  res.json({ candles });
+});
+
+app.get('/api/user/chart-settings', async (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  
+  if (!token) {
+    return res.status(401).json({ status: 'fail', message: 'Unauthorized' });
+  }
+
+  try {
+    const decoded = verifyJWT(token);
+    const userId = decoded.id;
+    
+    const settingsKey = `user:${userId}:chart_settings`;
+    const settings = await redis.get(settingsKey);
+    
+    if (!settings) {
+      return res.json({ chartSettings: {
+        style: 'candlestick',
+        backgroundColor: '#0B0E11',
+        bullishColor: '#228B22',
+        bearishColor: '#FF0000',
+        solidCandles: false,
+        showBorders: true,
+        showWick: true,
+        tradeMarker: 'both'
+      }});
+    }
+    
+    res.json(JSON.parse(settings));
+  } catch (err) {
+    res.status(401).json({ status: 'fail', message: 'Invalid token' });
+  }
+});
+
+app.post('/api/user/chart-settings', async (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  
+  if (!token) {
+    return res.status(401).json({ status: 'fail', message: 'Unauthorized' });
+  }
+
+  try {
+    const decoded = verifyJWT(token);
+    const userId = decoded.id;
+    const { chartSettings } = req.body;
+    
+    const settingsKey = `user:${userId}:chart_settings`;
+    await redis.set(settingsKey, JSON.stringify(chartSettings));
+    
+    res.json({ status: 'success' });
+  } catch (err) {
+    res.status(401).json({ status: 'fail', message: 'Invalid token' });
+  }
+});
+
+app.get('/api/user/settings', async (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  
+  if (!token) {
+    return res.status(401).json({ status: 'fail', message: 'Unauthorized' });
+  }
+
+  try {
+    const decoded = verifyJWT(token);
+    const userId = decoded.id;
+    
+    const settingsKey = `user:${userId}:trading_settings`;
+    const settings = await redis.get(settingsKey);
+    
+    if (!settings) {
+      return res.json({ orderBookSettings: {
+        precision: 0.01,
+        depthSize: 20,
+        showCumulativeTotal: false,
+        colorMode: 'default',
+        displaySize: 'compact'
+      }});
+    }
+    
+    res.json(JSON.parse(settings));
+  } catch (err) {
+    res.status(401).json({ status: 'fail', message: 'Invalid token' });
+  }
+});
+
+app.post('/api/user/settings', async (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  
+  if (!token) {
+    return res.status(401).json({ status: 'fail', message: 'Unauthorized' });
+  }
+
+  try {
+    const decoded = verifyJWT(token);
+    const userId = decoded.id;
+    const { orderBookSettings } = req.body;
+    
+    const settingsKey = `user:${userId}:trading_settings`;
+    await redis.set(settingsKey, JSON.stringify(orderBookSettings));
+    
+    res.json({ status: 'success' });
+  } catch (err) {
+    res.status(401).json({ status: 'fail', message: 'Invalid token' });
+  }
+});
 
 
 
