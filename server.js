@@ -28886,116 +28886,22 @@ app.post('/api/user/settings', protect, async (req, res) => {
 
 
 
-// =============================================
-// TICKER WEBSOCKET - For footer ticker in trading.html
-// Add this to server.js (after existing WebSocket setups)
-// =============================================
 
-const setupTickerWebSocket = (server) => {
-  const wss = new WebSocket.Server({ 
-    server, 
-    path: '/ws/ticker',
-    clientTracking: true,
-    perMessageDeflate: false
-  });
 
-  const clients = new Set();
-  let broadcastInterval = null;
-  
-  const getTickerData = async () => {
-    const cachedPairs = await redis.get(REDIS_KEYS.ALL_PAIRS);
-    if (!cachedPairs) return [];
-    
-    const pairs = JSON.parse(cachedPairs);
-    const tickers = [];
-    const topPairs = pairs.slice(0, 30);
-    
-    for (const pair of topPairs) {
-      const tickerKey = REDIS_KEYS.TICKER(pair.symbol);
-      const tickerRaw = await redis.get(tickerKey);
-      if (tickerRaw) {
-        const ticker = JSON.parse(tickerRaw);
-        tickers.push({
-          symbol: `${pair.baseAsset}/${pair.quoteAsset}`,
-          price: ticker.lastPrice,
-          change24h: ticker.priceChangePercent,
-          high: ticker.highPrice,
-          low: ticker.lowPrice,
-          volume: ticker.volume
-        });
-      }
-    }
-    return tickers;
-  };
 
-  const broadcastTickers = async () => {
-    if (clients.size === 0) return;
-    
-    try {
-      const tickers = await getTickerData();
-      if (tickers.length > 0) {
-        const message = JSON.stringify({
-          type: 'tickers',
-          data: tickers,
-          timestamp: Date.now()
-        });
-        
-        for (const client of clients) {
-          if (client.readyState === WebSocket.OPEN) {
-            client.send(message);
-          }
-        }
-      }
-    } catch (err) {
-      console.error('Ticker broadcast error:', err);
-    }
-  };
-
-  wss.on('connection', async (ws, req) => {
-    clients.add(ws);
-    
-    let heartbeatInterval = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.ping();
-      }
-    }, 30000);
-
-    const initialTickers = await getTickerData();
-    if (initialTickers.length > 0) {
-      ws.send(JSON.stringify({
-        type: 'tickers',
-        data: initialTickers,
-        timestamp: Date.now()
-      }));
-    }
-
-    ws.on('pong', () => {});
-    
-    ws.on('message', (message) => {
-      try {
-        const data = JSON.parse(message);
-        if (data.type === 'ping') {
-          ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
-        }
-      } catch (err) {}
-    });
-
-    ws.on('close', () => {
-      clearInterval(heartbeatInterval);
-      clients.delete(ws);
-    });
-  });
-
-  if (!broadcastInterval) {
-    broadcastInterval = setInterval(broadcastTickers, 2000);
+async function getCurrentPrice(symbol) {
+  const priceKey = REDIS_KEYS.LAST_PRICE(symbol.toUpperCase());
+  const priceRaw = await redis.get(priceKey);
+  if (priceRaw) {
+    return JSON.parse(priceRaw).price;
   }
-  
-  return wss;
-};
-
-
-
-
+  const tickerKey = REDIS_KEYS.TICKER(symbol.toUpperCase());
+  const tickerRaw = await redis.get(tickerKey);
+  if (tickerRaw) {
+    return JSON.parse(tickerRaw).lastPrice;
+  }
+  return null;
+}
 
 
 
