@@ -5627,17 +5627,24 @@ async function ensureAllPairsSubscribed() {
   let subscribed = 0;
   let failed = 0;
   
-  for (const symbol of allSymbols) {
-    const success = await subscribeToSymbol(symbol);
-    if (success) {
-      subscribed++;
-    } else {
-      failed++;
+  // Process in batches to avoid overwhelming WebSocket
+  const BATCH_SIZE = 5;
+  const DELAY_BETWEEN_BATCHES = 1000;
+  
+  for (let i = 0; i < allSymbols.length; i += BATCH_SIZE) {
+    const batch = allSymbols.slice(i, i + BATCH_SIZE);
+    
+    for (const symbol of batch) {
+      const success = await subscribeToSymbol(symbol);
+      if (success) {
+        subscribed++;
+      } else {
+        failed++;
+      }
     }
     
-    // Small delay to avoid overwhelming the connection
-    if (subscribed % 50 === 0) {
-      await new Promise(resolve => setTimeout(resolve, 100));
+    if (i + BATCH_SIZE < allSymbols.length) {
+      await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_BATCHES));
     }
   }
   
@@ -5724,6 +5731,11 @@ function connectBinanceWebSocket() {
     
     // Ensure all pairs are subscribed - HOT AGGREGATOR
     await ensureAllPairsSubscribed();
+    
+    // Preload initial prices AFTER WebSocket is connected
+    setTimeout(async () => {
+      await preloadInitialPrices();
+    }, 2000);
     
     // Start heartbeat monitor
     startHeartbeatMonitor();
