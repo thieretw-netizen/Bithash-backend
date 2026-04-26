@@ -10054,14 +10054,19 @@ app.post('/api/convert', protect, async (req, res) => {
 
 
 
+// =============================================
+// MARKET DATA ENDPOINT - Prices by Market Cap
+// PERFECT IMPLEMENTATION MATCHING FRONTEND EXPECTATIONS
+// =============================================
 
-// =============================================
-// MARKET ASSETS ENDPOINT - For "Prices by Market Cap" table
-// Fetches top cryptocurrencies with real-time prices from CoinGecko
-// =============================================
-app.get('/api/market/assets', async (req, res) => {
+// Cache with 30-second TTL
+let marketDataCache = {
+  data: null,
+  lastUpdated: null
+};
+
+async function fetchMarketData() {
   try {
-    // Fetch real-time cryptocurrency data from CoinGecko
     const response = await axios.get(
       'https://api.coingecko.com/api/v3/coins/markets',
       {
@@ -10076,81 +10081,95 @@ app.get('/api/market/assets', async (req, res) => {
         timeout: 10000,
         headers: {
           'Accept': 'application/json',
-          'User-Agent': 'BitHash-Capital/1.0'
+          'User-Agent': 'Mozilla/5.0 (compatible; BitHashBot/1.0)'
         }
       }
     );
 
-    if (!response.data || !Array.isArray(response.data)) {
-      throw new Error('Invalid response from CoinGecko');
+    if (response.data && Array.isArray(response.data)) {
+      const transformed = response.data.map(coin => ({
+        id: coin.id,
+        symbol: coin.symbol,
+        name: coin.name,
+        image: coin.image,
+        current_price: coin.current_price || 0,
+        market_cap: coin.market_cap || 0,
+        market_cap_rank: coin.market_cap_rank || 0,
+        total_volume: coin.total_volume || 0,
+        high_24h: coin.high_24h || 0,
+        low_24h: coin.low_24h || 0,
+        price_change_24h: coin.price_change_24h || 0,
+        price_change_percentage_24h: coin.price_change_percentage_24h || 0,
+        price_change_percentage_1h_in_currency: coin.price_change_percentage_1h_in_currency || 0,
+        price_change_percentage_7d_in_currency: coin.price_change_percentage_7d_in_currency || 0,
+        sparkline_in_7d: {
+          price: coin.sparkline_in_7d?.price || []
+        },
+        circulating_supply: coin.circulating_supply || 0,
+        total_supply: coin.total_supply || 0,
+        ath: coin.ath || 0,
+        ath_change_percentage: coin.ath_change_percentage || 0,
+        ath_date: coin.ath_date || null,
+        atl: coin.atl || 0,
+        atl_change_percentage: coin.atl_change_percentage || 0,
+        atl_date: coin.atl_date || null
+      }));
+
+      marketDataCache = {
+        data: transformed,
+        lastUpdated: new Date()
+      };
+      
+      console.log(`✅ Market data fetched: ${transformed.length} assets`);
+      return transformed;
     }
-
-    // Format the data to match what your frontend expects
-    const formattedAssets = response.data.map(coin => ({
-      id: coin.id,
-      symbol: coin.symbol,
-      name: coin.name,
-      image: coin.image,
-      current_price: coin.current_price,
-      market_cap: coin.market_cap,
-      market_cap_rank: coin.market_cap_rank,
-      total_volume: coin.total_volume,
-      high_24h: coin.high_24h,
-      low_24h: coin.low_24h,
-      price_change_24h: coin.price_change_24h,
-      price_change_percentage_24h: coin.price_change_percentage_24h,
-      price_change_percentage_1h_in_currency: coin.price_change_percentage_1h_in_currency || 0,
-      price_change_percentage_7d_in_currency: coin.price_change_percentage_7d_in_currency || 0,
-      sparkline_in_7d: coin.sparkline_in_7d,
-      circulating_supply: coin.circulating_supply,
-      total_supply: coin.total_supply,
-      ath: coin.ath,
-      ath_change_percentage: coin.ath_change_percentage,
-      ath_date: coin.ath_date,
-      atl: coin.atl,
-      atl_change_percentage: coin.atl_change_percentage,
-      atl_date: coin.atl_date
-    }));
-
-    // Cache the response in Redis for 30 seconds (since prices change frequently)
-    await redis.setex('market:assets:cached', 30, JSON.stringify(formattedAssets));
-
-    res.status(200).json({
-      status: 'success',
-      data: formattedAssets,
-      timestamp: Date.now(),
-      source: 'coingecko'
-    });
-
+    
+    return marketDataCache.data || [];
+    
   } catch (error) {
-    console.error('Error fetching market assets from CoinGecko:', error.message);
+    console.error('❌ Market data fetch error:', error.message);
+    return marketDataCache.data || [];
+  }
+}
+
+// ENDPOINT: /api/market/assets
+// Returns EXACT structure frontend expects: { status: 'success', data: [...] }
+app.get('/api/market/assets', async (req, res) => {
+  try {
+    let assets = marketDataCache.data;
     
-    // Try fallback to cached data
-    try {
-      const cachedData = await redis.get('market:assets:cached');
-      if (cachedData) {
-        const parsed = JSON.parse(cachedData);
-        return res.status(200).json({
-          status: 'success',
-          data: parsed,
-          timestamp: Date.now(),
-          source: 'cache',
-          cached: true
-        });
-      }
-    } catch (cacheErr) {
-      console.error('Cache fallback failed:', cacheErr.message);
+    // Refresh if cache is older than 30 seconds or empty
+    if (!assets || assets.length === 0 || !marketDataCache.lastUpdated || 
+        (new Date() - marketDataCache.lastUpdated) > 30000) {
+      assets = await fetchMarketData();
     }
     
-    // If all fails, return empty array (frontend shows "refreshing soon" message)
-    res.status(200).json({
+    // Return EXACT structure frontend expects
+    res.json({
       status: 'success',
-      data: [],
-      timestamp: Date.now(),
-      error: 'Unable to fetch live market data'
+      data: assets || []
+    });
+    
+  } catch (error) {
+    console.error('Market assets endpoint error:', error);
+    // Return empty array - NO fake data
+    res.json({
+      status: 'success',
+      data: []
     });
   }
 });
+
+// Refresh cache every 30 seconds in background
+setInterval(async () => {
+  await fetchMarketData();
+}, 30000);
+
+// Initial cache load on server startup
+fetchMarketData().then(assets => {
+  console.log(`🚀 Market data cache initialized with ${assets?.length || 0} assets`);
+});
+
 
 
 
