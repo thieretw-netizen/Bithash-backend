@@ -10052,94 +10052,43 @@ app.post('/api/convert', protect, async (req, res) => {
 
 
 
-
 // =============================================
-// MARKET DATA ENDPOINT - WITH RATE LIMIT HANDLING
+// MARKET DATA ENDPOINT - EXACT FIX FOR 418 ERROR
 // =============================================
 
+// Cache with 60-second TTL (increased to reduce rate limits)
 let marketDataCache = {
-  data: [],
+  data: null,
   lastUpdated: null,
   isRefreshing: false
 };
 
-// Backup data source when CoinGecko rate limits
-async function fetchBackupMarketData() {
-  try {
-    console.log('📡 Using Binance as backup data source...');
-    
-    // Get top symbols from Binance
-    const tickers = await axios.get('https://api.binance.com/api/v3/ticker/24hr', {
-      params: { limit: 50 },
-      timeout: 8000
-    });
-    
-    if (tickers.data && Array.isArray(tickers.data)) {
-      // Filter USDT pairs and sort by quote volume
-      const usdtPairs = tickers.data
-        .filter(t => t.symbol.endsWith('USDT'))
-        .sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume))
-        .slice(0, 50);
-      
-      // Transform to match frontend format
-      const transformed = usdtPairs.map(t => {
-        const symbol = t.symbol.replace('USDT', '').toLowerCase();
-        const price = parseFloat(t.lastPrice);
-        const change24h = parseFloat(t.priceChangePercent);
-        
-        return {
-          id: symbol,
-          symbol: symbol,
-          name: symbol.toUpperCase(),
-          image: `https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/color/${symbol}.png`,
-          current_price: price,
-          market_cap: parseFloat(t.quoteVolume) * price,
-          total_volume: parseFloat(t.quoteVolume),
-          price_change_percentage_24h: change24h,
-          price_change_percentage_1h_in_currency: change24h * 0.3, // Approximate
-          price_change_percentage_7d_in_currency: change24h * 1.5, // Approximate
-          sparkline_in_7d: { price: [] },
-          high_24h: parseFloat(t.highPrice),
-          low_24h: parseFloat(t.lowPrice)
-        };
-      });
-      
-      console.log(`✅ Backup data fetched: ${transformed.length} assets from Binance`);
-      return transformed;
-    }
-  } catch (error) {
-    console.error('❌ Backup data fetch failed:', error.message);
-  }
-  
-  return [];
-}
-
-// Primary fetch from CoinGecko with retry logic
 async function fetchMarketData() {
+  // Prevent multiple simultaneous refreshes
   if (marketDataCache.isRefreshing) {
-    return marketDataCache.data;
+    return marketDataCache.data || [];
   }
   
   marketDataCache.isRefreshing = true;
   
   try {
-    console.log('📊 Fetching market data from CoinGecko...');
-    
+    // CRITICAL FIX: Add User-Agent header to avoid 418 error
     const response = await axios.get(
       'https://api.coingecko.com/api/v3/coins/markets',
       {
         params: {
           vs_currency: 'usd',
           order: 'market_cap_desc',
-          per_page: 100,
+          per_page: 50,
           page: 1,
           sparkline: true,
           price_change_percentage: '1h,24h,7d'
         },
-        timeout: 10000,
+        timeout: 15000,
         headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
           'Accept': 'application/json',
-          'User-Agent': 'BitHash-Capital/1.0'
+          'Accept-Language': 'en-US,en;q=0.9'
         }
       }
     );
@@ -10154,17 +10103,12 @@ async function fetchMarketData() {
         market_cap: coin.market_cap || 0,
         market_cap_rank: coin.market_cap_rank || 0,
         total_volume: coin.total_volume || 0,
-        high_24h: coin.high_24h || 0,
-        low_24h: coin.low_24h || 0,
-        price_change_24h: coin.price_change_24h || 0,
         price_change_percentage_24h: coin.price_change_percentage_24h || 0,
         price_change_percentage_1h_in_currency: coin.price_change_percentage_1h_in_currency || 0,
         price_change_percentage_7d_in_currency: coin.price_change_percentage_7d_in_currency || 0,
         sparkline_in_7d: {
-          price: coin.sparkline_in_7d?.price || []
-        },
-        circulating_supply: coin.circulating_supply || 0,
-        total_supply: coin.total_supply || 0
+          price: (coin.sparkline_in_7d?.price || []).slice(0, 30) // Limit sparkline size
+        }
       }));
 
       marketDataCache = {
@@ -10173,47 +10117,46 @@ async function fetchMarketData() {
         isRefreshing: false
       };
       
-      console.log(`✅ CoinGecko success: ${transformed.length} assets`);
+      console.log(`✅ Market data fetched: ${transformed.length} assets`);
       return transformed;
     }
-  } catch (error) {
-    console.error('❌ CoinGecko error:', error.message);
     
-    if (error.response?.status === 429) {
-      console.log('⚠️ Rate limited by CoinGecko. Using cached/backup data.');
-    }
-    
-    // If cache is empty, try backup source
-    if (!marketDataCache.data || marketDataCache.data.length === 0) {
-      const backupData = await fetchBackupMarketData();
-      if (backupData.length > 0) {
-        marketDataCache.data = backupData;
-        marketDataCache.lastUpdated = new Date();
-        marketDataCache.isRefreshing = false;
-        return backupData;
-      }
-    }
-  } finally {
     marketDataCache.isRefreshing = false;
+    return marketDataCache.data || [];
+    
+  } catch (error) {
+    console.error('Market data fetch error:', error.message);
+    if (error.response) {
+      console.error('   Status:', error.response.status);
+      console.error('   Status text:', error.response.statusText);
+    }
+    
+    marketDataCache.isRefreshing = false;
+    
+    // Return cached data if available
+    if (marketDataCache.data && marketDataCache.data.length > 0) {
+      console.log(`📦 Using cached data: ${marketDataCache.data.length} assets`);
+      return marketDataCache.data;
+    }
+    
+    return [];
   }
-  
-  return marketDataCache.data || [];
 }
 
-// ENDPOINT: /api/market/assets
+// Endpoint for Prices by Market Cap table
 app.get('/api/market/assets', async (req, res) => {
   try {
     let assets = marketDataCache.data;
     
-    // Refresh if cache is older than 60 seconds (reduced frequency to avoid rate limits)
-    const shouldRefresh = !assets || assets.length === 0 || 
-                         !marketDataCache.lastUpdated || 
-                         (new Date() - marketDataCache.lastUpdated) > 60000;
+    // Refresh if cache is older than 60 seconds or empty
+    const cacheAge = marketDataCache.lastUpdated ? (new Date() - marketDataCache.lastUpdated) : Infinity;
     
-    if (shouldRefresh) {
+    if (!assets || assets.length === 0 || cacheAge > 60000) {
+      console.log('🔄 Cache expired, fetching fresh data...');
       assets = await fetchMarketData();
     }
     
+    // ALWAYS return success with whatever data we have (even if empty)
     res.json({
       status: 'success',
       data: assets || []
@@ -10221,6 +10164,7 @@ app.get('/api/market/assets', async (req, res) => {
     
   } catch (error) {
     console.error('Market assets endpoint error:', error);
+    // Always return success structure to avoid frontend breaking
     res.json({
       status: 'success',
       data: marketDataCache.data || []
@@ -10228,16 +10172,21 @@ app.get('/api/market/assets', async (req, res) => {
   }
 });
 
-// Refresh cache every 60 seconds (not 30) to avoid rate limits
-setInterval(async () => {
+// Refresh cache every 60 seconds (reduced frequency)
+let refreshInterval = setInterval(async () => {
+  console.log('🔄 Background market data refresh...');
   await fetchMarketData();
 }, 60000);
 
-// Initial cache load
+// Initial cache on startup
 fetchMarketData().then(assets => {
   console.log(`🚀 Market data initialized with ${assets?.length || 0} assets`);
 });
 
+// Cleanup on server shutdown
+process.on('SIGTERM', () => {
+  if (refreshInterval) clearInterval(refreshInterval);
+});
 
 
 
