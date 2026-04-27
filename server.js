@@ -26028,11 +26028,255 @@ app.get('/api/market/pairs', async (req, res) => {
 
 
 
+// =============================================
+// GET /api/market/candles - For TradingView chart data
+// =============================================
+app.get('/api/market/candles', async (req, res) => {
+  try {
+    const { symbol, interval = '15m', limit = 200 } = req.query;
+    
+    if (!symbol) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Symbol parameter is required'
+      });
+    }
+    
+    // Map interval to Binance format
+    const intervalMap = {
+      '1s': '1s',
+      '1m': '1m',
+      '5m': '5m',
+      '15m': '15m',
+      '30m': '30m',
+      '1h': '1h',
+      '4h': '4h',
+      '1d': '1d',
+      '1w': '1w'
+    };
+    
+    const binanceInterval = intervalMap[interval] || '15m';
+    
+    // Fetch candles from Binance API
+    const response = await axios.get(
+      `https://api.binance.com/api/v3/klines`,
+      {
+        params: {
+          symbol: symbol.toUpperCase(),
+          interval: binanceInterval,
+          limit: parseInt(limit)
+        },
+        timeout: 10000,
+        headers: { 'User-Agent': 'Mozilla/5.0' }
+      }
+    );
+    
+    if (!response.data || !Array.isArray(response.data)) {
+      return res.status(200).json({
+        status: 'success',
+        candles: []
+      });
+    }
+    
+    // Transform Binance kline data to frontend format
+    const candles = response.data.map(kline => ({
+      openTime: new Date(kline[0]),
+      open: parseFloat(kline[1]),
+      high: parseFloat(kline[2]),
+      low: parseFloat(kline[3]),
+      close: parseFloat(kline[4]),
+      volume: parseFloat(kline[5]),
+      closeTime: new Date(kline[6]),
+      quoteVolume: parseFloat(kline[7]),
+      trades: parseInt(kline[8])
+    }));
+    
+    res.status(200).json({
+      status: 'success',
+      candles: candles
+    });
+    
+  } catch (err) {
+    console.error('Error fetching candles:', err);
+    
+    // Return empty candles on error - chart will show "No data" but not break
+    res.status(200).json({
+      status: 'success',
+      candles: []
+    });
+  }
+});
 
 
+// =============================================
+// GET /api/market/ticker/24hr - 24hr ticker stats for a symbol
+// =============================================
+app.get('/api/market/ticker/24hr', async (req, res) => {
+  try {
+    const { symbol } = req.query;
+    
+    if (!symbol) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Symbol parameter is required'
+      });
+    }
+    
+    // Try Redis cache first
+    const tickerKey = REDIS_KEYS.TICKER(symbol.toUpperCase());
+    const cachedTicker = await redis.get(tickerKey);
+    
+    if (cachedTicker) {
+      const ticker = JSON.parse(cachedTicker);
+      return res.status(200).json({
+        symbol: ticker.symbol,
+        priceChange: ticker.priceChange || 0,
+        priceChangePercent: ticker.priceChangePercent || 0,
+        weightedAvgPrice: ticker.weightedAvgPrice || 0,
+        prevClosePrice: ticker.prevClosePrice || 0,
+        lastPrice: ticker.lastPrice || 0,
+        lastQty: ticker.lastQty || 0,
+        bidPrice: ticker.bidPrice || 0,
+        askPrice: ticker.askPrice || 0,
+        openPrice: ticker.openPrice || 0,
+        highPrice: ticker.highPrice || 0,
+        lowPrice: ticker.lowPrice || 0,
+        volume: ticker.volume || 0,
+        quoteVolume: ticker.quoteVolume || 0,
+        openTime: ticker.openTime,
+        closeTime: ticker.closeTime,
+        firstId: ticker.firstId || 0,
+        lastId: ticker.lastId || 0,
+        count: ticker.count || 0
+      });
+    }
+    
+    // Fallback to Binance API
+    const response = await axios.get(
+      `https://api.binance.com/api/v3/ticker/24hr`,
+      {
+        params: { symbol: symbol.toUpperCase() },
+        timeout: 10000,
+        headers: { 'User-Agent': 'Mozilla/5.0' }
+      }
+    );
+    
+    if (!response.data) {
+      return res.status(200).json({
+        symbol: symbol.toUpperCase(),
+        lastPrice: 0,
+        priceChangePercent: 0,
+        highPrice: 0,
+        lowPrice: 0,
+        volume: 0,
+        quoteVolume: 0,
+        openPrice: 0
+      });
+    }
+    
+    const data = response.data;
+    
+    res.status(200).json({
+      symbol: data.symbol,
+      priceChange: parseFloat(data.priceChange),
+      priceChangePercent: parseFloat(data.priceChangePercent),
+      weightedAvgPrice: parseFloat(data.weightedAvgPrice),
+      prevClosePrice: parseFloat(data.prevClosePrice),
+      lastPrice: parseFloat(data.lastPrice),
+      lastQty: parseFloat(data.lastQty),
+      bidPrice: parseFloat(data.bidPrice),
+      askPrice: parseFloat(data.askPrice),
+      openPrice: parseFloat(data.openPrice),
+      highPrice: parseFloat(data.highPrice),
+      lowPrice: parseFloat(data.lowPrice),
+      volume: parseFloat(data.volume),
+      quoteVolume: parseFloat(data.quoteVolume),
+      openTime: data.openTime,
+      closeTime: data.closeTime,
+      firstId: data.firstId,
+      lastId: data.lastId,
+      count: data.count
+    });
+    
+  } catch (err) {
+    console.error('Error fetching 24hr ticker:', err);
+    
+    // Return default values on error - frontend handles gracefully
+    res.status(200).json({
+      symbol: req.query.symbol?.toUpperCase() || 'BTCUSDT',
+      lastPrice: 0,
+      priceChangePercent: 0,
+      highPrice: 0,
+      lowPrice: 0,
+      volume: 0,
+      quoteVolume: 0,
+      openPrice: 0
+    });
+  }
+});
 
 
-
+// =============================================
+// GET /api/market/trades - Recent trades for a symbol
+// =============================================
+app.get('/api/market/trades', async (req, res) => {
+  try {
+    const { symbol, limit = 50 } = req.query;
+    
+    if (!symbol) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Symbol parameter is required'
+      });
+    }
+    
+    // Try Redis cache first
+    const tradesKey = REDIS_KEYS.TRADES(symbol.toUpperCase());
+    const cachedTrades = await redis.get(tradesKey);
+    
+    if (cachedTrades) {
+      const trades = JSON.parse(cachedTrades);
+      return res.status(200).json(trades.slice(0, parseInt(limit)));
+    }
+    
+    // Fallback to Binance API
+    const response = await axios.get(
+      `https://api.binance.com/api/v3/trades`,
+      {
+        params: {
+          symbol: symbol.toUpperCase(),
+          limit: parseInt(limit)
+        },
+        timeout: 10000,
+        headers: { 'User-Agent': 'Mozilla/5.0' }
+      }
+    );
+    
+    if (!response.data || !Array.isArray(response.data)) {
+      return res.status(200).json([]);
+    }
+    
+    // Transform Binance trade data to frontend format
+    const trades = response.data.map(trade => ({
+      id: trade.id,
+      price: parseFloat(trade.price),
+      amount: parseFloat(trade.qty),
+      time: trade.time,
+      isBuyerMaker: trade.isBuyerMaker
+    }));
+    
+    // Cache trades in Redis for 10 seconds
+    await redis.setex(tradesKey, 10, JSON.stringify(trades));
+    
+    res.status(200).json(trades);
+    
+  } catch (err) {
+    console.error('Error fetching recent trades:', err);
+    
+    // Return empty array on error
+    res.status(200).json([]);
+  }
+});
 
 
 
