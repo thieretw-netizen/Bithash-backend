@@ -26712,6 +26712,124 @@ app.get('/api/asset/extra', async (req, res) => {
 });
 
 
+// =============================================
+// GET /api/trading/user-limits - Get user's trading limits and available balance
+// Supports ALL quote and base assets dynamically
+// =============================================
+app.get('/api/trading/user-limits', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { symbol, side } = req.query;
+    
+    if (!symbol || !side) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Symbol and side parameters are required'
+      });
+    }
+    
+    // Get user from database
+    const user = await User.findById(userId);
+    
+    if (!user || !user.balances) {
+      return res.status(200).json({
+        maxAmount: 0,
+        availableBalance: 0,
+        asset: 'UNKNOWN'
+      });
+    }
+    
+    // Dynamically extract base and quote assets from symbol
+    // Examples: BTCUSDT -> base=BTC, quote=USDT
+    //          ETHBTC -> base=ETH, quote=BTC
+    //          SOLUSDC -> base=SOL, quote=USDC
+    //          XRPETH -> base=XRP, quote=ETH
+    let baseAsset = '';
+    let quoteAsset = '';
+    
+    // Common quote assets to detect (in order of priority)
+    const quoteAssets = ['USDT', 'USDC', 'BTC', 'ETH', 'BNB', 'SOL', 'EUR', 'GBP', 'TRY', 'BUSD', 'DAI'];
+    
+    for (const quote of quoteAssets) {
+      if (symbol.endsWith(quote)) {
+        quoteAsset = quote;
+        baseAsset = symbol.slice(0, -quote.length);
+        break;
+      }
+    }
+    
+    // If no quote asset found, assume last 3-4 chars are quote
+    if (!quoteAsset) {
+      quoteAsset = symbol.slice(-4);
+      baseAsset = symbol.slice(0, -4);
+    }
+    
+    const baseLower = baseAsset.toLowerCase();
+    const quoteLower = quoteAsset.toLowerCase();
+    
+    let availableBalance = 0;
+    let maxAmount = 0;
+    
+    if (side === 'buy') {
+      // For BUY, check QUOTE asset balance (e.g., USDT, BTC, ETH)
+      // Check both main and matured wallets
+      const mainQuoteBalance = user.balances.main?.get(quoteLower) || 0;
+      const maturedQuoteBalance = user.balances.matured?.get(quoteLower) || 0;
+      availableBalance = mainQuoteBalance + maturedQuoteBalance;
+      
+      // Get current price for this pair
+      let currentPrice = 0;
+      const tickerKey = REDIS_KEYS.TICKER(symbol.toUpperCase());
+      const tickerRaw = await redis.get(tickerKey);
+      
+      if (tickerRaw) {
+        const ticker = JSON.parse(tickerRaw);
+        currentPrice = ticker.lastPrice || 0;
+      } else {
+        try {
+          const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol.toUpperCase()}`, {
+            timeout: 5000,
+            headers: { 'User-Agent': 'Mozilla/5.0' }
+          });
+          currentPrice = parseFloat(response.data.price);
+        } catch (err) {
+          currentPrice = 0;
+        }
+      }
+      
+      // Calculate max amount of base asset you can buy
+      maxAmount = currentPrice > 0 ? availableBalance / currentPrice : 0;
+      
+      res.status(200).json({
+        maxAmount: maxAmount,
+        availableBalance: availableBalance,
+        asset: quoteAsset
+      });
+      
+    } else {
+      // For SELL, check BASE asset balance (e.g., BTC, ETH, SOL)
+      // Check both main and matured wallets
+      const mainBaseBalance = user.balances.main?.get(baseLower) || 0;
+      const maturedBaseBalance = user.balances.matured?.get(baseLower) || 0;
+      availableBalance = mainBaseBalance + maturedBaseBalance;
+      maxAmount = availableBalance;
+      
+      res.status(200).json({
+        maxAmount: maxAmount,
+        availableBalance: availableBalance,
+        asset: baseAsset
+      });
+    }
+    
+  } catch (err) {
+    console.error('Error fetching user trading limits:', err);
+    res.status(200).json({
+      maxAmount: 0,
+      availableBalance: 0,
+      asset: 'UNKNOWN'
+    });
+  }
+});
 
 
 
