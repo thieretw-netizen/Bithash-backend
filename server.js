@@ -26561,7 +26561,155 @@ app.get('/api/analysis', async (req, res) => {
 
 
 
+// =============================================
+// GET /api/market/orderbook - Get order book depth for a symbol
+// =============================================
+app.get('/api/market/orderbook', async (req, res) => {
+  try {
+    const { symbol, limit = 100 } = req.query;
+    
+    if (!symbol) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Symbol parameter is required'
+      });
+    }
+    
+    // Try Redis cache first (from WebSocket orderbook updates)
+    const orderbookKey = REDIS_KEYS.ORDERBOOK(symbol.toUpperCase());
+    const cachedOrderbook = await redis.get(orderbookKey);
+    
+    if (cachedOrderbook) {
+      const orderbook = JSON.parse(cachedOrderbook);
+      return res.status(200).json({
+        bids: orderbook.bids || [],
+        asks: orderbook.asks || [],
+        lastUpdateId: orderbook.lastUpdateId || 0
+      });
+    }
+    
+    // Fallback to Binance API
+    const response = await axios.get(
+      `https://api.binance.com/api/v3/depth`,
+      {
+        params: {
+          symbol: symbol.toUpperCase(),
+          limit: parseInt(limit)
+        },
+        timeout: 10000,
+        headers: { 'User-Agent': 'Mozilla/5.0' }
+      }
+    );
+    
+    if (!response.data) {
+      return res.status(200).json({
+        bids: [],
+        asks: [],
+        lastUpdateId: 0
+      });
+    }
+    
+    res.status(200).json({
+      bids: response.data.bids || [],
+      asks: response.data.asks || [],
+      lastUpdateId: response.data.lastUpdateId || 0
+    });
+    
+  } catch (err) {
+    console.error('Error fetching orderbook:', err);
+    
+    // Return empty orderbook on error - frontend will show "No data"
+    res.status(200).json({
+      bids: [],
+      asks: [],
+      lastUpdateId: 0
+    });
+  }
+});
 
+// =============================================
+// GET /api/asset/extra - Get additional asset information (tags, networks, social links)
+// =============================================
+app.get('/api/asset/extra', async (req, res) => {
+  try {
+    const { symbol } = req.query;
+    
+    if (!symbol) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Symbol parameter is required'
+      });
+    }
+    
+    // Try Redis cache first
+    const assetExtraKey = `asset:extra:${symbol.toUpperCase()}`;
+    const cachedExtra = await redis.get(assetExtraKey);
+    
+    if (cachedExtra) {
+      return res.status(200).json(JSON.parse(cachedExtra));
+    }
+    
+    // Default tags based on symbol
+    const defaultTags = {
+      'BTC': ['POW', 'Store of Value', 'Payments', 'Layer 1', 'Digital Gold'],
+      'ETH': ['Smart Contracts', 'DeFi', 'NFT', 'Layer 1', 'Staking'],
+      'BNB': ['Exchange Token', 'Smart Contracts', 'BSC', 'DeFi'],
+      'SOL': ['High Performance', 'Layer 1', 'DeFi', 'NFT'],
+      'XRP': ['Payments', 'Enterprise', 'Banking', 'RippleNet'],
+      'DOGE': ['Meme', 'Payments', 'Community'],
+      'ADA': ['Smart Contracts', 'Research', 'Layer 1', 'Staking'],
+      'TRX': ['Entertainment', 'DeFi', 'Layer 1'],
+      'LTC': ['Payments', 'Digital Silver', 'Fast Transactions'],
+      'DOT': ['Interoperability', 'Parachains', 'Layer 0'],
+      'MATIC': ['Layer 2', 'Scaling', 'DeFi', 'Polygon'],
+      'LINK': ['Oracle', 'Data Feeds', 'DeFi']
+    };
+    
+    // Default networks based on symbol
+    const defaultNetworks = {
+      'BTC': ['Bitcoin', 'Lightning Network'],
+      'ETH': ['Ethereum', 'Arbitrum', 'Optimism', 'Base'],
+      'BNB': ['BNB Smart Chain', 'BNB Beacon Chain'],
+      'SOL': ['Solana'],
+      'TRX': ['TRON', 'TRC-20', 'TRC-10'],
+      'LTC': ['Litecoin'],
+      'XRP': ['XRP Ledger'],
+      'DOGE': ['Dogecoin']
+    };
+    
+    const tags = defaultTags[symbol.toUpperCase()] || ['Cryptocurrency', 'Digital Asset'];
+    const networks = defaultNetworks[symbol.toUpperCase()] || ['Blockchain'];
+    
+    const assetExtra = {
+      tags: tags,
+      networks: networks,
+      website: `https://${symbol.toLowerCase()}.org`,
+      explorer: `https://explorer.${symbol.toLowerCase()}.com`,
+      twitter: `https://twitter.com/${symbol.toLowerCase()}`,
+      reddit: `https://reddit.com/r/${symbol.toLowerCase()}`,
+      updatedAt: new Date()
+    };
+    
+    // Cache for 1 hour
+    await redis.setex(assetExtraKey, 3600, JSON.stringify(assetExtra));
+    
+    res.status(200).json(assetExtra);
+    
+  } catch (err) {
+    console.error('Error fetching asset extra info:', err);
+    
+    // Return default values on error
+    res.status(200).json({
+      tags: ['Cryptocurrency', 'Digital Asset'],
+      networks: ['Blockchain'],
+      website: '',
+      explorer: '',
+      twitter: '',
+      reddit: '',
+      updatedAt: new Date()
+    });
+  }
+});
 
 
 
