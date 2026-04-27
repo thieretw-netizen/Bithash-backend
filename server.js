@@ -27072,6 +27072,194 @@ const setupMarketWebSocket = (server) => {
   });
 };
 
+
+
+
+// Add these TWO WebSocket endpoints to your existing setup (around line 16150, after your existing WebSocket servers)
+
+// =============================================
+// WEBSOCKET 1: Ticker WebSocket at /ws/ticker
+// =============================================
+const tickerWss = new WebSocket.Server({ 
+  server: httpServer, 
+  path: '/ws/ticker'
+});
+
+const tickerClients = new Set();
+
+tickerWss.on('connection', (ws) => {
+  tickerClients.add(ws);
+  console.log(`📈 Ticker WebSocket client connected. Total: ${tickerClients.size}`);
+
+  ws.on('message', async (message) => {
+    try {
+      const data = JSON.parse(message);
+      if (data.type === 'ping') {
+        ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
+      }
+    } catch (err) {
+      console.error('Ticker WebSocket message error:', err);
+    }
+  });
+
+  ws.on('close', () => {
+    tickerClients.delete(ws);
+    console.log(`📈 Ticker WebSocket client disconnected. Total: ${tickerClients.size}`);
+  });
+});
+
+// Broadcast ticker updates every 3 seconds
+setInterval(async () => {
+  if (tickerClients.size === 0) return;
+  
+  try {
+    const allPairsRaw = await redis.get(REDIS_KEYS.ALL_PAIRS);
+    if (!allPairsRaw) return;
+    
+    const allPairs = JSON.parse(allPairsRaw);
+    const tickerData = [];
+    
+    for (const pair of allPairs.slice(0, 30)) {
+      const tickerKey = REDIS_KEYS.TICKER(pair.symbol);
+      const tickerRaw = await redis.get(tickerKey);
+      
+      if (tickerRaw) {
+        const ticker = JSON.parse(tickerRaw);
+        tickerData.push({
+          symbol: `${pair.base}/${pair.quote}`,
+          price: ticker.lastPrice || 0,
+          change24h: ticker.priceChangePercent || 0
+        });
+      }
+    }
+    
+    const message = JSON.stringify({
+      type: 'ticker_update',
+      data: tickerData,
+      timestamp: Date.now()
+    });
+    
+    tickerClients.forEach(client => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(message);
+      }
+    });
+  } catch (err) {
+    console.error('Ticker broadcast error:', err);
+  }
+}, 3000);
+
+
+// =============================================
+// WEBSOCKET 2: Spot Market WebSocket at /ws/spotmarket
+// =============================================
+const spotWss = new WebSocket.Server({ 
+  server: httpServer, 
+  path: '/ws/spotmarket'
+});
+
+const spotClients = new Set();
+
+spotWss.on('connection', (ws) => {
+  spotClients.add(ws);
+  console.log(`📊 Spot market WebSocket client connected. Total: ${spotClients.size}`);
+
+  ws.on('message', async (message) => {
+    try {
+      const data = JSON.parse(message);
+      
+      if (data.type === 'ping') {
+        ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
+      }
+      
+      if (data.type === 'subscribe' && data.pair) {
+        ws.pair = data.pair;
+        ws.channels = data.channels || ['ticker', 'orderbook', 'trades'];
+        
+        // Send initial data immediately
+        const tickerKey = REDIS_KEYS.TICKER(data.pair);
+        const tickerRaw = await redis.get(tickerKey);
+        if (tickerRaw) {
+          ws.send(JSON.stringify({
+            type: 'ticker',
+            symbol: data.pair,
+            price: JSON.parse(tickerRaw).lastPrice,
+            stats: JSON.parse(tickerRaw)
+          }));
+        }
+        
+        const orderbookKey = REDIS_KEYS.ORDERBOOK(data.pair);
+        const orderbookRaw = await redis.get(orderbookKey);
+        if (orderbookRaw) {
+          ws.send(JSON.stringify({
+            type: 'orderbook',
+            symbol: data.pair,
+            ...JSON.parse(orderbookRaw)
+          }));
+        }
+      }
+    } catch (err) {
+      console.error('Spot market WebSocket message error:', err);
+    }
+  });
+
+  ws.on('close', () => {
+    spotClients.delete(ws);
+    console.log(`📊 Spot market WebSocket client disconnected. Total: ${spotClients.size}`);
+  });
+});
+
+// Broadcast market data every 2 seconds
+setInterval(async () => {
+  if (spotClients.size === 0) return;
+  
+  try {
+    for (const client of spotClients) {
+      if (client.readyState !== WebSocket.OPEN) continue;
+      if (!client.pair) continue;
+      
+      // Send ticker update
+      const tickerKey = REDIS_KEYS.TICKER(client.pair);
+      const tickerRaw = await redis.get(tickerKey);
+      if (tickerRaw) {
+        const ticker = JSON.parse(tickerRaw);
+        client.send(JSON.stringify({
+          type: 'ticker',
+          symbol: client.pair,
+          price: ticker.lastPrice,
+          priceChangePercent: ticker.priceChangePercent,
+          highPrice: ticker.highPrice,
+          lowPrice: ticker.lowPrice,
+          volume: ticker.volume,
+          quoteVolume: ticker.quoteVolume,
+          timestamp: Date.now()
+        }));
+      }
+      
+      // Send orderbook update
+      const orderbookKey = REDIS_KEYS.ORDERBOOK(client.pair);
+      const orderbookRaw = await redis.get(orderbookKey);
+      if (orderbookRaw) {
+        const orderbook = JSON.parse(orderbookRaw);
+        client.send(JSON.stringify({
+          type: 'orderbook',
+          symbol: client.pair,
+          bids: orderbook.bids?.slice(0, 20) || [],
+          asks: orderbook.asks?.slice(0, 20) || [],
+          timestamp: Date.now()
+        }));
+      }
+    }
+  } catch (err) {
+    console.error('Spot market broadcast error:', err);
+  }
+}, 2000);
+
+console.log('✅ WebSocket endpoints: /ws/ticker, /ws/spotmarket, /ws/market');
+
+
+
+
 io.on('connection', async (socket) => {
   console.log('New client connected:', socket.id);
   
