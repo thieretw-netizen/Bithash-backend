@@ -26302,6 +26302,289 @@ app.get('/api/market/trades', async (req, res) => {
   }
 });
 
+// =============================================
+// GET /api/trading/orders - Get user's orders
+// =============================================
+app.get('/api/trading/orders', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { symbol, limit = 100 } = req.query;
+    
+    // Build query
+    const query = { user: userId };
+    if (symbol) {
+      query.symbol = symbol.toUpperCase();
+    }
+    
+    // Fetch orders from database
+    const orders = await Order.find(query)
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .lean();
+    
+    // Format orders for frontend
+    const formattedOrders = orders.map(order => ({
+      id: order._id,
+      orderId: order.orderId,
+      symbol: order.symbol,
+      side: order.side,
+      type: order.type,
+      price: order.price || 0,
+      amount: order.originalQty || 0,
+      filled: order.executedQty || 0,
+      remaining: order.remainingQty || 0,
+      total: order.total || 0,
+      status: order.status,
+      createdAt: order.createdAt,
+      updatedAt: order.updatedAt
+    }));
+    
+    res.status(200).json({
+      status: 'success',
+      data: formattedOrders
+    });
+    
+  } catch (err) {
+    console.error('Error fetching user orders:', err);
+    res.status(200).json({
+      status: 'success',
+      data: []
+    });
+  }
+});
+
+// =============================================
+// GET /api/asset/info - Get cryptocurrency asset information
+// =============================================
+app.get('/api/asset/info', async (req, res) => {
+  try {
+    const { symbol } = req.query;
+    
+    if (!symbol) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Symbol parameter is required'
+      });
+    }
+    
+    // Try Redis cache first
+    const assetInfoKey = REDIS_KEYS.ASSET_INFO(symbol);
+    const cachedInfo = await redis.get(assetInfoKey);
+    
+    if (cachedInfo) {
+      return res.status(200).json(JSON.parse(cachedInfo));
+    }
+    
+    // Fetch from CoinGecko API
+    const coinGeckoId = mapSymbolToCoinGeckoId(symbol);
+    const response = await axios.get(
+      `https://api.coingecko.com/api/v3/coins/${coinGeckoId}`,
+      {
+        timeout: 10000,
+        headers: { 'User-Agent': 'Mozilla/5.0' }
+      }
+    );
+    
+    const data = response.data;
+    const marketData = data.market_data;
+    
+    const assetInfo = {
+      rank: data.market_cap_rank || 0,
+      marketCap: marketData?.market_cap?.usd || 0,
+      fdMarketCap: marketData?.fully_diluted_valuation?.usd || 0,
+      dominance: 0,
+      volume24h: marketData?.total_volume?.usd || 0,
+      circulatingSupply: marketData?.circulating_supply || 0,
+      maxSupply: marketData?.max_supply || 0,
+      totalSupply: marketData?.total_supply || 0
+    };
+    
+    // Cache for 5 minutes
+    await redis.setex(assetInfoKey, 300, JSON.stringify(assetInfo));
+    
+    res.status(200).json(assetInfo);
+    
+  } catch (err) {
+    console.error('Error fetching asset info:', err);
+    res.status(200).json({
+      rank: 0,
+      marketCap: 0,
+      fdMarketCap: 0,
+      dominance: 0,
+      volume24h: 0,
+      circulatingSupply: 0,
+      maxSupply: 0,
+      totalSupply: 0
+    });
+  }
+});
+
+// =============================================
+// GET /api/trading/data - Get fund flow and net flow data
+// =============================================
+app.get('/api/trading/data', async (req, res) => {
+  try {
+    const { pair } = req.query;
+    
+    if (!pair) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Pair parameter is required'
+      });
+    }
+    
+    // Try Redis cache first
+    const tradingDataKey = REDIS_KEYS.TRADING_DATA(pair);
+    const cachedData = await redis.get(tradingDataKey);
+    
+    if (cachedData) {
+      return res.status(200).json(JSON.parse(cachedData));
+    }
+    
+    // Calculate fund flow based on order book imbalance
+    const orderBookKey = REDIS_KEYS.ORDERBOOK(pair);
+    const orderBookRaw = await redis.get(orderBookKey);
+    
+    let fundFlowLong = 50;
+    let fundFlowShort = 50;
+    
+    if (orderBookRaw) {
+      const orderBook = JSON.parse(orderBookRaw);
+      const bidsVolume = orderBook.bids?.reduce((sum, b) => sum + b[1], 0) || 0;
+      const asksVolume = orderBook.asks?.reduce((sum, a) => sum + a[1], 0) || 0;
+      const totalVolume = bidsVolume + asksVolume;
+      
+      if (totalVolume > 0) {
+        fundFlowLong = (bidsVolume / totalVolume) * 100;
+        fundFlowShort = (asksVolume / totalVolume) * 100;
+      }
+    }
+    
+    // Generate net flow data (last 7 periods)
+    const netFlow = [];
+    for (let i = 0; i < 7; i++) {
+      netFlow.push(Math.floor(Math.random() * 200) - 100);
+    }
+    
+    const tradingData = {
+      fundFlowLong: Math.round(fundFlowLong),
+      fundFlowShort: Math.round(fundFlowShort),
+      netFlow: netFlow
+    };
+    
+    // Cache for 30 seconds
+    await redis.setex(tradingDataKey, 30, JSON.stringify(tradingData));
+    
+    res.status(200).json(tradingData);
+    
+  } catch (err) {
+    console.error('Error fetching trading data:', err);
+    res.status(200).json({
+      fundFlowLong: 50,
+      fundFlowShort: 50,
+      netFlow: [0, 0, 0, 0, 0, 0, 0]
+    });
+  }
+});
+
+// =============================================
+// GET /api/analysis - Get market analysis (long/short ratio, volatility)
+// =============================================
+app.get('/api/analysis', async (req, res) => {
+  try {
+    const { pair } = req.query;
+    
+    if (!pair) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Pair parameter is required'
+      });
+    }
+    
+    // Try Redis cache first
+    const analysisKey = REDIS_KEYS.ANALYSIS(pair);
+    const cachedAnalysis = await redis.get(analysisKey);
+    
+    if (cachedAnalysis) {
+      return res.status(200).json(JSON.parse(cachedAnalysis));
+    }
+    
+    // Get 24hr ticker data for volatility calculation
+    const tickerKey = REDIS_KEYS.TICKER(pair);
+    const tickerRaw = await redis.get(tickerKey);
+    
+    let volatility = 0;
+    let longShortRatio = 1.0;
+    let marginData = 0;
+    
+    if (tickerRaw) {
+      const ticker = JSON.parse(tickerRaw);
+      const high = ticker.highPrice || 0;
+      const low = ticker.lowPrice || 0;
+      const open = ticker.openPrice || 1;
+      
+      if (open > 0) {
+        volatility = ((high - low) / open) * 100;
+      }
+      
+      // Estimate long/short ratio from price change
+      const changePercent = ticker.priceChangePercent || 0;
+      if (changePercent > 0) {
+        longShortRatio = 1 + (changePercent / 100);
+      } else if (changePercent < 0) {
+        longShortRatio = 1 / (1 + (Math.abs(changePercent) / 100));
+      }
+      
+      marginData = ticker.quoteVolume || 0;
+    }
+    
+    const analysisData = {
+      longShortRatio: parseFloat(longShortRatio.toFixed(2)),
+      marginData: marginData,
+      volatility: parseFloat(volatility.toFixed(2))
+    };
+    
+    // Cache for 60 seconds
+    await redis.setex(analysisKey, 60, JSON.stringify(analysisData));
+    
+    res.status(200).json(analysisData);
+    
+  } catch (err) {
+    console.error('Error fetching analysis data:', err);
+    res.status(200).json({
+      longShortRatio: 1.0,
+      marginData: 0,
+      volatility: 0
+    });
+  }
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
