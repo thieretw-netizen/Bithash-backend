@@ -26109,61 +26109,123 @@ app.get('/api/market/candles', async (req, res) => {
 
 
 // =============================================
-// GET /api/market/ticker/24hr - 24hr ticker stats for a symbol
-// =============================================
 app.get('/api/market/ticker/24hr', async (req, res) => {
   try {
     const { symbol } = req.query;
     
-    if (!symbol) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Symbol parameter is required'
-      });
-    }
-    
-    // Try Redis cache first
-    const tickerKey = REDIS_KEYS.TICKER(symbol.toUpperCase());
-    const cachedTicker = await redis.get(tickerKey);
-    
-    if (cachedTicker) {
-      const ticker = JSON.parse(cachedTicker);
-      return res.status(200).json({
-        symbol: ticker.symbol,
-        priceChange: ticker.priceChange || 0,
-        priceChangePercent: ticker.priceChangePercent || 0,
-        weightedAvgPrice: ticker.weightedAvgPrice || 0,
-        prevClosePrice: ticker.prevClosePrice || 0,
-        lastPrice: ticker.lastPrice || 0,
-        lastQty: ticker.lastQty || 0,
-        bidPrice: ticker.bidPrice || 0,
-        askPrice: ticker.askPrice || 0,
-        openPrice: ticker.openPrice || 0,
-        highPrice: ticker.highPrice || 0,
-        lowPrice: ticker.lowPrice || 0,
-        volume: ticker.volume || 0,
-        quoteVolume: ticker.quoteVolume || 0,
-        openTime: ticker.openTime,
-        closeTime: ticker.closeTime,
-        firstId: ticker.firstId || 0,
-        lastId: ticker.lastId || 0,
-        count: ticker.count || 0
-      });
-    }
-    
-    // Fallback to Binance API
-    const response = await axios.get(
-      `https://api.binance.com/api/v3/ticker/24hr`,
-      {
-        params: { symbol: symbol.toUpperCase() },
-        timeout: 10000,
-        headers: { 'User-Agent': 'Mozilla/5.0' }
+    // If symbol is provided, return single ticker
+    if (symbol) {
+      // Try Redis cache first
+      const tickerKey = REDIS_KEYS.TICKER(symbol.toUpperCase());
+      const cachedTicker = await redis.get(tickerKey);
+      
+      if (cachedTicker) {
+        const ticker = JSON.parse(cachedTicker);
+        return res.status(200).json({
+          symbol: ticker.symbol,
+          priceChange: ticker.priceChange || 0,
+          priceChangePercent: ticker.priceChangePercent || 0,
+          weightedAvgPrice: ticker.weightedAvgPrice || 0,
+          prevClosePrice: ticker.prevClosePrice || 0,
+          lastPrice: ticker.lastPrice || 0,
+          lastQty: ticker.lastQty || 0,
+          bidPrice: ticker.bidPrice || 0,
+          askPrice: ticker.askPrice || 0,
+          openPrice: ticker.openPrice || 0,
+          highPrice: ticker.highPrice || 0,
+          lowPrice: ticker.lowPrice || 0,
+          volume: ticker.volume || 0,
+          quoteVolume: ticker.quoteVolume || 0,
+          openTime: ticker.openTime,
+          closeTime: ticker.closeTime,
+          firstId: ticker.firstId || 0,
+          lastId: ticker.lastId || 0,
+          count: ticker.count || 0
+        });
       }
-    );
-    
-    if (!response.data) {
+      
+      // Fallback to Binance API
+      const response = await axios.get(
+        `https://api.binance.com/api/v3/ticker/24hr`,
+        {
+          params: { symbol: symbol.toUpperCase() },
+          timeout: 10000,
+          headers: { 'User-Agent': 'Mozilla/5.0' }
+        }
+      );
+      
+      const data = response.data;
+      
       return res.status(200).json({
-        symbol: symbol.toUpperCase(),
+        symbol: data.symbol,
+        priceChange: parseFloat(data.priceChange),
+        priceChangePercent: parseFloat(data.priceChangePercent),
+        weightedAvgPrice: parseFloat(data.weightedAvgPrice),
+        prevClosePrice: parseFloat(data.prevClosePrice),
+        lastPrice: parseFloat(data.lastPrice),
+        lastQty: parseFloat(data.lastQty),
+        bidPrice: parseFloat(data.bidPrice),
+        askPrice: parseFloat(data.askPrice),
+        openPrice: parseFloat(data.openPrice),
+        highPrice: parseFloat(data.highPrice),
+        lowPrice: parseFloat(data.lowPrice),
+        volume: parseFloat(data.volume),
+        quoteVolume: parseFloat(data.quoteVolume),
+        openTime: data.openTime,
+        closeTime: data.closeTime,
+        firstId: data.firstId,
+        lastId: data.lastId,
+        count: data.count
+      });
+    }
+    
+    // If no symbol provided, return all tickers (for ticker bar)
+    const allPairsRaw = await redis.get(REDIS_KEYS.ALL_PAIRS);
+    
+    if (!allPairsRaw) {
+      return res.status(200).json([]);
+    }
+    
+    const allPairs = JSON.parse(allPairsRaw);
+    const tickers = [];
+    
+    for (const pair of allPairs.slice(0, 30)) {
+      const tickerKey = REDIS_KEYS.TICKER(pair.symbol);
+      const cachedTicker = await redis.get(tickerKey);
+      
+      if (cachedTicker) {
+        const ticker = JSON.parse(cachedTicker);
+        tickers.push({
+          symbol: ticker.symbol,
+          lastPrice: ticker.lastPrice || 0,
+          priceChangePercent: ticker.priceChangePercent || 0,
+          volume: ticker.volume || 0,
+          highPrice: ticker.highPrice || 0,
+          lowPrice: ticker.lowPrice || 0,
+          openPrice: ticker.openPrice || 0
+        });
+      } else {
+        tickers.push({
+          symbol: pair.symbol,
+          lastPrice: 0,
+          priceChangePercent: 0,
+          volume: 0,
+          highPrice: 0,
+          lowPrice: 0,
+          openPrice: 0
+        });
+      }
+    }
+    
+    res.status(200).json(tickers);
+    
+  } catch (err) {
+    console.error('Error fetching 24hr ticker:', err);
+    
+    // Return default values on error
+    if (req.query.symbol) {
+      res.status(200).json({
+        symbol: req.query.symbol.toUpperCase(),
         lastPrice: 0,
         priceChangePercent: 0,
         highPrice: 0,
@@ -26172,49 +26234,11 @@ app.get('/api/market/ticker/24hr', async (req, res) => {
         quoteVolume: 0,
         openPrice: 0
       });
+    } else {
+      res.status(200).json([]);
     }
-    
-    const data = response.data;
-    
-    res.status(200).json({
-      symbol: data.symbol,
-      priceChange: parseFloat(data.priceChange),
-      priceChangePercent: parseFloat(data.priceChangePercent),
-      weightedAvgPrice: parseFloat(data.weightedAvgPrice),
-      prevClosePrice: parseFloat(data.prevClosePrice),
-      lastPrice: parseFloat(data.lastPrice),
-      lastQty: parseFloat(data.lastQty),
-      bidPrice: parseFloat(data.bidPrice),
-      askPrice: parseFloat(data.askPrice),
-      openPrice: parseFloat(data.openPrice),
-      highPrice: parseFloat(data.highPrice),
-      lowPrice: parseFloat(data.lowPrice),
-      volume: parseFloat(data.volume),
-      quoteVolume: parseFloat(data.quoteVolume),
-      openTime: data.openTime,
-      closeTime: data.closeTime,
-      firstId: data.firstId,
-      lastId: data.lastId,
-      count: data.count
-    });
-    
-  } catch (err) {
-    console.error('Error fetching 24hr ticker:', err);
-    
-    // Return default values on error - frontend handles gracefully
-    res.status(200).json({
-      symbol: req.query.symbol?.toUpperCase() || 'BTCUSDT',
-      lastPrice: 0,
-      priceChangePercent: 0,
-      highPrice: 0,
-      lowPrice: 0,
-      volume: 0,
-      quoteVolume: 0,
-      openPrice: 0
-    });
   }
 });
-
 
 // =============================================
 // GET /api/market/trades - Recent trades for a symbol
