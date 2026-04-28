@@ -6672,6 +6672,239 @@ const getBrowserFromUserAgent = (userAgent) => {
 
 
 // Routes
+
+// Enhanced Signup Endpoint with OTP - Captures ALL fields from HTML forms
+app.post('/api/auth/signup', [
+  // Individual form fields
+  body('firstName').trim().notEmpty().withMessage('First name is required').escape(),
+  body('lastName').trim().notEmpty().withMessage('Last name is required').escape(),
+  body('email').isEmail().withMessage('Please provide a valid email').custom((value) => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(value)) {
+      throw new Error('Please provide a valid email address (e.g., name@domain.com)');
+    }
+    return true;
+  }),
+  body('city').trim().notEmpty().withMessage('City is required').escape(),
+  body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters')
+      .matches(/[A-Z]/).withMessage('Password must contain at least one uppercase letter')
+      .matches(/[a-z]/).withMessage('Password must contain at least one lowercase letter')
+      .matches(/[0-9]/).withMessage('Password must contain at least one number')
+      .matches(/[^A-Za-z0-9]/).withMessage('Password must contain at least one special character'),
+  body('referralCode').optional().trim().escape(),
+  body('accountType').optional().isIn(['individual', 'business']).withMessage('Account type must be individual or business'),
+  
+  // Business form fields (optional for individual accounts)
+  body('organizationName').optional().trim().escape(),
+  body('role').optional().trim().escape(),
+  body('country').optional().trim().escape(),
+  body('workEmail').optional().isEmail().withMessage('Please provide a valid work email'),
+  body('orgEmail').optional().isEmail().withMessage('Please provide a valid email address'),
+  body('orgCity').optional().trim().escape(),
+  body('orgFirstName').optional().trim().escape(),
+  body('orgLastName').optional().trim().escape(),
+  body('orgPassword').optional().trim(),
+  body('confirmOrgPassword').optional().trim()
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    console.error('Signup validation errors:', errors.array());
+    return res.status(400).json({
+      status: 'fail',
+      errors: errors.array(),
+      message: errors.array()[0]?.msg || 'Validation failed'
+    });
+  }
+
+  try {
+    const { 
+      // Individual fields
+      firstName, lastName, email, city, password, referralCode, accountType,
+      // Business fields
+      organizationName, role, country, workEmail, orgEmail, orgCity,
+      orgFirstName, orgLastName, orgPassword
+    } = req.body;
+
+    // Determine which email to use (individual email or business org email)
+    const userEmail = email || orgEmail;
+    const userFirstName = firstName || orgFirstName;
+    const userLastName = lastName || orgLastName;
+    const userPassword = password || orgPassword;
+    const userCity = city || orgCity;
+    const userAccountType = accountType || 'individual';
+
+    // Validate email exists
+    if (!userEmail) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Email address is required'
+      });
+    }
+
+    // Validate password exists
+    if (!userPassword) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Password is required'
+      });
+    }
+
+    // Validate first and last name
+    if (!userFirstName || !userLastName) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'First name and last name are required'
+      });
+    }
+
+    // Validate city
+    if (!userCity) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'City is required'
+      });
+    }
+
+    // Use exact email for all operations
+    const originalEmail = userEmail;
+
+    // Check if email already exists - exact match only
+    const existingUser = await User.findOne({ email: originalEmail });
+    if (existingUser) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Email already in use'
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(userPassword, 12);
+    const newReferralCode = generateReferralCode();
+
+    let referredByUser = null;
+    let referralSource = 'organic';
+
+    // Handle referral code from URL parameter
+    if (referralCode) {
+      console.log('Processing referral code:', referralCode);
+      
+      let actualReferralCode = referralCode;
+      if (referralCode.includes('-')) {
+        const parts = referralCode.split('-');
+        if (parts.length >= 4) {
+          actualReferralCode = `${parts[0]}-${parts[1]}-${parts[2]}-${parts[3]}`;
+        } else {
+          actualReferralCode = parts[parts.length - 1];
+        }
+      }
+      
+      referredByUser = await User.findOne({ referralCode: actualReferralCode });
+      
+      if (referredByUser) {
+        referralSource = 'referral_link';
+        console.log(`Referral found: ${referredByUser.firstName} ${referredByUser.lastName} (${referredByUser.email})`);
+      }
+    }
+
+    // Create complete user object with ALL fields
+    const userData = {
+      // Core required fields
+      firstName: userFirstName,
+      lastName: userLastName,
+      email: originalEmail,
+      password: hashedPassword,
+      city: userCity,
+      referralCode: newReferralCode,
+      referredBy: referredByUser ? referredByUser._id : undefined,
+      isVerified: false,
+      accountType: userAccountType,
+      
+      // Store signup source
+      signupSource: referralCode ? 'referral' : 'organic',
+      
+      // Business fields (will be null for individual accounts)
+      organizationName: organizationName || null,
+      role: role || null,
+      country: country || null,
+      workEmail: workEmail || null,
+      
+      // Metadata about the signup
+      metadata: {
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'],
+        signupDate: new Date(),
+        accountTypeSelected: userAccountType
+      }
+    };
+
+    const newUser = await User.create(userData);
+
+    // Generate OTP with exact email
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+    await OTP.create({
+      email: originalEmail,
+      otp,
+      type: 'signup',
+      expiresAt,
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent']
+    });
+
+    // Send OTP email
+    await sendProfessionalEmail({
+      email: originalEmail,
+      template: 'otp',
+      data: {
+        name: userFirstName,
+        otp: otp,
+        action: 'account verification'
+      }
+    });
+
+    // Send welcome email
+    await sendAutomatedEmail(newUser, 'welcome', {
+      firstName: userFirstName
+    });
+
+    // Generate temporary token for OTP verification
+    const tempToken = generateJWT(newUser._id);
+
+    res.status(201).json({
+      status: 'success',
+      message: 'Account created successfully. Please verify your email with the OTP sent to your inbox.',
+      tempToken,
+      data: {
+        user: {
+          id: newUser._id,
+          firstName: newUser.firstName,
+          lastName: newUser.lastName,
+          email: newUser.email,
+          accountType: newUser.accountType,
+          city: newUser.city,
+          organizationName: newUser.organizationName,
+          needsVerification: true
+        }
+      }
+    });
+
+    // Log activity
+    await logActivity('signup_initiated', 'user', newUser._id, newUser._id, 'User', req);
+
+  } catch (err) {
+    console.error('Signup error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'An error occurred during signup'
+    });
+  }
+});
+
+
+
+
+
+
 // Enhanced Login Endpoint with OTP - Captures ALL fields from HTML form
 app.post('/api/auth/login', [
   body('email').isEmail().withMessage('Please provide a valid email').custom((value) => {
