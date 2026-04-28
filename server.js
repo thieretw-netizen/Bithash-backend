@@ -4175,7 +4175,36 @@ const detectAndSetIPPreferences = async (userId, req) => {
 
 
 
+// Cache configuration
+const cryptoPriceCache = new Map();
+const CACHE_TTL = 30000; // 30 seconds cache TTL (reduces API calls while keeping prices reasonably fresh)
+const RATE_LIMIT_COOLDOWN = 1000; // 1 second cooldown between API calls
+
+// Helper function to get cached price
+const getCachedPrice = (asset) => {
+  const cached = cryptoPriceCache.get(asset);
+  if (cached && (Date.now() - cached.timestamp) < CACHE_TTL) {
+    console.log(`📦 Cache hit for ${asset}: $${cached.price}`);
+    return cached.price;
+  }
+  return null;
+};
+
+// Helper function to set cached price
+const setCachedPrice = (asset, price) => {
+  cryptoPriceCache.set(asset, {
+    price: price,
+    timestamp: Date.now()
+  });
+};
+
 const getCryptoPrice = async (asset) => {
+  // Check cache first
+  const cachedPrice = getCachedPrice(asset);
+  if (cachedPrice !== null) {
+    return cachedPrice;
+  }
+
   try {
     const assetUpper = asset.toUpperCase();
     
@@ -4183,6 +4212,7 @@ const getCryptoPrice = async (asset) => {
     const stablecoins = ['USDT', 'USDC', 'DAI', 'BUSD', 'TUSD', 'USDP'];
     if (stablecoins.includes(assetUpper)) {
       console.log(`${assetUpper} is a stablecoin, price is $1`);
+      setCachedPrice(assetUpper, 1);
       return 1;
     }
     
@@ -4266,6 +4296,7 @@ const getCryptoPrice = async (asset) => {
         if (data && data.price && parseFloat(data.price) > 0) {
           const price = parseFloat(data.price);
           console.log(`✅ ${asset} price from Binance: $${price}`);
+          setCachedPrice(assetUpper, price);
           return price;
         }
       }
@@ -4287,12 +4318,16 @@ const getCryptoPrice = async (asset) => {
         if (data && data.price && parseFloat(data.price) > 0) {
           const price = parseFloat(data.price);
           console.log(`✅ ${asset} price from Binance (USD pair): $${price}`);
+          setCachedPrice(assetUpper, price);
           return price;
         }
       }
     } catch (err) {
       console.log(`Binance USD direct failed for ${asset}:`, err.message);
     }
+    
+    // Rate limiting cooldown before next API batch
+    await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_COOLDOWN));
     
     // Try CoinGecko with dynamic coin ID lookup
     if (coinId) {
@@ -4309,6 +4344,7 @@ const getCryptoPrice = async (asset) => {
           if (data && data[coinId] && data[coinId].usd && data[coinId].usd > 0) {
             const price = data[coinId].usd;
             console.log(`✅ ${asset} price from CoinGecko: $${price}`);
+            setCachedPrice(assetUpper, price);
             return price;
           }
         }
@@ -4316,6 +4352,9 @@ const getCryptoPrice = async (asset) => {
         console.log(`CoinGecko failed for ${asset}:`, err.message);
       }
     }
+    
+    // Rate limiting cooldown
+    await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_COOLDOWN));
     
     // Try CoinGecko search endpoint for unknown coins
     try {
@@ -4340,6 +4379,7 @@ const getCryptoPrice = async (asset) => {
             if (priceData && priceData[foundCoinId] && priceData[foundCoinId].usd && priceData[foundCoinId].usd > 0) {
               const price = priceData[foundCoinId].usd;
               console.log(`✅ ${asset} price from CoinGecko search: $${price}`);
+              setCachedPrice(assetUpper, price);
               return price;
             }
           }
@@ -4348,6 +4388,9 @@ const getCryptoPrice = async (asset) => {
     } catch (err) {
       console.log(`CoinGecko search failed for ${asset}:`, err.message);
     }
+    
+    // Rate limiting cooldown
+    await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_COOLDOWN));
     
     // Try CryptoCompare (works with any crypto symbol)
     try {
@@ -4363,12 +4406,16 @@ const getCryptoPrice = async (asset) => {
         if (data && data.USD && data.USD > 0) {
           const price = data.USD;
           console.log(`✅ ${asset} price from CryptoCompare: $${price}`);
+          setCachedPrice(assetUpper, price);
           return price;
         }
       }
     } catch (err) {
       console.log(`CryptoCompare failed for ${asset}:`, err.message);
     }
+    
+    // Rate limiting cooldown
+    await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_COOLDOWN));
     
     // Try Kraken with dynamic symbol lookup
     try {
@@ -4401,6 +4448,7 @@ const getCryptoPrice = async (asset) => {
                 const price = parseFloat(tickerData.result[matchingPair].c[0]);
                 if (price > 0) {
                   console.log(`✅ ${asset} price from Kraken: $${price}`);
+                  setCachedPrice(assetUpper, price);
                   return price;
                 }
               }
@@ -4411,6 +4459,9 @@ const getCryptoPrice = async (asset) => {
     } catch (err) {
       console.log(`Kraken failed for ${asset}:`, err.message);
     }
+    
+    // Rate limiting cooldown
+    await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_COOLDOWN));
     
     // Try KuCoin (works with any USDT pair)
     try {
@@ -4426,12 +4477,16 @@ const getCryptoPrice = async (asset) => {
         if (data && data.data && data.data.price && parseFloat(data.data.price) > 0) {
           const price = parseFloat(data.data.price);
           console.log(`✅ ${asset} price from KuCoin: $${price}`);
+          setCachedPrice(assetUpper, price);
           return price;
         }
       }
     } catch (err) {
       console.log(`KuCoin failed for ${asset}:`, err.message);
     }
+    
+    // Rate limiting cooldown
+    await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_COOLDOWN));
     
     // Try Bybit (works with any USDT pair)
     try {
@@ -4448,6 +4503,7 @@ const getCryptoPrice = async (asset) => {
           const price = parseFloat(data.result.list[0].lastPrice);
           if (price > 0) {
             console.log(`✅ ${asset} price from Bybit: $${price}`);
+            setCachedPrice(assetUpper, price);
             return price;
           }
         }
@@ -4455,6 +4511,9 @@ const getCryptoPrice = async (asset) => {
     } catch (err) {
       console.log(`Bybit failed for ${asset}:`, err.message);
     }
+    
+    // Rate limiting cooldown
+    await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_COOLDOWN));
     
     // Try OKX (works with any USDT pair)
     try {
@@ -4470,12 +4529,16 @@ const getCryptoPrice = async (asset) => {
         if (data && data.data && data.data[0] && data.data[0].last && parseFloat(data.data[0].last) > 0) {
           const price = parseFloat(data.data[0].last);
           console.log(`✅ ${asset} price from OKX: $${price}`);
+          setCachedPrice(assetUpper, price);
           return price;
         }
       }
     } catch (err) {
       console.log(`OKX failed for ${asset}:`, err.message);
     }
+    
+    // Rate limiting cooldown
+    await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_COOLDOWN));
     
     // Try Gate.io (works with any USDT pair)
     try {
@@ -4491,12 +4554,16 @@ const getCryptoPrice = async (asset) => {
         if (data && data[0] && data[0].last && parseFloat(data[0].last) > 0) {
           const price = parseFloat(data[0].last);
           console.log(`✅ ${asset} price from Gate.io: $${price}`);
+          setCachedPrice(assetUpper, price);
           return price;
         }
       }
     } catch (err) {
       console.log(`Gate.io failed for ${asset}:`, err.message);
     }
+    
+    // Rate limiting cooldown
+    await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_COOLDOWN));
     
     // Try Coinbase (works with any USD pair)
     try {
@@ -4512,12 +4579,16 @@ const getCryptoPrice = async (asset) => {
         if (data && data.data && data.data.amount && parseFloat(data.data.amount) > 0) {
           const price = parseFloat(data.data.amount);
           console.log(`✅ ${asset} price from Coinbase: $${price}`);
+          setCachedPrice(assetUpper, price);
           return price;
         }
       }
     } catch (err) {
       console.log(`Coinbase failed for ${asset}:`, err.message);
     }
+    
+    // Rate limiting cooldown
+    await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_COOLDOWN));
     
     // Try Huobi (works with any USDT pair)
     try {
@@ -4533,12 +4604,16 @@ const getCryptoPrice = async (asset) => {
         if (data && data.tick && data.tick.close && parseFloat(data.tick.close) > 0) {
           const price = parseFloat(data.tick.close);
           console.log(`✅ ${asset} price from Huobi: $${price}`);
+          setCachedPrice(assetUpper, price);
           return price;
         }
       }
     } catch (err) {
       console.log(`Huobi failed for ${asset}:`, err.message);
     }
+    
+    // Rate limiting cooldown
+    await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_COOLDOWN));
     
     // Try Bitfinex (works with any USD pair)
     try {
@@ -4554,6 +4629,7 @@ const getCryptoPrice = async (asset) => {
         if (data && data[6] && parseFloat(data[6]) > 0) {
           const price = parseFloat(data[6]);
           console.log(`✅ ${asset} price from Bitfinex: $${price}`);
+          setCachedPrice(assetUpper, price);
           return price;
         }
       }
@@ -4570,7 +4646,6 @@ const getCryptoPrice = async (asset) => {
     return null;
   }
 };
-
 
 
 
@@ -9619,22 +9694,55 @@ app.post('/api/convert', protect, async (req, res) => {
 // MARKET DATA ENDPOINT - EXACT FIX FOR 418 ERROR
 // =============================================
 
-// Cache with 120-second TTL (increased to reduce rate limits)
-let marketDataCache = {
-  data: null,
-  lastUpdated: null,
-  isRefreshing: false
+// Cache configuration - same pattern as getCryptoPrice
+const marketDataCacheStore = new Map();
+const MARKET_DATA_CACHE_TTL = 120000; // 120 seconds cache TTL
+const MARKET_DATA_RATE_LIMIT_COOLDOWN = 2000; // 2 second cooldown between API calls
+let isRefreshingMarketData = false;
+
+// Helper function to get cached market data
+const getCachedMarketData = () => {
+  const cached = marketDataCacheStore.get('market_data');
+  if (cached && (Date.now() - cached.timestamp) < MARKET_DATA_CACHE_TTL) {
+    console.log(`📦 Market data cache hit: ${cached.data?.length || 0} assets`);
+    return cached.data;
+  }
+  return null;
+};
+
+// Helper function to set cached market data
+const setCachedMarketData = (data) => {
+  marketDataCacheStore.set('market_data', {
+    data: data,
+    timestamp: Date.now()
+  });
 };
 
 async function fetchMarketData() {
   // Prevent multiple simultaneous refreshes
-  if (marketDataCache.isRefreshing) {
-    return marketDataCache.data || [];
+  if (isRefreshingMarketData) {
+    console.log('⏳ Market data refresh already in progress, waiting...');
+    // Wait up to 5 seconds for the ongoing refresh to complete
+    let attempts = 0;
+    while (isRefreshingMarketData && attempts < 25) {
+      await new Promise(resolve => setTimeout(resolve, 200));
+      attempts++;
+    }
+    return getCachedMarketData() || [];
   }
   
-  marketDataCache.isRefreshing = true;
+  // Check cache first
+  const cachedData = getCachedMarketData();
+  if (cachedData) {
+    return cachedData;
+  }
+  
+  isRefreshingMarketData = true;
   
   try {
+    // Rate limiting cooldown before API call
+    await new Promise(resolve => setTimeout(resolve, MARKET_DATA_RATE_LIMIT_COOLDOWN));
+    
     // CRITICAL FIX: Add User-Agent header to avoid 418 error
     const response = await axios.get(
       'https://api.coingecko.com/api/v3/coins/markets',
@@ -9674,18 +9782,16 @@ async function fetchMarketData() {
         }
       }));
 
-      marketDataCache = {
-        data: transformed,
-        lastUpdated: new Date(),
-        isRefreshing: false
-      };
+      // Cache the transformed data
+      setCachedMarketData(transformed);
       
       console.log(`✅ Market data fetched: ${transformed.length} assets`);
+      isRefreshingMarketData = false;
       return transformed;
     }
     
-    marketDataCache.isRefreshing = false;
-    return marketDataCache.data || [];
+    isRefreshingMarketData = false;
+    return getCachedMarketData() || [];
     
   } catch (error) {
     console.error('Market data fetch error:', error.message);
@@ -9694,12 +9800,13 @@ async function fetchMarketData() {
       console.error('   Status text:', error.response.statusText);
     }
     
-    marketDataCache.isRefreshing = false;
+    isRefreshingMarketData = false;
     
     // Return cached data if available
-    if (marketDataCache.data && marketDataCache.data.length > 0) {
-      console.log(`📦 Using cached data: ${marketDataCache.data.length} assets`);
-      return marketDataCache.data;
+    const cachedFallback = getCachedMarketData();
+    if (cachedFallback && cachedFallback.length > 0) {
+      console.log(`📦 Using cached data (API failed): ${cachedFallback.length} assets`);
+      return cachedFallback;
     }
     
     return [];
@@ -9709,13 +9816,14 @@ async function fetchMarketData() {
 // Endpoint for Prices by Market Cap table
 app.get('/api/market/assets', async (req, res) => {
   try {
-    let assets = marketDataCache.data;
+    let assets = getCachedMarketData();
     
-    // Refresh if cache is older than 120 seconds or empty
-    const cacheAge = marketDataCache.lastUpdated ? (new Date() - marketDataCache.lastUpdated) : Infinity;
+    // Check if cache is expired or empty
+    const cachedEntry = marketDataCacheStore.get('market_data');
+    const cacheAge = cachedEntry ? (Date.now() - cachedEntry.timestamp) : Infinity;
     
-    if (!assets || assets.length === 0 || cacheAge > 120000) {
-      console.log('🔄 Cache expired, fetching fresh data...');
+    if (!assets || assets.length === 0 || cacheAge > MARKET_DATA_CACHE_TTL) {
+      console.log('🔄 Cache expired or empty, fetching fresh data...');
       assets = await fetchMarketData();
     }
     
@@ -9728,9 +9836,10 @@ app.get('/api/market/assets', async (req, res) => {
   } catch (error) {
     console.error('Market assets endpoint error:', error);
     // Always return success structure to avoid frontend breaking
+    const cachedData = getCachedMarketData();
     res.json({
       status: 'success',
-      data: marketDataCache.data || []
+      data: cachedData || []
     });
   }
 });
@@ -9738,19 +9847,22 @@ app.get('/api/market/assets', async (req, res) => {
 // Refresh cache every 120 seconds (reduced frequency)
 let refreshInterval = setInterval(async () => {
   console.log('🔄 Background market data refresh...');
+  // Add cooldown before background refresh
+  await new Promise(resolve => setTimeout(resolve, MARKET_DATA_RATE_LIMIT_COOLDOWN));
   await fetchMarketData();
-}, 120000);
+}, MARKET_DATA_CACHE_TTL);
 
-// Initial cache on startup
-fetchMarketData().then(assets => {
+// Initial cache on startup with cooldown
+(async () => {
+  await new Promise(resolve => setTimeout(resolve, MARKET_DATA_RATE_LIMIT_COOLDOWN));
+  const assets = await fetchMarketData();
   console.log(`🚀 Market data initialized with ${assets?.length || 0} assets`);
-});
+})();
 
 // Cleanup on server shutdown
 process.on('SIGTERM', () => {
   if (refreshInterval) clearInterval(refreshInterval);
 });
-
 
 
 
