@@ -6677,7 +6677,18 @@ const getBrowserFromUserAgent = (userAgent) => {
 app.post('/api/auth/signup', [
   body('firstName').trim().notEmpty().withMessage('First name is required').escape(),
   body('lastName').trim().notEmpty().withMessage('Last name is required').escape(),
-  body('email').isEmail().withMessage('Please provide a valid email'),
+  body('email').isEmail().withMessage('Please provide a valid email').custom((value) => {
+    // Verify email has correct format for Gmail and others
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(value)) {
+      throw new Error('Please provide a valid email address');
+    }
+    // Additional validation for common email providers
+    const domain = value.split('@')[1].toLowerCase();
+    const validDomains = ['gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'aol.com', 'protonmail.com', 'icloud.com', 'mail.com', 'yandex.com', 'gmx.com'];
+    // Allow any valid email format, not just common domains
+    return true;
+  }),
   body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters')
       .matches(/[A-Z]/).withMessage('Password must contain at least one uppercase letter')
       .matches(/[a-z]/).withMessage('Password must contain at least one lowercase letter')
@@ -6871,7 +6882,14 @@ app.get('/api/referrals/validate/:code', async (req, res) => {
 
 // Enhanced Login Endpoint with OTP - FIXED email handling
 app.post('/api/auth/login', [
-  body('email').isEmail().withMessage('Please provide a valid email'),
+  body('email').isEmail().withMessage('Please provide a valid email').custom((value) => {
+    // Verify email has correct format for Gmail and others
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(value)) {
+      throw new Error('Please provide a valid email address');
+    }
+    return true;
+  }),
   body('password').notEmpty().withMessage('Password is required'),
   body('rememberMe').optional().isBoolean().withMessage('Remember me must be a boolean')
 ], async (req, res) => {
@@ -7028,8 +7046,6 @@ await logActivity('login_attempt', 'authentication', null, null, null, req, {
     });
   }
 });
-
-
 
 
 
