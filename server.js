@@ -9619,7 +9619,7 @@ app.post('/api/convert', protect, async (req, res) => {
 // MARKET DATA ENDPOINT - EXACT FIX FOR 418 ERROR
 // =============================================
 
-// Cache with 60-second TTL (increased to reduce rate limits)
+// Cache with 120-second TTL (increased to reduce rate limits)
 let marketDataCache = {
   data: null,
   lastUpdated: null,
@@ -9711,10 +9711,10 @@ app.get('/api/market/assets', async (req, res) => {
   try {
     let assets = marketDataCache.data;
     
-    // Refresh if cache is older than 60 seconds or empty
+    // Refresh if cache is older than 120 seconds or empty
     const cacheAge = marketDataCache.lastUpdated ? (new Date() - marketDataCache.lastUpdated) : Infinity;
     
-    if (!assets || assets.length === 0 || cacheAge > 60000) {
+    if (!assets || assets.length === 0 || cacheAge > 120000) {
       console.log('🔄 Cache expired, fetching fresh data...');
       assets = await fetchMarketData();
     }
@@ -9735,11 +9735,11 @@ app.get('/api/market/assets', async (req, res) => {
   }
 });
 
-// Refresh cache every 60 seconds (reduced frequency)
+// Refresh cache every 120 seconds (reduced frequency)
 let refreshInterval = setInterval(async () => {
   console.log('🔄 Background market data refresh...');
   await fetchMarketData();
-}, 60000);
+}, 120000);
 
 // Initial cache on startup
 fetchMarketData().then(assets => {
@@ -9750,8 +9750,6 @@ fetchMarketData().then(assets => {
 process.on('SIGTERM', () => {
   if (refreshInterval) clearInterval(refreshInterval);
 });
-
-
 
 
 
