@@ -6672,226 +6672,18 @@ const getBrowserFromUserAgent = (userAgent) => {
 
 
 // Routes
-
-// Enhanced Signup Endpoint with OTP - FIXED email handling
-app.post('/api/auth/signup', [
-  body('firstName').trim().notEmpty().withMessage('First name is required').escape(),
-  body('lastName').trim().notEmpty().withMessage('Last name is required').escape(),
-  body('email').isEmail().withMessage('Please provide a valid email').custom((value) => {
-    // Verify email has correct format for Gmail and others
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(value)) {
-      throw new Error('Please provide a valid email address');
-    }
-    // Additional validation for common email providers
-    const domain = value.split('@')[1].toLowerCase();
-    const validDomains = ['gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'aol.com', 'protonmail.com', 'icloud.com', 'mail.com', 'yandex.com', 'gmx.com'];
-    // Allow any valid email format, not just common domains
-    return true;
-  }),
-  body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters')
-      .matches(/[A-Z]/).withMessage('Password must contain at least one uppercase letter')
-      .matches(/[a-z]/).withMessage('Password must contain at least one lowercase letter')
-      .matches(/[0-9]/).withMessage('Password must contain at least one number')
-      .matches(/[^A-Za-z0-9]/).withMessage('Password must contain at least one special character'),
-  body('city').trim().notEmpty().withMessage('City is required').escape(),
-  body('referralCode').optional().trim().escape()
-], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({
-      status: 'fail',
-      errors: errors.array()
-    });
-  }
-
-  try {
-    const { firstName, lastName, email, password, city, referralCode } = req.body;
-
-    // Use exact email for all operations
-    const originalEmail = email;
-
-    // Check if email already exists - exact match only
-    const existingUser = await User.findOne({ email: originalEmail });
-    if (existingUser) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Email already in use'
-      });
-    }
-
-    const hashedPassword = await bcrypt.hash(password, 12);
-    const newReferralCode = generateReferralCode();
-
-    let referredByUser = null;
-    let referralSource = 'organic';
-
-    // Handle referral code from URL parameter
-    if (referralCode) {
-      console.log('Processing referral code:', referralCode);
-      
-      let actualReferralCode = referralCode;
-      // Extract the last part of the referral code (format: BH-timestamp-random-checksum)
-      if (referralCode.includes('-')) {
-        const parts = referralCode.split('-');
-        // Reconstruct the full code format: BH-timestamp-random-checksum
-        if (parts.length >= 4) {
-          actualReferralCode = `${parts[0]}-${parts[1]}-${parts[2]}-${parts[3]}`;
-        } else {
-          actualReferralCode = parts[parts.length - 1];
-        }
-      }
-      
-      referredByUser = await User.findOne({ referralCode: actualReferralCode });
-      
-      if (referredByUser) {
-        referralSource = 'referral_link';
-        console.log(`Referral found: ${referredByUser.firstName} ${referredByUser.lastName} (${referredByUser.email})`);
-      }
-    }
-
-    // Create user with exact email - no normalization
-    const newUser = await User.create({
-      firstName,
-      lastName,
-      email: originalEmail, // Store exact email as provided
-      password: hashedPassword,
-      city,
-      referralCode: newReferralCode,
-      referredBy: referredByUser ? referredByUser._id : undefined,
-      isVerified: false // User needs to verify via OTP first
-    });
-
-    // Generate OTP with exact email
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
-
-    await OTP.create({
-      email: originalEmail, // Exact email
-      otp,
-      type: 'signup',
-      expiresAt,
-      ipAddress: req.ip,
-      userAgent: req.headers['user-agent']
-    });
-
-    // Send OTP email to exact email address
-    await sendProfessionalEmail({
-      email: originalEmail, // Exact email
-      template: 'otp',
-      data: {
-        name: firstName,
-        otp: otp,
-        action: 'account verification'
-      }
-    });
-
-    // Send welcome email to exact email address
-    await sendAutomatedEmail(newUser, 'welcome', {
-      firstName
-    });
-
-    // Generate temporary token for OTP verification
-    const tempToken = generateJWT(newUser._id);
-
-    res.status(201).json({
-      status: 'success',
-      message: 'Account created successfully. Please verify your email with the OTP sent to your inbox.',
-      tempToken,
-      data: {
-        user: {
-          id: newUser._id,
-          firstName: newUser.firstName,
-          lastName: newUser.lastName,
-          email: newUser.email, // Return exact email from database
-          needsVerification: true
-        }
-      }
-    });
-
-    // Log activity
-    await logActivity('signup_initiated', 'user', newUser._id, newUser._id, 'User', req);
-
-  } catch (err) {
-    console.error('Signup error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'An error occurred during signup'
-    });
-  }
-});
-
-// Validate referral code endpoint
-app.get('/api/referrals/validate/:code', async (req, res) => {
-    try {
-        const { code } = req.params;
-        
-        if (!code) {
-            return res.status(400).json({
-                status: 'fail',
-                message: 'Referral code is required'
-            });
-        }
-
-        let actualReferralCode = code;
-        
-        // Handle BH-timestamp-random-checksum format
-        if (code.includes('-')) {
-            const parts = code.split('-');
-            // Reconstruct the full code format: BH-timestamp-random-checksum
-            if (parts.length >= 4) {
-                actualReferralCode = `${parts[0]}-${parts[1]}-${parts[2]}-${parts[3]}`;
-            } else {
-                actualReferralCode = parts[parts.length - 1];
-            }
-        }
-
-        const referringUser = await User.findOne({ 
-            referralCode: actualReferralCode,
-            status: 'active'
-        }).select('firstName lastName email referralCode');
-
-        if (!referringUser) {
-            return res.status(404).json({
-                status: 'fail',
-                message: 'Invalid referral code'
-            });
-        }
-
-        res.status(200).json({
-            status: 'success',
-            data: {
-                valid: true,
-                referringUser: {
-                    firstName: referringUser.firstName,
-                    lastName: referringUser.lastName,
-                    referralCode: referringUser.referralCode
-                },
-                message: `You're being referred by ${referringUser.firstName} ${referringUser.lastName}`
-            }
-        });
-
-    } catch (err) {
-        console.error('Referral validation error:', err);
-        res.status(500).json({
-            status: 'error',
-            message: 'Failed to validate referral code'
-        });
-    }
-});
-
-// Enhanced Login Endpoint with OTP - FIXED email handling
+// Enhanced Login Endpoint with OTP - Captures ALL fields from HTML form
 app.post('/api/auth/login', [
   body('email').isEmail().withMessage('Please provide a valid email').custom((value) => {
-    // Verify email has correct format for Gmail and others
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(value)) {
-      throw new Error('Please provide a valid email address');
+      throw new Error('Please provide a valid email address (e.g., name@domain.com)');
     }
     return true;
   }),
   body('password').notEmpty().withMessage('Password is required'),
-  body('rememberMe').optional().isBoolean().withMessage('Remember me must be a boolean')
+  body('rememberMe').optional().isBoolean().withMessage('Remember me must be a boolean'),
+  body('accountType').optional().isIn(['individual', 'business']).withMessage('Account type must be individual or business')
 ], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -6902,18 +6694,17 @@ app.post('/api/auth/login', [
   }
 
   try {
-    const { email, password, rememberMe } = req.body;
+    const { email, password, rememberMe, accountType } = req.body;
 
     // Use exact email for lookup - no normalization
     const user = await User.findOne({ email }).select('+password +twoFactorAuth.secret');
+    
     if (!user || !(await bcrypt.compare(password, user.password))) {
-      
-     // ✅ CORRECT - Use the existing logActivity function
-await logActivity('login_attempt', 'authentication', null, null, null, req, {
-    error: 'Invalid credentials',
-    email: email,
-    status: 'failed'
-});
+      await logActivity('login_attempt', 'authentication', null, null, null, req, {
+        error: 'Invalid credentials',
+        email: email,
+        status: 'failed'
+      });
       
       return res.status(401).json({
         status: 'fail',
@@ -6921,13 +6712,20 @@ await logActivity('login_attempt', 'authentication', null, null, null, req, {
       });
     }
 
+    // Verify account type matches (if specified in login form)
+    if (accountType && user.accountType !== accountType) {
+      return res.status(401).json({
+        status: 'fail',
+        message: `Account type mismatch. This email is registered as a ${user.accountType} account.`
+      });
+    }
+
     if (user.status !== 'active') {
-     // ✅ CORRECT - Use the existing logActivity function
-await logActivity('login_attempt', 'authentication', null, null, null, req, {
-    error: 'Invalid credentials',
-    email: email,
-    status: 'failed'
-});
+      await logActivity('login_attempt', 'authentication', null, null, null, req, {
+        error: 'Account suspended',
+        email: email,
+        status: 'failed'
+      });
       
       return res.status(401).json({
         status: 'fail',
@@ -6937,11 +6735,10 @@ await logActivity('login_attempt', 'authentication', null, null, null, req, {
 
     // Generate OTP for login
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
-    // Store OTP with exact email
     await OTP.create({
-      email: email, // Exact email from request
+      email: email,
       otp,
       type: 'login',
       expiresAt,
@@ -6949,9 +6746,9 @@ await logActivity('login_attempt', 'authentication', null, null, null, req, {
       userAgent: req.headers['user-agent']
     });
 
-    // Send OTP email to exact email address
+    // Send OTP email
     await sendProfessionalEmail({
-      email: email, // Exact email from request
+      email: email,
       template: 'otp',
       data: {
         name: user.firstName,
@@ -6960,7 +6757,7 @@ await logActivity('login_attempt', 'authentication', null, null, null, req, {
       }
     });
 
-    // ✅ CREATE LOG FOR LOGIN ATTEMPT
+    // Create log for login attempt
     const deviceInfo = await getUserDeviceInfo(req);
     await UserLog.create({
       user: user._id,
@@ -6989,11 +6786,13 @@ await logActivity('login_attempt', 'authentication', null, null, null, req, {
       metadata: {
         email: email,
         loginMethod: 'password',
-        otpSent: true
+        otpSent: true,
+        rememberMe: rememberMe || false,
+        accountType: accountType || user.accountType
       }
     });
 
-    // ✅ SEND LOGIN ATTEMPT EMAIL
+    // Send login attempt email
     try {
       await sendAutomatedEmail(user, 'login_success', {
         name: user.firstName,
@@ -7005,11 +6804,16 @@ await logActivity('login_attempt', 'authentication', null, null, null, req, {
       console.log(`📧 Login attempt email sent to ${user.email}`);
     } catch (emailError) {
       console.error('Failed to send login attempt email:', emailError);
-      // Don't fail the login if email fails
     }
 
     // Generate temporary token for OTP verification
     const tempToken = generateJWT(user._id);
+
+    // If rememberMe is true, set longer expiration for token
+    const tokenOptions = {};
+    if (rememberMe) {
+      tokenOptions.expiresIn = '30d'; // 30 days for remember me
+    }
 
     res.status(200).json({
       status: 'success',
@@ -7021,24 +6825,27 @@ await logActivity('login_attempt', 'authentication', null, null, null, req, {
           id: user._id,
           firstName: user.firstName,
           lastName: user.lastName,
-          email: user.email // Return exact email from database
+          email: user.email,
+          accountType: user.accountType,
+          organizationName: user.organizationName || null
         }
       }
     });
 
     await logActivity('login_otp_sent', 'authentication', user._id, user._id, 'User', req, {
-  email: email,
-  status: 'pending'
-});
+      email: email,
+      status: 'pending',
+      rememberMe: rememberMe || false
+    });
 
   } catch (err) {
     console.error('Login error:', err);
     
-  await logActivity('login_error', 'authentication', null, null, null, req, {
-  error: err.message,
-  email: req.body.email,
-  status: 'failed'
-});
+    await logActivity('login_error', 'authentication', null, null, null, req, {
+      error: err.message,
+      email: req.body.email,
+      status: 'failed'
+    });
 
     res.status(500).json({
       status: 'error',
@@ -7046,8 +6853,6 @@ await logActivity('login_attempt', 'authentication', null, null, null, req, {
     });
   }
 });
-
-
 
 
 app.post('/api/auth/google', async (req, res) => {
