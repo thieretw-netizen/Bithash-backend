@@ -9758,7 +9758,8 @@ const marketDataCacheStore = new Map();
 const MARKET_DATA_CACHE_TTL = 120000; // 120 seconds cache TTL
 const MARKET_DATA_RATE_LIMIT_COOLDOWN = 2000; // 2 second cooldown between API calls
 let isRefreshingMarketData = false;
-let logoCache = new Map();
+let lastCoinGeckoSuccessTime = 0;
+let consecutiveCoinGeckoFailures = 0;
 
 // Helper function to get cached market data
 const getCachedMarketData = () => {
@@ -9778,155 +9779,225 @@ const setCachedMarketData = (data) => {
   });
 };
 
-// PRIMARY LOGO DATABASE - Most common cryptocurrencies with their EXACT correct logos
-const getCryptoLogoUrl = (symbol) => {
-  const logoMap = {
+// CORRECT LOGO MAPPING - every crypto gets its own logo
+const getCorrectLogo = (symbol) => {
+  const logos = {
     'btc': 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png',
-    'bitcoin': 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png',
     'eth': 'https://assets.coingecko.com/coins/images/279/large/ethereum.png',
-    'ethereum': 'https://assets.coingecko.com/coins/images/279/large/ethereum.png',
     'usdt': 'https://assets.coingecko.com/coins/images/325/large/Tether.png',
-    'tether': 'https://assets.coingecko.com/coins/images/325/large/Tether.png',
     'bnb': 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png',
-    'binancecoin': 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png',
     'sol': 'https://assets.coingecko.com/coins/images/4128/large/solana.png',
-    'solana': 'https://assets.coingecko.com/coins/images/4128/large/solana.png',
     'usdc': 'https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png',
-    'usd-coin': 'https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png',
     'xrp': 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png',
-    'ripple': 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png',
     'doge': 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png',
-    'dogecoin': 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png',
     'ada': 'https://assets.coingecko.com/coins/images/975/large/cardano.png',
-    'cardano': 'https://assets.coingecko.com/coins/images/975/large/cardano.png',
     'shib': 'https://assets.coingecko.com/coins/images/11939/large/shiba.png',
-    'shiba-inu': 'https://assets.coingecko.com/coins/images/11939/large/shiba.png',
     'avax': 'https://assets.coingecko.com/coins/images/12559/large/Avalanche_Circle_RedWhite.png',
-    'avalanche-2': 'https://assets.coingecko.com/coins/images/12559/large/Avalanche_Circle_RedWhite.png',
     'dot': 'https://assets.coingecko.com/coins/images/12171/large/polkadot.png',
-    'polkadot': 'https://assets.coingecko.com/coins/images/12171/large/polkadot.png',
     'trx': 'https://assets.coingecko.com/coins/images/1094/large/tron-logo.png',
-    'tron': 'https://assets.coingecko.com/coins/images/1094/large/tron-logo.png',
     'link': 'https://assets.coingecko.com/coins/images/877/large/chainlink-new-logo.png',
-    'chainlink': 'https://assets.coingecko.com/coins/images/877/large/chainlink-new-logo.png',
     'matic': 'https://assets.coingecko.com/coins/images/4713/large/matic-token-icon.png',
-    'polygon': 'https://assets.coingecko.com/coins/images/4713/large/matic-token-icon.png',
     'wbtc': 'https://assets.coingecko.com/coins/images/7598/large/wrapped_bitcoin_wbtc.png',
-    'wrapped-bitcoin': 'https://assets.coingecko.com/coins/images/7598/large/wrapped_bitcoin_wbtc.png',
     'ltc': 'https://assets.coingecko.com/coins/images/2/large/litecoin.png',
-    'litecoin': 'https://assets.coingecko.com/coins/images/2/large/litecoin.png',
     'near': 'https://assets.coingecko.com/coins/images/10365/large/near_icon.png',
-    'near-protocol': 'https://assets.coingecko.com/coins/images/10365/large/near_icon.png',
     'uni': 'https://assets.coingecko.com/coins/images/12504/large/uni.jpg',
-    'uniswap': 'https://assets.coingecko.com/coins/images/12504/large/uni.jpg',
     'bch': 'https://assets.coingecko.com/coins/images/780/large/bitcoin-cash-circle.png',
-    'bitcoin-cash': 'https://assets.coingecko.com/coins/images/780/large/bitcoin-cash-circle.png',
     'xlm': 'https://assets.coingecko.com/coins/images/100/large/Stellar_symbol_black_RGB.png',
-    'stellar': 'https://assets.coingecko.com/coins/images/100/large/Stellar_symbol_black_RGB.png',
     'atom': 'https://assets.coingecko.com/coins/images/1481/large/cosmos_hub.png',
-    'cosmos': 'https://assets.coingecko.com/coins/images/1481/large/cosmos_hub.png',
     'xmr': 'https://assets.coingecko.com/coins/images/69/large/monero_logo.png',
-    'monero': 'https://assets.coingecko.com/coins/images/69/large/monero_logo.png',
-    'flow': 'https://assets.coingecko.com/coins/images/13446/large/5f6294c0c7a8cda55cb1.png',
-    'vet': 'https://assets.coingecko.com/coins/images/1167/large/VET_Token_Icon.png',
-    'vechain': 'https://assets.coingecko.com/coins/images/1167/large/VET_Token_Icon.png',
-    'fil': 'https://assets.coingecko.com/coins/images/12817/large/filecoin.png',
-    'filecoin': 'https://assets.coingecko.com/coins/images/12817/large/filecoin.png',
-    'theta': 'https://assets.coingecko.com/coins/images/2538/large/theta-token-logo.png',
-    'theta-token': 'https://assets.coingecko.com/coins/images/2538/large/theta-token-logo.png',
-    'hbar': 'https://assets.coingecko.com/coins/images/3688/large/hbar.png',
-    'hedera-hashgraph': 'https://assets.coingecko.com/coins/images/3688/large/hbar.png',
-    'ftm': 'https://assets.coingecko.com/coins/images/4001/large/Fantom_round.png',
-    'fantom': 'https://assets.coingecko.com/coins/images/4001/large/Fantom_round.png',
-    'xtz': 'https://assets.coingecko.com/coins/images/976/large/Tezos-logo.png',
-    'tezos': 'https://assets.coingecko.com/coins/images/976/large/Tezos-logo.png',
     'algo': 'https://assets.coingecko.com/coins/images/4380/large/algorand.png',
-    'algorand': 'https://assets.coingecko.com/coins/images/4380/large/algorand.png',
-    'eos': 'https://assets.coingecko.com/coins/images/738/large/eos-eos-logo.png',
+    'vet': 'https://assets.coingecko.com/coins/images/1167/large/VET_Token_Icon.png',
+    'fil': 'https://assets.coingecko.com/coins/images/12817/large/filecoin.png',
+    'theta': 'https://assets.coingecko.com/coins/images/2538/large/theta-token-logo.png',
+    'hbar': 'https://assets.coingecko.com/coins/images/3688/large/hbar.png',
+    'ftm': 'https://assets.coingecko.com/coins/images/4001/large/Fantom_round.png',
+    'xtz': 'https://assets.coingecko.com/coins/images/976/large/Tezos-logo.png',
     'eos': 'https://assets.coingecko.com/coins/images/738/large/eos-eos-logo.png',
     'neo': 'https://assets.coingecko.com/coins/images/480/large/neo.png',
-    'neo': 'https://assets.coingecko.com/coins/images/480/large/neo.png',
-    'icp': 'https://assets.coingecko.com/coins/images/14495/large/Internet_Computer_logo.png',
-    'internet-computer': 'https://assets.coingecko.com/coins/images/14495/large/Internet_Computer_logo.png'
+    'icp': 'https://assets.coingecko.com/coins/images/14495/large/Internet_Computer_logo.png'
   };
-  
-  const key = symbol.toLowerCase();
-  if (logoMap[key]) {
-    return logoMap[key];
-  }
-  
-  return null;
+  return logos[symbol.toLowerCase()] || 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png';
 };
 
-// DYNAMIC LOGO FETCHER - Gets logo from CoinGecko API for ANY crypto symbol
-const fetchLogoForSymbol = async (symbol, retryCount = 0) => {
-  if (logoCache.has(symbol)) {
-    return logoCache.get(symbol);
+// Check if CoinGecko should be used (avoid rate limits)
+const shouldUseCoinGecko = () => {
+  if (consecutiveCoinGeckoFailures >= 3) {
+    const timeSinceLastSuccess = Date.now() - lastCoinGeckoSuccessTime;
+    if (timeSinceLastSuccess < 60000) {
+      console.log(`⏸️ Cooling down CoinGecko after ${consecutiveCoinGeckoFailures} failures. Waiting ${Math.ceil((60000 - timeSinceLastSuccess)/1000)}s...`);
+      return false;
+    }
+    consecutiveCoinGeckoFailures = 0;
   }
+  return true;
+};
+
+// PRIMARY API: CoinGecko
+const fetchFromCoinGecko = async () => {
+  if (!shouldUseCoinGecko()) return null;
   
   try {
-    const response = await axios.get('https://api.coingecko.com/api/v3/coins/list', {
-      timeout: 5000,
-      headers: { 'User-Agent': 'Mozilla/5.0' }
+    await new Promise(resolve => setTimeout(resolve, MARKET_DATA_RATE_LIMIT_COOLDOWN));
+    
+    const response = await axios.get(
+      'https://api.coingecko.com/api/v3/coins/markets',
+      {
+        params: {
+          vs_currency: 'usd',
+          order: 'market_cap_desc',
+          per_page: 50,
+          page: 1,
+          sparkline: true,
+          price_change_percentage: '1h,24h,7d'
+        },
+        timeout: 10000,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json',
+          'Accept-Language': 'en-US,en;q=0.9'
+        }
+      }
+    );
+
+    if (response.data && Array.isArray(response.data) && response.data.length > 0) {
+      lastCoinGeckoSuccessTime = Date.now();
+      consecutiveCoinGeckoFailures = 0;
+      console.log(`✅ CoinGecko success: ${response.data.length} assets`);
+      return response.data;
+    }
+    return null;
+  } catch (error) {
+    consecutiveCoinGeckoFailures++;
+    const isRateLimit = error.response?.status === 429 || error.response?.status === 418;
+    if (isRateLimit) {
+      console.log(`⚠️ CoinGecko rate limited (${error.response?.status}). Using fallback...`);
+    } else {
+      console.log(`⚠️ CoinGecko error: ${error.message}`);
+    }
+    return null;
+  }
+};
+
+// FALLBACK 1: Binance API
+const fetchFromBinance = async () => {
+  try {
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    const response = await axios.get('https://api.binance.com/api/v3/ticker/24hr', {
+      timeout: 8000
     });
     
     if (response.data && Array.isArray(response.data)) {
-      const coin = response.data.find(c => 
-        c.symbol.toLowerCase() === symbol.toLowerCase() || 
-        c.id.toLowerCase() === symbol.toLowerCase()
-      );
+      const usdtPairs = response.data.filter(item => item.symbol && item.symbol.endsWith('USDT'));
+      const topPairs = usdtPairs.slice(0, 50);
       
-      if (coin) {
-        const detailResponse = await axios.get(`https://api.coingecko.com/api/v3/coins/${coin.id}`, {
-          timeout: 5000,
-          headers: { 'User-Agent': 'Mozilla/5.0' }
-        });
-        
-        const logoUrl = detailResponse.data?.image?.large || 
-                        detailResponse.data?.image?.small || 
-                        null;
-        
-        if (logoUrl) {
-          logoCache.set(symbol, logoUrl);
-          return logoUrl;
+      return topPairs.map(pair => {
+        const symbol = pair.symbol.replace('USDT', '').toLowerCase();
+        return {
+          id: symbol,
+          symbol: symbol,
+          name: symbol.toUpperCase(),
+          image: getCorrectLogo(symbol),
+          current_price: parseFloat(pair.lastPrice) || 0,
+          market_cap: 0,
+          market_cap_rank: 0,
+          total_volume: parseFloat(pair.quoteVolume) || 0,
+          price_change_percentage_24h: parseFloat(pair.priceChangePercent) || 0,
+          price_change_percentage_1h_in_currency: 0,
+          price_change_percentage_7d_in_currency: 0,
+          sparkline_in_7d: { price: [] }
+        };
+      });
+    }
+    return null;
+  } catch (error) {
+    console.log(`⚠️ Binance fallback error: ${error.message}`);
+    return null;
+  }
+};
+
+// FALLBACK 2: Kraken API
+const fetchFromKraken = async () => {
+  try {
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    const response = await axios.get('https://api.kraken.com/0/public/Ticker', {
+      timeout: 8000
+    });
+    
+    if (response.data && response.data.result) {
+      const pairs = Object.keys(response.data.result).filter(key => key.endsWith('USD'));
+      const results = [];
+      
+      for (const pair of pairs.slice(0, 50)) {
+        const data = response.data.result[pair];
+        if (data && data.c && data.c[0]) {
+          const symbol = pair.replace('USD', '').toLowerCase();
+          results.push({
+            id: symbol,
+            symbol: symbol,
+            name: symbol.toUpperCase(),
+            image: getCorrectLogo(symbol),
+            current_price: parseFloat(data.c[0]) || 0,
+            market_cap: 0,
+            market_cap_rank: 0,
+            total_volume: parseFloat(data.v[1]) || 0,
+            price_change_percentage_24h: parseFloat(data.p[2]) || 0,
+            price_change_percentage_1h_in_currency: 0,
+            price_change_percentage_7d_in_currency: 0,
+            sparkline_in_7d: { price: [] }
+          });
         }
       }
+      
+      return results.length > 0 ? results : null;
     }
-    
-    if (retryCount < 2) {
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      return fetchLogoForSymbol(symbol, retryCount + 1);
-    }
-    
     return null;
-  } catch (err) {
-    if (retryCount < 2) {
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      return fetchLogoForSymbol(symbol, retryCount + 1);
-    }
+  } catch (error) {
+    console.log(`⚠️ Kraken fallback error: ${error.message}`);
     return null;
   }
 };
 
-// Get logo for ANY cryptocurrency - PRIMARY LOGO DB + DYNAMIC FETCH
-const getAnyCryptoLogo = async (symbol) => {
-  const primaryLogo = getCryptoLogoUrl(symbol);
-  if (primaryLogo) {
-    return primaryLogo;
+// FALLBACK 3: CryptoCompare API
+const fetchFromCryptoCompare = async () => {
+  try {
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    const response = await axios.get('https://min-api.cryptocompare.com/data/top/mktcapfull?limit=50&tsym=USD', {
+      timeout: 8000
+    });
+    
+    if (response.data && response.data.Data && Array.isArray(response.data.Data)) {
+      return response.data.Data.map(coin => {
+        const coinInfo = coin.CoinInfo || {};
+        const raw = coin.RAW?.USD || {};
+        const symbol = coinInfo.Name ? coinInfo.Name.toLowerCase() : 'unknown';
+        
+        return {
+          id: symbol,
+          symbol: symbol,
+          name: coinInfo.FullName || symbol.toUpperCase(),
+          image: getCorrectLogo(symbol),
+          current_price: raw.PRICE || 0,
+          market_cap: raw.MKTCAP || 0,
+          market_cap_rank: 0,
+          total_volume: raw.VOLUME24HOUR || 0,
+          price_change_percentage_24h: raw.CHANGEPCT24HOUR || 0,
+          price_change_percentage_1h_in_currency: 0,
+          price_change_percentage_7d_in_currency: 0,
+          sparkline_in_7d: { price: [] }
+        };
+      });
+    }
+    return null;
+  } catch (error) {
+    console.log(`⚠️ CryptoCompare fallback error: ${error.message}`);
+    return null;
   }
-  
-  if (logoCache.has(symbol)) {
-    return logoCache.get(symbol);
-  }
-  
-  const dynamicLogo = await fetchLogoForSymbol(symbol);
-  if (dynamicLogo) {
-    return dynamicLogo;
-  }
-  
-  return 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png';
 };
 
+// MAIN fetch function with smart fallback chain
 async function fetchMarketData() {
   if (isRefreshingMarketData) {
     console.log('⏳ Market data refresh already in progress, waiting...');
@@ -9946,253 +10017,50 @@ async function fetchMarketData() {
   isRefreshingMarketData = true;
   
   try {
-    let response = null;
-    let apiSuccess = false;
-    let usedApi = 'CoinGecko';
+    let marketData = null;
+    let usedApi = null;
     
-    // =============================================
-    // PRIMARY API: CoinGecko
-    // =============================================
-    await new Promise(resolve => setTimeout(resolve, MARKET_DATA_RATE_LIMIT_COOLDOWN));
-    
-    try {
-      response = await axios.get(
-        'https://api.coingecko.com/api/v3/coins/markets',
-        {
-          params: {
-            vs_currency: 'usd',
-            order: 'market_cap_desc',
-            per_page: 50,
-            page: 1,
-            sparkline: true,
-            price_change_percentage: '1h,24h,7d'
-          },
-          timeout: 15000,
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'application/json',
-            'Accept-Language': 'en-US,en;q=0.9'
-          }
-        }
-      );
-      
-      if (response.data && Array.isArray(response.data) && response.data.length > 0) {
-        apiSuccess = true;
-        usedApi = 'CoinGecko';
-        console.log(`✅ Market data fetched from CoinGecko: ${response.data.length} assets`);
-      }
-    } catch (coingeckoError) {
-      console.log(`⚠️ CoinGecko API failed: ${coingeckoError.message}`);
+    // Try CoinGecko first
+    marketData = await fetchFromCoinGecko();
+    if (marketData) {
+      usedApi = 'CoinGecko';
     }
     
-    // =============================================
-    // FALLBACK API #1: Binance (with DYNAMIC logos)
-    // =============================================
-    if (!apiSuccess) {
-      try {
-        console.log('🔄 Falling back to Binance API for market data...');
-        await new Promise(resolve => setTimeout(resolve, MARKET_DATA_RATE_LIMIT_COOLDOWN));
-        
-        const binanceResponse = await axios.get('https://api.binance.com/api/v3/ticker/24hr', {
-          timeout: 10000,
-          headers: { 'Accept': 'application/json' }
-        });
-        
-        if (binanceResponse.data && Array.isArray(binanceResponse.data) && binanceResponse.data.length > 0) {
-          const usdtPairs = binanceResponse.data.filter(item => 
-            item.symbol && item.symbol.endsWith('USDT')
-          );
-          
-          const topPairs = usdtPairs
-            .sort((a, b) => parseFloat(b.quoteVolume || 0) - parseFloat(a.quoteVolume || 0))
-            .slice(0, 50);
-          
-          const transformedData = [];
-          
-          for (const pair of topPairs) {
-            const symbol = pair.symbol.replace('USDT', '').toLowerCase();
-            const logoUrl = await getAnyCryptoLogo(symbol);
-            const price = parseFloat(pair.lastPrice) || 0;
-            const priceChangePercent = parseFloat(pair.priceChangePercent) || 0;
-            const volume = parseFloat(pair.quoteVolume) || 0;
-            
-            transformedData.push({
-              id: symbol,
-              symbol: symbol,
-              name: symbol.toUpperCase(),
-              image: logoUrl,
-              current_price: price,
-              market_cap: volume * price || 0,
-              market_cap_rank: 0,
-              total_volume: volume,
-              price_change_percentage_24h: priceChangePercent,
-              price_change_percentage_1h_in_currency: 0,
-              price_change_percentage_7d_in_currency: 0,
-              sparkline_in_7d: { price: [] }
-            });
-          }
-          
-          if (transformedData.length > 0) {
-            response = { data: transformedData };
-            apiSuccess = true;
-            usedApi = 'Binance';
-            console.log(`✅ Market data fetched from Binance (Fallback #1): ${transformedData.length} assets`);
-          }
-        }
-      } catch (binanceError) {
-        console.log(`⚠️ Binance fallback API failed: ${binanceError.message}`);
-      }
+    // If CoinGecko failed, try Binance
+    if (!marketData) {
+      console.log('🔄 Switching to Binance fallback...');
+      marketData = await fetchFromBinance();
+      if (marketData) usedApi = 'Binance';
     }
     
-    // =============================================
-    // FALLBACK API #2: Kraken (with DYNAMIC logos)
-    // =============================================
-    if (!apiSuccess) {
-      try {
-        console.log('🔄 Falling back to Kraken API for market data...');
-        await new Promise(resolve => setTimeout(resolve, MARKET_DATA_RATE_LIMIT_COOLDOWN));
-        
-        const pairsResponse = await axios.get('https://api.kraken.com/0/public/AssetPairs', {
-          timeout: 10000
-        });
-        
-        if (pairsResponse.data && pairsResponse.data.result) {
-          const usdPairs = Object.keys(pairsResponse.data.result).filter(key => 
-            key.endsWith('USD') && !key.includes('.') && key !== 'USDUSD'
-          );
-          
-          const limitedPairs = usdPairs.slice(0, 50);
-          const tickerPromises = limitedPairs.map(pair => 
-            axios.get(`https://api.kraken.com/0/public/Ticker?pair=${pair}`, { timeout: 5000 })
-              .catch(() => null)
-          );
-          
-          const tickerResponses = await Promise.all(tickerPromises);
-          const transformedData = [];
-          
-          for (let i = 0; i < limitedPairs.length; i++) {
-            const pair = limitedPairs[i];
-            const tickerData = tickerResponses[i];
-            
-            if (tickerData && tickerData.data && tickerData.data.result) {
-              const pairData = tickerData.data.result[pair];
-              if (pairData && pairData.c && pairData.c[0]) {
-                const symbol = pair.replace('USD', '').toLowerCase();
-                const logoUrl = await getAnyCryptoLogo(symbol);
-                const price = parseFloat(pairData.c[0]);
-                const volume = parseFloat(pairData.v[1]) || 0;
-                
-                transformedData.push({
-                  id: symbol,
-                  symbol: symbol,
-                  name: symbol.toUpperCase(),
-                  image: logoUrl,
-                  current_price: price,
-                  market_cap: volume * price || 0,
-                  market_cap_rank: 0,
-                  total_volume: volume,
-                  price_change_percentage_24h: parseFloat(pairData.p[2]) || 0,
-                  price_change_percentage_1h_in_currency: 0,
-                  price_change_percentage_7d_in_currency: 0,
-                  sparkline_in_7d: { price: [] }
-                });
-              }
-            }
-          }
-          
-          if (transformedData.length > 0) {
-            response = { data: transformedData };
-            apiSuccess = true;
-            usedApi = 'Kraken';
-            console.log(`✅ Market data fetched from Kraken (Fallback #2): ${transformedData.length} assets`);
-          }
-        }
-      } catch (krakenError) {
-        console.log(`⚠️ Kraken fallback API failed: ${krakenError.message}`);
-      }
+    // If Binance failed, try Kraken
+    if (!marketData) {
+      console.log('🔄 Switching to Kraken fallback...');
+      marketData = await fetchFromKraken();
+      if (marketData) usedApi = 'Kraken';
     }
     
-    // =============================================
-    // FALLBACK API #3: CryptoCompare (with DYNAMIC logos)
-    // =============================================
-    if (!apiSuccess) {
-      try {
-        console.log('🔄 Falling back to CryptoCompare API for market data...');
-        await new Promise(resolve => setTimeout(resolve, MARKET_DATA_RATE_LIMIT_COOLDOWN));
-        
-        const ccResponse = await axios.get('https://min-api.cryptocompare.com/data/top/mktcapfull?limit=50&tsym=USD', {
-          timeout: 10000,
-          headers: { 'Accept': 'application/json' }
-        });
-        
-        if (ccResponse.data && ccResponse.data.Data && Array.isArray(ccResponse.data.Data)) {
-          const transformedData = [];
-          
-          for (const coin of ccResponse.data.Data) {
-            const coinInfo = coin.CoinInfo || {};
-            const raw = coin.RAW?.USD || {};
-            const symbol = coinInfo.Name ? coinInfo.Name.toLowerCase() : 'unknown';
-            const logoUrl = await getAnyCryptoLogo(symbol);
-            
-            transformedData.push({
-              id: symbol,
-              symbol: symbol,
-              name: coinInfo.FullName || coinInfo.Name || 'Unknown',
-              image: logoUrl,
-              current_price: raw.PRICE || 0,
-              market_cap: raw.MKTCAP || 0,
-              market_cap_rank: 0,
-              total_volume: raw.VOLUME24HOUR || 0,
-              price_change_percentage_24h: raw.CHANGEPCT24HOUR || 0,
-              price_change_percentage_1h_in_currency: 0,
-              price_change_percentage_7d_in_currency: 0,
-              sparkline_in_7d: { price: [] }
-            });
-          }
-          
-          if (transformedData.length > 0) {
-            response = { data: transformedData };
-            apiSuccess = true;
-            usedApi = 'CryptoCompare';
-            console.log(`✅ Market data fetched from CryptoCompare (Fallback #3): ${transformedData.length} assets`);
-          }
-        }
-      } catch (ccError) {
-        console.log(`⚠️ CryptoCompare fallback API failed: ${ccError.message}`);
-      }
+    // If Kraken failed, try CryptoCompare
+    if (!marketData) {
+      console.log('🔄 Switching to CryptoCompare fallback...');
+      marketData = await fetchFromCryptoCompare();
+      if (marketData) usedApi = 'CryptoCompare';
     }
     
-    if (apiSuccess && response && response.data && Array.isArray(response.data) && response.data.length > 0) {
-      const transformed = response.data.map(coin => ({
-        id: coin.id,
-        symbol: coin.symbol,
-        name: coin.name,
-        image: coin.image,
-        current_price: coin.current_price || 0,
-        market_cap: coin.market_cap || 0,
-        market_cap_rank: coin.market_cap_rank || 0,
-        total_volume: coin.total_volume || 0,
-        price_change_percentage_24h: coin.price_change_percentage_24h || 0,
-        price_change_percentage_1h_in_currency: coin.price_change_percentage_1h_in_currency || 0,
-        price_change_percentage_7d_in_currency: coin.price_change_percentage_7d_in_currency || 0,
-        sparkline_in_7d: {
-          price: (coin.sparkline_in_7d?.price || []).slice(0, 30)
-        }
-      }));
-
-      setCachedMarketData(transformed);
-      
-      console.log(`✅ Market data fetched: ${transformed.length} assets (Source: ${usedApi})`);
+    // If we got data from any source, cache and return it
+    if (marketData && marketData.length > 0) {
+      setCachedMarketData(marketData);
+      console.log(`✅ Market data fetched: ${marketData.length} assets (Source: ${usedApi})`);
       isRefreshingMarketData = false;
-      return transformed;
+      return marketData;
     }
     
-    console.error('❌ All market data APIs (CoinGecko + 3 fallbacks) failed');
+    // If all APIs failed, return cached data
+    console.error('❌ All market data APIs failed');
     isRefreshingMarketData = false;
-    
     const cachedFallback = getCachedMarketData();
     if (cachedFallback && cachedFallback.length > 0) {
-      console.log(`📦 Using cached data (all APIs failed): ${cachedFallback.length} assets`);
+      console.log(`📦 Using cached data: ${cachedFallback.length} assets`);
       return cachedFallback;
     }
     
@@ -10200,20 +10068,9 @@ async function fetchMarketData() {
     
   } catch (error) {
     console.error('Market data fetch error:', error.message);
-    if (error.response) {
-      console.error('   Status:', error.response.status);
-      console.error('   Status text:', error.response.statusText);
-    }
-    
     isRefreshingMarketData = false;
-    
     const cachedFallback = getCachedMarketData();
-    if (cachedFallback && cachedFallback.length > 0) {
-      console.log(`📦 Using cached data (API failed): ${cachedFallback.length} assets`);
-      return cachedFallback;
-    }
-    
-    return [];
+    return cachedFallback || [];
   }
 }
 
@@ -10230,9 +10087,10 @@ app.get('/api/market/assets', async (req, res) => {
       assets = await fetchMarketData();
     }
     
+    // ALWAYS return data - never empty array if we have cache
     res.json({
       status: 'success',
-      data: assets || []
+      data: assets || (getCachedMarketData() || [])
     });
     
   } catch (error) {
@@ -10248,13 +10106,11 @@ app.get('/api/market/assets', async (req, res) => {
 // Refresh cache every 120 seconds
 let refreshInterval = setInterval(async () => {
   console.log('🔄 Background market data refresh...');
-  await new Promise(resolve => setTimeout(resolve, MARKET_DATA_RATE_LIMIT_COOLDOWN));
   await fetchMarketData();
 }, MARKET_DATA_CACHE_TTL);
 
 // Initial cache on startup
 (async () => {
-  await new Promise(resolve => setTimeout(resolve, MARKET_DATA_RATE_LIMIT_COOLDOWN));
   const assets = await fetchMarketData();
   console.log(`🚀 Market data initialized with ${assets?.length || 0} assets`);
 })();
@@ -10263,8 +10119,6 @@ let refreshInterval = setInterval(async () => {
 process.on('SIGTERM', () => {
   if (refreshInterval) clearInterval(refreshInterval);
 });
-
-
 
 
 
