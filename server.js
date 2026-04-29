@@ -9758,6 +9758,7 @@ const marketDataCacheStore = new Map();
 const MARKET_DATA_CACHE_TTL = 120000; // 120 seconds cache TTL
 const MARKET_DATA_RATE_LIMIT_COOLDOWN = 2000; // 2 second cooldown between API calls
 let isRefreshingMarketData = false;
+let logoCache = new Map();
 
 // Helper function to get cached market data
 const getCachedMarketData = () => {
@@ -9777,45 +9778,156 @@ const setCachedMarketData = (data) => {
   });
 };
 
-// Crypto logo mapping - ensures EVERY crypto gets its correct logo
+// PRIMARY LOGO DATABASE - Most common cryptocurrencies with their EXACT correct logos
 const getCryptoLogoUrl = (symbol) => {
   const logoMap = {
     'btc': 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png',
+    'bitcoin': 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png',
     'eth': 'https://assets.coingecko.com/coins/images/279/large/ethereum.png',
+    'ethereum': 'https://assets.coingecko.com/coins/images/279/large/ethereum.png',
     'usdt': 'https://assets.coingecko.com/coins/images/325/large/Tether.png',
+    'tether': 'https://assets.coingecko.com/coins/images/325/large/Tether.png',
     'bnb': 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png',
+    'binancecoin': 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png',
     'sol': 'https://assets.coingecko.com/coins/images/4128/large/solana.png',
+    'solana': 'https://assets.coingecko.com/coins/images/4128/large/solana.png',
     'usdc': 'https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png',
+    'usd-coin': 'https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png',
     'xrp': 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png',
+    'ripple': 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png',
     'doge': 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png',
+    'dogecoin': 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png',
     'ada': 'https://assets.coingecko.com/coins/images/975/large/cardano.png',
+    'cardano': 'https://assets.coingecko.com/coins/images/975/large/cardano.png',
     'shib': 'https://assets.coingecko.com/coins/images/11939/large/shiba.png',
+    'shiba-inu': 'https://assets.coingecko.com/coins/images/11939/large/shiba.png',
     'avax': 'https://assets.coingecko.com/coins/images/12559/large/Avalanche_Circle_RedWhite.png',
+    'avalanche-2': 'https://assets.coingecko.com/coins/images/12559/large/Avalanche_Circle_RedWhite.png',
     'dot': 'https://assets.coingecko.com/coins/images/12171/large/polkadot.png',
+    'polkadot': 'https://assets.coingecko.com/coins/images/12171/large/polkadot.png',
     'trx': 'https://assets.coingecko.com/coins/images/1094/large/tron-logo.png',
+    'tron': 'https://assets.coingecko.com/coins/images/1094/large/tron-logo.png',
     'link': 'https://assets.coingecko.com/coins/images/877/large/chainlink-new-logo.png',
+    'chainlink': 'https://assets.coingecko.com/coins/images/877/large/chainlink-new-logo.png',
     'matic': 'https://assets.coingecko.com/coins/images/4713/large/matic-token-icon.png',
+    'polygon': 'https://assets.coingecko.com/coins/images/4713/large/matic-token-icon.png',
     'wbtc': 'https://assets.coingecko.com/coins/images/7598/large/wrapped_bitcoin_wbtc.png',
+    'wrapped-bitcoin': 'https://assets.coingecko.com/coins/images/7598/large/wrapped_bitcoin_wbtc.png',
     'ltc': 'https://assets.coingecko.com/coins/images/2/large/litecoin.png',
+    'litecoin': 'https://assets.coingecko.com/coins/images/2/large/litecoin.png',
     'near': 'https://assets.coingecko.com/coins/images/10365/large/near_icon.png',
+    'near-protocol': 'https://assets.coingecko.com/coins/images/10365/large/near_icon.png',
     'uni': 'https://assets.coingecko.com/coins/images/12504/large/uni.jpg',
+    'uniswap': 'https://assets.coingecko.com/coins/images/12504/large/uni.jpg',
     'bch': 'https://assets.coingecko.com/coins/images/780/large/bitcoin-cash-circle.png',
+    'bitcoin-cash': 'https://assets.coingecko.com/coins/images/780/large/bitcoin-cash-circle.png',
     'xlm': 'https://assets.coingecko.com/coins/images/100/large/Stellar_symbol_black_RGB.png',
+    'stellar': 'https://assets.coingecko.com/coins/images/100/large/Stellar_symbol_black_RGB.png',
     'atom': 'https://assets.coingecko.com/coins/images/1481/large/cosmos_hub.png',
+    'cosmos': 'https://assets.coingecko.com/coins/images/1481/large/cosmos_hub.png',
     'xmr': 'https://assets.coingecko.com/coins/images/69/large/monero_logo.png',
+    'monero': 'https://assets.coingecko.com/coins/images/69/large/monero_logo.png',
     'flow': 'https://assets.coingecko.com/coins/images/13446/large/5f6294c0c7a8cda55cb1.png',
     'vet': 'https://assets.coingecko.com/coins/images/1167/large/VET_Token_Icon.png',
+    'vechain': 'https://assets.coingecko.com/coins/images/1167/large/VET_Token_Icon.png',
     'fil': 'https://assets.coingecko.com/coins/images/12817/large/filecoin.png',
+    'filecoin': 'https://assets.coingecko.com/coins/images/12817/large/filecoin.png',
     'theta': 'https://assets.coingecko.com/coins/images/2538/large/theta-token-logo.png',
+    'theta-token': 'https://assets.coingecko.com/coins/images/2538/large/theta-token-logo.png',
     'hbar': 'https://assets.coingecko.com/coins/images/3688/large/hbar.png',
+    'hedera-hashgraph': 'https://assets.coingecko.com/coins/images/3688/large/hbar.png',
     'ftm': 'https://assets.coingecko.com/coins/images/4001/large/Fantom_round.png',
-    'xtz': 'https://assets.coingecko.com/coins/images/976/large/Tezos-logo.png'
+    'fantom': 'https://assets.coingecko.com/coins/images/4001/large/Fantom_round.png',
+    'xtz': 'https://assets.coingecko.com/coins/images/976/large/Tezos-logo.png',
+    'tezos': 'https://assets.coingecko.com/coins/images/976/large/Tezos-logo.png',
+    'algo': 'https://assets.coingecko.com/coins/images/4380/large/algorand.png',
+    'algorand': 'https://assets.coingecko.com/coins/images/4380/large/algorand.png',
+    'eos': 'https://assets.coingecko.com/coins/images/738/large/eos-eos-logo.png',
+    'eos': 'https://assets.coingecko.com/coins/images/738/large/eos-eos-logo.png',
+    'neo': 'https://assets.coingecko.com/coins/images/480/large/neo.png',
+    'neo': 'https://assets.coingecko.com/coins/images/480/large/neo.png',
+    'icp': 'https://assets.coingecko.com/coins/images/14495/large/Internet_Computer_logo.png',
+    'internet-computer': 'https://assets.coingecko.com/coins/images/14495/large/Internet_Computer_logo.png'
   };
-  return logoMap[symbol.toLowerCase()] || `https://assets.coingecko.com/coins/images/1/large/bitcoin.png`;
+  
+  const key = symbol.toLowerCase();
+  if (logoMap[key]) {
+    return logoMap[key];
+  }
+  
+  return null;
+};
+
+// DYNAMIC LOGO FETCHER - Gets logo from CoinGecko API for ANY crypto symbol
+const fetchLogoForSymbol = async (symbol, retryCount = 0) => {
+  if (logoCache.has(symbol)) {
+    return logoCache.get(symbol);
+  }
+  
+  try {
+    const response = await axios.get('https://api.coingecko.com/api/v3/coins/list', {
+      timeout: 5000,
+      headers: { 'User-Agent': 'Mozilla/5.0' }
+    });
+    
+    if (response.data && Array.isArray(response.data)) {
+      const coin = response.data.find(c => 
+        c.symbol.toLowerCase() === symbol.toLowerCase() || 
+        c.id.toLowerCase() === symbol.toLowerCase()
+      );
+      
+      if (coin) {
+        const detailResponse = await axios.get(`https://api.coingecko.com/api/v3/coins/${coin.id}`, {
+          timeout: 5000,
+          headers: { 'User-Agent': 'Mozilla/5.0' }
+        });
+        
+        const logoUrl = detailResponse.data?.image?.large || 
+                        detailResponse.data?.image?.small || 
+                        null;
+        
+        if (logoUrl) {
+          logoCache.set(symbol, logoUrl);
+          return logoUrl;
+        }
+      }
+    }
+    
+    if (retryCount < 2) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      return fetchLogoForSymbol(symbol, retryCount + 1);
+    }
+    
+    return null;
+  } catch (err) {
+    if (retryCount < 2) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      return fetchLogoForSymbol(symbol, retryCount + 1);
+    }
+    return null;
+  }
+};
+
+// Get logo for ANY cryptocurrency - PRIMARY LOGO DB + DYNAMIC FETCH
+const getAnyCryptoLogo = async (symbol) => {
+  const primaryLogo = getCryptoLogoUrl(symbol);
+  if (primaryLogo) {
+    return primaryLogo;
+  }
+  
+  if (logoCache.has(symbol)) {
+    return logoCache.get(symbol);
+  }
+  
+  const dynamicLogo = await fetchLogoForSymbol(symbol);
+  if (dynamicLogo) {
+    return dynamicLogo;
+  }
+  
+  return 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png';
 };
 
 async function fetchMarketData() {
-  // Prevent multiple simultaneous refreshes
   if (isRefreshingMarketData) {
     console.log('⏳ Market data refresh already in progress, waiting...');
     let attempts = 0;
@@ -9826,7 +9938,6 @@ async function fetchMarketData() {
     return getCachedMarketData() || [];
   }
   
-  // Check cache first
   const cachedData = getCachedMarketData();
   if (cachedData) {
     return cachedData;
@@ -9840,7 +9951,7 @@ async function fetchMarketData() {
     let usedApi = 'CoinGecko';
     
     // =============================================
-    // PRIMARY API: CoinGecko (with User-Agent fix)
+    // PRIMARY API: CoinGecko
     // =============================================
     await new Promise(resolve => setTimeout(resolve, MARKET_DATA_RATE_LIMIT_COOLDOWN));
     
@@ -9875,7 +9986,7 @@ async function fetchMarketData() {
     }
     
     // =============================================
-    // FALLBACK API #1: Binance (with correct logos)
+    // FALLBACK API #1: Binance (with DYNAMIC logos)
     // =============================================
     if (!apiSuccess) {
       try {
@@ -9896,17 +10007,20 @@ async function fetchMarketData() {
             .sort((a, b) => parseFloat(b.quoteVolume || 0) - parseFloat(a.quoteVolume || 0))
             .slice(0, 50);
           
-          const transformedData = topPairs.map(pair => {
+          const transformedData = [];
+          
+          for (const pair of topPairs) {
             const symbol = pair.symbol.replace('USDT', '').toLowerCase();
+            const logoUrl = await getAnyCryptoLogo(symbol);
             const price = parseFloat(pair.lastPrice) || 0;
             const priceChangePercent = parseFloat(pair.priceChangePercent) || 0;
             const volume = parseFloat(pair.quoteVolume) || 0;
             
-            return {
+            transformedData.push({
               id: symbol,
               symbol: symbol,
               name: symbol.toUpperCase(),
-              image: getCryptoLogoUrl(symbol), // ✅ CORRECT LOGO for EACH crypto
+              image: logoUrl,
               current_price: price,
               market_cap: volume * price || 0,
               market_cap_rank: 0,
@@ -9915,8 +10029,8 @@ async function fetchMarketData() {
               price_change_percentage_1h_in_currency: 0,
               price_change_percentage_7d_in_currency: 0,
               sparkline_in_7d: { price: [] }
-            };
-          });
+            });
+          }
           
           if (transformedData.length > 0) {
             response = { data: transformedData };
@@ -9931,7 +10045,7 @@ async function fetchMarketData() {
     }
     
     // =============================================
-    // FALLBACK API #2: Kraken (with correct logos)
+    // FALLBACK API #2: Kraken (with DYNAMIC logos)
     // =============================================
     if (!apiSuccess) {
       try {
@@ -9954,8 +10068,8 @@ async function fetchMarketData() {
           );
           
           const tickerResponses = await Promise.all(tickerPromises);
-          
           const transformedData = [];
+          
           for (let i = 0; i < limitedPairs.length; i++) {
             const pair = limitedPairs[i];
             const tickerData = tickerResponses[i];
@@ -9964,6 +10078,7 @@ async function fetchMarketData() {
               const pairData = tickerData.data.result[pair];
               if (pairData && pairData.c && pairData.c[0]) {
                 const symbol = pair.replace('USD', '').toLowerCase();
+                const logoUrl = await getAnyCryptoLogo(symbol);
                 const price = parseFloat(pairData.c[0]);
                 const volume = parseFloat(pairData.v[1]) || 0;
                 
@@ -9971,7 +10086,7 @@ async function fetchMarketData() {
                   id: symbol,
                   symbol: symbol,
                   name: symbol.toUpperCase(),
-                  image: getCryptoLogoUrl(symbol), // ✅ CORRECT LOGO for EACH crypto
+                  image: logoUrl,
                   current_price: price,
                   market_cap: volume * price || 0,
                   market_cap_rank: 0,
@@ -9998,7 +10113,7 @@ async function fetchMarketData() {
     }
     
     // =============================================
-    // FALLBACK API #3: CryptoCompare (with correct logos)
+    // FALLBACK API #3: CryptoCompare (with DYNAMIC logos)
     // =============================================
     if (!apiSuccess) {
       try {
@@ -10011,16 +10126,19 @@ async function fetchMarketData() {
         });
         
         if (ccResponse.data && ccResponse.data.Data && Array.isArray(ccResponse.data.Data)) {
-          const transformedData = ccResponse.data.Data.map(coin => {
+          const transformedData = [];
+          
+          for (const coin of ccResponse.data.Data) {
             const coinInfo = coin.CoinInfo || {};
             const raw = coin.RAW?.USD || {};
             const symbol = coinInfo.Name ? coinInfo.Name.toLowerCase() : 'unknown';
+            const logoUrl = await getAnyCryptoLogo(symbol);
             
-            return {
+            transformedData.push({
               id: symbol,
               symbol: symbol,
               name: coinInfo.FullName || coinInfo.Name || 'Unknown',
-              image: getCryptoLogoUrl(symbol), // ✅ CORRECT LOGO for EACH crypto
+              image: logoUrl,
               current_price: raw.PRICE || 0,
               market_cap: raw.MKTCAP || 0,
               market_cap_rank: 0,
@@ -10029,8 +10147,8 @@ async function fetchMarketData() {
               price_change_percentage_1h_in_currency: 0,
               price_change_percentage_7d_in_currency: 0,
               sparkline_in_7d: { price: [] }
-            };
-          });
+            });
+          }
           
           if (transformedData.length > 0) {
             response = { data: transformedData };
@@ -10044,15 +10162,12 @@ async function fetchMarketData() {
       }
     }
     
-    // =============================================
-    // Process successful response (from any API)
-    // =============================================
     if (apiSuccess && response && response.data && Array.isArray(response.data) && response.data.length > 0) {
       const transformed = response.data.map(coin => ({
         id: coin.id,
         symbol: coin.symbol,
         name: coin.name,
-        image: coin.image, // Already set to correct logo
+        image: coin.image,
         current_price: coin.current_price || 0,
         market_cap: coin.market_cap || 0,
         market_cap_rank: coin.market_cap_rank || 0,
@@ -10148,7 +10263,6 @@ let refreshInterval = setInterval(async () => {
 process.on('SIGTERM', () => {
   if (refreshInterval) clearInterval(refreshInterval);
 });
-
 
 
 
