@@ -25917,6 +25917,562 @@ app.get('/api/referrals', protect, async (req, res) => {
 
 
 
+// =============================================
+// GET DOWNLINE RELATIONSHIPS (With pagination)
+// =============================================
+app.get('/api/admin/downline', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    // Get downline relationships with user details
+    const relationships = await DownlineRelationship.find({})
+      .populate('upline', 'firstName lastName email')
+      .populate('downline', 'firstName lastName email')
+      .populate('assignedBy', 'name email')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const total = await DownlineRelationship.countDocuments({});
+    const totalPages = Math.ceil(total / limit);
+
+    // Format relationships for frontend
+    const formattedRelationships = relationships.map(rel => ({
+      _id: rel._id,
+      upline: rel.upline ? {
+        _id: rel.upline._id,
+        firstName: rel.upline.firstName,
+        lastName: rel.upline.lastName,
+        email: rel.upline.email
+      } : null,
+      downline: rel.downline ? {
+        _id: rel.downline._id,
+        firstName: rel.downline.firstName,
+        lastName: rel.downline.lastName,
+        email: rel.downline.email
+      } : null,
+      commissionPercentage: rel.commissionPercentage,
+      commissionRounds: rel.commissionRounds,
+      remainingRounds: rel.remainingRounds,
+      totalCommissionEarned: rel.totalCommissionEarned || 0,
+      status: rel.status,
+      assignedBy: rel.assignedBy ? {
+        name: rel.assignedBy.name,
+        email: rel.assignedBy.email
+      } : null,
+      assignedAt: rel.assignedAt,
+      createdAt: rel.createdAt
+    }));
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        relationships: formattedRelationships,
+        pagination: {
+          currentPage: page,
+          totalPages: totalPages,
+          totalItems: total,
+          itemsPerPage: limit,
+          hasNextPage: page < totalPages,
+          hasPrevPage: page > 1
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Error fetching downline relationships:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch downline relationships'
+    });
+  }
+});
+
+// =============================================
+// GET COMMISSION HISTORY (With pagination)
+// =============================================
+app.get('/api/admin/commission-history', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    // Get commission history with user details
+    const commissions = await CommissionHistory.find({})
+      .populate('upline', 'firstName lastName email')
+      .populate('downline', 'firstName lastName email')
+      .populate('investment')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const total = await CommissionHistory.countDocuments({});
+    const totalPages = Math.ceil(total / limit);
+
+    // Format commissions for frontend
+    const formattedCommissions = commissions.map(comm => ({
+      _id: comm._id,
+      upline: comm.upline ? {
+        _id: comm.upline._id,
+        firstName: comm.upline.firstName,
+        lastName: comm.upline.lastName,
+        email: comm.upline.email
+      } : null,
+      downline: comm.downline ? {
+        _id: comm.downline._id,
+        firstName: comm.downline.firstName,
+        lastName: comm.downline.lastName,
+        email: comm.downline.email
+      } : null,
+      investmentAmount: comm.investmentAmount,
+      commissionPercentage: comm.commissionPercentage,
+      commissionAmount: comm.commissionAmount,
+      roundNumber: comm.roundNumber,
+      status: comm.status,
+      createdAt: comm.createdAt,
+      paidAt: comm.paidAt
+    }));
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        commissions: formattedCommissions,
+        pagination: {
+          currentPage: page,
+          totalPages: totalPages,
+          totalItems: total,
+          itemsPerPage: limit,
+          hasNextPage: page < totalPages,
+          hasPrevPage: page > 1
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Error fetching commission history:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch commission history'
+    });
+  }
+});
+
+// =============================================
+// GET COMMISSION SETTINGS
+// =============================================
+app.get('/api/admin/commission-settings', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+  try {
+    // Get the active commission settings
+    let settings = await CommissionSettings.findOne({ isActive: true }).sort({ createdAt: -1 });
+    
+    // If no settings exist, return defaults
+    if (!settings) {
+      return res.status(200).json({
+        status: 'success',
+        data: {
+          settings: {
+            commissionPercentage: 5,
+            commissionRounds: 3,
+            isActive: true
+          }
+        }
+      });
+    }
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        settings: {
+          commissionPercentage: settings.commissionPercentage,
+          commissionRounds: settings.commissionRounds,
+          isActive: settings.isActive,
+          updatedBy: settings.updatedBy,
+          updatedAt: settings.updatedAt
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Error fetching commission settings:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch commission settings'
+    });
+  }
+});
+
+// =============================================
+// UPDATE COMMISSION SETTINGS
+// =============================================
+app.post('/api/admin/commission-settings', adminProtect, restrictTo('super'), async (req, res) => {
+  try {
+    const { commissionPercentage, commissionRounds } = req.body;
+
+    // Validate inputs
+    if (commissionPercentage === undefined || commissionRounds === undefined) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Commission percentage and rounds are required'
+      });
+    }
+
+    if (commissionPercentage < 0 || commissionPercentage > 50) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Commission percentage must be between 0 and 50'
+      });
+    }
+
+    if (commissionRounds < 1 || commissionRounds > 10) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Commission rounds must be between 1 and 10'
+      });
+    }
+
+    // Deactivate all existing settings
+    await CommissionSettings.updateMany(
+      { isActive: true },
+      { $set: { isActive: false } }
+    );
+
+    // Create new active settings
+    const newSettings = await CommissionSettings.create({
+      commissionPercentage: commissionPercentage,
+      commissionRounds: commissionRounds,
+      isActive: true,
+      updatedBy: req.admin._id
+    });
+
+    // Also update all existing downline relationships to use new settings?
+    // (Optional: This would update existing relationships)
+    await DownlineRelationship.updateMany(
+      { status: 'active' },
+      {
+        $set: {
+          commissionPercentage: commissionPercentage,
+          commissionRounds: commissionRounds,
+          remainingRounds: commissionRounds
+        }
+      }
+    );
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Commission settings updated successfully',
+      data: {
+        settings: {
+          commissionPercentage: newSettings.commissionPercentage,
+          commissionRounds: newSettings.commissionRounds,
+          isActive: newSettings.isActive
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Error updating commission settings:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to update commission settings'
+    });
+  }
+});
+
+// =============================================
+// ASSIGN DOWNLINE RELATIONSHIP
+// =============================================
+app.post('/api/admin/downline/assign', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+  try {
+    const { downlineUserId, uplineUserId } = req.body;
+
+    // Validate inputs
+    if (!downlineUserId || !uplineUserId) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Both downline and upline user IDs are required'
+      });
+    }
+
+    if (downlineUserId === uplineUserId) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Downline and upline cannot be the same user'
+      });
+    }
+
+    // Check if users exist
+    const downlineUser = await User.findById(downlineUserId);
+    const uplineUser = await User.findById(uplineUserId);
+
+    if (!downlineUser || !uplineUser) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'One or both users not found'
+      });
+    }
+
+    // Check if downline already has an upline
+    const existingRelationship = await DownlineRelationship.findOne({ downline: downlineUserId });
+    if (existingRelationship) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `User ${downlineUser.firstName} ${downlineUser.lastName} already has an upline`
+      });
+    }
+
+    // Get current commission settings
+    const settings = await CommissionSettings.findOne({ isActive: true }).sort({ createdAt: -1 });
+    const commissionPercentage = settings?.commissionPercentage || 5;
+    const commissionRounds = settings?.commissionRounds || 3;
+
+    // Create new relationship
+    const relationship = await DownlineRelationship.create({
+      upline: uplineUserId,
+      downline: downlineUserId,
+      commissionPercentage: commissionPercentage,
+      commissionRounds: commissionRounds,
+      remainingRounds: commissionRounds,
+      assignedBy: req.admin._id,
+      assignedAt: new Date(),
+      status: 'active'
+    });
+
+    // Update downline stats for upline
+    const totalDownlines = await DownlineRelationship.countDocuments({ upline: uplineUserId });
+    await User.findByIdAndUpdate(uplineUserId, {
+      $inc: { 'downlineStats.totalDownlines': 1 },
+      $set: { 'downlineStats.activeDownlines': totalDownlines }
+    });
+
+    res.status(201).json({
+      status: 'success',
+      message: `Downline relationship created successfully`,
+      data: {
+        relationship: {
+          _id: relationship._id,
+          upline: {
+            _id: uplineUser._id,
+            firstName: uplineUser.firstName,
+            lastName: uplineUser.lastName,
+            email: uplineUser.email
+          },
+          downline: {
+            _id: downlineUser._id,
+            firstName: downlineUser.firstName,
+            lastName: downlineUser.lastName,
+            email: downlineUser.email
+          },
+          commissionPercentage: relationship.commissionPercentage,
+          commissionRounds: relationship.commissionRounds,
+          remainingRounds: relationship.remainingRounds,
+          status: relationship.status
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Error assigning downline:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to assign downline relationship'
+    });
+  }
+});
+
+// =============================================
+// REMOVE DOWNLINE RELATIONSHIP
+// =============================================
+app.delete('/api/admin/downline/:id', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid relationship ID'
+      });
+    }
+
+    const relationship = await DownlineRelationship.findById(id);
+    if (!relationship) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Relationship not found'
+      });
+    }
+
+    const uplineId = relationship.upline;
+
+    // Delete the relationship
+    await DownlineRelationship.findByIdAndDelete(id);
+
+    // Update downline stats for upline
+    const totalDownlines = await DownlineRelationship.countDocuments({ upline: uplineId });
+    await User.findByIdAndUpdate(uplineId, {
+      $set: { 'downlineStats.activeDownlines': totalDownlines }
+    });
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Downline relationship removed successfully'
+    });
+
+  } catch (err) {
+    console.error('Error removing downline:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to remove downline relationship'
+    });
+  }
+});
+
+// =============================================
+// SAVE ACCOUNT RESTRICTIONS (POST)
+// =============================================
+app.post('/api/admin/restrictions', adminProtect, restrictTo('super'), async (req, res) => {
+  try {
+    const {
+      withdraw_limit_no_kyc,
+      invest_limit_no_kyc,
+      trade_limit_no_txn,
+      withdraw_limit_no_txn,
+      kyc_restriction_reason,
+      txn_restriction_reason
+    } = req.body;
+
+    // Get or create restrictions instance
+    let restrictions = await AccountRestrictions.findOne();
+    
+    if (!restrictions) {
+      restrictions = new AccountRestrictions();
+    }
+
+    // Update fields (allow null for no limit)
+    if (withdraw_limit_no_kyc !== undefined) {
+      restrictions.withdraw_limit_no_kyc = withdraw_limit_no_kyc === '' || withdraw_limit_no_kyc === null 
+        ? null 
+        : parseFloat(withdraw_limit_no_kyc);
+    }
+    
+    if (invest_limit_no_kyc !== undefined) {
+      restrictions.invest_limit_no_kyc = invest_limit_no_kyc === '' || invest_limit_no_kyc === null 
+        ? null 
+        : parseFloat(invest_limit_no_kyc);
+    }
+    
+    if (trade_limit_no_txn !== undefined) {
+      restrictions.invest_limit_no_txn = trade_limit_no_txn === '' || trade_limit_no_txn === null 
+        ? null 
+        : parseFloat(trade_limit_no_txn);
+    }
+    
+    if (withdraw_limit_no_txn !== undefined) {
+      restrictions.withdraw_limit_no_txn = withdraw_limit_no_txn === '' || withdraw_limit_no_txn === null 
+        ? null 
+        : parseFloat(withdraw_limit_no_txn);
+    }
+    
+    if (kyc_restriction_reason !== undefined) {
+      restrictions.kyc_restriction_reason = kyc_restriction_reason;
+    }
+    
+    if (txn_restriction_reason !== undefined) {
+      restrictions.txn_restriction_reason = txn_restriction_reason;
+    }
+
+    restrictions.updatedBy = req.admin._id;
+    restrictions.updatedAt = new Date();
+    
+    await restrictions.save();
+
+    // Log the activity
+    await logActivity(
+      'restrictions_updated',
+      'AccountRestrictions',
+      restrictions._id,
+      req.admin._id,
+      'Admin',
+      req,
+      {
+        withdraw_limit_no_kyc: restrictions.withdraw_limit_no_kyc,
+        invest_limit_no_kyc: restrictions.invest_limit_no_kyc,
+        invest_limit_no_txn: restrictions.invest_limit_no_txn,
+        withdraw_limit_no_txn: restrictions.withdraw_limit_no_txn,
+        updatedBy: req.admin.email
+      }
+    );
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Account restrictions saved successfully',
+      data: {
+        restrictions: {
+          withdraw_limit_no_kyc: restrictions.withdraw_limit_no_kyc,
+          invest_limit_no_kyc: restrictions.invest_limit_no_kyc,
+          trade_limit_no_txn: restrictions.invest_limit_no_txn,
+          withdraw_limit_no_txn: restrictions.withdraw_limit_no_txn,
+          kyc_restriction_reason: restrictions.kyc_restriction_reason,
+          txn_restriction_reason: restrictions.txn_restriction_reason
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Error saving restrictions:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to save account restrictions'
+    });
+  }
+});
+
+// =============================================
+// GET ACCOUNT RESTRICTIONS (Already exists - but ensure it's working)
+// =============================================
+app.get('/api/admin/restrictions', adminProtect, restrictTo('super'), async (req, res) => {
+  try {
+    const restrictions = await AccountRestrictions.findOne();
+    
+    if (!restrictions) {
+      // Return default restrictions if none exist
+      return res.status(200).json({
+        status: 'success',
+        data: {
+          withdraw_limit_no_kyc: null,
+          invest_limit_no_kyc: null,
+          trade_limit_no_txn: null,
+          withdraw_limit_no_txn: null,
+          kyc_restriction_reason: 'Please complete your KYC verification to increase your limits.',
+          txn_restriction_reason: 'Please complete at least one deposit or withdrawal to increase your trading limits.'
+        }
+      });
+    }
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        withdraw_limit_no_kyc: restrictions.withdraw_limit_no_kyc,
+        invest_limit_no_kyc: restrictions.invest_limit_no_kyc,
+        trade_limit_no_txn: restrictions.invest_limit_no_txn,
+        withdraw_limit_no_txn: restrictions.withdraw_limit_no_txn,
+        kyc_restriction_reason: restrictions.kyc_restriction_reason,
+        txn_restriction_reason: restrictions.txn_restriction_reason
+      }
+    });
+
+  } catch (err) {
+    console.error('Error fetching restrictions:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch account restrictions'
+    });
+  }
+});
+
 
 
 
