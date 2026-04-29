@@ -9744,6 +9744,11 @@ app.post('/api/convert', protect, async (req, res) => {
 
 
 
+
+
+
+
+
 // =============================================
 // MARKET DATA ENDPOINT - EXACT FIX FOR 418 ERROR
 // =============================================
@@ -9772,6 +9777,9 @@ const setCachedMarketData = (data) => {
   });
 };
 
+// FALLBACK API #1: Binance (trading platform - reliable, no API key needed)
+// FALLBACK API #2: Kraken (established exchange - reliable fallback)
+// FALLBACK API #3: CryptoCompare (aggregator - wide coverage)
 async function fetchMarketData() {
   // Prevent multiple simultaneous refreshes
   if (isRefreshingMarketData) {
@@ -9794,31 +9802,231 @@ async function fetchMarketData() {
   isRefreshingMarketData = true;
   
   try {
+    // =============================================
+    // PRIMARY API: CoinGecko (with User-Agent fix)
+    // =============================================
     // Rate limiting cooldown before API call
     await new Promise(resolve => setTimeout(resolve, MARKET_DATA_RATE_LIMIT_COOLDOWN));
     
-    // CRITICAL FIX: Add User-Agent header to avoid 418 error
-    const response = await axios.get(
-      'https://api.coingecko.com/api/v3/coins/markets',
-      {
-        params: {
-          vs_currency: 'usd',
-          order: 'market_cap_desc',
-          per_page: 50,
-          page: 1,
-          sparkline: true,
-          price_change_percentage: '1h,24h,7d'
-        },
-        timeout: 15000,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Accept': 'application/json',
-          'Accept-Language': 'en-US,en;q=0.9'
+    let response = null;
+    let apiSuccess = false;
+    let usedApi = 'CoinGecko';
+    
+    // Try CoinGecko with User-Agent header to avoid 418 error
+    try {
+      response = await axios.get(
+        'https://api.coingecko.com/api/v3/coins/markets',
+        {
+          params: {
+            vs_currency: 'usd',
+            order: 'market_cap_desc',
+            per_page: 50,
+            page: 1,
+            sparkline: true,
+            price_change_percentage: '1h,24h,7d'
+          },
+          timeout: 15000,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/json',
+            'Accept-Language': 'en-US,en;q=0.9'
+          }
         }
+      );
+      
+      if (response.data && Array.isArray(response.data) && response.data.length > 0) {
+        apiSuccess = true;
+        usedApi = 'CoinGecko';
+        console.log(`✅ Market data fetched from CoinGecko: ${response.data.length} assets`);
       }
-    );
-
-    if (response.data && Array.isArray(response.data) && response.data.length > 0) {
+    } catch (coingeckoError) {
+      console.log(`⚠️ CoinGecko API failed: ${coingeckoError.message}`);
+    }
+    
+    // =============================================
+    // FALLBACK API #1: Binance (top trading volume exchange)
+    // =============================================
+    if (!apiSuccess) {
+      try {
+        console.log('🔄 Falling back to Binance API for market data...');
+        await new Promise(resolve => setTimeout(resolve, MARKET_DATA_RATE_LIMIT_COOLDOWN));
+        
+        // Get 24hr ticker data for all symbols from Binance
+        const binanceResponse = await axios.get('https://api.binance.com/api/v3/ticker/24hr', {
+          timeout: 10000,
+          headers: {
+            'Accept': 'application/json'
+          }
+        });
+        
+        if (binanceResponse.data && Array.isArray(binanceResponse.data) && binanceResponse.data.length > 0) {
+          // Filter to USDT pairs only and transform to match CoinGecko format
+          const usdtPairs = binanceResponse.data.filter(item => 
+            item.symbol && item.symbol.endsWith('USDT')
+          );
+          
+          // Take top 50 by quoteVolume (most traded)
+          const topPairs = usdtPairs
+            .sort((a, b) => parseFloat(b.quoteVolume || 0) - parseFloat(a.quoteVolume || 0))
+            .slice(0, 50);
+          
+          const transformedData = topPairs.map(pair => {
+            const symbol = pair.symbol.replace('USDT', '').toLowerCase();
+            const price = parseFloat(pair.lastPrice) || 0;
+            const priceChangePercent = parseFloat(pair.priceChangePercent) || 0;
+            
+            return {
+              id: symbol,
+              symbol: symbol,
+              name: symbol.toUpperCase(),
+              image: `https://assets.coingecko.com/coins/images/1/large/bitcoin.png`, // generic fallback
+              current_price: price,
+              market_cap: parseFloat(pair.quoteVolume) * price || 0,
+              market_cap_rank: 0,
+              total_volume: parseFloat(pair.quoteVolume) || 0,
+              price_change_percentage_24h: priceChangePercent,
+              price_change_percentage_1h_in_currency: priceChangePercent,
+              price_change_percentage_7d_in_currency: 0,
+              sparkline_in_7d: { price: [] }
+            };
+          });
+          
+          if (transformedData.length > 0) {
+            response = { data: transformedData };
+            apiSuccess = true;
+            usedApi = 'Binance';
+            console.log(`✅ Market data fetched from Binance (Fallback #1): ${transformedData.length} assets`);
+          }
+        }
+      } catch (binanceError) {
+        console.log(`⚠️ Binance fallback API failed: ${binanceError.message}`);
+      }
+    }
+    
+    // =============================================
+    // FALLBACK API #2: Kraken (established exchange)
+    // =============================================
+    if (!apiSuccess) {
+      try {
+        console.log('🔄 Falling back to Kraken API for market data...');
+        await new Promise(resolve => setTimeout(resolve, MARKET_DATA_RATE_LIMIT_COOLDOWN));
+        
+        // Get tradable asset pairs from Kraken
+        const pairsResponse = await axios.get('https://api.kraken.com/0/public/AssetPairs', {
+          timeout: 10000
+        });
+        
+        if (pairsResponse.data && pairsResponse.data.result) {
+          // Find USD pairs
+          const usdPairs = Object.keys(pairsResponse.data.result).filter(key => 
+            key.endsWith('USD') && !key.includes('.')
+          );
+          
+          // Get ticker data for each pair (limit to 50)
+          const limitedPairs = usdPairs.slice(0, 50);
+          const tickerPromises = limitedPairs.map(pair => 
+            axios.get(`https://api.kraken.com/0/public/Ticker?pair=${pair}`, { timeout: 5000 })
+              .catch(() => null)
+          );
+          
+          const tickerResponses = await Promise.all(tickerPromises);
+          
+          const transformedData = [];
+          for (let i = 0; i < limitedPairs.length; i++) {
+            const pair = limitedPairs[i];
+            const tickerData = tickerResponses[i];
+            
+            if (tickerData && tickerData.data && tickerData.data.result) {
+              const pairData = tickerData.data.result[pair];
+              if (pairData && pairData.c && pairData.c[0]) {
+                const symbol = pair.replace('USD', '').toLowerCase();
+                const price = parseFloat(pairData.c[0]);
+                const volume = parseFloat(pairData.v[1]) || 0;
+                
+                transformedData.push({
+                  id: symbol,
+                  symbol: symbol,
+                  name: symbol.toUpperCase(),
+                  image: '',
+                  current_price: price,
+                  market_cap: volume * price,
+                  market_cap_rank: 0,
+                  total_volume: volume,
+                  price_change_percentage_24h: parseFloat(pairData.p[2]) || 0,
+                  price_change_percentage_1h_in_currency: 0,
+                  price_change_percentage_7d_in_currency: 0,
+                  sparkline_in_7d: { price: [] }
+                });
+              }
+            }
+          }
+          
+          if (transformedData.length > 0) {
+            response = { data: transformedData };
+            apiSuccess = true;
+            usedApi = 'Kraken';
+            console.log(`✅ Market data fetched from Kraken (Fallback #2): ${transformedData.length} assets`);
+          }
+        }
+      } catch (krakenError) {
+        console.log(`⚠️ Kraken fallback API failed: ${krakenError.message}`);
+      }
+    }
+    
+    // =============================================
+    // FALLBACK API #3: CryptoCompare (data aggregator)
+    // =============================================
+    if (!apiSuccess) {
+      try {
+        console.log('🔄 Falling back to CryptoCompare API for market data...');
+        await new Promise(resolve => setTimeout(resolve, MARKET_DATA_RATE_LIMIT_COOLDOWN));
+        
+        // Get top coins by volume from CryptoCompare
+        const ccResponse = await axios.get('https://min-api.cryptocompare.com/data/top/mktcapfull?limit=50&tsym=USD', {
+          timeout: 10000,
+          headers: {
+            'Accept': 'application/json'
+          }
+        });
+        
+        if (ccResponse.data && ccResponse.data.Data && Array.isArray(ccResponse.data.Data)) {
+          const transformedData = ccResponse.data.Data.map(coin => {
+            const coinInfo = coin.CoinInfo || {};
+            const display = coin.DISPLAY?.USD || {};
+            const raw = coin.RAW?.USD || {};
+            
+            return {
+              id: coinInfo.Name ? coinInfo.Name.toLowerCase() : 'unknown',
+              symbol: coinInfo.Name ? coinInfo.Name.toLowerCase() : 'unknown',
+              name: coinInfo.FullName || coinInfo.Name || 'Unknown',
+              image: `https://www.cryptocompare.com${coinInfo.ImageUrl || ''}`,
+              current_price: parseFloat(display.PRICE?.replace(/[^0-9.-]/g, '')) || 0,
+              market_cap: parseFloat(display.MKTCAP?.replace(/[^0-9.-]/g, '')) || 0,
+              market_cap_rank: 0,
+              total_volume: parseFloat(display.VOLUME24HOUR?.replace(/[^0-9.-]/g, '')) || 0,
+              price_change_percentage_24h: parseFloat(display.CHANGEPCT24HOUR?.replace(/[^0-9.-]/g, '')) || 0,
+              price_change_percentage_1h_in_currency: 0,
+              price_change_percentage_7d_in_currency: 0,
+              sparkline_in_7d: { price: [] }
+            };
+          });
+          
+          if (transformedData.length > 0) {
+            response = { data: transformedData };
+            apiSuccess = true;
+            usedApi = 'CryptoCompare';
+            console.log(`✅ Market data fetched from CryptoCompare (Fallback #3): ${transformedData.length} assets`);
+          }
+        }
+      } catch (ccError) {
+        console.log(`⚠️ CryptoCompare fallback API failed: ${ccError.message}`);
+      }
+    }
+    
+    // =============================================
+    // Process successful response (from any API)
+    // =============================================
+    if (apiSuccess && response && response.data && Array.isArray(response.data) && response.data.length > 0) {
       const transformed = response.data.map(coin => ({
         id: coin.id,
         symbol: coin.symbol,
@@ -9839,13 +10047,23 @@ async function fetchMarketData() {
       // Cache the transformed data
       setCachedMarketData(transformed);
       
-      console.log(`✅ Market data fetched: ${transformed.length} assets`);
+      console.log(`✅ Market data fetched: ${transformed.length} assets (Source: ${usedApi})`);
       isRefreshingMarketData = false;
       return transformed;
     }
     
+    // No API succeeded
+    console.error('❌ All market data APIs (CoinGecko + 3 fallbacks) failed');
     isRefreshingMarketData = false;
-    return getCachedMarketData() || [];
+    
+    // Return cached data if available
+    const cachedFallback = getCachedMarketData();
+    if (cachedFallback && cachedFallback.length > 0) {
+      console.log(`📦 Using cached data (all APIs failed): ${cachedFallback.length} assets`);
+      return cachedFallback;
+    }
+    
+    return [];
     
   } catch (error) {
     console.error('Market data fetch error:', error.message);
@@ -9917,6 +10135,22 @@ let refreshInterval = setInterval(async () => {
 process.on('SIGTERM', () => {
   if (refreshInterval) clearInterval(refreshInterval);
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
