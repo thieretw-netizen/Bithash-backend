@@ -8001,7 +8001,7 @@ const investment = await Investment.create({
             </div>
             
             <p style="color: #333333; line-height: 1.6;">Dear <strong>${user.firstName}</strong>,</p>
-            <p style="color: #333333; line-height: 1.6;">Great news! Your investment in the <strong>${plan.name}</strong> plan has been successfully activated and credited to your <strong style="color: #10B981;">Active Wallet</strong>.</p>
+            <p style="color: #333333; line-height: 1.6;">Great news! Your Mining contract in the <strong>${plan.name}</strong> plan has been successfully activated and credited to your <strong style="color: #10B981;">Active Wallet</strong>.</p>
             
             <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
               <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
@@ -8018,7 +8018,7 @@ const investment = await Investment.create({
                   <td style="padding: 8px 0; text-align: right;">${plan.name}</td>
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
-                  <td style="padding: 8px 0;"><strong>Investment Amount (Gross):</strong></td>
+                  <td style="padding: 8px 0;"><strong> Contract Amount (Gross):</strong></td>
                   <td style="padding: 8px 0; text-align: right;">${formattedOriginalBTC} BTC (≈ $${formattedAmount} USD)</td>
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
@@ -8082,7 +8082,7 @@ const investment = await Investment.create({
             </div>
             
             <div style="text-align: center; margin: 30px 0;">
-              <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Track Your Investment</a>
+              <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Track Your Contract</a>
             </div>
             
             <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${formattedStartDate}</p>
@@ -8621,8 +8621,8 @@ const completeMaturedInvestmentsCron = async () => {
                         <path d="M8 12L11 15L16 9" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                       </svg>
                     </div>
-                    <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">INVESTMENT MATURED!</h2>
-                    <p style="color: #065F46; font-size: 13px; margin: 0;">Your mining contract has successfully completed</p>
+                    <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">CONTRACT MATURED!</h2>
+                    <p style="color: #065F46; font-size: 13px; margin: 0;">Your mining contract has successfully matured</p>
                   </div>
                   
                   <p style="color: #333333; line-height: 1.6;">Dear <strong>${user.firstName}</strong>,</p>
