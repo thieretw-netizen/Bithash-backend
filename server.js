@@ -55,7 +55,7 @@ app.use(helmet({
       connectSrc: ["'self'", "https://api.ipinfo.io", "https://website-backendd-1.onrender.com", "https://api.coingecko.com", "https://bithash-backend-1.onrender.com"],
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
       objectSrc: ["'none'"],
-      frameSrc: ["'self'", "https://bithash-backend-1.onrender.com", "https://www.bithashcapital.live", "chrome-error://chromewebdata/"],
+      frameSrc: ["'self'", "https://bithash-backend-kg7j.onrender.com", "https://www.bithashcapital.live", "chrome-error://chromewebdata/"],
       frameAncestors: ["'self'", "https://www.bithashcapital.live", "https://bithhash.vercel.app"],
       upgradeInsecureRequests: null
     }
@@ -67,7 +67,7 @@ app.use(helmet({
 
 app.use(cors({
   origin: [
-    'https://www.bithashcapital.live', 
+    'https://www.bithashcapital.live', 'https://bithash-backend-kg7j.onrender.com',
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
