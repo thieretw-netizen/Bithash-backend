@@ -19151,184 +19151,92 @@ const startRealTimePriceUpdates = (io) => {
 
 
 // =============================================
-// HELPER: Calculate wallet value from balances Map (SKIPS stored 'usd')
-// =============================================
-const calculateWalletValueFromBalances = async (balancesMap, currentPrices) => {
-  let totalValue = 0;
-  
-  if (!balancesMap) return totalValue;
-  
-  for (const [asset, balance] of balancesMap.entries()) {
-    // ✅ CRITICAL FIX: Skip the stored 'usd' key entirely
-    // This prevents double-counting (crypto value + stored USD)
-    if (balance > 0 && asset !== 'usd') {
-      let price = 0;
-      
-      // Try to get price from current price update first
-      if (currentPrices && currentPrices[asset] && currentPrices[asset].price) {
-        price = currentPrices[asset].price;
-      } else {
-        // Fallback to fresh API call
-        price = await getCryptoPrice(asset.toUpperCase());
-      }
-      
-      if (price && price > 0) {
-        totalValue += balance * price;
-      } else {
-        console.warn(`⚠️ Could not fetch price for ${asset} (balance: ${balance})`);
-      }
-    }
-  }
-  
-  return totalValue;
-};
-
-// =============================================
-// REAL-TIME WALLET RECALCULATION - FIXED VERSION
-// Skips stored 'usd' values to prevent double counting
+// REPLACE ONLY THIS FUNCTION - recalculateAllWalletValuesRealtime
 // =============================================
 const recalculateAllWalletValuesRealtime = async (io, currentPrices) => {
-  if (isRecalculating) {
-    // Skip if already running to avoid overlapping
-    return;
-  }
+  if (isRecalculating) return;
   isRecalculating = true;
   
   try {
-    const startTime = Date.now();
     const users = await User.find({}).select('_id balances');
-    let updatedCount = 0;
-    let skippedCount = 0;
     
     for (const user of users) {
       let totalMainValue = 0;
       let totalMaturedValue = 0;
+      
+      // Active wallet value should NOT be recalculated - it's fixed!
       let totalActiveValue = 0;
-      
-      // =============================================
-      // MAIN WALLET: Calculate from crypto ONLY (skip 'usd')
-      // =============================================
-      if (user.balances && user.balances.main) {
-        totalMainValue = await calculateWalletValueFromBalances(user.balances.main, currentPrices);
-      }
-      
-      // =============================================
-      // MATURED WALLET: Calculate from crypto ONLY (skip 'usd')
-      // =============================================
-      if (user.balances && user.balances.matured) {
-        totalMaturedValue = await calculateWalletValueFromBalances(user.balances.matured, currentPrices);
-      }
-      
-      // =============================================
-      // ACTIVE WALLET: FIXED value - stored directly as USD
-      // No price calculation needed
-      // =============================================
       if (user.balances && user.balances.active) {
-        for (const [asset, balance] of user.balances.active.entries()) {
+        const activeBalances = user.balances.active;
+        for (const [asset, balance] of activeBalances.entries()) {
           if (balance > 0) {
-            // Active wallet stores USD values directly
             totalActiveValue += balance;
           }
         }
       }
       
-      // Only emit if values changed significantly (avoid constant updates)
-      const shouldEmit = true; // You can add change detection here
+      // Recalculate MAIN wallet (fluctuates) - SKIP the 'usd' key!
+      if (user.balances && user.balances.main) {
+        for (const [asset, balance] of user.balances.main.entries()) {
+          // ✅ CRITICAL: Skip the stored 'usd' value
+          if (balance > 0 && asset !== 'usd') {
+            let price = 0;
+            if (currentPrices && currentPrices[asset] && currentPrices[asset].price) {
+              price = currentPrices[asset].price;
+            } else {
+              price = await getCryptoPrice(asset.toUpperCase());
+            }
+            if (price && price > 0) {
+              totalMainValue += balance * price;
+            }
+          }
+        }
+      }
       
-      if (shouldEmit && io) {
+      // Recalculate MATURED wallet (fluctuates) - SKIP the 'usd' key!
+      if (user.balances && user.balances.matured) {
+        for (const [asset, balance] of user.balances.matured.entries()) {
+          // ✅ CRITICAL: Skip the stored 'usd' value
+          if (balance > 0 && asset !== 'usd') {
+            let price = 0;
+            if (currentPrices && currentPrices[asset] && currentPrices[asset].price) {
+              price = currentPrices[asset].price;
+            } else {
+              price = await getCryptoPrice(asset.toUpperCase());
+            }
+            if (price && price > 0) {
+              totalMaturedValue += balance * price;
+            }
+          }
+        }
+      }
+      
+      // Send real-time updates via Socket.IO to each specific user
+      if (io) {
         io.to(`user_${user._id}`).emit('wallet_realtime_update', {
           main: totalMainValue,
           active: totalActiveValue,
           matured: totalMaturedValue,
           timestamp: Date.now()
         });
-        updatedCount++;
-      } else {
-        skippedCount++;
       }
     }
     
-    const elapsed = Date.now() - startTime;
-    if (process.env.NODE_ENV !== 'production') {
-      console.log(`💰 Wallet recalculation completed in ${elapsed}ms: ${updatedCount} updated, ${skippedCount} skipped`);
-    }
-    
   } catch (err) {
-    console.error('❌ Error in real-time wallet recalculation:', err);
+    console.error('Error in real-time wallet recalculation:', err);
   } finally {
     isRecalculating = false;
   }
 };
 
 // =============================================
-// REAL-TIME PRICE UPDATES
-// Fetches fresh prices and triggers wallet recalculation
-// =============================================
-let priceUpdateInterval = null;
-
-const startRealTimePriceUpdates = (io) => {
-  // Clear existing interval if any
-  if (priceUpdateInterval) {
-    clearInterval(priceUpdateInterval);
-  }
-  
-  // Update interval: EVERY 10 SECONDS (not 1 second - avoids rate limits)
-  priceUpdateInterval = setInterval(async () => {
-    try {
-      // List of assets to track
-      const assets = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'ADA', 'SHIB'];
-      const priceUpdates = {};
-      
-      // Fetch all prices in parallel
-      const pricePromises = assets.map(async (asset) => {
-        try {
-          const price = await getCryptoPrice(asset);
-          if (price && price > 0) {
-            priceUpdates[asset.toLowerCase()] = {
-              price: price,
-              timestamp: Date.now()
-            };
-          }
-        } catch (err) {
-          console.warn(`⚠️ Failed to fetch price for ${asset}:`, err.message);
-        }
-      });
-      
-      await Promise.all(pricePromises);
-      
-      // Broadcast price updates to all clients
-      if (Object.keys(priceUpdates).length > 0 && io) {
-        io.emit('price_update', priceUpdates);
-        
-        if (process.env.NODE_ENV !== 'production') {
-          console.log(`📊 Price update broadcast: ${Object.keys(priceUpdates).length} assets updated`);
-        }
-      }
-      
-      // Recalculate all wallet values with new prices
-      await recalculateAllWalletValuesRealtime(io, priceUpdates);
-      
-    } catch (err) {
-      console.error('❌ Error in price update interval:', err);
-    }
-  }, 10000); // EVERY 10 SECONDS
-};
-
-// =============================================
-// INITIALIZE REAL-TIME WALLET UPDATES
+// REPLACE THIS FUNCTION - startRealTimeWalletUpdates
 // =============================================
 const startRealTimeWalletUpdates = (io) => {
-  // Start the price update loop
   startRealTimePriceUpdates(io);
   console.log('💰 Real-time wallet value updates started (every 10 seconds)');
-  console.log('📊 CRITICAL: Skipping stored "usd" values to prevent double counting');
+  console.log('✅ FIXED: Skipping stored "usd" values to prevent double counting');
 };
-
-// =============================================
-// MAKE SURE isRecalculating is declared globally
-// =============================================
-let isRecalculating = false; // Add this near the top of your file with other global variables
-
 
 
 
