@@ -19160,33 +19160,47 @@ const recalculateAllWalletValuesRealtime = async (io, currentPrices) => {
       let totalMainValue = 0;
       let totalMaturedValue = 0;
       
-      // Active wallet value should NOT be recalculated - it's fixed!
-      // Just use stored value
+      // Recalculate MAIN wallet (fluctuates) - SKIP the 'usd' key!
+      if (user.balances && user.balances.main) {
+        for (const [asset, balance] of user.balances.main.entries()) {
+          // ✅ CRITICAL FIX: Skip the 'usd' key entirely
+          if (balance > 0 && asset !== 'usd') {
+            const price = currentPrices?.[asset]?.price || await getCryptoPrice(asset.toUpperCase());
+            if (price && price > 0) {
+              totalMainValue += balance * price;
+            }
+          }
+        }
+      }
+      
+      // Active wallet value - FIXED, just use stored USD
       let totalActiveValue = 0;
       if (user.balances && user.balances.active) {
-        const activeBalances = user.balances.active;
-        for (const [asset, balance] of activeBalances.entries()) {
+        for (const [asset, balance] of user.balances.active.entries()) {
           if (balance > 0) {
             totalActiveValue += balance;
           }
         }
       }
       
-      // Recalculate MAIN wallet (fluctuates)
-      if (user.balances && user.balances.main) {
-        totalMainValue = await calculateWalletValueFromBalances(user.balances.main, currentPrices);
-      }
-      
-      // Recalculate MATURED wallet (fluctuates)
+      // Recalculate MATURED wallet - SKIP the 'usd' key!
       if (user.balances && user.balances.matured) {
-        totalMaturedValue = await calculateWalletValueFromBalances(user.balances.matured, currentPrices);
+        for (const [asset, balance] of user.balances.matured.entries()) {
+          // ✅ CRITICAL FIX: Skip the 'usd' key entirely
+          if (balance > 0 && asset !== 'usd') {
+            const price = currentPrices?.[asset]?.price || await getCryptoPrice(asset.toUpperCase());
+            if (price && price > 0) {
+              totalMaturedValue += balance * price;
+            }
+          }
+        }
       }
       
-      // Send real-time updates via Socket.IO to each specific user
+      // Send real-time updates
       if (io) {
         io.to(`user_${user._id}`).emit('wallet_realtime_update', {
-          main: totalMainValue,
-          active: totalActiveValue,  // FIXED: Use stored value, not recalculated
+          main: totalMainValue,      // ✅ Now correctly calculated
+          active: totalActiveValue,
           matured: totalMaturedValue,
           timestamp: Date.now()
         });
@@ -19199,14 +19213,6 @@ const recalculateAllWalletValuesRealtime = async (io, currentPrices) => {
     isRecalculating = false;
   }
 };
-
-// Initialize real-time updates
-const startRealTimeWalletUpdates = (io) => {
-  startRealTimePriceUpdates(io);
-  console.log('💰 Real-time wallet value updates started (every 1 second)');
-};
-
-
 
 
 
