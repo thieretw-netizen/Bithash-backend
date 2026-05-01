@@ -19152,8 +19152,6 @@ const startRealTimePriceUpdates = (io) => {
 // =============================================
 // START REAL-TIME WALLET UPDATES
 // =============================================
-
-let priceUpdateInterval = null;
 let isRecalculating = false;
 
 const startRealTimeWalletUpdates = (io) => {
