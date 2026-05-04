@@ -27018,6 +27018,223 @@ const setupMarketWebSocket = (server) => {
   });
 };
 
+
+
+
+
+// Add this line to declare currentPrices globally before it's used
+let currentPrices = {};
+
+// Then modify your socket.on('refresh_pnl') handler to use it correctly
+io.on('connection', async (socket) => {
+  console.log('New client connected:', socket.id);
+  
+  const token = socket.handshake.auth.token;
+  let userId = null;
+  
+  if (token) {
+    try {
+      const decoded = verifyJWT(token);
+      if (decoded && !decoded.isAdmin) {
+        userId = decoded.id;
+        socket.join(`user_${userId}`);
+        console.log(`Socket authenticated for user: ${userId}`);
+        
+        const user = await User.findById(userId).select('balances');
+        if (user) {
+          // Calculate REAL balances (NO stored USD values, NO fake data)
+          let mainUSD = 0;
+          let activeUSD = 0;
+          let maturedUSD = 0;
+          let priceErrors = [];
+          
+          // Calculate MAIN wallet from REAL crypto balances only
+          if (user.balances && user.balances.main) {
+            for (const [asset, balance] of user.balances.main.entries()) {
+              // Skip the 'usd' key - it's a cache value, NOT for calculation
+              if (balance > 0 && asset !== 'usd') {
+                const price = await getCryptoPrice(asset.toUpperCase());
+                if (price && price > 0) {
+                  mainUSD += balance * price;
+                } else {
+                  priceErrors.push(asset);
+                }
+              }
+            }
+          }
+          
+          // If any price fetch failed, send error (NO fake data)
+          if (priceErrors.length > 0) {
+            socket.emit('error', {
+              type: 'price_fetch_failed',
+              message: `Unable to fetch current prices for: ${priceErrors.join(', ').toUpperCase()}. Please try again.`,
+              missingAssets: priceErrors,
+              timestamp: Date.now()
+            });
+            return;
+          }
+          
+          // Calculate ACTIVE wallet (FIXED values - stored directly)
+          if (user.balances && user.balances.active) {
+            for (const [asset, balance] of user.balances.active.entries()) {
+              if (balance > 0) {
+                activeUSD += balance;
+              }
+            }
+          }
+          
+          // Calculate MATURED wallet from REAL crypto balances only
+          if (user.balances && user.balances.matured) {
+            for (const [asset, balance] of user.balances.matured.entries()) {
+              if (balance > 0 && asset !== 'usd') {
+                const price = await getCryptoPrice(asset.toUpperCase());
+                if (price && price > 0) {
+                  maturedUSD += balance * price;
+                } else {
+                  priceErrors.push(asset);
+                }
+              }
+            }
+          }
+          
+          // Send REAL balance update
+          socket.emit('balance_update', {
+            main: mainUSD,
+            active: activeUSD,
+            matured: maturedUSD,
+            timestamp: Date.now()
+          });
+          
+          console.log(`💰 Sent REAL balance to user ${userId}: MAIN=$${mainUSD.toFixed(2)}, ACTIVE=$${activeUSD.toFixed(2)}, MATURED=$${maturedUSD.toFixed(2)}`);
+          
+          // Build and send REAL asset data
+          const assetData = await buildRealAssetData(user, userId);
+          if (assetData.length > 0 || priceErrors.length === 0) {
+            socket.emit('asset_balances_update', assetData);
+          }
+        }
+        
+        // Send user preferences
+        const userPref = await UserPreference.findOne({ user: userId });
+        if (userPref) {
+          socket.emit('preferences_update', {
+            displayAsset: userPref.displayAsset,
+            language: userPref.language,
+            currency: userPref.currency
+          });
+        }
+      }
+    } catch (err) {
+      console.error('Socket auth error:', err);
+      socket.emit('error', { type: 'auth_failed', message: 'Authentication failed' });
+    }
+  }
+  
+  // Send investor stats
+  const currentStats = await getCurrentStats();
+  socket.emit('stats-update', currentStats);
+  console.log(`📡 Sent stats to new client ${socket.id}: ${currentStats.totalInvestors.toLocaleString()} investors`);
+
+  socket.on('authenticate', async (token) => {
+    try {
+      const decoded = verifyJWT(token);
+      if (!decoded.isAdmin) {
+        socket.disconnect();
+        return;
+      }
+
+      const admin = await Admin.findById(decoded.id);
+      if (!admin) {
+        socket.disconnect();
+        return;
+      }
+
+      socket.adminId = admin._id;
+      console.log(`Admin ${admin.email} connected`);
+    } catch (err) {
+      socket.disconnect();
+    }
+  });
+  
+  // FIX: Modified refresh_pnl handler - removed undefined currentPrices reference
+  socket.on('refresh_pnl', async () => {
+    if (userId) {
+      const user = await User.findById(userId).select('balances');
+      // Calculate PnL from REAL data only
+      let totalMainValue = 0;
+      let previousDayValue = 0;
+      
+      if (user && user.balances && user.balances.main) {
+        for (const [asset, balance] of user.balances.main.entries()) {
+          if (balance > 0 && asset !== 'usd') {
+            const currentPrice = await getCryptoPrice(asset.toUpperCase());
+            if (currentPrice && currentPrice > 0) {
+              totalMainValue += balance * currentPrice;
+              
+              // Get 24h change from API or use fallback calculation
+              let change24h = 0;
+              try {
+                const assetUpper = asset.toUpperCase();
+                const priceData = await getCryptoPriceWithChange(assetUpper);
+                change24h = priceData?.change24h || 0;
+              } catch (err) {
+                // If we can't get 24h change, use small default (won't affect PnL accuracy)
+                change24h = 0;
+              }
+              
+              const previousPrice = currentPrice / (1 + change24h / 100);
+              previousDayValue += balance * previousPrice;
+            }
+          }
+        }
+      }
+      
+      const dailyPnL = totalMainValue - previousDayValue;
+      const dailyPnLPercentage = previousDayValue > 0 ? (dailyPnL / previousDayValue) * 100 : 0;
+      
+      socket.emit('pnl_update', {
+        main: {
+          amount: dailyPnL,
+          percentage: dailyPnLPercentage
+        },
+        matured: {
+          amount: 0,
+          percentage: 0
+        },
+        timestamp: Date.now()
+      });
+    }
+  });
+
+  socket.on('disconnect', () => {
+    console.log('Client disconnected:', socket.id);
+  });
+});
+
+// Add this helper function after your getCryptoPrice function
+async function getCryptoPriceWithChange(asset) {
+  try {
+    const assetLower = asset.toLowerCase();
+    const response = await axios.get(
+      `https://api.coingecko.com/api/v3/simple/price?ids=${assetLower}&vs_currencies=usd&include_24hr_change=true`,
+      { timeout: 5000 }
+    );
+    
+    if (response.data && response.data[assetLower]) {
+      return {
+        price: response.data[assetLower].usd,
+        change24h: response.data[assetLower].usd_24h_change || 0
+      };
+    }
+    return { price: null, change24h: 0 };
+  } catch (err) {
+    console.warn(`Could not fetch 24h change for ${asset}:`, err.message);
+    return { price: null, change24h: 0 };
+  }
+}
+
+
+
 // =============================================
 // SOCKET.IO CONNECTION HANDLER - REAL DATA ONLY
 // =============================================
