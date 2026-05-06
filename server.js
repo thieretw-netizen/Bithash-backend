@@ -26796,10 +26796,164 @@ app.get('/api/admin/statements/:id', adminProtect, async (req, res) => {
 
 
 
-
 // =============================================
 // MISSING ENDPOINTS FOR ADMIN DASHBOARD
 // =============================================
+
+// =============================================
+// SAVE EMAIL TEMPLATE - Using Redis first, MongoDB fallback
+// =============================================
+app.post('/api/admin/email-templates', adminProtect, async (req, res) => {
+  try {
+    const { name, subject, content, type } = req.body;
+
+    if (!name || !subject || !content) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Name, subject, and content are required'
+      });
+    }
+
+    const templateId = new mongoose.Types.ObjectId();
+    const template = {
+      _id: templateId,
+      name,
+      subject,
+      content,
+      type: type || 'html',
+      createdBy: req.admin._id,
+      createdByEmail: req.admin.email,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+
+    // Store in Redis
+    await redis.setex(`email_template:${templateId}`, 86400 * 90, JSON.stringify(template));
+    
+    // Also store in list for pagination
+    await redis.lpush('email_templates_list', templateId.toString());
+    await redis.ltrim('email_templates_list', 0, 999);
+
+    res.status(201).json({
+      status: 'success',
+      message: 'Template saved successfully',
+      data: { template }
+    });
+
+  } catch (err) {
+    console.error('Save email template error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to save email template'
+    });
+  }
+});
+
+// =============================================
+// GET EMAIL TEMPLATES - Paginated from Redis
+// =============================================
+app.get('/api/admin/email-templates', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const start = (page - 1) * limit;
+    const end = start + limit - 1;
+
+    // Get template IDs from Redis list
+    const templateIds = await redis.lrange('email_templates_list', start, end);
+    const templates = [];
+
+    for (const id of templateIds) {
+      const templateJson = await redis.get(`email_template:${id}`);
+      if (templateJson) {
+        templates.push(JSON.parse(templateJson));
+      }
+    }
+
+    const total = await redis.llen('email_templates_list');
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        templates: templates,
+        pagination: {
+          currentPage: page,
+          totalPages: Math.ceil(total / limit),
+          totalItems: total,
+          itemsPerPage: limit
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Get email templates error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch email templates'
+    });
+  }
+});
+
+// =============================================
+// GET SINGLE EMAIL TEMPLATE
+// =============================================
+app.get('/api/admin/email-templates/:id', adminProtect, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const templateJson = await redis.get(`email_template:${id}`);
+    if (!templateJson) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Template not found'
+      });
+    }
+
+    res.status(200).json({
+      status: 'success',
+      data: { template: JSON.parse(templateJson) }
+    });
+
+  } catch (err) {
+    console.error('Get email template error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch email template'
+    });
+  }
+});
+
+// =============================================
+// DELETE EMAIL TEMPLATE
+// =============================================
+app.delete('/api/admin/email-templates/:id', adminProtect, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const exists = await redis.get(`email_template:${id}`);
+    if (!exists) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Template not found'
+      });
+    }
+
+    await redis.del(`email_template:${id}`);
+    await redis.lrem('email_templates_list', 0, id);
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Template deleted successfully'
+    });
+
+  } catch (err) {
+    console.error('Delete email template error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to delete email template'
+    });
+  }
+});
 
 // =============================================
 // SEND EMAIL ENDPOINT - For Email Marketing
@@ -26823,14 +26977,6 @@ app.post('/api/admin/send-email', adminProtect, async (req, res) => {
     }
 
     const recipientEmails = [];
-    let sentCount = 0;
-    let failedCount = 0;
-
-    // Get email configuration from database or use default
-    const emailConfig = {
-      from: process.env.EMAIL_INFO_USER || 'info@bithashcapital.live',
-      fromName: process.env.EMAIL_FROM_NAME || '₿itHash Capital'
-    };
 
     if (recipients[0] === 'all') {
       // Get all active users
@@ -26865,6 +27011,13 @@ app.post('/api/admin/send-email', adminProtect, async (req, res) => {
       }
     }
 
+    if (recipientEmails.length === 0) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'No valid recipients found'
+      });
+    }
+
     const emailHistoryId = new mongoose.Types.ObjectId();
     const emailRecord = {
       _id: emailHistoryId,
@@ -26885,36 +27038,18 @@ app.post('/api/admin/send-email', adminProtect, async (req, res) => {
       status: 'sending',
       sentBy: req.admin._id,
       sentByEmail: req.admin.email,
-      createdAt: new Date(),
+      createdAt: new Date().toISOString(),
       trackDelivery: trackDelivery || false
     };
 
-    // Store in Redis for tracking
-    await redis.setex(`email:${emailHistoryId}`, 86400 * 30, JSON.stringify(emailRecord));
-
-    // Also store in MongoDB for persistence
-    const EmailHistory = mongoose.model('EmailHistory', new mongoose.Schema({
-      _id: mongoose.Schema.Types.ObjectId,
-      subject: String,
-      content: String,
-      type: String,
-      recipients: Array,
-      recipientCount: Number,
-      deliveredCount: Number,
-      readCount: Number,
-      status: String,
-      sentBy: mongoose.Schema.Types.ObjectId,
-      sentByEmail: String,
-      createdAt: Date,
-      trackDelivery: Boolean
-    }));
-
-    await EmailHistory.create(emailRecord);
+    // Store in Redis
+    await redis.setex(`email_history:${emailHistoryId}`, 86400 * 30, JSON.stringify(emailRecord));
+    await redis.lpush('email_history_list', emailHistoryId.toString());
+    await redis.ltrim('email_history_list', 0, 999);
 
     // Send emails asynchronously
     setImmediate(async () => {
       let delivered = 0;
-      let failed = 0;
 
       for (const recipient of recipientEmails) {
         try {
@@ -26965,40 +27100,32 @@ app.post('/api/admin/send-email', adminProtect, async (req, res) => {
           delivered++;
 
           // Update Redis with delivery status
-          const storedEmail = await redis.get(`email:${emailHistoryId}`);
+          const storedEmail = await redis.get(`email_history:${emailHistoryId}`);
           if (storedEmail) {
             const emailData = JSON.parse(storedEmail);
             const recipientIndex = emailData.recipients.findIndex(r => r.email === recipient.email);
             if (recipientIndex !== -1) {
               emailData.recipients[recipientIndex].delivered = true;
               emailData.recipients[recipientIndex].status = 'delivered';
-              emailData.recipients[recipientIndex].deliveredAt = new Date();
+              emailData.recipients[recipientIndex].deliveredAt = new Date().toISOString();
               emailData.deliveredCount = delivered;
-              await redis.setex(`email:${emailHistoryId}`, 86400 * 30, JSON.stringify(emailData));
+              await redis.setex(`email_history:${emailHistoryId}`, 86400 * 30, JSON.stringify(emailData));
             }
           }
-
-          // Update MongoDB
-          await EmailHistory.updateOne(
-            { _id: emailHistoryId },
-            {
-              $inc: { deliveredCount: 1 },
-              $set: { 'recipients.$[elem].delivered': true, 'recipients.$[elem].status': 'delivered', 'recipients.$[elem].deliveredAt': new Date() }
-            },
-            { arrayFilters: [{ 'elem.email': recipient.email }] }
-          );
 
           await new Promise(resolve => setTimeout(resolve, 500));
         } catch (err) {
           console.error(`Failed to send email to ${recipient.email}:`, err);
-          failed++;
         }
       }
 
       // Update final status
-      const finalStatus = delivered > 0 && failed === 0 ? 'sent' : (delivered > 0 ? 'partial' : 'failed');
-      await redis.setex(`email:${emailHistoryId}`, 86400 * 30, JSON.stringify({ ...JSON.parse(await redis.get(`email:${emailHistoryId}`) || '{}'), status: finalStatus }));
-      await EmailHistory.updateOne({ _id: emailHistoryId }, { status: finalStatus });
+      const storedEmail = await redis.get(`email_history:${emailHistoryId}`);
+      if (storedEmail) {
+        const emailData = JSON.parse(storedEmail);
+        emailData.status = delivered === recipientEmails.length ? 'sent' : (delivered > 0 ? 'partial' : 'failed');
+        await redis.setex(`email_history:${emailHistoryId}`, 86400 * 30, JSON.stringify(emailData));
+      }
     });
 
     res.status(200).json({
@@ -27006,9 +27133,7 @@ app.post('/api/admin/send-email', adminProtect, async (req, res) => {
       message: `Email sending initiated to ${recipientEmails.length} recipient(s)`,
       data: {
         emailId: emailHistoryId,
-        recipientCount: recipientEmails.length,
-        sentCount: sentCount,
-        failedCount: failedCount
+        recipientCount: recipientEmails.length
       }
     });
 
@@ -27029,26 +27154,15 @@ app.get('/api/email/track/:emailId/:encodedEmail', async (req, res) => {
     const { emailId, encodedEmail } = req.params;
     const email = Buffer.from(encodedEmail, 'base64').toString();
 
-    const storedEmail = await redis.get(`email:${emailId}`);
+    const storedEmail = await redis.get(`email_history:${emailId}`);
     if (storedEmail) {
       const emailData = JSON.parse(storedEmail);
       const recipientIndex = emailData.recipients.findIndex(r => r.email === email);
       if (recipientIndex !== -1 && !emailData.recipients[recipientIndex].read) {
         emailData.recipients[recipientIndex].read = true;
-        emailData.recipients[recipientIndex].readAt = new Date();
+        emailData.recipients[recipientIndex].readAt = new Date().toISOString();
         emailData.readCount++;
-        await redis.setex(`email:${emailId}`, 86400 * 30, JSON.stringify(emailData));
-
-        // Update MongoDB
-        const EmailHistory = mongoose.model('EmailHistory');
-        await EmailHistory.updateOne(
-          { _id: emailId },
-          {
-            $inc: { readCount: 1 },
-            $set: { 'recipients.$[elem].read': true, 'recipients.$[elem].readAt': new Date() }
-          },
-          { arrayFilters: [{ 'elem.email': email }] }
-        );
+        await redis.setex(`email_history:${emailId}`, 86400 * 30, JSON.stringify(emailData));
       }
     }
 
@@ -27062,197 +27176,54 @@ app.get('/api/email/track/:emailId/:encodedEmail', async (req, res) => {
 });
 
 // =============================================
-// GET EMAIL TEMPLATES - Paginated
-// =============================================
-app.get('/api/admin/email-templates', adminProtect, async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    const skip = (page - 1) * limit;
-
-    const EmailTemplate = mongoose.model('EmailTemplate', new mongoose.Schema({
-      name: String,
-      subject: String,
-      content: String,
-      type: String,
-      createdBy: mongoose.Schema.Types.ObjectId,
-      createdAt: Date,
-      updatedAt: Date
-    }));
-
-    const templates = await EmailTemplate.find()
-      .sort({ updatedAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean();
-
-    const total = await EmailTemplate.countDocuments();
-
-    res.status(200).json({
-      status: 'success',
-      data: {
-        templates: templates,
-        pagination: {
-          currentPage: page,
-          totalPages: Math.ceil(total / limit),
-          totalItems: total,
-          itemsPerPage: limit
-        }
-      }
-    });
-
-  } catch (err) {
-    console.error('Get email templates error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch email templates'
-    });
-  }
-});
-
-// =============================================
-// GET SINGLE EMAIL TEMPLATE
-// =============================================
-app.get('/api/admin/email-templates/:id', adminProtect, async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const EmailTemplate = mongoose.model('EmailTemplate');
-    const template = await EmailTemplate.findById(id);
-
-    if (!template) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Template not found'
-      });
-    }
-
-    res.status(200).json({
-      status: 'success',
-      data: { template }
-    });
-
-  } catch (err) {
-    console.error('Get email template error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch email template'
-    });
-  }
-});
-
-// =============================================
-// SAVE EMAIL TEMPLATE
-// =============================================
-app.post('/api/admin/email-templates', adminProtect, async (req, res) => {
-  try {
-    const { name, subject, content, type } = req.body;
-
-    if (!name || !subject || !content) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Name, subject, and content are required'
-      });
-    }
-
-    const EmailTemplate = mongoose.model('EmailTemplate');
-    const template = await EmailTemplate.create({
-      name,
-      subject,
-      content,
-      type: type || 'html',
-      createdBy: req.admin._id,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    });
-
-    res.status(201).json({
-      status: 'success',
-      message: 'Template saved successfully',
-      data: { template }
-    });
-
-  } catch (err) {
-    console.error('Save email template error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to save email template'
-    });
-  }
-});
-
-// =============================================
-// DELETE EMAIL TEMPLATE
-// =============================================
-app.delete('/api/admin/email-templates/:id', adminProtect, async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const EmailTemplate = mongoose.model('EmailTemplate');
-    const template = await EmailTemplate.findByIdAndDelete(id);
-
-    if (!template) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Template not found'
-      });
-    }
-
-    res.status(200).json({
-      status: 'success',
-      message: 'Template deleted successfully'
-    });
-
-  } catch (err) {
-    console.error('Delete email template error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to delete email template'
-    });
-  }
-});
-
-// =============================================
-// GET EMAIL HISTORY - Paginated with stats
+// GET EMAIL HISTORY - Paginated from Redis
 // =============================================
 app.get('/api/admin/email-history', adminProtect, async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
-    const skip = (page - 1) * limit;
+    const start = (page - 1) * limit;
+    const end = start + limit - 1;
 
-    const EmailHistory = mongoose.model('EmailHistory');
+    // Get email history IDs from Redis list
+    const emailIds = await redis.lrange('email_history_list', start, end);
+    const emails = [];
 
-    const emails = await EmailHistory.find()
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean();
-
-    const total = await EmailHistory.countDocuments();
-    const stats = await EmailHistory.aggregate([
-      {
-        $group: {
-          _id: null,
-          total: { $sum: 1 },
-          delivered: { $sum: '$deliveredCount' },
-          read: { $sum: '$readCount' }
-        }
+    for (const id of emailIds) {
+      const emailJson = await redis.get(`email_history:${id}`);
+      if (emailJson) {
+        emails.push(JSON.parse(emailJson));
       }
-    ]);
+    }
 
-    const openRate = stats[0] && stats[0].delivered > 0
-      ? ((stats[0].read / stats[0].delivered) * 100).toFixed(1)
-      : '0';
+    const total = await redis.llen('email_history_list');
+
+    // Calculate stats
+    let totalEmails = 0;
+    let totalDelivered = 0;
+    let totalRead = 0;
+
+    const allEmailIds = await redis.lrange('email_history_list', 0, -1);
+    for (const id of allEmailIds) {
+      const emailJson = await redis.get(`email_history:${id}`);
+      if (emailJson) {
+        const emailData = JSON.parse(emailJson);
+        totalEmails++;
+        totalDelivered += emailData.deliveredCount || 0;
+        totalRead += emailData.readCount || 0;
+      }
+    }
+
+    const openRate = totalDelivered > 0 ? ((totalRead / totalDelivered) * 100).toFixed(1) : '0';
 
     res.status(200).json({
       status: 'success',
       data: {
         emails: emails,
         stats: {
-          total: stats[0]?.total || 0,
-          delivered: stats[0]?.delivered || 0,
-          read: stats[0]?.read || 0,
+          total: totalEmails,
+          delivered: totalDelivered,
+          read: totalRead,
           openRate: `${openRate}%`
         },
         pagination: {
@@ -27280,10 +27251,8 @@ app.get('/api/admin/email-history/:id', adminProtect, async (req, res) => {
   try {
     const { id } = req.params;
 
-    const EmailHistory = mongoose.model('EmailHistory');
-    const email = await EmailHistory.findById(id);
-
-    if (!email) {
+    const emailJson = await redis.get(`email_history:${id}`);
+    if (!emailJson) {
       return res.status(404).json({
         status: 'fail',
         message: 'Email record not found'
@@ -27292,7 +27261,7 @@ app.get('/api/admin/email-history/:id', adminProtect, async (req, res) => {
 
     res.status(200).json({
       status: 'success',
-      data: { email }
+      data: { email: JSON.parse(emailJson) }
     });
 
   } catch (err) {
@@ -27303,7 +27272,6 @@ app.get('/api/admin/email-history/:id', adminProtect, async (req, res) => {
     });
   }
 });
-
 
 
 
