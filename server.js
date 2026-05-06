@@ -1250,7 +1250,123 @@ LoginRecordSchema.index({ email: 1, timestamp: -1 });
 LoginRecordSchema.index({ timestamp: -1 });
 
 const LoginRecord = mongoose.model('LoginRecord', LoginRecordSchema);
+// =============================================
+// EMAIL MARKETING SCHEMAS
+// =============================================
 
+// Email Template Schema
+const EmailTemplateSchema = new mongoose.Schema({
+  name: {
+    type: String,
+    required: [true, 'Template name is required'],
+    trim: true
+  },
+  subject: {
+    type: String,
+    required: [true, 'Email subject is required'],
+    trim: true
+  },
+  content: {
+    type: String,
+    required: [true, 'Email content is required']
+  },
+  type: {
+    type: String,
+    enum: ['html', 'plain'],
+    default: 'html'
+  },
+  createdBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Admin',
+    required: true
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now
+  },
+  updatedAt: {
+    type: Date,
+    default: Date.now
+  }
+}, { timestamps: true });
+
+EmailTemplateSchema.index({ name: 1 });
+EmailTemplateSchema.index({ createdBy: 1 });
+EmailTemplateSchema.index({ createdAt: -1 });
+
+// Email History Schema
+const EmailHistorySchema = new mongoose.Schema({
+  _id: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: true
+  },
+  subject: {
+    type: String,
+    required: true
+  },
+  content: {
+    type: String,
+    required: true
+  },
+  type: {
+    type: String,
+    enum: ['html', 'plain'],
+    default: 'html'
+  },
+  recipients: [{
+    email: { type: String, required: true },
+    name: { type: String },
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    delivered: { type: Boolean, default: false },
+    deliveredAt: { type: Date },
+    read: { type: Boolean, default: false },
+    readAt: { type: Date },
+    status: { type: String, enum: ['pending', 'delivered', 'failed'], default: 'pending' }
+  }],
+  recipientCount: {
+    type: Number,
+    default: 0
+  },
+  deliveredCount: {
+    type: Number,
+    default: 0
+  },
+  readCount: {
+    type: Number,
+    default: 0
+  },
+  status: {
+    type: String,
+    enum: ['sending', 'sent', 'partial', 'failed'],
+    default: 'sending'
+  },
+  sentBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Admin',
+    required: true
+  },
+  sentByEmail: {
+    type: String,
+    required: true
+  },
+  trackDelivery: {
+    type: Boolean,
+    default: false
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now
+  }
+}, { timestamps: true });
+
+EmailHistorySchema.index({ sentBy: 1 });
+EmailHistorySchema.index({ createdAt: -1 });
+EmailHistorySchema.index({ status: 1 });
+EmailHistorySchema.index({ 'recipients.userId': 1 });
+
+// Add to existing models
+const EmailTemplate = mongoose.models.EmailTemplate || mongoose.model('EmailTemplate', EmailTemplateSchema);
+const EmailHistory = mongoose.models.EmailHistory || mongoose.model('EmailHistory', EmailHistorySchema);
 const MarketPairSchema = new mongoose.Schema({
   symbol: { type: String, required: true, unique: true, index: true },
   baseAsset: { type: String, required: true, index: true },
@@ -5812,86 +5928,82 @@ const sendProfessionalEmail = async ({ email, template, data, useSupportEmail = 
         `;
         break;
 
+      case 'crypto_deposit':
+        subject = `Crypto Deposit Confirmed - ₿itHash Capital`;
+        html = `
+          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+            <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+              <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+              <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+              <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+            </div>
+            <div style="padding: 30px; background: #FFFFFF;">
+              <div style="text-align: center; margin-bottom: 20px;">
+                <img src="${data.cryptoLogoUrl}" alt="${data.currency} logo" style="width: 64px; height: 64px; border-radius: 50%;">
+              </div>
+              <h2 style="color: #0B0E11; margin-bottom: 20px;">Crypto Deposit Received</h2>
+              <p style="color: #333333; line-height: 1.6;">Dear ${data.name},</p>
+              <p style="color: #333333; line-height: 1.6;">You have received a crypto deposit from ₿itHash Capital Secure Asset Fund (BCSAF).</p>
+              <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+                <table style="width: 100%; border-collapse: collapse;">
+                  <table>
+                    <td style="padding: 8px 0;"><strong>Cryptocurrency:</strong></td>
+                    <td style="padding: 8px 0; text-align: right;">
+                      <img src="${data.cryptoLogoUrl}" alt="${data.currency}" style="width: 20px; height: 20px; vertical-align: middle; margin-right: 5px;">
+                      ${data.currency}
+                    </td>
+                  </tr>
+                  <tr style="border-top: 1px solid #E2E8F0;">
+                    <td style="padding: 8px 0;"><strong>Amount:</strong></td>
+                    <td style="padding: 8px 0; text-align: right; font-weight: bold;">${data.amount} ${data.currency}</td>
+                  </tr>
+                  <tr style="border-top: 1px solid #E2E8F0;">
+                    <td style="padding: 8px 0;"><strong>USD Value:</strong></td>
+                    <td style="padding: 8px 0; text-align: right;">$${data.usdValue} USD</td>
+                  </tr>
+                  <tr style="border-top: 1px solid #E2E8F0;">
+                    <td style="padding: 8px 0;"><strong>Exchange Rate:</strong></td>
+                    <td style="padding: 8px 0; text-align: right;">1 ${data.currency} = $${data.price}</td>
+                  </tr>
+                  <tr style="border-top: 1px solid #E2E8F0;">
+                    <td style="padding: 8px 0;"><strong>Wallet Type:</strong></td>
+                    <td style="padding: 8px 0; text-align: right;">
+                      <span style="background: ${data.walletColor}; color: white; padding: 4px 12px; border-radius: 20px; font-size: 12px;">${data.walletType}</span>
+                    </td>
+                  </tr>
+                  <tr style="border-top: 1px solid #E2E8F0;">
+                    <td style="padding: 8px 0;"><strong>Date:</strong></td>
+                    <td style="padding: 8px 0; text-align: right;">${data.timestamp}</td>
+                  </tr>
+                  <tr style="border-top: 1px solid #E2E8F0;">
+                    <td style="padding: 8px 0;"><strong>Transaction ID:</strong></td>
+                    <td style="padding: 8px 0; text-align: right; font-size: 11px;">${data.transactionId}</td>
+                  </tr>
+                  ${data.description ? `
+                  <tr style="border-top: 1px solid #E2E8F0;">
+                    <td style="padding: 8px 0;"><strong>Note:</strong></td>
+                    <td style="padding: 8px 0; text-align: right;">${data.description}</td>
+                  </tr>
+                  ` : ''}
+                </table>
+              </div>
+              <div style="text-align: center; margin: 30px 0;">
+                <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Go to Dashboard</a>
+              </div>
+              <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${data.timestamp}</p>
+            </div>
+            <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+              <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+              <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+              <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
+                <a href="mailto:support@bithash.com" style="color: #F7A600; text-decoration: none;">support@bithash.com</a> | 
+                <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
+              </p>
+            </div>
+          </div>
+        `;
+        break;
 
-
-case 'crypto_deposit':
-  subject = `Crypto Deposit Confirmed - ₿itHash Capital`;
-  html = `
-    <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-      <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-        <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-        <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
-        <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
-      </div>
-      <div style="padding: 30px; background: #FFFFFF;">
-        <div style="text-align: center; margin-bottom: 20px;">
-          <img src="${data.cryptoLogoUrl}" alt="${data.currency} logo" style="width: 64px; height: 64px; border-radius: 50%;">
-        </div>
-        <h2 style="color: #0B0E11; margin-bottom: 20px;">Crypto Deposit Received</h2>
-        <p style="color: #333333; line-height: 1.6;">Dear ${data.name},</p>
-        <p style="color: #333333; line-height: 1.6;">You have received a crypto deposit from ₿itHash Capital Secure Asset Fund (BCSAF).</p>
-        <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-          <table style="width: 100%; border-collapse: collapse;">
-            <tr>
-              <td style="padding: 8px 0;"><strong>Cryptocurrency:</strong></td>
-              <td style="padding: 8px 0; text-align: right;">
-                <img src="${data.cryptoLogoUrl}" alt="${data.currency}" style="width: 20px; height: 20px; vertical-align: middle; margin-right: 5px;">
-                ${data.currency}
-              </td>
-            </tr>
-            <tr style="border-top: 1px solid #E2E8F0;">
-              <td style="padding: 8px 0;"><strong>Amount:</strong></td>
-              <td style="padding: 8px 0; text-align: right; font-weight: bold;">${data.amount} ${data.currency}</td>
-            </tr>
-            <tr style="border-top: 1px solid #E2E8F0;">
-              <td style="padding: 8px 0;"><strong>USD Value:</strong></td>
-              <td style="padding: 8px 0; text-align: right;">$${data.usdValue} USD</td>
-            </tr>
-            <tr style="border-top: 1px solid #E2E8F0;">
-              <td style="padding: 8px 0;"><strong>Exchange Rate:</strong></td>
-              <td style="padding: 8px 0; text-align: right;">1 ${data.currency} = $${data.price}</td>
-            </tr>
-            <tr style="border-top: 1px solid #E2E8F0;">
-              <td style="padding: 8px 0;"><strong>Wallet Type:</strong></td>
-              <td style="padding: 8px 0; text-align: right;">
-                <span style="background: ${data.walletColor}; color: white; padding: 4px 12px; border-radius: 20px; font-size: 12px;">${data.walletType}</span>
-               </td>
-            </tr>
-            <tr style="border-top: 1px solid #E2E8F0;">
-              <td style="padding: 8px 0;"><strong>Date:</strong></td>
-              <td style="padding: 8px 0; text-align: right;">${data.timestamp}</td>
-            </tr>
-            <tr style="border-top: 1px solid #E2E8F0;">
-              <td style="padding: 8px 0;"><strong>Transaction ID:</strong></td>
-              <td style="padding: 8px 0; text-align: right; font-size: 11px;">${data.transactionId}</td>
-            </tr>
-            ${data.description ? `
-            <tr style="border-top: 1px solid #E2E8F0;">
-              <td style="padding: 8px 0;"><strong>Note:</strong></td>
-              <td style="padding: 8px 0; text-align: right;">${data.description}</td>
-            </tr>
-            ` : ''}
-          </table>
-        </div>
-        <div style="text-align: center; margin: 30px 0;">
-          <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Go to Dashboard</a>
-        </div>
-        <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${data.timestamp}</p>
-      </div>
-      <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
-          <a href="mailto:support@bithash.com" style="color: #F7A600; text-decoration: none;">support@bithash.com</a> | 
-          <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
-        </p>
-      </div>
-    </div>
-  `;
-  break;
-
-
-        
       case 'kyc_approved':
         subject = 'KYC Verification Approved - ₿itHash Capital';
         html = `
@@ -5932,171 +6044,170 @@ case 'crypto_deposit':
           </div>
         `;
         break;
-case 'deposit_approved':
-  cryptoLogoUrl = getCryptoLogo(data.cryptoAsset);
-  formattedAmount = data.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  formattedCryptoAmount = data.cryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
-  formattedRate = (data.exchangeRate || 1).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  
-  subject = '✅ Deposit Confirmed - ₿itHash Capital';
-  html = `
-    <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-      <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-        <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-        <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
-        <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
-      </div>
-      
-      <div style="padding: 30px; background: #FFFFFF;">
-        <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-          <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
-            ${cryptoLogoUrl ? `<img src="${cryptoLogoUrl}" width="32" height="32" style="border-radius: 50%;">` : ''}
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <circle cx="12" cy="12" r="10" stroke="#10B981" stroke-width="2"/>
-              <path d="M8 12L11 15L16 9" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </div>
-          <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">DEPOSIT CONFIRMED!</h2>
-          <p style="color: #065F46; font-size: 13px; margin: 0;">Your funds have been successfully credited</p>
-        </div>
+
+      case 'deposit_approved':
+        cryptoLogoUrl = getCryptoLogo(data.cryptoAsset);
+        formattedAmount = data.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        formattedCryptoAmount = data.cryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
+        formattedRate = (data.exchangeRate || 1).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         
-        <p style="color: #333333; line-height: 1.6;">Dear <strong>${data.name}</strong>,</p>
-        <p style="color: #333333; line-height: 1.6;">Great news! Your deposit has been successfully processed and credited to your <strong style="color: #10B981;">Main Wallet</strong>.</p>
-        
-        <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-          <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
-            ${cryptoLogoUrl ? `<img src="${cryptoLogoUrl}" width="32" height="32" style="border-radius: 50%;">` : ''}
-            <div>
-              <div style="font-weight: bold; font-size: 18px;">+ ${formattedCryptoAmount} ${data.cryptoAsset}</div>
-              <div style="color: #64748B; font-size: 12px;">≈ $${formattedAmount} USD</div>
+        subject = '✅ Deposit Confirmed - ₿itHash Capital';
+        html = `
+          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+            <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+              <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+              <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+              <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+            </div>
+            
+            <div style="padding: 30px; background: #FFFFFF;">
+              <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
+                <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
+                  ${cryptoLogoUrl ? `<img src="${cryptoLogoUrl}" width="32" height="32" style="border-radius: 50%;">` : ''}
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="12" cy="12" r="10" stroke="#10B981" stroke-width="2"/>
+                    <path d="M8 12L11 15L16 9" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </div>
+                <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">DEPOSIT CONFIRMED!</h2>
+                <p style="color: #065F46; font-size: 13px; margin: 0;">Your funds have been successfully credited</p>
+              </div>
+              
+              <p style="color: #333333; line-height: 1.6;">Dear <strong>${data.name}</strong>,</p>
+              <p style="color: #333333; line-height: 1.6;">Great news! Your deposit has been successfully processed and credited to your <strong style="color: #10B981;">Main Wallet</strong>.</p>
+              
+              <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+                <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
+                  ${cryptoLogoUrl ? `<img src="${cryptoLogoUrl}" width="32" height="32" style="border-radius: 50%;">` : ''}
+                  <div>
+                    <div style="font-weight: bold; font-size: 18px;">+ ${formattedCryptoAmount} ${data.cryptoAsset}</div>
+                    <div style="color: #64748B; font-size: 12px;">≈ $${formattedAmount} USD</div>
+                  </div>
+                </div>
+                
+                <table style="width: 100%; border-collapse: collapse;">
+                  <tr>
+                    <td style="padding: 8px 0;"><strong>Exchange Rate (Live):</strong></td>
+                    <td style="padding: 8px 0; text-align: right;">1 ${data.cryptoAsset} = $${formattedRate}</td>
+                  </tr>
+                  <tr style="border-top: 1px solid #E2E8F0;">
+                    <td style="padding: 8px 0;"><strong>Wallet Credited:</strong></td>
+                    <td style="padding: 8px 0; text-align: right;"><span style="background: #10B981; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Main Wallet</span></td>
+                  </tr>
+                  <tr style="border-top: 1px solid #E2E8F0;">
+                    <td style="padding: 8px 0;"><strong>Payment Method:</strong></td>
+                    <td style="padding: 8px 0; text-align: right;">${data.method}</td>
+                  </tr>
+                  <tr style="border-top: 1px solid #E2E8F0;">
+                    <td style="padding: 8px 0;"><strong>Transaction ID:</strong></td>
+                    <td style="padding: 8px 0; text-align: right; font-size: 11px;">${data.reference}</td>
+                  </tr>
+                  <tr style="border-top: 1px solid #E2E8F0;">
+                    <td style="padding: 8px 0;"><strong>New Main Wallet Balance:</strong></td>
+                    <td style="padding: 8px 0; text-align: right; font-weight: bold; color: #10B981;">$${data.newBalance.toLocaleString()}</td>
+                  </tr>
+                  <tr style="border-top: 1px solid #E2E8F0;">
+                    <td style="padding: 8px 0;"><strong>Processed At:</strong></td>
+                    <td style="padding: 8px 0; text-align: right;">${new Date(data.processedAt).toLocaleString()}</td>
+                  </tr>
+                </table>
+              </div>
+              
+              <div style="text-align: center; margin: 30px 0;">
+                <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View Transaction</a>
+              </div>
+              
+              <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${new Date().toLocaleString()}</p>
+            </div>
+            
+            <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+              <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+              <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+              <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
+                <a href="mailto:support@bithash.com" style="color: #F7A600; text-decoration: none;">support@bithash.com</a> | 
+                <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
+              </p>
             </div>
           </div>
-          
-          <table style="width: 100%; border-collapse: collapse;">
-            <tr>
-              <td style="padding: 8px 0;"><strong>Exchange Rate (Live):</strong></td>
-              <td style="padding: 8px 0; text-align: right;">1 ${data.cryptoAsset} = $${formattedRate}</td>
-            </tr>
-            <tr style="border-top: 1px solid #E2E8F0;">
-              <td style="padding: 8px 0;"><strong>Wallet Credited:</strong></td>
-              <td style="padding: 8px 0; text-align: right;"><span style="background: #10B981; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Main Wallet</span></td>
-            </tr>
-            <tr style="border-top: 1px solid #E2E8F0;">
-              <td style="padding: 8px 0;"><strong>Payment Method:</strong></td>
-              <td style="padding: 8px 0; text-align: right;">${data.method}</td>
-            </tr>
-            <tr style="border-top: 1px solid #E2E8F0;">
-              <td style="padding: 8px 0;"><strong>Transaction ID:</strong></td>
-              <td style="padding: 8px 0; text-align: right; font-size: 11px;">${data.reference}</td>
-            </tr>
-            <tr style="border-top: 1px solid #E2E8F0;">
-              <td style="padding: 8px 0;"><strong>New Main Wallet Balance:</strong></td>
-              <td style="padding: 8px 0; text-align: right; font-weight: bold; color: #10B981;">$${data.newBalance.toLocaleString()}</td>
-            </tr>
-            <tr style="border-top: 1px solid #E2E8F0;">
-              <td style="padding: 8px 0;"><strong>Processed At:</strong></td>
-              <td style="padding: 8px 0; text-align: right;">${new Date(data.processedAt).toLocaleString()}</td>
-            </tr>
-          </table>
-        </div>
-        
-        <div style="text-align: center; margin: 30px 0;">
-          <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View Transaction</a>
-        </div>
-        
-        <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${new Date().toLocaleString()}</p>
-      </div>
-      
-      <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
-          <a href="mailto:support@bithash.com" style="color: #F7A600; text-decoration: none;">support@bithash.com</a> | 
-          <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
-        </p>
-      </div>
-    </div>
-  `;
-  break;
+        `;
+        break;
 
-
+      case 'deposit_rejected':
+        cryptoLogoUrl = getCryptoLogo(data.cryptoAsset);
+        formattedAmount = data.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        formattedCryptoAmount = data.cryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
+        formattedRate = (data.exchangeRate || 1).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         
- case 'deposit_rejected':
-  cryptoLogoUrl = getCryptoLogo(data.cryptoAsset);
-  formattedAmount = data.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  formattedCryptoAmount = data.cryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
-  formattedRate = (data.exchangeRate || 1).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  
-  subject = '⛔ Deposit Declined - ₿itHash Capital';
-  html = `
-    <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-      <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-        <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-        <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
-        <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
-      </div>
-      
-      <div style="padding: 30px; background: #FFFFFF;">
-        <div style="background: #FEF2F2; border-radius: 12px; padding: 20px; text-align: center; margin-bottom: 25px;">
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin-bottom: 12px;">
-            <circle cx="12" cy="12" r="10" stroke="#DC2626" stroke-width="2"/>
-            <path d="M12 8V12M12 16H12.01" stroke="#DC2626" stroke-width="2" stroke-linecap="round"/>
-          </svg>
-          <h2 style="color: #DC2626; font-size: 22px; margin: 0 0 8px 0; font-weight: 700;">DEPOSIT DECLINED</h2>
-          <p style="color: #991B1B; font-size: 14px; margin: 0;">Your deposit request could not be approved</p>
-        </div>
-        
-        <p style="color: #333333; line-height: 1.6; margin-bottom: 20px;">Dear <strong>${data.name}</strong>,</p>
-        <p style="color: #333333; line-height: 1.6; margin-bottom: 25px;">We regret to inform you that your deposit request has been reviewed and <strong style="color: #DC2626;">could not be approved</strong> at this time.</p>
-        
-        <div style="background: #FEF2F2; border-left: 4px solid #DC2626; padding: 16px 20px; border-radius: 8px; margin-bottom: 25px;">
-          <p style="color: #991B1B; font-size: 13px; margin: 0 0 6px 0; font-weight: 600;">ⓘ REASON</p>
-          <p style="color: #7F1D1D; font-size: 14px; margin: 0; line-height: 1.5;">${data.reason}</p>
-        </div>
-        
-        <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-          <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
-            ${cryptoLogoUrl ? `<img src="${cryptoLogoUrl}" width="32" height="32" style="border-radius: 50%;">` : ''}
-            <div>
-              <div style="font-weight: bold; font-size: 18px;">${formattedCryptoAmount} ${data.cryptoAsset}</div>
-              <div style="color: #64748B; font-size: 12px;">≈ $${formattedAmount} USD</div>
+        subject = '⛔ Deposit Declined - ₿itHash Capital';
+        html = `
+          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+            <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+              <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+              <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+              <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+            </div>
+            
+            <div style="padding: 30px; background: #FFFFFF;">
+              <div style="background: #FEF2F2; border-radius: 12px; padding: 20px; text-align: center; margin-bottom: 25px;">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin-bottom: 12px;">
+                  <circle cx="12" cy="12" r="10" stroke="#DC2626" stroke-width="2"/>
+                  <path d="M12 8V12M12 16H12.01" stroke="#DC2626" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                <h2 style="color: #DC2626; font-size: 22px; margin: 0 0 8px 0; font-weight: 700;">DEPOSIT DECLINED</h2>
+                <p style="color: #991B1B; font-size: 14px; margin: 0;">Your deposit request could not be approved</p>
+              </div>
+              
+              <p style="color: #333333; line-height: 1.6; margin-bottom: 20px;">Dear <strong>${data.name}</strong>,</p>
+              <p style="color: #333333; line-height: 1.6; margin-bottom: 25px;">We regret to inform you that your deposit request has been reviewed and <strong style="color: #DC2626;">could not be approved</strong> at this time.</p>
+              
+              <div style="background: #FEF2F2; border-left: 4px solid #DC2626; padding: 16px 20px; border-radius: 8px; margin-bottom: 25px;">
+                <p style="color: #991B1B; font-size: 13px; margin: 0 0 6px 0; font-weight: 600;">ⓘ REASON</p>
+                <p style="color: #7F1D1D; font-size: 14px; margin: 0; line-height: 1.5;">${data.reason}</p>
+              </div>
+              
+              <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+                <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
+                  ${cryptoLogoUrl ? `<img src="${cryptoLogoUrl}" width="32" height="32" style="border-radius: 50%;">` : ''}
+                  <div>
+                    <div style="font-weight: bold; font-size: 18px;">${formattedCryptoAmount} ${data.cryptoAsset}</div>
+                    <div style="color: #64748B; font-size: 12px;">≈ $${formattedAmount} USD</div>
+                  </div>
+                </div>
+                
+                <table style="width: 100%; border-collapse: collapse;">
+                  <tr>
+                    <td style="padding: 8px 0;"><strong>Exchange Rate:</strong></td>
+                    <td style="padding: 8px 0; text-align: right;">1 ${data.cryptoAsset} = $${formattedRate}</td>
+                  </tr>
+                  <tr style="border-top: 1px solid #E2E8F0;">
+                    <td style="padding: 8px 0;"><strong>Payment Method:</strong></td>
+                    <td style="padding: 8px 0; text-align: right;">${data.method}</td>
+                  </tr>
+                  <tr style="border-top: 1px solid #E2E8F0;">
+                    <td style="padding: 8px 0;"><strong>Request ID:</strong></td>
+                    <td style="padding: 8px 0; text-align: right; font-size: 11px;">${data.reference}</td>
+                  </tr>
+                </table>
+              </div>
+              
+              <div style="text-align: center; margin: 30px 0;">
+                <a href="https://www.bithashcapital.live/support" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Contact Support</a>
+              </div>
+              
+              <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${new Date().toLocaleString()}</p>
+            </div>
+            
+            <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+              <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+              <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+              <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
+                <a href="mailto:support@bithash.com" style="color: #F7A600; text-decoration: none;">support@bithash.com</a> | 
+                <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
+              </p>
             </div>
           </div>
-          
-          <table style="width: 100%; border-collapse: collapse;">
-            <tr>
-              <td style="padding: 8px 0;"><strong>Exchange Rate:</strong></td>
-              <td style="padding: 8px 0; text-align: right;">1 ${data.cryptoAsset} = $${formattedRate}</td>
-            </tr>
-            <tr style="border-top: 1px solid #E2E8F0;">
-              <td style="padding: 8px 0;"><strong>Payment Method:</strong></td>
-              <td style="padding: 8px 0; text-align: right;">${data.method}</td>
-            </tr>
-            <tr style="border-top: 1px solid #E2E8F0;">
-              <td style="padding: 8px 0;"><strong>Request ID:</strong></td>
-              <td style="padding: 8px 0; text-align: right; font-size: 11px;">${data.reference}</td>
-            </tr>
-          </table>
-        </div>
-        
-        <div style="text-align: center; margin: 30px 0;">
-          <a href="https://www.bithashcapital.live/support" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Contact Support</a>
-        </div>
-        
-        <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${new Date().toLocaleString()}</p>
-      </div>
-      
-      <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
-          <a href="mailto:support@bithash.com" style="color: #F7A600; text-decoration: none;">support@bithash.com</a> | 
-          <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
-        </p>
-      </div>
-    </div>
-  `;
-  break;
+        `;
+        break;
 
       case 'withdrawal_approved':
         const withdrawalRate = await getCurrentExchangeRate('bitcoin');
@@ -6229,32 +6340,31 @@ case 'deposit_approved':
         `;
         break;
 
-case 'login_success':
-  // Use a fallback if timestamp is missing
-  const loginTime = data.timestamp ? new Date(data.timestamp) : new Date();
-  const isValidTime = !isNaN(loginTime.getTime());
-  
-  subject = 'New Login Detected - ₿itHash Capital';
-  html = `
-    <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-      ${brandHeader}
-      <div style="padding: 30px; background: #FFFFFF;">
-        <h2 style="color: #0B0E11; margin-bottom: 20px;">New Login Detected</h2>
-        <p style="color: #333333; line-height: 1.6;">Hello ${data.name},</p>
-        <p style="color: #333333; line-height: 1.6;">A new login was detected on your account.</p>
-        <div style="background: #F5F5F5; padding: 20px; border-radius: 8px; margin: 20px 0;">
-          <p style="margin: 5px 0;"><strong>Device:</strong> ${data.device || 'Unknown'}</p>
-          <p style="margin: 5px 0;"><strong>Location:</strong> ${data.location || 'Unknown'}</p>
-          <p style="margin: 5px 0;"><strong>IP Address:</strong> ${data.ip || 'Unknown'}</p>
-          <p style="margin: 5px 0;"><strong>Time:</strong> ${isValidTime ? loginTime.toLocaleString() : formattedTimestamp}</p>
-        </div>
-        <p style="color: #333333; line-height: 1.6;">If this wasn't you, please contact support immediately.</p>
-        <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${formattedTimestamp}</p>
-      </div>
-      ${brandFooter}
-    </div>
-  `;
-  break;
+      case 'login_success':
+        const loginTime = data.timestamp ? new Date(data.timestamp) : new Date();
+        const isValidTime = !isNaN(loginTime.getTime());
+        
+        subject = 'New Login Detected - ₿itHash Capital';
+        html = `
+          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+            ${brandHeader}
+            <div style="padding: 30px; background: #FFFFFF;">
+              <h2 style="color: #0B0E11; margin-bottom: 20px;">New Login Detected</h2>
+              <p style="color: #333333; line-height: 1.6;">Hello ${data.name},</p>
+              <p style="color: #333333; line-height: 1.6;">A new login was detected on your account.</p>
+              <div style="background: #F5F5F5; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                <p style="margin: 5px 0;"><strong>Device:</strong> ${data.device || 'Unknown'}</p>
+                <p style="margin: 5px 0;"><strong>Location:</strong> ${data.location || 'Unknown'}</p>
+                <p style="margin: 5px 0;"><strong>IP Address:</strong> ${data.ip || 'Unknown'}</p>
+                <p style="margin: 5px 0;"><strong>Time:</strong> ${isValidTime ? loginTime.toLocaleString() : formattedTimestamp}</p>
+              </div>
+              <p style="color: #333333; line-height: 1.6;">If this wasn't you, please contact support immediately.</p>
+              <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${formattedTimestamp}</p>
+            </div>
+            ${brandFooter}
+          </div>
+        `;
+        break;
 
       case 'password_changed':
         subject = 'Password Changed - ₿itHash Capital';
@@ -6310,13 +6420,13 @@ case 'login_success':
                 <p style="margin: 5px 0;"><strong>Device:</strong> ${data.device}</p>
                 <p style="margin: 5px 0;"><strong>Location:</strong> ${data.location}</p>
                 <p style="margin: 5px 0;"><strong>IP Address:</strong> ${data.ip}</p>
-              <p style="margin: 5px 0;"><strong>Time:</strong> ${(() => {
-  let date = data.timestamp;
-  if (!date) return 'Unknown';
-  if (date instanceof Date) return date.toLocaleString();
-  const parsed = new Date(date);
-  return isNaN(parsed.getTime()) ? new Date().toLocaleString() : parsed.toLocaleString();
-})()}</p>
+                <p style="margin: 5px 0;"><strong>Time:</strong> ${(() => {
+                  let date = data.timestamp;
+                  if (!date) return 'Unknown';
+                  if (date instanceof Date) return date.toLocaleString();
+                  const parsed = new Date(date);
+                  return isNaN(parsed.getTime()) ? new Date().toLocaleString() : parsed.toLocaleString();
+                })()}</p>
               </div>
               <p style="color: #333333; line-height: 1.6;">If this was you, you can safely ignore this email. If not, please secure your account immediately.</p>
               <div style="text-align: center; margin: 30px 0;">
@@ -6329,156 +6439,145 @@ case 'login_success':
         `;
         break;
 
- default:
-  subject = 'Important Account Update - ₿itHash Capital';
-  html = `
-    <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-      ${brandHeader}
-      <div style="padding: 30px; background: #FFFFFF;">
-        <div style="background: #F3F4F6; border-radius: 12px; padding: 20px; margin-bottom: 25px; text-align: center;">
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin: 0 auto 12px auto;">
-            <path d="M12 8V12M12 16H12.01M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="#F7A600" stroke-width="2" stroke-linecap="round"/>
-          </svg>
-          <h2 style="color: #0B0E11; font-size: 20px; margin: 0 0 8px 0;">Account Update Notification</h2>
-          <p style="color: #6C7480; font-size: 14px; margin: 0;">Action Required / Information</p>
-        </div>
-        
-        <p style="color: #333333; line-height: 1.6;">Dear <strong>${data.name || 'Valued Customer'}</strong>,</p>
-        
-        <p style="color: #333333; line-height: 1.6;">${data.message || 'We have an important update regarding your account that requires your attention.'}</p>
-        
-        ${data.details ? `
-        <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-          <h3 style="color: #0B0E11; margin: 0 0 12px 0; font-size: 16px;">Update Details:</h3>
-          <p style="color: #4B5563; margin: 0; line-height: 1.5;">${data.details}</p>
-        </div>
-        ` : ''}
-        
-        ${data.actionRequired ? `
-        <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
-          <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">⚠️ Action Required</p>
-          <p style="color: #78350F; margin: 0; font-size: 14px;">${data.actionRequired}</p>
-        </div>
-        ` : ''}
-        
-        ${data.actionLink ? `
-        <div style="text-align: center; margin: 30px 0;">
-          <a href="${data.actionLink}" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">${data.buttonText || 'View Details'}</a>
-        </div>
-        ` : ''}
-        
-        <div style="margin-top: 25px; padding-top: 20px; border-top: 1px solid #E5E7EB;">
-          <p style="color: #6C7480; font-size: 13px; line-height: 1.5; margin: 0 0 10px 0;">
-            <strong>What this means for you:</strong>
-          </p>
-          <ul style="color: #6C7480; font-size: 13px; margin: 0; padding-left: 20px;">
-            <li style="margin: 5px 0;">Your account security is our top priority</li>
-            <li style="margin: 5px 0;">Review the information above for any necessary actions</li>
-            <li style="margin: 5px 0;">Contact support if you have any questions</li>
-          </ul>
-        </div>
-        
-        <p style="color: #666666; font-size: 12px; margin-top: 30px;">
-          <strong>Reference ID:</strong> ${data.referenceId || 'N/A'}<br>
-          <strong>Email sent:</strong> ${formattedTimestamp}
-        </p>
-        
-        <div style="background: #F9FAFB; padding: 15px; border-radius: 8px; margin-top: 20px;">
-          <p style="color: #6C7480; font-size: 12px; margin: 0 0 5px 0;">
-            <strong>Need help?</strong> Contact our support team:
-          </p>
-          <p style="color: #6C7480; font-size: 12px; margin: 0;">
-            📧 <a href="mailto:support@bithashcapital.live" style="color: #F7A600;">support@bithashcapital.live</a><br>
-            🌐 <a href="https://www.bithashcapital.live/support" style="color: #F7A600;">www.bithashcapital.live/support</a>
-          </p>
-        </div>
-      </div>
-      ${brandFooter}
-    </div>
-  `;
-  break;
-  } 
+      default:
+        subject = 'Important Account Update - ₿itHash Capital';
+        html = `
+          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+            ${brandHeader}
+            <div style="padding: 30px; background: #FFFFFF;">
+              <div style="background: #F3F4F6; border-radius: 12px; padding: 20px; margin-bottom: 25px; text-align: center;">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin: 0 auto 12px auto;">
+                  <path d="M12 8V12M12 16H12.01M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="#F7A600" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                <h2 style="color: #0B0E11; font-size: 20px; margin: 0 0 8px 0;">Account Update Notification</h2>
+                <p style="color: #6C7480; font-size: 14px; margin: 0;">Action Required / Information</p>
+              </div>
+              
+              <p style="color: #333333; line-height: 1.6;">Dear <strong>${data.name || 'Valued Customer'}</strong>,</p>
+              
+              <p style="color: #333333; line-height: 1.6;">${data.message || 'We have an important update regarding your account that requires your attention.'}</p>
+              
+              ${data.details ? `
+              <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+                <h3 style="color: #0B0E11; margin: 0 0 12px 0; font-size: 16px;">Update Details:</h3>
+                <p style="color: #4B5563; margin: 0; line-height: 1.5;">${data.details}</p>
+              </div>
+              ` : ''}
+              
+              ${data.actionRequired ? `
+              <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
+                <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">⚠️ Action Required</p>
+                <p style="color: #78350F; margin: 0; font-size: 14px;">${data.actionRequired}</p>
+              </div>
+              ` : ''}
+              
+              ${data.actionLink ? `
+              <div style="text-align: center; margin: 30px 0;">
+                <a href="${data.actionLink}" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">${data.buttonText || 'View Details'}</a>
+              </div>
+              ` : ''}
+              
+              <div style="margin-top: 25px; padding-top: 20px; border-top: 1px solid #E5E7EB;">
+                <p style="color: #6C7480; font-size: 13px; line-height: 1.5; margin: 0 0 10px 0;">
+                  <strong>What this means for you:</strong>
+                </p>
+                <ul style="color: #6C7480; font-size: 13px; margin: 0; padding-left: 20px;">
+                  <li style="margin: 5px 0;">Your account security is our top priority</li>
+                  <li style="margin: 5px 0;">Review the information above for any necessary actions</li>
+                  <li style="margin: 5px 0;">Contact support if you have any questions</li>
+                </ul>
+              </div>
+              
+              <p style="color: #666666; font-size: 12px; margin-top: 30px;">
+                <strong>Reference ID:</strong> ${data.referenceId || 'N/A'}<br>
+                <strong>Email sent:</strong> ${formattedTimestamp}
+              </p>
+              
+              <div style="background: #F9FAFB; padding: 15px; border-radius: 8px; margin-top: 20px;">
+                <p style="color: #6C7480; font-size: 12px; margin: 0 0 5px 0;">
+                  <strong>Need help?</strong> Contact our support team:
+                </p>
+                <p style="color: #6C7480; font-size: 12px; margin: 0;">
+                  📧 <a href="mailto:support@bithashcapital.live" style="color: #F7A600;">support@bithashcapital.live</a><br>
+                  🌐 <a href="https://www.bithashcapital.live/support" style="color: #F7A600;">www.bithashcapital.live/support</a>
+                </p>
+              </div>
+            </div>
+            ${brandFooter}
+          </div>
+        `;
+        break;
+    }
 
+    // Helper function for sending admin action notifications
+    const sendAdminActionNotification = async (user, action, details, actionRequired = null, actionLink = null) => {
+      try {
+        const actionMessages = {
+          'account_suspended': {
+            message: 'Your account has been temporarily suspended due to unusual activity.',
+            subject: 'Account Temporarily Suspended - Action Required'
+          },
+          'account_restricted': {
+            message: 'Your account has been restricted. Please review the details below.',
+            subject: 'Account Restrictions Applied'
+          },
+          'kyc_review': {
+            message: 'Your KYC documents are under review. We will notify you once completed.',
+            subject: 'KYC Document Review Status'
+          },
+          'deposit_manual': {
+            message: 'Your deposit has been manually processed by our finance team.',
+            subject: 'Manual Deposit Processed'
+          },
+          'withdrawal_manual': {
+            message: 'Your withdrawal request has been manually reviewed and processed.',
+            subject: 'Manual Withdrawal Processed'
+          },
+          'balance_adjustment': {
+            message: 'Your account balance has been adjusted by our administration team.',
+            subject: 'Account Balance Adjustment'
+          },
+          'security_alert': {
+            message: 'Security alert: Unusual activity detected on your account.',
+            subject: '⚠️ Security Alert - Action Required'
+          },
+          'compliance_update': {
+            message: 'Important update regarding your account compliance status.',
+            subject: 'Compliance Status Update'
+          },
+          'investment_update': {
+            message: 'Your investment portfolio has been updated by our management team.',
+            subject: 'Investment Portfolio Update'
+          }
+        };
 
+        const actionConfig = actionMessages[action] || {
+          message: details?.message || 'An important update has been made to your account.',
+          subject: 'Important Account Update - ₿itHash Capital'
+        };
 
+        await sendProfessionalEmail({
+          email: user.email,
+          template: 'default',
+          data: {
+            name: user.firstName || 'Valued Customer',
+            message: actionConfig.message,
+            details: details?.description || details?.reason || JSON.stringify(details, null, 2),
+            actionRequired: actionRequired,
+            actionLink: actionLink,
+            buttonText: details?.buttonText || 'View Details',
+            referenceId: `${action.toUpperCase()}-${Date.now()}-${Math.floor(Math.random() * 10000)}`
+          }
+        });
 
+        console.log(`📧 Admin action notification sent to ${user.email} for action: ${action}`);
+        return true;
 
-
-
-// Helper function for sending admin action notifications
-const sendAdminActionNotification = async (user, action, details, actionRequired = null, actionLink = null) => {
-  try {
-    // Map admin actions to appropriate messages
-    const actionMessages = {
-      'account_suspended': {
-        message: 'Your account has been temporarily suspended due to unusual activity.',
-        subject: 'Account Temporarily Suspended - Action Required'
-      },
-      'account_restricted': {
-        message: 'Your account has been restricted. Please review the details below.',
-        subject: 'Account Restrictions Applied'
-      },
-      'kyc_review': {
-        message: 'Your KYC documents are under review. We will notify you once completed.',
-        subject: 'KYC Document Review Status'
-      },
-      'deposit_manual': {
-        message: 'Your deposit has been manually processed by our finance team.',
-        subject: 'Manual Deposit Processed'
-      },
-      'withdrawal_manual': {
-        message: 'Your withdrawal request has been manually reviewed and processed.',
-        subject: 'Manual Withdrawal Processed'
-      },
-      'balance_adjustment': {
-        message: 'Your account balance has been adjusted by our administration team.',
-        subject: 'Account Balance Adjustment'
-      },
-      'security_alert': {
-        message: 'Security alert: Unusual activity detected on your account.',
-        subject: '⚠️ Security Alert - Action Required'
-      },
-      'compliance_update': {
-        message: 'Important update regarding your account compliance status.',
-        subject: 'Compliance Status Update'
-      },
-      'investment_update': {
-        message: 'Your investment portfolio has been updated by our management team.',
-        subject: 'Investment Portfolio Update'
+      } catch (err) {
+        console.error('Failed to send admin action notification:', err);
+        return false;
       }
     };
-
-    const actionConfig = actionMessages[action] || {
-      message: details?.message || 'An important update has been made to your account.',
-      subject: 'Important Account Update - ₿itHash Capital'
-    };
-
-    // Send the email using the professional email service
-    await sendProfessionalEmail({
-      email: user.email,
-      template: 'default',
-      data: {
-        name: user.firstName || 'Valued Customer',
-        message: actionConfig.message,
-        details: details?.description || details?.reason || JSON.stringify(details, null, 2),
-        actionRequired: actionRequired,
-        actionLink: actionLink,
-        buttonText: details?.buttonText || 'View Details',
-        referenceId: `${action.toUpperCase()}-${Date.now()}-${Math.floor(Math.random() * 10000)}`
-      }
-    });
-
-    console.log(`📧 Admin action notification sent to ${user.email} for action: ${action}`);
-    return true;
-
-  } catch (err) {
-    console.error('Failed to send admin action notification:', err);
-    return false;
-  }
-};
-
-
-        
 
     const mailOptions = {
       from: `₿itHash Capital <${mailTransporter === supportTransporter ? process.env.EMAIL_SUPPORT_USER : process.env.EMAIL_INFO_USER}>`,
@@ -26698,7 +26797,512 @@ app.get('/api/admin/statements/:id', adminProtect, async (req, res) => {
 
 
 
+// =============================================
+// MISSING ENDPOINTS FOR ADMIN DASHBOARD
+// =============================================
 
+// =============================================
+// SEND EMAIL ENDPOINT - For Email Marketing
+// =============================================
+app.post('/api/admin/send-email', adminProtect, async (req, res) => {
+  try {
+    const { subject, content, type, recipients, trackDelivery, attachments } = req.body;
+
+    if (!subject || !content) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Subject and content are required'
+      });
+    }
+
+    if (!recipients || recipients.length === 0) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'At least one recipient is required'
+      });
+    }
+
+    const recipientEmails = [];
+    let sentCount = 0;
+    let failedCount = 0;
+
+    // Get email configuration from database or use default
+    const emailConfig = {
+      from: process.env.EMAIL_INFO_USER || 'info@bithashcapital.live',
+      fromName: process.env.EMAIL_FROM_NAME || '₿itHash Capital'
+    };
+
+    if (recipients[0] === 'all') {
+      // Get all active users
+      const users = await User.find({ status: 'active' }).select('email firstName lastName');
+      for (const user of users) {
+        recipientEmails.push({
+          email: user.email,
+          name: `${user.firstName} ${user.lastName}`,
+          userId: user._id
+        });
+      }
+    } else if (recipients[0] && recipients[0].match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
+      // External emails
+      for (const email of recipients) {
+        recipientEmails.push({
+          email: email,
+          name: email.split('@')[0],
+          userId: null
+        });
+      }
+    } else {
+      // Specific user IDs
+      for (const userId of recipients) {
+        const user = await User.findById(userId).select('email firstName lastName');
+        if (user) {
+          recipientEmails.push({
+            email: user.email,
+            name: `${user.firstName} ${user.lastName}`,
+            userId: user._id
+          });
+        }
+      }
+    }
+
+    const emailHistoryId = new mongoose.Types.ObjectId();
+    const emailRecord = {
+      _id: emailHistoryId,
+      subject,
+      content: type === 'html' ? content : content.replace(/\n/g, '<br>'),
+      type,
+      recipients: recipientEmails.map(r => ({
+        email: r.email,
+        name: r.name,
+        userId: r.userId,
+        delivered: false,
+        read: false,
+        status: 'pending'
+      })),
+      recipientCount: recipientEmails.length,
+      deliveredCount: 0,
+      readCount: 0,
+      status: 'sending',
+      sentBy: req.admin._id,
+      sentByEmail: req.admin.email,
+      createdAt: new Date(),
+      trackDelivery: trackDelivery || false
+    };
+
+    // Store in Redis for tracking
+    await redis.setex(`email:${emailHistoryId}`, 86400 * 30, JSON.stringify(emailRecord));
+
+    // Also store in MongoDB for persistence
+    const EmailHistory = mongoose.model('EmailHistory', new mongoose.Schema({
+      _id: mongoose.Schema.Types.ObjectId,
+      subject: String,
+      content: String,
+      type: String,
+      recipients: Array,
+      recipientCount: Number,
+      deliveredCount: Number,
+      readCount: Number,
+      status: String,
+      sentBy: mongoose.Schema.Types.ObjectId,
+      sentByEmail: String,
+      createdAt: Date,
+      trackDelivery: Boolean
+    }));
+
+    await EmailHistory.create(emailRecord);
+
+    // Send emails asynchronously
+    setImmediate(async () => {
+      let delivered = 0;
+      let failed = 0;
+
+      for (const recipient of recipientEmails) {
+        try {
+          let personalizedContent = content;
+          if (type === 'html') {
+            personalizedContent = content.replace(/{{name}}/g, recipient.name);
+          } else {
+            personalizedContent = content.replace(/{{name}}/g, recipient.name);
+          }
+
+          const trackingPixel = trackDelivery ? `<img src="https://bithash-backend-kg7j.onrender.com/api/email/track/${emailHistoryId}/${Buffer.from(recipient.email).toString('base64')}" width="1" height="1" style="display:none;">` : '';
+
+          const htmlContent = type === 'html'
+            ? `
+              <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto;">
+                <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+                  <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 50px; height: 50px; margin-bottom: 10px;">
+                  <h1 style="color: #F7A600; font-size: 24px; margin: 0;">₿itHash Capital</h1>
+                  <p style="color: #B7BDC6; font-size: 12px;">Institutional Bitcoin Mining</p>
+                </div>
+                <div style="padding: 20px; background: #FFFFFF;">
+                  ${personalizedContent}
+                </div>
+                <div style="text-align: center; padding: 20px; background: #0B0E11;">
+                  <p style="color: #6C7480; font-size: 11px;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+                  <p style="color: #6C7480; font-size: 11px;">800 Plant St, Wilmington, DE 19801, United States</p>
+                  <p style="color: #6C7480; font-size: 11px;">
+                    <a href="mailto:support@bithashcapital.live" style="color: #F7A600;">support@bithashcapital.live</a>
+                  </p>
+                </div>
+                ${trackingPixel}
+              </div>
+            `
+            : personalizedContent;
+
+          await sendProfessionalEmail({
+            email: recipient.email,
+            template: 'default',
+            data: {
+              name: recipient.name,
+              message: type === 'html' ? '' : personalizedContent,
+              details: type === 'html' ? personalizedContent : '',
+              buttonText: 'View Dashboard',
+              actionLink: 'https://www.bithashcapital.live/dashboard'
+            }
+          });
+
+          delivered++;
+
+          // Update Redis with delivery status
+          const storedEmail = await redis.get(`email:${emailHistoryId}`);
+          if (storedEmail) {
+            const emailData = JSON.parse(storedEmail);
+            const recipientIndex = emailData.recipients.findIndex(r => r.email === recipient.email);
+            if (recipientIndex !== -1) {
+              emailData.recipients[recipientIndex].delivered = true;
+              emailData.recipients[recipientIndex].status = 'delivered';
+              emailData.recipients[recipientIndex].deliveredAt = new Date();
+              emailData.deliveredCount = delivered;
+              await redis.setex(`email:${emailHistoryId}`, 86400 * 30, JSON.stringify(emailData));
+            }
+          }
+
+          // Update MongoDB
+          await EmailHistory.updateOne(
+            { _id: emailHistoryId },
+            {
+              $inc: { deliveredCount: 1 },
+              $set: { 'recipients.$[elem].delivered': true, 'recipients.$[elem].status': 'delivered', 'recipients.$[elem].deliveredAt': new Date() }
+            },
+            { arrayFilters: [{ 'elem.email': recipient.email }] }
+          );
+
+          await new Promise(resolve => setTimeout(resolve, 500));
+        } catch (err) {
+          console.error(`Failed to send email to ${recipient.email}:`, err);
+          failed++;
+        }
+      }
+
+      // Update final status
+      const finalStatus = delivered > 0 && failed === 0 ? 'sent' : (delivered > 0 ? 'partial' : 'failed');
+      await redis.setex(`email:${emailHistoryId}`, 86400 * 30, JSON.stringify({ ...JSON.parse(await redis.get(`email:${emailHistoryId}`) || '{}'), status: finalStatus }));
+      await EmailHistory.updateOne({ _id: emailHistoryId }, { status: finalStatus });
+    });
+
+    res.status(200).json({
+      status: 'success',
+      message: `Email sending initiated to ${recipientEmails.length} recipient(s)`,
+      data: {
+        emailId: emailHistoryId,
+        recipientCount: recipientEmails.length,
+        sentCount: sentCount,
+        failedCount: failedCount
+      }
+    });
+
+  } catch (err) {
+    console.error('Send email error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to send email'
+    });
+  }
+});
+
+// =============================================
+// TRACK EMAIL OPEN (Pixel tracking)
+// =============================================
+app.get('/api/email/track/:emailId/:encodedEmail', async (req, res) => {
+  try {
+    const { emailId, encodedEmail } = req.params;
+    const email = Buffer.from(encodedEmail, 'base64').toString();
+
+    const storedEmail = await redis.get(`email:${emailId}`);
+    if (storedEmail) {
+      const emailData = JSON.parse(storedEmail);
+      const recipientIndex = emailData.recipients.findIndex(r => r.email === email);
+      if (recipientIndex !== -1 && !emailData.recipients[recipientIndex].read) {
+        emailData.recipients[recipientIndex].read = true;
+        emailData.recipients[recipientIndex].readAt = new Date();
+        emailData.readCount++;
+        await redis.setex(`email:${emailId}`, 86400 * 30, JSON.stringify(emailData));
+
+        // Update MongoDB
+        const EmailHistory = mongoose.model('EmailHistory');
+        await EmailHistory.updateOne(
+          { _id: emailId },
+          {
+            $inc: { readCount: 1 },
+            $set: { 'recipients.$[elem].read': true, 'recipients.$[elem].readAt': new Date() }
+          },
+          { arrayFilters: [{ 'elem.email': email }] }
+        );
+      }
+    }
+
+    // Return a 1x1 transparent pixel
+    res.setHeader('Content-Type', 'image/gif');
+    res.send(Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64'));
+  } catch (err) {
+    console.error('Email tracking error:', err);
+    res.status(200).send(Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64'));
+  }
+});
+
+// =============================================
+// GET EMAIL TEMPLATES - Paginated
+// =============================================
+app.get('/api/admin/email-templates', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const EmailTemplate = mongoose.model('EmailTemplate', new mongoose.Schema({
+      name: String,
+      subject: String,
+      content: String,
+      type: String,
+      createdBy: mongoose.Schema.Types.ObjectId,
+      createdAt: Date,
+      updatedAt: Date
+    }));
+
+    const templates = await EmailTemplate.find()
+      .sort({ updatedAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const total = await EmailTemplate.countDocuments();
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        templates: templates,
+        pagination: {
+          currentPage: page,
+          totalPages: Math.ceil(total / limit),
+          totalItems: total,
+          itemsPerPage: limit
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Get email templates error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch email templates'
+    });
+  }
+});
+
+// =============================================
+// GET SINGLE EMAIL TEMPLATE
+// =============================================
+app.get('/api/admin/email-templates/:id', adminProtect, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const EmailTemplate = mongoose.model('EmailTemplate');
+    const template = await EmailTemplate.findById(id);
+
+    if (!template) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Template not found'
+      });
+    }
+
+    res.status(200).json({
+      status: 'success',
+      data: { template }
+    });
+
+  } catch (err) {
+    console.error('Get email template error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch email template'
+    });
+  }
+});
+
+// =============================================
+// SAVE EMAIL TEMPLATE
+// =============================================
+app.post('/api/admin/email-templates', adminProtect, async (req, res) => {
+  try {
+    const { name, subject, content, type } = req.body;
+
+    if (!name || !subject || !content) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Name, subject, and content are required'
+      });
+    }
+
+    const EmailTemplate = mongoose.model('EmailTemplate');
+    const template = await EmailTemplate.create({
+      name,
+      subject,
+      content,
+      type: type || 'html',
+      createdBy: req.admin._id,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    });
+
+    res.status(201).json({
+      status: 'success',
+      message: 'Template saved successfully',
+      data: { template }
+    });
+
+  } catch (err) {
+    console.error('Save email template error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to save email template'
+    });
+  }
+});
+
+// =============================================
+// DELETE EMAIL TEMPLATE
+// =============================================
+app.delete('/api/admin/email-templates/:id', adminProtect, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const EmailTemplate = mongoose.model('EmailTemplate');
+    const template = await EmailTemplate.findByIdAndDelete(id);
+
+    if (!template) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Template not found'
+      });
+    }
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Template deleted successfully'
+    });
+
+  } catch (err) {
+    console.error('Delete email template error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to delete email template'
+    });
+  }
+});
+
+// =============================================
+// GET EMAIL HISTORY - Paginated with stats
+// =============================================
+app.get('/api/admin/email-history', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const EmailHistory = mongoose.model('EmailHistory');
+
+    const emails = await EmailHistory.find()
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const total = await EmailHistory.countDocuments();
+    const stats = await EmailHistory.aggregate([
+      {
+        $group: {
+          _id: null,
+          total: { $sum: 1 },
+          delivered: { $sum: '$deliveredCount' },
+          read: { $sum: '$readCount' }
+        }
+      }
+    ]);
+
+    const openRate = stats[0] && stats[0].delivered > 0
+      ? ((stats[0].read / stats[0].delivered) * 100).toFixed(1)
+      : '0';
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        emails: emails,
+        stats: {
+          total: stats[0]?.total || 0,
+          delivered: stats[0]?.delivered || 0,
+          read: stats[0]?.read || 0,
+          openRate: `${openRate}%`
+        },
+        pagination: {
+          currentPage: page,
+          totalPages: Math.ceil(total / limit),
+          totalItems: total,
+          itemsPerPage: limit
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Get email history error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch email history'
+    });
+  }
+});
+
+// =============================================
+// GET EMAIL HISTORY DETAIL BY ID
+// =============================================
+app.get('/api/admin/email-history/:id', adminProtect, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const EmailHistory = mongoose.model('EmailHistory');
+    const email = await EmailHistory.findById(id);
+
+    if (!email) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Email record not found'
+      });
+    }
+
+    res.status(200).json({
+      status: 'success',
+      data: { email }
+    });
+
+  } catch (err) {
+    console.error('Get email history detail error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch email details'
+    });
+  }
+});
 
 
 
