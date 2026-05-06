@@ -26617,7 +26617,80 @@ app.get('/api/admin/restrictions', adminProtect, restrictTo('super'), async (req
 
 
 
+// =============================================
+// GET SINGLE FINANCIAL STATEMENT BY ID
+// =============================================
+app.get('/api/admin/statements/:id', adminProtect, async (req, res) => {
+  try {
+    const { id } = req.params;
 
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid statement ID'
+      });
+    }
+
+    const statement = await FinancialStatement.findById(id)
+      .populate('user', 'firstName lastName email')
+      .lean();
+
+    if (!statement) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Financial statement not found'
+      });
+    }
+
+    // Format the response exactly as the frontend expects
+    const formattedStatement = {
+      _id: statement._id,
+      user: statement.user ? {
+        _id: statement.user._id,
+        firstName: statement.user.firstName,
+        lastName: statement.user.lastName,
+        email: statement.user.email
+      } : null,
+      period: {
+        startDate: statement.period.startDate,
+        endDate: statement.period.endDate
+      },
+      statementType: statement.statementType,
+      createdAt: statement.createdAt,
+      isDelivered: statement.isDelivered || false,
+      deliveredAt: statement.deliveredAt,
+      data: {
+        summary: {
+          totalDeposits: statement.transactions?.summary?.totalDepositsUSD || 0,
+          totalWithdrawals: statement.transactions?.summary?.totalWithdrawalsUSD || 0,
+          totalInvestments: statement.investments?.summary?.totalPrincipalInvestedUSD || 0,
+          totalProfit: statement.summary?.netProfitUSD || 0,
+          currentBalance: statement.closingBalances?.totalUSD || 0
+        },
+        openingBalances: statement.openingBalances,
+        closingBalances: statement.closingBalances,
+        transactions: statement.transactions,
+        investments: statement.investments,
+        fees: statement.fees,
+        summary: statement.summary
+      }
+    };
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        statement: formattedStatement
+      }
+    });
+
+  } catch (err) {
+    console.error('Error fetching financial statement by ID:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to fetch financial statement'
+    });
+  }
+});
 
 
 
