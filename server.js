@@ -26617,12 +26617,115 @@ app.get('/api/admin/restrictions', adminProtect, restrictTo('super'), async (req
 
 
 
+
+
 // =============================================
-// EMAIL MARKETING ENDPOINTS - Separate Snippet
+// MISSING EMAIL MARKETING ENDPOINTS
+// Add these to your server.js after the notification endpoints
 // =============================================
 
 // =============================================
-// GET /api/admin/email-templates - Get saved email templates
+// EMAIL TEMPLATES MODEL - Add this if not already defined
+// =============================================
+const EmailTemplateSchema = new mongoose.Schema({
+  name: {
+    type: String,
+    required: [true, 'Template name is required'],
+    trim: true
+  },
+  subject: {
+    type: String,
+    required: [true, 'Subject is required'],
+    trim: true
+  },
+  content: {
+    type: String,
+    required: [true, 'Content is required']
+  },
+  type: {
+    type: String,
+    enum: ['html', 'plain'],
+    default: 'html'
+  },
+  createdBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Admin',
+    required: true
+  },
+  lastUsed: {
+    type: Date,
+    default: null
+  }
+}, {
+  timestamps: true
+});
+
+const EmailTemplate = mongoose.models.EmailTemplate || mongoose.model('EmailTemplate', EmailTemplateSchema);
+
+// =============================================
+// EMAIL HISTORY MODEL - Track sent emails and read receipts
+// =============================================
+const EmailHistorySchema = new mongoose.Schema({
+  subject: {
+    type: String,
+    required: true
+  },
+  content: {
+    type: String,
+    required: true
+  },
+  type: {
+    type: String,
+    enum: ['html', 'plain'],
+    default: 'html'
+  },
+  recipients: [{
+    email: { type: String, required: true },
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    delivered: { type: Boolean, default: false },
+    deliveredAt: { type: Date },
+    read: { type: Boolean, default: false },
+    readAt: { type: Date },
+    status: { type: String, enum: ['pending', 'sent', 'failed', 'delivered', 'read'], default: 'pending' }
+  }],
+  recipientCount: { type: Number, default: 0 },
+  deliveredCount: { type: Number, default: 0 },
+  readCount: { type: Number, default: 0 },
+  openRate: { type: Number, default: 0 },
+  status: {
+    type: String,
+    enum: ['sending', 'sent', 'failed', 'partial'],
+    default: 'sending'
+  },
+  sentBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Admin',
+    required: true
+  },
+  trackDelivery: {
+    type: Boolean,
+    default: false
+  },
+  attachments: [{
+    filename: String,
+    originalName: String,
+    size: Number,
+    mimeType: String
+  }],
+  errorMessage: String
+}, {
+  timestamps: true
+});
+
+// Indexes for fast queries
+EmailHistorySchema.index({ createdAt: -1 });
+EmailHistorySchema.index({ status: 1 });
+EmailHistorySchema.index({ 'recipients.userId': 1 });
+
+const EmailHistory = mongoose.models.EmailHistory || mongoose.model('EmailHistory', EmailHistorySchema);
+
+// =============================================
+// GET EMAIL TEMPLATES - Paginated
 // =============================================
 app.get('/api/admin/email-templates', adminProtect, async (req, res) => {
   try {
@@ -26630,22 +26733,20 @@ app.get('/api/admin/email-templates', adminProtect, async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
-    const [templates, total] = await Promise.all([
-      EmailTemplate.find({})
-        .sort({ updatedAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .lean(),
-      EmailTemplate.countDocuments({})
-    ]);
+    const templates = await EmailTemplate.find({})
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
 
+    const total = await EmailTemplate.countDocuments({});
     const totalPages = Math.ceil(total / limit);
 
     const formattedTemplates = templates.map(template => ({
       _id: template._id,
       name: template.name,
       subject: template.subject,
-      content: template.content,
+      content: template.type === 'html' ? template.content.substring(0, 100) : template.content.substring(0, 100),
       type: template.type,
       createdAt: template.createdAt,
       updatedAt: template.updatedAt,
@@ -26677,7 +26778,7 @@ app.get('/api/admin/email-templates', adminProtect, async (req, res) => {
 });
 
 // =============================================
-// GET /api/admin/email-templates/:id - Get single email template
+// GET SINGLE EMAIL TEMPLATE
 // =============================================
 app.get('/api/admin/email-templates/:id', adminProtect, async (req, res) => {
   try {
@@ -26707,9 +26808,7 @@ app.get('/api/admin/email-templates/:id', adminProtect, async (req, res) => {
           name: template.name,
           subject: template.subject,
           content: template.content,
-          type: template.type,
-          createdAt: template.createdAt,
-          updatedAt: template.updatedAt
+          type: template.type
         }
       }
     });
@@ -26724,7 +26823,7 @@ app.get('/api/admin/email-templates/:id', adminProtect, async (req, res) => {
 });
 
 // =============================================
-// POST /api/admin/email-templates - Save email template
+// CREATE EMAIL TEMPLATE
 // =============================================
 app.post('/api/admin/email-templates', adminProtect, async (req, res) => {
   try {
@@ -26742,9 +26841,7 @@ app.post('/api/admin/email-templates', adminProtect, async (req, res) => {
       subject: subject.trim(),
       content: content,
       type: type || 'html',
-      createdBy: req.admin._id,
-      createdAt: new Date(),
-      updatedAt: new Date()
+      createdBy: req.admin._id
     });
 
     res.status(201).json({
@@ -26755,14 +26852,13 @@ app.post('/api/admin/email-templates', adminProtect, async (req, res) => {
           _id: template._id,
           name: template.name,
           subject: template.subject,
-          type: template.type,
-          createdAt: template.createdAt
+          type: template.type
         }
       }
     });
 
   } catch (err) {
-    console.error('Error saving email template:', err);
+    console.error('Error creating email template:', err);
     res.status(500).json({
       status: 'error',
       message: err.message || 'Failed to save email template'
@@ -26771,7 +26867,7 @@ app.post('/api/admin/email-templates', adminProtect, async (req, res) => {
 });
 
 // =============================================
-// PUT /api/admin/email-templates/:id - Update email template
+// UPDATE EMAIL TEMPLATE
 // =============================================
 app.put('/api/admin/email-templates/:id', adminProtect, async (req, res) => {
   try {
@@ -26793,11 +26889,10 @@ app.put('/api/admin/email-templates/:id', adminProtect, async (req, res) => {
       });
     }
 
-    if (name) template.name = name.trim();
-    if (subject) template.subject = subject.trim();
-    if (content) template.content = content;
-    if (type) template.type = type;
-    template.updatedAt = new Date();
+    if (name !== undefined) template.name = name.trim();
+    if (subject !== undefined) template.subject = subject.trim();
+    if (content !== undefined) template.content = content;
+    if (type !== undefined) template.type = type;
 
     await template.save();
 
@@ -26809,8 +26904,7 @@ app.put('/api/admin/email-templates/:id', adminProtect, async (req, res) => {
           _id: template._id,
           name: template.name,
           subject: template.subject,
-          type: template.type,
-          updatedAt: template.updatedAt
+          type: template.type
         }
       }
     });
@@ -26825,7 +26919,7 @@ app.put('/api/admin/email-templates/:id', adminProtect, async (req, res) => {
 });
 
 // =============================================
-// DELETE /api/admin/email-templates/:id - Delete email template
+// DELETE EMAIL TEMPLATE
 // =============================================
 app.delete('/api/admin/email-templates/:id', adminProtect, async (req, res) => {
   try {
@@ -26862,12 +26956,20 @@ app.delete('/api/admin/email-templates/:id', adminProtect, async (req, res) => {
 });
 
 // =============================================
-// POST /api/admin/send-email - Send marketing email
+// SEND EMAIL - Main endpoint for email marketing
 // =============================================
 app.post('/api/admin/send-email', adminProtect, async (req, res) => {
   try {
-    const { subject, content, type, recipients, trackDelivery, attachments } = req.body;
+    const {
+      subject,
+      content,
+      type,
+      recipients: recipientsInput,
+      trackDelivery,
+      testMode
+    } = req.body;
 
+    // Validate required fields
     if (!subject || !content) {
       return res.status(400).json({
         status: 'fail',
@@ -26875,232 +26977,187 @@ app.post('/api/admin/send-email', adminProtect, async (req, res) => {
       });
     }
 
-    if (!recipients || recipients.length === 0) {
+    if (!recipientsInput || recipientsInput.length === 0) {
       return res.status(400).json({
         status: 'fail',
         message: 'At least one recipient is required'
       });
     }
 
-    const emailType = type || 'html';
-    const shouldTrack = trackDelivery === true;
-    let recipientList = [];
-    let sentCount = 0;
-    let failedCount = 0;
-    const emailResults = [];
+    // Process recipients
+    let recipients = [];
+    const allRecipients = recipientsInput[0] === 'all';
 
-    // Process recipients based on type
-    if (recipients[0] === 'all') {
-      // Send to all active users
-      const allUsers = await User.find({ status: 'active' }).select('email firstName lastName').lean();
-      recipientList = allUsers.map(user => ({
+    if (allRecipients) {
+      // Get all active users
+      const users = await User.find({ status: 'active' }).select('email _id');
+      recipients = users.map(user => ({
         email: user.email,
-        userId: user._id,
-        name: `${user.firstName} ${user.lastName}`.trim()
+        userId: user._id
       }));
     } else {
-      // Specific users or external emails
-      for (const recipient of recipients) {
-        if (recipient.includes('@')) {
-          // External email
-          recipientList.push({
-            email: recipient,
-            userId: null,
-            name: recipient.split('@')[0]
-          });
-        } else {
-          // User ID
-          const user = await User.findById(recipient).select('email firstName lastName').lean();
-          if (user) {
-            recipientList.push({
+      // Process specific recipients - can be user IDs or email addresses
+      for (const recipient of recipientsInput) {
+        if (mongoose.Types.ObjectId.isValid(recipient)) {
+          // It's a user ID, look up their email
+          const user = await User.findById(recipient).select('email _id');
+          if (user && user.email) {
+            recipients.push({
               email: user.email,
-              userId: user._id,
-              name: `${user.firstName} ${user.lastName}`.trim()
+              userId: user._id
+            });
+          } else {
+            recipients.push({
+              email: recipient,
+              userId: null
             });
           }
+        } else if (recipient.includes('@')) {
+          // It's an email address
+          // Check if this email belongs to a registered user
+          const user = await User.findOne({ email: recipient }).select('_id');
+          recipients.push({
+            email: recipient,
+            userId: user ? user._id : null
+          });
         }
       }
     }
 
-    // Create email log record
-    const emailLog = await EmailLog.create({
-      subject: subject,
-      content: content,
-      type: emailType,
-      recipients: recipientList.map(r => ({
+    // Remove duplicates
+    const uniqueRecipients = [];
+    const seenEmails = new Set();
+    for (const recipient of recipients) {
+      if (!seenEmails.has(recipient.email)) {
+        seenEmails.add(recipient.email);
+        uniqueRecipients.push(recipient);
+      }
+    }
+
+    if (testMode) {
+      // Just return preview without sending
+      return res.status(200).json({
+        status: 'success',
+        data: {
+          preview: {
+            subject,
+            content: type === 'html' ? content : content.replace(/\n/g, '<br>'),
+            recipientCount: uniqueRecipients.length,
+            sampleRecipients: uniqueRecipients.slice(0, 5).map(r => r.email)
+          }
+        }
+      });
+    }
+
+    // Create email history record
+    const emailHistory = new EmailHistory({
+      subject,
+      content,
+      type: type || 'html',
+      recipients: uniqueRecipients.map(r => ({
         email: r.email,
         userId: r.userId,
-        name: r.name,
-        status: 'pending',
-        delivered: false,
-        read: false,
-        sentAt: null
+        status: 'pending'
       })),
-      recipientCount: recipientList.length,
-      deliveredCount: 0,
-      readCount: 0,
+      recipientCount: uniqueRecipients.length,
       sentBy: req.admin._id,
-      sentByEmail: req.admin.email,
-      sentAt: new Date(),
-      trackDelivery: shouldTrack,
+      trackDelivery: trackDelivery || false,
       status: 'sending'
     });
 
-    // Build email HTML with platform header and footer if HTML type
-    const platformName = 'BitHash Capital';
-    const platformUrl = 'https://www.bithashcapital.live';
-    const supportEmail = 'support@bithashcapital.live';
-    const currentYear = new Date().getFullYear();
+    await emailHistory.save();
 
-    const brandHeader = `
-      <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-        <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="${platformName} Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-        <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">${platformName}</h1>
-        <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
-      </div>
-    `;
+    // Send emails (asynchronously to avoid blocking)
+    let sentCount = 0;
+    let failedCount = 0;
 
-    const brandFooter = `
-      <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${currentYear} ${platformName}. All rights reserved.</p>
-        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
-          <a href="mailto:${supportEmail}" style="color: #F7A600; text-decoration: none;">${supportEmail}</a> | 
-          <a href="${platformUrl}" style="color: #F7A600; text-decoration: none;">${platformUrl}</a>
-        </p>
-      </div>
-    `;
-
-    let finalContent = '';
-    if (emailType === 'html') {
-      finalContent = `
-        <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-          ${brandHeader}
-          <div style="padding: 30px; background: #FFFFFF;">
-            ${content}
-          </div>
-          ${brandFooter}
-        </div>
-      `;
-    } else {
-      finalContent = content;
-    }
-
-    // Send emails in batches to respect rate limits
-    const BATCH_SIZE = 10;
-    const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-    for (let i = 0; i < recipientList.length; i += BATCH_SIZE) {
-      const batch = recipientList.slice(i, i + BATCH_SIZE);
+    // Process in batches to avoid overwhelming the email service
+    const batchSize = 10;
+    for (let i = 0; i < uniqueRecipients.length; i += batchSize) {
+      const batch = uniqueRecipients.slice(i, i + batchSize);
       
-      const batchPromises = batch.map(async (recipient, idx) => {
+      await Promise.all(batch.map(async (recipient, idx) => {
         try {
-          // Add tracking pixel if enabled
-          let emailContent = finalContent;
-          let trackingPixel = '';
+          // Build HTML content with tracking pixel if enabled
+          let emailHtml = content;
+          let emailPlain = content;
           
-          if (shouldTrack) {
-            const trackingId = `track_${emailLog._id}_${recipient.email.replace(/[^a-zA-Z0-9]/g, '_')}`;
-            trackingPixel = `<img src="${platformUrl}/api/email/track/open/${emailLog._id}/${encodeURIComponent(recipient.email)}?t=${Date.now()}" width="1" height="1" style="display:none;">`;
-            
-            if (emailType === 'html') {
-              emailContent = emailContent.replace('</body>', `${trackingPixel}</body>`);
-              if (!emailContent.includes('</body>')) {
-                emailContent += trackingPixel;
-              }
-            }
+          if (trackDelivery && type === 'html') {
+            // Add tracking pixel
+            const trackingPixel = `<img src="https://bithash-backend-kg7j.onrender.com/api/admin/email/track/${emailHistory._id}/${encodeURIComponent(recipient.email)}" width="1" height="1" style="display:none;">`;
+            emailHtml = content + trackingPixel;
           }
-
-          const mailOptions = {
-            from: `${platformName} <${process.env.EMAIL_INFO_USER}>`,
-            to: recipient.email,
-            subject: subject,
-            html: emailType === 'html' ? emailContent : undefined,
-            text: emailType === 'plain' ? finalContent : undefined
-          };
-
-          await infoTransporter.sendMail(mailOptions);
           
+          // Send email using your existing sendProfessionalEmail function
+          await sendProfessionalEmail({
+            email: recipient.email,
+            template: 'default',
+            data: {
+              name: recipient.email.split('@')[0],
+              message: emailHtml,
+              details: type === 'html' ? emailHtml : emailPlain,
+              actionLink: 'https://www.bithashcapital.live',
+              buttonText: 'Visit Dashboard',
+              referenceId: emailHistory._id.toString()
+            }
+          });
+          
+          // Update recipient status in email history
+          const recipientIndex = emailHistory.recipients.findIndex(r => r.email === recipient.email);
+          if (recipientIndex !== -1) {
+            emailHistory.recipients[recipientIndex].delivered = true;
+            emailHistory.recipients[recipientIndex].deliveredAt = new Date();
+            emailHistory.recipients[recipientIndex].status = 'delivered';
+          }
           sentCount++;
           
-          // Update recipient status in email log
-          const recipientIndex = emailLog.recipients.findIndex(r => r.email === recipient.email);
-          if (recipientIndex !== -1) {
-            emailLog.recipients[recipientIndex].status = 'sent';
-            emailLog.recipients[recipientIndex].delivered = true;
-            emailLog.recipients[recipientIndex].sentAt = new Date();
-          }
-          
-          emailLog.deliveredCount++;
-          
-          emailResults.push({
-            email: recipient.email,
-            status: 'sent',
-            error: null
-          });
         } catch (err) {
-          failedCount++;
-          
-          // Update recipient status in email log
-          const recipientIndex = emailLog.recipients.findIndex(r => r.email === recipient.email);
-          if (recipientIndex !== -1) {
-            emailLog.recipients[recipientIndex].status = 'failed';
-            emailLog.recipients[recipientIndex].error = err.message;
-          }
-          
-          emailResults.push({
-            email: recipient.email,
-            status: 'failed',
-            error: err.message
-          });
-          
           console.error(`Failed to send email to ${recipient.email}:`, err.message);
+          const recipientIndex = emailHistory.recipients.findIndex(r => r.email === recipient.email);
+          if (recipientIndex !== -1) {
+            emailHistory.recipients[recipientIndex].status = 'failed';
+            emailHistory.recipients[recipientIndex].errorMessage = err.message;
+          }
+          failedCount++;
         }
-      });
+      }));
       
-      await Promise.all(batchPromises);
-      
-      // Delay between batches to avoid rate limiting
-      if (i + BATCH_SIZE < recipientList.length) {
-        await delay(1000);
-      }
+      // Small delay between batches
+      await new Promise(resolve => setTimeout(resolve, 500));
     }
 
-    // Update email log status
-    emailLog.status = sentCount === recipientList.length ? 'sent' : (sentCount > 0 ? 'partial' : 'failed');
-    emailLog.completedAt = new Date();
-    await emailLog.save();
-
-    // Create notifications for users
-    if (recipients[0] !== 'all') {
-      for (const recipient of recipientList) {
-        if (recipient.userId) {
-          await Notification.create({
-            title: subject.length > 100 ? subject.substring(0, 97) + '...' : subject,
-            message: `You received an email: "${subject}"`,
-            type: 'info',
-            recipientType: 'specific',
-            specificUserId: recipient.userId,
-            sentBy: req.admin._id,
-            isImportant: false,
-            metadata: {
-              emailLogId: emailLog._id,
-              emailSubject: subject
-            }
-          });
-        }
-      }
+    // Update email history
+    emailHistory.deliveredCount = sentCount;
+    emailHistory.status = sentCount === uniqueRecipients.length ? 'sent' : (sentCount > 0 ? 'partial' : 'failed');
+    if (failedCount > 0 && sentCount === 0) {
+      emailHistory.status = 'failed';
     }
+    await emailHistory.save();
+
+    // Log activity
+    await logActivity(
+      'mass_email_sent',
+      'EmailHistory',
+      emailHistory._id,
+      req.admin._id,
+      'Admin',
+      req,
+      {
+        subject: subject,
+        recipientCount: uniqueRecipients.length,
+        sentCount: sentCount,
+        failedCount: failedCount
+      }
+    );
 
     res.status(200).json({
       status: 'success',
-      message: `Email sent to ${sentCount} recipient(s)`,
+      message: `Email sent to ${sentCount} recipients${failedCount > 0 ? ` (${failedCount} failed)` : ''}`,
       data: {
-        emailId: emailLog._id,
+        emailId: emailHistory._id,
         sentCount: sentCount,
         failedCount: failedCount,
-        totalCount: recipientList.length,
-        results: emailResults
+        totalCount: uniqueRecipients.length
       }
     });
 
@@ -27114,59 +27171,97 @@ app.post('/api/admin/send-email', adminProtect, async (req, res) => {
 });
 
 // =============================================
-// GET /api/admin/email-history - Get email sending history
+// TRACKING PIXEL ENDPOINT - For read receipts
+// =============================================
+app.get('/api/admin/email/track/:emailId/:email', async (req, res) => {
+  try {
+    const { emailId, email } = req.params;
+    const decodedEmail = decodeURIComponent(email);
+
+    // Update read status in email history
+    const emailHistory = await EmailHistory.findById(emailId);
+    
+    if (emailHistory && emailHistory.trackDelivery) {
+      const recipient = emailHistory.recipients.find(r => r.email === decodedEmail);
+      if (recipient && !recipient.read) {
+        recipient.read = true;
+        recipient.readAt = new Date();
+        recipient.status = 'read';
+        
+        // Update read count
+        emailHistory.readCount = emailHistory.recipients.filter(r => r.read === true).length;
+        emailHistory.openRate = (emailHistory.readCount / emailHistory.recipientCount) * 100;
+        await emailHistory.save();
+      }
+    }
+
+    // Send a 1x1 transparent GIF
+    const transparentGif = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
+    res.set('Content-Type', 'image/gif');
+    res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.send(transparentGif);
+
+  } catch (err) {
+    console.error('Tracking pixel error:', err);
+    // Still return transparent GIF to avoid breaking email clients
+    const transparentGif = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
+    res.set('Content-Type', 'image/gif');
+    res.send(transparentGif);
+  }
+});
+
+// =============================================
+// GET EMAIL HISTORY - Paginated with stats
 // =============================================
 app.get('/api/admin/email-history', adminProtect, async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
+    const status = req.query.status;
 
-    const [emails, total] = await Promise.all([
-      EmailLog.find({})
-        .populate('sentBy', 'name email')
-        .sort({ sentAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .lean(),
-      EmailLog.countDocuments({})
-    ]);
+    let query = {};
+    if (status && status !== 'all') {
+      query.status = status;
+    }
 
+    const emails = await EmailHistory.find(query)
+      .populate('sentBy', 'name email')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const total = await EmailHistory.countDocuments(query);
     const totalPages = Math.ceil(total / limit);
 
-    // Calculate stats
-    const stats = await EmailLog.aggregate([
+    // Calculate overall stats
+    const stats = await EmailHistory.aggregate([
       {
         $group: {
           _id: null,
           total: { $sum: 1 },
-          totalRecipients: { $sum: '$recipientCount' },
           totalDelivered: { $sum: '$deliveredCount' },
-          totalRead: { $sum: '$readCount' }
+          totalRead: { $sum: '$readCount' },
+          totalRecipients: { $sum: '$recipientCount' }
         }
       }
     ]);
 
-    const statsData = stats[0] || { total: 0, totalRecipients: 0, totalDelivered: 0, totalRead: 0 };
-    const openRate = statsData.totalDelivered > 0 
-      ? ((statsData.totalRead / statsData.totalDelivered) * 100).toFixed(1) 
+    const overallStats = stats[0] || { total: 0, totalDelivered: 0, totalRead: 0, totalRecipients: 0 };
+    const openRate = overallStats.totalRecipients > 0 
+      ? ((overallStats.totalRead / overallStats.totalRecipients) * 100).toFixed(1)
       : '0';
 
     const formattedEmails = emails.map(email => ({
       _id: email._id,
       subject: email.subject,
-      type: email.type,
       recipientCount: email.recipientCount,
-      deliveredCount: email.deliveredCount || 0,
-      readCount: email.readCount || 0,
+      deliveredCount: email.deliveredCount,
+      readCount: email.readCount,
+      openRate: email.openRate ? email.openRate.toFixed(1) : '0',
       status: email.status,
-      sentBy: email.sentBy ? {
-        _id: email.sentBy._id,
-        name: email.sentBy.name,
-        email: email.sentBy.email
-      } : null,
-      sentAt: email.sentAt,
-      completedAt: email.completedAt,
+      sentBy: email.sentBy?.name || 'System',
       createdAt: email.createdAt
     }));
 
@@ -27175,9 +27270,9 @@ app.get('/api/admin/email-history', adminProtect, async (req, res) => {
       data: {
         emails: formattedEmails,
         stats: {
-          total: statsData.total,
-          delivered: statsData.totalDelivered,
-          read: statsData.totalRead,
+          total: overallStats.total,
+          delivered: overallStats.totalDelivered,
+          read: overallStats.totalRead,
           openRate: `${openRate}%`
         },
         pagination: {
@@ -27201,7 +27296,7 @@ app.get('/api/admin/email-history', adminProtect, async (req, res) => {
 });
 
 // =============================================
-// GET /api/admin/email-history/:id - Get single email details with read receipts
+// GET SINGLE EMAIL HISTORY DETAILS with recipient tracking
 // =============================================
 app.get('/api/admin/email-history/:id', adminProtect, async (req, res) => {
   try {
@@ -27214,7 +27309,7 @@ app.get('/api/admin/email-history/:id', adminProtect, async (req, res) => {
       });
     }
 
-    const email = await EmailLog.findById(id)
+    const email = await EmailHistory.findById(id)
       .populate('sentBy', 'name email')
       .lean();
 
@@ -27225,9 +27320,23 @@ app.get('/api/admin/email-history/:id', adminProtect, async (req, res) => {
       });
     }
 
-    const openRate = email.deliveredCount > 0 
-      ? ((email.readCount / email.deliveredCount) * 100).toFixed(1) 
-      : '0';
+    // Format recipient data for display (mask emails partially for privacy)
+    const formattedRecipients = email.recipients.map(recipient => {
+      const emailParts = recipient.email.split('@');
+      const maskedEmail = emailParts.length > 1
+        ? `${emailParts[0].substring(0, 3)}...@${emailParts[1]}`
+        : recipient.email;
+      
+      return {
+        email: maskedEmail,
+        fullEmail: recipient.email,
+        delivered: recipient.delivered,
+        deliveredAt: recipient.deliveredAt,
+        read: recipient.read,
+        readAt: recipient.readAt,
+        status: recipient.status
+      };
+    });
 
     res.status(200).json({
       status: 'success',
@@ -27235,30 +27344,17 @@ app.get('/api/admin/email-history/:id', adminProtect, async (req, res) => {
         email: {
           _id: email._id,
           subject: email.subject,
-          content: email.content,
+          content: email.type === 'html' ? email.content.substring(0, 500) : email.content.substring(0, 500),
           type: email.type,
           recipientCount: email.recipientCount,
-          deliveredCount: email.deliveredCount || 0,
-          readCount: email.readCount || 0,
-          openRate: `${openRate}%`,
+          deliveredCount: email.deliveredCount,
+          readCount: email.readCount,
+          openRate: email.openRate ? email.openRate.toFixed(1) : '0',
           status: email.status,
-          recipients: email.recipients.map(r => ({
-            email: r.email,
-            name: r.name,
-            delivered: r.delivered || false,
-            read: r.read || false,
-            readAt: r.readAt,
-            status: r.status,
-            error: r.error
-          })),
-          sentBy: email.sentBy ? {
-            _id: email.sentBy._id,
-            name: email.sentBy.name,
-            email: email.sentBy.email
-          } : null,
-          sentAt: email.sentAt,
-          completedAt: email.completedAt,
-          createdAt: email.createdAt
+          sentBy: email.sentBy?.name || 'System',
+          sentByEmail: email.sentBy?.email || 'system@bithash.com',
+          createdAt: email.createdAt,
+          recipients: formattedRecipients.slice(0, 100) // Show first 100 recipients
         }
       }
     });
@@ -27273,199 +27369,126 @@ app.get('/api/admin/email-history/:id', adminProtect, async (req, res) => {
 });
 
 // =============================================
-// POST /api/email/track/open/:emailId/:email - Track email open (tracking pixel)
+// RESEND FAILED EMAILS
 // =============================================
-app.get('/api/email/track/open/:emailId/:email', async (req, res) => {
+app.post('/api/admin/email-history/:id/resend', adminProtect, async (req, res) => {
   try {
-    const { emailId, email } = req.params;
-    const decodedEmail = decodeURIComponent(email);
+    const { id } = req.params;
 
-    if (!mongoose.Types.ObjectId.isValid(emailId)) {
-      // Return 1x1 pixel even on error
-      res.setHeader('Content-Type', 'image/gif');
-      return res.send(Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64'));
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid email ID'
+      });
     }
 
-    // Update read status
-    const result = await EmailLog.updateOne(
-      { 
-        _id: emailId,
-        'recipients.email': decodedEmail,
-        'recipients.delivered': true,
-        'recipients.read': false
-      },
-      {
-        $set: {
-          'recipients.$.read': true,
-          'recipients.$.readAt': new Date()
-        },
-        $inc: { readCount: 1 }
+    const emailHistory = await EmailHistory.findById(id);
+
+    if (!emailHistory) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Email record not found'
+      });
+    }
+
+    // Get failed recipients
+    const failedRecipients = emailHistory.recipients.filter(r => r.status === 'failed');
+
+    if (failedRecipients.length === 0) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'No failed recipients to resend to'
+      });
+    }
+
+    let sentCount = 0;
+    let failedCount = 0;
+
+    for (const recipient of failedRecipients) {
+      try {
+        await sendProfessionalEmail({
+          email: recipient.email,
+          template: 'default',
+          data: {
+            name: recipient.email.split('@')[0],
+            message: emailHistory.content,
+            details: emailHistory.type === 'html' ? emailHistory.content : emailHistory.content.replace(/\n/g, '<br>'),
+            actionLink: 'https://www.bithashcapital.live',
+            buttonText: 'Visit Dashboard',
+            referenceId: emailHistory._id.toString()
+          }
+        });
+
+        recipient.delivered = true;
+        recipient.deliveredAt = new Date();
+        recipient.status = 'delivered';
+        sentCount++;
+
+      } catch (err) {
+        recipient.errorMessage = err.message;
+        failedCount++;
       }
-    );
-
-    if (result.modifiedCount > 0) {
-      console.log(`📧 Email opened: ${decodedEmail} for email ${emailId}`);
     }
 
-    // Return 1x1 transparent pixel
-    res.setHeader('Content-Type', 'image/gif');
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.send(Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64'));
+    // Update email history
+    emailHistory.deliveredCount = emailHistory.recipients.filter(r => r.delivered === true).length;
+    emailHistory.status = emailHistory.deliveredCount === emailHistory.recipientCount ? 'sent' : 'partial';
+    await emailHistory.save();
+
+    res.status(200).json({
+      status: 'success',
+      message: `Resent to ${sentCount} recipients${failedCount > 0 ? ` (${failedCount} failed again)` : ''}`,
+      data: {
+        sentCount,
+        failedCount
+      }
+    });
 
   } catch (err) {
-    console.error('Error tracking email open:', err);
-    // Return 1x1 pixel even on error
-    res.setHeader('Content-Type', 'image/gif');
-    res.send(Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64'));
+    console.error('Error resending emails:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to resend emails'
+    });
   }
 });
 
 // =============================================
-// EMAIL TEMPLATE SCHEMA
+// DELETE EMAIL HISTORY RECORD
 // =============================================
-const EmailTemplateSchema = new mongoose.Schema({
-  name: {
-    type: String,
-    required: [true, 'Template name is required'],
-    trim: true,
-    index: true
-  },
-  subject: {
-    type: String,
-    required: [true, 'Subject is required'],
-    trim: true
-  },
-  content: {
-    type: String,
-    required: [true, 'Content is required']
-  },
-  type: {
-    type: String,
-    enum: ['html', 'plain'],
-    default: 'html'
-  },
-  createdBy: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Admin'
-  },
-  lastUsed: {
-    type: Date
-  },
-  tags: [{
-    type: String,
-    trim: true
-  }]
-}, {
-  timestamps: true
+app.delete('/api/admin/email-history/:id', adminProtect, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid email ID'
+      });
+    }
+
+    const email = await EmailHistory.findByIdAndDelete(id);
+
+    if (!email) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Email record not found'
+      });
+    }
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Email history record deleted successfully'
+    });
+
+  } catch (err) {
+    console.error('Error deleting email history:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to delete email history record'
+    });
+  }
 });
-
-// =============================================
-// EMAIL LOG SCHEMA - For tracking sent emails
-// =============================================
-const EmailLogSchema = new mongoose.Schema({
-  subject: {
-    type: String,
-    required: true,
-    trim: true,
-    index: true
-  },
-  content: {
-    type: String,
-    required: true
-  },
-  type: {
-    type: String,
-    enum: ['html', 'plain'],
-    default: 'html'
-  },
-  recipients: [{
-    email: {
-      type: String,
-      required: true,
-      lowercase: true
-    },
-    userId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
-    },
-    name: String,
-    status: {
-      type: String,
-      enum: ['pending', 'sent', 'failed', 'opened'],
-      default: 'pending'
-    },
-    delivered: {
-      type: Boolean,
-      default: false
-    },
-    read: {
-      type: Boolean,
-      default: false
-    },
-    readAt: Date,
-    sentAt: Date,
-    error: String
-  }],
-  recipientCount: {
-    type: Number,
-    default: 0
-  },
-  deliveredCount: {
-    type: Number,
-    default: 0
-  },
-  readCount: {
-    type: Number,
-    default: 0
-  },
-  sentBy: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Admin',
-    required: true
-  },
-  sentByEmail: {
-    type: String,
-    required: true
-  },
-  sentAt: {
-    type: Date,
-    default: Date.now,
-    index: true
-  },
-  completedAt: Date,
-  trackDelivery: {
-    type: Boolean,
-    default: false
-  },
-  status: {
-    type: String,
-    enum: ['sending', 'sent', 'partial', 'failed'],
-    default: 'sending'
-  },
-  metadata: mongoose.Schema.Types.Mixed
-}, {
-  timestamps: true
-});
-
-// Indexes for performance
-EmailLogSchema.index({ sentAt: -1 });
-EmailLogSchema.index({ status: 1, sentAt: -1 });
-EmailLogSchema.index({ sentBy: 1, sentAt: -1 });
-EmailLogSchema.index({ 'recipients.email': 1 });
-EmailLogSchema.index({ 'recipients.userId': 1 });
-
-// =============================================
-// COMPILE MODELS
-// =============================================
-const EmailTemplate = mongoose.models.EmailTemplate || mongoose.model('EmailTemplate', EmailTemplateSchema);
-const EmailLog = mongoose.models.EmailLog || mongoose.model('EmailLog', EmailLogSchema);
-
-// Export models for use in other parts of the application
-module.exports.EmailTemplate = EmailTemplate;
-module.exports.EmailLog = EmailLog;
-
-
-
 
 
 
