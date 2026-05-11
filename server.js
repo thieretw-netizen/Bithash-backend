@@ -17971,7 +17971,7 @@ app.get('/api/deposits/address/:asset', async (req, res) => {
       'xrp': 'rexV2DWLYpzqoFd3DtVXmcFSseaoLmT7Z',
       'doge': 'DPcwJVQzCHYXqVf59trFPj5bhomW14UEnW',
       'shib': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
-      'ltc': 'LSkAHMqtB8SdoG9jKxr3UTVDTUqhs44vWg'
+      'ltc': 'LSkAHMqtB8SdoG9jKxr3UTVDTUqhs44vWg',
 	  'trx': 'TJMe6pfdoQAAD2rTwAGhBCyXhXUgmyKg7t'
     };
 
