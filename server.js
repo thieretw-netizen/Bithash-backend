@@ -17972,7 +17972,7 @@ app.get('/api/deposits/address/:asset', async (req, res) => {
       'doge': 'DPcwJVQzCHYXqVf59trFPj5bhomW14UEnW',
       'shib': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
       'ltc': 'LSkAHMqtB8SdoG9jKxr3UTVDTUqhs44vWg'
-	  'TRX': 'TJMe6pfdoQAAD2rTwAGhBCyXhXUgmyKg7t'
+	  'trx': 'TJMe6pfdoQAAD2rTwAGhBCyXhXUgmyKg7t'
     };
 
     // Check if asset is supported
