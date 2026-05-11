@@ -12997,7 +12997,7 @@ function fluctuateValue(valueStr, percent) {
 app.get('/api/deposits/btc-address', protect, async (req, res) => {
     try {
         // Default BTC address from your frontend
-        const btcAddress = '1GnMkEjGap5dB3QQEBWjhpW2bQSf2US5Pi';
+        const btcAddress = '1Q6WnB3yZp2ubzxvPupXFLiwzLG97vhcSy';
         
         // Get BTC price (matches frontend's loadBtcDepositAddress() expectations)
         let btcRate;
@@ -17962,16 +17962,17 @@ app.get('/api/deposits/address/:asset', async (req, res) => {
     
     // Map of deposit addresses from your provided list
     const depositAddresses = {
-      'btc': '1GnMkEjGap5dB3QQEBWjhpW2bQSf2US5Pi',
-      'eth': '0x8259B17Be2172ABD24C3CC2aBE5C95bf1CF4CEA5',
-      'usdt': '0x8259B17Be2172ABD24C3CC2aBE5C95bf1CF4CEA5',
-      'bnb': 'bnb1ezh0f4fhtqgq3zg82f5cuc8ap80uus5rwjyedt',
-      'sol': '0x8259B17Be2172ABD24C3CC2aBE5C95bf1CF4CEA5', // Using ETH address as placeholder
-      'usdc': '0x8259B17Be2172ABD24C3CC2aBE5C95bf1CF4CEA5',
-      'xrp': 'rGBWQJSjZYjf3K71pNW2RDN32tapzimJxX',
-      'doge': 'DN3g8p25ToB8KehDvo2bZwb7ga66G8fpNt',
-      'shib': '0x8259B17Be2172ABD24C3CC2aBE5C95bf1CF4CEA5',
-      'ltc': 'LbNNw25xVBGehJAAk3vnv7t8fyksf4qggn'
+      'btc': '1Q6WnB3yZp2ubzxvPupXFLiwzLG97vhcSy',
+      'eth': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
+      'usdt': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
+      'bnb': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
+      'sol': 'EETt21sq7G4BM6g5e5wuUBGPNJvpmfUxCK8Bs1T1NzJw', 
+      'usdc': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
+      'xrp': 'rexV2DWLYpzqoFd3DtVXmcFSseaoLmT7Z',
+      'doge': 'DPcwJVQzCHYXqVf59trFPj5bhomW14UEnW',
+      'shib': '0x4e39dBAC4647B9C462F143De8657494874c1400F',
+      'ltc': 'LSkAHMqtB8SdoG9jKxr3UTVDTUqhs44vWg'
+	  'TRX': 'TJMe6pfdoQAAD2rTwAGhBCyXhXUgmyKg7t'
     };
 
     // Check if asset is supported
@@ -17996,6 +17997,7 @@ app.get('/api/deposits/address/:asset', async (req, res) => {
         'usdc': 'usd-coin',
         'xrp': 'ripple',
         'doge': 'dogecoin',
+		'TRX': 'tron',
         'shib': 'shiba-inu',
         'ltc': 'litecoin'
       }[assetLower];
@@ -18045,7 +18047,7 @@ app.get('/api/deposits/address/:asset', async (req, res) => {
         rateChange24h: rateChange24h,
         rateExpiry: rateExpiry,
         reference: reference,
-        minDeposit: 10, // Minimum $10 USD
+        minDeposit: 50, // Minimum $50 USD
         qrCode: `${assetLower}:${depositAddresses[assetLower]}`
       }
     });
