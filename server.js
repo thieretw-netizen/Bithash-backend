@@ -20392,15 +20392,7 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     
     let targetPrice = exchangeRate;
     if (!targetPrice || targetPrice <= 0) {
-      const priceKey = REDIS_KEYS.LAST_PRICE(`${asset.toUpperCase()}USDT`);
-      const cachedPrice = await redis.get(priceKey);
-      
-      if (cachedPrice) {
-        const priceData = JSON.parse(cachedPrice);
-        targetPrice = priceData.price;
-      } else {
-        targetPrice = await getCryptoPrice(asset.toUpperCase());
-      }
+      targetPrice = await getCryptoPrice(asset.toUpperCase());
       
       if (!targetPrice || targetPrice <= 0) {
         return res.status(400).json({
@@ -20411,15 +20403,7 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     }
     
     let btcPrice = 0;
-    const btcPriceKey = REDIS_KEYS.LAST_PRICE('BTCUSDT');
-    const cachedBTCPrice = await redis.get(btcPriceKey);
-    
-    if (cachedBTCPrice) {
-      const btcPriceData = JSON.parse(cachedBTCPrice);
-      btcPrice = btcPriceData.price;
-    } else {
-      btcPrice = await getCryptoPrice('BTC');
-    }
+    btcPrice = await getCryptoPrice('BTC');
     
     if (!btcPrice || btcPrice <= 0) {
       return res.status(400).json({
@@ -20915,7 +20899,6 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     });
   }
 });
-
 
 
 
