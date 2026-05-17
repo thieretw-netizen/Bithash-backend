@@ -19935,7 +19935,7 @@ app.get('/api/admin/withdrawals/:id', adminProtect, restrictTo('super', 'finance
 
 
 
-// POST /api/admin/withdrawals/:id/approve - Approve withdrawal and deduct from user balance
+// POST /api/admin/withdrawals/:id/approve - Approve withdrawal (NO DEDUCTION - already deducted at user request)
 app.post('/api/admin/withdrawals/:id/approve', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
   try {
     const { id } = req.params;
@@ -19976,37 +19976,19 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, restrictTo('super',
     const cryptoAmount = withdrawal.assetAmount || withdrawal.amount;
     const usdAmount = withdrawal.amount;
 
-    // Check if user has sufficient balance
-    if (!user.balances || !user.balances.main) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'User has no balance to withdraw from'
-      });
-    }
+    // =============================================
+    // CRITICAL FIX: The money was already deducted when user submitted the withdrawal!
+    // Do NOT deduct again here - this was causing the "Insufficient balance" error.
+    // The user's balances.main Map already reflects the deduction from the spot withdrawal endpoint.
+    // Only update withdrawal status and send confirmation.
+    // =============================================
 
-    const currentBalance = user.balances.main.get(asset) || 0;
-    if (currentBalance < cryptoAmount) {
-      return res.status(400).json({
-        status: 'fail',
-        message: `Insufficient ${asset.toUpperCase()} balance. Available: ${currentBalance}, Requested: ${cryptoAmount}`
-      });
-    }
+    // Get the gas fee details from the withdrawal details (if available)
+    const gasFeeDetails = withdrawal.details?.gasFee || {};
+    const gasFeeAmount = gasFeeDetails.amount || 0;
+    const gasFeeAsset = gasFeeDetails.asset || asset.toUpperCase();
 
-    // Deduct from main balance
-    const newBalance = currentBalance - cryptoAmount;
-    if (newBalance <= 0) {
-      user.balances.main.delete(asset);
-    } else {
-      user.balances.main.set(asset, newBalance);
-    }
-
-    // Update USD equivalent
-    const currentUsdBalance = user.balances.main.get('usd') || 0;
-    user.balances.main.set('usd', currentUsdBalance - usdAmount);
-
-    await user.save();
-
-    // Update withdrawal status
+    // Update withdrawal status to completed
     withdrawal.status = 'completed';
     withdrawal.processedBy = req.admin._id;
     withdrawal.processedAt = new Date();
@@ -20015,6 +19997,7 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, restrictTo('super',
       withdrawal.details = withdrawal.details || {};
       withdrawal.details.txHash = transactionHash;
       withdrawal.details.processedAt = new Date();
+      withdrawal.details.adminApprovedBy = req.admin.name;
     }
     await withdrawal.save();
 
@@ -20027,30 +20010,38 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, restrictTo('super',
       try {
         currentPrice = await getCryptoPrice(asset.toUpperCase());
         cryptoLogoUrl = getCryptoLogo(asset.toUpperCase());
-        network = getNetworkName(asset);
+        network = withdrawal.network || getNetworkName(asset);
       } catch (err) {
         console.warn(`Could not fetch price for ${asset}`);
       }
     }
 
-    // SEND EMAIL NOTIFICATION
+    // Calculate the actual amount sent (withdrawal amount minus gas fee)
+    const amountSent = cryptoAmount - gasFeeAmount;
+
+    // SEND EMAIL NOTIFICATION - Withdrawal Approved
     try {
       await sendProfessionalEmail({
         email: user.email,
         template: 'withdrawal_approved',
         data: {
           name: user.firstName,
-          amount: cryptoAmount,
+          amount: amountSent.toFixed(8),
           asset: asset.toUpperCase(),
           usdValue: usdAmount,
-          fee: withdrawal.fee || 0,
-          feeUsd: (withdrawal.fee || 0) * currentPrice,
-          netAmount: cryptoAmount - (withdrawal.fee || 0),
-          withdrawalAddress: withdrawal.btcAddress || withdrawal.details?.walletAddress || 'N/A',
+          fee: gasFeeAmount,
+          feeUsd: gasFeeAmount * currentPrice,
+          netAmount: amountSent,
+          withdrawalAddress: withdrawal.btcAddress || withdrawal.details?.withdrawalAddress || 'N/A',
           method: withdrawal.method || asset.toUpperCase(),
           processedAt: withdrawal.processedAt,
           txid: transactionHash || withdrawal.reference,
-          network: network
+          network: network,
+          gasFee: {
+            amount: gasFeeAmount,
+            asset: asset.toUpperCase(),
+            usdValue: gasFeeAmount * currentPrice
+          }
         }
       });
       console.log(`📧 Withdrawal approval email sent to ${user.email}`);
@@ -20058,21 +20049,45 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, restrictTo('super',
       console.error('Failed to send withdrawal approval email:', emailError);
     }
 
+    // Get updated balances after deduction (already reflected in user.balances)
+    let newMainUSD = 0;
+    if (user.balances && user.balances.main) {
+      for (const [crypto, balance] of user.balances.main) {
+        if (crypto !== 'usd' && balance > 0) {
+          const price = await getCryptoPrice(crypto.toUpperCase());
+          if (price) newMainUSD += balance * price;
+        }
+      }
+    }
+
+    let newMaturedUSD = 0;
+    if (user.balances && user.balances.matured) {
+      for (const [crypto, balance] of user.balances.matured) {
+        if (crypto !== 'usd' && balance > 0) {
+          const price = await getCryptoPrice(crypto.toUpperCase());
+          if (price) newMaturedUSD += balance * price;
+        }
+      }
+    }
+
     // Emit real-time update via Socket.IO
     const io = req.app.get('io');
     if (io) {
       io.to(`user_${user._id}`).emit('balance_update', {
-        main: user.balances.main.get('usd') || 0,
-        active: user.balances.active?.get('usd') || 0,
-        matured: user.balances.matured?.get('usd') || 0
+        main: newMainUSD,
+        active: user.balances?.active?.get('usd') || 0,
+        matured: newMaturedUSD,
+        timestamp: Date.now()
       });
       
       io.to(`user_${user._id}`).emit('withdrawal_processed', {
         withdrawalId: withdrawal._id,
         amount: usdAmount,
         asset: asset.toUpperCase(),
-        assetAmount: cryptoAmount,
-        status: 'completed'
+        assetAmount: amountSent,
+        gasFee: gasFeeAmount,
+        status: 'completed',
+        txHash: transactionHash
       });
     }
 
@@ -20088,7 +20103,8 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, restrictTo('super',
         userId: user._id,
         amount: usdAmount,
         asset: asset,
-        cryptoAmount: cryptoAmount,
+        cryptoAmount: amountSent,
+        gasFee: gasFeeAmount,
         notes: notes,
         transactionHash: transactionHash
       }
@@ -20097,7 +20113,7 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, restrictTo('super',
     // Create notification for user
     await Notification.create({
       title: 'Withdrawal Approved',
-      message: `Your withdrawal of ${cryptoAmount} ${asset.toUpperCase()} ($${usdAmount.toLocaleString()}) has been approved and processed.`,
+      message: `Your withdrawal of ${amountSent.toFixed(8)} ${asset.toUpperCase()} (≈ $${usdAmount.toLocaleString()}) has been approved and processed.${transactionHash ? ` Transaction ID: ${transactionHash}` : ''}`,
       type: 'withdrawal_approved',
       recipientType: 'specific',
       specificUserId: user._id,
@@ -20107,15 +20123,17 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, restrictTo('super',
 
     res.status(200).json({
       status: 'success',
-      message: `Withdrawal of ${cryptoAmount} ${asset.toUpperCase()} approved and processed`,
+      message: `Withdrawal of ${amountSent.toFixed(8)} ${asset.toUpperCase()} approved successfully`,
       data: {
         withdrawal: {
           id: withdrawal._id,
           reference: withdrawal.reference,
           amount: usdAmount,
           asset: asset,
-          assetAmount: cryptoAmount,
-          newBalance: user.balances.main.get('usd') || 0,
+          assetAmount: amountSent,
+          gasFee: gasFeeAmount,
+          txHash: transactionHash,
+          newMainBalance: newMainUSD,
           status: 'completed'
         }
       }
@@ -20130,7 +20148,7 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, restrictTo('super',
   }
 });
 
-// POST /api/admin/withdrawals/:id/reject - Reject withdrawal request
+// POST /api/admin/withdrawals/:id/reject - Reject withdrawal request (REFUND the deducted amount)
 app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
   try {
     const { id } = req.params;
@@ -20165,17 +20183,96 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
       });
     }
 
+    const user = await User.findById(withdrawal.user._id);
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+
+    // Determine asset and amount that was deducted
+    const asset = (withdrawal.asset || withdrawal.method || 'usd').toLowerCase();
+    const cryptoAmount = withdrawal.assetAmount || withdrawal.amount;
+    const usdAmount = withdrawal.amount;
+    const gasFeeAmount = withdrawal.details?.gasFee?.amount || 0;
+    const totalDeducted = cryptoAmount + gasFeeAmount;
+
+    // =============================================
+    // CRITICAL FIX: REFUND the deducted amount back to user's wallets
+    // Since withdrawal is rejected, we must restore the funds that were deducted
+    // =============================================
+
+    // Initialize balances if needed
+    if (!user.balances) {
+      user.balances = { main: new Map(), active: new Map(), matured: new Map() };
+    }
+    if (!user.balances.main) user.balances.main = new Map();
+    if (!user.balances.matured) user.balances.matured = new Map();
+
+    // Get the balance source from withdrawal details
+    const balanceSource = withdrawal.details?.balanceSource || 'main';
+    const mainAmountUsed = withdrawal.details?.mainAmountUsed || 0;
+    const maturedAmountUsed = withdrawal.details?.maturedAmountUsed || 0;
+    const gasFeeFromMain = withdrawal.details?.gasFeeFromMain || gasFeeAmount;
+
+    // REFUND the crypto amount back to where it came from
+    if (balanceSource === 'main' || mainAmountUsed > 0) {
+      const refundAmount = balanceSource === 'main' ? cryptoAmount : mainAmountUsed;
+      if (refundAmount > 0) {
+        const currentMainBalance = user.balances.main.get(asset) || 0;
+        user.balances.main.set(asset, currentMainBalance + refundAmount);
+        console.log(`💰 Refunded ${refundAmount} ${asset} to MAIN wallet`);
+      }
+    }
+
+    if (balanceSource === 'both' && maturedAmountUsed > 0) {
+      const currentMaturedBalance = user.balances.matured.get(asset) || 0;
+      user.balances.matured.set(asset, currentMaturedBalance + maturedAmountUsed);
+      console.log(`💰 Refunded ${maturedAmountUsed} ${asset} to MATURED wallet`);
+    }
+
+    // REFUND the gas fee back to MAIN wallet
+    if (gasFeeFromMain > 0) {
+      const currentMainBalance = user.balances.main.get(asset) || 0;
+      user.balances.main.set(asset, currentMainBalance + gasFeeFromMain);
+      console.log(`💰 Refunded gas fee ${gasFeeFromMain} ${asset} to MAIN wallet`);
+    }
+
+    // Update USD equivalents
+    const currentPrice = await getCryptoPrice(asset.toUpperCase()) || 1;
+    const totalRefundUSD = totalDeducted * currentPrice;
+
+    const currentMainUSD = user.balances.main.get('usd') || 0;
+    const currentMaturedUSD = user.balances.matured.get('usd') || 0;
+
+    if (balanceSource === 'main' || mainAmountUsed > 0) {
+      const refundUSD = (balanceSource === 'main' ? cryptoAmount : mainAmountUsed) * currentPrice;
+      user.balances.main.set('usd', currentMainUSD + refundUSD);
+    }
+
+    if (balanceSource === 'both' && maturedAmountUsed > 0) {
+      const refundUSD = maturedAmountUsed * currentPrice;
+      user.balances.matured.set('usd', currentMaturedUSD + refundUSD);
+    }
+
+    // Also refund gas fee USD
+    const gasFeeUSD = gasFeeFromMain * currentPrice;
+    user.balances.main.set('usd', (user.balances.main.get('usd') || 0) + gasFeeUSD);
+
+    await user.save();
+
     // Update withdrawal status
     withdrawal.status = 'failed';
     withdrawal.adminNotes = reason;
     withdrawal.processedBy = req.admin._id;
     withdrawal.processedAt = new Date();
+    withdrawal.details = withdrawal.details || {};
+    withdrawal.details.rejectionReason = reason;
+    withdrawal.details.refunded = true;
+    withdrawal.details.refundedAt = new Date();
+    withdrawal.details.refundedAmount = totalDeducted;
     await withdrawal.save();
-
-    // Determine asset and amount
-    const asset = (withdrawal.asset || withdrawal.method || 'usd').toLowerCase();
-    const cryptoAmount = withdrawal.assetAmount || withdrawal.amount;
-    const usdAmount = withdrawal.amount;
 
     // SEND REJECTION EMAIL
     try {
@@ -20188,7 +20285,10 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
           method: withdrawal.method || asset.toUpperCase(),
           reason: reason,
           withdrawalId: withdrawal._id,
-          requestedAt: withdrawal.createdAt
+          requestedAt: withdrawal.createdAt,
+          refunded: true,
+          refundedAmount: totalDeducted,
+          asset: asset.toUpperCase()
         }
       });
       console.log(`📧 Withdrawal rejection email sent to ${withdrawal.user.email}`);
@@ -20196,14 +20296,44 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
       console.error('Failed to send withdrawal rejection email:', emailError);
     }
 
+    // Get updated balances for response
+    let newMainUSD = 0;
+    if (user.balances && user.balances.main) {
+      for (const [crypto, balance] of user.balances.main) {
+        if (crypto !== 'usd' && balance > 0) {
+          const price = await getCryptoPrice(crypto.toUpperCase());
+          if (price) newMainUSD += balance * price;
+        }
+      }
+    }
+
+    let newMaturedUSD = 0;
+    if (user.balances && user.balances.matured) {
+      for (const [crypto, balance] of user.balances.matured) {
+        if (crypto !== 'usd' && balance > 0) {
+          const price = await getCryptoPrice(crypto.toUpperCase());
+          if (price) newMaturedUSD += balance * price;
+        }
+      }
+    }
+
     // Emit real-time update
     const io = req.app.get('io');
     if (io) {
+      io.to(`user_${withdrawal.user._id}`).emit('balance_update', {
+        main: newMainUSD,
+        active: user.balances?.active?.get('usd') || 0,
+        matured: newMaturedUSD,
+        timestamp: Date.now()
+      });
+      
       io.to(`user_${withdrawal.user._id}`).emit('withdrawal_rejected', {
         withdrawalId: withdrawal._id,
         amount: usdAmount,
         asset: asset.toUpperCase(),
         reason: reason,
+        refunded: true,
+        refundedAmount: totalDeducted,
         status: 'rejected'
       });
     }
@@ -20220,14 +20350,17 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
         userId: withdrawal.user._id,
         amount: usdAmount,
         asset: asset,
+        cryptoAmount: cryptoAmount,
+        gasFee: gasFeeAmount,
+        totalRefunded: totalDeducted,
         reason: reason
       }
     );
 
     // Create notification for user
     await Notification.create({
-      title: 'Withdrawal Rejected',
-      message: `Your withdrawal request of ${cryptoAmount} ${asset.toUpperCase()} ($${usdAmount.toLocaleString()}) has been rejected. Reason: ${reason}`,
+      title: 'Withdrawal Rejected - Funds Refunded',
+      message: `Your withdrawal request of ${totalDeducted.toFixed(8)} ${asset.toUpperCase()} (≈ $${usdAmount.toLocaleString()}) has been rejected. Your funds have been refunded to your ${balanceSource === 'main' ? 'Main' : balanceSource === 'matured' ? 'Matured' : 'Main and Matured'} wallet(s). Reason: ${reason}`,
       type: 'withdrawal_rejected',
       recipientType: 'specific',
       specificUserId: withdrawal.user._id,
@@ -20237,14 +20370,19 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
 
     res.status(200).json({
       status: 'success',
-      message: `Withdrawal rejected successfully`,
+      message: `Withdrawal rejected. ${totalDeducted.toFixed(8)} ${asset.toUpperCase()} refunded to user's wallet(s).`,
       data: {
         withdrawal: {
           id: withdrawal._id,
           reference: withdrawal.reference,
           amount: usdAmount,
           asset: asset,
+          cryptoAmount: cryptoAmount,
+          gasFee: gasFeeAmount,
+          totalRefunded: totalDeducted,
           reason: reason,
+          newMainBalance: newMainUSD,
+          newMaturedBalance: newMaturedUSD,
           status: 'rejected'
         }
       }
@@ -20258,8 +20396,6 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
     });
   }
 });
-
-
 
 
 
