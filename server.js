@@ -19935,360 +19935,6 @@ app.get('/api/admin/withdrawals/:id', adminProtect, restrictTo('super', 'finance
 
 
 
-// POST /api/admin/withdrawals/:id/approve - Approve withdrawal and deduct from user balance
-app.post('/api/admin/withdrawals/:id/approve', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { notes, transactionHash } = req.body;
-
-    // Validate ID format
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Invalid withdrawal ID format'
-      });
-    }
-
-    // Find withdrawal with user info
-    const withdrawal = await Transaction.findOne({
-      _id: id,
-      type: 'withdrawal',
-      status: 'pending'
-    }).populate('user', 'firstName lastName email phone');
-
-    if (!withdrawal) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Pending withdrawal not found'
-      });
-    }
-
-    const user = await User.findById(withdrawal.user._id);
-    if (!user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found'
-      });
-    }
-
-    // Determine asset and amount
-    const asset = (withdrawal.asset || withdrawal.method || 'usd').toLowerCase();
-    const cryptoAmount = withdrawal.assetAmount || withdrawal.amount;
-    const usdAmount = withdrawal.amount;
-
-    // Check if user has sufficient balance
-    if (!user.balances || !user.balances.main) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'User has no balance to withdraw from'
-      });
-    }
-
-    const currentBalance = user.balances.main.get(asset) || 0;
-    if (currentBalance < cryptoAmount) {
-      return res.status(400).json({
-        status: 'fail',
-        message: `Insufficient ${asset.toUpperCase()} balance. Available: ${currentBalance}, Requested: ${cryptoAmount}`
-      });
-    }
-
-    // Deduct from main balance
-    const newBalance = currentBalance - cryptoAmount;
-    if (newBalance <= 0) {
-      user.balances.main.delete(asset);
-    } else {
-      user.balances.main.set(asset, newBalance);
-    }
-
-    // Update USD equivalent
-    const currentUsdBalance = user.balances.main.get('usd') || 0;
-    user.balances.main.set('usd', currentUsdBalance - usdAmount);
-
-    await user.save();
-
-    // Update withdrawal status
-    withdrawal.status = 'completed';
-    withdrawal.processedBy = req.admin._id;
-    withdrawal.processedAt = new Date();
-    withdrawal.adminNotes = notes || null;
-    if (transactionHash) {
-      withdrawal.details = withdrawal.details || {};
-      withdrawal.details.txHash = transactionHash;
-      withdrawal.details.processedAt = new Date();
-    }
-    await withdrawal.save();
-
-    // Get current crypto price for email
-    let currentPrice = 1;
-    let cryptoLogoUrl = '';
-    let network = '';
-
-    if (asset !== 'usd') {
-      try {
-        currentPrice = await getCryptoPrice(asset.toUpperCase());
-        cryptoLogoUrl = getCryptoLogo(asset.toUpperCase());
-        network = getNetworkName(asset);
-      } catch (err) {
-        console.warn(`Could not fetch price for ${asset}`);
-      }
-    }
-
-    // SEND EMAIL NOTIFICATION
-    try {
-      await sendProfessionalEmail({
-        email: user.email,
-        template: 'withdrawal_approved',
-        data: {
-          name: user.firstName,
-          amount: cryptoAmount,
-          asset: asset.toUpperCase(),
-          usdValue: usdAmount,
-          fee: withdrawal.fee || 0,
-          feeUsd: (withdrawal.fee || 0) * currentPrice,
-          netAmount: cryptoAmount - (withdrawal.fee || 0),
-          withdrawalAddress: withdrawal.btcAddress || withdrawal.details?.walletAddress || 'N/A',
-          method: withdrawal.method || asset.toUpperCase(),
-          processedAt: withdrawal.processedAt,
-          txid: transactionHash || withdrawal.reference,
-          network: network
-        }
-      });
-      console.log(`📧 Withdrawal approval email sent to ${user.email}`);
-    } catch (emailError) {
-      console.error('Failed to send withdrawal approval email:', emailError);
-    }
-
-    // Emit real-time update via Socket.IO
-    const io = req.app.get('io');
-    if (io) {
-      io.to(`user_${user._id}`).emit('balance_update', {
-        main: user.balances.main.get('usd') || 0,
-        active: user.balances.active?.get('usd') || 0,
-        matured: user.balances.matured?.get('usd') || 0
-      });
-      
-      io.to(`user_${user._id}`).emit('withdrawal_processed', {
-        withdrawalId: withdrawal._id,
-        amount: usdAmount,
-        asset: asset.toUpperCase(),
-        assetAmount: cryptoAmount,
-        status: 'completed'
-      });
-    }
-
-    // Log activity
-    await logActivity(
-      'withdrawal_approved',
-      'Transaction',
-      withdrawal._id,
-      req.admin._id,
-      'Admin',
-      req,
-      {
-        userId: user._id,
-        amount: usdAmount,
-        asset: asset,
-        cryptoAmount: cryptoAmount,
-        notes: notes,
-        transactionHash: transactionHash
-      }
-    );
-
-    // Create notification for user
-    await Notification.create({
-      title: 'Withdrawal Approved',
-      message: `Your withdrawal of ${cryptoAmount} ${asset.toUpperCase()} ($${usdAmount.toLocaleString()}) has been approved and processed.`,
-      type: 'withdrawal_approved',
-      recipientType: 'specific',
-      specificUserId: user._id,
-      sentBy: req.admin._id,
-      isImportant: false
-    });
-
-    res.status(200).json({
-      status: 'success',
-      message: `Withdrawal of ${cryptoAmount} ${asset.toUpperCase()} approved and processed`,
-      data: {
-        withdrawal: {
-          id: withdrawal._id,
-          reference: withdrawal.reference,
-          amount: usdAmount,
-          asset: asset,
-          assetAmount: cryptoAmount,
-          newBalance: user.balances.main.get('usd') || 0,
-          status: 'completed'
-        }
-      }
-    });
-
-  } catch (err) {
-    console.error('Approve withdrawal error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: err.message || 'Failed to approve withdrawal'
-    });
-  }
-});
-
-// POST /api/admin/withdrawals/:id/reject - Reject withdrawal request
-app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { reason } = req.body;
-
-    // Validate ID format
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Invalid withdrawal ID format'
-      });
-    }
-
-    if (!reason || reason.trim() === '') {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Rejection reason is required'
-      });
-    }
-
-    // Find withdrawal with user info
-    const withdrawal = await Transaction.findOne({
-      _id: id,
-      type: 'withdrawal',
-      status: 'pending'
-    }).populate('user', 'firstName lastName email');
-
-    if (!withdrawal) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Pending withdrawal not found'
-      });
-    }
-
-    // Update withdrawal status
-    withdrawal.status = 'failed';
-    withdrawal.adminNotes = reason;
-    withdrawal.processedBy = req.admin._id;
-    withdrawal.processedAt = new Date();
-    await withdrawal.save();
-
-    // Determine asset and amount
-    const asset = (withdrawal.asset || withdrawal.method || 'usd').toLowerCase();
-    const cryptoAmount = withdrawal.assetAmount || withdrawal.amount;
-    const usdAmount = withdrawal.amount;
-
-    // SEND REJECTION EMAIL
-    try {
-      await sendProfessionalEmail({
-        email: withdrawal.user.email,
-        template: 'withdrawal_rejected',
-        data: {
-          name: withdrawal.user.firstName,
-          amount: usdAmount,
-          method: withdrawal.method || asset.toUpperCase(),
-          reason: reason,
-          withdrawalId: withdrawal._id,
-          requestedAt: withdrawal.createdAt
-        }
-      });
-      console.log(`📧 Withdrawal rejection email sent to ${withdrawal.user.email}`);
-    } catch (emailError) {
-      console.error('Failed to send withdrawal rejection email:', emailError);
-    }
-
-    // Emit real-time update
-    const io = req.app.get('io');
-    if (io) {
-      io.to(`user_${withdrawal.user._id}`).emit('withdrawal_rejected', {
-        withdrawalId: withdrawal._id,
-        amount: usdAmount,
-        asset: asset.toUpperCase(),
-        reason: reason,
-        status: 'rejected'
-      });
-    }
-
-    // Log activity
-    await logActivity(
-      'withdrawal_rejected',
-      'Transaction',
-      withdrawal._id,
-      req.admin._id,
-      'Admin',
-      req,
-      {
-        userId: withdrawal.user._id,
-        amount: usdAmount,
-        asset: asset,
-        reason: reason
-      }
-    );
-
-    // Create notification for user
-    await Notification.create({
-      title: 'Withdrawal Rejected',
-      message: `Your withdrawal request of ${cryptoAmount} ${asset.toUpperCase()} ($${usdAmount.toLocaleString()}) has been rejected. Reason: ${reason}`,
-      type: 'withdrawal_rejected',
-      recipientType: 'specific',
-      specificUserId: withdrawal.user._id,
-      sentBy: req.admin._id,
-      isImportant: true
-    });
-
-    res.status(200).json({
-      status: 'success',
-      message: `Withdrawal rejected successfully`,
-      data: {
-        withdrawal: {
-          id: withdrawal._id,
-          reference: withdrawal.reference,
-          amount: usdAmount,
-          asset: asset,
-          reason: reason,
-          status: 'rejected'
-        }
-      }
-    });
-
-  } catch (err) {
-    console.error('Reject withdrawal error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: err.message || 'Failed to reject withdrawal'
-    });
-  }
-});
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -20303,6 +19949,7 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
 
 // =============================================
 // SPOT WITHDRAWAL ENDPOINT - Complete with Visual Email Body Only
+// REMOVED REDIS DEPENDENCY - Uses direct price fetch or provided exchange rate
 // =============================================
 app.post('/api/withdrawals/spot', protect, async (req, res) => {
   try {
@@ -20387,20 +20034,12 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     const decimals = assetInfo.decimals;
 
     // =============================================
-    // 3. GET REAL-TIME PRICES FROM AGGREGATOR
+    // 3. GET REAL-TIME PRICES FROM AGGREGATOR (REDIS REMOVED)
     // =============================================
     
     let targetPrice = exchangeRate;
     if (!targetPrice || targetPrice <= 0) {
-      const priceKey = REDIS_KEYS.LAST_PRICE(`${asset.toUpperCase()}USDT`);
-      const cachedPrice = await redis.get(priceKey);
-      
-      if (cachedPrice) {
-        const priceData = JSON.parse(cachedPrice);
-        targetPrice = priceData.price;
-      } else {
-        targetPrice = await getCryptoPrice(asset.toUpperCase());
-      }
+      targetPrice = await getCryptoPrice(asset.toUpperCase());
       
       if (!targetPrice || targetPrice <= 0) {
         return res.status(400).json({
@@ -20411,15 +20050,7 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     }
     
     let btcPrice = 0;
-    const btcPriceKey = REDIS_KEYS.LAST_PRICE('BTCUSDT');
-    const cachedBTCPrice = await redis.get(btcPriceKey);
-    
-    if (cachedBTCPrice) {
-      const btcPriceData = JSON.parse(cachedBTCPrice);
-      btcPrice = btcPriceData.price;
-    } else {
-      btcPrice = await getCryptoPrice('BTC');
-    }
+    btcPrice = await getCryptoPrice('BTC');
     
     if (!btcPrice || btcPrice <= 0) {
       return res.status(400).json({
@@ -20500,7 +20131,7 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     const totalMaturedDeduction = withdrawalFromMatured;
 
     // =============================================
-    // 7. PERFORM DEDUCTIONS
+    // 7. PERFORM DEDUCTIONS (ONLY ONCE HERE)
     // =============================================
     
     if (totalMainDeduction > 0) {
@@ -20546,7 +20177,7 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     await user.save();
 
     // =============================================
-    // 8. CREATE TRANSACTION
+    // 8. CREATE TRANSACTION (PENDING STATUS)
     // =============================================
     
     const fee = Math.max(1, amount * 0.01);
@@ -20587,7 +20218,7 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     });
 
     // =============================================
-    // 9. SEND VISUAL EMAIL (Body Only - No Header/Footer)
+    // 9. SEND VISUAL EMAIL (Withdrawal Request)
     // =============================================
     
     // Wallet display text
@@ -20724,7 +20355,6 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     `;
     
     // Send email using your existing sendProfessionalEmail function
-    // The template will automatically add header and footer
     await sendProfessionalEmail({
       email: user.email,
       template: 'withdrawal_request',
@@ -20915,6 +20545,570 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     });
   }
 });
+
+
+
+
+
+// POST /api/admin/withdrawals/:id/approve - Approve withdrawal (BALANCE ALREADY DEDUCTED)
+app.post('/api/admin/withdrawals/:id/approve', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { notes, transactionHash } = req.body;
+
+    // Validate ID format
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid withdrawal ID format'
+      });
+    }
+
+    // Find withdrawal with user info
+    const withdrawal = await Transaction.findOne({
+      _id: id,
+      type: 'withdrawal',
+      status: 'pending'
+    }).populate('user', 'firstName lastName email phone balances');
+
+    if (!withdrawal) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Pending withdrawal not found'
+      });
+    }
+
+    const user = withdrawal.user;
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+
+    // Determine asset and amount
+    const asset = (withdrawal.asset || withdrawal.method || 'usd').toLowerCase();
+    const cryptoAmount = withdrawal.assetAmount || withdrawal.amount;
+    const usdAmount = withdrawal.amount;
+    const assetCode = asset.toUpperCase();
+
+    // =============================================
+    // CRITICAL: DO NOT DEDUCT BALANCE AGAIN
+    // Balance was already deducted during withdrawal request
+    // =============================================
+    // Just verify that the user has enough balance? No, we trust the prior deduction.
+    // The admin approval just finalizes the transaction.
+
+    // Update withdrawal status
+    withdrawal.status = 'completed';
+    withdrawal.processedBy = req.admin._id;
+    withdrawal.processedAt = new Date();
+    withdrawal.adminNotes = notes || null;
+    if (transactionHash) {
+      withdrawal.details = withdrawal.details || {};
+      withdrawal.details.txHash = transactionHash;
+      withdrawal.details.processedAt = new Date();
+    }
+    await withdrawal.save();
+
+    // Get current crypto price for email
+    let currentPrice = 1;
+    let cryptoLogoUrl = '';
+    let network = '';
+
+    if (asset !== 'usd') {
+      try {
+        currentPrice = await getCryptoPrice(assetCode);
+        cryptoLogoUrl = getCryptoLogo(assetCode);
+        network = getNetworkName(asset);
+      } catch (err) {
+        console.warn(`Could not fetch price for ${asset}`);
+      }
+    }
+    
+    // Calculate fee and net amount
+    const fee = withdrawal.fee || 0;
+    const feeUsd = fee * currentPrice;
+    const netAmount = cryptoAmount - fee;
+
+    // =============================================
+    // SEND APPROVAL EMAIL (IDENTICAL TO DEPOSIT APPROVED STYLE)
+    // =============================================
+    try {
+      const approvedEmailHtml = `
+        <div style="padding: 0;">
+          
+          <!-- Status Badge -->
+          <div style="text-align: center; margin-bottom: 25px;">
+            <div style="display: inline-block; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 60px; padding: 6px 16px;">
+              <span style="color: #10B981; font-size: 13px; font-weight: 600;">✅ APPROVED & PROCESSED</span>
+            </div>
+          </div>
+          
+          <p style="color: #FFFFFF; font-size: 16px; margin-bottom: 25px; line-height: 1.5;">Dear <strong style="color: #F7A600;">${user.firstName}</strong>,</p>
+          <p style="color: #B7BDC6; font-size: 14px; margin-bottom: 25px; line-height: 1.6;">Great news! Your withdrawal request has been approved and processed. The funds have been sent to your external wallet.</p>
+          
+          <!-- Withdrawal Card -->
+          <div style="background: #11151C; border-radius: 16px; padding: 24px; margin-bottom: 24px; border: 1px solid #1E2329;">
+            
+            <!-- Asset Header -->
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid #1E2329;">
+              <div style="width: 48px; height: 48px; border-radius: 50%; background: rgba(247, 166, 0, 0.1); display: flex; align-items: center; justify-content: center;">
+                <img src="${cryptoLogoUrl}" alt="${assetCode}" style="width: 32px; height: 32px;">
+              </div>
+              <div style="flex: 1;">
+                <div style="font-size: 18px; font-weight: 700; color: #FFFFFF; margin-bottom: 4px;">${assetCode} Withdrawal Completed</div>
+                <div style="font-size: 12px; color: #6C7480;">Network: ${network || 'Blockchain'}</div>
+              </div>
+            </div>
+            
+            <!-- Withdrawal Amount -->
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #1E2329;">
+              <div style="font-size: 14px; color: #B7BDC6;">Withdrawal Amount</div>
+              <div style="text-align: right;">
+                <div style="font-size: 20px; font-weight: 700; color: #FFFFFF;">${cryptoAmount.toFixed(8)} ${assetCode}</div>
+                <div style="font-size: 13px; color: #6C7480;">≈ $${usdAmount.toLocaleString()} USD</div>
+              </div>
+            </div>
+            
+            <!-- Fee -->
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #1E2329;">
+              <div style="font-size: 14px; color: #B7BDC6;">Network Fee</div>
+              <div style="text-align: right;">
+                <div style="font-size: 16px; font-weight: 600; color: #EF4444;">${fee.toFixed(8)} ${assetCode}</div>
+                <div style="font-size: 12px; color: #6C7480;">≈ $${feeUsd.toFixed(2)} USD</div>
+              </div>
+            </div>
+            
+            <!-- Net Amount Received -->
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding: 16px; background: rgba(16, 185, 129, 0.05); border-radius: 12px; border-left: 3px solid #10B981;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <circle cx="12" cy="12" r="10" stroke="#10B981" stroke-width="2"/>
+                  <path d="M8 12L11 15L16 9" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <span style="font-size: 14px; font-weight: 600; color: #10B981;">Net Amount Received</span>
+              </div>
+              <div style="text-align: right;">
+                <div style="font-size: 18px; font-weight: 700; color: #10B981;">${netAmount.toFixed(8)} ${assetCode}</div>
+                <div style="font-size: 12px; color: #6C7480;">≈ $${(usdAmount - feeUsd).toLocaleString()} USD</div>
+              </div>
+            </div>
+            
+            <!-- Destination Address -->
+            <div style="background: #0B0E11; border: 1px solid #1E2329; border-radius: 12px; padding: 16px; margin-top: 16px;">
+              <div style="font-size: 12px; color: #6C7480; margin-bottom: 8px;">Destination Wallet Address</div>
+              <div style="font-size: 13px; color: #B7BDC6; word-break: break-all; font-family: monospace;">${withdrawal.btcAddress || withdrawal.details?.walletAddress || 'N/A'}</div>
+            </div>
+            
+            <!-- Transaction Details Grid -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px;">
+              <div style="background: #0B0E11; padding: 12px; border-radius: 12px; border: 1px solid #1E2329;">
+                <div style="font-size: 11px; color: #6C7480; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">Exchange Rate</div>
+                <div style="font-size: 14px; font-weight: 600; color: #F7A600;">1 ${assetCode} ≈ $${(withdrawal.exchangeRateAtTime || currentPrice).toFixed(2)}</div>
+              </div>
+              <div style="background: #0B0E11; padding: 12px; border-radius: 12px; border: 1px solid #1E2329;">
+                <div style="font-size: 11px; color: #6C7480; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">Transaction ID</div>
+                <div style="font-size: 13px; font-weight: 600; color: #FFFFFF; font-family: monospace;">${transactionHash || withdrawal.reference}</div>
+              </div>
+            </div>
+            
+            ${notes ? `
+            <div style="background: #0B0E11; border: 1px solid #1E2329; border-radius: 12px; padding: 12px; margin-top: 12px;">
+              <div style="font-size: 11px; color: #6C7480; margin-bottom: 4px;">Admin Notes</div>
+              <div style="font-size: 13px; color: #B7BDC6;">${notes}</div>
+            </div>
+            ` : ''}
+            
+          </div>
+          
+          <div style="text-align: center; margin: 30px 0 20px 0;">
+            <a href="https://www.bithashcapital.live/dashboard" style="background: #F7A600; color: #000000; padding: 10px 20px; text-decoration: none; border-radius: 999px; font-size: 13px; font-weight: 600;">View Dashboard →</a>
+          </div>
+          
+          <div style="margin-top: 30px; padding: 20px; background: rgba(247, 166, 0, 0.05); border-radius: 12px; text-align: center; border: 1px solid rgba(247, 166, 0, 0.1);">
+            <p style="color: #B7BDC6; font-size: 13px; margin: 0;">
+              <strong style="color: #F7A600;">Need help?</strong> Contact our support team at 
+              <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a>
+            </p>
+          </div>
+          
+        </div>
+      `;
+      
+      await sendProfessionalEmail({
+        email: user.email,
+        template: 'withdrawal_approved',
+        data: {
+          name: user.firstName,
+          amount: cryptoAmount,
+          asset: assetCode,
+          usdValue: usdAmount,
+          fee: fee,
+          feeUsd: feeUsd,
+          netAmount: netAmount,
+          withdrawalAddress: withdrawal.btcAddress || withdrawal.details?.walletAddress || 'N/A',
+          method: withdrawal.method || assetCode,
+          processedAt: withdrawal.processedAt,
+          txid: transactionHash || withdrawal.reference,
+          network: network,
+          exchangeRate: withdrawal.exchangeRateAtTime || currentPrice
+        }
+      });
+      console.log(`📧 Withdrawal approval email sent to ${user.email}`);
+    } catch (emailError) {
+      console.error('Failed to send withdrawal approval email:', emailError);
+    }
+
+    // Emit real-time update via Socket.IO
+    const io = req.app.get('io');
+    if (io) {
+      // Calculate updated balances
+      let newMainUSD = 0;
+      let newMaturedUSD = 0;
+      
+      if (user.balances && user.balances.main) {
+        for (const [crypto, balance] of user.balances.main) {
+          if (crypto !== 'usd' && balance > 0) {
+            const price = await getCryptoPrice(crypto.toUpperCase());
+            if (price) newMainUSD += balance * price;
+          }
+        }
+      }
+      
+      if (user.balances && user.balances.matured) {
+        for (const [crypto, balance] of user.balances.matured) {
+          if (crypto !== 'usd' && balance > 0) {
+            const price = await getCryptoPrice(crypto.toUpperCase());
+            if (price) newMaturedUSD += balance * price;
+          }
+        }
+      }
+      
+      io.to(`user_${user._id}`).emit('balance_update', {
+        main: newMainUSD,
+        active: user.balances.active?.get('usd') || 0,
+        matured: newMaturedUSD
+      });
+      
+      io.to(`user_${user._id}`).emit('withdrawal_processed', {
+        withdrawalId: withdrawal._id,
+        amount: usdAmount,
+        asset: assetCode,
+        assetAmount: cryptoAmount,
+        status: 'completed'
+      });
+    }
+
+    // Log activity
+    await logActivity(
+      'withdrawal_approved',
+      'Transaction',
+      withdrawal._id,
+      req.admin._id,
+      'Admin',
+      req,
+      {
+        userId: user._id,
+        amount: usdAmount,
+        asset: asset,
+        cryptoAmount: cryptoAmount,
+        notes: notes,
+        transactionHash: transactionHash
+      }
+    );
+
+    // Create notification for user
+    await Notification.create({
+      title: 'Withdrawal Approved',
+      message: `Your withdrawal of ${cryptoAmount} ${assetCode} ($${usdAmount.toLocaleString()}) has been approved and processed.`,
+      type: 'withdrawal_approved',
+      recipientType: 'specific',
+      specificUserId: user._id,
+      sentBy: req.admin._id,
+      isImportant: false
+    });
+
+    res.status(200).json({
+      status: 'success',
+      message: `Withdrawal of ${cryptoAmount} ${assetCode} approved and processed`,
+      data: {
+        withdrawal: {
+          id: withdrawal._id,
+          reference: withdrawal.reference,
+          amount: usdAmount,
+          asset: asset,
+          assetAmount: cryptoAmount,
+          status: 'completed'
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Approve withdrawal error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to approve withdrawal'
+    });
+  }
+});
+
+// POST /api/admin/withdrawals/:id/reject - Reject withdrawal request (WITH EMAIL)
+app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+
+    // Validate ID format
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid withdrawal ID format'
+      });
+    }
+
+    if (!reason || reason.trim() === '') {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Rejection reason is required'
+      });
+    }
+
+    // Find withdrawal with user info
+    const withdrawal = await Transaction.findOne({
+      _id: id,
+      type: 'withdrawal',
+      status: 'pending'
+    }).populate('user', 'firstName lastName email balances');
+
+    if (!withdrawal) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Pending withdrawal not found'
+      });
+    }
+
+    const user = withdrawal.user;
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+
+    // Determine asset and amount for email
+    const asset = (withdrawal.asset || withdrawal.method || 'usd').toLowerCase();
+    const cryptoAmount = withdrawal.assetAmount || withdrawal.amount;
+    const usdAmount = withdrawal.amount;
+    const assetCode = asset.toUpperCase();
+    
+    // Get crypto logo for email
+    let cryptoLogoUrl = '';
+    let network = '';
+    if (asset !== 'usd') {
+      cryptoLogoUrl = getCryptoLogo(assetCode);
+      network = getNetworkName(asset);
+    }
+    
+    // Update withdrawal status
+    withdrawal.status = 'failed';
+    withdrawal.adminNotes = reason;
+    withdrawal.processedBy = req.admin._id;
+    withdrawal.processedAt = new Date();
+    await withdrawal.save();
+
+    // =============================================
+    // SEND REJECTION EMAIL (IDENTICAL TO DEPOSIT REJECTED STYLE)
+    // =============================================
+    try {
+      const rejectedEmailHtml = `
+        <div style="padding: 0;">
+          
+          <!-- Status Badge -->
+          <div style="text-align: center; margin-bottom: 25px;">
+            <div style="display: inline-block; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 60px; padding: 6px 16px;">
+              <span style="color: #EF4444; font-size: 13px; font-weight: 600;">⛔ WITHDRAWAL DECLINED</span>
+            </div>
+          </div>
+          
+          <p style="color: #FFFFFF; font-size: 16px; margin-bottom: 25px; line-height: 1.5;">Dear <strong style="color: #F7A600;">${user.firstName}</strong>,</p>
+          <p style="color: #B7BDC6; font-size: 14px; margin-bottom: 25px; line-height: 1.6;">We regret to inform you that your withdrawal request has been reviewed and <strong style="color: #EF4444;">could not be approved</strong> at this time.</p>
+          
+          <!-- Withdrawal Card -->
+          <div style="background: #11151C; border-radius: 16px; padding: 24px; margin-bottom: 24px; border: 1px solid #1E2329;">
+            
+            <!-- Asset Header -->
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid #1E2329;">
+              <div style="width: 48px; height: 48px; border-radius: 50%; background: rgba(247, 166, 0, 0.1); display: flex; align-items: center; justify-content: center;">
+                <img src="${cryptoLogoUrl}" alt="${assetCode}" style="width: 32px; height: 32px;">
+              </div>
+              <div style="flex: 1;">
+                <div style="font-size: 18px; font-weight: 700; color: #FFFFFF; margin-bottom: 4px;">${assetCode} Withdrawal Request</div>
+                <div style="font-size: 12px; color: #6C7480;">Network: ${network || 'Blockchain'}</div>
+              </div>
+            </div>
+            
+            <!-- Withdrawal Amount -->
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #1E2329;">
+              <div style="font-size: 14px; color: #B7BDC6;">Requested Amount</div>
+              <div style="text-align: right;">
+                <div style="font-size: 20px; font-weight: 700; color: #FFFFFF;">${cryptoAmount.toFixed(8)} ${assetCode}</div>
+                <div style="font-size: 13px; color: #6C7480;">≈ $${usdAmount.toLocaleString()} USD</div>
+              </div>
+            </div>
+            
+            <!-- Rejection Reason -->
+            <div style="background: rgba(239, 68, 68, 0.05); border-left: 3px solid #EF4444; border-radius: 12px; padding: 16px; margin: 16px 0;">
+              <div style="font-size: 12px; color: #EF4444; margin-bottom: 8px; font-weight: 600;">ⓘ REASON FOR DECLINATION</div>
+              <div style="font-size: 14px; color: #FCA5A5; line-height: 1.5;">${reason}</div>
+            </div>
+            
+            <!-- Destination Address -->
+            <div style="background: #0B0E11; border: 1px solid #1E2329; border-radius: 12px; padding: 16px; margin-top: 16px;">
+              <div style="font-size: 12px; color: #6C7480; margin-bottom: 8px;">Destination Wallet Address</div>
+              <div style="font-size: 13px; color: #B7BDC6; word-break: break-all; font-family: monospace;">${withdrawal.btcAddress || withdrawal.details?.walletAddress || 'N/A'}</div>
+            </div>
+            
+            <!-- Transaction Details -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px;">
+              <div style="background: #0B0E11; padding: 12px; border-radius: 12px; border: 1px solid #1E2329;">
+                <div style="font-size: 11px; color: #6C7480; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">Request ID</div>
+                <div style="font-size: 13px; font-weight: 600; color: #FFFFFF; font-family: monospace;">${withdrawal.reference}</div>
+              </div>
+              <div style="background: #0B0E11; padding: 12px; border-radius: 12px; border: 1px solid #1E2329;">
+                <div style="font-size: 11px; color: #6C7480; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">Date Requested</div>
+                <div style="font-size: 13px; font-weight: 600; color: #FFFFFF;">${new Date(withdrawal.createdAt).toLocaleDateString()}</div>
+              </div>
+            </div>
+            
+          </div>
+          
+          <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
+            <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">What happens next?</p>
+            <p style="color: #78350F; margin: 0; font-size: 14px;">Your funds remain safely in your account. You can submit a new withdrawal request or contact support for assistance.</p>
+          </div>
+          
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="https://www.bithashcapital.live/support" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Contact Support</a>
+          </div>
+          
+          <div style="margin-top: 30px; padding: 20px; background: rgba(247, 166, 0, 0.05); border-radius: 12px; text-align: center; border: 1px solid rgba(247, 166, 0, 0.1);">
+            <p style="color: #B7BDC6; font-size: 13px; margin: 0;">
+              <strong style="color: #F7A600;">Need help?</strong> Contact our support team at 
+              <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a>
+            </p>
+          </div>
+          
+        </div>
+      `;
+      
+      await sendProfessionalEmail({
+        email: withdrawal.user.email,
+        template: 'withdrawal_rejected',
+        data: {
+          name: withdrawal.user.firstName,
+          amount: usdAmount,
+          method: withdrawal.method || assetCode,
+          reason: reason,
+          withdrawalId: withdrawal._id,
+          requestedAt: withdrawal.createdAt
+        }
+      });
+      console.log(`📧 Withdrawal rejection email sent to ${withdrawal.user.email}`);
+    } catch (emailError) {
+      console.error('Failed to send withdrawal rejection email:', emailError);
+    }
+
+    // Emit real-time update
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${withdrawal.user._id}`).emit('withdrawal_rejected', {
+        withdrawalId: withdrawal._id,
+        amount: usdAmount,
+        asset: assetCode,
+        reason: reason,
+        status: 'rejected'
+      });
+    }
+
+    // Log activity
+    await logActivity(
+      'withdrawal_rejected',
+      'Transaction',
+      withdrawal._id,
+      req.admin._id,
+      'Admin',
+      req,
+      {
+        userId: withdrawal.user._id,
+        amount: usdAmount,
+        asset: asset,
+        reason: reason
+      }
+    );
+
+    // Create notification for user
+    await Notification.create({
+      title: 'Withdrawal Rejected',
+      message: `Your withdrawal request of ${cryptoAmount} ${assetCode} ($${usdAmount.toLocaleString()}) has been rejected. Reason: ${reason}`,
+      type: 'withdrawal_rejected',
+      recipientType: 'specific',
+      specificUserId: withdrawal.user._id,
+      sentBy: req.admin._id,
+      isImportant: true
+    });
+
+    res.status(200).json({
+      status: 'success',
+      message: `Withdrawal rejected successfully`,
+      data: {
+        withdrawal: {
+          id: withdrawal._id,
+          reference: withdrawal.reference,
+          amount: usdAmount,
+          asset: asset,
+          reason: reason,
+          status: 'rejected'
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Reject withdrawal error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to reject withdrawal'
+    });
+  }
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
