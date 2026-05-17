@@ -19935,6 +19935,360 @@ app.get('/api/admin/withdrawals/:id', adminProtect, restrictTo('super', 'finance
 
 
 
+// POST /api/admin/withdrawals/:id/approve - Approve withdrawal and deduct from user balance
+app.post('/api/admin/withdrawals/:id/approve', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { notes, transactionHash } = req.body;
+
+    // Validate ID format
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid withdrawal ID format'
+      });
+    }
+
+    // Find withdrawal with user info
+    const withdrawal = await Transaction.findOne({
+      _id: id,
+      type: 'withdrawal',
+      status: 'pending'
+    }).populate('user', 'firstName lastName email phone');
+
+    if (!withdrawal) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Pending withdrawal not found'
+      });
+    }
+
+    const user = await User.findById(withdrawal.user._id);
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+
+    // Determine asset and amount
+    const asset = (withdrawal.asset || withdrawal.method || 'usd').toLowerCase();
+    const cryptoAmount = withdrawal.assetAmount || withdrawal.amount;
+    const usdAmount = withdrawal.amount;
+
+    // Check if user has sufficient balance
+    if (!user.balances || !user.balances.main) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'User has no balance to withdraw from'
+      });
+    }
+
+    const currentBalance = user.balances.main.get(asset) || 0;
+    if (currentBalance < cryptoAmount) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Insufficient ${asset.toUpperCase()} balance. Available: ${currentBalance}, Requested: ${cryptoAmount}`
+      });
+    }
+
+    // Deduct from main balance
+    const newBalance = currentBalance - cryptoAmount;
+    if (newBalance <= 0) {
+      user.balances.main.delete(asset);
+    } else {
+      user.balances.main.set(asset, newBalance);
+    }
+
+    // Update USD equivalent
+    const currentUsdBalance = user.balances.main.get('usd') || 0;
+    user.balances.main.set('usd', currentUsdBalance - usdAmount);
+
+    await user.save();
+
+    // Update withdrawal status
+    withdrawal.status = 'completed';
+    withdrawal.processedBy = req.admin._id;
+    withdrawal.processedAt = new Date();
+    withdrawal.adminNotes = notes || null;
+    if (transactionHash) {
+      withdrawal.details = withdrawal.details || {};
+      withdrawal.details.txHash = transactionHash;
+      withdrawal.details.processedAt = new Date();
+    }
+    await withdrawal.save();
+
+    // Get current crypto price for email
+    let currentPrice = 1;
+    let cryptoLogoUrl = '';
+    let network = '';
+
+    if (asset !== 'usd') {
+      try {
+        currentPrice = await getCryptoPrice(asset.toUpperCase());
+        cryptoLogoUrl = getCryptoLogo(asset.toUpperCase());
+        network = getNetworkName(asset);
+      } catch (err) {
+        console.warn(`Could not fetch price for ${asset}`);
+      }
+    }
+
+    // SEND EMAIL NOTIFICATION
+    try {
+      await sendProfessionalEmail({
+        email: user.email,
+        template: 'withdrawal_approved',
+        data: {
+          name: user.firstName,
+          amount: cryptoAmount,
+          asset: asset.toUpperCase(),
+          usdValue: usdAmount,
+          fee: withdrawal.fee || 0,
+          feeUsd: (withdrawal.fee || 0) * currentPrice,
+          netAmount: cryptoAmount - (withdrawal.fee || 0),
+          withdrawalAddress: withdrawal.btcAddress || withdrawal.details?.walletAddress || 'N/A',
+          method: withdrawal.method || asset.toUpperCase(),
+          processedAt: withdrawal.processedAt,
+          txid: transactionHash || withdrawal.reference,
+          network: network
+        }
+      });
+      console.log(`📧 Withdrawal approval email sent to ${user.email}`);
+    } catch (emailError) {
+      console.error('Failed to send withdrawal approval email:', emailError);
+    }
+
+    // Emit real-time update via Socket.IO
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${user._id}`).emit('balance_update', {
+        main: user.balances.main.get('usd') || 0,
+        active: user.balances.active?.get('usd') || 0,
+        matured: user.balances.matured?.get('usd') || 0
+      });
+      
+      io.to(`user_${user._id}`).emit('withdrawal_processed', {
+        withdrawalId: withdrawal._id,
+        amount: usdAmount,
+        asset: asset.toUpperCase(),
+        assetAmount: cryptoAmount,
+        status: 'completed'
+      });
+    }
+
+    // Log activity
+    await logActivity(
+      'withdrawal_approved',
+      'Transaction',
+      withdrawal._id,
+      req.admin._id,
+      'Admin',
+      req,
+      {
+        userId: user._id,
+        amount: usdAmount,
+        asset: asset,
+        cryptoAmount: cryptoAmount,
+        notes: notes,
+        transactionHash: transactionHash
+      }
+    );
+
+    // Create notification for user
+    await Notification.create({
+      title: 'Withdrawal Approved',
+      message: `Your withdrawal of ${cryptoAmount} ${asset.toUpperCase()} ($${usdAmount.toLocaleString()}) has been approved and processed.`,
+      type: 'withdrawal_approved',
+      recipientType: 'specific',
+      specificUserId: user._id,
+      sentBy: req.admin._id,
+      isImportant: false
+    });
+
+    res.status(200).json({
+      status: 'success',
+      message: `Withdrawal of ${cryptoAmount} ${asset.toUpperCase()} approved and processed`,
+      data: {
+        withdrawal: {
+          id: withdrawal._id,
+          reference: withdrawal.reference,
+          amount: usdAmount,
+          asset: asset,
+          assetAmount: cryptoAmount,
+          newBalance: user.balances.main.get('usd') || 0,
+          status: 'completed'
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Approve withdrawal error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to approve withdrawal'
+    });
+  }
+});
+
+// POST /api/admin/withdrawals/:id/reject - Reject withdrawal request
+app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+
+    // Validate ID format
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid withdrawal ID format'
+      });
+    }
+
+    if (!reason || reason.trim() === '') {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Rejection reason is required'
+      });
+    }
+
+    // Find withdrawal with user info
+    const withdrawal = await Transaction.findOne({
+      _id: id,
+      type: 'withdrawal',
+      status: 'pending'
+    }).populate('user', 'firstName lastName email');
+
+    if (!withdrawal) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Pending withdrawal not found'
+      });
+    }
+
+    // Update withdrawal status
+    withdrawal.status = 'failed';
+    withdrawal.adminNotes = reason;
+    withdrawal.processedBy = req.admin._id;
+    withdrawal.processedAt = new Date();
+    await withdrawal.save();
+
+    // Determine asset and amount
+    const asset = (withdrawal.asset || withdrawal.method || 'usd').toLowerCase();
+    const cryptoAmount = withdrawal.assetAmount || withdrawal.amount;
+    const usdAmount = withdrawal.amount;
+
+    // SEND REJECTION EMAIL
+    try {
+      await sendProfessionalEmail({
+        email: withdrawal.user.email,
+        template: 'withdrawal_rejected',
+        data: {
+          name: withdrawal.user.firstName,
+          amount: usdAmount,
+          method: withdrawal.method || asset.toUpperCase(),
+          reason: reason,
+          withdrawalId: withdrawal._id,
+          requestedAt: withdrawal.createdAt
+        }
+      });
+      console.log(`📧 Withdrawal rejection email sent to ${withdrawal.user.email}`);
+    } catch (emailError) {
+      console.error('Failed to send withdrawal rejection email:', emailError);
+    }
+
+    // Emit real-time update
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${withdrawal.user._id}`).emit('withdrawal_rejected', {
+        withdrawalId: withdrawal._id,
+        amount: usdAmount,
+        asset: asset.toUpperCase(),
+        reason: reason,
+        status: 'rejected'
+      });
+    }
+
+    // Log activity
+    await logActivity(
+      'withdrawal_rejected',
+      'Transaction',
+      withdrawal._id,
+      req.admin._id,
+      'Admin',
+      req,
+      {
+        userId: withdrawal.user._id,
+        amount: usdAmount,
+        asset: asset,
+        reason: reason
+      }
+    );
+
+    // Create notification for user
+    await Notification.create({
+      title: 'Withdrawal Rejected',
+      message: `Your withdrawal request of ${cryptoAmount} ${asset.toUpperCase()} ($${usdAmount.toLocaleString()}) has been rejected. Reason: ${reason}`,
+      type: 'withdrawal_rejected',
+      recipientType: 'specific',
+      specificUserId: withdrawal.user._id,
+      sentBy: req.admin._id,
+      isImportant: true
+    });
+
+    res.status(200).json({
+      status: 'success',
+      message: `Withdrawal rejected successfully`,
+      data: {
+        withdrawal: {
+          id: withdrawal._id,
+          reference: withdrawal.reference,
+          amount: usdAmount,
+          asset: asset,
+          reason: reason,
+          status: 'rejected'
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Reject withdrawal error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to reject withdrawal'
+    });
+  }
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -20038,7 +20392,15 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     
     let targetPrice = exchangeRate;
     if (!targetPrice || targetPrice <= 0) {
-      targetPrice = await getCryptoPrice(asset.toUpperCase());
+      const priceKey = REDIS_KEYS.LAST_PRICE(`${asset.toUpperCase()}USDT`);
+      const cachedPrice = await redis.get(priceKey);
+      
+      if (cachedPrice) {
+        const priceData = JSON.parse(cachedPrice);
+        targetPrice = priceData.price;
+      } else {
+        targetPrice = await getCryptoPrice(asset.toUpperCase());
+      }
       
       if (!targetPrice || targetPrice <= 0) {
         return res.status(400).json({
@@ -20049,7 +20411,15 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     }
     
     let btcPrice = 0;
-    btcPrice = await getCryptoPrice('BTC');
+    const btcPriceKey = REDIS_KEYS.LAST_PRICE('BTCUSDT');
+    const cachedBTCPrice = await redis.get(btcPriceKey);
+    
+    if (cachedBTCPrice) {
+      const btcPriceData = JSON.parse(cachedBTCPrice);
+      btcPrice = btcPriceData.price;
+    } else {
+      btcPrice = await getCryptoPrice('BTC');
+    }
     
     if (!btcPrice || btcPrice <= 0) {
       return res.status(400).json({
@@ -20217,147 +20587,201 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     });
 
     // =============================================
-    // 9. SEND WITHDRAWAL REQUEST EMAIL (Deposit Approved style)
+    // 9. SEND VISUAL EMAIL (Body Only - No Header/Footer)
     // =============================================
     
-    const getCryptoLogoUrl = (assetSymbol) => {
-      const logos = {
-        'BTC': 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png',
-        'ETH': 'https://assets.coingecko.com/coins/images/279/large/ethereum.png',
-        'USDT': 'https://assets.coingecko.com/coins/images/325/large/Tether.png',
-        'BNB': 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png',
-        'SOL': 'https://assets.coingecko.com/coins/images/4128/large/solana.png',
-        'USDC': 'https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png',
-        'XRP': 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png',
-        'DOGE': 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png'
-      };
-      return logos[assetSymbol.toUpperCase()] || logos['BTC'];
-    };
+    // Wallet display text
+    let walletDisplayText = balanceSource === 'main' ? 'Main Wallet' : 
+                           balanceSource === 'matured' ? 'Matured Wallet' : 'Main & Matured Wallets';
     
-    const cryptoLogoUrl = getCryptoLogoUrl(asset);
-    const formattedAmount = amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const formattedCryptoAmount = withdrawalCryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
-    const formattedGasFee = gasFeeInTargetAsset.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
-    const formattedGasFeeUSD = gasFeeInUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const formattedRate = targetPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const formattedDate = new Date().toLocaleString('en-US', {
-      year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', timeZoneName: 'short'
-    });
-    
-    // Calculate total deduction for email
-    const totalDeducted = withdrawalCryptoAmount + gasFeeInTargetAsset;
-    const totalDeductedUSD = amount + gasFeeInUSD;
-    const formattedTotalDeducted = totalDeducted.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
-    const formattedTotalDeductedUSD = totalDeductedUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    
-    const mailTransporter = infoTransporter;
-    
-    const withdrawalRequestEmailHtml = `
-      <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-        <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-          <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-          <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
-          <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+    // Email body HTML (clean, visual, organized)
+    const emailBodyHtml = `
+      <div style="padding: 0;">
+        
+        <!-- Status Badge -->
+        <div style="text-align: center; margin-bottom: 25px;">
+          <div style="display: inline-block; background: rgba(247, 166, 0, 0.1); border: 1px solid rgba(247, 166, 0, 0.3); border-radius: 60px; padding: 6px 16px;">
+            <span style="color: #F7A600; font-size: 13px; font-weight: 600;">⏳ PENDING CONFIRMATION</span>
+          </div>
         </div>
         
-        <div style="padding: 30px; background: #FFFFFF;">
-          <div style="background: #FFF7ED; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-            <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
-              <img src="${cryptoLogoUrl}" width="32" height="32" style="border-radius: 50%;">
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <circle cx="12" cy="12" r="10" stroke="#F7A600" stroke-width="2"/>
-                <path d="M12 8V12M12 16H12.01" stroke="#F7A600" stroke-width="2" stroke-linecap="round"/>
+        <!-- Greeting -->
+        <p style="color: #FFFFFF; font-size: 16px; margin-bottom: 25px; line-height: 1.5;">Dear <strong style="color: #F7A600;">${user.firstName}</strong>,</p>
+        <p style="color: #B7BDC6; font-size: 14px; margin-bottom: 25px; line-height: 1.6;">Your withdrawal request has been received and is currently being processed. Below are the details of your transaction.</p>
+        
+        <!-- Withdrawal Card -->
+        <div style="background: #11151C; border-radius: 16px; padding: 24px; margin-bottom: 24px; border: 1px solid #1E2329;">
+          
+          <!-- Asset Header with Logo -->
+          <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid #1E2329;">
+            <div style="width: 48px; height: 48px; border-radius: 50%; background: rgba(247, 166, 0, 0.1); display: flex; align-items: center; justify-content: center;">
+              <img src="${assetLogo}" alt="${asset.toUpperCase()}" style="width: 32px; height: 32px;">
+            </div>
+            <div style="flex: 1;">
+              <div style="font-size: 18px; font-weight: 700; color: #FFFFFF; margin-bottom: 4px;">${asset.toUpperCase()} Withdrawal</div>
+              <div style="font-size: 12px; color: #6C7480;">Network: ${detectedNetwork}</div>
+            </div>
+          </div>
+          
+          <!-- Withdrawal Amount -->
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #1E2329;">
+            <div style="font-size: 14px; color: #B7BDC6;">Withdrawal Amount</div>
+            <div style="text-align: right;">
+              <div style="font-size: 20px; font-weight: 700; color: #FFFFFF;">${withdrawalCryptoAmount.toFixed(decimals)} ${asset.toUpperCase()}</div>
+              <div style="font-size: 13px; color: #6C7480;">≈ $${amount.toLocaleString()} USD</div>
+            </div>
+          </div>
+          
+          <!-- GAS FEE - IN RED -->
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding: 16px; background: rgba(239, 68, 68, 0.1); border-radius: 12px; border-left: 3px solid #EF4444;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M5 10H19M5 10V18C5 19.1046 5.89543 20 7 20H17C18.1046 20 19 19.1046 19 18V10M5 10L7 4H17L19 10M12 14V16" stroke="#EF4444" stroke-width="2" stroke-linecap="round"/>
+                <path d="M8 4L6 10M16 4L18 10" stroke="#EF4444" stroke-width="2" stroke-linecap="round"/>
               </svg>
+              <span style="font-size: 14px; font-weight: 600; color: #EF4444;">Network Gas Fee</span>
             </div>
-            <h2 style="color: #F7A600; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">WITHDRAWAL REQUEST RECEIVED!</h2>
-            <p style="color: #78350F; font-size: 13px; margin: 0;">Your withdrawal request is pending admin approval</p>
-          </div>
-          
-          <p style="color: #333333; line-height: 1.6;">Dear <strong>${user.firstName}</strong>,</p>
-          <p style="color: #333333; line-height: 1.6;">Your withdrawal request has been received and is currently pending admin approval. Once approved, the funds will be sent to your external wallet.</p>
-          
-          <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-            <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
-              <img src="${cryptoLogoUrl}" width="32" height="32" style="border-radius: 50%;">
-              <div>
-                <div style="font-weight: bold; font-size: 18px; color: #F7A600;">- ${formattedCryptoAmount} ${asset.toUpperCase()}</div>
-                <div style="color: #64748B; font-size: 12px;">≈ $${formattedAmount} USD deducted from your balance</div>
-              </div>
+            <div style="text-align: right;">
+              <div style="font-size: 16px; font-weight: 700; color: #EF4444;">${gasFeeInTargetAsset.toFixed(decimals)} ${asset.toUpperCase()}</div>
+              <div style="font-size: 12px; color: #EF4444; opacity: 0.8;">≈ $${gasFeeInUSD.toFixed(2)} USD</div>
             </div>
-            
-            <table style="width: 100%; border-collapse: collapse;">
-              <tr>
-                <td style="padding: 8px 0;"><strong>Requested Amount:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${formattedCryptoAmount} ${asset.toUpperCase()} (≈ $${formattedAmount} USD)</td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong style="color: #EF4444;">Network Gas Fee:</strong></td>
-                <td style="padding: 8px 0; text-align: right;"><strong style="color: #EF4444;">- ${formattedGasFee} ${asset.toUpperCase()} (≈ $${formattedGasFeeUSD} USD)</strong></td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Total Deducted:</strong></td>
-                <td style="padding: 8px 0; text-align: right; font-weight: bold;">- ${formattedTotalDeducted} ${asset.toUpperCase()} (≈ $${formattedTotalDeductedUSD} USD)</td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Destination Wallet:</strong></td>
-                <td style="padding: 8px 0; text-align: right; font-family: monospace; font-size: 12px; word-break: break-all;">${walletAddress}</td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Network:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${detectedNetwork}</td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Exchange Rate:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">1 ${asset.toUpperCase()} = $${formattedRate}</td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Request ID:</strong></td>
-                <td style="padding: 8px 0; text-align: right; font-size: 11px;">${reference}</td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Deducted From:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">
-                  <span style="background: ${balanceSource === 'main' ? '#F7A600' : balanceSource === 'matured' ? '#10B981' : '#818CF8'}; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">${balanceSource === 'main' ? 'Main Wallet' : balanceSource === 'matured' ? 'Matured Wallet' : 'Main & Matured Wallets'}</span>
-                </td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Requested At:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${formattedDate}</td>
-              </tr>
-            </table>
           </div>
           
-          <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
-            <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Pending Admin Approval</p>
-            <p style="color: #78350F; margin: 0; font-size: 14px;">Your withdrawal request is being reviewed by our team. You will receive an email confirmation once it is approved or rejected. Funds have been temporarily deducted from your balance and will be released if the request is rejected.</p>
+          <!-- Wallet Deduction Source -->
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding: 12px; background: ${balanceSource === 'main' ? 'rgba(247, 166, 0, 0.05)' : balanceSource === 'matured' ? 'rgba(16, 185, 129, 0.05)' : 'rgba(99, 102, 241, 0.05)'}; border-radius: 12px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M20 7H4C2.89543 7 2 7.89543 2 9V19C2 20.1046 2.89543 21 4 21H20C21.1046 21 22 20.1046 22 19V9C22 7.89543 21.1046 7 20 7Z" stroke="${balanceSource === 'main' ? '#F7A600' : balanceSource === 'matured' ? '#10B981' : '#818CF8'}" stroke-width="2" stroke-linecap="round"/>
+                <path d="M16 3L20 7M8 3L4 7" stroke="${balanceSource === 'main' ? '#F7A600' : balanceSource === 'matured' ? '#10B981' : '#818CF8'}" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+              <span style="font-size: 14px; color: #B7BDC6;">Deducted From</span>
+            </div>
+            <div>
+              <span style="display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; background: ${balanceSource === 'main' ? 'rgba(247, 166, 0, 0.15)' : balanceSource === 'matured' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(99, 102, 241, 0.15)'}; color: ${balanceSource === 'main' ? '#F7A600' : balanceSource === 'matured' ? '#10B981' : '#818CF8'};">${walletDisplayText}</span>
+            </div>
           </div>
           
-          <div style="text-align: center; margin: 30px 0;">
-            <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Track Your Request</a>
+          <!-- Detailed Breakdown (if both wallets used) -->
+          ${balanceSource === 'both' ? `
+          <div style="background: #0B0E11; border-radius: 12px; padding: 12px; margin-top: 12px; border: 1px solid #1E2329;">
+            <div style="font-size: 12px; color: #6C7480; margin-bottom: 8px;">Breakdown:</div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+              <span style="font-size: 13px; color: #B7BDC6;">From Main Wallet:</span>
+              <span style="font-size: 13px; font-weight: 600; color: #F7A600;">${withdrawalFromMain.toFixed(decimals)} ${asset.toUpperCase()}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span style="font-size: 13px; color: #B7BDC6;">From Matured Wallet:</span>
+              <span style="font-size: 13px; font-weight: 600; color: #10B981;">${withdrawalFromMatured.toFixed(decimals)} ${asset.toUpperCase()}</span>
+            </div>
+          </div>
+          ` : ''}
+          
+          <!-- Destination Address -->
+          <div style="background: #0B0E11; border: 1px solid #1E2329; border-radius: 12px; padding: 16px; margin-top: 16px;">
+            <div style="font-size: 12px; color: #6C7480; margin-bottom: 8px;">Destination Wallet Address</div>
+            <div style="font-size: 13px; color: #B7BDC6; word-break: break-all; font-family: monospace;">${walletAddress}</div>
           </div>
           
-          <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${formattedDate}</p>
+          <!-- Transaction Details Grid -->
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px;">
+            <div style="background: #0B0E11; padding: 12px; border-radius: 12px; border: 1px solid #1E2329;">
+              <div style="font-size: 11px; color: #6C7480; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">Exchange Rate</div>
+              <div style="font-size: 14px; font-weight: 600; color: #F7A600;">1 ${asset.toUpperCase()} ≈ $${targetPrice.toFixed(2)}</div>
+            </div>
+            <div style="background: #0B0E11; padding: 12px; border-radius: 12px; border: 1px solid #1E2329;">
+              <div style="font-size: 11px; color: #6C7480; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">Request ID</div>
+              <div style="font-size: 13px; font-weight: 600; color: #FFFFFF; font-family: monospace;">${reference}</div>
+            </div>
+          </div>
+          
         </div>
         
-        <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-          <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-          <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-          <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
-            <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> | 
-            <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
+        <!-- Total Summary -->
+        <div style="background: linear-gradient(135deg, #11151C 0%, #0B0E11 100%); border-radius: 12px; padding: 20px; margin-top: 8px; border: 1px solid #1E2329;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <div style="font-size: 16px; font-weight: 600; color: #FFFFFF;">Total Deducted</div>
+            <div style="text-align: right;">
+              <div style="font-size: 18px; font-weight: 700; color: #F7A600;">${totalCryptoNeeded.toFixed(decimals)} ${asset.toUpperCase()}</div>
+              <div style="font-size: 12px; color: #6C7480;">≈ $${(amount + gasFeeInUSD).toFixed(2)} USD</div>
+            </div>
+          </div>
+          <div style="height: 1px; background: #1E2329; margin: 12px 0;"></div>
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="font-size: 13px; color: #6C7480;">Your remaining balance will be updated shortly</div>
+            <a href="https://www.bithashcapital.live/dashboard" style="background: #F7A600; color: #000000; padding: 10px 20px; text-decoration: none; border-radius: 999px; font-size: 13px; font-weight: 600;">View Dashboard →</a>
+          </div>
+        </div>
+        
+        <!-- Help Section -->
+        <div style="margin-top: 30px; padding: 20px; background: rgba(247, 166, 0, 0.05); border-radius: 12px; text-align: center; border: 1px solid rgba(247, 166, 0, 0.1);">
+          <p style="color: #B7BDC6; font-size: 13px; margin: 0;">
+            <strong style="color: #F7A600;">Need help?</strong> Contact our support team at 
+            <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a>
           </p>
         </div>
+        
       </div>
     `;
     
+    // Send email using your existing sendProfessionalEmail function
+    // The template will automatically add header and footer
+    await sendProfessionalEmail({
+      email: user.email,
+      template: 'withdrawal_request',
+      data: {
+        name: user.firstName,
+        amount: withdrawalCryptoAmount.toFixed(decimals),
+        asset: asset.toUpperCase(),
+        usdValue: amount,
+        withdrawalAddress: walletAddress,
+        requestId: reference,
+        network: detectedNetwork,
+        exchangeRate: targetPrice,
+        gasFee: {
+          amount: gasFeeInTargetAsset.toFixed(decimals),
+          usdValue: gasFeeInUSD.toFixed(2)
+        },
+        walletSource: balanceSource,
+        customBody: emailBodyHtml  // Pass custom body to override default
+      }
+    });
+    
+    // Override the email content with our visual body
+    // This uses the existing transporter directly to avoid duplicating header/footer
+    const mailTransporter = infoTransporter;
     await mailTransporter.sendMail({
       from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
       to: user.email,
-      subject: `⏳ Withdrawal Request Received - ₿itHash Capital`,
-      html: withdrawalRequestEmailHtml
+      subject: `Withdrawal Request Submitted - ₿itHash Capital`,
+      html: `
+        <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #0B0E11;">
+          <!-- Header -->
+          <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%); border-bottom: 1px solid #1E2329;">
+            <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+            <h1 style="color: #F7A600; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+            <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+          </div>
+          
+          <!-- Body Content -->
+          ${emailBodyHtml}
+          
+          <!-- Footer -->
+          <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+            <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+            <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+            <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
+              <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> | 
+              <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
+            </p>
+          </div>
+        </div>
+      `
     });
     
-    console.log(`📧 Withdrawal request email sent to ${user.email}`);
+    console.log(`📧 Visual withdrawal email sent to ${user.email}`);
+    console.log(`   Asset: ${asset.toUpperCase()}`);
+    console.log(`   Amount: ${withdrawalCryptoAmount.toFixed(decimals)}`);
+    console.log(`   Gas Fee: ${gasFeeInTargetAsset.toFixed(decimals)} (deducted from ${balanceSource} wallet)`);
 
     // =============================================
     // 10. CREATE SYSTEM LOG
@@ -20491,621 +20915,6 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     });
   }
 });
-
-// =============================================
-// ADMIN WITHDRAWAL APPROVE ENDPOINT - With Professional Email
-// =============================================
-app.post('/api/admin/withdrawals/:id/approve', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { notes, transactionHash } = req.body;
-
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Invalid withdrawal ID format'
-      });
-    }
-
-    const withdrawal = await Transaction.findOne({
-      _id: id,
-      type: 'withdrawal',
-      status: 'pending'
-    }).populate('user', 'firstName lastName email phone');
-
-    if (!withdrawal) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Pending withdrawal not found'
-      });
-    }
-
-    const user = await User.findById(withdrawal.user._id);
-    if (!user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found'
-      });
-    }
-
-    const asset = (withdrawal.asset || withdrawal.method || 'usd').toLowerCase();
-    const cryptoAmount = withdrawal.assetAmount || withdrawal.amount;
-    const usdAmount = withdrawal.amount;
-    const gasFeeAmount = withdrawal.details?.gasFee?.amount || 0;
-    const amountSent = cryptoAmount - gasFeeAmount;
-    const network = withdrawal.network || getNetworkName(asset);
-
-    // Update withdrawal status (NO deduction - already deducted at user request)
-    withdrawal.status = 'completed';
-    withdrawal.processedBy = req.admin._id;
-    withdrawal.processedAt = new Date();
-    withdrawal.adminNotes = notes || null;
-    if (transactionHash) {
-      withdrawal.details = withdrawal.details || {};
-      withdrawal.details.txHash = transactionHash;
-      withdrawal.details.processedAt = new Date();
-      withdrawal.details.adminApprovedBy = req.admin.name;
-    }
-    await withdrawal.save();
-
-    // Get current crypto price for email
-    let currentPrice = 1;
-    let cryptoLogoUrl = '';
-    try {
-      currentPrice = await getCryptoPrice(asset.toUpperCase());
-      cryptoLogoUrl = getCryptoLogo(asset.toUpperCase());
-    } catch (err) {
-      console.warn(`Could not fetch price for ${asset}`);
-    }
-
-    const formattedAmountSent = amountSent.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
-    const formattedUsdAmount = usdAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const formattedGasFee = gasFeeAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
-    const formattedGasFeeUSD = (gasFeeAmount * currentPrice).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const formattedRate = currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const formattedDate = new Date().toLocaleString('en-US', {
-      year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', timeZoneName: 'short'
-    });
-
-    // Get current main balance after deduction
-    let newMainBalance = 0;
-    if (user.balances && user.balances.main) {
-      for (const [crypto, balance] of user.balances.main) {
-        if (crypto !== 'usd' && balance > 0) {
-          const price = await getCryptoPrice(crypto.toUpperCase());
-          if (price) newMainBalance += balance * price;
-        }
-      }
-    }
-
-    // =============================================
-    // SEND WITHDRAWAL APPROVED EMAIL (Identical to Deposit Approved design)
-    // =============================================
-    const mailTransporter = infoTransporter;
-    
-    const withdrawalApprovedEmailHtml = `
-      <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-        <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-          <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-          <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
-          <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
-        </div>
-        
-        <div style="padding: 30px; background: #FFFFFF;">
-          <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-            <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
-              <img src="${cryptoLogoUrl}" width="32" height="32" style="border-radius: 50%;">
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <circle cx="12" cy="12" r="10" stroke="#10B981" stroke-width="2"/>
-                <path d="M8 12L11 15L16 9" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-            </div>
-            <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">WITHDRAWAL APPROVED!</h2>
-            <p style="color: #065F46; font-size: 13px; margin: 0;">Your funds have been sent to your external wallet</p>
-          </div>
-          
-          <p style="color: #333333; line-height: 1.6;">Dear <strong>${user.firstName}</strong>,</p>
-          <p style="color: #333333; line-height: 1.6;">Great news! Your withdrawal request has been approved and the funds have been sent to your external wallet.</p>
-          
-          <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-            <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
-              <img src="${cryptoLogoUrl}" width="32" height="32" style="border-radius: 50%;">
-              <div>
-                <div style="font-weight: bold; font-size: 18px; color: #10B981;">- ${formattedAmountSent} ${asset.toUpperCase()}</div>
-                <div style="color: #64748B; font-size: 12px;">≈ $${formattedUsdAmount} USD sent to your wallet</div>
-              </div>
-            </div>
-            
-            <table style="width: 100%; border-collapse: collapse;">
-              <tr>
-                <td style="padding: 8px 0;"><strong>Amount Sent:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${formattedAmountSent} ${asset.toUpperCase()} (≈ $${formattedUsdAmount} USD)</td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong style="color: #EF4444;">Network Gas Fee:</strong></td>
-                <td style="padding: 8px 0; text-align: right;"><strong style="color: #EF4444;">- ${formattedGasFee} ${asset.toUpperCase()} (≈ $${formattedGasFeeUSD} USD)</strong></td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Destination Wallet:</strong></td>
-                <td style="padding: 8px 0; text-align: right; font-family: monospace; font-size: 12px; word-break: break-all;">${withdrawal.btcAddress || withdrawal.details?.withdrawalAddress || 'N/A'}</td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Network:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${network}</td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Exchange Rate:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">1 ${asset.toUpperCase()} = $${formattedRate}</td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Transaction ID:</strong></td>
-                <td style="padding: 8px 0; text-align: right; font-size: 11px; font-family: monospace;">${transactionHash || withdrawal.reference}</td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Processed At:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${formattedDate}</td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>New Main Balance:</strong></td>
-                <td style="padding: 8px 0; text-align: right; font-weight: bold; color: #10B981;">$${newMainBalance.toLocaleString()}</td>
-              </tr>
-            </table>
-          </div>
-          
-          <div style="text-align: center; margin: 30px 0;">
-            <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View Dashboard</a>
-          </div>
-          
-          <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${formattedDate}</p>
-        </div>
-        
-        <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-          <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-          <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-          <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
-            <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> | 
-            <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
-          </p>
-        </div>
-      </div>
-    `;
-    
-    await mailTransporter.sendMail({
-      from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
-      to: user.email,
-      subject: `✅ Withdrawal Approved - ₿itHash Capital`,
-      html: withdrawalApprovedEmailHtml
-    });
-    
-    console.log(`📧 Withdrawal approval email sent to ${user.email}`);
-
-    // Emit real-time update
-    const io = req.app.get('io');
-    if (io) {
-      io.to(`user_${user._id}`).emit('balance_update', {
-        main: newMainBalance,
-        active: user.balances?.active?.get('usd') || 0,
-        matured: 0,
-        timestamp: Date.now()
-      });
-      
-      io.to(`user_${user._id}`).emit('withdrawal_processed', {
-        withdrawalId: withdrawal._id,
-        amount: usdAmount,
-        asset: asset.toUpperCase(),
-        assetAmount: amountSent,
-        status: 'completed',
-        txHash: transactionHash
-      });
-    }
-
-    // Log activity
-    await logActivity(
-      'withdrawal_approved',
-      'Transaction',
-      withdrawal._id,
-      req.admin._id,
-      'Admin',
-      req,
-      {
-        userId: user._id,
-        amount: usdAmount,
-        asset: asset,
-        cryptoAmount: amountSent,
-        notes: notes,
-        transactionHash: transactionHash
-      }
-    );
-
-    await Notification.create({
-      title: 'Withdrawal Approved',
-      message: `Your withdrawal of ${formattedAmountSent} ${asset.toUpperCase()} (≈ $${formattedUsdAmount}) has been approved and processed.${transactionHash ? ` Transaction ID: ${transactionHash}` : ''}`,
-      type: 'withdrawal_approved',
-      recipientType: 'specific',
-      specificUserId: user._id,
-      sentBy: req.admin._id,
-      isImportant: false
-    });
-
-    res.status(200).json({
-      status: 'success',
-      message: `Withdrawal of ${amountSent.toFixed(8)} ${asset.toUpperCase()} approved successfully`,
-      data: {
-        withdrawal: {
-          id: withdrawal._id,
-          reference: withdrawal.reference,
-          amount: usdAmount,
-          asset: asset,
-          assetAmount: amountSent,
-          gasFee: gasFeeAmount,
-          txHash: transactionHash,
-          newBalance: newMainBalance,
-          status: 'completed'
-        }
-      }
-    });
-
-  } catch (err) {
-    console.error('Approve withdrawal error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: err.message || 'Failed to approve withdrawal'
-    });
-  }
-});
-
-// =============================================
-// ADMIN WITHDRAWAL REJECT ENDPOINT - With Refund and Professional Email
-// =============================================
-app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { reason } = req.body;
-
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Invalid withdrawal ID format'
-      });
-    }
-
-    if (!reason || reason.trim() === '') {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Rejection reason is required'
-      });
-    }
-
-    const withdrawal = await Transaction.findOne({
-      _id: id,
-      type: 'withdrawal',
-      status: 'pending'
-    }).populate('user', 'firstName lastName email');
-
-    if (!withdrawal) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Pending withdrawal not found'
-      });
-    }
-
-    const user = await User.findById(withdrawal.user._id);
-    if (!user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found'
-      });
-    }
-
-    const asset = (withdrawal.asset || withdrawal.method || 'usd').toLowerCase();
-    const cryptoAmount = withdrawal.assetAmount || withdrawal.amount;
-    const usdAmount = withdrawal.amount;
-    const gasFeeAmount = withdrawal.details?.gasFee?.amount || 0;
-    const totalDeducted = cryptoAmount + gasFeeAmount;
-    const balanceSource = withdrawal.details?.balanceSource || 'main';
-    const mainAmountUsed = withdrawal.details?.mainAmountUsed || 0;
-    const maturedAmountUsed = withdrawal.details?.maturedAmountUsed || 0;
-    const gasFeeFromMain = withdrawal.details?.gasFeeFromMain || gasFeeAmount;
-
-    // =============================================
-    // REFUND the deducted amount back to user's wallets
-    // =============================================
-    
-    if (!user.balances) {
-      user.balances = { main: new Map(), active: new Map(), matured: new Map() };
-    }
-    if (!user.balances.main) user.balances.main = new Map();
-    if (!user.balances.matured) user.balances.matured = new Map();
-
-    // Refund withdrawal amount
-    if (balanceSource === 'main' || mainAmountUsed > 0) {
-      const refundAmount = balanceSource === 'main' ? cryptoAmount : mainAmountUsed;
-      if (refundAmount > 0) {
-        const currentMainBalance = user.balances.main.get(asset) || 0;
-        user.balances.main.set(asset, currentMainBalance + refundAmount);
-      }
-    }
-
-    if (balanceSource === 'both' && maturedAmountUsed > 0) {
-      const currentMaturedBalance = user.balances.matured.get(asset) || 0;
-      user.balances.matured.set(asset, currentMaturedBalance + maturedAmountUsed);
-    }
-
-    // Refund gas fee
-    if (gasFeeFromMain > 0) {
-      const currentMainBalance = user.balances.main.get(asset) || 0;
-      user.balances.main.set(asset, currentMainBalance + gasFeeFromMain);
-    }
-
-    // Update USD equivalents
-    const currentPrice = await getCryptoPrice(asset.toUpperCase()) || 1;
-    const currentMainUSD = user.balances.main.get('usd') || 0;
-    const currentMaturedUSD = user.balances.matured.get('usd') || 0;
-
-    if (balanceSource === 'main' || mainAmountUsed > 0) {
-      const refundUSD = (balanceSource === 'main' ? cryptoAmount : mainAmountUsed) * currentPrice;
-      user.balances.main.set('usd', currentMainUSD + refundUSD);
-    }
-
-    if (balanceSource === 'both' && maturedAmountUsed > 0) {
-      const refundUSD = maturedAmountUsed * currentPrice;
-      user.balances.matured.set('usd', currentMaturedUSD + refundUSD);
-    }
-
-    const gasFeeUSD = gasFeeFromMain * currentPrice;
-    user.balances.main.set('usd', (user.balances.main.get('usd') || 0) + gasFeeUSD);
-
-    await user.save();
-
-    // Update withdrawal status
-    withdrawal.status = 'failed';
-    withdrawal.adminNotes = reason;
-    withdrawal.processedBy = req.admin._id;
-    withdrawal.processedAt = new Date();
-    withdrawal.details = withdrawal.details || {};
-    withdrawal.details.rejectionReason = reason;
-    withdrawal.details.refunded = true;
-    withdrawal.details.refundedAt = new Date();
-    withdrawal.details.refundedAmount = totalDeducted;
-    await withdrawal.save();
-
-    // Get crypto logo and price for email
-    let cryptoLogoUrl = getCryptoLogo(asset.toUpperCase());
-    const formattedTotalDeducted = totalDeducted.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
-    const formattedUsdAmount = usdAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const formattedCryptoAmount = cryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
-    const formattedGasFee = gasFeeAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
-    const formattedDate = new Date().toLocaleString('en-US', {
-      year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', timeZoneName: 'short'
-    });
-
-    // Calculate new balances after refund
-    let newMainBalanceUSD = 0;
-    let newMaturedBalanceUSD = 0;
-    if (user.balances && user.balances.main) {
-      for (const [crypto, balance] of user.balances.main) {
-        if (crypto !== 'usd' && balance > 0) {
-          const price = await getCryptoPrice(crypto.toUpperCase());
-          if (price) newMainBalanceUSD += balance * price;
-        }
-      }
-    }
-    if (user.balances && user.balances.matured) {
-      for (const [crypto, balance] of user.balances.matured) {
-        if (crypto !== 'usd' && balance > 0) {
-          const price = await getCryptoPrice(crypto.toUpperCase());
-          if (price) newMaturedBalanceUSD += balance * price;
-        }
-      }
-    }
-
-    // =============================================
-    // SEND WITHDRAWAL REJECTED EMAIL (Identical to Deposit Rejected design)
-    // =============================================
-    const mailTransporter = infoTransporter;
-    
-    const withdrawalRejectedEmailHtml = `
-      <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-        <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-          <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-          <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
-          <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
-        </div>
-        
-        <div style="padding: 30px; background: #FFFFFF;">
-          <div style="background: #FEF2F2; border-radius: 12px; padding: 20px; text-align: center; margin-bottom: 25px;">
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin-bottom: 12px;">
-              <circle cx="12" cy="12" r="10" stroke="#DC2626" stroke-width="2"/>
-              <path d="M12 8V12M12 16H12.01" stroke="#DC2626" stroke-width="2" stroke-linecap="round"/>
-            </svg>
-            <h2 style="color: #DC2626; font-size: 22px; margin: 0 0 8px 0; font-weight: 700;">WITHDRAWAL DECLINED</h2>
-            <p style="color: #991B1B; font-size: 14px; margin: 0;">Your withdrawal request could not be approved</p>
-          </div>
-          
-          <p style="color: #333333; line-height: 1.6; margin-bottom: 20px;">Dear <strong>${user.firstName}</strong>,</p>
-          <p style="color: #333333; line-height: 1.6; margin-bottom: 25px;">We regret to inform you that your withdrawal request has been reviewed and <strong style="color: #DC2626;">could not be approved</strong> at this time. Your funds have been refunded to your wallet(s).</p>
-          
-          <div style="background: #FEF2F2; border-left: 4px solid #DC2626; padding: 16px 20px; border-radius: 8px; margin-bottom: 25px;">
-            <p style="color: #991B1B; font-size: 13px; margin: 0 0 6px 0; font-weight: 600;">ⓘ REASON</p>
-            <p style="color: #7F1D1D; font-size: 14px; margin: 0; line-height: 1.5;">${reason}</p>
-          </div>
-          
-          <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-            <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
-              <img src="${cryptoLogoUrl}" width="32" height="32" style="border-radius: 50%;">
-              <div>
-                <div style="font-weight: bold; font-size: 18px;">+ ${formattedTotalDeducted} ${asset.toUpperCase()}</div>
-                <div style="color: #64748B; font-size: 12px;">≈ $${formattedUsdAmount} USD refunded to your wallet</div>
-              </div>
-            </div>
-            
-            <table style="width: 100%; border-collapse: collapse;">
-              <tr>
-                <td style="padding: 8px 0;"><strong>Refunded Amount:</strong></td>
-                <td style="padding: 8px 0; text-align: right; font-weight: bold; color: #10B981;">+ ${formattedTotalDeducted} ${asset.toUpperCase()} (≈ $${formattedUsdAmount} USD)</td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Original Request Amount:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${formattedCryptoAmount} ${asset.toUpperCase()} (≈ $${formattedUsdAmount} USD)</td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong style="color: #EF4444;">Network Gas Fee Refunded:</strong></td>
-                <td style="padding: 8px 0; text-align: right;"><strong style="color: #10B981;">+ ${formattedGasFee} ${asset.toUpperCase()}</strong></td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Refunded To:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">
-                  <span style="background: ${balanceSource === 'main' ? '#F7A600' : balanceSource === 'matured' ? '#10B981' : '#818CF8'}; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">${balanceSource === 'main' ? 'Main Wallet' : balanceSource === 'matured' ? 'Matured Wallet' : 'Main & Matured Wallets'}</span>
-                 </td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>New Main Balance:</strong></td>
-                <td style="padding: 8px 0; text-align: right; font-weight: bold;">$${newMainBalanceUSD.toLocaleString()}</td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>New Matured Balance:</strong></td>
-                <td style="padding: 8px 0; text-align: right; font-weight: bold;">$${newMaturedBalanceUSD.toLocaleString()}</td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Request ID:</strong></td>
-                <td style="padding: 8px 0; text-align: right; font-size: 11px;">${withdrawal.reference}</td>
-              </tr>
-            </table>
-          </div>
-          
-          <div style="text-align: center; margin: 30px 0;">
-            <a href="https://www.bithashcapital.live/support" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Contact Support</a>
-          </div>
-          
-          <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${formattedDate}</p>
-        </div>
-        
-        <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-          <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-          <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-          <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
-            <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> | 
-            <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
-          </p>
-        </div>
-      </div>
-    `;
-    
-    await mailTransporter.sendMail({
-      from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
-      to: user.email,
-      subject: `⛔ Withdrawal Declined - ₿itHash Capital`,
-      html: withdrawalRejectedEmailHtml
-    });
-    
-    console.log(`📧 Withdrawal rejection email sent to ${user.email}`);
-
-    // Emit real-time update
-    const io = req.app.get('io');
-    if (io) {
-      io.to(`user_${withdrawal.user._id}`).emit('balance_update', {
-        main: newMainBalanceUSD,
-        active: user.balances?.active?.get('usd') || 0,
-        matured: newMaturedBalanceUSD,
-        timestamp: Date.now()
-      });
-      
-      io.to(`user_${withdrawal.user._id}`).emit('withdrawal_rejected', {
-        withdrawalId: withdrawal._id,
-        amount: usdAmount,
-        asset: asset.toUpperCase(),
-        reason: reason,
-        refunded: true,
-        refundedAmount: totalDeducted,
-        status: 'rejected'
-      });
-    }
-
-    // Log activity
-    await logActivity(
-      'withdrawal_rejected',
-      'Transaction',
-      withdrawal._id,
-      req.admin._id,
-      'Admin',
-      req,
-      {
-        userId: withdrawal.user._id,
-        amount: usdAmount,
-        asset: asset,
-        cryptoAmount: cryptoAmount,
-        gasFee: gasFeeAmount,
-        totalRefunded: totalDeducted,
-        reason: reason
-      }
-    );
-
-    await Notification.create({
-      title: 'Withdrawal Declined - Funds Refunded',
-      message: `Your withdrawal request of ${formattedTotalDeducted} ${asset.toUpperCase()} (≈ $${formattedUsdAmount}) has been declined. Your funds have been refunded to your wallet(s). Reason: ${reason}`,
-      type: 'withdrawal_rejected',
-      recipientType: 'specific',
-      specificUserId: withdrawal.user._id,
-      sentBy: req.admin._id,
-      isImportant: true
-    });
-
-    res.status(200).json({
-      status: 'success',
-      message: `Withdrawal rejected. ${totalDeducted.toFixed(8)} ${asset.toUpperCase()} refunded to user's wallet(s).`,
-      data: {
-        withdrawal: {
-          id: withdrawal._id,
-          reference: withdrawal.reference,
-          amount: usdAmount,
-          asset: asset,
-          cryptoAmount: cryptoAmount,
-          gasFee: gasFeeAmount,
-          totalRefunded: totalDeducted,
-          reason: reason,
-          newMainBalance: newMainBalanceUSD,
-          newMaturedBalance: newMaturedBalanceUSD,
-          status: 'rejected'
-        }
-      }
-    });
-
-  } catch (err) {
-    console.error('Reject withdrawal error:', err);
-    res.status(500).json({
-      status: 'error',
-      message: err.message || 'Failed to reject withdrawal'
-    });
-  }
-});
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
