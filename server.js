@@ -19945,8 +19945,10 @@ app.get('/api/admin/withdrawals/:id', adminProtect, restrictTo('super', 'finance
 
 
 
+
+
 // =============================================
-// SPOT WITHDRAWAL ENDPOINT - Complete with Visual Email Body Only
+// SPOT WITHDRAWAL ENDPOINT - Complete with Visual Email Body Only (NO Platform Fee)
 // =============================================
 app.post('/api/withdrawals/spot', protect, async (req, res) => {
   try {
@@ -20057,7 +20059,7 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     }
 
     // =============================================
-    // 4. CALCULATE GAS FEE
+    // 4. CALCULATE GAS FEE (NO PLATFORM FEE)
     // =============================================
     
     const gasFeeInBTC = amount < 10000 ? GAS_FEE_BTC_LOW : GAS_FEE_BTC_HIGH;
@@ -20128,7 +20130,7 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     const totalMaturedDeduction = withdrawalFromMatured;
 
     // =============================================
-    // 7. PERFORM DEDUCTIONS (One time only - gas fee + withdrawal amount together)
+    // 7. PERFORM DEDUCTIONS (Gas fee + withdrawal amount together)
     // =============================================
     
     if (totalMainDeduction > 0) {
@@ -20174,11 +20176,9 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     await user.save();
 
     // =============================================
-    // 8. CREATE TRANSACTION (IMPORTANT: No further deductions in admin approval)
+    // 8. CREATE TRANSACTION (NO platform fee - fee = 0)
     // =============================================
     
-    const fee = Math.max(1, amount * 0.01);
-    const netAmount = amount - fee;
     const reference = `WTH-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
     
     const transaction = await Transaction.create({
@@ -20210,14 +20210,14 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
         totalDeducted: totalCryptoNeeded
       },
       btcAddress: walletAddress,
-      fee: fee,
-      netAmount: netAmount,
+      fee: 0,
+      netAmount: amount,
       exchangeRateAtTime: targetPrice,
       network: detectedNetwork
     });
 
     // =============================================
-    // 9. SEND VISUAL EMAIL (Matching deposit_approved design)
+    // 9. SEND VISUAL EMAIL (NO platform fee displayed)
     // =============================================
     
     const cryptoAsset = asset.toUpperCase();
@@ -20229,9 +20229,7 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
     const formattedTotalDeducted = totalCryptoNeeded.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
     const formattedTotalDeductedUSD = (amount + gasFeeInUSD).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const formattedRate = targetPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const formattedFee = fee.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     
-    // Build the visual email HTML exactly matching deposit_approved design
     const emailHtml = `
       <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
         <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
@@ -20273,10 +20271,6 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong style="color: #EF4444;">Network Gas Fee:</strong></td>
                 <td style="padding: 8px 0; text-align: right;"><strong style="color: #EF4444;">- ${formattedGasFee} ${cryptoAsset} (≈ $${formattedGasFeeUSD} USD)</strong></td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Platform Fee (1%):</strong></td>
-                <td style="padding: 8px 0; text-align: right; color: #EF4444;">- $${formattedFee} USD</strong></td>
               </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Total Deducted:</strong></td>
@@ -20470,7 +20464,7 @@ app.post('/api/withdrawals/spot', protect, async (req, res) => {
   }
 });
 
-// POST /api/admin/withdrawals/:id/approve - Approve withdrawal with CORRECT calculations
+// POST /api/admin/withdrawals/:id/approve - Approve withdrawal (NO platform fee)
 app.post('/api/admin/withdrawals/:id/approve', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
   try {
     const { id } = req.params;
@@ -20507,18 +20501,12 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, restrictTo('super',
     const asset = (withdrawal.asset || withdrawal.method || 'usd').toLowerCase();
     const cryptoAmount = withdrawal.assetAmount || withdrawal.amount;
     const usdAmount = withdrawal.amount;
+    const gasFeeAmount = withdrawal.details?.gasFee?.amount || 0;
+    const gasFeeUSD = withdrawal.details?.gasFee?.usdValue || 0;
     
-    // Get current price for email calculations
-    let currentPrice = await getCryptoPrice(asset.toUpperCase());
-    if (!currentPrice || currentPrice <= 0) {
-      currentPrice = withdrawal.exchangeRateAtTime || 1;
-    }
-    
-    // Calculate the CORRECT net amount after fee
-    const fee = withdrawal.fee || (usdAmount * 0.01);
-    const feeInCrypto = fee / currentPrice;
-    const netCryptoAmount = cryptoAmount - feeInCrypto;
-    const netUsdAmount = usdAmount - fee;
+    // NO platform fee - net amount = withdrawal amount (gas fee already deducted separately)
+    const netCryptoAmount = cryptoAmount;
+    const netUsdAmount = usdAmount;
 
     const fundsAlreadyDeducted = withdrawal.details?.fundsAlreadyDeducted === true;
 
@@ -20570,15 +20558,15 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, restrictTo('super',
     
     const formattedUsdAmount = usdAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const formattedCryptoAmount = cryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
-    const formattedFee = fee.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const formattedFeeCrypto = feeInCrypto.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
+    const formattedGasFee = gasFeeAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
+    const formattedGasFeeUSD = gasFeeUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const formattedNetCrypto = netCryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
     const formattedNetUsd = netUsdAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const formattedRate = (withdrawal.exchangeRateAtTime || currentPrice).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const formattedRate = (withdrawal.exchangeRateAtTime || 1).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const walletAddress = withdrawal.btcAddress || withdrawal.details?.withdrawalAddress || 'N/A';
 
     // =============================================
-    // SEND WITHDRAWAL APPROVED EMAIL - MATCHING deposit_approved DESIGN
+    // SEND WITHDRAWAL APPROVED EMAIL (NO platform fee)
     // =============================================
     const emailHtml = `
       <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
@@ -20623,12 +20611,8 @@ app.post('/api/admin/withdrawals/:id/approve', adminProtect, restrictTo('super',
                 <td style="padding: 8px 0; text-align: right;">${formattedCryptoAmount} ${cryptoAsset} (≈ $${formattedUsdAmount} USD)</strong></td>
               </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong style="color: #EF4444;">Platform Fee (1%):</strong></td>
-                <td style="padding: 8px 0; text-align: right;"><strong style="color: #EF4444;">- ${formattedFeeCrypto} ${cryptoAsset} (≈ $${formattedFee} USD)</strong></strong></td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong style="color: #EF4444;">Network Gas Fee:</strong></td>
-                <td style="padding: 8px 0; text-align: right;"><strong style="color: #EF4444;">- ${withdrawal.details?.gasFee?.amount?.toFixed(8) || '0.00000000'} ${cryptoAsset} (≈ $${withdrawal.details?.gasFee?.usdValue?.toFixed(2) || '0.00'} USD)</strong></strong></td>
+                <td style="padding: 8px 0; text-align: right;"><strong style="color: #EF4444;">- ${formattedGasFee} ${cryptoAsset} (≈ $${formattedGasFeeUSD} USD)</strong></strong></td>
               </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Net Amount Sent:</strong></td>
@@ -20874,7 +20858,7 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
     }
 
     // =============================================
-    // SEND REJECTION EMAIL - MATCHING deposit_rejected DESIGN
+    // SEND REJECTION EMAIL
     // =============================================
     const cryptoAsset = asset.toUpperCase();
     const cryptoLogo = getCryptoLogo(cryptoAsset);
@@ -21031,8 +21015,6 @@ app.post('/api/admin/withdrawals/:id/reject', adminProtect, restrictTo('super', 
     });
   }
 });
-
-
 
 
 
