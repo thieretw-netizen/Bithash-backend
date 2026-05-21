@@ -25850,7 +25850,7 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
           html: `
             <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
               <div style="text-align: center; padding: 30px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-                <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="Bit Hash Capital" style="width: 60px; height: 60px; margin-bottom: 12px;">
+                <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Capital" style="width: 60px; height: 60px; margin-bottom: 12px;">
                 <h1 style="color: #F7A600; font-size: 24px; margin: 0; letter-spacing: 1px;">BIT HASH CAPITAL</h1>
                 <p style="color: #B7BDC6; font-size: 12px; margin: 12px 0 0;">Financial Statement</p>
               </div>
@@ -25886,7 +25886,7 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
                 </div>
               </div>
               <div style="text-align: center; padding: 20px; background: #0B0E11;">
-                <p style="color: #6C7480; font-size: 10px;">&copy; ${new Date().getFullYear()} Bit Hash Capital. All rights reserved.</p>
+                <p style="color: #6C7480; font-size: 10px;">&copy; ${new Date().getFullYear()}₿itHash Capital. All rights reserved.</p>
                 <p style="color: #6C7480; font-size: 10px; margin-top: 6px;">800 Plant Street, Wilmington, DE 19801, United States</p>
               </div>
             </div>
