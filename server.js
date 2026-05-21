@@ -25851,7 +25851,7 @@ app.post('/api/admin/statements/generate', adminProtect, async (req, res) => {
             <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
               <div style="text-align: center; padding: 30px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
                 <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Capital" style="width: 60px; height: 60px; margin-bottom: 12px;">
-                <h1 style="color: #F7A600; font-size: 24px; margin: 0; letter-spacing: 1px;">BIT HASH CAPITAL</h1>
+                <h1 style="color: #F7A600; font-size: 24px; margin: 0; letter-spacing: 1px;"₿itHash Capital</h1>
                 <p style="color: #B7BDC6; font-size: 12px; margin: 12px 0 0;">Financial Statement</p>
               </div>
               <div style="padding: 30px;">
