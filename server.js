@@ -27081,12 +27081,25 @@ app.delete('/api/admin/email-templates/:id', adminProtect, async (req, res) => {
   }
 });
 
+
+
+
+
+
+
 // =============================================
-// SEND EMAIL ENDPOINT - For Email Marketing
+// SEND EMAIL ENDPOINT - For Email Marketing (NO backend templates)
 // =============================================
 app.post('/api/admin/send-email', adminProtect, async (req, res) => {
   try {
-    const { subject, content, type, recipients, trackDelivery, attachments } = req.body;
+    const { subject, content, recipients, trackDelivery } = req.body;
+
+    console.log('📧 SEND EMAIL REQUEST:', { 
+      subject, 
+      contentLength: content?.length,
+      recipientCount: recipients?.length,
+      trackDelivery
+    });
 
     if (!subject || !content) {
       return res.status(400).json({
@@ -27095,171 +27108,109 @@ app.post('/api/admin/send-email', adminProtect, async (req, res) => {
       });
     }
 
+    let emailRecipients = [];
+
+    // Handle recipients array - could be empty (all users), user IDs, or email addresses
     if (!recipients || recipients.length === 0) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'At least one recipient is required'
-      });
-    }
-
-    const recipientEmails = [];
-
-    if (recipients[0] === 'all') {
-      // Get all active users
+      // Send to ALL active users
       const users = await User.find({ status: 'active' }).select('email firstName lastName');
-      for (const user of users) {
-        recipientEmails.push({
-          email: user.email,
-          name: `${user.firstName} ${user.lastName}`,
-          userId: user._id
-        });
-      }
-    } else if (recipients[0] && recipients[0].match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
-      // External emails
-      for (const email of recipients) {
-        recipientEmails.push({
-          email: email,
-          name: email.split('@')[0],
-          userId: null
-        });
-      }
-    } else {
+      emailRecipients = users.map(user => ({
+        email: user.email,
+        name: `${user.firstName} ${user.lastName}`,
+        userId: user._id
+      }));
+      console.log(`📧 Sending to ALL users: ${emailRecipients.length} recipients`);
+    } 
+    else if (recipients[0] && recipients[0].includes('@')) {
+      // Manual email addresses
+      emailRecipients = recipients.map(email => ({
+        email: email,
+        name: email.split('@')[0],
+        userId: null
+      }));
+      console.log(`📧 Sending to manual emails: ${emailRecipients.length} recipients`);
+    }
+    else {
       // Specific user IDs
       for (const userId of recipients) {
         const user = await User.findById(userId).select('email firstName lastName');
         if (user) {
-          recipientEmails.push({
+          emailRecipients.push({
             email: user.email,
             name: `${user.firstName} ${user.lastName}`,
             userId: user._id
           });
         }
       }
+      console.log(`📧 Sending to specific users: ${emailRecipients.length} recipients`);
     }
 
-    if (recipientEmails.length === 0) {
+    if (emailRecipients.length === 0) {
       return res.status(400).json({
         status: 'fail',
         message: 'No valid recipients found'
       });
     }
 
-    const emailHistoryId = new mongoose.Types.ObjectId();
-    const emailRecord = {
-      _id: emailHistoryId,
-      subject,
-      content: type === 'html' ? content : content.replace(/\n/g, '<br>'),
-      type,
-      recipients: recipientEmails.map(r => ({
-        email: r.email,
-        name: r.name,
-        userId: r.userId,
-        delivered: false,
-        read: false,
-        status: 'pending'
-      })),
-      recipientCount: recipientEmails.length,
-      deliveredCount: 0,
-      readCount: 0,
-      status: 'sending',
-      sentBy: req.admin._id,
-      sentByEmail: req.admin.email,
-      createdAt: new Date().toISOString(),
-      trackDelivery: trackDelivery || false
-    };
+    // Send emails (with tracking pixel if enabled)
+    let sentCount = 0;
+    let failedCount = 0;
 
-    // Store in Redis
-    await redis.setex(`email_history:${emailHistoryId}`, 86400 * 30, JSON.stringify(emailRecord));
-    await redis.lpush('email_history_list', emailHistoryId.toString());
-    await redis.ltrim('email_history_list', 0, 999);
-
-    // Send emails asynchronously
-    setImmediate(async () => {
-      let delivered = 0;
-
-      for (const recipient of recipientEmails) {
-        try {
-          let personalizedContent = content;
-          if (type === 'html') {
-            personalizedContent = content.replace(/{{name}}/g, recipient.name);
-          } else {
-            personalizedContent = content.replace(/{{name}}/g, recipient.name);
-          }
-
-          const trackingPixel = trackDelivery ? `<img src="https://bithash-backend-kg7j.onrender.com/api/email/track/${emailHistoryId}/${Buffer.from(recipient.email).toString('base64')}" width="1" height="1" style="display:none;">` : '';
-
-          const htmlContent = type === 'html'
-            ? `
-              <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto;">
-                <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-                  <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 50px; height: 50px; margin-bottom: 10px;">
-                  <h1 style="color: #F7A600; font-size: 24px; margin: 0;">₿itHash Capital</h1>
-                  <p style="color: #B7BDC6; font-size: 12px;">Institutional Bitcoin Mining</p>
-                </div>
-                <div style="padding: 20px; background: #FFFFFF;">
-                  ${personalizedContent}
-                </div>
-                <div style="text-align: center; padding: 20px; background: #0B0E11;">
-                  <p style="color: #6C7480; font-size: 11px;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-                  <p style="color: #6C7480; font-size: 11px;">800 Plant St, Wilmington, DE 19801, United States</p>
-                  <p style="color: #6C7480; font-size: 11px;">
-                    <a href="mailto:support@bithashcapital.live" style="color: #F7A600;">support@bithashcapital.live</a>
-                  </p>
-                </div>
-                ${trackingPixel}
-              </div>
-            `
-            : personalizedContent;
-
-          await sendProfessionalEmail({
-            email: recipient.email,
-            template: 'default',
-            data: {
-              name: recipient.name,
-              message: type === 'html' ? '' : personalizedContent,
-              details: type === 'html' ? personalizedContent : '',
-              buttonText: 'View Dashboard',
-              actionLink: 'https://www.bithashcapital.live/dashboard'
-            }
-          });
-
-          delivered++;
-
-          // Update Redis with delivery status
-          const storedEmail = await redis.get(`email_history:${emailHistoryId}`);
-          if (storedEmail) {
-            const emailData = JSON.parse(storedEmail);
-            const recipientIndex = emailData.recipients.findIndex(r => r.email === recipient.email);
-            if (recipientIndex !== -1) {
-              emailData.recipients[recipientIndex].delivered = true;
-              emailData.recipients[recipientIndex].status = 'delivered';
-              emailData.recipients[recipientIndex].deliveredAt = new Date().toISOString();
-              emailData.deliveredCount = delivered;
-              await redis.setex(`email_history:${emailHistoryId}`, 86400 * 30, JSON.stringify(emailData));
-            }
-          }
-
-          await new Promise(resolve => setTimeout(resolve, 500));
-        } catch (err) {
-          console.error(`Failed to send email to ${recipient.email}:`, err);
+    for (const recipient of emailRecipients) {
+      try {
+        // Use the HTML content directly from frontend (no template modification)
+        let emailHtml = content;
+        
+        // Add tracking pixel if enabled
+        if (trackDelivery) {
+          const trackingPixel = `<img src="https://bithash-backend-kg7j.onrender.com/api/email/track/${Date.now()}/${Buffer.from(recipient.email).toString('base64')}" width="1" height="1" style="display:none;">`;
+          emailHtml = emailHtml.replace('</body>', `${trackingPixel}</body>`);
         }
-      }
 
-      // Update final status
-      const storedEmail = await redis.get(`email_history:${emailHistoryId}`);
-      if (storedEmail) {
-        const emailData = JSON.parse(storedEmail);
-        emailData.status = delivered === recipientEmails.length ? 'sent' : (delivered > 0 ? 'partial' : 'failed');
-        await redis.setex(`email_history:${emailHistoryId}`, 86400 * 30, JSON.stringify(emailData));
+        // Send email using nodemailer directly (not through template system)
+        const mailOptions = {
+          from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
+          to: recipient.email,
+          subject: subject,
+          html: emailHtml
+        };
+
+        await infoTransporter.sendMail(mailOptions);
+        sentCount++;
+        console.log(`✅ Email sent to ${recipient.email}`);
+
+        // Small delay to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 200));
+      } catch (err) {
+        failedCount++;
+        console.error(`❌ Failed to send to ${recipient.email}:`, err.message);
       }
-    });
+    }
+
+    // Log the activity
+    await logActivity(
+      'email_marketing_sent',
+      'Email',
+      null,
+      req.admin._id,
+      'Admin',
+      req,
+      {
+        subject: subject,
+        recipientCount: emailRecipients.length,
+        sentCount: sentCount,
+        failedCount: failedCount,
+        trackDelivery: trackDelivery
+      }
+    );
 
     res.status(200).json({
       status: 'success',
-      message: `Email sending initiated to ${recipientEmails.length} recipient(s)`,
+      message: `Email sent to ${sentCount} recipient(s)`,
       data: {
-        emailId: emailHistoryId,
-        recipientCount: recipientEmails.length
+        sentCount: sentCount,
+        failedCount: failedCount,
+        totalRecipients: emailRecipients.length
       }
     });
 
@@ -27271,6 +27222,15 @@ app.post('/api/admin/send-email', adminProtect, async (req, res) => {
     });
   }
 });
+
+
+
+
+
+
+
+
+
 
 // =============================================
 // TRACK EMAIL OPEN (Pixel tracking)
