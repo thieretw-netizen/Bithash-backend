@@ -27088,19 +27088,32 @@ app.delete('/api/admin/email-templates/:id', adminProtect, async (req, res) => {
 
 
 // =============================================
-// SEND EMAIL ENDPOINT - For Email Marketing (NO backend templates)
+// SEND EMAIL ENDPOINT - EXACT MATCH for admin.html
 // =============================================
 app.post('/api/admin/send-email', adminProtect, async (req, res) => {
   try {
-    const { subject, content, recipients, trackDelivery } = req.body;
+    const { 
+      subject, 
+      content, 
+      type, 
+      recipients, 
+      trackDelivery, 
+      saveAsTemplate, 
+      templateName 
+    } = req.body;
 
     console.log('📧 SEND EMAIL REQUEST:', { 
       subject, 
       contentLength: content?.length,
-      recipientCount: recipients?.length,
-      trackDelivery
+      type,
+      recipientsLength: recipients?.length,
+      recipients: recipients,
+      trackDelivery,
+      saveAsTemplate,
+      templateName
     });
 
+    // Validation
     if (!subject || !content) {
       return res.status(400).json({
         status: 'fail',
@@ -27108,66 +27121,65 @@ app.post('/api/admin/send-email', adminProtect, async (req, res) => {
       });
     }
 
-    let emailRecipients = [];
+    // Determine recipients
+    let emailList = [];
 
-    // Handle recipients array - could be empty (all users), user IDs, or email addresses
+    // Case 1: Empty array means send to ALL investors
     if (!recipients || recipients.length === 0) {
-      // Send to ALL active users
       const users = await User.find({ status: 'active' }).select('email firstName lastName');
-      emailRecipients = users.map(user => ({
+      emailList = users.map(user => ({
         email: user.email,
         name: `${user.firstName} ${user.lastName}`,
         userId: user._id
       }));
-      console.log(`📧 Sending to ALL users: ${emailRecipients.length} recipients`);
+      console.log(`📧 Sending to ALL active users: ${emailList.length} recipients`);
     } 
+    // Case 2: First item contains @ symbol - manual email addresses
     else if (recipients[0] && recipients[0].includes('@')) {
-      // Manual email addresses
-      emailRecipients = recipients.map(email => ({
+      emailList = recipients.map(email => ({
         email: email,
         name: email.split('@')[0],
         userId: null
       }));
-      console.log(`📧 Sending to manual emails: ${emailRecipients.length} recipients`);
+      console.log(`📧 Sending to manual emails: ${emailList.length} recipients`);
     }
+    // Case 3: Array of user IDs
     else {
-      // Specific user IDs
       for (const userId of recipients) {
         const user = await User.findById(userId).select('email firstName lastName');
         if (user) {
-          emailRecipients.push({
+          emailList.push({
             email: user.email,
             name: `${user.firstName} ${user.lastName}`,
             userId: user._id
           });
         }
       }
-      console.log(`📧 Sending to specific users: ${emailRecipients.length} recipients`);
+      console.log(`📧 Sending to ${emailList.length} specific users`);
     }
 
-    if (emailRecipients.length === 0) {
+    if (emailList.length === 0) {
       return res.status(400).json({
         status: 'fail',
         message: 'No valid recipients found'
       });
     }
 
-    // Send emails (with tracking pixel if enabled)
+    // Send emails
     let sentCount = 0;
-    let failedCount = 0;
+    let failedCount = [];
 
-    for (const recipient of emailRecipients) {
+    for (const recipient of emailList) {
       try {
-        // Use the HTML content directly from frontend (no template modification)
+        // Prepare email HTML with tracking if enabled
         let emailHtml = content;
         
-        // Add tracking pixel if enabled
         if (trackDelivery) {
-          const trackingPixel = `<img src="https://bithash-backend-kg7j.onrender.com/api/email/track/${Date.now()}/${Buffer.from(recipient.email).toString('base64')}" width="1" height="1" style="display:none;">`;
-          emailHtml = emailHtml.replace('</body>', `${trackingPixel}</body>`);
+          const trackingId = Buffer.from(`${recipient.email}:${Date.now()}`).toString('base64');
+          const trackingPixel = `<img src="https://bithash-backend-kg7j.onrender.com/api/email/track/${trackingId}" width="1" height="1" style="display:none;" />`;
+          emailHtml = emailHtml + trackingPixel;
         }
 
-        // Send email using nodemailer directly (not through template system)
         const mailOptions = {
           from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
           to: recipient.email,
@@ -27182,12 +27194,35 @@ app.post('/api/admin/send-email', adminProtect, async (req, res) => {
         // Small delay to avoid rate limiting
         await new Promise(resolve => setTimeout(resolve, 200));
       } catch (err) {
-        failedCount++;
+        failedCount.push(recipient.email);
         console.error(`❌ Failed to send to ${recipient.email}:`, err.message);
       }
     }
 
-    // Log the activity
+    // Save as template if requested
+    if (saveAsTemplate && templateName) {
+      try {
+        const templateId = new mongoose.Types.ObjectId();
+        const template = {
+          _id: templateId,
+          name: templateName,
+          subject: subject,
+          content: content,
+          type: type || 'plain',
+          createdBy: req.admin._id,
+          createdByEmail: req.admin.email,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        };
+        await redis.setex(`email_template:${templateId}`, 86400 * 90, JSON.stringify(template));
+        await redis.lpush('email_templates_list', templateId.toString());
+        console.log(`💾 Template saved: ${templateName}`);
+      } catch (templateErr) {
+        console.error('Failed to save template:', templateErr);
+      }
+    }
+
+    // Log activity
     await logActivity(
       'email_marketing_sent',
       'Email',
@@ -27197,20 +27232,22 @@ app.post('/api/admin/send-email', adminProtect, async (req, res) => {
       req,
       {
         subject: subject,
-        recipientCount: emailRecipients.length,
+        recipientCount: emailList.length,
         sentCount: sentCount,
-        failedCount: failedCount,
-        trackDelivery: trackDelivery
+        failedCount: failedCount.length,
+        trackDelivery: trackDelivery,
+        saveAsTemplate: saveAsTemplate
       }
     );
 
+    // Return success response matching frontend expectations
     res.status(200).json({
       status: 'success',
       message: `Email sent to ${sentCount} recipient(s)`,
       data: {
         sentCount: sentCount,
-        failedCount: failedCount,
-        totalRecipients: emailRecipients.length
+        failedCount: failedCount.length,
+        totalRecipients: emailList.length
       }
     });
 
@@ -27222,7 +27259,6 @@ app.post('/api/admin/send-email', adminProtect, async (req, res) => {
     });
   }
 });
-
 
 
 
