@@ -8034,8 +8034,12 @@ const investment = await Investment.create({
                   <td style="padding: 8px 0; text-align: right;">${formattedInvestmentBTC} BTC</td>
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
-                  <td style="padding: 8px 0;"><strong>Expected Return:</strong></td>
+                  <td style="padding: 8px 0;"><strong>Expected Return (Gross):</strong></td>
                   <td style="padding: 8px 0; text-align: right; font-weight: bold; color: #10B981;">+ ${formattedExpectedReturnBTC} BTC (≈ $${formattedExpectedReturnUSD} USD)</td>
+                </tr>
+                <tr style="border-top: 1px solid #E2E8F0;">
+                  <td style="padding: 8px 0;"><strong>Net Profit (Return - Investment):</strong></td>
+                  <td style="padding: 8px 0; text-align: right; font-weight: bold; color: #10B981;">+ ${(expectedReturnBTC - investmentAmountAfterFeeBTC).toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 })} BTC (≈ $${(expectedReturnUSD - investmentAmountAfterFeeUSD).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD)</td>
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>ROI Percentage:</strong></td>
@@ -8127,6 +8131,8 @@ const investment = await Investment.create({
           investmentFeeBTC: investmentFeeBTC,
           expectedReturnUSD: investment.expectedReturn,
           expectedReturnBTC: investment.expectedReturnBTC,
+          netProfitUSD: expectedReturnUSD - investmentAmountAfterFeeUSD,
+          netProfitBTC: expectedReturnBTC - investmentAmountAfterFeeBTC,
           endDate: investment.endDate,
           status: investment.status,
           balanceType: balanceType,
@@ -8651,11 +8657,11 @@ const completeMaturedInvestmentsCron = async () => {
                         <td style="padding: 8px 0; text-align: right;">${formattedPrincipalBTC} BTC (≈ $${formattedPrincipalUSD} USD)</td>
                       </tr>
                       <tr style="border-top: 1px solid #E2E8F0;">
-                        <td style="padding: 8px 0;"><strong>Total Return:</strong></td>
+                        <td style="padding: 8px 0;"><strong>Total Return (Gross):</strong></td>
                         <td style="padding: 8px 0; text-align: right; font-weight: bold; color: #10B981;">+ ${formattedReturnBTC} BTC (≈ $${formattedReturnUSD} USD)</td>
                       </tr>
                       <tr style="border-top: 1px solid #E2E8F0;">
-                        <td style="padding: 8px 0;"><strong>Profit Earned:</strong></td>
+                        <td style="padding: 8px 0;"><strong>Net Profit Earned:</strong></td>
                         <td style="padding: 8px 0; text-align: right; color: #10B981;">+ ${formattedProfitBTC} BTC (≈ $${formattedProfitUSD} USD)</td>
                       </tr>
                       <tr style="border-top: 1px solid #E2E8F0;">
@@ -8810,7 +8816,6 @@ cron.schedule('*/10 * * * * *', async () => {
 console.log('🚀 Investment maturity cron job scheduled to run EVERY 10 SECONDS');
 console.log('📊 The system will log which users have matured investments at each check');
 console.log('⏰ First check will run immediately when the schedule triggers\n');
-
 
 
 
