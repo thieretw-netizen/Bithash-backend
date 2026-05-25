@@ -5851,7 +5851,7 @@ const sendProfessionalEmail = async ({ email, template, data, useSupportEmail = 
               <p style="color: #333333; line-height: 1.6;">You have received a crypto deposit from ₿itHash Capital Secure Asset Fund (BCSAF).</p>
               <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
                 <table style="width: 100%; border-collapse: collapse;">
-                  <table>
+                  <tr>
                     <td style="padding: 8px 0;"><strong>Cryptocurrency:</strong></td>
                     <td style="padding: 8px 0; text-align: right;">
                       <img src="${data.cryptoLogoUrl}" alt="${data.currency}" style="width: 20px; height: 20px; vertical-align: middle; margin-right: 5px;">
@@ -6345,7 +6345,7 @@ const sendProfessionalEmail = async ({ email, template, data, useSupportEmail = 
         break;
 
       default:
-        subject = 'Important Account Update - ₿itHash Capital';
+        subject = data.subject || 'Important Account Update - ₿itHash Capital';
         html = `
           <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
             ${brandHeader}
@@ -6355,7 +6355,7 @@ const sendProfessionalEmail = async ({ email, template, data, useSupportEmail = 
                   <path d="M12 8V12M12 16H12.01M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="#F7A600" stroke-width="2" stroke-linecap="round"/>
                 </svg>
                 <h2 style="color: #0B0E11; font-size: 20px; margin: 0 0 8px 0;">Account Update Notification</h2>
-                <p style="color: #6C7480; font-size: 14px; margin: 0;">Action Required / Information</p>
+                <p style="color: #6C7480; font-size: 14px; margin: 0;">${data.notificationType || 'Information'}</p>
               </div>
               
               <p style="color: #333333; line-height: 1.6;">Dear <strong>${data.name || 'Valued Customer'}</strong>,</p>
@@ -6466,6 +6466,7 @@ const sendProfessionalEmail = async ({ email, template, data, useSupportEmail = 
           template: 'default',
           data: {
             name: user.firstName || 'Valued Customer',
+            subject: actionConfig.subject,
             message: actionConfig.message,
             details: details?.description || details?.reason || JSON.stringify(details, null, 2),
             actionRequired: actionRequired,
@@ -6563,7 +6564,6 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
     return false;
   }
 };
-
 
 
 
