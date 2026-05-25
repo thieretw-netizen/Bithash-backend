@@ -8047,7 +8047,7 @@ const investment = await Investment.create({
                   <td style="padding: 8px 0; text-align: right; font-weight: bold; color: #10B981;">+ ${formattedExpectedReturnBTC} BTC (≈ $${formattedExpectedReturnUSD} USD)</td>
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
-                  <td style="padding: 8px 0;"><strong>Net Profit (Return - Investment):</strong></td>
+                  <td style="padding: 8px 0;"><strong>Net Profit Expected :</strong></td>
                   <td style="padding: 8px 0; text-align: right; font-weight: bold; color: #10B981;">+ ${formattedNetProfitBTC} BTC (≈ $${formattedNetProfitUSD} USD)</td>
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
