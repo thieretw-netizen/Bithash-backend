@@ -8123,7 +8123,7 @@ const investment = await Investment.create({
       await mailTransporter.sendMail({
         from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
         to: user.email,
-        subject: `Mining Contract Activated - ₿itHash Capital`,
+        subject: ` ✅ Mining Contract Activated  - ₿itHash Capital`,
         html: emailHtml
       });
       
