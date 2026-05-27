@@ -17569,6 +17569,9 @@ app.get('/api/assets/portfolio', protect, async (req, res) => {
 
 
 
+
+
+
 // =============================================
 // GET /api/transactions - User Transaction History
 // =============================================
@@ -17653,6 +17656,47 @@ app.get('/api/transactions', protect, async (req, res) => {
       xtz: 'https://assets.coingecko.com/coins/images/976/large/Tezos-logo.png'
     };
 
+    // Network mapping based on your backend deposit addresses
+    const getNetworkName = (asset, method, details) => {
+      const assetLower = (asset || '').toLowerCase();
+      const methodLower = (method || '').toLowerCase();
+      
+      // BTC
+      if (assetLower === 'btc' || methodLower === 'btc') return 'Bitcoin';
+      
+      // ETH and ERC20 tokens
+      if (assetLower === 'eth' || methodLower === 'eth') return 'Ethereum (ERC20)';
+      if (assetLower === 'usdt' || methodLower === 'usdt') return 'Ethereum (ERC20)';
+      if (assetLower === 'usdc' || methodLower === 'usdc') return 'Ethereum (ERC20)';
+      if (assetLower === 'shib' || methodLower === 'shib') return 'Ethereum (ERC20)';
+      if (assetLower === 'link' || methodLower === 'link') return 'Ethereum (ERC20)';
+      if (assetLower === 'matic' || methodLower === 'matic') return 'Polygon (MATIC)';
+      
+      // BNB BEP20
+      if (assetLower === 'bnb' || methodLower === 'bnb') return 'BSC (BEP20)';
+      
+      // Solana
+      if (assetLower === 'sol' || methodLower === 'sol') return 'Solana';
+      
+      // XRP
+      if (assetLower === 'xrp' || methodLower === 'xrp') return 'XRP Ledger';
+      
+      // Dogecoin
+      if (assetLower === 'doge' || methodLower === 'doge') return 'Dogecoin';
+      
+      // TRON TRC20
+      if (assetLower === 'trx' || methodLower === 'trx') return 'TRON (TRC20)';
+      
+      // Litecoin
+      if (assetLower === 'ltc' || methodLower === 'ltc') return 'Litecoin';
+      
+      // Cardano
+      if (assetLower === 'ada' || methodLower === 'ada') return 'Cardano';
+      
+      // Default
+      return details?.network || 'Blockchain';
+    };
+
     // Format transactions for frontend
     const formattedTransactions = transactions.map(t => {
       // Determine asset symbol - PRIORITIZE actual asset field, NOT method
@@ -17695,44 +17739,83 @@ app.get('/api/transactions', protect, async (req, res) => {
 
       // Get method (for display purposes only, not as asset)
       const method = t.method && typeof t.method === 'string' ? t.method.toLowerCase() : 'crypto';
+      
+      // Get network for this transaction
+      const network = getNetworkName(t.asset, t.method, t.details);
 
-      // Generate accurate description based on transaction type
+      // Calculate BTC value at time of transaction (for investment type)
+      let btcValueAtActivity = null;
+      if (type === 'investment' && t.exchangeRateAtTime) {
+        btcValueAtActivity = amount / t.exchangeRateAtTime;
+      } else if (type === 'investment' && t.details?.btcPriceAtInvestment) {
+        btcValueAtActivity = amount / t.details.btcPriceAtInvestment;
+      }
+
+      // Generate accurate description based on transaction type and network
       let description = '';
 
       if (type === 'deposit') {
-        if (method === 'btc' || method === 'bitcoin') {
-          description = `Deposit of ${assetAmount.toFixed(8)} BTC ($${amount.toFixed(2)}) via Bitcoin network.`;
-        } else if (method === 'eth' || method === 'ethereum') {
-          description = `Deposit of ${assetAmount.toFixed(8)} ETH ($${amount.toFixed(2)}) via Ethereum network.`;
-        } else if (method === 'usdt') {
-          description = `Deposit of ${assetAmount.toFixed(2)} USDT ($${amount.toFixed(2)}) completed.`;
+        if (assetSymbol === 'btc') {
+          description = `Bitcoin deposit: ${assetAmount.toFixed(8)} BTC ($${amount.toFixed(2)}) received via Bitcoin network.`;
+        } else if (assetSymbol === 'eth') {
+          description = `Ethereum deposit: ${assetAmount.toFixed(8)} ETH ($${amount.toFixed(2)}) received via ERC20 on Ethereum network.`;
+        } else if (assetSymbol === 'usdt') {
+          description = `Tether deposit: ${assetAmount.toFixed(2)} USDT ($${amount.toFixed(2)}) received via ERC20 on Ethereum network.`;
+        } else if (assetSymbol === 'usdc') {
+          description = `USD Coin deposit: ${assetAmount.toFixed(2)} USDC ($${amount.toFixed(2)}) received via ERC20 on Ethereum network.`;
+        } else if (assetSymbol === 'bnb') {
+          description = `Binance Coin deposit: ${assetAmount.toFixed(8)} BNB ($${amount.toFixed(2)}) received via BEP20 on BSC network.`;
+        } else if (assetSymbol === 'sol') {
+          description = `Solana deposit: ${assetAmount.toFixed(8)} SOL ($${amount.toFixed(2)}) received on Solana blockchain.`;
+        } else if (assetSymbol === 'xrp') {
+          description = `Ripple deposit: ${assetAmount.toFixed(6)} XRP ($${amount.toFixed(2)}) received on XRP Ledger.`;
+        } else if (assetSymbol === 'doge') {
+          description = `Dogecoin deposit: ${assetAmount.toFixed(8)} DOGE ($${amount.toFixed(2)}) received on Dogecoin network.`;
+        } else if (assetSymbol === 'trx') {
+          description = `TRON deposit: ${assetAmount.toFixed(6)} TRX ($${amount.toFixed(2)}) received via TRC20 on TRON network.`;
+        } else if (assetSymbol === 'ltc') {
+          description = `Litecoin deposit: ${assetAmount.toFixed(8)} LTC ($${amount.toFixed(2)}) received on Litecoin network.`;
         } else if (method === 'card') {
-          description = `Deposit of $${amount.toFixed(2)} via Credit/Debit Card.`;
+          description = `Card payment: $${amount.toFixed(2)} processed via credit/debit card.`;
         } else if (method === 'bank') {
-          description = `Deposit of $${amount.toFixed(2)} via Bank Transfer.`;
+          description = `Bank transfer: $${amount.toFixed(2)} received via wire transfer.`;
         } else {
-          description = `Deposit of $${amount.toFixed(2)} (${assetAmount.toFixed(8)} ${assetSymbol.toUpperCase()}) completed.`;
+          description = `Crypto deposit: ${assetAmount.toFixed(8)} ${assetSymbol.toUpperCase()} ($${amount.toFixed(2)}) received on ${network}.`;
         }
       } 
       else if (type === 'withdrawal') {
-        if (method === 'btc' || method === 'bitcoin') {
-          description = `Withdrawal of ${assetAmount.toFixed(8)} BTC ($${amount.toFixed(2)}) to external wallet.`;
-        } else if (method === 'eth' || method === 'ethereum') {
-          description = `Withdrawal of ${assetAmount.toFixed(8)} ETH ($${amount.toFixed(2)}) to external wallet.`;
-        } else if (method === 'usdt') {
-          description = `Withdrawal of ${assetAmount.toFixed(2)} USDT ($${amount.toFixed(2)}) to external wallet.`;
+        if (assetSymbol === 'btc') {
+          description = `Bitcoin withdrawal: ${assetAmount.toFixed(8)} BTC ($${amount.toFixed(2)}) sent to external wallet on Bitcoin network.`;
+        } else if (assetSymbol === 'eth') {
+          description = `Ethereum withdrawal: ${assetAmount.toFixed(8)} ETH ($${amount.toFixed(2)}) sent via ERC20 to external address.`;
+        } else if (assetSymbol === 'usdt') {
+          description = `Tether withdrawal: ${assetAmount.toFixed(2)} USDT ($${amount.toFixed(2)}) sent via ERC20 to external wallet.`;
+        } else if (assetSymbol === 'usdc') {
+          description = `USD Coin withdrawal: ${assetAmount.toFixed(2)} USDC ($${amount.toFixed(2)}) sent via ERC20 to external address.`;
+        } else if (assetSymbol === 'bnb') {
+          description = `Binance Coin withdrawal: ${assetAmount.toFixed(8)} BNB ($${amount.toFixed(2)}) sent via BEP20 on BSC.`;
+        } else if (assetSymbol === 'sol') {
+          description = `Solana withdrawal: ${assetAmount.toFixed(8)} SOL ($${amount.toFixed(2)}) sent on Solana blockchain.`;
+        } else if (assetSymbol === 'xrp') {
+          description = `Ripple withdrawal: ${assetAmount.toFixed(6)} XRP ($${amount.toFixed(2)}) sent on XRP Ledger.`;
+        } else if (assetSymbol === 'doge') {
+          description = `Dogecoin withdrawal: ${assetAmount.toFixed(8)} DOGE ($${amount.toFixed(2)}) sent on Dogecoin network.`;
+        } else if (assetSymbol === 'trx') {
+          description = `TRON withdrawal: ${assetAmount.toFixed(6)} TRX ($${amount.toFixed(2)}) sent via TRC20 on TRON.`;
+        } else if (assetSymbol === 'ltc') {
+          description = `Litecoin withdrawal: ${assetAmount.toFixed(8)} LTC ($${amount.toFixed(2)}) sent on Litecoin network.`;
         } else if (method === 'bank') {
-          description = `Withdrawal of $${amount.toFixed(2)} to bank account.`;
+          description = `Bank withdrawal: $${amount.toFixed(2)} transferred to linked bank account.`;
         } else {
-          description = `Withdrawal of $${amount.toFixed(2)} (${assetAmount.toFixed(8)} ${assetSymbol.toUpperCase()}) processed.`;
+          description = `Crypto withdrawal: ${assetAmount.toFixed(8)} ${assetSymbol.toUpperCase()} ($${amount.toFixed(2)}) sent on ${network}.`;
         }
       } 
       else if (type === 'buy') {
         if (t.buyDetails && t.buyDetails.price) {
           const price = parseFloat(t.buyDetails.price);
-          description = `Purchased ${assetAmount.toFixed(8)} ${assetSymbol.toUpperCase()} for $${amount.toFixed(2)} at $${price.toFixed(2)} per coin.`;
+          description = `Market buy: Purchased ${assetAmount.toFixed(8)} ${assetSymbol.toUpperCase()} for $${amount.toFixed(2)} at $${price.toFixed(2)} per coin via spot trading.`;
         } else {
-          description = `Purchased ${assetAmount.toFixed(8)} ${assetSymbol.toUpperCase()} for $${amount.toFixed(2)}.`;
+          description = `Spot purchase: Acquired ${assetAmount.toFixed(8)} ${assetSymbol.toUpperCase()} for $${amount.toFixed(2)} on exchange.`;
         }
       } 
       else if (type === 'sell') {
@@ -17742,46 +17825,54 @@ app.get('/api/transactions', protect, async (req, res) => {
           const loss = t.sellDetails.loss ? parseFloat(t.sellDetails.loss) : 0;
           
           if (profit > 0) {
-            description = `Sold ${assetAmount.toFixed(8)} ${assetSymbol.toUpperCase()} for $${amount.toFixed(2)} at $${price.toFixed(2)}. Profit: +$${profit.toFixed(2)}.`;
+            description = `Limit sell: Sold ${assetAmount.toFixed(8)} ${assetSymbol.toUpperCase()} for $${amount.toFixed(2)} at $${price.toFixed(2)}. Profit: +$${profit.toFixed(2)}.`;
           } else if (loss > 0) {
-            description = `Sold ${assetAmount.toFixed(8)} ${assetSymbol.toUpperCase()} for $${amount.toFixed(2)} at $${price.toFixed(2)}. Loss: -$${loss.toFixed(2)}.`;
+            description = `Market sell: Sold ${assetAmount.toFixed(8)} ${assetSymbol.toUpperCase()} for $${amount.toFixed(2)} at $${price.toFixed(2)}. Loss: -$${loss.toFixed(2)}.`;
           } else {
-            description = `Sold ${assetAmount.toFixed(8)} ${assetSymbol.toUpperCase()} for $${amount.toFixed(2)} at $${price.toFixed(2)}.`;
+            description = `Spot sell: Sold ${assetAmount.toFixed(8)} ${assetSymbol.toUpperCase()} for $${amount.toFixed(2)} at $${price.toFixed(2)} per coin.`;
           }
         } else {
-          description = `Sold ${assetAmount.toFixed(8)} ${assetSymbol.toUpperCase()} for $${amount.toFixed(2)}.`;
+          description = `Trade execution: Sold ${assetAmount.toFixed(8)} ${assetSymbol.toUpperCase()} for $${amount.toFixed(2)}.`;
         }
       } 
       else if (type === 'interest') {
         if (t.details && t.details.planName) {
-          description = `Interest earned of $${amount.toFixed(2)} from ${t.details.planName} mining contract.`;
+          description = `Mining reward: $${amount.toFixed(2)} earned from ${t.details.planName} cloud mining contract.`;
         } else {
-          description = `Interest payment of $${amount.toFixed(2)} from cloud mining.`;
+          description = `Staking yield: $${amount.toFixed(2)} generated from active mining position.`;
         }
       } 
       else if (type === 'referral') {
         if (t.details && t.details.downlineName) {
-          description = `Referral bonus of $${amount.toFixed(2)} earned from ${t.details.downlineName}'s investment.`;
+          description = `Referral commission: $${amount.toFixed(2)} earned from ${t.details.downlineName}'s investment.`;
         } else {
-          description = `Referral bonus of $${amount.toFixed(2)} credited to account.`;
+          description = `Affiliate reward: $${amount.toFixed(2)} credited from referral activity.`;
         }
       } 
       else if (type === 'transfer') {
         if (t.details && t.details.from && t.details.to) {
-          description = `Transfer of $${amount.toFixed(2)} from ${t.details.from} to ${t.details.to} balance.`;
+          description = `Internal transfer: $${amount.toFixed(2)} moved from ${t.details.from} to ${t.details.to} wallet.`;
         } else {
-          description = `Internal transfer of $${amount.toFixed(2)} completed.`;
+          description = `Wallet transfer: $${amount.toFixed(2)} transferred between internal wallets.`;
         }
       } 
       else if (type === 'investment') {
         if (t.details && t.details.planName) {
-          description = `New investment of $${amount.toFixed(2)} in ${t.details.planName} started.`;
+          if (btcValueAtActivity) {
+            description = `Mining contract activation: $${amount.toFixed(2)} (≈ ${btcValueAtActivity.toFixed(8)} BTC at activation) allocated to ${t.details.planName} hashrate pool.`;
+          } else {
+            description = `Cloud mining investment: $${amount.toFixed(2)} activated in ${t.details.planName} contract.`;
+          }
         } else {
-          description = `Investment of $${amount.toFixed(2)} activated.`;
+          if (btcValueAtActivity) {
+            description = `Hashrate purchase: $${amount.toFixed(2)} (≈ ${btcValueAtActivity.toFixed(8)} BTC at execution) added to mining pool.`;
+          } else {
+            description = `Investment deposit: $${amount.toFixed(2)} allocated to mining contract.`;
+          }
         }
       } 
       else {
-        description = `Transaction of $${amount.toFixed(2)} processed.`;
+        description = `Transaction: $${amount.toFixed(2)} processed.`;
       }
 
       // Ensure description is ALWAYS a string
@@ -17800,16 +17891,17 @@ app.get('/api/transactions', protect, async (req, res) => {
         _id: t._id ? t._id.toString() : `tx-${Date.now()}`,
         type: type,
         amount: amount,
-        asset: assetSymbol, // This will NEVER be 'internal' now
+        asset: assetSymbol,
         assetAmount: assetAmount,
         status: status,
-        method: method, // Keep method separate for reference
+        method: method,
         reference: t.reference && typeof t.reference === 'string' ? t.reference : '',
         fee: t.fee ? parseFloat(t.fee) : 0,
         netAmount: t.netAmount ? parseFloat(t.netAmount) : amount,
         btcAddress: t.btcAddress && typeof t.btcAddress === 'string' ? t.btcAddress : '',
-        network: t.network && typeof t.network === 'string' ? t.network : 'Blockchain',
-        exchangeRateAtTime: t.exchangeRateAtTime ? parseFloat(t.exchangeRateAtTime) : 1,
+        network: network,
+        exchangeRateAtTime: t.exchangeRateAtTime ? parseFloat(t.exchangeRateAtTime) : null,
+        btcValueAtActivity: btcValueAtActivity,
         description: description,
         details: description,
         buyDetails: t.buyDetails || null,
@@ -17855,10 +17947,298 @@ app.get('/api/transactions', protect, async (req, res) => {
   }
 });
 
+// =============================================
+// GET /api/transactions/:id - Single Transaction Details
+// =============================================
+app.get('/api/transactions/:id', protect, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const transactionId = req.params.id;
 
+    // Validate transaction ID format
+    if (!mongoose.Types.ObjectId.isValid(transactionId)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid transaction ID format'
+      });
+    }
 
+    // Find the transaction and ensure it belongs to the authenticated user
+    const transaction = await Transaction.findOne({
+      _id: transactionId,
+      user: userId
+    }).lean();
 
+    if (!transaction) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Transaction not found'
+      });
+    }
 
+    // Asset logo mapping
+    const assetLogos = {
+      btc: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png',
+      eth: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png',
+      usdt: 'https://assets.coingecko.com/coins/images/325/large/Tether.png',
+      bnb: 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png',
+      sol: 'https://assets.coingecko.com/coins/images/4128/large/solana.png',
+      usdc: 'https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png',
+      xrp: 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png',
+      doge: 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png',
+      ada: 'https://assets.coingecko.com/coins/images/975/large/cardano.png',
+      shib: 'https://assets.coingecko.com/coins/images/11939/large/shiba.png',
+      avax: 'https://assets.coingecko.com/coins/images/12559/large/Avalanche_Circle_RedWhite.png',
+      dot: 'https://assets.coingecko.com/coins/images/12171/large/polkadot.png',
+      trx: 'https://assets.coingecko.com/coins/images/1094/large/tron-logo.png',
+      link: 'https://assets.coingecko.com/coins/images/877/large/chainlink-new-logo.png',
+      matic: 'https://assets.coingecko.com/coins/images/4713/large/matic-token-icon.png',
+      wbtc: 'https://assets.coingecko.com/coins/images/7598/large/wrapped_bitcoin_wbtc.png',
+      ltc: 'https://assets.coingecko.com/coins/images/2/large/litecoin.png',
+      near: 'https://assets.coingecko.com/coins/images/10365/large/near_icon.png',
+      uni: 'https://assets.coingecko.com/coins/images/12504/large/uni.jpg',
+      bch: 'https://assets.coingecko.com/coins/images/780/large/bitcoin-cash-circle.png',
+      xlm: 'https://assets.coingecko.com/coins/images/100/large/Stellar_symbol_black_RGB.png',
+      atom: 'https://assets.coingecko.com/coins/images/1481/large/cosmos_hub.png',
+      xmr: 'https://assets.coingecko.com/coins/images/69/large/monero_logo.png',
+      flow: 'https://assets.coingecko.com/coins/images/13446/large/5f6294c0c7a8cda55cb1.png',
+      vet: 'https://assets.coingecko.com/coins/images/1167/large/VET_Token_Icon.png',
+      fil: 'https://assets.coingecko.com/coins/images/12817/large/filecoin.png',
+      theta: 'https://assets.coingecko.com/coins/images/2538/large/theta-token-logo.png',
+      hbar: 'https://assets.coingecko.com/coins/images/3688/large/hbar.png',
+      ftm: 'https://assets.coingecko.com/coins/images/4001/large/Fantom_round.png',
+      xtz: 'https://assets.coingecko.com/coins/images/976/large/Tezos-logo.png'
+    };
+
+    // Network mapping function (same as above)
+    const getNetworkName = (asset, method, details) => {
+      const assetLower = (asset || '').toLowerCase();
+      const methodLower = (method || '').toLowerCase();
+      
+      if (assetLower === 'btc' || methodLower === 'btc') return 'Bitcoin';
+      if (assetLower === 'eth' || methodLower === 'eth') return 'Ethereum (ERC20)';
+      if (assetLower === 'usdt' || methodLower === 'usdt') return 'Ethereum (ERC20)';
+      if (assetLower === 'usdc' || methodLower === 'usdc') return 'Ethereum (ERC20)';
+      if (assetLower === 'shib' || methodLower === 'shib') return 'Ethereum (ERC20)';
+      if (assetLower === 'link' || methodLower === 'link') return 'Ethereum (ERC20)';
+      if (assetLower === 'matic' || methodLower === 'matic') return 'Polygon (MATIC)';
+      if (assetLower === 'bnb' || methodLower === 'bnb') return 'BSC (BEP20)';
+      if (assetLower === 'sol' || methodLower === 'sol') return 'Solana';
+      if (assetLower === 'xrp' || methodLower === 'xrp') return 'XRP Ledger';
+      if (assetLower === 'doge' || methodLower === 'doge') return 'Dogecoin';
+      if (assetLower === 'trx' || methodLower === 'trx') return 'TRON (TRC20)';
+      if (assetLower === 'ltc' || methodLower === 'ltc') return 'Litecoin';
+      if (assetLower === 'ada' || methodLower === 'ada') return 'Cardano';
+      return details?.network || 'Blockchain';
+    };
+
+    // Determine asset symbol
+    let assetSymbol = 'btc';
+    if (transaction.asset && typeof transaction.asset === 'string' && transaction.asset !== 'internal') {
+      assetSymbol = transaction.asset.toLowerCase();
+    } else if (transaction.type === 'buy' && transaction.buyDetails?.asset) {
+      assetSymbol = transaction.buyDetails.asset.toLowerCase();
+    } else if (transaction.type === 'sell' && transaction.sellDetails?.asset) {
+      assetSymbol = transaction.sellDetails.asset.toLowerCase();
+    } else if (transaction.method && typeof transaction.method === 'string') {
+      const method = transaction.method.toLowerCase();
+      const validCryptoAssets = ['btc', 'eth', 'usdt', 'bnb', 'sol', 'usdc', 'xrp', 'doge', 'ada', 'shib', 
+                                 'avax', 'dot', 'trx', 'link', 'matic', 'wbtc', 'ltc', 'near', 'uni', 'bch',
+                                 'xlm', 'atom', 'xmr', 'flow', 'vet', 'fil', 'theta', 'hbar', 'ftm', 'xtz'];
+      if (validCryptoAssets.includes(method)) {
+        assetSymbol = method;
+      }
+    }
+
+    const amount = transaction.amount ? parseFloat(transaction.amount) : 0;
+    const assetAmount = transaction.assetAmount ? parseFloat(transaction.assetAmount) : 0;
+    const status = transaction.status && typeof transaction.status === 'string' ? transaction.status.toLowerCase() : 'pending';
+    const type = transaction.type && typeof transaction.type === 'string' ? transaction.type.toLowerCase() : 'transaction';
+    const method = transaction.method && typeof transaction.method === 'string' ? transaction.method.toLowerCase() : 'crypto';
+    const network = getNetworkName(transaction.asset, transaction.method, transaction.details);
+    
+    // Calculate BTC value at time of transaction
+    let btcValueAtActivity = null;
+    if (type === 'investment' && transaction.exchangeRateAtTime) {
+      btcValueAtActivity = amount / transaction.exchangeRateAtTime;
+    } else if (type === 'investment' && transaction.details?.btcPriceAtInvestment) {
+      btcValueAtActivity = amount / transaction.details.btcPriceAtInvestment;
+    }
+
+    // Generate detailed description for single transaction
+    let description = '';
+
+    if (type === 'deposit') {
+      if (assetSymbol === 'btc') {
+        description = `Bitcoin deposit: ${assetAmount.toFixed(8)} BTC ($${amount.toFixed(2)}) received via Bitcoin network. Transaction ID: ${transaction.reference || 'N/A'}.`;
+      } else if (assetSymbol === 'eth') {
+        description = `Ethereum deposit: ${assetAmount.toFixed(8)} ETH ($${amount.toFixed(2)}) received via ERC20 on Ethereum network. Contract: 0x...`;
+      } else if (assetSymbol === 'usdt') {
+        description = `Tether (USDT) deposit: ${assetAmount.toFixed(2)} USDT ($${amount.toFixed(2)}) received via ERC20 on Ethereum network. Contract: 0xdAC17F958D2ee523a2206206994597C13D831ec7.`;
+      } else if (assetSymbol === 'usdc') {
+        description = `USD Coin deposit: ${assetAmount.toFixed(2)} USDC ($${amount.toFixed(2)}) received via ERC20 on Ethereum network. Contract: 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48.`;
+      } else if (assetSymbol === 'bnb') {
+        description = `Binance Coin deposit: ${assetAmount.toFixed(8)} BNB ($${amount.toFixed(2)}) received via BEP20 on BSC network.`;
+      } else if (assetSymbol === 'sol') {
+        description = `Solana deposit: ${assetAmount.toFixed(8)} SOL ($${amount.toFixed(2)}) received on Solana blockchain.`;
+      } else if (assetSymbol === 'xrp') {
+        description = `Ripple deposit: ${assetAmount.toFixed(6)} XRP ($${amount.toFixed(2)}) received on XRP Ledger. Destination tag: ${transaction.details?.destinationTag || 'N/A'}.`;
+      } else if (assetSymbol === 'doge') {
+        description = `Dogecoin deposit: ${assetAmount.toFixed(8)} DOGE ($${amount.toFixed(2)}) received on Dogecoin network.`;
+      } else if (assetSymbol === 'trx') {
+        description = `TRON deposit: ${assetAmount.toFixed(6)} TRX ($${amount.toFixed(2)}) received via TRC20 on TRON network.`;
+      } else if (assetSymbol === 'ltc') {
+        description = `Litecoin deposit: ${assetAmount.toFixed(8)} LTC ($${amount.toFixed(2)}) received on Litecoin network.`;
+      } else if (method === 'card') {
+        description = `Card payment: $${amount.toFixed(2)} processed via credit/debit card. Reference: ${transaction.reference}.`;
+      } else if (method === 'bank') {
+        description = `Bank transfer: $${amount.toFixed(2)} received via wire transfer. Reference: ${transaction.reference}.`;
+      } else {
+        description = `Crypto deposit: ${assetAmount.toFixed(8)} ${assetSymbol.toUpperCase()} ($${amount.toFixed(2)}) received on ${network}.`;
+      }
+    } 
+    else if (type === 'withdrawal') {
+      if (assetSymbol === 'btc') {
+        description = `Bitcoin withdrawal: ${assetAmount.toFixed(8)} BTC ($${amount.toFixed(2)}) sent to ${transaction.btcAddress || 'external wallet'} on Bitcoin network. Fee: ${transaction.fee || 0.0005} BTC.`;
+      } else if (assetSymbol === 'eth') {
+        description = `Ethereum withdrawal: ${assetAmount.toFixed(8)} ETH ($${amount.toFixed(2)}) sent via ERC20 to external address. Gas fee: ${transaction.fee || 0.002} ETH.`;
+      } else if (assetSymbol === 'usdt') {
+        description = `Tether withdrawal: ${assetAmount.toFixed(2)} USDT ($${amount.toFixed(2)}) sent via ERC20 to external wallet. Contract: 0xdAC17F958D2ee523a2206206994597C13D831ec7.`;
+      } else if (assetSymbol === 'usdc') {
+        description = `USD Coin withdrawal: ${assetAmount.toFixed(2)} USDC ($${amount.toFixed(2)}) sent via ERC20 to external address.`;
+      } else if (assetSymbol === 'bnb') {
+        description = `Binance Coin withdrawal: ${assetAmount.toFixed(8)} BNB ($${amount.toFixed(2)}) sent via BEP20 on BSC.`;
+      } else if (assetSymbol === 'sol') {
+        description = `Solana withdrawal: ${assetAmount.toFixed(8)} SOL ($${amount.toFixed(2)}) sent on Solana blockchain.`;
+      } else if (assetSymbol === 'xrp') {
+        description = `Ripple withdrawal: ${assetAmount.toFixed(6)} XRP ($${amount.toFixed(2)}) sent on XRP Ledger.`;
+      } else if (assetSymbol === 'doge') {
+        description = `Dogecoin withdrawal: ${assetAmount.toFixed(8)} DOGE ($${amount.toFixed(2)}) sent on Dogecoin network.`;
+      } else if (assetSymbol === 'trx') {
+        description = `TRON withdrawal: ${assetAmount.toFixed(6)} TRX ($${amount.toFixed(2)}) sent via TRC20 on TRON.`;
+      } else if (assetSymbol === 'ltc') {
+        description = `Litecoin withdrawal: ${assetAmount.toFixed(8)} LTC ($${amount.toFixed(2)}) sent on Litecoin network.`;
+      } else if (method === 'bank') {
+        description = `Bank withdrawal: $${amount.toFixed(2)} transferred to linked bank account. Reference: ${transaction.reference}.`;
+      } else {
+        description = `Crypto withdrawal: ${assetAmount.toFixed(8)} ${assetSymbol.toUpperCase()} ($${amount.toFixed(2)}) sent on ${network}.`;
+      }
+    } 
+    else if (type === 'buy') {
+      if (transaction.buyDetails && transaction.buyDetails.price) {
+        const price = parseFloat(transaction.buyDetails.price);
+        description = `Market buy order executed: Purchased ${assetAmount.toFixed(8)} ${assetSymbol.toUpperCase()} for $${amount.toFixed(2)} at $${price.toFixed(2)} per coin via spot trading. Order ID: ${transaction.reference}.`;
+      } else {
+        description = `Spot purchase: Acquired ${assetAmount.toFixed(8)} ${assetSymbol.toUpperCase()} for $${amount.toFixed(2)} on exchange.`;
+      }
+    } 
+    else if (type === 'sell') {
+      if (transaction.sellDetails) {
+        const price = transaction.sellDetails.price ? parseFloat(transaction.sellDetails.price) : 0;
+        const profit = transaction.sellDetails.profit ? parseFloat(transaction.sellDetails.profit) : 0;
+        const loss = transaction.sellDetails.loss ? parseFloat(transaction.sellDetails.loss) : 0;
+        
+        if (profit > 0) {
+          description = `Limit sell order filled: Sold ${assetAmount.toFixed(8)} ${assetSymbol.toUpperCase()} for $${amount.toFixed(2)} at $${price.toFixed(2)}. Profit: +$${profit.toFixed(2)}. Order ID: ${transaction.reference}.`;
+        } else if (loss > 0) {
+          description = `Market sell executed: Sold ${assetAmount.toFixed(8)} ${assetSymbol.toUpperCase()} for $${amount.toFixed(2)} at $${price.toFixed(2)}. Loss: -$${loss.toFixed(2)}.`;
+        } else {
+          description = `Spot sell: Sold ${assetAmount.toFixed(8)} ${assetSymbol.toUpperCase()} for $${amount.toFixed(2)} at $${price.toFixed(2)} per coin.`;
+        }
+      } else {
+        description = `Trade execution: Sold ${assetAmount.toFixed(8)} ${assetSymbol.toUpperCase()} for $${amount.toFixed(2)}.`;
+      }
+    } 
+    else if (type === 'interest') {
+      if (transaction.details && transaction.details.planName) {
+        description = `Mining reward distribution: $${amount.toFixed(2)} earned from ${transaction.details.planName} cloud mining contract. Payout timestamp: ${new Date(transaction.createdAt).toLocaleString()}.`;
+      } else {
+        description = `Staking yield: $${amount.toFixed(2)} generated from active mining position.`;
+      }
+    } 
+    else if (type === 'referral') {
+      if (transaction.details && transaction.details.downlineName) {
+        description = `Referral commission credited: $${amount.toFixed(2)} earned from ${transaction.details.downlineName}'s investment. Tier: ${transaction.details.tier || 1}.`;
+      } else {
+        description = `Affiliate reward: $${amount.toFixed(2)} credited from referral activity.`;
+      }
+    } 
+    else if (type === 'transfer') {
+      if (transaction.details && transaction.details.from && transaction.details.to) {
+        description = `Internal wallet transfer: $${amount.toFixed(2)} moved from ${transaction.details.from} to ${transaction.details.to} wallet.`;
+      } else {
+        description = `Wallet transfer: $${amount.toFixed(2)} transferred between internal wallets.`;
+      }
+    } 
+    else if (type === 'investment') {
+      if (transaction.details && transaction.details.planName) {
+        if (btcValueAtActivity) {
+          description = `Cloud mining contract activation: $${amount.toFixed(2)} (≈ ${btcValueAtActivity.toFixed(8)} BTC at activation) allocated to ${transaction.details.planName} hashrate pool. Contract duration: ${transaction.details.duration || 'variable'} hours.`;
+        } else {
+          description = `Mining contract activation: $${amount.toFixed(2)} invested in ${transaction.details.planName} cloud mining.`;
+        }
+      } else {
+        if (btcValueAtActivity) {
+          description = `Hashrate purchase: $${amount.toFixed(2)} (≈ ${btcValueAtActivity.toFixed(8)} BTC at execution) added to mining pool.`;
+        } else {
+          description = `Investment deposit: $${amount.toFixed(2)} allocated to mining contract.`;
+        }
+      }
+    } 
+    else {
+      description = `Transaction: $${amount.toFixed(2)} processed on ${network}.`;
+    }
+
+    // Format the response with all available transaction details
+    const formattedTransaction = {
+      id: transaction._id.toString(),
+      _id: transaction._id.toString(),
+      type: type,
+      amount: amount,
+      asset: assetSymbol,
+      assetAmount: assetAmount,
+      status: status,
+      method: method,
+      reference: transaction.reference || '',
+      fee: transaction.fee ? parseFloat(transaction.fee) : 0,
+      netAmount: transaction.netAmount ? parseFloat(transaction.netAmount) : amount,
+      btcAddress: transaction.btcAddress || '',
+      network: network,
+      exchangeRateAtTime: transaction.exchangeRateAtTime ? parseFloat(transaction.exchangeRateAtTime) : null,
+      btcValueAtActivity: btcValueAtActivity,
+      description: description,
+      details: transaction.details || {},
+      buyDetails: transaction.buyDetails || null,
+      sellDetails: transaction.sellDetails || null,
+      bankDetails: transaction.bankDetails || null,
+      cardDetails: transaction.cardDetails ? {
+        last4: transaction.cardDetails.cardNumber ? transaction.cardDetails.cardNumber.slice(-4) : null,
+        cardType: transaction.cardDetails.cardType
+      } : null,
+      processedBy: transaction.processedBy ? transaction.processedBy.toString() : null,
+      processedAt: transaction.processedAt || null,
+      adminNotes: transaction.adminNotes || null,
+      createdAt: transaction.createdAt,
+      date: transaction.createdAt,
+      timestamp: transaction.createdAt,
+      logo: assetLogos[assetSymbol] || 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png'
+    };
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        transaction: formattedTransaction
+      }
+    });
+
+  } catch (err) {
+    console.error('Single transaction error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to fetch transaction details'
+    });
+  }
+});
 
 
 
