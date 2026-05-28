@@ -27247,7 +27247,400 @@ app.get('/api/admin/statements/:id', adminProtect, async (req, res) => {
 
 
 
+// =============================================
+// EMAIL MARKETING ENDPOINTS - FULLY WORKING
+// =============================================
 
+// GET /api/admin/email-templates - Fetch all email templates
+app.get('/api/admin/email-templates', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    // Query for email templates (stored in Notification collection with type 'email_template')
+    const query = { type: 'email_template' };
+    
+    const templates = await Notification.find(query)
+      .populate('sentBy', 'name email')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const total = await Notification.countDocuments(query);
+    const totalPages = Math.ceil(total / limit);
+
+    const formattedTemplates = templates.map(template => ({
+      _id: template._id,
+      name: template.title,
+      subject: template.metadata?.subject || template.title,
+      content: template.message,
+      type: template.type,
+      usedCount: template.metadata?.usedCount || 0,
+      lastModified: template.updatedAt,
+      createdAt: template.createdAt,
+      sentBy: template.sentBy ? {
+        name: template.sentBy.name,
+        email: template.sentBy.email
+      } : null
+    }));
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        templates: formattedTemplates,
+        pagination: {
+          currentPage: page,
+          totalPages: totalPages,
+          totalItems: total,
+          itemsPerPage: limit,
+          hasNextPage: page < totalPages,
+          hasPrevPage: page > 1
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Error fetching email templates:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch email templates'
+    });
+  }
+});
+
+// POST /api/admin/email-templates - Create a new email template
+app.post('/api/admin/email-templates', adminProtect, async (req, res) => {
+  try {
+    const { name, subject, content, type = 'email_template' } = req.body;
+
+    if (!name || !subject || !content) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Name, subject, and content are required'
+      });
+    }
+
+    // Check if template name already exists
+    const existingTemplate = await Notification.findOne({ 
+      title: name, 
+      type: 'email_template' 
+    });
+
+    if (existingTemplate) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'A template with this name already exists'
+      });
+    }
+
+    const template = await Notification.create({
+      title: name,
+      message: content,
+      type: 'email_template',
+      recipientType: 'all',
+      isImportant: false,
+      sentBy: req.admin._id,
+      metadata: {
+        isTemplate: true,
+        subject: subject,
+        originalContent: content,
+        usedCount: 0,
+        createdAt: new Date()
+      }
+    });
+
+    res.status(201).json({
+      status: 'success',
+      message: 'Email template created successfully',
+      data: {
+        template: {
+          _id: template._id,
+          name: template.title,
+          subject: template.metadata.subject,
+          content: template.message,
+          type: template.type,
+          usedCount: 0,
+          createdAt: template.createdAt
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Error creating email template:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to create email template'
+    });
+  }
+});
+
+// DELETE /api/admin/email-templates/:id - Delete an email template
+app.delete('/api/admin/email-templates/:id', adminProtect, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid template ID'
+      });
+    }
+
+    const template = await Notification.findOne({ 
+      _id: id, 
+      type: 'email_template' 
+    });
+
+    if (!template) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Email template not found'
+      });
+    }
+
+    await Notification.deleteOne({ _id: id });
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Email template deleted successfully'
+    });
+
+  } catch (err) {
+    console.error('Error deleting email template:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to delete email template'
+    });
+  }
+});
+
+// GET /api/admin/email-history - Fetch email sending history
+app.get('/api/admin/email-history', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    // Query for sent emails (stored in Notification collection with type 'sent_email')
+    const query = { type: 'sent_email' };
+    
+    const emails = await Notification.find(query)
+      .populate('sentBy', 'name email')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const total = await Notification.countDocuments(query);
+    const totalPages = Math.ceil(total / limit);
+
+    const formattedEmails = emails.map(email => ({
+      _id: email._id,
+      subject: email.metadata?.subject || email.title,
+      recipientCount: email.metadata?.recipientCount || 0,
+      recipients: email.metadata?.recipients || [],
+      openRate: email.metadata?.openRate || 0,
+      status: email.metadata?.deliveryStatus || 'sent',
+      sentBy: email.sentBy ? {
+        name: email.sentBy.name,
+        email: email.sentBy.email
+      } : null,
+      createdAt: email.createdAt,
+      updatedAt: email.updatedAt
+    }));
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        emails: formattedEmails,
+        pagination: {
+          currentPage: page,
+          totalPages: totalPages,
+          totalItems: total,
+          itemsPerPage: limit,
+          hasNextPage: page < totalPages,
+          hasPrevPage: page > 1
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Error fetching email history:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch email history'
+    });
+  }
+});
+
+// POST /api/admin/send-email - Send marketing email
+app.post('/api/admin/send-email', adminProtect, async (req, res) => {
+  try {
+    const {
+      subject,
+      content,
+      type = 'plain',
+      recipients,
+      trackDelivery = true,
+      saveAsTemplate = false,
+      templateName = null
+    } = req.body;
+
+    if (!subject || !content) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Subject and content are required'
+      });
+    }
+
+    // Determine recipients
+    let recipientEmails = [];
+    let recipientCount = 0;
+
+    if (recipients && recipients.length > 0) {
+      // Specific recipients provided
+      recipientEmails = recipients;
+      recipientCount = recipients.length;
+    } else {
+      // Send to all active users
+      const allUsers = await User.find({ status: 'active' }).select('email');
+      recipientEmails = allUsers.map(user => user.email);
+      recipientCount = allUsers.length;
+    }
+
+    if (recipientEmails.length === 0) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'No recipients found'
+      });
+    }
+
+    // Send emails to all recipients
+    let sentCount = 0;
+    let failedCount = 0;
+
+    for (const email of recipientEmails) {
+      try {
+        await sendProfessionalEmail({
+          email: email,
+          template: 'default',
+          data: {
+            name: email.split('@')[0],
+            subject: subject,
+            message: content,
+            details: content,
+            actionLink: 'https://www.bithashcapital.live/dashboard',
+            buttonText: 'Go to Dashboard',
+            referenceId: `EMAIL-${Date.now()}-${Math.floor(Math.random() * 10000)}`
+          }
+        });
+        sentCount++;
+      } catch (emailError) {
+        console.error(`Failed to send email to ${email}:`, emailError);
+        failedCount++;
+      }
+      
+      // Small delay to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    // Save as template if requested
+    let templateId = null;
+    if (saveAsTemplate && templateName) {
+      const existingTemplate = await Notification.findOne({ 
+        title: templateName, 
+        type: 'email_template' 
+      });
+
+      if (existingTemplate) {
+        // Update existing template
+        existingTemplate.message = content;
+        existingTemplate.metadata.subject = subject;
+        existingTemplate.metadata.usedCount = (existingTemplate.metadata?.usedCount || 0) + 1;
+        existingTemplate.updatedAt = new Date();
+        await existingTemplate.save();
+        templateId = existingTemplate._id;
+      } else {
+        // Create new template
+        const newTemplate = await Notification.create({
+          title: templateName,
+          message: content,
+          type: 'email_template',
+          recipientType: 'all',
+          isImportant: false,
+          sentBy: req.admin._id,
+          metadata: {
+            isTemplate: true,
+            subject: subject,
+            originalContent: content,
+            usedCount: 1,
+            createdAt: new Date()
+          }
+        });
+        templateId = newTemplate._id;
+      }
+    }
+
+    // Record the sent email in history
+    const emailRecord = await Notification.create({
+      title: subject,
+      message: content,
+      type: 'sent_email',
+      recipientType: recipients?.length > 0 ? 'specific' : 'all',
+      isImportant: false,
+      sentBy: req.admin._id,
+      metadata: {
+        subject: subject,
+        recipients: recipientEmails.slice(0, 10), // Store first 10 for preview
+        recipientCount: recipientCount,
+        sentCount: sentCount,
+        failedCount: failedCount,
+        deliveryStatus: failedCount === 0 ? 'delivered' : (sentCount > 0 ? 'partial' : 'failed'),
+        sentAt: new Date(),
+        templateId: templateId
+      }
+    });
+
+    // Log activity
+    await logActivity(
+      'email_marketing_sent',
+      'Notification',
+      emailRecord._id,
+      req.admin._id,
+      'Admin',
+      req,
+      {
+        subject: subject,
+        recipientCount: recipientCount,
+        sentCount: sentCount,
+        failedCount: failedCount,
+        saveAsTemplate: saveAsTemplate,
+        templateName: templateName
+      }
+    );
+
+    res.status(200).json({
+      status: 'success',
+      message: `Email sent to ${sentCount} recipient(s)${failedCount > 0 ? ` (${failedCount} failed)` : ''}`,
+      data: {
+        sentCount: sentCount,
+        failedCount: failedCount,
+        totalRecipients: recipientCount,
+        templateId: templateId,
+        emailRecordId: emailRecord._id
+      }
+    });
+
+  } catch (err) {
+    console.error('Error sending marketing email:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to send email'
+    });
+  }
+});
 
 
 
