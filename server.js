@@ -27227,8 +27227,18 @@ app.get('/api/admin/statements/:id', adminProtect, async (req, res) => {
 
 
 
+
+
+
+
+
+
+
+
+
+
 // =============================================
-// EMAIL MARKETING ENDPOINTS
+// EMAIL MARKETING ENDPOINTS - FIXED VERSION
 // =============================================
 
 // Email Template Schema
@@ -27267,9 +27277,13 @@ const EmailTemplateSchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
-const EmailTemplate = mongoose.models.EmailTemplate || mongoose.model('EmailTemplate', EmailTemplateSchema);
+// Drop existing model if it exists to avoid schema conflicts
+if (mongoose.models.EmailTemplate) {
+  delete mongoose.models.EmailTemplate;
+}
+const EmailTemplate = mongoose.model('EmailTemplate', EmailTemplateSchema);
 
-// Email History Schema
+// Email History Schema - WITHOUT trackingId to avoid duplicate key error
 const EmailHistorySchema = new mongoose.Schema({
   subject: {
     type: String,
@@ -27320,7 +27334,15 @@ const EmailHistorySchema = new mongoose.Schema({
   metadata: mongoose.Schema.Types.Mixed
 }, { timestamps: true });
 
-const EmailHistory = mongoose.models.EmailHistory || mongoose.model('EmailHistory', EmailHistorySchema);
+// Drop existing model if it exists
+if (mongoose.models.EmailHistory) {
+  delete mongoose.models.EmailHistory;
+}
+const EmailHistory = mongoose.model('EmailHistory', EmailHistorySchema);
+
+// Ensure indexes are created properly
+EmailHistorySchema.index({ sentAt: -1 });
+EmailHistorySchema.index({ status: 1 });
 
 // GET /api/admin/email-templates - Fetch email templates with pagination
 app.get('/api/admin/email-templates', adminProtect, async (req, res) => {
@@ -27391,7 +27413,6 @@ app.post('/api/admin/email-templates', adminProtect, async (req, res) => {
       isActive: true
     });
 
-    // Log activity
     await logActivity(
       'email_template_created',
       'EmailTemplate',
@@ -27440,7 +27461,6 @@ app.delete('/api/admin/email-templates/:id', adminProtect, async (req, res) => {
 
     await EmailTemplate.findByIdAndDelete(id);
 
-    // Log activity
     await logActivity(
       'email_template_deleted',
       'EmailTemplate',
@@ -27481,7 +27501,6 @@ app.get('/api/admin/email-history', adminProtect, async (req, res) => {
     const total = await EmailHistory.countDocuments({});
     const totalPages = Math.ceil(total / limit);
 
-    // Calculate open rate for each email
     const formattedEmails = emails.map(email => {
       let openRate = 0;
       if (email.recipientCount > 0) {
@@ -27524,7 +27543,7 @@ app.get('/api/admin/email-history', adminProtect, async (req, res) => {
   }
 });
 
-// POST /api/admin/send-email - Send marketing emails
+// POST /api/admin/send-email - Send marketing emails (FIXED - no duplicate key error)
 app.post('/api/admin/send-email', adminProtect, async (req, res) => {
   try {
     const {
@@ -27559,11 +27578,10 @@ app.post('/api/admin/send-email', adminProtect, async (req, res) => {
       }
     }
 
-    // Get recipient emails based on recipientType
+    // Determine recipient type and get emails
     let recipientEmails = [];
     let recipientType = '';
 
-    // Parse recipients from the request
     if (recipients && recipients.length > 0) {
       if (typeof recipients[0] === 'string') {
         // Direct email addresses
@@ -27576,7 +27594,7 @@ app.post('/api/admin/send-email', adminProtect, async (req, res) => {
         recipientType = 'selected';
       }
     } else {
-      // Send to all users
+      // Send to all active users
       const users = await User.find({ status: 'active' }).select('email');
       recipientEmails = users.map(u => u.email).filter(e => e);
       recipientType = 'all';
@@ -27589,7 +27607,7 @@ app.post('/api/admin/send-email', adminProtect, async (req, res) => {
       });
     }
 
-    // Create email history record
+    // Create email history record (without trackingId to avoid duplicate key error)
     const emailHistory = await EmailHistory.create({
       subject: subject.trim(),
       content: content,
@@ -27605,7 +27623,7 @@ app.post('/api/admin/send-email', adminProtect, async (req, res) => {
       }
     });
 
-    // Send emails in batches to avoid overwhelming the email service
+    // Send emails in batches
     const batchSize = 10;
     let sentCount = 0;
     let failedCount = 0;
@@ -27615,8 +27633,9 @@ app.post('/api/admin/send-email', adminProtect, async (req, res) => {
       
       for (const email of batch) {
         try {
-          // Add tracking pixel if tracking is enabled
           let emailContent = content;
+          
+          // Add tracking pixel if tracking is enabled
           if (trackDelivery) {
             const trackingPixel = `<img src="https://bithash-backend-kg7j.onrender.com/api/email/track/${emailHistory._id}?email=${encodeURIComponent(email)}" width="1" height="1" style="display:none;">`;
             emailContent = content + trackingPixel;
@@ -27671,7 +27690,6 @@ app.post('/api/admin/send-email', adminProtect, async (req, res) => {
       openRate: openRate
     });
 
-    // Log activity
     await logActivity(
       'bulk_email_sent',
       'EmailHistory',
@@ -27731,6 +27749,14 @@ app.get('/api/email/track/:emailId', async (req, res) => {
       }
     );
 
+    // Also update overall open rate
+    const emailHistory = await EmailHistory.findById(emailId);
+    if (emailHistory) {
+      const openedCount = emailHistory.recipients.filter(r => r.openedAt).length;
+      const openRate = Math.round((openedCount / emailHistory.recipientCount) * 100);
+      await EmailHistory.findByIdAndUpdate(emailId, { openRate: openRate });
+    }
+
     // Send a 1x1 transparent pixel
     const pixel = Buffer.from(
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
@@ -27746,6 +27772,29 @@ app.get('/api/email/track/:emailId', async (req, res) => {
     res.status(200).send();
   }
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
