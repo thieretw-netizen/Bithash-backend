@@ -6346,7 +6346,12 @@ const sendProfessionalEmail = async ({ email, template, data, useSupportEmail = 
 
       default:
         subject = '';
-        html = '';
+        html = `
+          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+            ${brandHeader}
+            ${brandFooter}
+          </div>
+        `;
         break;
     }
 
@@ -6500,6 +6505,36 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
     return false;
   }
 };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
