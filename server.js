@@ -5737,6 +5737,26 @@ const recalculateAllUserBalances = async (io) => {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // =============================================
 // ENHANCED EMAIL SERVICE WITH ENTERPRISE TEMPLATES
 // =============================================
@@ -6349,6 +6369,8 @@ const sendProfessionalEmail = async ({ email, template, data, useSupportEmail = 
         html = `
           <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
             ${brandHeader}
+            <div style="padding: 30px; background: #FFFFFF;">
+            </div>
             ${brandFooter}
           </div>
         `;
@@ -6505,27 +6527,6 @@ const sendAutomatedEmail = async (user, action, data = {}) => {
     return false;
   }
 };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
