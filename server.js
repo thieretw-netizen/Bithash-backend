@@ -27307,7 +27307,364 @@ app.get('/api/admin/statements/:id', adminProtect, async (req, res) => {
 
 
 
+// =============================================
+// EMAIL MARKETING ENDPOINTS (NEW - Separate from existing email system)
+// =============================================
 
+// Email Template Schema
+const EmailTemplateSchema = new mongoose.Schema({
+  name: { type: String, required: true, trim: true },
+  subject: { type: String, required: true, trim: true },
+  content: { type: String, required: true },
+  type: { type: String, enum: ['html', 'plain'], default: 'html' },
+  usedCount: { type: Number, default: 0 },
+  createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
+  updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' }
+}, { timestamps: true });
+
+const EmailTemplate = mongoose.model('EmailTemplate', EmailTemplateSchema);
+
+// Email History Schema (for tracking sent emails)
+const EmailHistorySchema = new mongoose.Schema({
+  subject: { type: String, required: true },
+  content: { type: String, required: true },
+  type: { type: String, enum: ['html', 'plain'], default: 'html' },
+  recipients: [{ type: String }],
+  recipientCount: { type: Number, default: 0 },
+  recipientType: { type: String, enum: ['all', 'selected', 'manual', 'excel'] },
+  openRate: { type: Number, default: 0 },
+  status: { type: String, enum: ['sent', 'failed', 'partial'], default: 'sent' },
+  sentBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
+  sentByEmail: { type: String },
+  trackDelivery: { type: Boolean, default: false },
+  openedBy: [{
+    email: String,
+    openedAt: { type: Date, default: Date.now },
+    ipAddress: String,
+    userAgent: String
+  }]
+}, { timestamps: true });
+
+const EmailHistory = mongoose.model('EmailHistory', EmailHistorySchema);
+
+// GET /api/admin/email-templates - Fetch email templates with pagination
+app.get('/api/admin/email-templates', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const templates = await EmailTemplate.find({})
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const total = await EmailTemplate.countDocuments({});
+    const totalPages = Math.ceil(total / limit);
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        templates: templates,
+        pagination: {
+          currentPage: page,
+          totalPages: totalPages,
+          totalItems: total,
+          itemsPerPage: limit
+        }
+      }
+    });
+  } catch (err) {
+    console.error('Error fetching email templates:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch email templates'
+    });
+  }
+});
+
+// POST /api/admin/email-templates - Save email template
+app.post('/api/admin/email-templates', adminProtect, async (req, res) => {
+  try {
+    const { name, subject, content, type } = req.body;
+
+    if (!name || !subject || !content) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Name, subject, and content are required'
+      });
+    }
+
+    const template = await EmailTemplate.create({
+      name: name.trim(),
+      subject: subject.trim(),
+      content: content,
+      type: type || 'html',
+      createdBy: req.admin._id
+    });
+
+    res.status(201).json({
+      status: 'success',
+      message: 'Template saved successfully',
+      data: { template }
+    });
+  } catch (err) {
+    console.error('Error saving email template:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to save email template'
+    });
+  }
+});
+
+// DELETE /api/admin/email-templates/:id - Delete template
+app.delete('/api/admin/email-templates/:id', adminProtect, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid template ID'
+      });
+    }
+
+    const template = await EmailTemplate.findByIdAndDelete(id);
+    if (!template) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Template not found'
+      });
+    }
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Template deleted successfully'
+    });
+  } catch (err) {
+    console.error('Error deleting email template:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to delete email template'
+    });
+  }
+});
+
+// GET /api/admin/email-history - Fetch email history with pagination
+app.get('/api/admin/email-history', adminProtect, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const emails = await EmailHistory.find({})
+      .populate('sentBy', 'name email')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const total = await EmailHistory.countDocuments({});
+    const totalPages = Math.ceil(total / limit);
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        emails: emails,
+        pagination: {
+          currentPage: page,
+          totalPages: totalPages,
+          totalItems: total,
+          itemsPerPage: limit
+        }
+      }
+    });
+  } catch (err) {
+    console.error('Error fetching email history:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch email history'
+    });
+  }
+});
+
+// POST /api/admin/send-email - Send marketing emails (HTML or plain text) with branding wrapper
+app.post('/api/admin/send-email', adminProtect, async (req, res) => {
+  try {
+    const { subject, content, type, recipients, saveAsTemplate, templateName, trackDelivery } = req.body;
+
+    if (!subject || !content) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Subject and content are required'
+      });
+    }
+
+    const emailType = type || (content.includes('<') && content.includes('>') ? 'html' : 'plain');
+
+    // Get recipient emails
+    let recipientEmails = [];
+    
+    if (recipients && recipients.length > 0) {
+      // If specific recipients provided
+      if (typeof recipients[0] === 'string' && recipients[0].includes('@')) {
+        recipientEmails = recipients;
+      } else {
+        // Recipients are user IDs - fetch emails from database
+        const users = await User.find({ _id: { $in: recipients }, status: 'active' }).select('email');
+        recipientEmails = users.map(u => u.email);
+      }
+    } else {
+      // Send to all active users
+      const allUsers = await User.find({ status: 'active' }).select('email');
+      recipientEmails = allUsers.map(u => u.email);
+    }
+
+    if (recipientEmails.length === 0) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'No valid recipients found'
+      });
+    }
+
+    // =============================================
+    // BRANDING WRAPPER - Uses same style as existing email system
+    // =============================================
+    const brandHeader = `
+      <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+        <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+        <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+        <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+      </div>
+    `;
+
+    const brandFooter = `
+      <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
+          <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> | 
+          <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
+        </p>
+      </div>
+    `;
+
+    const timestamp = new Date();
+    const formattedTimestamp = timestamp.toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      timeZoneName: 'short'
+    });
+
+    // Wrap content with branding
+    let wrappedContent;
+    if (emailType === 'html') {
+      wrappedContent = `
+        <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+          ${brandHeader}
+          <div style="padding: 30px; background: #FFFFFF;">
+            ${content}
+            <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${formattedTimestamp}</p>
+          </div>
+          ${brandFooter}
+        </div>
+      `;
+    } else {
+      // Plain text email - wrap with simple branding
+      wrappedContent = content;
+    }
+
+    // Send emails
+    let sentCount = 0;
+    let failedCount = 0;
+
+    for (const email of recipientEmails) {
+      try {
+        await sendProfessionalEmail({
+          email: email,
+          template: 'default',
+          data: {
+            name: email.split('@')[0],
+            message: emailType === 'html' ? wrappedContent : content,
+            subject: subject,
+            actionRequired: '',
+            buttonText: 'View Dashboard',
+            actionLink: 'https://www.bithashcapital.live/dashboard',
+            referenceId: `EMAIL-${Date.now()}-${Math.floor(Math.random() * 10000)}`
+          }
+        });
+        sentCount++;
+      } catch (err) {
+        console.error(`Failed to send to ${email}:`, err);
+        failedCount++;
+      }
+    }
+
+    // Save email history
+    const emailHistory = await EmailHistory.create({
+      subject: subject,
+      content: content,
+      type: emailType,
+      recipients: recipientEmails,
+      recipientCount: sentCount,
+      recipientType: recipients && recipients.length > 0 ? (recipients[0].includes('@') ? 'manual' : 'selected') : 'all',
+      status: failedCount > 0 ? (sentCount > 0 ? 'partial' : 'failed') : 'sent',
+      sentBy: req.admin._id,
+      sentByEmail: req.admin.email,
+      trackDelivery: trackDelivery || false
+    });
+
+    // Save as template if requested
+    if (saveAsTemplate && templateName) {
+      await EmailTemplate.create({
+        name: templateName.trim(),
+        subject: subject,
+        content: content,
+        type: emailType,
+        createdBy: req.admin._id
+      });
+    }
+
+    // Log activity
+    await logActivity(
+      'marketing_email_sent',
+      'EmailHistory',
+      emailHistory._id,
+      req.admin._id,
+      'Admin',
+      req,
+      {
+        subject: subject,
+        recipientCount: sentCount,
+        failedCount: failedCount,
+        emailType: emailType,
+        savedAsTemplate: saveAsTemplate || false
+      }
+    );
+
+    res.status(200).json({
+      status: 'success',
+      message: `Email sent to ${sentCount} recipient(s)${failedCount > 0 ? ` (${failedCount} failed)` : ''}`,
+      data: {
+        sentCount: sentCount,
+        failedCount: failedCount,
+        emailHistoryId: emailHistory._id
+      }
+    });
+
+  } catch (err) {
+    console.error('Error sending marketing email:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to send email'
+    });
+  }
+});
 
 
 
