@@ -27317,515 +27317,460 @@ app.get('/api/admin/statements/:id', adminProtect, async (req, res) => {
 
 
 
-
-
-
-
-
-
-
 // =============================================
-// COMPLETE EMAIL MARKETING SYSTEM - DEBUGGED
+// COMPLETE EMAIL MARKETING SYSTEM
+// Paste this entire block into your server.js
 // =============================================
 
 // =============================================
 // SCHEMAS
 // =============================================
-
-const MarketingEmailTemplateSchema = new mongoose.Schema({
-  name: { type: String, required: true, trim: true, unique: true },
-  subject: { type: String, required: true, trim: true },
-  bodyContent: { type: String, required: true },
-  createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin', required: true },
-  createdByName: { type: String },
+const EmailTemplateSchema = new mongoose.Schema({
+  name: { type: String, required: true, unique: true },
+  subject: { type: String, required: true },
+  htmlContent: { type: String, required: true },
+  createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
   createdAt: { type: Date, default: Date.now },
-  updatedAt: { type: Date, default: Date.now },
-  usedCount: { type: Number, default: 0 },
-  isActive: { type: Boolean, default: true }
+  usedCount: { type: Number, default: 0 }
 });
 
-const MarketingEmailHistorySchema = new mongoose.Schema({
-  subject: { type: String, required: true, trim: true },
-  bodyContent: { type: String, required: true },
-  recipientType: { type: String, enum: ['all', 'selected', 'manual', 'excel'], required: true },
-  recipients: [{
-    email: { type: String, required: true },
-    name: { type: String },
-    status: { type: String, enum: ['pending', 'sent', 'failed'], default: 'pending' },
-    error: String,
-    sentAt: Date
-  }],
-  recipientCount: { type: Number, default: 0 },
+const EmailHistorySchema = new mongoose.Schema({
+  subject: { type: String, required: true },
+  htmlContent: { type: String, required: true },
+  recipients: [{ email: String, status: String, error: String }],
+  totalRecipients: { type: Number, default: 0 },
   sentCount: { type: Number, default: 0 },
   failedCount: { type: Number, default: 0 },
-  status: { type: String, enum: ['pending', 'sending', 'sent', 'failed', 'partial'], default: 'pending' },
-  sentBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin', required: true },
-  sentByName: { type: String },
-  sentAt: { type: Date, default: Date.now },
-  templateId: { type: mongoose.Schema.Types.ObjectId, ref: 'MarketingEmailTemplate' },
-  templateName: { type: String },
-  createdAt: { type: Date, default: Date.now },
-  completedAt: Date
+  status: { type: String, default: 'pending' },
+  sentBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
+  sentAt: { type: Date, default: Date.now }
 });
 
-// Compile models safely
-const MarketingEmailTemplate = mongoose.models.MarketingEmailTemplate || mongoose.model('MarketingEmailTemplate', MarketingEmailTemplateSchema);
-const MarketingEmailHistory = mongoose.models.MarketingEmailHistory || mongoose.model('MarketingEmailHistory', MarketingEmailHistorySchema);
+const EmailTemplate = mongoose.models.EmailTemplate || mongoose.model('EmailTemplate', EmailTemplateSchema);
+const EmailHistory = mongoose.models.EmailHistory || mongoose.model('EmailHistory', EmailHistorySchema);
 
 // =============================================
-// HELPER: Wrap email with header and footer
+// HELPER: Build complete email with header/footer
 // =============================================
-function wrapEmailWithBrandHeaderFooter(bodyContent, recipientName = 'Valued Customer') {
-  // Replace name placeholders
-  let processedBody = bodyContent;
-  processedBody = processedBody.replace(/\{\{name\}\}/g, recipientName);
-  processedBody = processedBody.replace(/\{name\}/g, recipientName);
-  processedBody = processedBody.replace(/\[name\]/g, recipientName);
-
-  const brandHeader = `
-    <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-      <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-      <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
-      <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
+function buildCompleteEmail(userHtmlContent, recipientName = 'Customer') {
+  // Replace placeholders
+  let content = userHtmlContent;
+  content = content.replace(/\{\{name\}\}/gi, recipientName);
+  content = content.replace(/\{name\}/gi, recipientName);
+  
+  const currentYear = new Date().getFullYear();
+  const currentDate = new Date().toLocaleString();
+  
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>₿itHash Capital</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { 
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background-color: #f4f4f4;
+      margin: 0;
+      padding: 20px;
+    }
+    .email-container {
+      max-width: 600px;
+      margin: 0 auto;
+      background: #ffffff;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    .header {
+      background: linear-gradient(135deg, #0a0e1a 0%, #1a1f2e 100%);
+      text-align: center;
+      padding: 30px 20px;
+    }
+    .header img {
+      width: 60px;
+      height: 60px;
+      margin-bottom: 15px;
+    }
+    .header h1 {
+      color: #ffffff;
+      font-size: 28px;
+      margin: 0;
+      font-weight: bold;
+    }
+    .header p {
+      color: #b7bdc6;
+      font-size: 14px;
+      margin-top: 10px;
+    }
+    .content {
+      padding: 40px 30px;
+      background: #ffffff;
+    }
+    .footer {
+      background: #0a0e1a;
+      text-align: center;
+      padding: 20px;
+      border-top: 1px solid #1e2329;
+    }
+    .footer p {
+      color: #6c7480;
+      font-size: 12px;
+      margin: 5px 0;
+    }
+    .footer a {
+      color: #f7931a;
+      text-decoration: none;
+    }
+    hr {
+      margin: 30px 0;
+      border: none;
+      border-top: 1px solid #e5e7eb;
+    }
+    @media only screen and (max-width: 600px) {
+      .content { padding: 30px 20px; }
+      .header h1 { font-size: 24px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="email-container">
+    <div class="header">
+      <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo">
+      <h1>₿itHash</h1>
+      <p><i>Where Your Financial Goals Become Reality</i></p>
     </div>
-  `;
-
-  const brandFooter = `
-    <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-      <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-      <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-      <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
-        <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> | 
-        <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
+    <div class="content">
+      ${content}
+      <hr>
+      <p style="color: #9ca3af; font-size: 11px; text-align: center; margin: 0;">
+        This email was sent from ₿itHash Capital. If you did not expect this email, please contact support.
+      </p>
+      <p style="color: #9ca3af; font-size: 11px; text-align: center; margin: 10px 0 0;">
+        Sent: ${currentDate}
       </p>
     </div>
-  `;
-
-  const timestamp = new Date().toLocaleString('en-US', {
-    year: 'numeric', month: 'long', day: 'numeric',
-    hour: '2-digit', minute: '2-digit', second: '2-digit', timeZoneName: 'short'
-  });
-
-  return `
-    <!DOCTYPE html>
-    <html>
-    <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-    <body style="margin:0;padding:0;font-family:Arial,sans-serif;background-color:#F3F4F6;">
-      <div style="max-width:600px;margin:0 auto;background:#FFFFFF;border-radius:28px;overflow:hidden;">
-        ${brandHeader}
-        <div style="padding:36px 32px;">
-          ${processedBody}
-          <hr style="margin:30px 0;border:none;border-top:1px solid #E5E7EB;">
-          <p style="color:#9CA3AF;font-size:11px;text-align:center;">Sent: ${timestamp}</p>
-        </div>
-        ${brandFooter}
-      </div>
-    </body>
-    </html>
-  `;
+    <div class="footer">
+      <p>&copy; ${currentYear} ₿itHash Capital. All rights reserved.</p>
+      <p>800 Plant St, Wilmington, DE 19801, United States</p>
+      <p>
+        <a href="mailto:support@bithashcapital.live">support@bithashcapital.live</a> | 
+        <a href="https://www.bithashcapital.live">www.bithashcapital.live</a>
+      </p>
+    </div>
+  </div>
+</body>
+</html>`;
 }
 
 // =============================================
-// DEBUG ENDPOINT - Test if backend is working
-// =============================================
-app.get('/api/admin/email-debug', adminProtect, async (req, res) => {
-  try {
-    // Test database connection
-    const dbStatus = mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected';
-    
-    // Test email transporter
-    let emailStatus = 'Not tested';
-    try {
-      await infoTransporter.verify();
-      emailStatus = 'Working';
-    } catch (err) {
-      emailStatus = `Error: ${err.message}`;
-    }
-    
-    res.json({
-      status: 'success',
-      debug: {
-        database: dbStatus,
-        emailTransporter: emailStatus,
-        templatesCount: await MarketingEmailTemplate.countDocuments(),
-        historyCount: await MarketingEmailHistory.countDocuments(),
-        environment: process.env.NODE_ENV,
-        emailUser: process.env.EMAIL_INFO_USER ? 'Set' : 'Missing'
-      }
-    });
-  } catch (err) {
-    res.status(500).json({ status: 'error', message: err.message });
-  }
-});
-
-// =============================================
-// 1. POST /api/admin/send-email - FIXED VERSION
+// MAIN SEND EMAIL ENDPOINT
 // =============================================
 app.post('/api/admin/send-email', adminProtect, async (req, res) => {
   try {
-    console.log('📧 ==================== SEND EMAIL REQUEST ====================');
-    console.log('📧 Request body keys:', Object.keys(req.body));
-    console.log('📧 Subject:', req.body.subject?.substring(0, 50));
-    console.log('📧 Content length:', req.body.content?.length);
-    console.log('📧 Recipients:', req.body.recipients?.length || 'all users');
+    const { subject, content, recipients, saveAsTemplate, templateName } = req.body;
     
-    const { subject, content, recipients, saveAsTemplate, templateName, recipientType } = req.body;
-
-    // VALIDATION
+    console.log('📧 ===== SEND EMAIL REQUEST =====');
+    console.log('Subject:', subject);
+    console.log('Content length:', content?.length);
+    console.log('Recipients type:', Array.isArray(recipients) ? `${recipients.length} items` : 'all users');
+    
+    // Validation
     if (!subject || !content) {
-      console.log('❌ Missing subject or content');
       return res.status(400).json({ 
-        status: 'fail', 
-        message: 'Subject and content are required' 
+        success: false, 
+        error: 'Subject and content are required' 
       });
     }
-
-    // GET RECIPIENTS
-    let finalRecipientType = recipientType || 'all';
-    let allRecipients = [];
-
+    
+    // Get recipient emails
+    let recipientEmails = [];
+    
     if (recipients && recipients.length > 0) {
-      const firstRecipient = recipients[0];
-      if (firstRecipient && firstRecipient.includes('@')) {
-        finalRecipientType = 'manual';
-        allRecipients = recipients.filter(e => e && e.includes('@')).map(email => ({ 
-          email, 
-          name: email.split('@')[0] 
-        }));
-        console.log(`📧 Manual recipients: ${allRecipients.length} emails`);
+      // Check if recipients are email addresses or user IDs
+      if (recipients[0] && recipients[0].includes('@')) {
+        recipientEmails = recipients;
       } else {
-        finalRecipientType = 'selected';
-        const users = await User.find({ _id: { $in: recipients }, status: 'active' }, 'firstName lastName email').lean();
-        allRecipients = users.map(user => ({ 
-          email: user.email, 
-          name: `${user.firstName} ${user.lastName}`.trim() 
-        }));
-        console.log(`📧 Selected recipients: ${allRecipients.length} users`);
+        const users = await User.find({ _id: { $in: recipients }, status: 'active' }).select('email');
+        recipientEmails = users.map(u => u.email);
       }
     } else {
-      const allUsers = await User.find({ status: 'active' }, 'firstName lastName email').lean();
-      allRecipients = allUsers.map(user => ({ 
-        email: user.email, 
-        name: `${user.firstName} ${user.lastName}`.trim() 
-      }));
-      console.log(`📧 All active users: ${allRecipients.length} recipients`);
+      const users = await User.find({ status: 'active' }).select('email');
+      recipientEmails = users.map(u => u.email);
     }
-
-    if (allRecipients.length === 0) {
-      console.log('❌ No recipients found');
+    
+    if (recipientEmails.length === 0) {
       return res.status(400).json({ 
-        status: 'fail', 
-        message: 'No recipients found to send email' 
+        success: false, 
+        error: 'No recipients found' 
       });
     }
-
-    // SAVE AS TEMPLATE (optional)
+    
+    console.log(`📧 Sending to ${recipientEmails.length} recipients`);
+    
+    // Save as template if requested
     if (saveAsTemplate && templateName) {
-      try {
-        const existing = await MarketingEmailTemplate.findOne({ name: templateName });
-        if (existing) {
-          existing.subject = subject;
-          existing.bodyContent = content;
-          existing.updatedAt = new Date();
-          existing.usedCount = (existing.usedCount || 0) + 1;
-          await existing.save();
-          console.log(`📧 Updated template: ${templateName}`);
-        } else {
-          await MarketingEmailTemplate.create({
-            name: templateName.trim(),
-            subject: subject,
-            bodyContent: content,
-            createdBy: req.admin._id,
-            createdByName: req.admin.name
-          });
-          console.log(`📧 Created template: ${templateName}`);
-        }
-      } catch (err) {
-        console.error('❌ Template save error:', err.message);
+      const existing = await EmailTemplate.findOne({ name: templateName });
+      if (existing) {
+        existing.subject = subject;
+        existing.htmlContent = content;
+        existing.usedCount++;
+        await existing.save();
+      } else {
+        await EmailTemplate.create({
+          name: templateName,
+          subject: subject,
+          htmlContent: content,
+          createdBy: req.admin._id
+        });
       }
     }
-
-    // CREATE HISTORY RECORD
-    const emailHistory = await MarketingEmailHistory.create({
+    
+    // Create history record
+    const history = await EmailHistory.create({
       subject,
-      bodyContent: content,
-      recipientType: finalRecipientType,
-      recipients: allRecipients.map(r => ({ email: r.email, name: r.name })),
-      recipientCount: allRecipients.length,
+      htmlContent: content,
+      recipients: recipientEmails.map(email => ({ email, status: 'pending' })),
+      totalRecipients: recipientEmails.length,
       status: 'sending',
-      sentBy: req.admin._id,
-      sentByName: req.admin.name,
-      sentAt: new Date()
+      sentBy: req.admin._id
     });
-    console.log(`📧 History record created: ${emailHistory._id}`);
-
-    // SEND EMAILS
+    
+    // Send emails
     let sentCount = 0;
     let failedCount = 0;
-
-    for (let i = 0; i < allRecipients.length; i++) {
-      const recipient = allRecipients[i];
+    const failedList = [];
+    
+    for (const email of recipientEmails) {
       try {
-        const fullHtml = wrapEmailWithBrandHeaderFooter(content, recipient.name || 'Valued Customer');
+        // Build complete email with header/footer
+        const fullHtml = buildCompleteEmail(content, email.split('@')[0]);
         
         await infoTransporter.sendMail({
           from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
-          to: recipient.email,
+          to: email,
           subject: subject,
           html: fullHtml
         });
         
         sentCount++;
-        console.log(`✅ [${i+1}/${allRecipients.length}] Sent to ${recipient.email}`);
+        console.log(`✅ Sent to: ${email}`);
         
-        await MarketingEmailHistory.updateOne(
-          { _id: emailHistory._id, 'recipients.email': recipient.email },
-          { $set: { 'recipients.$.status': 'sent', 'recipients.$.sentAt': new Date() } }
+        // Update recipient status
+        await EmailHistory.updateOne(
+          { _id: history._id, 'recipients.email': email },
+          { $set: { 'recipients.$.status': 'sent' } }
         );
-        
-        await new Promise(r => setTimeout(r, 200));
         
       } catch (err) {
         failedCount++;
-        console.error(`❌ Failed to send to ${recipient.email}:`, err.message);
+        failedList.push(email);
+        console.error(`❌ Failed to send to ${email}:`, err.message);
         
-        await MarketingEmailHistory.updateOne(
-          { _id: emailHistory._id, 'recipients.email': recipient.email },
+        await EmailHistory.updateOne(
+          { _id: history._id, 'recipients.email': email },
           { $set: { 'recipients.$.status': 'failed', 'recipients.$.error': err.message } }
         );
       }
+      
+      // Small delay to avoid rate limiting
+      await new Promise(r => setTimeout(r, 100));
     }
-
-    // UPDATE FINAL STATUS
-    const finalStatus = failedCount === 0 ? 'sent' : (sentCount > 0 ? 'partial' : 'failed');
-    await MarketingEmailHistory.findByIdAndUpdate(emailHistory._id, {
-      sentCount: sentCount,
-      failedCount: failedCount,
-      status: finalStatus,
+    
+    // Update history
+    await EmailHistory.findByIdAndUpdate(history._id, {
+      sentCount,
+      failedCount,
+      status: failedCount === 0 ? 'sent' : (sentCount > 0 ? 'partial' : 'failed'),
       completedAt: new Date()
     });
-
-    console.log(`📧 FINAL: ${sentCount} sent, ${failedCount} failed`);
-    console.log('📧 ==================== SEND COMPLETE ====================');
-
-    res.status(200).json({
-      status: 'success',
-      message: `Email sent to ${sentCount} recipient(s)${failedCount > 0 ? ` (${failedCount} failed)` : ''}`,
+    
+    console.log(`📧 Complete: ${sentCount} sent, ${failedCount} failed`);
+    
+    res.json({
+      success: true,
+      message: `Email sent to ${sentCount} of ${recipientEmails.length} recipients`,
       data: {
-        emailHistoryId: emailHistory._id,
-        sentCount: sentCount,
-        failedCount: failedCount,
-        totalRecipients: allRecipients.length,
-        status: finalStatus
+        sentCount,
+        failedCount,
+        failedList: failedList.slice(0, 10)
       }
     });
-
-  } catch (err) {
-    console.error('❌ SEND EMAIL ERROR:', err);
-    console.error('❌ Error stack:', err.stack);
+    
+  } catch (error) {
+    console.error('❌ Send email error:', error);
     res.status(500).json({ 
-      status: 'error', 
-      message: err.message || 'Failed to send email',
-      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+      success: false, 
+      error: error.message 
     });
   }
 });
 
 // =============================================
-// 2. GET /api/admin/email-history
+// GET EMAIL HISTORY
 // =============================================
 app.get('/api/admin/email-history', adminProtect, async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
-
-    const emails = await MarketingEmailHistory.find({})
+    
+    const history = await EmailHistory.find({})
       .populate('sentBy', 'name')
-      .sort({ createdAt: -1 })
+      .sort({ sentAt: -1 })
       .skip(skip)
-      .limit(limit)
-      .lean();
-
-    const total = await MarketingEmailHistory.countDocuments();
-
-    res.status(200).json({
-      status: 'success',
+      .limit(limit);
+    
+    const total = await EmailHistory.countDocuments();
+    
+    res.json({
+      success: true,
       data: {
-        emails: emails.map(e => ({
-          _id: e._id,
-          subject: e.subject,
-          recipientCount: e.recipientCount,
-          sentCount: e.sentCount,
-          failedCount: e.failedCount,
-          status: e.status,
-          sentBy: e.sentByName || e.sentBy?.name || 'Admin',
-          sentAt: e.sentAt,
-          createdAt: e.createdAt
+        emails: history.map(h => ({
+          _id: h._id,
+          subject: h.subject,
+          totalRecipients: h.totalRecipients,
+          sentCount: h.sentCount,
+          failedCount: h.failedCount,
+          status: h.status,
+          sentBy: h.sentBy?.name || 'Admin',
+          sentAt: h.sentAt
         })),
         pagination: {
           currentPage: page,
           totalPages: Math.ceil(total / limit),
-          totalItems: total,
-          hasNextPage: page < Math.ceil(total / limit),
-          hasPrevPage: page > 1
+          totalItems: total
         }
       }
     });
-  } catch (err) {
-    console.error('Email history error:', err);
-    res.status(500).json({ status: 'error', message: err.message });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
 // =============================================
-// 3. GET /api/admin/email-templates
+// GET EMAIL TEMPLATES
 // =============================================
 app.get('/api/admin/email-templates', adminProtect, async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
-
-    const templates = await MarketingEmailTemplate.find({ isActive: true })
+    
+    const templates = await EmailTemplate.find({})
       .sort({ updatedAt: -1 })
       .skip(skip)
-      .limit(limit)
-      .lean();
-
-    const total = await MarketingEmailTemplate.countDocuments({ isActive: true });
-
-    res.status(200).json({
-      status: 'success',
+      .limit(limit);
+    
+    const total = await EmailTemplate.countDocuments();
+    
+    res.json({
+      success: true,
       data: {
         templates: templates.map(t => ({
           _id: t._id,
           name: t.name,
           subject: t.subject,
-          bodyContent: t.bodyContent,
-          usedCount: t.usedCount || 0,
-          updatedAt: t.updatedAt,
-          createdAt: t.createdAt,
-          createdBy: t.createdByName || 'Admin'
+          htmlContent: t.htmlContent,
+          usedCount: t.usedCount,
+          createdAt: t.createdAt
         })),
         pagination: {
           currentPage: page,
           totalPages: Math.ceil(total / limit),
-          totalItems: total,
-          hasNextPage: page < Math.ceil(total / limit),
-          hasPrevPage: page > 1
+          totalItems: total
         }
       }
     });
-  } catch (err) {
-    console.error('Templates error:', err);
-    res.status(500).json({ status: 'error', message: err.message });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
 // =============================================
-// 4. POST /api/admin/email-templates
+// CREATE/UPDATE/DELETE TEMPLATES
 // =============================================
 app.post('/api/admin/email-templates', adminProtect, async (req, res) => {
   try {
-    const { name, subject, bodyContent } = req.body;
-
-    if (!name || !subject || !bodyContent) {
-      return res.status(400).json({ status: 'fail', message: 'Name, subject, and body content are required' });
+    const { name, subject, htmlContent } = req.body;
+    
+    if (!name || !subject || !htmlContent) {
+      return res.status(400).json({ success: false, error: 'Missing required fields' });
     }
-
-    const existing = await MarketingEmailTemplate.findOne({ name });
+    
+    const existing = await EmailTemplate.findOne({ name });
     if (existing) {
-      return res.status(400).json({ status: 'fail', message: 'Template name already exists' });
+      return res.status(400).json({ success: false, error: 'Template name already exists' });
     }
-
-    const template = await MarketingEmailTemplate.create({
-      name: name.trim(),
-      subject: subject.trim(),
-      bodyContent: bodyContent,
-      createdBy: req.admin._id,
-      createdByName: req.admin.name
+    
+    const template = await EmailTemplate.create({
+      name,
+      subject,
+      htmlContent,
+      createdBy: req.admin._id
     });
-
-    res.status(201).json({ status: 'success', message: 'Template saved', data: { template } });
-  } catch (err) {
-    console.error('Save template error:', err);
-    res.status(500).json({ status: 'error', message: err.message });
+    
+    res.json({ success: true, data: template });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// =============================================
-// 5. PUT /api/admin/email-templates/:id
-// =============================================
 app.put('/api/admin/email-templates/:id', adminProtect, async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, subject, bodyContent } = req.body;
-
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ status: 'fail', message: 'Invalid ID' });
-    }
-
-    const template = await MarketingEmailTemplate.findById(id);
+    const { name, subject, htmlContent } = req.body;
+    
+    const template = await EmailTemplate.findById(id);
     if (!template) {
-      return res.status(404).json({ status: 'fail', message: 'Template not found' });
+      return res.status(404).json({ success: false, error: 'Template not found' });
     }
-
-    if (name && name !== template.name) {
-      const existing = await MarketingEmailTemplate.findOne({ name });
-      if (existing) return res.status(400).json({ status: 'fail', message: 'Name already exists' });
-      template.name = name.trim();
-    }
-    if (subject) template.subject = subject.trim();
-    if (bodyContent) template.bodyContent = bodyContent;
+    
+    if (name) template.name = name;
+    if (subject) template.subject = subject;
+    if (htmlContent) template.htmlContent = htmlContent;
     template.updatedAt = new Date();
-
+    
     await template.save();
-    res.status(200).json({ status: 'success', message: 'Template updated', data: { template } });
-  } catch (err) {
-    console.error('Update template error:', err);
-    res.status(500).json({ status: 'error', message: err.message });
+    res.json({ success: true, data: template });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// =============================================
-// 6. DELETE /api/admin/email-templates/:id
-// =============================================
 app.delete('/api/admin/email-templates/:id', adminProtect, async (req, res) => {
   try {
     const { id } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ status: 'fail', message: 'Invalid ID' });
+    const template = await EmailTemplate.findByIdAndDelete(id);
+    if (!template) {
+      return res.status(404).json({ success: false, error: 'Template not found' });
     }
-
-    const template = await MarketingEmailTemplate.findByIdAndUpdate(id, { isActive: false }, { new: true });
-    if (!template) return res.status(404).json({ status: 'fail', message: 'Template not found' });
-
-    res.status(200).json({ status: 'success', message: 'Template deleted' });
-  } catch (err) {
-    console.error('Delete template error:', err);
-    res.status(500).json({ status: 'error', message: err.message });
+    res.json({ success: true, message: 'Template deleted' });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
 // =============================================
-// 7. POST /api/admin/email-preview
+// PREVIEW EMAIL
 // =============================================
 app.post('/api/admin/email-preview', adminProtect, async (req, res) => {
   try {
-    const { bodyContent, recipientName } = req.body;
-    if (!bodyContent) {
-      return res.status(400).json({ status: 'fail', message: 'Body content required' });
+    const { htmlContent, recipientName } = req.body;
+    if (!htmlContent) {
+      return res.status(400).json({ success: false, error: 'Content required' });
     }
-    const previewHtml = wrapEmailWithBrandHeaderFooter(bodyContent, recipientName || 'Sample User');
-    res.status(200).json({ status: 'success', data: { previewHtml } });
-  } catch (err) {
-    console.error('Preview error:', err);
-    res.status(500).json({ status: 'error', message: err.message });
+    const preview = buildCompleteEmail(htmlContent, recipientName || 'Sample User');
+    res.json({ success: true, preview });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-console.log('✅ Email marketing endpoints registered');
+console.log('✅ Email marketing system loaded successfully');
+
+
 
 
 
