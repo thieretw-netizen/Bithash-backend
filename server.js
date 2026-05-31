@@ -5270,8 +5270,8 @@ const initializePlans = async () => {
     const plans = [
       {
         name: 'Starter Plan',
-        description: '9.731% After 10 hours',
-        percentage: 9.731,
+        description: '6.731% After 10 hours',
+        percentage: 6.731,
         duration: 10,
         minAmount: 100,
         maxAmount: 499,
@@ -5279,8 +5279,8 @@ const initializePlans = async () => {
       },
       {
         name: 'Standard Plan',
-        description: '15.682% After 24 hours',
-        percentage: 15.682,
+        description: '9.682% After 24 hours',
+        percentage: 8.682,
         duration: 24,
         minAmount: 500,
         maxAmount: 1999,
@@ -5288,8 +5288,8 @@ const initializePlans = async () => {
       },
       {
         name: 'Gold Plan',
-        description: '25.564% After 48 hours',
-        percentage: 25.564,
+        description: '10.564% After 48 hours',
+        percentage: 10.564,
         duration: 48,
         minAmount: 2000,
         maxAmount: 9999,
@@ -5297,8 +5297,8 @@ const initializePlans = async () => {
       },
       {
         name: 'Enterprise Plan',
-        description: '43.711% After 72 hours',
-        percentage: 43.711,
+        description: '16.711% After 72 hours',
+        percentage: 16.711,
         duration: 72,
         minAmount: 10000,
         maxAmount: 49999,
@@ -5306,8 +5306,8 @@ const initializePlans = async () => {
       },
       {
         name: 'Ultimate Plan',
-        description: '53.921% After 96 hours',
-        percentage: 53.921,
+        description: '23.921% After 96 hours',
+        percentage: 23.921,
         duration: 96,
         minAmount: 50000,
         maxAmount: 1000000,
