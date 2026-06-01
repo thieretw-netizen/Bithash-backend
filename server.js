@@ -7567,6 +7567,11 @@ app.post('/api/auth/reset-password', [
 
 
 
+
+
+
+
+
 app.post('/api/investments', protect, [
   body('planId').notEmpty().withMessage('Plan ID is required').isMongoId().withMessage('Invalid Plan ID'),
   body('amount').isFloat({ min: 1 }).withMessage('Amount must be a positive number'),
@@ -7746,9 +7751,9 @@ app.post('/api/investments', protect, [
     user.balances.active.set('btc', currentActiveBTC + investmentAmountAfterFeeBTC);
     console.log(`   Added ${investmentAmountAfterFeeBTC.toFixed(8)} BTC to Active wallet. New active balance: ${(currentActiveBTC + investmentAmountAfterFeeBTC).toFixed(8)} BTC`);
     
-    // Track USD equivalents for reporting
-    const currentActiveUSD = user.balances.active?.get('usd') || 0;
-    user.balances.active.set('usd', currentActiveUSD + investmentAmountAfterFeeUSD);
+    // ❌ USD storage line REMOVED as requested
+    // The following line has been REMOVED:
+    // user.balances.active.set('usd', currentActiveUSD + investmentAmountAfterFeeUSD);
     
     await user.save();
 
@@ -8022,47 +8027,47 @@ const investment = await Investment.create({
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>ROI Percentage:</strong></td>
-                  <td style="padding: 8px 0; text-align: right; color: #10B981;">+${plan.percentage}%</td>
+                  <td style="padding: 8px 0; text-align: right; color: #10B981;">+${plan.percentage}%</div>
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>Duration:</strong></td>
-                  <td style="padding: 8px 0; text-align: right;">${plan.duration} hours</td>
+                  <td style="padding: 8px 0; text-align: right;">${plan.duration} hours</div>
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>Hashrate (TH/s):</strong></td>
-                  <td style="padding: 8px 0; text-align: right;">${plan.duration === 10 ? '68' : plan.duration === 24 ? '110' : plan.duration === 48 ? '150' : plan.duration === 72 ? '234' : '255'} TH/s</td>
+                  <td style="padding: 8px 0; text-align: right;">${plan.duration === 10 ? '68' : plan.duration === 24 ? '110' : plan.duration === 48 ? '150' : plan.duration === 72 ? '234' : '255'} TH/s</div>
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>Mining Type:</strong></td>
-                  <td style="padding: 8px 0; text-align: right;">SHA-256 ASIC mining</td>
+                  <td style="padding: 8px 0; text-align: right;">SHA-256 ASIC mining</div>
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>Start Date:</strong></td>
-                  <td style="padding: 8px 0; text-align: right;">${formattedStartDate}</td>
+                  <td style="padding: 8px 0; text-align: right;">${formattedStartDate}</div>
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>Expected Maturity:</strong></td>
-                  <td style="padding: 8px 0; text-align: right; color: #F7A600;">${formattedEndDate}</td>
+                  <td style="padding: 8px 0; text-align: right; color: #F7A600;">${formattedEndDate}</div>
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>Wallet Credited:</strong></td>
-                  <td style="padding: 8px 0; text-align: right;"><span style="background: #10B981; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Active Wallet</span></td>
+                  <td style="padding: 8px 0; text-align: right;"><span style="background: #10B981; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Active Wallet</span></div>
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>Deducted From:</strong></td>
-                  <td style="padding: 8px 0; text-align: right;"><span style="background: #F7A600; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">${walletName} Wallet</span></td>
+                  <td style="padding: 8px 0; text-align: right;"><span style="background: #F7A600; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">${walletName} Wallet</span></div>
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>New Active Wallet Balance:</strong></td>
-                  <td style="padding: 8px 0; text-align: right; font-weight: bold; color: #10B981;">${formattedNewActiveBTC} BTC (≈ $${formattedNewActiveUSD} USD)</td>
+                  <td style="padding: 8px 0; text-align: right; font-weight: bold; color: #10B981;">${formattedNewActiveBTC} BTC (≈ $${formattedNewActiveUSD} USD)</div>
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>Exchange Rate (BTC/USD):</strong></td>
-                  <td style="padding: 8px 0; text-align: right;">1 BTC = $${formattedBtcPrice}</td>
+                  <td style="padding: 8px 0; text-align: right;">1 BTC = $${formattedBtcPrice}</div>
                 </tr>
                 <tr style="border-top: 1px solid #E2E8F0;">
                   <td style="padding: 8px 0;"><strong>Contract ID:</strong></td>
-                  <td style="padding: 8px 0; text-align: right; font-size: 11px;">${transaction.reference}</td>
+                  <td style="padding: 8px 0; text-align: right; font-size: 11px;">${transaction.reference}</div>
                 </tr>
               </table>
             </div>
@@ -8799,11 +8804,6 @@ cron.schedule('*/10 * * * * *', async () => {
 console.log('🚀 Investment maturity cron job scheduled to run EVERY 10 SECONDS');
 console.log('📊 The system will log which users have matured investments at each check');
 console.log('⏰ First check will run immediately when the schedule triggers\n');
-
-
-
-
-
 
 
 
@@ -18831,9 +18831,11 @@ function maskCardNumber(cardNumber) {
 
 
 
+
 // =============================================
 // GET USER BALANCES - REAL TIME CRYPTO HOLDINGS WITH PNL
-// FIXED: NO double counting, NO fake fallbacks, ONLY real API prices
+// Database stores ONLY crypto amounts (btc, eth, etc.)
+// USD values calculated in real-time from APIs
 // =============================================
 app.get('/api/users/balances', protect, async (req, res) => {
   try {
@@ -18854,7 +18856,7 @@ app.get('/api/users/balances', protect, async (req, res) => {
     const preferredFiat = userPref?.currency || 'USD';
     
     // =============================================
-    // FETCH FIAT EXCHANGE RATE (REAL API, NO FALLBACK)
+    // FETCH FIAT EXCHANGE RATE
     // =============================================
     let fiatRate = 1;
     let fiatRateError = false;
@@ -18870,14 +18872,13 @@ app.get('/api/users/balances', protect, async (req, res) => {
         console.log(`✅ Fiat rate fetched: 1 USD = ${fiatRate} ${preferredFiat}`);
       } else {
         fiatRateError = true;
-        console.warn(`⚠️ Fiat rate for ${preferredFiat} not found, using USD`);
       }
     } catch (err) {
       fiatRateError = true;
       console.error(`❌ Failed to fetch fiat rates: ${err.message}`);
     }
     
-    // If fiat API fails, return error (NO fake fallback)
+    // If fiat API fails and not USD, return error
     if (fiatRateError && preferredFiat !== 'USD') {
       return res.status(503).json({
         status: 'error',
@@ -18887,7 +18888,7 @@ app.get('/api/users/balances', protect, async (req, res) => {
     }
     
     // =============================================
-    // MAIN WALLET: Calculate from crypto ONLY (NO stored USD)
+    // MAIN WALLET: Calculate from crypto ONLY (SKIP stored 'usd' values)
     // =============================================
     let totalMainUSD = 0;
     const mainAssets = [];
@@ -18895,16 +18896,24 @@ app.get('/api/users/balances', protect, async (req, res) => {
     
     if (user.balances && user.balances.main) {
       const mainBalances = user.balances.main;
+      // Handle both Map and plain object formats
+      const entries = mainBalances instanceof Map ? mainBalances.entries() : Object.entries(mainBalances);
       
-      for (const [asset, balance] of mainBalances.entries()) {
-        // Skip the 'usd' key - it's a cache value, NOT for calculation
+      for (const [asset, balance] of entries) {
+        // ✅ CRITICAL: Skip the stored 'usd' key - it's a cache value, NOT for calculation
         if (balance > 0 && asset !== 'usd') {
           const price = await getCryptoPrice(asset.toUpperCase());
           
           if (price && price > 0) {
             const assetValueUSD = balance * price;
             totalMainUSD += assetValueUSD;
-            mainAssets.push({ asset, balance, price, valueUSD: assetValueUSD });
+            mainAssets.push({ 
+              asset, 
+              balance, 
+              price, 
+              valueUSD: assetValueUSD,
+              valueUSDFormatted: `$${assetValueUSD.toFixed(2)}`
+            });
             console.log(`💰 MAIN: ${balance} ${asset.toUpperCase()} @ $${price} = $${assetValueUSD.toFixed(2)}`);
           } else {
             mainPriceErrors.push(asset);
@@ -18914,7 +18923,7 @@ app.get('/api/users/balances', protect, async (req, res) => {
       }
     }
     
-    // If ANY crypto price failed, return error (NO fake fallback)
+    // If ANY crypto price failed, return error
     if (mainPriceErrors.length > 0) {
       return res.status(503).json({
         status: 'error',
@@ -18925,7 +18934,7 @@ app.get('/api/users/balances', protect, async (req, res) => {
     }
     
     // =============================================
-    // MATURED WALLET: Calculate from crypto ONLY (NO stored USD)
+    // MATURED WALLET: Calculate from crypto ONLY (SKIP stored 'usd' values)
     // =============================================
     let totalMaturedUSD = 0;
     const maturedAssets = [];
@@ -18933,16 +18942,23 @@ app.get('/api/users/balances', protect, async (req, res) => {
     
     if (user.balances && user.balances.matured) {
       const maturedBalances = user.balances.matured;
+      const entries = maturedBalances instanceof Map ? maturedBalances.entries() : Object.entries(maturedBalances);
       
-      for (const [asset, balance] of maturedBalances.entries()) {
-        // Skip the 'usd' key - it's a cache value, NOT for calculation
+      for (const [asset, balance] of entries) {
+        // ✅ CRITICAL: Skip the stored 'usd' key - it's a cache value, NOT for calculation
         if (balance > 0 && asset !== 'usd') {
           const price = await getCryptoPrice(asset.toUpperCase());
           
           if (price && price > 0) {
             const assetValueUSD = balance * price;
             totalMaturedUSD += assetValueUSD;
-            maturedAssets.push({ asset, balance, price, valueUSD: assetValueUSD });
+            maturedAssets.push({ 
+              asset, 
+              balance, 
+              price, 
+              valueUSD: assetValueUSD,
+              valueUSDFormatted: `$${assetValueUSD.toFixed(2)}`
+            });
             console.log(`💰 MATURED: ${balance} ${asset.toUpperCase()} @ $${price} = $${assetValueUSD.toFixed(2)}`);
           } else {
             maturedPriceErrors.push(asset);
@@ -18952,7 +18968,7 @@ app.get('/api/users/balances', protect, async (req, res) => {
       }
     }
     
-    // If ANY crypto price failed, return error (NO fake fallback)
+    // If ANY crypto price failed, return error
     if (maturedPriceErrors.length > 0) {
       return res.status(503).json({
         status: 'error',
@@ -18970,53 +18986,21 @@ app.get('/api/users/balances', protect, async (req, res) => {
     
     if (user.balances && user.balances.active) {
       const activeBalances = user.balances.active;
+      const entries = activeBalances instanceof Map ? activeBalances.entries() : Object.entries(activeBalances);
       
-      for (const [asset, balance] of activeBalances.entries()) {
+      for (const [asset, balance] of entries) {
         if (balance > 0) {
-          // Active wallet only stores USD values (no price calculation needed)
-          if (asset === 'usd') {
-            totalActiveUSD += balance;
-            console.log(`💰 ACTIVE (fixed): $${balance.toFixed(2)} USD from mining contracts`);
-          } else {
-            // If there's crypto in active wallet, it's also fixed (contract value)
-            totalActiveUSD += balance;
-            console.log(`💰 ACTIVE (fixed): ${balance} ${asset.toUpperCase()} (contract value)`);
-          }
+          // Active wallet stores USD values directly (no price calculation needed)
+          totalActiveUSD += balance;
+          console.log(`💰 ACTIVE (fixed): $${balance.toFixed(2)} USD from mining contracts`);
         }
       }
     }
     
     // =============================================
-    // STORE HOLDINGS IN REDIS FOR ASSET ENDPOINT
+    // PNL CALCULATION (Compare to previous day's USD value)
     // =============================================
-    const totalCryptoHoldings = new Map();
-    
-    if (user.balances && user.balances.main) {
-      for (const [asset, balance] of user.balances.main.entries()) {
-        if (balance > 0 && asset !== 'usd') {
-          totalCryptoHoldings.set(asset, (totalCryptoHoldings.get(asset) || 0) + balance);
-        }
-      }
-    }
-    
-    if (user.balances && user.balances.matured) {
-      for (const [asset, balance] of user.balances.matured.entries()) {
-        if (balance > 0 && asset !== 'usd') {
-          totalCryptoHoldings.set(asset, (totalCryptoHoldings.get(asset) || 0) + balance);
-        }
-      }
-    }
-    
-    const holdingsObj = {};
-    for (const [asset, balance] of totalCryptoHoldings.entries()) {
-      holdingsObj[asset] = balance;
-    }
-    await redis.setex(`user:${userId}:total_holdings`, 60, JSON.stringify(holdingsObj));
-    
-    // =============================================
-    // PNL CALCULATION (Only for assets that fluctuate)
-    // =============================================
-    const previousDayKey = `user:${userId}:prev_balances`;
+    const previousDayKey = `user:${userId}:prev_usd_value`;
     let previousMainUSD = totalMainUSD;
     let previousMaturedUSD = totalMaturedUSD;
     const cachedPrev = await redis.get(previousDayKey);
@@ -19048,26 +19032,31 @@ app.get('/api/users/balances', protect, async (req, res) => {
       }));
       await redis.set(`user:${userId}:pnl_date`, today);
       console.log(`📅 Reset PnL baseline for user ${userId} - new day: ${today}`);
+      console.log(`   Previous Main USD: $${previousMainUSD.toFixed(2)} → New: $${totalMainUSD.toFixed(2)}`);
     }
     
     // =============================================
-    // CONVERT TO PREFERRED FIAT (using real exchange rate)
+    // CONVERT TO PREFERRED FIAT
     // =============================================
     const mainFiat = totalMainUSD * fiatRate;
     const activeFiat = totalActiveUSD * fiatRate;
     const maturedFiat = totalMaturedUSD * fiatRate;
-    
-    // Calculate total portfolio value (NO double counting!)
     const totalPortfolioValue = totalMainUSD + totalActiveUSD + totalMaturedUSD;
     const totalPortfolioFiat = totalPortfolioValue * fiatRate;
+    
+    // Format PnL with sign
+    const mainPnLFormatted = mainPnL >= 0 ? `+$${mainPnL.toFixed(2)}` : `-$${Math.abs(mainPnL).toFixed(2)}`;
+    const mainPnLPercentFormatted = mainPnLPercent >= 0 ? `+${mainPnLPercent.toFixed(2)}%` : `${mainPnLPercent.toFixed(2)}%`;
+    const maturedPnLFormatted = maturedPnL >= 0 ? `+$${maturedPnL.toFixed(2)}` : `-$${Math.abs(maturedPnL).toFixed(2)}`;
+    const maturedPnLPercentFormatted = maturedPnLPercent >= 0 ? `+${maturedPnLPercent.toFixed(2)}%` : `${maturedPnLPercent.toFixed(2)}%`;
     
     console.log(`\n📊 FINAL BALANCES for user ${userId}:`);
     console.log(`   MAIN: $${totalMainUSD.toFixed(2)} USD → ${mainFiat.toFixed(2)} ${preferredFiat}`);
     console.log(`   ACTIVE: $${totalActiveUSD.toFixed(2)} USD → ${activeFiat.toFixed(2)} ${preferredFiat}`);
     console.log(`   MATURED: $${totalMaturedUSD.toFixed(2)} USD → ${maturedFiat.toFixed(2)} ${preferredFiat}`);
     console.log(`   TOTAL: $${totalPortfolioValue.toFixed(2)} USD → ${totalPortfolioFiat.toFixed(2)} ${preferredFiat}`);
-    console.log(`   PnL MAIN: ${mainPnL >= 0 ? '+' : ''}$${mainPnL.toFixed(2)} (${mainPnLPercent >= 0 ? '+' : ''}${mainPnLPercent.toFixed(2)}%)`);
-    console.log(`   PnL MATURED: ${maturedPnL >= 0 ? '+' : ''}$${maturedPnL.toFixed(2)} (${maturedPnLPercent >= 0 ? '+' : ''}${maturedPnLPercent.toFixed(2)}%)\n`);
+    console.log(`   PnL MAIN: ${mainPnLFormatted} (${mainPnLPercentFormatted})`);
+    console.log(`   PnL MATURED: ${maturedPnLFormatted} (${maturedPnLPercentFormatted})\n`);
     
     // Return in the format expected by HTML dashboard
     res.status(200).json({
@@ -19084,14 +19073,18 @@ app.get('/api/users/balances', protect, async (req, res) => {
       },
       pnl: {
         main: {
-          amount: mainPnL * fiatRate,
+          amount: mainPnL,
           amountUSD: mainPnL,
-          percentage: mainPnLPercent
+          amountFormatted: mainPnLFormatted,
+          percentage: mainPnLPercent,
+          percentageFormatted: mainPnLPercentFormatted
         },
         matured: {
-          amount: maturedPnL * fiatRate,
+          amount: maturedPnL,
           amountUSD: maturedPnL,
-          percentage: maturedPnLPercent
+          amountFormatted: maturedPnLFormatted,
+          percentage: maturedPnLPercent,
+          percentageFormatted: maturedPnLPercentFormatted
         }
       },
       exchangeRate: {
@@ -19103,6 +19096,10 @@ app.get('/api/users/balances', protect, async (req, res) => {
       assets: {
         main: mainAssets,
         matured: maturedAssets
+      },
+      cryptoHoldings: {
+        main: user.balances?.main instanceof Map ? Object.fromEntries(user.balances.main) : user.balances?.main || {},
+        matured: user.balances?.matured instanceof Map ? Object.fromEntries(user.balances.matured) : user.balances?.matured || {}
       }
     });
     
@@ -19115,7 +19112,6 @@ app.get('/api/users/balances', protect, async (req, res) => {
     });
   }
 });
-
 
 
 
@@ -19488,7 +19484,18 @@ const calculateWalletValueFromBalances = async (balancesMap, currentPrices) => {
 const startRealTimePriceUpdates = (io) => {
   if (priceUpdateInterval) clearInterval(priceUpdateInterval);
   
-  // UPDATE PRICES EVERY 1 SECOND FOR TRUE REAL-TIME
+  // =============================================
+// REAL-TIME PRICE UPDATES WITH WEBSOCKET
+// Broadcasts price changes to all connected clients
+// =============================================
+
+let priceUpdateInterval = null;
+let lastPrices = {};
+
+const startRealTimePriceUpdates = (io) => {
+  if (priceUpdateInterval) clearInterval(priceUpdateInterval);
+  
+  // UPDATE PRICES EVERY 10 SECONDS FOR TRUE REAL-TIME
   priceUpdateInterval = setInterval(async () => {
     try {
       const assets = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'ADA', 'SHIB', 'AVAX', 'DOT', 'TRX', 'LINK', 'MATIC', 'LTC'];
@@ -19497,7 +19504,7 @@ const startRealTimePriceUpdates = (io) => {
       // Fetch all prices in parallel for speed
       const pricePromises = assets.map(async (asset) => {
         const price = await getCryptoPrice(asset);
-        if (price) {
+        if (price && price > 0) {
           priceUpdates[asset.toLowerCase()] = {
             price: price,
             timestamp: Date.now()
@@ -19511,48 +19518,110 @@ const startRealTimePriceUpdates = (io) => {
         // Broadcast price updates to all clients
         io.emit('price_update', priceUpdates);
         lastPrices = priceUpdates;
+        console.log(`📡 Broadcasted real-time prices for ${Object.keys(priceUpdates).length} assets`);
       }
       
-      // IMMEDIATELY recalculate ALL user wallet values based on new prices
+      // Recalculate ALL user wallet values based on new prices
       await recalculateAllWalletValuesRealtime(io, priceUpdates);
       
     } catch (err) {
       console.error('Error in price update interval:', err);
     }
-  }, 1000); // EVERY SECOND
+  }, 10000); // EVERY 10 SECONDS
+};
+
+const startRealTimeWalletUpdates = (io) => {
+  startRealTimePriceUpdates(io);
+  console.log('💰 Real-time wallet value updates started (every 10 seconds)');
+  console.log('✅ Database stores ONLY crypto amounts - USD calculated in real-time');
 };
 
 
 
+
+
+
+
+
+
+
+
+
 // =============================================
-// REPLACE ONLY THIS FUNCTION - recalculateAllWalletValuesRealtime
+// GET FIAT EXCHANGE RATE
 // =============================================
+const getFiatRate = async (fiatCurrency) => {
+  if (fiatCurrency === 'USD') return 1;
+  
+  try {
+    const response = await axios.get('https://api.exchangerate-api.com/v4/latest/USD', { 
+      timeout: 5000,
+      headers: { 'Accept': 'application/json' }
+    });
+    
+    if (response.data?.rates?.[fiatCurrency]) {
+      return response.data.rates[fiatCurrency];
+    }
+    return 1;
+  } catch (err) {
+    console.warn(`Failed to fetch fiat rate for ${fiatCurrency}:`, err.message);
+    return 1;
+  }
+};
+
+
+
+
+
+
+
+
+
+
+
+	
+
+
+
+
+// =============================================
+// REAL-TIME WALLET VALUE RECALCULATION
+// Calculates USD values from crypto amounts and broadcasts via Socket.IO
+// =============================================
+
 const recalculateAllWalletValuesRealtime = async (io, currentPrices) => {
   if (isRecalculating) return;
   isRecalculating = true;
   
   try {
     const users = await User.find({}).select('_id balances');
+    let updatedCount = 0;
     
     for (const user of users) {
       let totalMainValue = 0;
       let totalMaturedValue = 0;
       
-      // Active wallet value should NOT be recalculated - it's fixed!
+      // Active wallet value is FIXED - does NOT fluctuate with price
       let totalActiveValue = 0;
       if (user.balances && user.balances.active) {
         const activeBalances = user.balances.active;
-        for (const [asset, balance] of activeBalances.entries()) {
+        const entries = activeBalances instanceof Map ? activeBalances.entries() : Object.entries(activeBalances);
+        
+        for (const [asset, balance] of entries) {
           if (balance > 0) {
+            // Active wallet stores USD values directly (mining contracts)
             totalActiveValue += balance;
           }
         }
       }
       
-      // Recalculate MAIN wallet (fluctuates) - SKIP the 'usd' key!
+      // Recalculate MAIN wallet from crypto ONLY - SKIP the 'usd' key!
       if (user.balances && user.balances.main) {
-        for (const [asset, balance] of user.balances.main.entries()) {
-          // ✅ CRITICAL: Skip the stored 'usd' value
+        const mainBalances = user.balances.main;
+        const entries = mainBalances instanceof Map ? mainBalances.entries() : Object.entries(mainBalances);
+        
+        for (const [asset, balance] of entries) {
+          // ✅ CRITICAL: Skip the stored 'usd' value - calculate fresh every time
           if (balance > 0 && asset !== 'usd') {
             let price = 0;
             if (currentPrices && currentPrices[asset] && currentPrices[asset].price) {
@@ -19567,10 +19636,13 @@ const recalculateAllWalletValuesRealtime = async (io, currentPrices) => {
         }
       }
       
-      // Recalculate MATURED wallet (fluctuates) - SKIP the 'usd' key!
+      // Recalculate MATURED wallet from crypto ONLY - SKIP the 'usd' key!
       if (user.balances && user.balances.matured) {
-        for (const [asset, balance] of user.balances.matured.entries()) {
-          // ✅ CRITICAL: Skip the stored 'usd' value
+        const maturedBalances = user.balances.matured;
+        const entries = maturedBalances instanceof Map ? maturedBalances.entries() : Object.entries(maturedBalances);
+        
+        for (const [asset, balance] of entries) {
+          // ✅ CRITICAL: Skip the stored 'usd' value - calculate fresh every time
           if (balance > 0 && asset !== 'usd') {
             let price = 0;
             if (currentPrices && currentPrices[asset] && currentPrices[asset].price) {
@@ -19587,13 +19659,48 @@ const recalculateAllWalletValuesRealtime = async (io, currentPrices) => {
       
       // Send real-time updates via Socket.IO to each specific user
       if (io) {
+        // Calculate PnL for real-time updates
+        const previousDayKey = `user:${user._id}:prev_usd_value`;
+        const cachedPrev = await redis.get(previousDayKey);
+        let mainPnL = 0;
+        let mainPnLPercent = 0;
+        
+        if (cachedPrev) {
+          try {
+            const prev = JSON.parse(cachedPrev);
+            const prevMainUSD = prev.mainUSD || totalMainValue;
+            mainPnL = totalMainValue - prevMainUSD;
+            mainPnLPercent = prevMainUSD > 0 ? (mainPnL / prevMainUSD) * 100 : 0;
+          } catch(e) {}
+        }
+        
+        // Emit wallet value update
         io.to(`user_${user._id}`).emit('wallet_realtime_update', {
           main: totalMainValue,
           active: totalActiveValue,
           matured: totalMaturedValue,
           timestamp: Date.now()
         });
+        
+        // Emit PnL update separately
+        io.to(`user_${user._id}`).emit('pnl_update', {
+          main: {
+            amount: mainPnL,
+            percentage: mainPnLPercent
+          },
+          matured: {
+            amount: 0,
+            percentage: 0
+          },
+          timestamp: Date.now()
+        });
+        
+        updatedCount++;
       }
+    }
+    
+    if (updatedCount > 0) {
+      console.log(`📡 Real-time wallet updates sent to ${updatedCount} users`);
     }
     
   } catch (err) {
@@ -19602,6 +19709,22 @@ const recalculateAllWalletValuesRealtime = async (io, currentPrices) => {
     isRecalculating = false;
   }
 };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // =============================================
 // REPLACE THIS FUNCTION - startRealTimeWalletUpdates
