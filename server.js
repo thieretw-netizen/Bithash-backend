@@ -25036,7 +25036,7 @@ app.get('/api/admin/transactions/export', adminProtect, async (req, res) => {
 
 
 // =============================================
-// CANCEL INVESTMENT (Admin) - PROPER REFUND LOGGING WITH BRANDED EMAIL
+// CANCEL INVESTMENT (Admin) - COMPLETE FIXED VERSION
 // =============================================
 app.post('/api/admin/investments/:id/cancel', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
   try {
@@ -25155,7 +25155,7 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, restrictTo('super', 
     
     const refundTransaction = await Transaction.create({
       user: user._id,
-      type: 'refund',  // Use 'refund' type instead of 'deposit'
+      type: 'refund',
       amount: refundAmountUSD,
       asset: 'BTC',
       assetAmount: refundAmountBTC,
@@ -25186,23 +25186,38 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, restrictTo('super', 
       adminNotes: `Investment cancelled by ${req.admin.name}. Refund processed to matured wallet.`
     });
 
-    // Also record platform revenue reversal (negative amount)
+    // =============================================
+    // RECORD REFUND (NOT NEGATIVE REVENUE) - FIXED
+    // =============================================
     if (investment.investmentFee && investment.investmentFee > 0) {
-      await PlatformRevenue.create({
-        source: 'refund',
-        amount: -investment.investmentFee,
-        currency: 'USD',
-        transactionId: refundTransaction._id,
-        investmentId: investment._id,
-        userId: user._id,
-        description: `Refund of investment fee for cancelled ${investment.plan?.name} investment`,
-        metadata: {
-          type: 'refund',
-          originalInvestmentId: investment._id,
-          originalFeeAmount: investment.investmentFee,
-          cancelledBy: req.admin.name
-        }
-      });
+      try {
+        await PlatformRevenue.create({
+          source: 'refund',
+          amount: investment.investmentFee,  // Positive amount
+          currency: 'USD',
+          transactionId: refundTransaction._id,
+          investmentId: investment._id,
+          userId: user._id,
+          description: `REFUND: Investment fee for cancelled ${investment.plan?.name} investment`,
+          metadata: {
+            type: 'refund',
+            originalInvestmentId: investment._id,
+            originalFeeAmount: investment.investmentFee,
+            originalFeeBTC: investment.investmentFeeBTC,
+            cancelledBy: req.admin.name,
+            cancellationReason: reason || 'Cancelled by admin',
+            isRefund: true,
+            refundProcessedAt: new Date(),
+            reference: refundReference
+          },
+          recordedAt: new Date()
+        });
+        
+        console.log(`💰 Refund recorded for investment fee: $${investment.investmentFee.toFixed(2)}`);
+      } catch (feeError) {
+        console.error('Failed to record fee refund:', feeError);
+        // Don't fail the whole cancellation if fee recording fails
+      }
     }
 
     // =============================================
@@ -25226,7 +25241,7 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, restrictTo('super', 
       timeZoneName: 'short'
     });
 
-    // Build branded email HTML (matching deposit_approved/deposit_rejected style)
+    // Build branded email HTML
     const emailHtml = `
       <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
         <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
@@ -25263,13 +25278,11 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, restrictTo('super', 
             <table style="width: 100%; border-collapse: collapse;">
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Plan Name:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${planName}</td>
+                <td style="padding: 8px 0; text-align: right;">${planName}</strong></td>
               </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Original Investment:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">$${formattedOriginalAmount} USD (${
-                  originalBTCAmount.toFixed(8)
-                } BTC at activation)</strong></td>
+                <td style="padding: 8px 0; text-align: right;">$${formattedOriginalAmount} USD (${originalBTCAmount.toFixed(8)} BTC at activation)</strong></td>
               </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Refund Amount:</strong></td>
@@ -25329,7 +25342,7 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, restrictTo('super', 
       </div>
     `;
 
-    // Send email using the same transporter as other emails
+    // Send email
     const mailTransporter = infoTransporter;
     await mailTransporter.sendMail({
       from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
@@ -25376,7 +25389,8 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, restrictTo('super', 
         newMaturedBalanceUSD: newMaturedUSDBalance,
         reason: reason || 'Cancelled by admin',
         cancelledBy: req.admin.name,
-        isRefund: true
+        isRefund: true,
+        feeRefunded: investment.investmentFee || 0
       },
       financial: {
         amount: refundAmountUSD,
@@ -25434,6 +25448,7 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, restrictTo('super', 
     console.log(`   Plan: ${planName}`);
     console.log(`   Refund: ${refundAmountBTC.toFixed(8)} BTC ($${refundAmountUSD.toLocaleString()})`);
     console.log(`   Target Wallet: MATURED`);
+    console.log(`   Fee Refunded: $${(investment.investmentFee || 0).toFixed(2)}`);
     console.log(`   Email sent to: ${user.email}`);
     
     res.status(200).json({
@@ -25452,7 +25467,8 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, restrictTo('super', 
           btcPrice: currentBTCPrice,
           walletType: 'matured',
           reference: refundReference,
-          isRefund: true
+          isRefund: true,
+          feeRefunded: investment.investmentFee || 0
         },
         newMaturedBalance: {
           usd: newMaturedUSDBalance,
