@@ -25036,7 +25036,7 @@ app.get('/api/admin/transactions/export', adminProtect, async (req, res) => {
 
 
 // =============================================
-// CANCEL INVESTMENT (Admin) - READS ACTUAL DATABASE VALUES
+// CANCEL INVESTMENT (Admin) - REAL-TIME PRICES, ONLY MATURED WALLET
 // =============================================
 app.post('/api/admin/investments/:id/cancel', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
   try {
@@ -25081,14 +25081,21 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, restrictTo('super', 
       });
     }
 
-    // Get REAL-TIME BTC price at cancellation moment
+    // Get REAL-TIME BTC price using existing getCryptoPrice function
     let currentBTCPrice = 0;
     try {
-      currentBTCPrice = await getRealTimeBitcoinPrice();
-      console.log(`💰 Current BTC price at cancellation: $${currentBTCPrice.toLocaleString()}`);
+      currentBTCPrice = await getCryptoPrice('BTC');
+      if (!currentBTCPrice || currentBTCPrice <= 0) {
+        throw new Error('Invalid BTC price received');
+      }
+      console.log(`💰 Real-time BTC price from API: $${currentBTCPrice.toLocaleString()}`);
     } catch (priceError) {
-      console.error('Failed to get BTC price:', priceError);
-      currentBTCPrice = 50000;
+      console.error('Failed to get real-time BTC price:', priceError);
+      return res.status(503).json({
+        status: 'error',
+        message: 'Unable to fetch current BTC price. Please try again later.',
+        error: priceError.message
+      });
     }
 
     // Calculate refund amounts
@@ -25099,6 +25106,7 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, restrictTo('super', 
     console.log(`📊 Refunding user ${user.email}:`);
     console.log(`   - USD Amount: $${refundAmountUSD.toLocaleString()}`);
     console.log(`   - BTC Amount: ${refundAmountBTC.toFixed(8)} BTC`);
+    console.log(`   - BTC Price Used: $${currentBTCPrice}`);
     console.log(`   - Target Wallet: MATURED`);
 
     // Initialize balances if needed
@@ -25142,20 +25150,13 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, restrictTo('super', 
     // =============================================
     // READ THE ACTUAL DATABASE VALUES AFTER SAVE
     // =============================================
-    // Fetch the user again to get the actual saved balances
     const updatedUser = await User.findById(user._id).select('balances');
     
     // Get the ACTUAL balances from database after refund
     const actualMaturedUSD = updatedUser.balances.matured.get('usd') || 0;
     const actualMaturedBTC = updatedUser.balances.matured.get('btc') || 0;
-    const actualActiveUSD = updatedUser.balances.active.get('usd') || 0;
-    const actualActiveBTC = updatedUser.balances.active.get('btc') || 0;
-    const actualMainUSD = updatedUser.balances.main.get('usd') || 0;
-    const actualMainBTC = updatedUser.balances.main.get('btc') || 0;
 
-    console.log(`📊 ACTUAL DATABASE BALANCES AFTER REFUND:`);
-    console.log(`   MAIN Wallet: $${actualMainUSD.toLocaleString()} USD, ${actualMainBTC.toFixed(8)} BTC`);
-    console.log(`   ACTIVE Wallet: $${actualActiveUSD.toLocaleString()} USD, ${actualActiveBTC.toFixed(8)} BTC`);
+    console.log(`📊 ACTUAL DATABASE MATURED WALLET BALANCE AFTER REFUND:`);
     console.log(`   MATURED Wallet: $${actualMaturedUSD.toLocaleString()} USD, ${actualMaturedBTC.toFixed(8)} BTC`);
 
     // Update investment status
@@ -25196,10 +25197,9 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, restrictTo('super', 
         refundProcessedAt: new Date(),
         targetWallet: 'matured',
         isRefund: true,
-        balancesAfterRefund: {
-          main: { usd: actualMainUSD, btc: actualMainBTC },
-          active: { usd: actualActiveUSD, btc: actualActiveBTC },
-          matured: { usd: actualMaturedUSD, btc: actualMaturedBTC }
+        maturedBalanceAfterRefund: {
+          usd: actualMaturedUSD,
+          btc: actualMaturedBTC
         }
       },
       fee: 0,
@@ -25249,11 +25249,7 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, restrictTo('super', 
     const formattedRefundUSD = refundAmountUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const formattedRefundBTC = refundAmountBTC.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
     const formattedActualMaturedUSD = actualMaturedUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const formattedActualMaturedBTC = actualMaturedBTC.toFixed(8);
-    const formattedActualMainUSD = actualMainUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const formattedActualMainBTC = actualMainBTC.toFixed(8);
-    const formattedActualActiveUSD = actualActiveUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const formattedActualActiveBTC = actualActiveBTC.toFixed(8);
+    const formattedActualMaturedBTC = actualMaturedBTC.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
     const formattedBTCPrice = currentBTCPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const formattedOriginalAmount = investment.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const planName = investment.plan?.name || 'your investment plan';
@@ -25270,7 +25266,7 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, restrictTo('super', 
     const cryptoLogoUrl = getCryptoLogo('BTC');
 
     // =============================================
-    // SEND EMAIL WITH ACTUAL DATABASE BALANCES
+    // SEND EMAIL WITH ONLY MATURED WALLET BALANCE
     // =============================================
     const emailHtml = `
       <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
@@ -25319,52 +25315,28 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, restrictTo('super', 
                 <td style="padding: 8px 0; text-align: right; font-weight: bold; color: #10B981;">+ ${formattedRefundBTC} BTC (≈ $${formattedRefundUSD} USD)</strong></td>
               </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>BTC Exchange Rate (Refund):</strong></td>
-                <td style="padding: 8px 0; text-align: right;">1 BTC = $${formattedBTCPrice}</strong></td>
+                <td style="padding: 8px 0;"><strong>BTC Exchange Rate Used:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">1 BTC = $${formattedBTCPrice} <span style="color: #10B981;">(Live Market Rate)</span></strong></td>
               </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Wallet Credited:</strong></td>
                 <td style="padding: 8px 0; text-align: right;"><span style="background: #D4AF37; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Matured Wallet</span></strong></td>
               </tr>
-            </tr>
+            </table>
           </div>
           
           <div style="background: #F0FDF4; border-radius: 12px; padding: 20px; margin: 20px 0; border: 1px solid #A7F3D0;">
-            <p style="color: #065F46; margin: 0 0 12px 0; font-weight: 600; font-size: 14px;">💰 Your Current Wallet Balances (Updated in Real-Time)</p>
+            <p style="color: #065F46; margin: 0 0 12px 0; font-weight: 600; font-size: 14px;">💰 Your Updated Matured Wallet Balance</p>
             
-            <div style="background: #FFFFFF; border-radius: 8px; padding: 12px; margin-bottom: 10px;">
-              <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div>
-                  <span style="font-size: 13px; color: #6B7280;">Main Wallet</span>
-                  <div style="font-weight: bold; font-size: 16px; color: #0B0E11;">$${formattedActualMainUSD} USD</div>
-                </div>
-                <div style="text-align: right;">
-                  <span style="font-size: 11px; color: #6B7280;">≈ ${formattedActualMainBTC} BTC</span>
-                </div>
+            <div style="background: #FFFFFF; border-radius: 8px; padding: 16px; text-align: center;">
+              <div style="font-size: 28px; font-weight: bold; color: #10B981; margin-bottom: 8px;">
+                $${formattedActualMaturedUSD} USD
               </div>
-            </div>
-            
-            <div style="background: #FFFFFF; border-radius: 8px; padding: 12px; margin-bottom: 10px;">
-              <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div>
-                  <span style="font-size: 13px; color: #6B7280;">Active Wallet (Mining Contracts)</span>
-                  <div style="font-weight: bold; font-size: 16px; color: #0B0E11;">$${formattedActualActiveUSD} USD</div>
-                </div>
-                <div style="text-align: right;">
-                  <span style="font-size: 11px; color: #6B7280;">≈ ${formattedActualActiveBTC} BTC</span>
-                </div>
+              <div style="font-size: 14px; color: #6B7280;">
+                ≈ ${formattedActualMaturedBTC} BTC
               </div>
-            </div>
-            
-            <div style="background: #FFFFFF; border-radius: 8px; padding: 12px;">
-              <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div>
-                  <span style="font-size: 13px; color: #6B7280;">Matured Wallet</span>
-                  <div style="font-weight: bold; font-size: 18px; color: #10B981;">$${formattedActualMaturedUSD} USD</div>
-                </div>
-                <div style="text-align: right;">
-                  <span style="font-size: 11px; color: #6B7280;">≈ ${formattedActualMaturedBTC} BTC</span>
-                </div>
+              <div style="font-size: 11px; color: #9CA3AF; margin-top: 8px;">
+                BTC value calculated at live market rate
               </div>
             </div>
           </div>
@@ -25410,10 +25382,8 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, restrictTo('super', 
     console.log(`   User: ${user.email}`);
     console.log(`   Plan: ${planName}`);
     console.log(`   Refund: ${refundAmountBTC.toFixed(8)} BTC ($${refundAmountUSD.toLocaleString()})`);
-    console.log(`   ACTUAL Balances after refund:`);
-    console.log(`     - MAIN: $${actualMainUSD.toLocaleString()} USD`);
-    console.log(`     - ACTIVE: $${actualActiveUSD.toLocaleString()} USD`);
-    console.log(`     - MATURED: $${actualMaturedUSD.toLocaleString()} USD`);
+    console.log(`   BTC Price Used: $${currentBTCPrice} (Live from API)`);
+    console.log(`   ACTUAL Matured Wallet Balance: $${actualMaturedUSD.toLocaleString()} USD (${actualMaturedBTC.toFixed(8)} BTC)`);
     console.log(`   Email sent to: ${user.email}`);
     
     res.status(200).json({
@@ -25430,15 +25400,15 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, restrictTo('super', 
           amountUSD: refundAmountUSD,
           amountBTC: refundAmountBTC,
           btcPrice: currentBTCPrice,
+          btcPriceSource: 'live_api',
           walletType: 'matured',
           reference: refundReference,
           isRefund: true,
           feeRefunded: investment.investmentFee || 0
         },
-        balancesAfterRefund: {
-          main: { usd: actualMainUSD, btc: actualMainBTC },
-          active: { usd: actualActiveUSD, btc: actualActiveBTC },
-          matured: { usd: actualMaturedUSD, btc: actualMaturedBTC }
+        maturedWalletAfterRefund: {
+          usd: actualMaturedUSD,
+          btc: actualMaturedBTC
         },
         transaction: {
           id: refundTransaction._id,
@@ -25457,7 +25427,6 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, restrictTo('super', 
     });
   }
 });
-
 
 
 
