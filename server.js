@@ -25036,7 +25036,7 @@ app.get('/api/admin/transactions/export', adminProtect, async (req, res) => {
 
 
 // =============================================
-// CANCEL INVESTMENT (Admin) - CORRECTED BALANCE DISPLAY
+// CANCEL INVESTMENT (Admin) - READS ACTUAL DATABASE VALUES
 // =============================================
 app.post('/api/admin/investments/:id/cancel', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
   try {
@@ -25108,25 +25108,29 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, restrictTo('super', 
     if (!user.balances.matured) user.balances.matured = new Map();
     if (!user.balances.active) user.balances.active = new Map();
 
-    // Get current balances
-    const currentMaturedBTCBalance = user.balances.matured.get('btc') || 0;
-    const currentMaturedUSDBalance = user.balances.matured.get('usd') || 0;
-    const currentActiveBTCBalance = user.balances.active.get('btc') || 0;
-    const currentActiveUSDBalance = user.balances.active.get('usd') || 0;
+    // Get current balances BEFORE refund
+    const beforeMaturedBTC = user.balances.matured.get('btc') || 0;
+    const beforeMaturedUSD = user.balances.matured.get('usd') || 0;
+    const beforeActiveBTC = user.balances.active.get('btc') || 0;
+    const beforeActiveUSD = user.balances.active.get('usd') || 0;
+
+    console.log(`📊 Balances BEFORE refund:`);
+    console.log(`   Matured Wallet: $${beforeMaturedUSD.toLocaleString()} USD, ${beforeMaturedBTC.toFixed(8)} BTC`);
+    console.log(`   Active Wallet: $${beforeActiveUSD.toLocaleString()} USD, ${beforeActiveBTC.toFixed(8)} BTC`);
 
     // REFUND TO MATURED WALLET
-    user.balances.matured.set('btc', currentMaturedBTCBalance + refundAmountBTC);
-    user.balances.matured.set('usd', currentMaturedUSDBalance + refundAmountUSD);
+    user.balances.matured.set('btc', beforeMaturedBTC + refundAmountBTC);
+    user.balances.matured.set('usd', beforeMaturedUSD + refundAmountUSD);
     
     // Remove from active wallet
-    const newActiveBTCBalance = currentActiveBTCBalance - originalBTCAmount;
+    const newActiveBTCBalance = beforeActiveBTC - originalBTCAmount;
     if (newActiveBTCBalance <= 0.00000001) {
       user.balances.active.delete('btc');
     } else {
       user.balances.active.set('btc', newActiveBTCBalance);
     }
     
-    const newActiveUSDBalance = currentActiveUSDBalance - refundAmountUSD;
+    const newActiveUSDBalance = beforeActiveUSD - refundAmountUSD;
     if (newActiveUSDBalance <= 0.01) {
       user.balances.active.delete('usd');
     } else {
@@ -25135,9 +25139,24 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, restrictTo('super', 
 
     await user.save();
 
-    // Calculate new matured wallet total after refund
-    const newMaturedBTCBalance = currentMaturedBTCBalance + refundAmountBTC;
-    const newMaturedUSDBalance = currentMaturedUSDBalance + refundAmountUSD;
+    // =============================================
+    // READ THE ACTUAL DATABASE VALUES AFTER SAVE
+    // =============================================
+    // Fetch the user again to get the actual saved balances
+    const updatedUser = await User.findById(user._id).select('balances');
+    
+    // Get the ACTUAL balances from database after refund
+    const actualMaturedUSD = updatedUser.balances.matured.get('usd') || 0;
+    const actualMaturedBTC = updatedUser.balances.matured.get('btc') || 0;
+    const actualActiveUSD = updatedUser.balances.active.get('usd') || 0;
+    const actualActiveBTC = updatedUser.balances.active.get('btc') || 0;
+    const actualMainUSD = updatedUser.balances.main.get('usd') || 0;
+    const actualMainBTC = updatedUser.balances.main.get('btc') || 0;
+
+    console.log(`📊 ACTUAL DATABASE BALANCES AFTER REFUND:`);
+    console.log(`   MAIN Wallet: $${actualMainUSD.toLocaleString()} USD, ${actualMainBTC.toFixed(8)} BTC`);
+    console.log(`   ACTIVE Wallet: $${actualActiveUSD.toLocaleString()} USD, ${actualActiveBTC.toFixed(8)} BTC`);
+    console.log(`   MATURED Wallet: $${actualMaturedUSD.toLocaleString()} USD, ${actualMaturedBTC.toFixed(8)} BTC`);
 
     // Update investment status
     investment.status = 'cancelled';
@@ -25149,7 +25168,7 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, restrictTo('super', 
     await investment.save();
 
     // =============================================
-    // CREATE REFUND TRANSACTION (NOT DEPOSIT)
+    // CREATE REFUND TRANSACTION
     // =============================================
     const refundReference = `REFUND-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
     
@@ -25176,7 +25195,12 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, restrictTo('super', 
         cancellationReason: reason || 'Cancelled by admin',
         refundProcessedAt: new Date(),
         targetWallet: 'matured',
-        isRefund: true
+        isRefund: true,
+        balancesAfterRefund: {
+          main: { usd: actualMainUSD, btc: actualMainBTC },
+          active: { usd: actualActiveUSD, btc: actualActiveBTC },
+          matured: { usd: actualMaturedUSD, btc: actualMaturedBTC }
+        }
       },
       fee: 0,
       netAmount: refundAmountUSD,
@@ -25220,17 +25244,16 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, restrictTo('super', 
     }
 
     // =============================================
-    // CALCULATE CORRECT BTC VALUE FOR DISPLAY
+    // FORMAT NUMBERS FOR EMAIL USING ACTUAL DATABASE VALUES
     // =============================================
-    // The matured wallet stores USD directly, so we need to calculate BTC equivalent
-    // using current price for display purposes only
-    const btcEquivalentOfMatured = newMaturedUSDBalance / currentBTCPrice;
-
-    // Format numbers for email
     const formattedRefundUSD = refundAmountUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const formattedRefundBTC = refundAmountBTC.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
-    const formattedNewMaturedUSD = newMaturedUSDBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const formattedNewMaturedBTC = btcEquivalentOfMatured.toLocaleString(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
+    const formattedActualMaturedUSD = actualMaturedUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const formattedActualMaturedBTC = actualMaturedBTC.toFixed(8);
+    const formattedActualMainUSD = actualMainUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const formattedActualMainBTC = actualMainBTC.toFixed(8);
+    const formattedActualActiveUSD = actualActiveUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const formattedActualActiveBTC = actualActiveBTC.toFixed(8);
     const formattedBTCPrice = currentBTCPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const formattedOriginalAmount = investment.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const planName = investment.plan?.name || 'your investment plan';
@@ -25244,11 +25267,10 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, restrictTo('super', 
       timeZoneName: 'short'
     });
 
-    // Get crypto logo
     const cryptoLogoUrl = getCryptoLogo('BTC');
 
     // =============================================
-    // SEND BRANDED EMAIL WITH CORRECT BALANCE DISPLAY
+    // SEND EMAIL WITH ACTUAL DATABASE BALANCES
     // =============================================
     const emailHtml = `
       <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
@@ -25304,19 +25326,47 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, restrictTo('super', 
                 <td style="padding: 8px 0;"><strong>Wallet Credited:</strong></td>
                 <td style="padding: 8px 0; text-align: right;"><span style="background: #D4AF37; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Matured Wallet</span></strong></td>
               </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>New Matured Wallet Balance:</strong></td>
-                <td style="padding: 8px 0; text-align: right; font-weight: bold; color: #10B981;">$${formattedNewMaturedUSD} USD</strong> <span style="color: #64748B; font-size: 12px;">(≈ ${formattedNewMaturedBTC} BTC at current price)</span></strong></td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Cancellation Date:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${cancellationDate}</strong></td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Reference ID:</strong></td>
-                <td style="padding: 8px 0; text-align: right; font-size: 11px;">${refundReference}</strong></td>
-              </tr>
-            </table>
+            </tr>
+          </div>
+          
+          <div style="background: #F0FDF4; border-radius: 12px; padding: 20px; margin: 20px 0; border: 1px solid #A7F3D0;">
+            <p style="color: #065F46; margin: 0 0 12px 0; font-weight: 600; font-size: 14px;">💰 Your Current Wallet Balances (Updated in Real-Time)</p>
+            
+            <div style="background: #FFFFFF; border-radius: 8px; padding: 12px; margin-bottom: 10px;">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                  <span style="font-size: 13px; color: #6B7280;">Main Wallet</span>
+                  <div style="font-weight: bold; font-size: 16px; color: #0B0E11;">$${formattedActualMainUSD} USD</div>
+                </div>
+                <div style="text-align: right;">
+                  <span style="font-size: 11px; color: #6B7280;">≈ ${formattedActualMainBTC} BTC</span>
+                </div>
+              </div>
+            </div>
+            
+            <div style="background: #FFFFFF; border-radius: 8px; padding: 12px; margin-bottom: 10px;">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                  <span style="font-size: 13px; color: #6B7280;">Active Wallet (Mining Contracts)</span>
+                  <div style="font-weight: bold; font-size: 16px; color: #0B0E11;">$${formattedActualActiveUSD} USD</div>
+                </div>
+                <div style="text-align: right;">
+                  <span style="font-size: 11px; color: #6B7280;">≈ ${formattedActualActiveBTC} BTC</span>
+                </div>
+              </div>
+            </div>
+            
+            <div style="background: #FFFFFF; border-radius: 8px; padding: 12px;">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                  <span style="font-size: 13px; color: #6B7280;">Matured Wallet</span>
+                  <div style="font-weight: bold; font-size: 18px; color: #10B981;">$${formattedActualMaturedUSD} USD</div>
+                </div>
+                <div style="text-align: right;">
+                  <span style="font-size: 11px; color: #6B7280;">≈ ${formattedActualMaturedBTC} BTC</span>
+                </div>
+              </div>
+            </div>
           </div>
           
           ${reason ? `
@@ -25326,17 +25376,13 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, restrictTo('super', 
           </div>
           ` : ''}
           
-          <div style="background: #F0FDF4; border-radius: 12px; padding: 16px 20px; margin: 20px 0; border-left: 4px solid #10B981;">
-            <p style="color: #065F46; margin: 0 0 8px 0; font-weight: 600;">✅ Funds Available in Matured Wallet</p>
-            <p style="color: #047857; margin: 0; font-size: 14px;">Your refunded funds are now available in your Matured Wallet. You can withdraw them to your external wallet or reinvest into a new mining contract.</p>
-          </div>
-          
           <div style="text-align: center; margin: 30px 0;">
             <a href="https://www.bithashcapital.live/dashboard" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View Dashboard</a>
             <a href="https://www.bithashcapital.live/invest" style="background-color: #10B981; color: #FFFFFF; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block; margin-left: 12px;">Reinvest Now</a>
           </div>
           
           <p style="color: #666666; font-size: 12px; margin-top: 30px;">Email sent: ${cancellationDate}</p>
+          <p style="color: #666666; font-size: 11px; margin-top: 10px;">Reference ID: ${refundReference}</p>
         </div>
         
         <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
@@ -25359,107 +25405,15 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, restrictTo('super', 
       html: emailHtml
     });
     
-    console.log(`📧 Investment cancellation email sent to ${user.email}`);
-    console.log(`   Matured Wallet Balance: $${newMaturedUSDBalance.toFixed(2)} USD (≈ ${btcEquivalentOfMatured.toFixed(8)} BTC at $${currentBTCPrice})`);
-
-    // Log to SystemLog
-    const deviceInfo = await getUserDeviceInfo(req);
-    
-    await SystemLog.create({
-      action: 'investment_cancelled',
-      entity: 'investment',
-      entityId: investment._id,
-      performedBy: req.admin._id,
-      performedByModel: 'Admin',
-      performedByEmail: req.admin.email,
-      performedByName: req.admin.name,
-      ip: getRealClientIP(req),
-      userAgent: req.headers['user-agent'] || 'Unknown',
-      deviceType: deviceInfo.deviceDetails?.type || 'desktop',
-      os: deviceInfo.deviceDetails?.os?.name,
-      browser: deviceInfo.deviceDetails?.browser?.name,
-      location: deviceInfo.location,
-      city: deviceInfo.locationDetails?.city,
-      region: deviceInfo.locationDetails?.region,
-      countryCode: deviceInfo.locationDetails?.country,
-      latitude: deviceInfo.locationDetails?.latitude,
-      longitude: deviceInfo.locationDetails?.longitude,
-      status: 'success',
-      riskLevel: 'low',
-      metadata: {
-        userId: user._id,
-        userEmail: user.email,
-        userName: `${user.firstName} ${user.lastName}`,
-        planName: investment.plan?.name,
-        originalInvestmentAmountUSD: investment.amount,
-        refundAmountUSD: refundAmountUSD,
-        refundAmountBTC: refundAmountBTC,
-        btcPriceAtCancellation: currentBTCPrice,
-        newMaturedBalanceUSD: newMaturedUSDBalance,
-        newMaturedBalanceBTC: btcEquivalentOfMatured,
-        reason: reason || 'Cancelled by admin',
-        cancelledBy: req.admin.name,
-        isRefund: true,
-        feeRefunded: investment.investmentFee || 0
-      },
-      financial: {
-        amount: refundAmountUSD,
-        amountUSD: refundAmountUSD,
-        cryptoAmount: refundAmountBTC,
-        cryptoAsset: 'BTC',
-        exchangeRate: currentBTCPrice,
-        balanceAfter: newMaturedUSDBalance,
-        walletType: 'matured',
-        transactionId: refundTransaction._id,
-        reference: refundReference
-      }
-    });
-
-    // Create notification for user
-    await Notification.create({
-      title: 'Investment Cancelled - Refund Processed',
-      message: `Your ${planName} investment of $${formattedOriginalAmount} USD has been cancelled. ${formattedRefundBTC} BTC (≈ $${formattedRefundUSD}) has been refunded to your Matured Wallet. New balance: $${formattedNewMaturedUSD} USD`,
-      type: 'investment_cancelled',
-      recipientType: 'specific',
-      specificUserId: user._id,
-      sentBy: req.admin._id,
-      isImportant: true,
-      metadata: {
-        investmentId: investment._id,
-        refundAmount: refundAmountUSD,
-        refundCurrency: 'USD',
-        planName: planName
-      }
-    });
-
-    // Emit real-time update via Socket.IO
-    const io = req.app.get('io');
-    if (io) {
-      io.to(`user_${user._id}`).emit('balance_update', {
-        main: user.balances.main?.get('usd') || 0,
-        active: user.balances.active?.get('usd') || 0,
-        matured: user.balances.matured?.get('usd') || 0,
-        timestamp: Date.now()
-      });
-      
-      io.to(`user_${user._id}`).emit('investment_cancelled', {
-        investmentId: investment._id,
-        planName: planName,
-        refundAmount: refundAmountUSD,
-        refundAmountBTC: refundAmountBTC,
-        refundReference: refundReference,
-        timestamp: Date.now()
-      });
-    }
-
     console.log(`\n✅ INVESTMENT CANCELLED SUCCESSFULLY`);
     console.log(`   Reference: ${refundReference}`);
     console.log(`   User: ${user.email}`);
     console.log(`   Plan: ${planName}`);
     console.log(`   Refund: ${refundAmountBTC.toFixed(8)} BTC ($${refundAmountUSD.toLocaleString()})`);
-    console.log(`   Target Wallet: MATURED`);
-    console.log(`   New Matured Balance: $${newMaturedUSDBalance.toFixed(2)} USD (≈ ${btcEquivalentOfMatured.toFixed(8)} BTC)`);
-    console.log(`   Fee Refunded: $${(investment.investmentFee || 0).toFixed(2)}`);
+    console.log(`   ACTUAL Balances after refund:`);
+    console.log(`     - MAIN: $${actualMainUSD.toLocaleString()} USD`);
+    console.log(`     - ACTIVE: $${actualActiveUSD.toLocaleString()} USD`);
+    console.log(`     - MATURED: $${actualMaturedUSD.toLocaleString()} USD`);
     console.log(`   Email sent to: ${user.email}`);
     
     res.status(200).json({
@@ -25481,10 +25435,10 @@ app.post('/api/admin/investments/:id/cancel', adminProtect, restrictTo('super', 
           isRefund: true,
           feeRefunded: investment.investmentFee || 0
         },
-        newMaturedBalance: {
-          usd: newMaturedUSDBalance,
-          btc: btcEquivalentOfMatured,
-          btcPriceUsed: currentBTCPrice
+        balancesAfterRefund: {
+          main: { usd: actualMainUSD, btc: actualMainBTC },
+          active: { usd: actualActiveUSD, btc: actualActiveBTC },
+          matured: { usd: actualMaturedUSD, btc: actualMaturedBTC }
         },
         transaction: {
           id: refundTransaction._id,
