@@ -27640,7 +27640,6 @@ app.post('/api/admin/send-email', adminProtect, async (req, res) => {
 
 
 
-
 // =============================================
 // ERROR HANDLING MIDDLEWARE
 // =============================================
@@ -27897,7 +27896,7 @@ const setupMarketWebSocket = (server) => {
   });
 
   const clients = new Set();
-  let priceInterval = null;
+  let wsPriceInterval = null;
 
   const broadcastRealPrices = async () => {
     try {
@@ -27987,7 +27986,7 @@ const setupMarketWebSocket = (server) => {
 
     // Send REAL initial data (NO fake fallbacks)
     try {
-      const realAssets = await fetchMarketData(); // This function already has no fallbacks
+      const realAssets = await fetchMarketData();
       if (realAssets && realAssets.length > 0) {
         ws.send(JSON.stringify({
           type: 'initial_data',
@@ -28010,8 +28009,8 @@ const setupMarketWebSocket = (server) => {
       }));
     }
 
-    if (clients.size === 1 && !priceInterval) {
-      priceInterval = setInterval(broadcastRealPrices, 10000); // Every 10 seconds
+    if (clients.size === 1 && !wsPriceInterval) {
+      wsPriceInterval = setInterval(broadcastRealPrices, 10000);
       console.log('⏲️ Started real price broadcast interval');
     }
 
@@ -28019,9 +28018,9 @@ const setupMarketWebSocket = (server) => {
       clients.delete(ws);
       console.log(`Market WebSocket client disconnected. Total: ${clients.size}`);
       
-      if (clients.size === 0 && priceInterval) {
-        clearInterval(priceInterval);
-        priceInterval = null;
+      if (clients.size === 0 && wsPriceInterval) {
+        clearInterval(wsPriceInterval);
+        wsPriceInterval = null;
         console.log('⏲️ Stopped price broadcast interval (no clients)');
       }
     });
@@ -28161,11 +28160,9 @@ async function calculateRealWalletBalances(user) {
   if (user.balances && user.balances.active) {
     for (const [asset, balance] of user.balances.active.entries()) {
       if (balance > 0) {
-        // Active wallet stores USD value directly (mining contracts)
         if (asset === 'usd') {
           activeUSD += balance;
         } else {
-          // If there's crypto in active wallet, treat as fixed value
           activeUSD += balance;
         }
       }
@@ -28343,6 +28340,30 @@ io.on('connection', async (socket) => {
 });
 
 // =============================================
+// HELPER FUNCTION - Get crypto price with 24h change
+// =============================================
+async function getCryptoPriceWithChange(asset) {
+  try {
+    const assetLower = asset.toLowerCase();
+    const response = await axios.get(
+      `https://api.coingecko.com/api/v3/simple/price?ids=${assetLower}&vs_currencies=usd&include_24hr_change=true`,
+      { timeout: 5000 }
+    );
+    
+    if (response.data && response.data[assetLower]) {
+      return {
+        price: response.data[assetLower].usd,
+        change24h: response.data[assetLower].usd_24h_change || 0
+      };
+    }
+    return { price: null, change24h: 0 };
+  } catch (err) {
+    console.warn(`Could not fetch 24h change for ${asset}:`, err.message);
+    return { price: null, change24h: 0 };
+  }
+}
+
+// =============================================
 // REAL-TIME BALANCE BROADCASTER - Every 10 seconds
 // =============================================
 let balanceBroadcastInterval = null;
@@ -28401,18 +28422,18 @@ const startRealTimeBalanceBroadcaster = () => {
     } catch (err) {
       console.error('Error in balance broadcaster:', err);
     }
-  }, 10000); // Every 10 seconds
+  }, 10000);
 };
 
 // =============================================
 // PRICE UPDATE BROADCASTER - Real-time price changes
 // =============================================
-let priceUpdateInterval = null;
+let priceBroadcastInterval = null;
 
 const startRealTimePriceBroadcaster = () => {
-  if (priceUpdateInterval) clearInterval(priceUpdateInterval);
+  if (priceBroadcastInterval) clearInterval(priceBroadcastInterval);
   
-  priceUpdateInterval = setInterval(async () => {
+  priceBroadcastInterval = setInterval(async () => {
     try {
       const assets = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'ADA', 'SHIB', 'AVAX', 'DOT', 'TRX', 'LINK', 'MATIC', 'LTC'];
       const priceUpdates = {};
@@ -28443,7 +28464,7 @@ const startRealTimePriceBroadcaster = () => {
     } catch (err) {
       console.error('Error in price broadcaster:', err);
     }
-  }, 5000); // Every 5 seconds
+  }, 5000);
 };
 
 // =============================================
@@ -28584,7 +28605,7 @@ startRealTimePriceBroadcaster();
 // =============================================
 const gracefulShutdown = () => {
   console.log('Received shutdown signal. Cleaning up...');
-  if (priceUpdateInterval) clearInterval(priceUpdateInterval);
+  if (priceBroadcastInterval) clearInterval(priceBroadcastInterval);
   if (balanceBroadcastInterval) clearInterval(balanceBroadcastInterval);
   stopInvestorGrowthJob();
   process.exit(0);
