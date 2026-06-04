@@ -18306,15 +18306,10 @@ app.get('/api/users/balances', protect, async (req, res) => {
 
 
 
-
-
-
-
-
-
 // =============================================
 // GET USER ASSETS ENDPOINT - Shows crypto from Main + Matured ONLY
 // Active wallet is NOT included here (it's fixed mining contracts)
+// Returns breakdown per wallet (main wallet and matured wallet separately)
 // =============================================
 app.get('/api/users/assets', protect, async (req, res) => {
   try {
@@ -18328,8 +18323,11 @@ app.get('/api/users/assets', protect, async (req, res) => {
     // =============================================
     // CRITICAL: Collect crypto holdings from Main AND Matured wallets ONLY
     // Active wallet is EXCLUDED because it represents fixed mining contracts
+    // Store MAIN and MATURED balances SEPARATELY for breakdown display
     // =============================================
     const totalHoldings = new Map(); // asset -> total balance (main + matured only)
+    const mainHoldings = new Map();   // asset -> main wallet balance only
+    const maturedHoldings = new Map(); // asset -> matured wallet balance only
     
     // Collect from MAIN wallet (crypto only, fluctuates)
     if (user.balances.main && user.balances.main instanceof Map) {
@@ -18337,6 +18335,7 @@ app.get('/api/users/assets', protect, async (req, res) => {
         if (balance > 0 && asset !== 'usd') {
           const currentTotal = totalHoldings.get(asset) || 0;
           totalHoldings.set(asset, currentTotal + balance);
+          mainHoldings.set(asset, balance);
         }
       }
     }
@@ -18347,6 +18346,7 @@ app.get('/api/users/assets', protect, async (req, res) => {
         if (balance > 0 && asset !== 'usd') {
           const currentTotal = totalHoldings.get(asset) || 0;
           totalHoldings.set(asset, currentTotal + balance);
+          maturedHoldings.set(asset, balance);
         }
       }
     }
@@ -18420,7 +18420,22 @@ app.get('/api/users/assets', protect, async (req, res) => {
           price = 0;
         }
         
+        // Return error if price fetch fails (NO fake fallback)
+        if (price <= 0) {
+          return res.status(503).json({
+            status: 'error',
+            message: `Unable to fetch current price for ${asset.toUpperCase()}. Please try again later.`,
+            missingAsset: asset
+          });
+        }
+        
         const currentValue = totalBalance * price;
+        
+        // Get main and matured balances separately for breakdown display
+        const mainBalance = mainHoldings.get(asset) || 0;
+        const maturedBalance = maturedHoldings.get(asset) || 0;
+        const mainValue = mainBalance * price;
+        const maturedValue = maturedBalance * price;
         
         // Calculate average buy price from history
         const assetBuys = buyHistoryByAsset[asset] || [];
@@ -18447,7 +18462,7 @@ app.get('/api/users/assets', protect, async (req, res) => {
           }
         });
         
-        const avgPrice = totalBought > 0 ? totalSpent / totalBought : 0;
+        const avgPrice = totalBought > 0 ? totalSpent / totalBought : price;
         const unrealizedPnl = currentValue - totalSpent;
         const unrealizedPercentage = totalSpent > 0 ? (unrealizedPnl / totalSpent) * 100 : 0;
         
@@ -18460,6 +18475,10 @@ app.get('/api/users/assets', protect, async (req, res) => {
         assetData.push({
           symbol: asset,
           balance: totalBalance, // TOTAL across Main + Matured wallets
+          mainBalance: mainBalance, // Main wallet balance only (for breakdown display)
+          maturedBalance: maturedBalance, // Matured wallet balance only (for breakdown display)
+          mainValue: mainValue,
+          maturedValue: maturedValue,
           currentValue: currentValue,
           avgPrice: avgPrice,
           totalSpent: totalSpent,
@@ -18491,6 +18510,11 @@ app.get('/api/users/assets', protect, async (req, res) => {
     });
   }
 });
+
+
+
+
+
 
 
 
