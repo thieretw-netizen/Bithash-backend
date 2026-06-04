@@ -22342,6 +22342,57 @@ async function getDetailedFinancialStats() {
 
 
 
+
+
+
+
+
+// Initialize R2 client once outside the route handlers
+const S3 = require('aws-sdk/clients/s3');
+
+const r2 = new S3({
+  endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+  accessKeyId: process.env.R2_ACCESS_KEY_ID,
+  secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+  region: 'auto',
+  signatureVersion: 'v4'
+});
+
+// Helper function to upload file to R2
+async function uploadToR2(file, key, contentType) {
+  try {
+    const fileContent = await fs.promises.readFile(file.path);
+    const result = await r2.putObject({
+      Bucket: process.env.R2_BUCKET_NAME,
+      Key: key,
+      Body: fileContent,
+      ContentType: contentType || file.mimetype
+    }).promise();
+    
+    // Clean up temp file
+    await fs.promises.unlink(file.path).catch(() => {});
+    
+    return { success: true, key, result };
+  } catch (error) {
+    console.error('R2 upload error:', error);
+    throw error;
+  }
+}
+
+// Helper function to get file from R2
+async function getFromR2(key) {
+  try {
+    const file = await r2.getObject({
+      Bucket: process.env.R2_BUCKET_NAME,
+      Key: key
+    }).promise();
+    return file;
+  } catch (error) {
+    console.error('R2 get error:', error);
+    throw error;
+  }
+}
+
 // NEW ENDPOINT: Serve files with token authentication for browser preview
 app.get('/api/admin/kyc/files/preview/:token/:type/:filename', async (req, res) => {
   try {
@@ -22357,16 +22408,6 @@ app.get('/api/admin/kyc/files/preview/:token/:type/:filename', async (req, res) 
         message: 'Invalid or expired token'
       });
     }
-
-    // Initialize R2 client
-    const S3 = require('aws-sdk/clients/s3');
-    const r2 = new S3({
-      endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-      accessKeyId: process.env.R2_ACCESS_KEY_ID,
-      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
-      region: 'auto',
-      signatureVersion: 'v4'
-    });
 
     let key;
     switch (type) {
@@ -22399,10 +22440,7 @@ app.get('/api/admin/kyc/files/preview/:token/:type/:filename', async (req, res) 
 
     try {
       // Get file from R2
-      const file = await r2.getObject({
-        Bucket: process.env.R2_BUCKET_NAME,
-        Key: key
-      }).promise();
+      const file = await getFromR2(key);
 
       // Get file extension and determine content type
       const ext = path.extname(filename).toLowerCase();
@@ -22617,16 +22655,6 @@ app.post('/api/users/kyc/identity', protect, upload.fields([
       });
     }
 
-    // Initialize R2 client
-    const S3 = require('aws-sdk/clients/s3');
-    const r2 = new S3({
-      endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-      accessKeyId: process.env.R2_ACCESS_KEY_ID,
-      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
-      region: 'auto',
-      signatureVersion: 'v4'
-    });
-
     // Update identity information
     kycRecord.identity.documentType = documentType.trim();
     kycRecord.identity.documentNumber = documentNumber.trim();
@@ -22640,17 +22668,8 @@ app.post('/api/users/kyc/identity', protect, upload.fields([
         const frontFile = req.files.front[0];
         const frontKey = `kyc/identity/${req.user.id}_${Date.now()}_front_${frontFile.originalname}`;
         
-        // Upload to R2
-        const frontFileContent = fs.readFileSync(frontFile.path);
-        await r2.putObject({
-          Bucket: process.env.R2_BUCKET_NAME,
-          Key: frontKey,
-          Body: frontFileContent,
-          ContentType: frontFile.mimetype
-        }).promise();
-        
-        // Clean up temp file
-        fs.unlinkSync(frontFile.path);
+        // Upload to R2 using the helper function
+        await uploadToR2(frontFile, frontKey, frontFile.mimetype);
         
         kycRecord.identity.frontImage = {
           filename: path.basename(frontKey),
@@ -22666,17 +22685,8 @@ app.post('/api/users/kyc/identity', protect, upload.fields([
         const backFile = req.files.back[0];
         const backKey = `kyc/identity/${req.user.id}_${Date.now()}_back_${backFile.originalname}`;
         
-        // Upload to R2
-        const backFileContent = fs.readFileSync(backFile.path);
-        await r2.putObject({
-          Bucket: process.env.R2_BUCKET_NAME,
-          Key: backKey,
-          Body: backFileContent,
-          ContentType: backFile.mimetype
-        }).promise();
-        
-        // Clean up temp file
-        fs.unlinkSync(backFile.path);
+        // Upload to R2 using the helper function
+        await uploadToR2(backFile, backKey, backFile.mimetype);
         
         kycRecord.identity.backImage = {
           filename: path.basename(backKey),
@@ -22792,16 +22802,6 @@ app.post('/api/users/kyc/address', protect, upload.single('document'), async (re
       });
     }
 
-    // Initialize R2 client
-    const S3 = require('aws-sdk/clients/s3');
-    const r2 = new S3({
-      endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-      accessKeyId: process.env.R2_ACCESS_KEY_ID,
-      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
-      region: 'auto',
-      signatureVersion: 'v4'
-    });
-
     // Update address information
     kycRecord.address.documentType = documentType.trim();
     kycRecord.address.documentDate = docDate;
@@ -22812,17 +22812,8 @@ app.post('/api/users/kyc/address', protect, upload.single('document'), async (re
     try {
       const key = `kyc/address/${req.user.id}_${Date.now()}_${req.file.originalname}`;
       
-      // Upload to R2
-      const fileContent = fs.readFileSync(req.file.path);
-      await r2.putObject({
-        Bucket: process.env.R2_BUCKET_NAME,
-        Key: key,
-        Body: fileContent,
-        ContentType: req.file.mimetype
-      }).promise();
-      
-      // Clean up temp file
-      fs.unlinkSync(req.file.path);
+      // Upload to R2 using the helper function
+      await uploadToR2(req.file, key, req.file.mimetype);
 
       kycRecord.address.documentImage = {
         filename: path.basename(key),
@@ -22920,16 +22911,6 @@ app.post('/api/users/kyc/facial', protect, upload.fields([
       });
     }
 
-    // Initialize R2 client
-    const S3 = require('aws-sdk/clients/s3');
-    const r2 = new S3({
-      endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-      accessKeyId: process.env.R2_ACCESS_KEY_ID,
-      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
-      region: 'auto',
-      signatureVersion: 'v4'
-    });
-
     // Update facial verification status
     kycRecord.facial.status = 'pending';
     kycRecord.facial.submittedAt = new Date();
@@ -22940,17 +22921,8 @@ app.post('/api/users/kyc/facial', protect, upload.fields([
         const videoFile = req.files.video[0];
         const videoKey = `kyc/facial/${req.user.id}_${Date.now()}_video_${videoFile.originalname}`;
         
-        // Upload to R2
-        const videoContent = fs.readFileSync(videoFile.path);
-        await r2.putObject({
-          Bucket: process.env.R2_BUCKET_NAME,
-          Key: videoKey,
-          Body: videoContent,
-          ContentType: videoFile.mimetype
-        }).promise();
-        
-        // Clean up temp file
-        fs.unlinkSync(videoFile.path);
+        // Upload to R2 using the helper function
+        await uploadToR2(videoFile, videoKey, videoFile.mimetype);
         
         kycRecord.facial.verificationVideo = {
           filename: path.basename(videoKey),
@@ -22966,17 +22938,8 @@ app.post('/api/users/kyc/facial', protect, upload.fields([
         const photoFile = req.files.photo[0];
         const photoKey = `kyc/facial/${req.user.id}_${Date.now()}_photo_${photoFile.originalname}`;
         
-        // Upload to R2
-        const photoContent = fs.readFileSync(photoFile.path);
-        await r2.putObject({
-          Bucket: process.env.R2_BUCKET_NAME,
-          Key: photoKey,
-          Body: photoContent,
-          ContentType: photoFile.mimetype
-        }).promise();
-        
-        // Clean up temp file
-        fs.unlinkSync(photoFile.path);
+        // Upload to R2 using the helper function
+        await uploadToR2(photoFile, photoKey, photoFile.mimetype);
         
         kycRecord.facial.verificationPhoto = {
           filename: path.basename(photoKey),
@@ -23406,7 +23369,7 @@ app.get('/api/admin/kyc/submissions/:id', adminProtect, async (req, res) => {
     const formatDocumentUrl = (filename, type) => {
       if (!filename) return null;
       // Generate token for authenticated access
-      const token = jwt.sign({ kycId: submission._id }, JWT_SECRET, { expiresIn: '1h' });
+      const token = jwt.sign({ kycId: submission._id }, process.env.JWT_SECRET, { expiresIn: '1h' });
       return `/api/admin/kyc/files/preview/${token}/${type}/${filename}`;
     };
 
@@ -23868,22 +23831,9 @@ app.get('/api/admin/kyc/files/:type/:filename', async (req, res) => {
         return res.status(400).json({ error: 'Invalid file type' });
     }
 
-    // Initialize R2 client
-    const S3 = require('aws-sdk/clients/s3');
-    const r2 = new S3({
-      endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-      accessKeyId: process.env.R2_ACCESS_KEY_ID,
-      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
-      region: 'auto',
-      signatureVersion: 'v4'
-    });
-
     try {
-      // Get file from R2
-      const file = await r2.getObject({
-        Bucket: process.env.R2_BUCKET_NAME,
-        Key: key
-      }).promise();
+      // Get file from R2 using the helper function
+      const file = await getFromR2(key);
 
       const fileSize = file.ContentLength;
       const contentType = getContentType(decodedFilename);
@@ -23960,6 +23910,19 @@ function getContentType(filename) {
   };
   return types[ext] || 'application/octet-stream';
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
