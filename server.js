@@ -27537,163 +27537,45 @@ app.get('/api/users/assets', protect, async (req, res) => {
 
 
 
-// =============================================
-// GET USER BALANCES - EXACT WEBSOCKET METHOD
-// Uses the SAME calculateRealWalletBalances function as WebSocket
-// NO Redis caching - reads directly from database
-// =============================================
 app.get('/api/users/balances', protect, async (req, res) => {
   try {
     const userId = req.user._id;
     
-    // =============================================
-    // READ USER DIRECTLY FROM DATABASE (SAME AS WEBSOCKET)
-    // =============================================
+    // Get FRESH user from database - NO CACHING
     const user = await User.findById(userId);
     
     if (!user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found'
-      });
+      return res.status(404).json({ status: 'fail', message: 'User not found' });
     }
     
-    // Get user's fiat preference
-    const userPref = await UserPreference.findOne({ user: userId });
-    const preferredFiat = userPref?.currency || 'USD';
-    
-    // =============================================
-    // USE THE EXACT SAME FUNCTION AS WEBSOCKET
-    // =============================================
+    // CALL THE SAME FUNCTION WEBSOCKET USES - NO MODIFICATIONS
     const { mainUSD, activeUSD, maturedUSD, priceErrors, mainBreakdown, maturedBreakdown } = 
       await calculateRealWalletBalances(user);
     
-    // =============================================
-    // FETCH FIAT EXCHANGE RATE (REAL API, NO FALLBACK)
-    // =============================================
-    let fiatRate = 1;
-    let fiatRateError = false;
-    
-    try {
-      const fiatResponse = await axios.get('https://api.exchangerate-api.com/v4/latest/USD', { 
-        timeout: 5000,
-        headers: { 'Accept': 'application/json' }
-      });
-      
-      if (fiatResponse.data?.rates?.[preferredFiat]) {
-        fiatRate = fiatResponse.data.rates[preferredFiat];
-      } else {
-        fiatRateError = true;
-      }
-    } catch (err) {
-      fiatRateError = true;
-      console.error(`❌ Failed to fetch fiat rates: ${err.message}`);
-    }
-    
-    // If fiat API fails for non-USD, return error
-    if (fiatRateError && preferredFiat !== 'USD') {
-      return res.status(503).json({
-        status: 'error',
-        message: `Unable to fetch exchange rate for ${preferredFiat}. Please try again later.`,
-        retryAfter: 30
-      });
-    }
-    
-    // If ANY crypto price failed, return error (SAME AS WEBSOCKET)
+    // If any price fetch failed, return error
     if (priceErrors.length > 0) {
       return res.status(503).json({
         status: 'error',
-        message: `Unable to fetch current prices for: ${priceErrors.join(', ').toUpperCase()}. Please try again later.`,
-        missingPrices: priceErrors,
-        retryAfter: 10
+        message: `Unable to fetch prices for: ${priceErrors.join(', ').toUpperCase()}`,
+        missingPrices: priceErrors
       });
     }
     
-    // =============================================
-    // CONVERT TO PREFERRED FIAT
-    // =============================================
-    const mainFiat = mainUSD * fiatRate;
-    const activeFiat = activeUSD * fiatRate;
-    const maturedFiat = maturedUSD * fiatRate;
+    // Calculate total - THIS IS THE WEBSOCKET VALUE
     const totalUSD = mainUSD + activeUSD + maturedUSD;
-    const totalFiat = totalUSD * fiatRate;
     
-    // =============================================
-    // PNL CALCULATION (SAME AS WEBSOCKET)
-    // =============================================
-    const previousDayKey = `user:${userId}:prev_balances`;
-    let previousMainUSD = mainUSD;
-    let previousMaturedUSD = maturedUSD;
-    const cachedPrev = await redis.get(previousDayKey);
+    console.log(`\n💰 REST endpoint total: $${totalUSD.toFixed(2)}`);
+    console.log(`   MAIN: $${mainUSD.toFixed(2)}`);
+    console.log(`   ACTIVE: $${activeUSD.toFixed(2)}`);
+    console.log(`   MATURED: $${maturedUSD.toFixed(2)}`);
     
-    if (cachedPrev) {
-      try {
-        const prev = JSON.parse(cachedPrev);
-        previousMainUSD = prev.mainUSD !== undefined ? prev.mainUSD : mainUSD;
-        previousMaturedUSD = prev.maturedUSD !== undefined ? prev.maturedUSD : maturedUSD;
-      } catch (parseErr) {
-        console.warn('Failed to parse cached previous balances:', parseErr.message);
-      }
-    }
-    
-    const mainPnL = mainUSD - previousMainUSD;
-    const maturedPnL = maturedUSD - previousMaturedUSD;
-    const mainPnLPercent = previousMainUSD > 0 ? (mainPnL / previousMainUSD) * 100 : 0;
-    const maturedPnLPercent = previousMaturedUSD > 0 ? (maturedPnL / previousMaturedUSD) * 100 : 0;
-    
-    const today = new Date().toDateString();
-    const lastDate = await redis.get(`user:${userId}:pnl_date`);
-    if (lastDate !== today) {
-      await redis.set(previousDayKey, JSON.stringify({
-        mainUSD: mainUSD,
-        maturedUSD: maturedUSD,
-        date: today
-      }));
-      await redis.set(`user:${userId}:pnl_date`, today);
-    }
-    
-    // =============================================
-    // LOG FOR DEBUGGING (SAME FORMAT AS WEBSOCKET)
-    // =============================================
-    console.log(`\n📊 BALANCES for user ${userId} (EXACT WEBSOCKET METHOD):`);
-    console.log(`   MAIN: $${mainUSD.toFixed(2)} USD → ${mainFiat.toFixed(2)} ${preferredFiat}`);
-    console.log(`   ACTIVE: $${activeUSD.toFixed(2)} USD → ${activeFiat.toFixed(2)} ${preferredFiat}`);
-    console.log(`   MATURED: $${maturedUSD.toFixed(2)} USD → ${maturedFiat.toFixed(2)} ${preferredFiat}`);
-    console.log(`   TOTAL: $${totalUSD.toFixed(2)} USD → ${totalFiat.toFixed(2)} ${preferredFiat}`);
-    
-    // =============================================
-    // RETURN EXACT SAME STRUCTURE AS WEBSOCKET EMITS
-    // =============================================
+    // Return the EXACT same values WebSocket broadcasts
     res.status(200).json({
       status: 'success',
-      main: mainFiat,
-      active: activeFiat,
-      matured: maturedFiat,
-      total: totalFiat,
-      rawUSD: {
-        main: mainUSD,
-        active: activeUSD,
-        matured: maturedUSD,
-        total: totalUSD
-      },
-      pnl: {
-        main: {
-          amount: mainPnL * fiatRate,
-          amountUSD: mainPnL,
-          percentage: mainPnLPercent
-        },
-        matured: {
-          amount: maturedPnL * fiatRate,
-          amountUSD: maturedPnL,
-          percentage: maturedPnLPercent
-        }
-      },
-      exchangeRate: {
-        from: 'USD',
-        to: preferredFiat,
-        rate: fiatRate,
-        timestamp: new Date().toISOString()
-      },
+      main: mainUSD,
+      active: activeUSD,
+      matured: maturedUSD,
+      total: totalUSD,
       assets: {
         main: mainBreakdown,
         matured: maturedBreakdown
@@ -27701,170 +27583,48 @@ app.get('/api/users/balances', protect, async (req, res) => {
     });
     
   } catch (err) {
-    console.error('❌ Error fetching user balances:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch user balances. Please try again later.',
-      error: process.env.NODE_ENV === 'development' ? err.message : undefined
-    });
+    console.error('Error:', err);
+    res.status(500).json({ status: 'error', message: err.message });
   }
-});// =============================================
-// GET USER BALANCES - EXACT WEBSOCKET METHOD
-// Uses the SAME calculateRealWalletBalances function as WebSocket
-// NO Redis caching - reads directly from database
-// =============================================
-app.get('/api/users/balances', protect, async (req, res) => {
+});app.get('/api/users/balances', protect, async (req, res) => {
   try {
     const userId = req.user._id;
     
-    // =============================================
-    // READ USER DIRECTLY FROM DATABASE (SAME AS WEBSOCKET)
-    // =============================================
+    // Get FRESH user from database - NO CACHING
     const user = await User.findById(userId);
     
     if (!user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found'
-      });
+      return res.status(404).json({ status: 'fail', message: 'User not found' });
     }
     
-    // Get user's fiat preference
-    const userPref = await UserPreference.findOne({ user: userId });
-    const preferredFiat = userPref?.currency || 'USD';
-    
-    // =============================================
-    // USE THE EXACT SAME FUNCTION AS WEBSOCKET
-    // =============================================
+    // CALL THE SAME FUNCTION WEBSOCKET USES - NO MODIFICATIONS
     const { mainUSD, activeUSD, maturedUSD, priceErrors, mainBreakdown, maturedBreakdown } = 
       await calculateRealWalletBalances(user);
     
-    // =============================================
-    // FETCH FIAT EXCHANGE RATE (REAL API, NO FALLBACK)
-    // =============================================
-    let fiatRate = 1;
-    let fiatRateError = false;
-    
-    try {
-      const fiatResponse = await axios.get('https://api.exchangerate-api.com/v4/latest/USD', { 
-        timeout: 5000,
-        headers: { 'Accept': 'application/json' }
-      });
-      
-      if (fiatResponse.data?.rates?.[preferredFiat]) {
-        fiatRate = fiatResponse.data.rates[preferredFiat];
-      } else {
-        fiatRateError = true;
-      }
-    } catch (err) {
-      fiatRateError = true;
-      console.error(`❌ Failed to fetch fiat rates: ${err.message}`);
-    }
-    
-    // If fiat API fails for non-USD, return error
-    if (fiatRateError && preferredFiat !== 'USD') {
-      return res.status(503).json({
-        status: 'error',
-        message: `Unable to fetch exchange rate for ${preferredFiat}. Please try again later.`,
-        retryAfter: 30
-      });
-    }
-    
-    // If ANY crypto price failed, return error (SAME AS WEBSOCKET)
+    // If any price fetch failed, return error
     if (priceErrors.length > 0) {
       return res.status(503).json({
         status: 'error',
-        message: `Unable to fetch current prices for: ${priceErrors.join(', ').toUpperCase()}. Please try again later.`,
-        missingPrices: priceErrors,
-        retryAfter: 10
+        message: `Unable to fetch prices for: ${priceErrors.join(', ').toUpperCase()}`,
+        missingPrices: priceErrors
       });
     }
     
-    // =============================================
-    // CONVERT TO PREFERRED FIAT
-    // =============================================
-    const mainFiat = mainUSD * fiatRate;
-    const activeFiat = activeUSD * fiatRate;
-    const maturedFiat = maturedUSD * fiatRate;
+    // Calculate total - THIS IS THE WEBSOCKET VALUE
     const totalUSD = mainUSD + activeUSD + maturedUSD;
-    const totalFiat = totalUSD * fiatRate;
     
-    // =============================================
-    // PNL CALCULATION (SAME AS WEBSOCKET)
-    // =============================================
-    const previousDayKey = `user:${userId}:prev_balances`;
-    let previousMainUSD = mainUSD;
-    let previousMaturedUSD = maturedUSD;
-    const cachedPrev = await redis.get(previousDayKey);
+    console.log(`\n💰 REST endpoint total: $${totalUSD.toFixed(2)}`);
+    console.log(`   MAIN: $${mainUSD.toFixed(2)}`);
+    console.log(`   ACTIVE: $${activeUSD.toFixed(2)}`);
+    console.log(`   MATURED: $${maturedUSD.toFixed(2)}`);
     
-    if (cachedPrev) {
-      try {
-        const prev = JSON.parse(cachedPrev);
-        previousMainUSD = prev.mainUSD !== undefined ? prev.mainUSD : mainUSD;
-        previousMaturedUSD = prev.maturedUSD !== undefined ? prev.maturedUSD : maturedUSD;
-      } catch (parseErr) {
-        console.warn('Failed to parse cached previous balances:', parseErr.message);
-      }
-    }
-    
-    const mainPnL = mainUSD - previousMainUSD;
-    const maturedPnL = maturedUSD - previousMaturedUSD;
-    const mainPnLPercent = previousMainUSD > 0 ? (mainPnL / previousMainUSD) * 100 : 0;
-    const maturedPnLPercent = previousMaturedUSD > 0 ? (maturedPnL / previousMaturedUSD) * 100 : 0;
-    
-    const today = new Date().toDateString();
-    const lastDate = await redis.get(`user:${userId}:pnl_date`);
-    if (lastDate !== today) {
-      await redis.set(previousDayKey, JSON.stringify({
-        mainUSD: mainUSD,
-        maturedUSD: maturedUSD,
-        date: today
-      }));
-      await redis.set(`user:${userId}:pnl_date`, today);
-    }
-    
-    // =============================================
-    // LOG FOR DEBUGGING (SAME FORMAT AS WEBSOCKET)
-    // =============================================
-    console.log(`\n📊 BALANCES for user ${userId} (EXACT WEBSOCKET METHOD):`);
-    console.log(`   MAIN: $${mainUSD.toFixed(2)} USD → ${mainFiat.toFixed(2)} ${preferredFiat}`);
-    console.log(`   ACTIVE: $${activeUSD.toFixed(2)} USD → ${activeFiat.toFixed(2)} ${preferredFiat}`);
-    console.log(`   MATURED: $${maturedUSD.toFixed(2)} USD → ${maturedFiat.toFixed(2)} ${preferredFiat}`);
-    console.log(`   TOTAL: $${totalUSD.toFixed(2)} USD → ${totalFiat.toFixed(2)} ${preferredFiat}`);
-    
-    // =============================================
-    // RETURN EXACT SAME STRUCTURE AS WEBSOCKET EMITS
-    // =============================================
+    // Return the EXACT same values WebSocket broadcasts
     res.status(200).json({
       status: 'success',
-      main: mainFiat,
-      active: activeFiat,
-      matured: maturedFiat,
-      total: totalFiat,
-      rawUSD: {
-        main: mainUSD,
-        active: activeUSD,
-        matured: maturedUSD,
-        total: totalUSD
-      },
-      pnl: {
-        main: {
-          amount: mainPnL * fiatRate,
-          amountUSD: mainPnL,
-          percentage: mainPnLPercent
-        },
-        matured: {
-          amount: maturedPnL * fiatRate,
-          amountUSD: maturedPnL,
-          percentage: maturedPnLPercent
-        }
-      },
-      exchangeRate: {
-        from: 'USD',
-        to: preferredFiat,
-        rate: fiatRate,
-        timestamp: new Date().toISOString()
-      },
+      main: mainUSD,
+      active: activeUSD,
+      matured: maturedUSD,
+      total: totalUSD,
       assets: {
         main: mainBreakdown,
         matured: maturedBreakdown
@@ -27872,12 +27632,8 @@ app.get('/api/users/balances', protect, async (req, res) => {
     });
     
   } catch (err) {
-    console.error('❌ Error fetching user balances:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch user balances. Please try again later.',
-      error: process.env.NODE_ENV === 'development' ? err.message : undefined
-    });
+    console.error('Error:', err);
+    res.status(500).json({ status: 'error', message: err.message });
   }
 });
 
