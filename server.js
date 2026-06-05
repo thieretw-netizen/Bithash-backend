@@ -20667,6 +20667,7 @@ app.get('/api/admin/deposits/:id', adminProtect, restrictTo('super', 'finance'),
 /**
  * APPROVE DEPOSIT ENDPOINT - FIXED VERSION
  * POST /api/admin/deposits/:id/approve
+ * NOW UPDATES EXISTING TRANSACTION INSTEAD OF CREATING DUPLICATE
  */
 app.post('/api/admin/deposits/:id/approve', adminProtect, restrictTo('super', 'finance'), async (req, res) => {
   try {
@@ -20675,21 +20676,30 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, restrictTo('super', 'f
     
     // Find the deposit - check both DepositAsset and Transaction collections
     let deposit = await DepositAsset.findById(id).populate('user', 'firstName lastName email balances');
+    let existingTransaction = null;
     
     if (!deposit) {
-      const transaction = await Transaction.findOne({ 
+      existingTransaction = await Transaction.findOne({ 
         _id: id, 
         type: 'deposit', 
         status: 'pending' 
       }).populate('user', 'firstName lastName email balances');
       
-      if (!transaction) {
+      if (!existingTransaction) {
         return res.status(404).json({
           status: 'fail',
           message: 'Deposit not found'
         });
       }
-      deposit = transaction;
+      deposit = existingTransaction;
+    } else {
+      // Also find the associated transaction if it exists
+      existingTransaction = await Transaction.findOne({
+        user: deposit.user._id,
+        type: 'deposit',
+        'details.depositId': deposit._id,
+        status: 'pending'
+      });
     }
     
     // Check if deposit is already processed
@@ -20743,32 +20753,60 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, restrictTo('super', 'f
     await deposit.save();
     await user.save();
     
-    // ✅ FIXED: Create transaction record with ALL required fields
-    const transactionReference = `DEP-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+    // ✅ FIXED: UPDATE EXISTING TRANSACTION instead of creating a new one
+    let transactionRecord;
     
-    const transactionRecord = await Transaction.create({
-      user: user._id,
-      type: 'deposit',
-      amount: usdAmount,
-      asset: cryptoAsset,                    // ✅ CRITICAL: Asset type
-      assetAmount: cryptoAmount,             // ✅ CRITICAL: Crypto amount
-      currency: 'USD',
-      status: 'completed',
-      method: cryptoAsset,
-      reference: transactionReference,
-      details: {
+    if (existingTransaction) {
+      // Update the existing transaction
+      existingTransaction.status = 'completed';
+      existingTransaction.processedBy = req.admin._id;
+      existingTransaction.processedAt = new Date();
+      existingTransaction.adminNotes = notes;
+      existingTransaction.exchangeRateAtTime = exchangeRate;
+      existingTransaction.details = {
+        ...existingTransaction.details,
         depositId: deposit._id,
         adminApprovedBy: req.admin.name,
         adminNotes: notes,
         exchangeRate: exchangeRate,
-        walletType: 'main'
-      },
-      fee: 0,
-      netAmount: usdAmount,
-      processedBy: req.admin._id,
-      processedAt: new Date(),
-      exchangeRateAtTime: exchangeRate
-    });
+        walletType: 'main',
+        approvedAt: new Date()
+      };
+      
+      await existingTransaction.save();
+      transactionRecord = existingTransaction;
+      
+      console.log(`✅ Updated existing transaction ${existingTransaction.reference} to completed status`);
+    } else {
+      // Only create a new transaction if no existing one was found (fallback)
+      const transactionReference = `DEP-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+      
+      transactionRecord = await Transaction.create({
+        user: user._id,
+        type: 'deposit',
+        amount: usdAmount,
+        asset: cryptoAsset,
+        assetAmount: cryptoAmount,
+        currency: 'USD',
+        status: 'completed',
+        method: cryptoAsset,
+        reference: transactionReference,
+        details: {
+          depositId: deposit._id,
+          adminApprovedBy: req.admin.name,
+          adminNotes: notes,
+          exchangeRate: exchangeRate,
+          walletType: 'main'
+        },
+        fee: 0,
+        netAmount: usdAmount,
+        processedBy: req.admin._id,
+        processedAt: new Date(),
+        exchangeRateAtTime: exchangeRate
+      });
+      
+      console.log(`⚠️ No existing transaction found, created new transaction ${transactionRecord.reference}`);
+    }
     
     // Calculate total MAIN wallet balance in USD for email
     let totalMainBalanceUSD = 0;
@@ -20811,7 +20849,7 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, restrictTo('super', 'f
       req.admin._id,
       'Admin',
       req,
-      { amount: usdAmount, asset: cryptoAsset, userId: user._id, cryptoAmount: cryptoAmount }
+      { amount: usdAmount, asset: cryptoAsset, userId: user._id, cryptoAmount: cryptoAmount, transactionUpdated: !!existingTransaction }
     );
     
     // Create notification for user
@@ -20864,7 +20902,8 @@ app.post('/api/admin/deposits/:id/approve', adminProtect, restrictTo('super', 'f
           id: transactionRecord._id,
           reference: transactionRecord.reference,
           asset: cryptoAsset,
-          assetAmount: cryptoAmount
+          assetAmount: cryptoAmount,
+          wasUpdated: !!existingTransaction
         }
       }
     });
