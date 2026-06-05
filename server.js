@@ -27296,8 +27296,21 @@ app.post('/api/admin/send-email', adminProtect, async (req, res) => {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
 // =============================================
-// REPLACE THIS ENTIRE ENDPOINT - ONLY SHOW ASSETS WITH BALANCE > 0
+// ASSETS ENDPOINT - Send asset balances with real-time USD values
+// Fetches ALL user assets with balances, gets real-time prices via getCryptoPrice()
+// Returns complete asset data including main/matured wallet breakdown
 // =============================================
 app.get('/api/users/assets', protect, async (req, res) => {
   try {
@@ -27309,51 +27322,99 @@ app.get('/api/users/assets', protect, async (req, res) => {
     }
     
     // =============================================
-    // CRITICAL: Collect crypto holdings from Main AND Matured wallets ONLY
-    // Active wallet is EXCLUDED because it represents fixed mining contracts
-    // ONLY include assets with balance > 0
+    // COLLECT ALL ASSETS FROM MAIN AND MATURED WALLETS
     // =============================================
-    const totalHoldings = new Map(); // asset -> total balance (main + matured only)
-    const mainHoldings = new Map();   // asset -> main wallet balance only
-    const maturedHoldings = new Map(); // asset -> matured wallet balance only
+    const allAssetsMap = new Map(); // asset -> { totalBalance, mainBalance, maturedBalance }
     
-    // Collect from MAIN wallet (crypto only, fluctuates)
+    // Collect from MAIN wallet (crypto only, fluctuates with price)
     if (user.balances.main && user.balances.main instanceof Map) {
       for (const [asset, balance] of user.balances.main.entries()) {
-        // ✅ Skip assets with zero balance
         if (balance > 0 && asset !== 'usd') {
-          const currentTotal = totalHoldings.get(asset) || 0;
-          totalHoldings.set(asset, currentTotal + balance);
-          mainHoldings.set(asset, balance);
+          if (!allAssetsMap.has(asset)) {
+            allAssetsMap.set(asset, { totalBalance: 0, mainBalance: 0, maturedBalance: 0 });
+          }
+          const entry = allAssetsMap.get(asset);
+          entry.totalBalance += balance;
+          entry.mainBalance += balance;
         }
       }
     }
     
-    // Collect from MATURED wallet (crypto only, fluctuates)
+    // Collect from MATURED wallet (crypto only, fluctuates with price)
     if (user.balances.matured && user.balances.matured instanceof Map) {
       for (const [asset, balance] of user.balances.matured.entries()) {
-        // ✅ Skip assets with zero balance
         if (balance > 0 && asset !== 'usd') {
-          const currentTotal = totalHoldings.get(asset) || 0;
-          totalHoldings.set(asset, currentTotal + balance);
-          maturedHoldings.set(asset, balance);
+          if (!allAssetsMap.has(asset)) {
+            allAssetsMap.set(asset, { totalBalance: 0, mainBalance: 0, maturedBalance: 0 });
+          }
+          const entry = allAssetsMap.get(asset);
+          entry.totalBalance += balance;
+          entry.maturedBalance += balance;
         }
       }
     }
     
-    // ✅ CRITICAL: Filter out assets with zero balance
-    const assetsWithBalance = [];
-    for (const [asset, totalBalance] of totalHoldings.entries()) {
-      if (totalBalance > 0.00000001) { // Use small epsilon for floating point
-        assetsWithBalance.push(asset);
-      }
-    }
+    const assetsList = Array.from(allAssetsMap.keys());
     
-    if (assetsWithBalance.length === 0) {
+    if (assetsList.length === 0) {
       return res.status(200).json([]);
     }
     
-    // Get buy transaction history for each asset
+    // =============================================
+    // FETCH REAL-TIME PRICES FOR ALL ASSETS IN PARALLEL
+    // =============================================
+    const pricePromises = assetsList.map(async (asset) => {
+      const price = await getCryptoPrice(asset.toUpperCase());
+      return { asset, price };
+    });
+    
+    const priceResults = await Promise.all(pricePromises);
+    
+    // Check for any failed price fetches - NO FAKE FALLBACKS
+    const failedAssets = priceResults.filter(r => !r.price || r.price <= 0).map(r => r.asset);
+    
+    if (failedAssets.length > 0) {
+      return res.status(503).json({
+        status: 'error',
+        message: `Unable to fetch current prices for: ${failedAssets.join(', ').toUpperCase()}. Please try again later.`,
+        missingPrices: failedAssets,
+        retryAfter: 10
+      });
+    }
+    
+    // Build price map
+    const priceMap = new Map();
+    priceResults.forEach(r => priceMap.set(r.asset, r.price));
+    
+    // =============================================
+    // FETCH 24H PRICE CHANGES FOR ALL ASSETS
+    // =============================================
+    const changePromises = assetsList.map(async (asset) => {
+      let change24h = 0;
+      try {
+        const assetUpper = asset.toUpperCase();
+        const coinGeckoId = mapSymbolToCoinGeckoId(asset);
+        const response = await axios.get(
+          `https://api.coingecko.com/api/v3/simple/price?ids=${coinGeckoId}&vs_currencies=usd&include_24hr_change=true`,
+          { timeout: 3000 }
+        );
+        if (response.data && response.data[coinGeckoId]) {
+          change24h = response.data[coinGeckoId].usd_24h_change || 0;
+        }
+      } catch (err) {
+        console.warn(`Could not fetch 24h change for ${asset}:`, err.message);
+        change24h = 0;
+      }
+      return { asset, change24h };
+    });
+    
+    const changeResults = await Promise.all(changePromises);
+    const changeMap = new Map();
+    changeResults.forEach(r => changeMap.set(r.asset, r.change24h));
+    
+    // =============================================
+    // GET BUY TRANSACTION HISTORY FOR AVERAGE PRICE CALCULATION
+    // =============================================
     const buyTransactions = await Transaction.find({
       user: userId,
       type: 'buy',
@@ -27364,7 +27425,7 @@ app.get('/api/users/assets', protect, async (req, res) => {
     const buyHistoryByAsset = {};
     buyTransactions.forEach(tx => {
       const asset = (tx.asset || tx.buyDetails?.asset || '').toLowerCase();
-      if (asset && asset !== 'usd' && assetsWithBalance.includes(asset)) {
+      if (asset && assetsList.includes(asset)) {
         if (!buyHistoryByAsset[asset]) {
           buyHistoryByAsset[asset] = [];
         }
@@ -27377,78 +27438,87 @@ app.get('/api/users/assets', protect, async (req, res) => {
       }
     });
     
+    // =============================================
+    // BUILD ASSET DATA ARRAY FOR FRONTEND
+    // =============================================
     const assetData = [];
     
-    for (const asset of assetsWithBalance) {
-      const totalBalance = totalHoldings.get(asset) || 0;
-      const mainBalance = mainHoldings.get(asset) || 0;
-      const maturedBalance = maturedHoldings.get(asset) || 0;
+    for (const [asset, balances] of allAssetsMap.entries()) {
+      const currentPrice = priceMap.get(asset);
+      const change24h = changeMap.get(asset) || 0;
+      const totalBalance = balances.totalBalance;
+      const mainBalance = balances.mainBalance;
+      const maturedBalance = balances.maturedBalance;
       
-      if (totalBalance > 0) {
-        // Get current price from API (fluctuates in real-time)
-        let price = 0;
-        try {
-          price = await getCryptoPrice(asset.toUpperCase());
-        } catch (err) {
-          console.warn(`Could not fetch price for ${asset}:`, err.message);
-          price = 0;
-        }
+      // Calculate current values
+      const mainValue = mainBalance * currentPrice;
+      const maturedValue = maturedBalance * currentPrice;
+      const currentValue = totalBalance * currentPrice;
+      
+      // Get buy history for this asset
+      const assetBuys = buyHistoryByAsset[asset] || [];
+      let totalSpent = 0;
+      let totalBought = 0;
+      assetBuys.forEach(b => {
+        totalSpent += b.usdValue;
+        totalBought += b.amount;
+      });
+      
+      // Calculate average buy price
+      const avgPrice = totalBought > 0 ? totalSpent / totalBought : currentPrice;
+      
+      // Calculate unrealized PnL
+      const unrealizedPnl = currentValue - totalSpent;
+      const unrealizedPercentage = totalSpent > 0 ? (unrealizedPnl / totalSpent) * 100 : 0;
+      
+      // Get recent transactions for this asset (last 20)
+      const allAssetTransactions = [
+        ...assetBuys.map(b => ({ ...b, type: 'buy' }))
+      ].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(-20);
+      
+      assetData.push({
+        // Core asset identification
+        symbol: asset,
+        asset: asset,
         
-        // Return error if price fetch fails (NO fake fallback)
-        if (price <= 0) {
-          return res.status(503).json({
-            status: 'error',
-            message: `Unable to fetch current price for ${asset.toUpperCase()}. Please try again later.`,
-            missingAsset: asset
-          });
-        }
+        // Wallet balances (crypto amounts)
+        balance: totalBalance,
+        mainBalance: mainBalance,
+        maturedBalance: maturedBalance,
         
-        const currentValue = totalBalance * price;
-        const mainValue = mainBalance * price;
-        const maturedValue = maturedBalance * price;
+        // USD values (real-time from currentPrice)
+        mainValue: mainValue,
+        maturedValue: maturedValue,
+        currentValue: currentValue,
         
-        // Calculate average buy price from history
-        const assetBuys = buyHistoryByAsset[asset] || [];
-        let totalSpent = 0;
-        let totalBought = 0;
-        assetBuys.forEach(b => {
-          totalSpent += b.usdValue;
-          totalBought += b.amount;
-        });
+        // Price data (REAL from API, NO FALLBACKS)
+        currentPrice: currentPrice,
+        change24h: change24h,
         
-        const avgPrice = totalBought > 0 ? totalSpent / totalBought : price;
-        const unrealizedPnl = currentValue - totalSpent;
-        const unrealizedPercentage = totalSpent > 0 ? (unrealizedPnl / totalSpent) * 100 : 0;
+        // PnL data
+        avgPrice: avgPrice,
+        totalSpent: totalSpent,
+        totalBought: totalBought,
+        realizedProfit: 0,
+        realizedLoss: 0,
+        unrealizedPnl: unrealizedPnl,
+        unrealizedPnlPercent: unrealizedPercentage,
         
-        // Get recent transactions for this asset
-        const allAssetTransactions = [
-          ...assetBuys.map(b => ({ ...b, type: 'buy' }))
-        ].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(-20);
+        // Additional fields for frontend compatibility
+        id: mapSymbolToCoinGeckoId(asset),
         
-        assetData.push({
-          symbol: asset,
-          balance: totalBalance,
-          mainBalance: mainBalance,
-          maturedBalance: maturedBalance,
-          mainValue: mainValue,
-          maturedValue: maturedValue,
-          currentValue: currentValue,
-          avgPrice: avgPrice,
-          totalSpent: totalSpent,
-          totalBought: totalBought,
-          realizedProfit: 0,
-          realizedLoss: 0,
-          unrealizedPnl: unrealizedPnl,
-          unrealizedPnlPercent: unrealizedPercentage,
-          id: mapSymbolToCoinGeckoId(asset),
-          currentPrice: price,
-          transactions: allAssetTransactions
-        });
-      }
+        // Transaction history
+        transactions: allAssetTransactions
+      });
     }
     
-    // Sort by current value descending
+    // Sort by current value descending (largest holdings first)
     assetData.sort((a, b) => b.currentValue - a.currentValue);
+    
+    console.log(`📊 Asset data prepared for user ${userId}: ${assetData.length} assets`);
+    assetData.forEach(a => {
+      console.log(`   ${a.symbol.toUpperCase()}: ${a.balance} @ $${a.currentPrice} = $${a.currentValue.toFixed(2)} (Main: ${a.mainBalance}, Matured: ${a.maturedBalance})`);
+    });
     
     res.status(200).json(assetData);
     
@@ -27467,20 +27537,19 @@ app.get('/api/users/assets', protect, async (req, res) => {
 
 
 
-
-
-
-
-
 // =============================================
-// GET USER BALANCES - REAL TIME CRYPTO HOLDINGS WITH PNL
-// FIXED: NO double counting, NO fake fallbacks, ONLY real API prices
+// GET USER BALANCES - REAL TIME FROM DATABASE ONLY
+// Reads actual asset balances from User.balances Maps
+// Calculates real-time USD values using getCryptoPrice()
+// NO Redis caching - matches WebSocket accuracy
 // =============================================
 app.get('/api/users/balances', protect, async (req, res) => {
   try {
     const userId = req.user._id;
     
-    // Get user's balances from User schema
+    // =============================================
+    // READ DIRECTLY FROM DATABASE - NO CACHE
+    // =============================================
     const user = await User.findById(userId);
     
     if (!user) {
@@ -27528,25 +27597,35 @@ app.get('/api/users/balances', protect, async (req, res) => {
     }
     
     // =============================================
-    // MAIN WALLET: Calculate from crypto ONLY (NO stored USD)
-    // For MAIN wallet: Asset A + Asset B + Asset C + Asset D + Asset E = Total Main USD
+    // COLLECT ALL ASSETS FROM MAIN WALLET
+    // Reads actual Map data from database
     // =============================================
     let totalMainUSD = 0;
     const mainAssets = [];
-    let mainPriceErrors = [];
+    const mainPriceErrors = [];
     
     if (user.balances && user.balances.main) {
       const mainBalances = user.balances.main;
       
-      for (const [asset, balance] of mainBalances.entries()) {
-        // Skip the 'usd' key - it's a cache value, NOT for calculation
+      // Handle both Map and plain object formats
+      const entries = mainBalances instanceof Map ? mainBalances.entries() : Object.entries(mainBalances);
+      
+      for (const [asset, balance] of entries) {
+        // Skip the stored 'usd' cache value - calculate fresh every time
         if (balance > 0 && asset !== 'usd') {
+          // Get REAL-TIME price from API (matches WebSocket)
           const price = await getCryptoPrice(asset.toUpperCase());
           
           if (price && price > 0) {
             const assetValueUSD = balance * price;
             totalMainUSD += assetValueUSD;
-            mainAssets.push({ asset, balance, price, valueUSD: assetValueUSD });
+            mainAssets.push({ 
+              asset: asset, 
+              symbol: asset.toUpperCase(),
+              balance: balance, 
+              price: price, 
+              valueUSD: assetValueUSD 
+            });
             console.log(`💰 MAIN WALLET: ${balance} ${asset.toUpperCase()} @ $${price} = $${assetValueUSD.toFixed(2)}`);
           } else {
             mainPriceErrors.push(asset);
@@ -27566,28 +27645,36 @@ app.get('/api/users/balances', protect, async (req, res) => {
       });
     }
     
-    console.log(`📊 MAIN WALLET TOTAL: Asset A + Asset B + Asset C + Asset D + Asset E... = $${totalMainUSD.toFixed(2)} USD`);
-    
     // =============================================
-    // MATURED WALLET: Calculate from crypto ONLY (NO stored USD)
-    // For MATURED wallet: Asset A + Asset B + Asset C + Asset D + Asset E = Total Matured USD
+    // COLLECT ALL ASSETS FROM MATURED WALLET
+    // Reads actual Map data from database
     // =============================================
     let totalMaturedUSD = 0;
     const maturedAssets = [];
-    let maturedPriceErrors = [];
+    const maturedPriceErrors = [];
     
     if (user.balances && user.balances.matured) {
       const maturedBalances = user.balances.matured;
       
-      for (const [asset, balance] of maturedBalances.entries()) {
-        // Skip the 'usd' key - it's a cache value, NOT for calculation
+      // Handle both Map and plain object formats
+      const entries = maturedBalances instanceof Map ? maturedBalances.entries() : Object.entries(maturedBalances);
+      
+      for (const [asset, balance] of entries) {
+        // Skip the stored 'usd' cache value - calculate fresh every time
         if (balance > 0 && asset !== 'usd') {
+          // Get REAL-TIME price from API (matches WebSocket)
           const price = await getCryptoPrice(asset.toUpperCase());
           
           if (price && price > 0) {
             const assetValueUSD = balance * price;
             totalMaturedUSD += assetValueUSD;
-            maturedAssets.push({ asset, balance, price, valueUSD: assetValueUSD });
+            maturedAssets.push({ 
+              asset: asset, 
+              symbol: asset.toUpperCase(),
+              balance: balance, 
+              price: price, 
+              valueUSD: assetValueUSD 
+            });
             console.log(`💰 MATURED WALLET: ${balance} ${asset.toUpperCase()} @ $${price} = $${assetValueUSD.toFixed(2)}`);
           } else {
             maturedPriceErrors.push(asset);
@@ -27607,61 +27694,45 @@ app.get('/api/users/balances', protect, async (req, res) => {
       });
     }
     
-    console.log(`📊 MATURED WALLET TOTAL: Asset A + Asset B + Asset C + Asset D + Asset E... = $${totalMaturedUSD.toFixed(2)} USD`);
-    
     // =============================================
-    // ACTIVE WALLET: FIXED - NO FLUCTUATION
-    // Active wallet stores USD value directly (mining contracts)
+    // ACTIVE WALLET: FIXED VALUES (NO FLUCTUATION)
+    // Active wallet stores USD value directly from mining contracts
     // =============================================
     let totalActiveUSD = 0;
+    const activeContracts = [];
     
     if (user.balances && user.balances.active) {
       const activeBalances = user.balances.active;
+      const entries = activeBalances instanceof Map ? activeBalances.entries() : Object.entries(activeBalances);
       
-      for (const [asset, balance] of activeBalances.entries()) {
+      for (const [asset, balance] of entries) {
         if (balance > 0) {
-          // Active wallet only stores USD values (no price calculation needed)
-          if (asset === 'usd') {
-            totalActiveUSD += balance;
-            console.log(`💰 ACTIVE WALLET (fixed): $${balance.toFixed(2)} USD from mining contracts`);
-          } else {
-            // If there's crypto in active wallet, it's also fixed (contract value)
-            totalActiveUSD += balance;
-            console.log(`💰 ACTIVE WALLET (fixed): ${balance} ${asset.toUpperCase()} (contract value)`);
-          }
+          totalActiveUSD += balance;
+          activeContracts.push({
+            asset: asset === 'usd' ? 'USD' : asset.toUpperCase(),
+            balance: balance,
+            type: 'mining_contract'
+          });
+          console.log(`💰 ACTIVE WALLET (fixed): $${balance.toFixed(2)} USD from mining contracts`);
         }
       }
     }
     
     // =============================================
-    // STORE HOLDINGS IN REDIS FOR ASSET ENDPOINT
+    // CALCULATE TOTAL PORTFOLIO VALUE
+    // Sum of MAIN + ACTIVE + MATURED (all calculated fresh)
     // =============================================
-    const totalCryptoHoldings = new Map();
+    const totalPortfolioUSD = totalMainUSD + totalActiveUSD + totalMaturedUSD;
     
-    if (user.balances && user.balances.main) {
-      for (const [asset, balance] of user.balances.main.entries()) {
-        if (balance > 0 && asset !== 'usd') {
-          totalCryptoHoldings.set(asset, (totalCryptoHoldings.get(asset) || 0) + balance);
-        }
-      }
-    }
-    
-    if (user.balances && user.balances.matured) {
-      for (const [asset, balance] of user.balances.matured.entries()) {
-        if (balance > 0 && asset !== 'usd') {
-          totalCryptoHoldings.set(asset, (totalCryptoHoldings.get(asset) || 0) + balance);
-        }
-      }
-    }
-    
-    const holdingsObj = {};
-    for (const [asset, balance] of totalCryptoHoldings.entries()) {
-      holdingsObj[asset] = balance;
-    }
-    await redis.setex(`user:${userId}:total_holdings`, 60, JSON.stringify(holdingsObj));
+    // Convert to preferred fiat
+    const mainFiat = totalMainUSD * fiatRate;
+    const activeFiat = totalActiveUSD * fiatRate;
+    const maturedFiat = totalMaturedUSD * fiatRate;
+    const totalFiat = totalPortfolioUSD * fiatRate;
     
     // =============================================
-    // PNL CALCULATION (Only for assets that fluctuate)
+    // CALCULATE DAILY PNL (COMPARE WITH YESTERDAY)
+    // Uses Redis only for PnL comparison, NOT for balances
     // =============================================
     const previousDayKey = `user:${userId}:prev_balances`;
     let previousMainUSD = totalMainUSD;
@@ -27698,37 +27769,34 @@ app.get('/api/users/balances', protect, async (req, res) => {
     }
     
     // =============================================
-    // CONVERT TO PREFERRED FIAT (using real exchange rate)
+    // LOG COMPLETE BREAKDOWN FOR DEBUGGING
     // =============================================
-    const mainFiat = totalMainUSD * fiatRate;
-    const activeFiat = totalActiveUSD * fiatRate;
-    const maturedFiat = totalMaturedUSD * fiatRate;
-    
-    // Calculate total portfolio value (NO double counting!)
-    const totalPortfolioValue = totalMainUSD + totalActiveUSD + totalMaturedUSD;
-    const totalPortfolioFiat = totalPortfolioValue * fiatRate;
-    
-    console.log(`\n📊 FINAL BALANCES for user ${userId}:`);
+    console.log(`\n📊 FINAL BALANCES for user ${userId} (${user.email}):`);
     console.log(`   MAIN WALLET TOTAL: $${totalMainUSD.toFixed(2)} USD → ${mainFiat.toFixed(2)} ${preferredFiat}`);
     console.log(`   ACTIVE WALLET TOTAL: $${totalActiveUSD.toFixed(2)} USD → ${activeFiat.toFixed(2)} ${preferredFiat}`);
     console.log(`   MATURED WALLET TOTAL: $${totalMaturedUSD.toFixed(2)} USD → ${maturedFiat.toFixed(2)} ${preferredFiat}`);
-    console.log(`   TOTAL PORTFOLIO: $${totalPortfolioValue.toFixed(2)} USD → ${totalPortfolioFiat.toFixed(2)} ${preferredFiat}`);
+    console.log(`   TOTAL PORTFOLIO: $${totalPortfolioUSD.toFixed(2)} USD → ${totalFiat.toFixed(2)} ${preferredFiat}`);
     console.log(`   PnL MAIN: ${mainPnL >= 0 ? '+' : ''}$${mainPnL.toFixed(2)} (${mainPnLPercent >= 0 ? '+' : ''}${mainPnLPercent.toFixed(2)}%)`);
-    console.log(`   PnL MATURED: ${maturedPnL >= 0 ? '+' : ''}$${maturedPnL.toFixed(2)} (${maturedPnLPercent >= 0 ? '+' : ''}${maturedPnLPercent.toFixed(2)}%)\n`);
+    console.log(`   PnL MATURED: ${maturedPnL >= 0 ? '+' : ''}$${maturedPnL.toFixed(2)} (${maturedPnLPercent >= 0 ? '+' : ''}${maturedPnLPercent.toFixed(2)}%)`);
     
-    // Return in the format expected by HTML dashboard
+    // =============================================
+    // RETURN RESPONSE MATCHING WEBSOCKET FORMAT
+    // =============================================
     res.status(200).json({
       status: 'success',
+      // Wallet totals in preferred fiat
       main: mainFiat,
       active: activeFiat,
       matured: maturedFiat,
-      total: totalPortfolioFiat,
+      total: totalFiat,
+      // Raw USD values (for calculations)
       rawUSD: {
         main: totalMainUSD,
         active: totalActiveUSD,
         matured: totalMaturedUSD,
-        total: totalPortfolioValue
+        total: totalPortfolioUSD
       },
+      // Daily PnL data
       pnl: {
         main: {
           amount: mainPnL * fiatRate,
@@ -27741,304 +27809,18 @@ app.get('/api/users/balances', protect, async (req, res) => {
           percentage: maturedPnLPercent
         }
       },
+      // Exchange rate info
       exchangeRate: {
         from: 'USD',
         to: preferredFiat,
         rate: fiatRate,
         timestamp: new Date().toISOString()
       },
+      // Detailed asset breakdown per wallet (matches WebSocket)
       assets: {
         main: mainAssets,
-        matured: maturedAssets
-      }
-    });
-    
-  } catch (err) {
-    console.error('❌ Error fetching user balances:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch user balances. Please try again later.',
-      error: process.env.NODE_ENV === 'development' ? err.message : undefined
-    });
-  }
-});// =============================================
-// GET USER BALANCES - REAL TIME CRYPTO HOLDINGS WITH PNL
-// FIXED: NO double counting, NO fake fallbacks, ONLY real API prices
-// =============================================
-app.get('/api/users/balances', protect, async (req, res) => {
-  try {
-    const userId = req.user._id;
-    
-    // Get user's balances from User schema
-    const user = await User.findById(userId);
-    
-    if (!user) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'User not found'
-      });
-    }
-    
-    // Get user's fiat preference for conversion
-    const userPref = await UserPreference.findOne({ user: userId });
-    const preferredFiat = userPref?.currency || 'USD';
-    
-    // =============================================
-    // FETCH FIAT EXCHANGE RATE (REAL API, NO FALLBACK)
-    // =============================================
-    let fiatRate = 1;
-    let fiatRateError = false;
-    
-    try {
-      const fiatResponse = await axios.get('https://api.exchangerate-api.com/v4/latest/USD', { 
-        timeout: 5000,
-        headers: { 'Accept': 'application/json' }
-      });
-      
-      if (fiatResponse.data?.rates?.[preferredFiat]) {
-        fiatRate = fiatResponse.data.rates[preferredFiat];
-        console.log(`✅ Fiat rate fetched: 1 USD = ${fiatRate} ${preferredFiat}`);
-      } else {
-        fiatRateError = true;
-        console.warn(`⚠️ Fiat rate for ${preferredFiat} not found, using USD`);
-      }
-    } catch (err) {
-      fiatRateError = true;
-      console.error(`❌ Failed to fetch fiat rates: ${err.message}`);
-    }
-    
-    // If fiat API fails, return error (NO fake fallback)
-    if (fiatRateError && preferredFiat !== 'USD') {
-      return res.status(503).json({
-        status: 'error',
-        message: `Unable to fetch exchange rate for ${preferredFiat}. Please try again later or switch to USD.`,
-        retryAfter: 30
-      });
-    }
-    
-    // =============================================
-    // MAIN WALLET: Calculate from crypto ONLY (NO stored USD)
-    // For MAIN wallet: Asset A + Asset B + Asset C + Asset D + Asset E = Total Main USD
-    // =============================================
-    let totalMainUSD = 0;
-    const mainAssets = [];
-    let mainPriceErrors = [];
-    
-    if (user.balances && user.balances.main) {
-      const mainBalances = user.balances.main;
-      
-      for (const [asset, balance] of mainBalances.entries()) {
-        // Skip the 'usd' key - it's a cache value, NOT for calculation
-        if (balance > 0 && asset !== 'usd') {
-          const price = await getCryptoPrice(asset.toUpperCase());
-          
-          if (price && price > 0) {
-            const assetValueUSD = balance * price;
-            totalMainUSD += assetValueUSD;
-            mainAssets.push({ asset, balance, price, valueUSD: assetValueUSD });
-            console.log(`💰 MAIN WALLET: ${balance} ${asset.toUpperCase()} @ $${price} = $${assetValueUSD.toFixed(2)}`);
-          } else {
-            mainPriceErrors.push(asset);
-            console.error(`❌ Failed to fetch price for ${asset.toUpperCase()} in MAIN wallet`);
-          }
-        }
-      }
-    }
-    
-    // If ANY crypto price failed, return error (NO fake fallback)
-    if (mainPriceErrors.length > 0) {
-      return res.status(503).json({
-        status: 'error',
-        message: `Unable to fetch current prices for: ${mainPriceErrors.join(', ').toUpperCase()}. Please try again later.`,
-        missingPrices: mainPriceErrors,
-        retryAfter: 10
-      });
-    }
-    
-    console.log(`📊 MAIN WALLET TOTAL: Asset A + Asset B + Asset C + Asset D + Asset E... = $${totalMainUSD.toFixed(2)} USD`);
-    
-    // =============================================
-    // MATURED WALLET: Calculate from crypto ONLY (NO stored USD)
-    // For MATURED wallet: Asset A + Asset B + Asset C + Asset D + Asset E = Total Matured USD
-    // =============================================
-    let totalMaturedUSD = 0;
-    const maturedAssets = [];
-    let maturedPriceErrors = [];
-    
-    if (user.balances && user.balances.matured) {
-      const maturedBalances = user.balances.matured;
-      
-      for (const [asset, balance] of maturedBalances.entries()) {
-        // Skip the 'usd' key - it's a cache value, NOT for calculation
-        if (balance > 0 && asset !== 'usd') {
-          const price = await getCryptoPrice(asset.toUpperCase());
-          
-          if (price && price > 0) {
-            const assetValueUSD = balance * price;
-            totalMaturedUSD += assetValueUSD;
-            maturedAssets.push({ asset, balance, price, valueUSD: assetValueUSD });
-            console.log(`💰 MATURED WALLET: ${balance} ${asset.toUpperCase()} @ $${price} = $${assetValueUSD.toFixed(2)}`);
-          } else {
-            maturedPriceErrors.push(asset);
-            console.error(`❌ Failed to fetch price for ${asset.toUpperCase()} in MATURED wallet`);
-          }
-        }
-      }
-    }
-    
-    // If ANY crypto price failed, return error (NO fake fallback)
-    if (maturedPriceErrors.length > 0) {
-      return res.status(503).json({
-        status: 'error',
-        message: `Unable to fetch current prices for: ${maturedPriceErrors.join(', ').toUpperCase()}. Please try again later.`,
-        missingPrices: maturedPriceErrors,
-        retryAfter: 10
-      });
-    }
-    
-    console.log(`📊 MATURED WALLET TOTAL: Asset A + Asset B + Asset C + Asset D + Asset E... = $${totalMaturedUSD.toFixed(2)} USD`);
-    
-    // =============================================
-    // ACTIVE WALLET: FIXED - NO FLUCTUATION
-    // Active wallet stores USD value directly (mining contracts)
-    // =============================================
-    let totalActiveUSD = 0;
-    
-    if (user.balances && user.balances.active) {
-      const activeBalances = user.balances.active;
-      
-      for (const [asset, balance] of activeBalances.entries()) {
-        if (balance > 0) {
-          // Active wallet only stores USD values (no price calculation needed)
-          if (asset === 'usd') {
-            totalActiveUSD += balance;
-            console.log(`💰 ACTIVE WALLET (fixed): $${balance.toFixed(2)} USD from mining contracts`);
-          } else {
-            // If there's crypto in active wallet, it's also fixed (contract value)
-            totalActiveUSD += balance;
-            console.log(`💰 ACTIVE WALLET (fixed): ${balance} ${asset.toUpperCase()} (contract value)`);
-          }
-        }
-      }
-    }
-    
-    // =============================================
-    // STORE HOLDINGS IN REDIS FOR ASSET ENDPOINT
-    // =============================================
-    const totalCryptoHoldings = new Map();
-    
-    if (user.balances && user.balances.main) {
-      for (const [asset, balance] of user.balances.main.entries()) {
-        if (balance > 0 && asset !== 'usd') {
-          totalCryptoHoldings.set(asset, (totalCryptoHoldings.get(asset) || 0) + balance);
-        }
-      }
-    }
-    
-    if (user.balances && user.balances.matured) {
-      for (const [asset, balance] of user.balances.matured.entries()) {
-        if (balance > 0 && asset !== 'usd') {
-          totalCryptoHoldings.set(asset, (totalCryptoHoldings.get(asset) || 0) + balance);
-        }
-      }
-    }
-    
-    const holdingsObj = {};
-    for (const [asset, balance] of totalCryptoHoldings.entries()) {
-      holdingsObj[asset] = balance;
-    }
-    await redis.setex(`user:${userId}:total_holdings`, 60, JSON.stringify(holdingsObj));
-    
-    // =============================================
-    // PNL CALCULATION (Only for assets that fluctuate)
-    // =============================================
-    const previousDayKey = `user:${userId}:prev_balances`;
-    let previousMainUSD = totalMainUSD;
-    let previousMaturedUSD = totalMaturedUSD;
-    const cachedPrev = await redis.get(previousDayKey);
-    
-    if (cachedPrev) {
-      try {
-        const prev = JSON.parse(cachedPrev);
-        previousMainUSD = prev.mainUSD !== undefined ? prev.mainUSD : totalMainUSD;
-        previousMaturedUSD = prev.maturedUSD !== undefined ? prev.maturedUSD : totalMaturedUSD;
-      } catch (parseErr) {
-        console.warn('Failed to parse cached previous balances:', parseErr.message);
-      }
-    }
-    
-    // Calculate PnL
-    const mainPnL = totalMainUSD - previousMainUSD;
-    const maturedPnL = totalMaturedUSD - previousMaturedUSD;
-    const mainPnLPercent = previousMainUSD > 0 ? (mainPnL / previousMainUSD) * 100 : 0;
-    const maturedPnLPercent = previousMaturedUSD > 0 ? (maturedPnL / previousMaturedUSD) * 100 : 0;
-    
-    // Store today's values for tomorrow's PnL (if date changed)
-    const today = new Date().toDateString();
-    const lastDate = await redis.get(`user:${userId}:pnl_date`);
-    if (lastDate !== today) {
-      await redis.set(previousDayKey, JSON.stringify({
-        mainUSD: totalMainUSD,
-        maturedUSD: totalMaturedUSD,
-        date: today
-      }));
-      await redis.set(`user:${userId}:pnl_date`, today);
-      console.log(`📅 Reset PnL baseline for user ${userId} - new day: ${today}`);
-    }
-    
-    // =============================================
-    // CONVERT TO PREFERRED FIAT (using real exchange rate)
-    // =============================================
-    const mainFiat = totalMainUSD * fiatRate;
-    const activeFiat = totalActiveUSD * fiatRate;
-    const maturedFiat = totalMaturedUSD * fiatRate;
-    
-    // Calculate total portfolio value (NO double counting!)
-    const totalPortfolioValue = totalMainUSD + totalActiveUSD + totalMaturedUSD;
-    const totalPortfolioFiat = totalPortfolioValue * fiatRate;
-    
-    console.log(`\n📊 FINAL BALANCES for user ${userId}:`);
-    console.log(`   MAIN WALLET TOTAL: $${totalMainUSD.toFixed(2)} USD → ${mainFiat.toFixed(2)} ${preferredFiat}`);
-    console.log(`   ACTIVE WALLET TOTAL: $${totalActiveUSD.toFixed(2)} USD → ${activeFiat.toFixed(2)} ${preferredFiat}`);
-    console.log(`   MATURED WALLET TOTAL: $${totalMaturedUSD.toFixed(2)} USD → ${maturedFiat.toFixed(2)} ${preferredFiat}`);
-    console.log(`   TOTAL PORTFOLIO: $${totalPortfolioValue.toFixed(2)} USD → ${totalPortfolioFiat.toFixed(2)} ${preferredFiat}`);
-    console.log(`   PnL MAIN: ${mainPnL >= 0 ? '+' : ''}$${mainPnL.toFixed(2)} (${mainPnLPercent >= 0 ? '+' : ''}${mainPnLPercent.toFixed(2)}%)`);
-    console.log(`   PnL MATURED: ${maturedPnL >= 0 ? '+' : ''}$${maturedPnL.toFixed(2)} (${maturedPnLPercent >= 0 ? '+' : ''}${maturedPnLPercent.toFixed(2)}%)\n`);
-    
-    // Return in the format expected by HTML dashboard
-    res.status(200).json({
-      status: 'success',
-      main: mainFiat,
-      active: activeFiat,
-      matured: maturedFiat,
-      total: totalPortfolioFiat,
-      rawUSD: {
-        main: totalMainUSD,
-        active: totalActiveUSD,
-        matured: totalMaturedUSD,
-        total: totalPortfolioValue
-      },
-      pnl: {
-        main: {
-          amount: mainPnL * fiatRate,
-          amountUSD: mainPnL,
-          percentage: mainPnLPercent
-        },
-        matured: {
-          amount: maturedPnL * fiatRate,
-          amountUSD: maturedPnL,
-          percentage: maturedPnLPercent
-        }
-      },
-      exchangeRate: {
-        from: 'USD',
-        to: preferredFiat,
-        rate: fiatRate,
-        timestamp: new Date().toISOString()
-      },
-      assets: {
-        main: mainAssets,
-        matured: maturedAssets
+        matured: maturedAssets,
+        active: activeContracts
       }
     });
     
@@ -28051,14 +27833,6 @@ app.get('/api/users/balances', protect, async (req, res) => {
     });
   }
 });
-
-
-
-
-
-
-
-
 
 
 
