@@ -9367,9 +9367,6 @@ app.get('/api/fiat-currencies', async (req, res) => {
 
 
 
-
-
-
 // =============================================
 // CONVERT ASSETS ENDPOINT - Get available target cryptos for conversion
 // =============================================
@@ -9397,8 +9394,6 @@ app.get('/api/convert/assets', protect, async (req, res) => {
     res.status(500).json({ status: 'error', message: 'Failed to fetch available assets' });
   }
 });
-
-
 
 
 
@@ -9466,7 +9461,7 @@ app.post('/api/convert', protect, async (req, res) => {
       });
     }
     
-    // Get real current prices using getCryptoPrice function
+    // Get real current prices using getCryptoPrice function (instantly with cache)
     const fromPrice = await getCryptoPrice(fromAsset);
     const toPrice = await getCryptoPrice(toAsset);
     
@@ -9728,6 +9723,12 @@ app.post('/api/convert', protect, async (req, res) => {
     res.status(500).json({ status: 'error', message: err.message || 'Conversion failed' });
   }
 });
+
+
+
+
+
+
 
 
 
