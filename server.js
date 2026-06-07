@@ -6654,8 +6654,6 @@ const getBrowserFromUserAgent = (userAgent) => {
 
 
 
-
-
 // Enhanced Signup Endpoint with OTP - Captures ALL fields from HTML forms
 app.post('/api/auth/signup', [
   // Individual form fields
@@ -6844,7 +6842,7 @@ app.post('/api/auth/signup', [
       userAgent: req.headers['user-agent']
     });
 
-    // ✅ ONLY SEND OTP EMAIL - NO DUPLICATE WELCOME EMAIL (will be sent after verification)
+    // ✅ ONLY SEND OTP EMAIL - NO duplicate welcome email (welcome email will be sent after OTP verification)
     await sendProfessionalEmail({
       email: originalEmail,
       template: 'otp',
@@ -6855,7 +6853,7 @@ app.post('/api/auth/signup', [
       }
     });
 
-    // ❌ REMOVED duplicate welcome email - will be sent after OTP verification
+    // ❌ REMOVED - No welcome email here
     // await sendAutomatedEmail(newUser, 'welcome', { firstName: userFirstName });
 
     // =============================================
@@ -7092,9 +7090,6 @@ app.post('/api/auth/signup', [
 });
 
 
-
-
-
 // Enhanced Login Endpoint with OTP - Captures ALL fields from HTML form
 app.post('/api/auth/login', [
   body('email').isEmail().withMessage('Please provide a valid email').custom((value) => {
@@ -7171,7 +7166,6 @@ app.post('/api/auth/login', [
       // SEND FAILED LOGIN ATTEMPT EMAIL (only on first attempt within 6 minutes)
       // =============================================
       if (recentFailedAttempts === 0 && user && user.email && user.authProvider !== 'google') {
-        // This is the first failed attempt in 6 minutes - send notification
         const rawDeviceInfo = await getUserDeviceInfo(req);
         try {
           await sendAutomatedEmail(user, 'suspicious_login', {
@@ -7230,14 +7224,14 @@ app.post('/api/auth/login', [
       userAgent: req.headers['user-agent']
     });
 
-    // ✅ ONLY SEND OTP EMAIL - NO duplicate login success email (will be sent after OTP verification)
+    // ✅ ONLY SEND OTP EMAIL - NO login success email here (will be sent after OTP verification)
     await sendProfessionalEmail({
       email: email,
       template: 'otp',
       data: {
         name: user.firstName,
         otp: otp,
-        action: 'login'
+        action: 'login verification'
       }
     });
 
@@ -7246,7 +7240,6 @@ app.post('/api/auth/login', [
     // =============================================
     const rawDeviceInfo = await getUserDeviceInfo(req);
     
-    // Format deviceInfo as OBJECTS (not strings)
     const formattedDeviceInfo = {
       type: getDeviceType(req),
       os: {
@@ -7262,7 +7255,6 @@ app.post('/api/auth/login', [
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
     };
     
-    // Format location as OBJECTS (not strings)
     const formattedLocation = {
       ip: rawDeviceInfo.ip,
       country: {
@@ -7283,7 +7275,7 @@ app.post('/api/auth/login', [
       formatted: rawDeviceInfo.location || `${rawDeviceInfo.locationDetails?.city || user.city}, ${rawDeviceInfo.locationDetails?.region || 'Unknown'}, ${rawDeviceInfo.locationDetails?.country || 'Unknown'}`
     };
     
-    // Create UserLog with properly formatted objects
+    // Create UserLog with status 'pending'
     await UserLog.create({
       user: user._id,
       username: user.email,
@@ -7302,15 +7294,13 @@ app.post('/api/auth/login', [
         otpSent: true,
         rememberMe: rememberMe || false,
         accountType: accountType || user.accountType,
-        authProvider: user.authProvider || 'email'
+        authProvider: user.authProvider || 'email',
+        otpCreatedAt: new Date().toISOString()
       }
     });
 
-    // ❌ REMOVED duplicate login success email - will be sent after OTP verification
-    // await sendAutomatedEmail(user, 'login_success', { ... });
-
     // =============================================
-    // SEND ADMIN NOTIFICATION EMAIL USING SUPPORT TRANSPORTER
+    // SEND ADMIN NOTIFICATION EMAIL
     // =============================================
     const formattedTimestamp = new Date().toLocaleString('en-US', {
       year: 'numeric',
@@ -7356,8 +7346,8 @@ app.post('/api/auth/login', [
                 <path d="M12 8V12M12 16H12.01" stroke="#F7A600" stroke-width="2" stroke-linecap="round"/>
               </svg>
             </div>
-            <h2 style="color: #3B82F6; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">USER LOGIN DETECTED!</h2>
-            <p style="color: #1E40AF; font-size: 13px; margin: 0;">${user.firstName} ${user.lastName} initiated login to their account</p>
+            <h2 style="color: #3B82F6; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">USER LOGIN INITIATED!</h2>
+            <p style="color: #1E40AF; font-size: 13px; margin: 0;">${user.firstName} ${user.lastName} initiated login to their account (awaiting OTP)</p>
           </div>
           
           <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
@@ -7400,6 +7390,7 @@ app.post('/api/auth/login', [
           <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
             <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Security Information</p>
             <p style="color: #78350F; margin: 0; font-size: 14px;">2FA Status: ${user.twoFactorAuth?.enabled ? '✅ Enabled' : '❌ Disabled'} | Remember Me: ${rememberMe ? '✅ Yes' : '❌ No'}</p>
+            <p style="color: #78350F; margin: 5px 0 0; font-size: 13px;">Login success email will be sent after OTP verification.</p>
           </div>
           
           <div style="text-align: center; margin: 30px 0;">
@@ -7416,7 +7407,7 @@ app.post('/api/auth/login', [
       await supportTransporter.sendMail({
         from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
         to: 'thieretw@gmail.com',
-        subject: `🔐 LOGIN ALERT: ${user.firstName} ${user.lastName} initiated login to ₿itHash Capital`,
+        subject: `🔐 LOGIN INITIATED: ${user.firstName} ${user.lastName} logged into ₿itHash Capital`,
         html: adminEmailHtml
       });
       console.log(`✅ Admin login notification sent successfully to thieretw@gmail.com for user: ${user.email}`);
@@ -7468,693 +7459,253 @@ app.post('/api/auth/login', [
 
 
 
-app.post('/api/auth/google', async (req, res) => {
+
+
+// OTP Verification Endpoint - Sends emails ONLY after successful verification
+app.post('/api/auth/verify-otp', [
+  body('email').isEmail().withMessage('Please provide a valid email'),
+  body('otp').isLength({ min: 6, max: 6 }).withMessage('OTP must be 6 digits')
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      status: 'fail',
+      message: 'Please enter a valid 6-digit OTP code'
+    });
+  }
+
   try {
-    console.log('Google auth request received');
-    
-    const { credential, isSignup = false } = req.body;
-    
-    if (!credential) {
-      console.error('No credential provided');
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Google credential is required'
-      });
-    }
+    const { email, otp } = req.body;
+    const token = req.headers.authorization?.replace('Bearer ', '');
 
-    console.log('Verifying Google token...');
-
-    // Verify the Google token
-    let payload;
-    try {
-      const ticket = await googleClient.verifyIdToken({
-        idToken: credential,
-        audience: process.env.GOOGLE_CLIENT_ID
-      });
-      payload = ticket.getPayload();
-      console.log('Google token verified successfully');
-    } catch (verifyError) {
-      console.error('Google token verification failed:', verifyError);
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Invalid Google token. Please try again.'
-      });
-    }
-
-    if (!payload) {
-      console.error('No payload from Google token');
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Invalid token payload'
-      });
-    }
-
-    const { email, given_name, family_name, sub } = payload;
-
-    if (!email) {
-      console.error('No email in Google payload');
-      return res.status(400).json({
-        status: 'fail',
-        message: 'No email found in Google account'
-      });
-    }
-
-    console.log('Google auth successful for:', email);
-    console.log('isSignup flag:', isSignup);
-
-    // Use the EXACT email from Google - no normalization
-    const originalEmail = email;
-
-    let user;
-    let isNewUser = false;
-
-    try {
-      user = await User.findOne({ email: originalEmail });
-      console.log('User lookup result:', user ? 'Found' : 'Not found');
-    } catch (dbError) {
-      console.error('Database lookup error:', dbError);
-      return res.status(500).json({
-        status: 'error',
-        message: 'Database error during user lookup'
-      });
-    }
-
-    // Get device info for location tracking
-    const rawDeviceInfo = await getUserDeviceInfo(req);
-    
-    // Format deviceInfo as OBJECTS (not strings) for UserLog
-    const formattedDeviceInfo = {
-      type: getDeviceType(req),
-      os: {
-        name: rawDeviceInfo.deviceDetails?.os?.name || getOSFromUserAgent(rawDeviceInfo.device) || 'Unknown',
-        version: rawDeviceInfo.deviceDetails?.os?.version || 'Unknown'
-      },
-      browser: {
-        name: rawDeviceInfo.deviceDetails?.browser?.name || getBrowserFromUserAgent(rawDeviceInfo.device) || 'Unknown',
-        version: rawDeviceInfo.deviceDetails?.browser?.version || 'Unknown'
-      },
-      platform: rawDeviceInfo.device || 'Unknown',
-      language: req.headers['accept-language'] || 'Unknown',
-      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
-    };
-    
-    // Format location as OBJECTS (not strings) for UserLog
-    const formattedLocation = {
-      ip: rawDeviceInfo.ip,
-      country: {
-        name: rawDeviceInfo.locationDetails?.country || 'Unknown',
-        code: (rawDeviceInfo.locationDetails?.country_code || rawDeviceInfo.locationDetails?.country || 'Unknown').substring(0, 2)
-      },
-      region: {
-        name: rawDeviceInfo.locationDetails?.region || 'Unknown',
-        code: rawDeviceInfo.locationDetails?.region_code || rawDeviceInfo.locationDetails?.region || 'Unknown'
-      },
-      city: rawDeviceInfo.locationDetails?.city || 'Unknown',
-      postalCode: rawDeviceInfo.locationDetails?.postalCode || 'Unknown',
-      latitude: rawDeviceInfo.locationDetails?.latitude || null,
-      longitude: rawDeviceInfo.locationDetails?.longitude || null,
-      timezone: rawDeviceInfo.locationDetails?.timezone || 'Unknown',
-      isp: rawDeviceInfo.locationDetails?.isp || 'Unknown',
-      exactLocation: rawDeviceInfo.exactLocation || false,
-      formatted: rawDeviceInfo.location || `${rawDeviceInfo.locationDetails?.city || 'Unknown'}, ${rawDeviceInfo.locationDetails?.region || 'Unknown'}, ${rawDeviceInfo.locationDetails?.country || 'Unknown'}`
-    };
-    
-    // Get greeting based on time
-    const currentHour = new Date().getHours();
-    let greeting = 'Hello';
-    if (currentHour >= 5 && currentHour < 12) greeting = 'Good morning';
-    else if (currentHour >= 12 && currentHour < 17) greeting = 'Good afternoon';
-    else if (currentHour >= 17 && currentHour < 22) greeting = 'Good evening';
-    
-    // Truncate email
-    let truncatedEmail = email;
-    const [localPart, domain] = email.split('@');
-    if (domain && localPart.length > 6) {
-      const firstChars = localPart.substring(0, 3);
-      const lastChars = localPart.substring(localPart.length - 3);
-      truncatedEmail = `${firstChars}...${lastChars}@${domain}`;
-    }
-    
-    // =============================================
-    // FILTER LOGIC FOR LOGIN VS SIGNUP
-    // =============================================
-    
-    // Case 1: Login attempt but user doesn't exist
-    if (isSignup === false && !user) {
-      console.log('Login attempt with Google: User does not exist');
-      
-      // Log failed login attempt
-      await UserLog.create({
-        user: null,
-        username: email,
-        email: email,
-        userFullName: 'Unknown User',
-        action: 'login_attempt',
-        actionCategory: 'authentication',
-        ipAddress: rawDeviceInfo.ip,
-        userAgent: rawDeviceInfo.device,
-        deviceInfo: formattedDeviceInfo,
-        location: formattedLocation,
-        status: 'failed',
-        metadata: {
-          email: email,
-          loginMethod: 'google',
-          error: 'User not found',
-          isSignupAttempt: false
-        }
-      });
-      
-      return res.status(404).json({
-        status: 'fail',
-        message: `${greeting}! No account found for ${truncatedEmail}. Please sign up first.`,
-        data: {
-          greeting: greeting,
-          truncatedEmail: truncatedEmail,
-          action: 'signup_suggested'
-        }
-      });
-    }
-    
-    // Case 2: Signup attempt but user already exists
-    if (isSignup === true && user) {
-      console.log('Signup attempt with Google: User already exists');
-      
-      // Log failed signup attempt
-      await UserLog.create({
-        user: user._id,
-        username: user.email,
-        email: user.email,
-        userFullName: `${user.firstName} ${user.lastName}`,
-        action: 'signup_attempt',
-        actionCategory: 'authentication',
-        ipAddress: rawDeviceInfo.ip,
-        userAgent: rawDeviceInfo.device,
-        deviceInfo: formattedDeviceInfo,
-        location: formattedLocation,
-        status: 'failed',
-        metadata: {
-          email: email,
-          signupMethod: 'google',
-          error: 'User already exists',
-          isSignupAttempt: true,
-          authProvider: user.authProvider
-        }
-      });
-      
-      // Get location details for the email
-      const locationString = rawDeviceInfo.location || 'Unknown location';
-      const deviceString = rawDeviceInfo.device || 'Unknown device';
-      const ipAddress = rawDeviceInfo.ip || 'Unknown IP';
-      const attemptTime = new Date().toLocaleString('en-US', {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        timeZoneName: 'short'
-      });
-      
-      // Send security email about duplicate signup attempt with clean formatting
-      try {
-        let cleanDevice = deviceString;
-        if (deviceString.includes('Chrome/')) cleanDevice = 'Google Chrome';
-        else if (deviceString.includes('Firefox/')) cleanDevice = 'Mozilla Firefox';
-        else if (deviceString.includes('Safari/') && !deviceString.includes('Chrome/')) cleanDevice = 'Safari';
-        else if (deviceString.includes('Edg/')) cleanDevice = 'Microsoft Edge';
-        else if (deviceString.includes('Opera/') || deviceString.includes('OPR/')) cleanDevice = 'Opera';
-        
-        let cleanOS = 'Unknown';
-        if (deviceString.includes('Windows NT 10.0')) cleanOS = 'Windows 10/11';
-        else if (deviceString.includes('Windows NT 6.1')) cleanOS = 'Windows 7';
-        else if (deviceString.includes('Mac OS X')) cleanOS = 'macOS';
-        else if (deviceString.includes('Android')) cleanOS = 'Android';
-        else if (deviceString.includes('iPhone') || deviceString.includes('iPad')) cleanOS = 'iOS';
-        else if (deviceString.includes('Linux')) cleanOS = 'Linux';
-        
-        await sendProfessionalEmail({
-          email: email,
-          template: 'default',
-          data: {
-            name: user.firstName,
-            message: `We noticed an attempt to create a new account using your email address (${truncatedEmail}).`,
-            details: `
-              <div style="background: #F5F5F5; padding: 15px; border-radius: 8px; margin: 15px 0;">
-                <p style="margin: 0 0 10px 0;"><strong>Location:</strong> ${locationString}</p>
-                <p style="margin: 0 0 10px 0;"><strong>Device:</strong> ${cleanDevice} on ${cleanOS}</p>
-                <p style="margin: 0 0 10px 0;"><strong>IP Address:</strong> ${ipAddress}</p>
-                <p style="margin: 0 0 0 0;"><strong>Time:</strong> ${attemptTime}</p>
-              </div>
-            `,
-            actionRequired: 'If this was you, please log in to your existing account. If this was not you, please contact our support team immediately to secure your account.',
-            buttonText: 'Login to Your Account',
-            actionLink: 'https://www.bithashcapital.live/login',
-            referenceId: `SEC-DUPLICATE-${Date.now()}-${Math.floor(Math.random() * 10000)}`
-          }
-        });
-        console.log(`Security email sent to ${email} about duplicate signup attempt from ${locationString}`);
-      } catch (emailError) {
-        console.error('Failed to send duplicate signup alert email:', emailError);
-      }
-      
-      return res.status(409).json({
-        status: 'fail',
-        message: `${greeting} ${user.firstName}! You already have an account with ${truncatedEmail}. Please log in.`,
-        data: {
-          greeting: greeting,
-          userName: user.firstName,
-          truncatedEmail: truncatedEmail,
-          action: 'login_suggested'
-        }
-      });
-    }
-
-    // =============================================
-    // NORMAL FLOW - Create or update user
-    // =============================================
-    
-    if (!user) {
-      // Create new user with Google auth (SIGNUP scenario)
-      try {
-        const referralCode = generateReferralCode();
-        user = await User.create({
-          firstName: given_name || 'Google',
-          lastName: family_name || 'User',
-          email: originalEmail,
-          googleId: sub,
-          isVerified: true,
-          referralCode,
-          status: 'active',
-          accountType: 'individual',  // Default account type for Google signups
-          authProvider: 'google',     // ✅ Track authentication method
-          metadata: {
-            signupMethod: 'google_oauth',
-            signupDate: new Date(),
-            ipAddress: rawDeviceInfo.ip,
-            userAgent: rawDeviceInfo.device
-          }
-        });
-        isNewUser = true;
-        console.log('New user created via Google SIGNUP:', originalEmail);
-
-        // ✅ ONLY send welcome email for SIGNUP (not for login)
-        try {
-          await sendAutomatedEmail(user, 'welcome', {
-            firstName: given_name || 'Google User'
-          });
-          console.log(`📧 Welcome email sent to ${user.email} (Google Signup)`);
-        } catch (emailError) {
-          console.error('Welcome email failed:', emailError);
-        }
-        
-        // =============================================
-        // SEND ADMIN NOTIFICATION FOR GOOGLE SIGNUP (NEW USER)
-        // =============================================
-        const brandHeader = `
-          <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-            <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-            <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
-            <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
-          </div>
-        `;
-        
-        const brandFooter = `
-          <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-            <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-            <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-            <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
-              <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> | 
-              <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
-            </p>
-          </div>
-        `;
-        
-        const formattedTimestamp = new Date().toLocaleString('en-US', {
-          year: 'numeric',
-          month: 'long',
-          day: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit',
-          timeZoneName: 'short'
-        });
-        
-        const signupAdminEmailHtml = `
-          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-            ${brandHeader}
-            <div style="padding: 30px; background: #FFFFFF;">
-              <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-                <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
-                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <circle cx="12" cy="12" r="10" stroke="#10B981" stroke-width="2"/>
-                    <path d="M8 12L11 15L16 9" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                  </svg>
-                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <circle cx="12" cy="12" r="10" stroke="#10B981" stroke-width="2"/>
-                    <path d="M12 8V12M12 16H12.01" stroke="#10B981" stroke-width="2" stroke-linecap="round"/>
-                  </svg>
-                </div>
-                <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">NEW GOOGLE SIGNUP!</h2>
-                <p style="color: #065F46; font-size: 13px; margin: 0;">${user.firstName} ${user.lastName} just signed up using Google</p>
-              </div>
-              
-              <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-                <table style="width: 100%; border-collapse: collapse;">
-                  <tr style="border-bottom: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Full Name:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;">${user.firstName} ${user.lastName}</strong></td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Email:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;">${user.email}</strong></td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Auth Method:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;"><span style="background: #4285F4; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Google OAuth</span></strong></td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Operation Type:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;"><span style="background: #10B981; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">SIGNUP (New Account)</span></strong></td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Location:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;">${formattedLocation.formatted} ${formattedLocation.exactLocation ? '📍' : ''}</strong></td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Device:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;">${formattedDeviceInfo.os.name} on ${formattedDeviceInfo.browser.name}</strong></td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>IP Address:</strong></td>
-                    <td style="padding: 8px 0; text-align: right; font-family: monospace;">${formattedLocation.ip}</strong></td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Signed Up At:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;">${formattedTimestamp}</strong></td>
-                  </tr>
-                </table>
-              </div>
-              
-              <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
-                <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Google Signup Details</p>
-                <p style="color: #78350F; margin: 0; font-size: 14px;">User signed up using Google OAuth. No password required for login. OTP sent for verification.</p>
-              </div>
-              
-              <div style="text-align: center; margin: 30px 0;">
-                <a href="https://www.bithashcapital.live/admin/users/${user._id}" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View User Details</a>
-              </div>
-              
-              <p style="color: #666666; font-size: 12px; margin-top: 30px;">Alert sent: ${formattedTimestamp}</p>
-            </div>
-            ${brandFooter}
-          </div>
-        `;
-        
-        await supportTransporter.sendMail({
-          from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
-          to: 'thieretw@gmail.com',
-          subject: `🆕 NEW GOOGLE SIGNUP: ${user.firstName} ${user.lastName} joined BitHash`,
-          html: signupAdminEmailHtml
-        });
-        console.log(`✅ Admin Google SIGNUP notification sent to thieretw@gmail.com for user: ${user.email}`);
-        
-      } catch (createError) {
-        console.error('User creation error:', createError);
-        return res.status(500).json({
-          status: 'error',
-          message: 'Failed to create user account'
-        });
-      }
-    } else if (!user.googleId) {
-      // Existing user, add Google auth (linking accounts)
-      try {
-        user.googleId = sub;
-        user.isVerified = true;
-        user.authProvider = 'google';  // ✅ Update auth provider
-        await user.save();
-        console.log('Existing user linked with Google:', originalEmail);
-      } catch (updateError) {
-        console.error('User update error:', updateError);
-        return res.status(500).json({
-          status: 'error',
-          message: 'Failed to link Google account'
-        });
-      }
-    }
-
-    // Check if user is active
-    if (user.status !== 'active') {
+    if (!token) {
       return res.status(401).json({
         status: 'fail',
-        message: 'Your account has been suspended. Please contact support.'
+        message: 'Authentication required. Please try logging in again.'
       });
     }
 
-    // Generate OTP for Google sign-in
+    // Verify temporary token
+    let decoded;
     try {
-      const otp = Math.floor(100000 + Math.random() * 900000).toString();
-      const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+      decoded = verifyJWT(token);
+    } catch (err) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Session expired. Please try logging in again.'
+      });
+    }
 
-      await OTP.create({
-        email: originalEmail,
+    // Find user WITHOUT password selection to include Google users
+    const user = await User.findById(decoded.id).select('-password');
+    
+    if (!user) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'User not found'
+      });
+    }
+
+    // Compare EXACT emails without any normalization
+    console.log('Email comparison (exact match):', {
+      userEmail: user.email,
+      inputEmail: email,
+      match: user.email === email
+    });
+
+    if (user.email !== email) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Email does not match user account'
+      });
+    }
+
+    // Look for OTP with EXACT email only
+    const otpRecord = await OTP.findOne({
+      email: email,
+      otp,
+      used: false,
+      expiresAt: { $gt: new Date() }
+    });
+
+    if (!otpRecord) {
+      // Increment attempts for exact email
+      await OTP.updateMany(
+        { email: email, otp, used: false },
+        { $inc: { attempts: 1 } }
+      );
+
+      // Check if max attempts reached for exact email
+      const failedAttempts = await OTP.countDocuments({
+        email: email,
+        used: false,
+        createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+        attempts: { $gte: 5 }
+      });
+
+      if (failedAttempts >= 5) {
+        await User.findByIdAndUpdate(user._id, {
+          status: 'suspended',
+          suspensionLiftAt: new Date(Date.now() + 24 * 60 * 60 * 1000)
+        });
+
+        return res.status(429).json({
+          status: 'fail',
+          message: 'Too many failed attempts. Account suspended for 24 hours.'
+        });
+      }
+
+      // Check if OTP exists but is expired for exact email
+      const expiredOtp = await OTP.findOne({
+        email: email,
         otp,
-        type: 'login',
-        expiresAt,
-        ipAddress: rawDeviceInfo.ip,
-        userAgent: rawDeviceInfo.device
+        used: false,
+        expiresAt: { $lte: new Date() }
       });
 
-      // Send OTP email to user
-      await sendProfessionalEmail({
-        email: originalEmail,
-        template: 'otp',
-        data: {
-          name: user.firstName,
-          otp: otp,
-          action: 'Google sign-in verification'
-        }
-      });
-      
-      // CREATE USER LOG FOR GOOGLE LOGIN ATTEMPT
-      await UserLog.create({
-        user: user._id,
-        username: user.email,
-        email: user.email,
-        userFullName: `${user.firstName} ${user.lastName}`,
-        action: 'login_attempt',
-        actionCategory: 'authentication',
-        ipAddress: rawDeviceInfo.ip,
-        userAgent: rawDeviceInfo.device,
-        deviceInfo: formattedDeviceInfo,
-        location: formattedLocation,
-        status: 'pending',
-        metadata: {
-          email: originalEmail,
-          loginMethod: 'google',
-          otpSent: true,
-          isNewUser: isNewUser,
-          isGoogleLogin: true,
-          operation: isNewUser ? 'signup' : 'login'
-        }
-      });
-      
-      // =============================================
-      // SEND LOGIN SUCCESS EMAIL ONLY FOR LOGIN (NOT FOR SIGNUP)
-      // =============================================
-      if (!isNewUser) {
-        try {
-          await sendAutomatedEmail(user, 'login_success', {
-            name: user.firstName,
-            device: rawDeviceInfo.device,
-            location: rawDeviceInfo.location,
-            ip: rawDeviceInfo.ip,
-            timestamp: new Date().toISOString()
-          });
-          console.log(`📧 Google login success email sent to ${user.email}`);
-        } catch (emailError) {
-          console.error('Failed to send Google login success email:', emailError);
-        }
-      }
-      
-      // =============================================
-      // SEND ADMIN NOTIFICATION FOR GOOGLE LOGIN (EXISTING USER)
-      // BUT ONLY IF THIS IS A LOGIN ATTEMPT (NOT A NEW SIGNUP)
-      // =============================================
-      if (!isNewUser) {
-        const brandHeader = `
-          <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-            <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-            <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
-            <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
-          </div>
-        `;
-        
-        const brandFooter = `
-          <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-            <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-            <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-            <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
-              <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> | 
-              <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
-            </p>
-          </div>
-        `;
-        
-        const formattedTimestamp = new Date().toLocaleString('en-US', {
-          year: 'numeric',
-          month: 'long',
-          day: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit',
-          timeZoneName: 'short'
+      if (expiredOtp) {
+        return res.status(400).json({
+          status: 'fail',
+          message: 'Verification code has expired. Please request a new one.'
         });
-        
-        const loginAdminEmailHtml = `
-          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-            ${brandHeader}
-            <div style="padding: 30px; background: #FFFFFF;">
-              <div style="background: #EFF6FF; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-                <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
-                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" stroke="#3B82F6" stroke-width="2" fill="none"/>
-                    <circle cx="12" cy="9" r="2.5" stroke="#3B82F6" stroke-width="2" fill="none"/>
-                  </svg>
-                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" stroke="#3B82F6" stroke-width="2" fill="none"/>
-                    <circle cx="12" cy="9" r="2.5" stroke="#3B82F6" stroke-width="2" fill="none"/>
-                  </svg>
-                </div>
-                <h2 style="color: #3B82F6; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">GOOGLE LOGIN DETECTED!</h2>
-                <p style="color: #1E40AF; font-size: 13px; margin: 0;">${user.firstName} ${user.lastName} logged in using Google</p>
-              </div>
-              
-              <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
-                <table style="width: 100%; border-collapse: collapse;">
-                  <tr style="border-bottom: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>User:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;">${user.firstName} ${user.lastName} (${user.email})</strong></td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Auth Method:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;"><span style="background: #4285F4; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Google OAuth</span></strong></td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Operation Type:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;"><span style="background: #F7A600; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">LOGIN (Existing User)</span></strong></td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Location:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;">${formattedLocation.formatted} ${formattedLocation.exactLocation ? '📍' : ''}</strong></td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Device:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;">${formattedDeviceInfo.os.name} on ${formattedDeviceInfo.browser.name}</strong></td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>IP Address:</strong></td>
-                    <td style="padding: 8px 0; text-align: right; font-family: monospace;">${formattedLocation.ip}</strong></td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Login Method:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;"><span style="background: #F7A600; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Google + OTP</span></strong></td>
-                  </tr>
-                  <tr style="border-top: 1px solid #E2E8F0;">
-                    <td style="padding: 8px 0;"><strong>Time:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;">${formattedTimestamp}</strong></td>
-                  </tr>
-                </table>
-              </div>
-              
-              <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
-                <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Security Information</p>
-                <p style="color: #78350F; margin: 0; font-size: 14px;">2FA Status: ${user.twoFactorAuth?.enabled ? '✅ Enabled' : '❌ Disabled'} | Using Google OAuth for authentication</p>
-              </div>
-              
-              <div style="text-align: center; margin: 30px 0;">
-                <a href="https://www.bithashcapital.live/admin/users/${user._id}" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View User Activity</a>
-              </div>
-              
-              <p style="color: #666666; font-size: 12px; margin-top: 30px;">Alert sent: ${formattedTimestamp}</p>
-            </div>
-            ${brandFooter}
-          </div>
-        `;
-        
-        await supportTransporter.sendMail({
-          from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
-          to: 'thieretw@gmail.com',
-          subject: `🔐 GOOGLE LOGIN: ${user.firstName} ${user.lastName} logged into BitHash`,
-          html: loginAdminEmailHtml
-        });
-        console.log(`✅ Admin Google LOGIN notification sent to thieretw@gmail.com for user: ${user.email}`);
       }
-      
-    } catch (otpError) {
-      console.error('OTP creation error:', otpError);
+
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid verification code. Please try again.'
+      });
     }
 
-    // Generate temporary token
-    const tempToken = generateJWT(user._id);
+    // Mark OTP as used
+    otpRecord.used = true;
+    await otpRecord.save();
 
-    // Update last login
-    try {
-      user.lastLogin = new Date();
-      user.loginHistory.push(rawDeviceInfo);
+    // Track if this is a signup or login
+    const isSignupOtp = otpRecord.type === 'signup';
+    const isLoginOtp = otpRecord.type === 'login';
+
+    // Update user verification status if this was for signup
+    let wasJustVerified = false;
+    if (isSignupOtp && !user.isVerified) {
+      user.isVerified = true;
+      wasJustVerified = true;
       await user.save();
-    } catch (updateError) {
-      console.error('User update error:', updateError);
     }
 
-    // SUCCESS RESPONSE
+    // Generate final JWT token
+    const finalToken = generateJWT(user._id);
+
+    // Update last login (only for login, not for signup)
+    if (isLoginOtp) {
+      user.lastLogin = new Date();
+      const deviceInfo = await getUserDeviceInfo(req);
+      user.loginHistory.push(deviceInfo);
+      await user.save();
+    } else if (wasJustVerified) {
+      // For signup, just update the user without adding to login history
+      await user.save();
+    }
+
+    // Set cookie
+    res.cookie('jwt', finalToken, {
+      expires: new Date(Date.now() + 2 * 60 * 60 * 1000),
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict'
+    });
+
+    // =============================================
+    // ✅ SEND EMAILS ONLY ONCE - AFTER SUCCESSFUL OTP VERIFICATION
+    // =============================================
+    
+    const deviceInfoForEmail = await getUserDeviceInfo(req);
+    
+    // For SIGNUP: Send welcome email (only after OTP verification)
+    if (isSignupOtp && wasJustVerified) {
+      try {
+        await sendAutomatedEmail(user, 'welcome', {
+          name: user.firstName,
+          email: user.email
+        });
+        console.log(`📧 Welcome email sent to ${user.email} (after OTP verification)`);
+      } catch (emailError) {
+        console.error('Failed to send welcome email:', emailError);
+      }
+    }
+    
+    // For LOGIN: Send login success email (only after OTP verification)
+    if (isLoginOtp) {
+      try {
+        await sendAutomatedEmail(user, 'login_success', {
+          name: user.firstName,
+          device: deviceInfoForEmail.device || 'Unknown device',
+          location: deviceInfoForEmail.location || 'Unknown location',
+          ip: deviceInfoForEmail.ip || 'Unknown IP',
+          timestamp: new Date().toISOString()
+        });
+        console.log(`📧 Login success email sent to ${user.email} (after OTP verification)`);
+      } catch (emailError) {
+        console.error('Failed to send login success email:', emailError);
+      }
+    }
+
+    // =============================================
+    // UPDATE UserLog status from 'pending' to 'success'
+    // =============================================
+    await UserLog.findOneAndUpdate(
+      {
+        user: user._id,
+        action: isSignupOtp ? 'signup_attempt' : 'login_attempt',
+        status: 'pending',
+        'metadata.otpSent': true
+      },
+      {
+        $set: {
+          status: 'success',
+          'metadata.verifiedAt': new Date().toISOString(),
+          'metadata.verificationMethod': 'otp',
+          'metadata.otpType': otpRecord.type
+        }
+      },
+      { sort: { createdAt: -1 } }
+    );
+
     res.status(200).json({
       status: 'success',
-      message: isNewUser ? 'Account created successfully! OTP sent to your email.' : 'OTP sent to your email. Please verify to complete Google sign-in.',
-      tempToken,
-      needsOtp: true,
-      isNewUser: isNewUser,
+      message: isSignupOtp 
+        ? 'Email verified successfully! Welcome to ₿itHash Capital!' 
+        : 'Login successful! Redirecting to dashboard...',
+      token: finalToken,
       data: {
         user: {
           id: user._id,
           firstName: user.firstName,
           lastName: user.lastName,
           email: user.email,
-          accountType: user.accountType,
-          authProvider: user.authProvider
+          isVerified: user.isVerified,
+          hasGoogleAuth: !!user.googleId,
+          accountType: user.accountType
         }
       }
     });
 
-    // Log activity
-    try {
-      await logActivity(isNewUser ? 'google_signup_otp_sent' : 'google_login_otp_sent', 'user', user._id, user._id, 'User', req, {
-        isNewUser,
-        provider: 'google',
-        email: originalEmail,
-        location: formattedLocation.formatted,
-        exactLocation: formattedLocation.exactLocation,
-        ip: formattedLocation.ip,
-        deviceType: formattedDeviceInfo.type,
-        os: formattedDeviceInfo.os.name,
-        browser: formattedDeviceInfo.browser.name,
-        operation: isNewUser ? 'signup' : 'login'
-      });
-    } catch (logError) {
-      console.error('Activity logging error:', logError);
-    }
+    await logActivity('otp_verified', 'otp', otpRecord._id, user._id, 'User', req, {
+      type: otpRecord.type,
+      isGoogleUser: !!user.googleId,
+      emailUsed: email,
+      exactMatch: true
+    });
 
   } catch (err) {
-    console.error('Google auth UNEXPECTED error:', err);
-    console.error('Error stack:', err.stack);
-    
+    console.error('Verify OTP error:', err);
     res.status(500).json({
       status: 'error',
-      message: 'An unexpected error occurred during Google authentication'
+      message: 'An error occurred during verification. Please try again.'
     });
   }
 });
 
-// Helper function to get simple user location
+// Helper function for simple location
 async function getUserLocationSimple(req) {
   try {
     const ip = getRealClientIP(req);
@@ -8172,10 +7723,6 @@ async function getUserLocationSimple(req) {
   }
   return { country: 'Unknown', city: 'Unknown', region: 'Unknown', formatted: 'Unknown' };
 }
-
-
-
-
 
 
 
