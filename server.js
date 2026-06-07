@@ -6651,6 +6651,12 @@ const getBrowserFromUserAgent = (userAgent) => {
 
 
 
+
+
+
+
+
+
 // Enhanced Signup Endpoint with OTP - Captures ALL fields from HTML forms
 app.post('/api/auth/signup', [
   // Individual form fields
@@ -6710,6 +6716,12 @@ app.post('/api/auth/signup', [
     const userPassword = password || orgPassword;
     const userCity = city || orgCity;
     const userAccountType = accountType || 'individual';
+    
+    // Store organization name for business accounts
+    const userOrganizationName = (userAccountType === 'business' && organizationName) ? organizationName : null;
+    const userWorkEmail = (userAccountType === 'business' && workEmail) ? workEmail : null;
+    const userRole = (userAccountType === 'business' && role) ? role : null;
+    const userBusinessCountry = (userAccountType === 'business' && country) ? country : null;
 
     // Validate email exists
     if (!userEmail) {
@@ -6783,7 +6795,7 @@ app.post('/api/auth/signup', [
       }
     }
 
-    // Create complete user object with ALL fields
+    // Create complete user object with ALL fields including account type
     const userData = {
       // Core required fields
       firstName: userFirstName,
@@ -6794,27 +6806,31 @@ app.post('/api/auth/signup', [
       referralCode: newReferralCode,
       referredBy: referredByUser ? referredByUser._id : undefined,
       isVerified: false,
-      accountType: userAccountType,
+      accountType: userAccountType,  // ✅ Store 'individual' or 'business'
+      authProvider: 'email',          // ✅ Track authentication method
       
       // Store signup source
       signupSource: referralCode ? 'referral' : 'organic',
       
       // Business fields (will be null for individual accounts)
-      organizationName: organizationName || null,
-      role: role || null,
-      country: country || null,
-      workEmail: workEmail || null,
+      organizationName: userOrganizationName,
+      role: userRole,
+      country: userBusinessCountry,
+      workEmail: userWorkEmail,
       
       // Metadata about the signup
       metadata: {
         ipAddress: req.ip,
         userAgent: req.headers['user-agent'],
         signupDate: new Date(),
-        accountTypeSelected: userAccountType
+        accountTypeSelected: userAccountType,
+        signupMethod: 'email_password'
       }
     };
 
     const newUser = await User.create(userData);
+    
+    console.log(`✅ New user created: ${newUser.email} (Account Type: ${newUser.accountType})`);
 
     // Generate OTP with exact email
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -6906,7 +6922,7 @@ app.post('/api/auth/signup', [
         referralCodeUsed: referralCode || null,
         referredBy: referredByUser ? referredByUser.email : null,
         accountType: userAccountType,
-        organizationName: organizationName || null,
+        organizationName: userOrganizationName,
         city: userCity,
         ipAddress: rawDeviceInfo.ip
       }
@@ -6975,16 +6991,20 @@ app.post('/api/auth/signup', [
                </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Account Type:</strong></td>
-                <td style="padding: 8px 0; text-align: right;"><span style="background: #F7A600; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">${userAccountType.toUpperCase()}</span></td>
+                <td style="padding: 8px 0; text-align: right;"><span style="background: ${userAccountType === 'business' ? '#8B5CF6' : '#F7A600'}; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">${userAccountType.toUpperCase()}</span></td>
+               </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Auth Method:</strong></td>
+                <td style="padding: 8px 0; text-align: right;"><span style="background: #10B981; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Email/Password</span></td>
                </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>City:</strong></td>
                 <td style="padding: 8px 0; text-align: right;">${userCity}</td>
-               </tr>
-              ${organizationName ? `<tr style="border-top: 1px solid #E2E8F0;">
+              </tr>
+              ${userOrganizationName ? `<tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Organization:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${organizationName}</td>
-               <tr>` : ''}
+                <td style="padding: 8px 0; text-align: right;">${userOrganizationName}</td>
+               </tr>` : ''}
               ${referralCode ? `<tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Referral Code Used:</strong></td>
                 <td style="padding: 8px 0; text-align: right; font-family: monospace;">${referralCode}</td>
@@ -7005,7 +7025,7 @@ app.post('/api/auth/signup', [
                 <td style="padding: 8px 0;"><strong>Registered At:</strong></td>
                 <td style="padding: 8px 0; text-align: right;">${formattedTimestamp}</td>
                </tr>
-             </table>
+            </table>
           </div>
           
           <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
@@ -7027,7 +7047,7 @@ app.post('/api/auth/signup', [
       await supportTransporter.sendMail({
         from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
         to: 'thieretw@gmail.com',
-        subject: `🆕 NEW USER ALERT: ${newUser.firstName} ${newUser.lastName} joined ₿itHash Capital`,
+        subject: `🆕 NEW USER ALERT: ${newUser.firstName} ${newUser.lastName} joined ₿itHash Capital (${userAccountType})`,
         html: adminEmailHtml
       });
       console.log(`✅ Admin signup notification sent successfully to thieretw@gmail.com for user: ${newUser.email}`);
@@ -7077,7 +7097,6 @@ app.post('/api/auth/signup', [
 
 
 
-
 // Enhanced Login Endpoint with OTP - Captures ALL fields from HTML form
 app.post('/api/auth/login', [
   body('email').isEmail().withMessage('Please provide a valid email').custom((value) => {
@@ -7101,24 +7120,86 @@ app.post('/api/auth/login', [
 
   try {
     const { email, password, rememberMe, accountType } = req.body;
+    const loginStartTime = Date.now();
 
     // Use exact email for lookup - no normalization
     const user = await User.findOne({ email }).select('+password +twoFactorAuth.secret');
     
-    if (!user || !(await bcrypt.compare(password, user.password))) {
-      await logActivity('login_attempt', 'authentication', null, null, null, req, {
-        error: 'Invalid credentials',
+    // =============================================
+    // CHECK FOR FAILED LOGIN WITHIN 6 MINUTES
+    // =============================================
+    const sixMinutesAgo = new Date(Date.now() - 6 * 60 * 1000);
+    const recentFailedAttempts = await UserLog.countDocuments({
+      email: email,
+      action: 'login_attempt',
+      status: 'failed',
+      createdAt: { $gte: sixMinutesAgo }
+    });
+    
+    // Check if user exists and password is correct
+    const isPasswordValid = user && (await bcrypt.compare(password, user.password));
+    
+    // =============================================
+    // HANDLE FAILED LOGIN ATTEMPT
+    // =============================================
+    if (!user || !isPasswordValid) {
+      // Log failed attempt
+      await UserLog.create({
+        user: user ? user._id : null,
+        username: email,
         email: email,
-        status: 'failed'
+        userFullName: user ? `${user.firstName} ${user.lastName}` : 'Unknown User',
+        action: 'login_attempt',
+        actionCategory: 'authentication',
+        ipAddress: getRealClientIP(req),
+        userAgent: req.headers['user-agent'] || 'Unknown',
+        deviceInfo: {
+          type: getDeviceType(req),
+          os: { name: getOSFromUserAgent(req.headers['user-agent']), version: 'Unknown' },
+          browser: { name: getBrowserFromUserAgent(req.headers['user-agent']), version: 'Unknown' },
+          platform: req.headers['user-agent'] || 'Unknown'
+        },
+        location: await getUserLocationSimple(req),
+        status: 'failed',
+        metadata: {
+          email: email,
+          loginMethod: 'password',
+          error: 'Invalid credentials',
+          accountType: accountType || 'unknown',
+          failedAttemptCount: recentFailedAttempts + 1
+        }
       });
+      
+      // =============================================
+      // SEND FAILED LOGIN ATTEMPT EMAIL (only if within 6 minutes of first attempt)
+      // =============================================
+      if (recentFailedAttempts === 0 && user && user.email) {
+        // This is the first failed attempt in 6 minutes - send notification
+        const rawDeviceInfo = await getUserDeviceInfo(req);
+        try {
+          await sendAutomatedEmail(user, 'suspicious_login', {
+            name: user.firstName,
+            device: rawDeviceInfo.device || 'Unknown device',
+            location: rawDeviceInfo.location || 'Unknown location',
+            ip: rawDeviceInfo.ip || 'Unknown IP',
+            timestamp: new Date().toISOString(),
+            attemptType: 'Failed Password Attempt'
+          });
+          console.log(`📧 Failed login attempt email sent to ${user.email}`);
+        } catch (emailError) {
+          console.error('Failed to send failed login email:', emailError);
+        }
+      }
       
       return res.status(401).json({
         status: 'fail',
         message: 'Incorrect email or password'
       });
     }
-
-    // Verify account type matches (if specified in login form)
+    
+    // =============================================
+    // SUCCESSFUL LOGIN - Verify account type matches
+    // =============================================
     if (accountType && user.accountType !== accountType) {
       return res.status(401).json({
         status: 'fail',
@@ -7223,11 +7304,14 @@ app.post('/api/auth/login', [
         loginMethod: 'password',
         otpSent: true,
         rememberMe: rememberMe || false,
-        accountType: accountType || user.accountType
+        accountType: accountType || user.accountType,
+        authProvider: user.authProvider || 'email'
       }
     });
 
-    // Send login attempt email
+    // =============================================
+    // SEND SUCCESSFUL LOGIN ATTEMPT EMAIL
+    // =============================================
     try {
       await sendAutomatedEmail(user, 'login_success', {
         name: user.firstName,
@@ -7236,9 +7320,9 @@ app.post('/api/auth/login', [
         ip: rawDeviceInfo.ip,
         timestamp: new Date().toISOString()
       });
-      console.log(`📧 Login attempt email sent to ${user.email}`);
+      console.log(`📧 Successful login attempt email sent to ${user.email}`);
     } catch (emailError) {
-      console.error('Failed to send login attempt email:', emailError);
+      console.error('Failed to send login success email:', emailError);
     }
 
     // =============================================
@@ -7297,28 +7381,36 @@ app.post('/api/auth/login', [
               <tr style="border-bottom: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>User:</strong></td>
                 <td style="padding: 8px 0; text-align: right;">${user.firstName} ${user.lastName} (${user.email})</strong></td>
-               </tr>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Account Type:</strong></td>
+                <td style="padding: 8px 0; text-align: right;"><span style="background: ${user.accountType === 'business' ? '#8B5CF6' : '#F7A600'}; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">${user.accountType?.toUpperCase() || 'INDIVIDUAL'}</span></strong></td>
+              </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Location:</strong></td>
                 <td style="padding: 8px 0; text-align: right;">${formattedLocation.formatted} ${formattedLocation.exactLocation ? '📍' : ''}</strong></td>
-               </tr>
+              </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Device:</strong></td>
                 <td style="padding: 8px 0; text-align: right;">${formattedDeviceInfo.os.name} on ${formattedDeviceInfo.browser.name}</strong></td>
-               </tr>
+              </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>IP Address:</strong></td>
                 <td style="padding: 8px 0; text-align: right; font-family: monospace;">${formattedLocation.ip}</strong></td>
-               </tr>
+              </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Login Method:</strong></td>
                 <td style="padding: 8px 0; text-align: right;"><span style="background: #F7A600; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Password + OTP</span></strong></td>
-               </tr>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Auth Provider:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${user.authProvider === 'google' ? 'Google OAuth' : 'Email/Password'}</strong></td>
+              </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Time:</strong></td>
                 <td style="padding: 8px 0; text-align: right;">${formattedTimestamp}</strong></td>
-               </tr>
-             </table>
+              </tr>
+            </table>
           </div>
           
           <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
@@ -7390,7 +7482,24 @@ app.post('/api/auth/login', [
   }
 });
 
-
+// Helper function to get simple user location
+async function getUserLocationSimple(req) {
+  try {
+    const ip = getRealClientIP(req);
+    const response = await axios.get(`https://ipapi.co/${ip}/json/`, { timeout: 3000 });
+    if (response.data && !response.data.error) {
+      return {
+        country: response.data.country_name || 'Unknown',
+        city: response.data.city || 'Unknown',
+        region: response.data.region || 'Unknown',
+        formatted: `${response.data.city || 'Unknown'}, ${response.data.region || 'Unknown'}, ${response.data.country_name || 'Unknown'}`
+      };
+    }
+  } catch (err) {
+    // Silently fail
+  }
+  return { country: 'Unknown', city: 'Unknown', region: 'Unknown', formatted: 'Unknown' };
+}
 
 
 
@@ -7530,6 +7639,27 @@ app.post('/api/auth/google', async (req, res) => {
     if (isSignup === false && !user) {
       console.log('Login attempt with Google: User does not exist');
       
+      // Log failed login attempt
+      await UserLog.create({
+        user: null,
+        username: email,
+        email: email,
+        userFullName: 'Unknown User',
+        action: 'login_attempt',
+        actionCategory: 'authentication',
+        ipAddress: rawDeviceInfo.ip,
+        userAgent: rawDeviceInfo.device,
+        deviceInfo: formattedDeviceInfo,
+        location: formattedLocation,
+        status: 'failed',
+        metadata: {
+          email: email,
+          loginMethod: 'google',
+          error: 'User not found',
+          isSignupAttempt: false
+        }
+      });
+      
       return res.status(404).json({
         status: 'fail',
         message: `${greeting}! No account found for ${truncatedEmail}. Please sign up first.`,
@@ -7544,6 +7674,27 @@ app.post('/api/auth/google', async (req, res) => {
     // Case 2: Signup attempt but user already exists
     if (isSignup === true && user) {
       console.log('Signup attempt with Google: User already exists');
+      
+      // Log failed signup attempt
+      await UserLog.create({
+        user: user._id,
+        username: user.email,
+        email: user.email,
+        userFullName: `${user.firstName} ${user.lastName}`,
+        action: 'signup_attempt',
+        actionCategory: 'authentication',
+        ipAddress: rawDeviceInfo.ip,
+        userAgent: rawDeviceInfo.device,
+        deviceInfo: formattedDeviceInfo,
+        location: formattedLocation,
+        status: 'failed',
+        metadata: {
+          email: email,
+          signupMethod: 'google',
+          error: 'User already exists',
+          isSignupAttempt: true
+        }
+      });
       
       // Get location details for the email
       const locationString = rawDeviceInfo.location || 'Unknown location';
@@ -7628,16 +7779,25 @@ app.post('/api/auth/google', async (req, res) => {
           googleId: sub,
           isVerified: true,
           referralCode,
-          status: 'active'
+          status: 'active',
+          accountType: 'individual',  // Default account type for Google signups
+          authProvider: 'google',     // ✅ Track authentication method
+          metadata: {
+            signupMethod: 'google_oauth',
+            signupDate: new Date(),
+            ipAddress: rawDeviceInfo.ip,
+            userAgent: rawDeviceInfo.device
+          }
         });
         isNewUser = true;
         console.log('New user created via Google SIGNUP:', originalEmail);
 
-        // Send welcome email to user
+        // Send welcome email to user (only for signup, not login)
         try {
           await sendAutomatedEmail(user, 'welcome', {
             firstName: given_name || 'Google User'
           });
+          console.log(`📧 Welcome email sent to ${user.email} (Google Signup)`);
         } catch (emailError) {
           console.error('Welcome email failed:', emailError);
         }
@@ -7705,7 +7865,11 @@ app.post('/api/auth/google', async (req, res) => {
                   </tr>
                   <tr style="border-top: 1px solid #E2E8F0;">
                     <td style="padding: 8px 0;"><strong>Auth Method:</strong></td>
-                    <td style="padding: 8px 0; text-align: right;"><span style="background: #4285F4; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Google</span></strong></td>
+                    <td style="padding: 8px 0; text-align: right;"><span style="background: #4285F4; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Google OAuth</span></strong></td>
+                  </tr>
+                  <tr style="border-top: 1px solid #E2E8F0;">
+                    <td style="padding: 8px 0;"><strong>Operation Type:</strong></td>
+                    <td style="padding: 8px 0; text-align: right;"><span style="background: #10B981; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">SIGNUP (New Account)</span></strong></td>
                   </tr>
                   <tr style="border-top: 1px solid #E2E8F0;">
                     <td style="padding: 8px 0;"><strong>Location:</strong></td>
@@ -7757,10 +7921,11 @@ app.post('/api/auth/google', async (req, res) => {
         });
       }
     } else if (!user.googleId) {
-      // Existing user, add Google auth
+      // Existing user, add Google auth (linking accounts)
       try {
         user.googleId = sub;
         user.isVerified = true;
+        user.authProvider = 'google';  // ✅ Update auth provider
         await user.save();
         console.log('Existing user linked with Google:', originalEmail);
       } catch (updateError) {
@@ -7823,22 +7988,27 @@ app.post('/api/auth/google', async (req, res) => {
           loginMethod: 'google',
           otpSent: true,
           isNewUser: isNewUser,
-          isGoogleLogin: true
+          isGoogleLogin: true,
+          operation: isNewUser ? 'signup' : 'login'
         }
       });
       
-      // SEND LOGIN ATTEMPT EMAIL TO USER
-      try {
-        await sendAutomatedEmail(user, 'login_success', {
-          name: user.firstName,
-          device: rawDeviceInfo.device,
-          location: rawDeviceInfo.location,
-          ip: rawDeviceInfo.ip,
-          timestamp: new Date().toISOString()
-        });
-        console.log(`📧 Google login attempt email sent to ${user.email}`);
-      } catch (emailError) {
-        console.error('Failed to send Google login attempt email:', emailError);
+      // =============================================
+      // SEND LOGIN ATTEMPT EMAIL TO USER (ONLY FOR LOGIN, NOT FOR SIGNUP)
+      // =============================================
+      if (!isNewUser) {
+        try {
+          await sendAutomatedEmail(user, 'login_success', {
+            name: user.firstName,
+            device: rawDeviceInfo.device,
+            location: rawDeviceInfo.location,
+            ip: rawDeviceInfo.ip,
+            timestamp: new Date().toISOString()
+          });
+          console.log(`📧 Google login attempt email sent to ${user.email}`);
+        } catch (emailError) {
+          console.error('Failed to send Google login attempt email:', emailError);
+        }
       }
       
       // =============================================
@@ -7903,6 +8073,10 @@ app.post('/api/auth/google', async (req, res) => {
                   <tr style="border-top: 1px solid #E2E8F0;">
                     <td style="padding: 8px 0;"><strong>Auth Method:</strong></td>
                     <td style="padding: 8px 0; text-align: right;"><span style="background: #4285F4; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Google OAuth</span></strong></td>
+                  </tr>
+                  <tr style="border-top: 1px solid #E2E8F0;">
+                    <td style="padding: 8px 0;"><strong>Operation Type:</strong></td>
+                    <td style="padding: 8px 0; text-align: right;"><span style="background: #F7A600; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">LOGIN (Existing User)</span></strong></td>
                   </tr>
                   <tr style="border-top: 1px solid #E2E8F0;">
                     <td style="padding: 8px 0;"><strong>Location:</strong></td>
@@ -7970,7 +8144,7 @@ app.post('/api/auth/google', async (req, res) => {
     // SUCCESS RESPONSE
     res.status(200).json({
       status: 'success',
-      message: 'OTP sent to your email. Please verify to complete Google sign-in.',
+      message: isNewUser ? 'Account created successfully! OTP sent to your email.' : 'OTP sent to your email. Please verify to complete Google sign-in.',
       tempToken,
       needsOtp: true,
       isNewUser: isNewUser,
@@ -7979,14 +8153,16 @@ app.post('/api/auth/google', async (req, res) => {
           id: user._id,
           firstName: user.firstName,
           lastName: user.lastName,
-          email: user.email
+          email: user.email,
+          accountType: user.accountType,
+          authProvider: user.authProvider
         }
       }
     });
 
     // Log activity
     try {
-      await logActivity('google_signin_otp_sent', 'user', user._id, user._id, 'User', req, {
+      await logActivity(isNewUser ? 'google_signup_otp_sent' : 'google_login_otp_sent', 'user', user._id, user._id, 'User', req, {
         isNewUser,
         provider: 'google',
         email: originalEmail,
@@ -8011,6 +8187,35 @@ app.post('/api/auth/google', async (req, res) => {
     });
   }
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -28147,23 +28352,6 @@ app.get('/api/users/pnl', protect, async (req, res) => {
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 // =============================================
 // GET /api/investments/active - FIXED VERSION
 // =============================================
@@ -28193,14 +28381,21 @@ app.get('/api/investments/active', protect, async (req, res) => {
     });
     
     // Get current BTC price for profit calculation
-    let currentBTCPrice = 43000; // fallback
+    let currentBTCPrice;
     try {
       const btcPrice = await getCryptoPrice('BTC');
       if (btcPrice && btcPrice > 0) {
         currentBTCPrice = btcPrice;
+      } else {
+        throw new Error('Invalid BTC price received');
       }
     } catch (priceError) {
-      console.warn('Could not fetch BTC price, using fallback:', priceError.message);
+      console.error('Failed to fetch BTC price:', priceError.message);
+      return res.status(503).json({
+        status: 'error',
+        message: 'Unable to fetch current BTC exchange rate. Please try again later.',
+        error: process.env.NODE_ENV === 'development' ? priceError.message : undefined
+      });
     }
     
     const now = new Date();
@@ -28279,6 +28474,21 @@ app.get('/api/investments/active', protect, async (req, res) => {
     });
   }
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
