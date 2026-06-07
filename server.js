@@ -13324,146 +13324,7 @@ app.get('/api/loans/limit', protect, async (req, res) => {
 
 
 
-app.get('/api/mining', protect, async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const cacheKey = `mining-stats:${userId}`;
-    
-    // Try to get cached data first (shorter cache time for real-time feel)
-    const cachedData = await redis.get(cacheKey);
-    if (cachedData) {
-      const parsedData = JSON.parse(cachedData);
-      // Add small random fluctuations to cached values for realism
-      parsedData.hashRate = fluctuateValue(parsedData.hashRate, 5); // ±5% fluctuation
-      parsedData.miningPower = fluctuateValue(parsedData.miningPower, 3); // ±3% fluctuation
-      parsedData.btcMined = fluctuateValue(parsedData.btcMined, 1); // ±1% fluctuation
-      return res.status(200).json({
-        status: 'success',
-        data: parsedData
-      });
-    }
 
-    // Get user's active investments
-    const activeInvestments = await Investment.find({
-      user: userId,
-      status: 'active'
-    }).populate('plan');
-
-    // Default response if no active investments
-    if (activeInvestments.length === 0) {
-      const defaultData = {
-        hashRate: "0 TH/s",
-        btcMined: "0 BTC",
-        miningPower: "0%",
-        totalReturn: "$0.00",
-        progress: 0,
-        lastUpdated: new Date().toISOString()
-      };
-      
-      await redis.set(cacheKey, JSON.stringify(defaultData), 'EX', 60); // Cache for 1 minute
-      return res.status(200).json({
-        status: 'success',
-        data: defaultData
-      });
-    }
-
-    // Calculate base values
-    let totalReturn = 0;
-    let totalInvestmentAmount = 0;
-    let maxProgress = 0;
-
-    for (const investment of activeInvestments) {
-      const investmentReturn = investment.expectedReturn - investment.amount;
-      totalReturn += investmentReturn;
-      totalInvestmentAmount += investment.amount;
-
-      // Calculate progress for this investment
-      const totalDuration = investment.endDate - investment.createdAt;
-      const elapsed = Date.now() - investment.createdAt;
-      const progress = Math.min(100, Math.max(0, (elapsed / totalDuration) * 100));
-      maxProgress = Math.max(maxProgress, progress);
-    }
-
-    // Get BTC price from CoinGecko
-    let btcPrice = 60000;
-    try {
-      const response = await axios.get('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd');
-      btcPrice = response.data.bitcoin.usd;
-    } catch (error) {
-      console.error('CoinGecko API error:', error);
-    }
-
-    // Base calculations
-    const baseHashRate = totalInvestmentAmount * 0.1;
-    const baseMiningPower = Math.min(100, (totalInvestmentAmount / 10000) * 100);
-    const baseBtcMined = totalReturn / btcPrice;
-
-    // Apply realistic fluctuations
-    const currentTime = Date.now();
-    const timeFactor = Math.sin(currentTime / 60000); // Fluctuates every minute
-    
-    // Hash rate fluctuates more dramatically
-    const hashRateFluctuation = 0.05 * timeFactor + (Math.random() * 0.1 - 0.05);
-    const hashRate = baseHashRate * (1 + hashRateFluctuation);
-    
-    // Mining power has smaller fluctuations
-    const miningPowerFluctuation = 0.02 * timeFactor + (Math.random() * 0.04 - 0.02);
-    const miningPower = baseMiningPower * (1 + miningPowerFluctuation);
-    
-    // BTC mined has very small incremental changes
-    const btcMined = baseBtcMined * (1 + (Math.random() * 0.01 - 0.005));
-
-    // Simulate network difficulty changes
-    const networkFactor = 1 + (Math.sin(currentTime / 300000) * 0.1); // Changes every 5 minutes
-    const adjustedHashRate = hashRate / networkFactor;
-    const adjustedMiningPower = miningPower / networkFactor;
-
-    const miningData = {
-      hashRate: `${adjustedHashRate.toFixed(2)} TH/s`,
-      btcMined: `${btcMined.toFixed(8)} BTC`,
-      miningPower: `${Math.min(100, adjustedMiningPower).toFixed(2)}%`,
-      totalReturn: `$${totalReturn.toFixed(2)}`,
-      progress: parseFloat(maxProgress.toFixed(2)),
-      lastUpdated: new Date().toISOString(),
-      networkDifficulty: networkFactor.toFixed(2),
-      workersOnline: Math.floor(3 + Math.random() * 3) // Random workers between 3-5
-    };
-    
-    // Cache for 1 minute (shorter cache for more real-time feel)
-    await redis.set(cacheKey, JSON.stringify(miningData), 'EX', 60);
-    
-    res.status(200).json({
-      status: 'success',
-      data: miningData
-    });
-
-  } catch (error) {
-    console.error('Mining endpoint error:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch mining data'
-    });
-  }
-});
-
-// Helper function to add fluctuations to cached values
-function fluctuateValue(valueStr, percent) {
-  const numericValue = parseFloat(valueStr);
-  const fluctuation = (Math.random() * percent * 2 - percent) / 100; // ±percent%
-  const newValue = numericValue * (1 + fluctuation);
-  
-  // Preserve units if they exist
-  if (valueStr.endsWith(' TH/s')) {
-    return `${newValue.toFixed(2)} TH/s`;
-  }
-  if (valueStr.endsWith(' BTC')) {
-    return `${newValue.toFixed(8)} BTC`;
-  }
-  if (valueStr.endsWith('%')) {
-    return `${Math.min(100, newValue).toFixed(2)}%`;
-  }
-  return valueStr; // Return original if no known unit
-}
 
 
 
@@ -14030,6 +13891,13 @@ app.get('/api/users/balance', protect, async (req, res) => {
 
 
 
+
+
+
+
+
+
+
 app.get('/api/investments/active', protect, async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -14066,6 +13934,18 @@ app.get('/api/investments/active', protect, async (req, res) => {
       status: 'active'
     });
     
+    // Get current BTC price for USD conversion
+    let currentBTCPrice = 0;
+    try {
+      currentBTCPrice = await getCryptoPrice('BTC');
+      if (!currentBTCPrice || currentBTCPrice <= 0) {
+        currentBTCPrice = 50000; // Fallback only if API fails
+      }
+    } catch (priceError) {
+      console.error('Error fetching BTC price:', priceError);
+      currentBTCPrice = 50000; // Fallback only if API fails
+    }
+    
     // Calculate additional fields for each investment
     const now = new Date();
     const enhancedInvestments = investments.map(investment => {
@@ -14079,28 +13959,55 @@ app.get('/api/investments/active', protect, async (req, res) => {
       // Calculate progress percentage
       const totalDurationMs = endDate - startDate;
       const elapsedMs = now - startDate;
-      const progressPercentage = totalDurationMs > 0 
+      let progressPercentage = totalDurationMs > 0 
         ? Math.min(100, (elapsedMs / totalDurationMs) * 100)
         : 0;
       
-// Get ROI percentage from the associated plan (this is the actual ROI percentage)
-const roiPercentage = investment.plan?.percentage || 0;
-
-// Calculate expected profit
-const expectedProfit = investment.amount * (roiPercentage / 100);
+      // Get ROI percentage from the associated plan
+      const roiPercentage = investment.plan?.percentage || 0;
+      
+      // Calculate expected profit
+      const expectedProfit = investment.amount * (roiPercentage / 100);
+      
+      // =============================================
+      // NEW: Calculate accumulated profit so far in BTC and USD
+      // Using the progress percentage to determine how much of the expected profit has been earned
+      // =============================================
+      const accumulatedProfitPercentage = progressPercentage;
+      const accumulatedProfitUSD = (expectedProfit * accumulatedProfitPercentage) / 100;
+      
+      // Get BTC amount from investment (amountBTC field from schema)
+      const amountBTC = investment.amountBTC || 0;
+      
+      // Calculate accumulated profit in BTC using the same proportion
+      // Since profit scales with the investment amount, we can calculate BTC profit similarly
+      const expectedProfitBTC = amountBTC * (roiPercentage / 100);
+      const accumulatedProfitBTC = (expectedProfitBTC * accumulatedProfitPercentage) / 100;
+      
+      // Alternative calculation using current BTC price for USD conversion
+      const accumulatedProfitBTCFromUSD = accumulatedProfitUSD / currentBTCPrice;
+      
+      // Use the BTC amount from the investment record if available, otherwise calculate from USD
+      const finalAccumulatedProfitBTC = accumulatedProfitBTC > 0 ? accumulatedProfitBTC : accumulatedProfitBTCFromUSD;
       
       return {
         id: investment._id,
         planName: investment.plan?.name || 'Unknown Plan',
         amount: investment.amount,
-        profitPercentage: roiPercentage, // This is what frontend expects as hourly ROI %
+        amountBTC: amountBTC,
+        profitPercentage: roiPercentage,
         durationHours: investment.plan?.duration || 0,
         startDate: investment.startDate,
         endDate: investment.endDate,
         status: investment.status,
         timeLeftHours,
-        progressPercentage,
-        expectedProfit,
+        progressPercentage: progressPercentage.toFixed(2),
+        expectedProfit: expectedProfit,
+        expectedProfitBTC: expectedProfitBTC,
+        // NEW FIELDS: Accumulated profit so far
+        accumulatedProfitUSD: accumulatedProfitUSD,
+        accumulatedProfitBTC: finalAccumulatedProfitBTC,
+        currentBTCPrice: currentBTCPrice,
         planDetails: {
           minAmount: investment.plan?.minAmount,
           maxAmount: investment.plan?.maxAmount,
@@ -14132,6 +14039,13 @@ const expectedProfit = investment.amount * (roiPercentage / 100);
     });
   }
 });
+
+
+
+
+
+
+
 
 
 
