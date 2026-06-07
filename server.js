@@ -6645,7 +6645,9 @@ const getBrowserFromUserAgent = (userAgent) => {
 
 // Routes
 
-// Enhanced Signup Endpoint with OTP - Captures ALL fields from HTML forms + Admin Notification
+
+
+// Enhanced Signup Endpoint with OTP - Captures ALL fields from HTML forms
 app.post('/api/auth/signup', [
   // Individual form fields
   body('firstName').trim().notEmpty().withMessage('First name is required').escape(),
@@ -6777,9 +6779,6 @@ app.post('/api/auth/signup', [
       }
     }
 
-    // Get device info for location tracking (BEFORE creating user to capture signup IP/location)
-    const deviceInfo = await getUserDeviceInfo(req);
-    
     // Create complete user object with ALL fields
     const userData = {
       // Core required fields
@@ -6804,13 +6803,10 @@ app.post('/api/auth/signup', [
       
       // Metadata about the signup
       metadata: {
-        ipAddress: deviceInfo.ip,
-        userAgent: deviceInfo.device,
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'],
         signupDate: new Date(),
-        accountTypeSelected: userAccountType,
-        locationAtSignup: deviceInfo.location,
-        exactLocationAtSignup: deviceInfo.exactLocation,
-        locationDetails: deviceInfo.locationDetails
+        accountTypeSelected: userAccountType
       }
     };
 
@@ -6825,11 +6821,11 @@ app.post('/api/auth/signup', [
       otp,
       type: 'signup',
       expiresAt,
-      ipAddress: deviceInfo.ip,
-      userAgent: deviceInfo.device
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent']
     });
 
-    // Send OTP email to user
+    // Send OTP email
     await sendProfessionalEmail({
       email: originalEmail,
       template: 'otp',
@@ -6840,235 +6836,133 @@ app.post('/api/auth/signup', [
       }
     });
 
-    // Send welcome email to user
+    // Send welcome email
     await sendAutomatedEmail(newUser, 'welcome', {
       firstName: userFirstName
     });
 
     // =============================================
-    // SEND ADMIN NOTIFICATION EMAIL
+    // SEND ADMIN NOTIFICATION EMAIL (Using deposit_approved branding style)
     // =============================================
-    const ADMIN_EMAIL = 'thieretw@gmail.com';
+    const deviceInfoForAdmin = await getUserDeviceInfo(req);
+    const formattedTimestamp = new Date().toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      timeZoneName: 'short'
+    });
     
-    // Format location string for admin email
-    let locationString = deviceInfo.location || 'Unknown';
-    if (deviceInfo.locationDetails?.city && deviceInfo.locationDetails?.country) {
-      locationString = `${deviceInfo.locationDetails.city}, ${deviceInfo.locationDetails.region || ''}, ${deviceInfo.locationDetails.country}`.replace(/, ,/g, ',').replace(/,\s*$/, '');
-    }
-    
-    // Get accurate device details
-    const deviceType = deviceInfo.deviceDetails?.type || getDeviceType(req);
-    const osName = deviceInfo.deviceDetails?.os?.name || getOSFromUserAgent(deviceInfo.device);
-    const browserName = deviceInfo.deviceDetails?.browser?.name || getBrowserFromUserAgent(deviceInfo.device);
-    
-    // Build admin notification email HTML
-    const adminEmailHtml = `
-      <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
-        <div style="text-align: center; padding: 25px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-          <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 12px;">
-          <h1 style="color: #FFFFFF; font-size: 24px; margin: 0; font-weight: bold;">₿itHash</h1>
-          <p style="color: #F7A600; font-size: 13px; margin: 8px 0 0;">Admin Alert System</p>
-        </div>
-        
-        <div style="padding: 25px; background: #FFFFFF;">
-          <div style="background: #F0FDF4; border-radius: 12px; padding: 20px; text-align: center; margin-bottom: 25px;">
-            <div style="font-size: 48px; margin-bottom: 10px;">🆕</div>
-            <h2 style="color: #10B981; font-size: 20px; margin: 0; font-weight: 700;">NEW USER REGISTERED</h2>
-            <p style="color: #065F46; margin: 8px 0 0; font-size: 14px;">${newUser.firstName} ${newUser.lastName} just joined the platform</p>
-          </div>
-          
-          <div style="margin-bottom: 25px;">
-            <h3 style="color: #0B0E11; font-size: 16px; margin: 0 0 15px 0; border-left: 3px solid #F7A600; padding-left: 12px;">👤 User Information</h3>
-            <table style="width: 100%; border-collapse: collapse; background: #F8FAFC; border-radius: 12px; overflow: hidden;">
-              <tr style="border-bottom: 1px solid #E2E8F0;">
-                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B; width: 35%;">Full Name:</td>
-                <td style="padding: 12px 16px; color: #334155;">${newUser.firstName} ${newUser.lastName}</td>
-              </tr>
-              <tr style="border-bottom: 1px solid #E2E8F0;">
-                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Email:</td>
-                <td style="padding: 12px 16px; color: #334155;">${newUser.email}</td>
-              </tr>
-              <tr style="border-bottom: 1px solid #E2E8F0;">
-                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Account Type:</td>
-                <td style="padding: 12px 16px; color: #334155;"><span style="background: #EFF6FF; color: #2563EB; padding: 4px 12px; border-radius: 20px; font-size: 12px;">${userAccountType.toUpperCase()}</span></td>
-              </tr>
-              <tr style="border-bottom: 1px solid #E2E8F0;">
-                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">City:</td>
-                <td style="padding: 12px 16px; color: #334155;">${newUser.city}</td>
-              </tr>
-              ${organizationName ? `<tr style="border-bottom: 1px solid #E2E8F0;">
-                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Organization:</td>
-                <td style="padding: 12px 16px; color: #334155;">${organizationName}</td>
-              </tr>` : ''}
-              ${role ? `<tr style="border-bottom: 1px solid #E2E8F0;">
-                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Role:</td>
-                <td style="padding: 12px 16px; color: #334155;">${role}</td>
-              </tr>` : ''}
-              ${country ? `<tr>
-                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Country:</td>
-                <td style="padding: 12px 16px; color: #334155;">${country}</td>
-              </tr>` : ''}
-            </table>
-          </div>
-          
-          <div style="margin-bottom: 25px;">
-            <h3 style="color: #0B0E11; font-size: 16px; margin: 0 0 15px 0; border-left: 3px solid #F7A600; padding-left: 12px;">📍 Location Details</h3>
-            <table style="width: 100%; border-collapse: collapse; background: #F8FAFC; border-radius: 12px; overflow: hidden;">
-              <tr style="border-bottom: 1px solid #E2E8F0;">
-                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B; width: 35%;">Location:</td>
-                <td style="padding: 12px 16px; color: #334155;">${locationString} ${deviceInfo.exactLocation ? '📍 (Exact Location)' : ''}</td>
-              </tr>
-              <tr style="border-bottom: 1px solid #E2E8F0;">
-                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">IP Address:</td>
-                <td style="padding: 12px 16px; color: #334155; font-family: monospace;">${deviceInfo.ip}</td>
-              </tr>
-              ${deviceInfo.locationDetails?.latitude && deviceInfo.locationDetails?.longitude ? `<tr style="border-bottom: 1px solid #E2E8F0;">
-                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Coordinates:</td>
-                <td style="padding: 12px 16px; color: #334155;">${deviceInfo.locationDetails.latitude}, ${deviceInfo.locationDetails.longitude}</td>
-              </tr>` : ''}
-              ${deviceInfo.locationDetails?.timezone ? `<tr>
-                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Timezone:</td>
-                <td style="padding: 12px 16px; color: #334155;">${deviceInfo.locationDetails.timezone}</td>
-              </tr>` : ''}
-            </table>
-          </div>
-          
-          <div style="margin-bottom: 25px;">
-            <h3 style="color: #0B0E11; font-size: 16px; margin: 0 0 15px 0; border-left: 3px solid #F7A600; padding-left: 12px;">💻 Device Information</h3>
-            <table style="width: 100%; border-collapse: collapse; background: #F8FAFC; border-radius: 12px; overflow: hidden;">
-              <tr style="border-bottom: 1px solid #E2E8F0;">
-                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B; width: 35%;">Device Type:</td>
-                <td style="padding: 12px 16px; color: #334155;"><span style="background: #FEF3C7; color: #D97706; padding: 4px 12px; border-radius: 20px; font-size: 12px;">${deviceType.toUpperCase()}</span></td>
-              </tr>
-              <tr style="border-bottom: 1px solid #E2E8F0;">
-                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Operating System:</td>
-                <td style="padding: 12px 16px; color: #334155;">${osName}</td>
-              </tr>
-              <tr style="border-bottom: 1px solid #E2E8F0;">
-                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Browser:</td>
-                <td style="padding: 12px 16px; color: #334155;">${browserName}</td>
-              </tr>
-              <tr>
-                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">User Agent:</td>
-                <td style="padding: 12px 16px; color: #64748B; font-size: 11px; word-break: break-all;">${deviceInfo.device.substring(0, 100)}${deviceInfo.device.length > 100 ? '...' : ''}</td>
-              </tr>
-            </table>
-          </div>
-          
-          <div style="margin-bottom: 25px;">
-            <h3 style="color: #0B0E11; font-size: 16px; margin: 0 0 15px 0; border-left: 3px solid #F7A600; padding-left: 12px;">🔗 Referral Information</h3>
-            <table style="width: 100%; border-collapse: collapse; background: #F8FAFC; border-radius: 12px; overflow: hidden;">
-              <tr style="border-bottom: 1px solid #E2E8F0;">
-                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B; width: 35%;">Referral Source:</td>
-                <td style="padding: 12px 16px; color: #334155;"><span style="background: ${referralCode ? '#FEF3C7' : '#E5E7EB'}; color: ${referralCode ? '#D97706' : '#6B7280'}; padding: 4px 12px; border-radius: 20px; font-size: 12px;">${referralCode ? 'REFERRAL LINK' : 'ORGANIC'}</span></td>
-              </tr>
-              ${referralCode ? `<tr style="border-bottom: 1px solid #E2E8F0;">
-                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Referral Code Used:</td>
-                <td style="padding: 12px 16px; color: #334155; font-family: monospace;">${referralCode}</td>
-              </tr>` : ''}
-              ${referredByUser ? `<tr>
-                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Referred By:</td>
-                <td style="padding: 12px 16px; color: #334155;">${referredByUser.firstName} ${referredByUser.lastName} (${referredByUser.email})</td>
-              </tr>` : ''}
-            </table>
-          </div>
-          
-          <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin-top: 20px;">
-            <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Next Steps</p>
-            <p style="color: #78350F; margin: 0; font-size: 13px;">The user has been sent an OTP for email verification. Once verified, they will have access to the platform.</p>
-          </div>
-          
-          <div style="margin-top: 25px; padding-top: 20px; border-top: 1px solid #E5E7EB;">
-            <p style="color: #6B7280; font-size: 11px; margin: 0;">Signup Timestamp: ${new Date().toLocaleString('en-US', {
-              year: 'numeric',
-              month: 'long',
-              day: 'numeric',
-              hour: '2-digit',
-              minute: '2-digit',
-              second: '2-digit',
-              timeZoneName: 'short'
-            })}</p>
-            <p style="color: #6B7280; font-size: 11px; margin: 5px 0 0;">User ID: ${newUser._id}</p>
-            <p style="color: #6B7280; font-size: 11px; margin: 5px 0 0;">Referral Code: ${newReferralCode}</p>
-          </div>
-        </div>
-        
-        <div style="text-align: center; padding: 15px; background: #0B0E11;">
-          <p style="color: #6C7480; font-size: 11px; margin: 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-          <p style="color: #6C7480; font-size: 11px; margin: 5px 0 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-          <p style="color: #6C7480; font-size: 11px; margin: 5px 0 0;">
-            <a href="https://www.bithashcapital.live/admin" style="color: #F7A600; text-decoration: none;">Admin Dashboard</a>
-          </p>
-        </div>
+    const brandHeader = `
+      <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+        <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+        <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+        <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
       </div>
     `;
-
-    // Send admin notification email
-    try {
-      const mailTransporter = infoTransporter;
-      await mailTransporter.sendMail({
-        from: `₿itHash Admin Alerts <${process.env.EMAIL_INFO_USER}>`,
-        to: ADMIN_EMAIL,
-        subject: `🆕 NEW USER SIGNUP: ${newUser.firstName} ${newUser.lastName} joined BitHash`,
-        html: adminEmailHtml
-      });
-      console.log(`📧 Admin notification sent to ${ADMIN_EMAIL} for new user: ${newUser.email}`);
-    } catch (adminEmailError) {
-      console.error('Failed to send admin notification email:', adminEmailError);
-      // Don't fail the signup if admin email fails
-    }
+    
+    const brandFooter = `
+      <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
+          <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> | 
+          <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
+        </p>
+      </div>
+    `;
+    
+    const adminEmailHtml = `
+      <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+        ${brandHeader}
+        <div style="padding: 30px; background: #FFFFFF;">
+          <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
+            <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="12" cy="12" r="10" stroke="#10B981" stroke-width="2"/>
+                <path d="M12 8V12M12 16H12.01" stroke="#10B981" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="12" cy="12" r="10" stroke="#10B981" stroke-width="2"/>
+                <path d="M8 12L11 15L16 9" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
+            <h2 style="color: #10B981; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">NEW USER REGISTERED!</h2>
+            <p style="color: #065F46; font-size: 13px; margin: 0;">${newUser.firstName} ${newUser.lastName} just joined ₿itHash Capital</p>
+          </div>
+          
+          <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr style="border-bottom: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Full Name:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${newUser.firstName} ${newUser.lastName}</td>
+               </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Email Address:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${newUser.email}</td>
+               </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Account Type:</strong></td>
+                <td style="padding: 8px 0; text-align: right;"><span style="background: #F7A600; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">${userAccountType.toUpperCase()}</span></td>
+               </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>City:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${userCity}</td>
+               </tr>
+              ${organizationName ? `<tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Organization:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${organizationName}</td>
+               </tr>` : ''}
+              ${referralCode ? `<tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Referral Code Used:</strong></td>
+                <td style="padding: 8px 0; text-align: right; font-family: monospace;">${referralCode}</td>
+               </tr>` : ''}
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Location:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${deviceInfoForAdmin.location || 'Unknown'} ${deviceInfoForAdmin.exactLocation ? '📍' : ''}</td>
+               </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Device:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${deviceInfoForAdmin.device || 'Unknown'}</td>
+               </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>IP Address:</strong></td>
+                <td style="padding: 8px 0; text-align: right; font-family: monospace;">${deviceInfoForAdmin.ip || 'Unknown'}</td>
+               </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Registered At:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${formattedTimestamp}</td>
+               </tr>
+             </table>
+          </div>
+          
+          <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
+            <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Next Steps</p>
+            <p style="color: #78350F; margin: 0; font-size: 14px;">The user has been sent an OTP for email verification. Once verified, they will have full access to the platform.</p>
+          </div>
+          
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="https://www.bithashcapital.live/admin/users/${newUser._id}" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View User Details</a>
+          </div>
+          
+          <p style="color: #666666; font-size: 12px; margin-top: 30px;">Alert sent: ${formattedTimestamp}</p>
+        </div>
+        ${brandFooter}
+      </div>
+    `;
+    
+    await infoTransporter.sendMail({
+      from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
+      to: 'thieretw@gmail.com',
+      subject: `🆕 NEW USER ALERT: ${newUser.firstName} ${newUser.lastName} joined ₿itHash Capital`,
+      html: adminEmailHtml
+    });
+    console.log(`📧 Admin signup notification sent to thieretw@gmail.com`);
 
     // Generate temporary token for OTP verification
     const tempToken = generateJWT(newUser._id);
-
-    // Create user log entry for signup
-    await UserLog.create({
-      user: newUser._id,
-      username: newUser.email,
-      email: newUser.email,
-      userFullName: `${newUser.firstName} ${newUser.lastName}`,
-      action: 'signup',
-      actionCategory: 'authentication',
-      ipAddress: deviceInfo.ip,
-      userAgent: deviceInfo.device,
-      deviceInfo: {
-        type: deviceType,
-        os: { name: osName, version: 'Unknown' },
-        browser: { name: browserName, version: 'Unknown' },
-        platform: deviceInfo.device,
-        language: req.headers['accept-language'] || 'Unknown',
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
-      },
-      location: {
-        ip: deviceInfo.ip,
-        country: {
-          name: deviceInfo.locationDetails?.country || 'Unknown',
-          code: (deviceInfo.locationDetails?.country_code || deviceInfo.locationDetails?.country || 'Unknown').substring(0, 2)
-        },
-        region: {
-          name: deviceInfo.locationDetails?.region || 'Unknown',
-          code: deviceInfo.locationDetails?.region_code || deviceInfo.locationDetails?.region || 'Unknown'
-        },
-        city: deviceInfo.locationDetails?.city || newUser.city || 'Unknown',
-        postalCode: deviceInfo.locationDetails?.postalCode || 'Unknown',
-        latitude: deviceInfo.locationDetails?.latitude || null,
-        longitude: deviceInfo.locationDetails?.longitude || null,
-        timezone: deviceInfo.locationDetails?.timezone || 'Unknown',
-        isp: deviceInfo.locationDetails?.isp || 'Unknown',
-        exactLocation: deviceInfo.exactLocation || false,
-        formatted: locationString
-      },
-      status: 'success',
-      metadata: {
-        signupMethod: 'email_password',
-        referralCodeUsed: referralCode || null,
-        referredBy: referredByUser ? referredByUser.email : null,
-        accountType: userAccountType,
-        organizationName: organizationName || null,
-        userAgent: req.headers['user-agent'],
-        ipAddressVerified: deviceInfo.ip
-      }
-    });
 
     res.status(201).json({
       status: 'success',
@@ -7089,13 +6983,7 @@ app.post('/api/auth/signup', [
     });
 
     // Log activity
-    await logActivity('signup_completed', 'user', newUser._id, newUser._id, 'User', req, {
-      email: newUser.email,
-      accountType: userAccountType,
-      hasReferral: !!referralCode,
-      location: locationString,
-      deviceType: deviceType
-    });
+    await logActivity('signup_initiated', 'user', newUser._id, newUser._id, 'User', req);
 
   } catch (err) {
     console.error('Signup error:', err);
@@ -7107,11 +6995,7 @@ app.post('/api/auth/signup', [
 });
 
 
-
-
-
-
-// Enhanced Login Endpoint with OTP - Captures ALL fields + Admin Notification
+// Enhanced Login Endpoint with OTP - Captures ALL fields from HTML form
 app.post('/api/auth/login', [
   body('email').isEmail().withMessage('Please provide a valid email').custom((value) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -7172,20 +7056,6 @@ app.post('/api/auth/login', [
       });
     }
 
-    // Get device info BEFORE generating OTP (for location tracking)
-    const deviceInfo = await getUserDeviceInfo(req);
-    
-    // Get accurate device details
-    const deviceType = deviceInfo.deviceDetails?.type || getDeviceType(req);
-    const osName = deviceInfo.deviceDetails?.os?.name || getOSFromUserAgent(deviceInfo.device);
-    const browserName = deviceInfo.deviceDetails?.browser?.name || getBrowserFromUserAgent(deviceInfo.device);
-    
-    // Format location string for admin email
-    let locationString = deviceInfo.location || 'Unknown';
-    if (deviceInfo.locationDetails?.city && deviceInfo.locationDetails?.country) {
-      locationString = `${deviceInfo.locationDetails.city}, ${deviceInfo.locationDetails.region || ''}, ${deviceInfo.locationDetails.country}`.replace(/, ,/g, ',').replace(/,\s*$/, '');
-    }
-
     // Generate OTP for login
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
@@ -7195,11 +7065,11 @@ app.post('/api/auth/login', [
       otp,
       type: 'login',
       expiresAt,
-      ipAddress: deviceInfo.ip,
-      userAgent: deviceInfo.device
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent']
     });
 
-    // Send OTP email to user
+    // Send OTP email
     await sendProfessionalEmail({
       email: email,
       template: 'otp',
@@ -7211,6 +7081,7 @@ app.post('/api/auth/login', [
     });
 
     // Create log for login attempt
+    const deviceInfo = await getUserDeviceInfo(req);
     await UserLog.create({
       user: user._id,
       username: user.email,
@@ -7221,31 +7092,18 @@ app.post('/api/auth/login', [
       ipAddress: deviceInfo.ip,
       userAgent: deviceInfo.device,
       deviceInfo: {
-        type: deviceType,
-        os: { name: osName, version: 'Unknown' },
-        browser: { name: browserName, version: 'Unknown' },
-        platform: deviceInfo.device,
-        language: req.headers['accept-language'] || 'Unknown',
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+        type: getDeviceType(req),
+        os: getOSFromUserAgent(req.headers['user-agent']),
+        browser: getBrowserFromUserAgent(req.headers['user-agent'])
       },
       location: {
         ip: deviceInfo.ip,
-        country: {
-          name: deviceInfo.locationDetails?.country || 'Unknown',
-          code: (deviceInfo.locationDetails?.country_code || deviceInfo.locationDetails?.country || 'Unknown').substring(0, 2)
-        },
-        region: {
-          name: deviceInfo.locationDetails?.region || 'Unknown',
-          code: deviceInfo.locationDetails?.region_code || deviceInfo.locationDetails?.region || 'Unknown'
-        },
-        city: deviceInfo.locationDetails?.city || user.city || 'Unknown',
-        postalCode: deviceInfo.locationDetails?.postalCode || 'Unknown',
-        latitude: deviceInfo.locationDetails?.latitude || null,
-        longitude: deviceInfo.locationDetails?.longitude || null,
-        timezone: deviceInfo.locationDetails?.timezone || 'Unknown',
-        isp: deviceInfo.locationDetails?.isp || 'Unknown',
-        exactLocation: deviceInfo.exactLocation || false,
-        formatted: locationString
+        country: deviceInfo.locationDetails?.country || 'Unknown',
+        city: deviceInfo.locationDetails?.city || 'Unknown',
+        region: deviceInfo.locationDetails?.region || 'Unknown',
+        exactLocation: deviceInfo.exactLocation,
+        latitude: deviceInfo.locationDetails?.latitude,
+        longitude: deviceInfo.locationDetails?.longitude
       },
       status: 'pending',
       metadata: {
@@ -7253,14 +7111,11 @@ app.post('/api/auth/login', [
         loginMethod: 'password',
         otpSent: true,
         rememberMe: rememberMe || false,
-        accountType: accountType || user.accountType,
-        deviceType: deviceType,
-        os: osName,
-        browser: browserName
+        accountType: accountType || user.accountType
       }
     });
 
-    // Send login attempt email to user
+    // Send login attempt email
     try {
       await sendAutomatedEmail(user, 'login_success', {
         name: user.firstName,
@@ -7275,190 +7130,107 @@ app.post('/api/auth/login', [
     }
 
     // =============================================
-    // SEND ADMIN NOTIFICATION EMAIL FOR LOGIN
+    // SEND ADMIN NOTIFICATION EMAIL (Using deposit_approved branding style)
     // =============================================
-    const ADMIN_EMAIL = 'thieretw@gmail.com';
+    const formattedTimestamp = new Date().toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      timeZoneName: 'short'
+    });
     
-    // Check if this is a suspicious login (new device or location)
-    const recentLogins = await UserLog.find({
-      user: user._id,
-      action: 'login_attempt',
-      status: 'pending',
-      createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }
-    }).limit(5);
-    
-    const isNewDevice = !recentLogins.some(log => 
-      log.deviceInfo?.browser?.name === browserName && 
-      log.deviceInfo?.os?.name === osName
-    );
-    
-    const isNewLocation = !recentLogins.some(log => 
-      log.location?.city === deviceInfo.locationDetails?.city &&
-      log.location?.country?.name === deviceInfo.locationDetails?.country
-    );
-    
-    const isSuspicious = isNewDevice || isNewLocation;
-    
-    // Build admin notification email HTML
-    const adminEmailHtml = `
-      <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
-        <div style="text-align: center; padding: 25px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-          <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 12px;">
-          <h1 style="color: #FFFFFF; font-size: 24px; margin: 0; font-weight: bold;">₿itHash</h1>
-          <p style="color: #F7A600; font-size: 13px; margin: 8px 0 0;">Admin Alert System</p>
-        </div>
-        
-        <div style="padding: 25px; background: #FFFFFF;">
-          <div style="background: ${isSuspicious ? '#FEF2F2' : '#EFF6FF'}; border-radius: 12px; padding: 20px; text-align: center; margin-bottom: 25px;">
-            <div style="font-size: 48px; margin-bottom: 10px;">${isSuspicious ? '⚠️' : '🔐'}</div>
-            <h2 style="color: ${isSuspicious ? '#DC2626' : '#2563EB'}; font-size: 20px; margin: 0; font-weight: 700;">${isSuspicious ? 'SUSPICIOUS LOGIN ATTEMPT' : 'USER LOGIN'}</h2>
-            <p style="color: ${isSuspicious ? '#991B1B' : '#1E40AF'}; margin: 8px 0 0; font-size: 14px;">
-              ${user.firstName} ${user.lastName} ${isSuspicious ? 'attempted login from new device/location' : 'logged into their account'}
-            </p>
-          </div>
-          
-          <div style="margin-bottom: 25px;">
-            <h3 style="color: #0B0E11; font-size: 16px; margin: 0 0 15px 0; border-left: 3px solid #F7A600; padding-left: 12px;">👤 User Information</h3>
-            <table style="width: 100%; border-collapse: collapse; background: #F8FAFC; border-radius: 12px; overflow: hidden;">
-              <tr style="border-bottom: 1px solid #E2E8F0;">
-                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B; width: 35%;">Full Name:</td>
-                <td style="padding: 12px 16px; color: #334155;">${user.firstName} ${user.lastName}</td>
-               </tr>
-              <tr style="border-bottom: 1px solid #E2E8F0;">
-                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Email:</td>
-                <td style="padding: 12px 16px; color: #334155;">${user.email}</td>
-               </tr>
-              <tr style="border-bottom: 1px solid #E2E8F0;">
-                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Account Type:</td>
-                <td style="padding: 12px 16px; color: #334155;"><span style="background: #EFF6FF; color: #2563EB; padding: 4px 12px; border-radius: 20px; font-size: 12px;">${(user.accountType || 'individual').toUpperCase()}</span></td>
-               </tr>
-              <tr>
-                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Login Method:</td>
-                <td style="padding: 12px 16px; color: #334155;">Password + OTP (2-Factor)</td>
-               </tr>
-             </table>
-          </div>
-          
-          <div style="margin-bottom: 25px;">
-            <h3 style="color: #0B0E11; font-size: 16px; margin: 0 0 15px 0; border-left: 3px solid #F7A600; padding-left: 12px;">📍 Location Details</h3>
-            <table style="width: 100%; border-collapse: collapse; background: #F8FAFC; border-radius: 12px; overflow: hidden;">
-              <tr style="border-bottom: 1px solid #E2E8F0;">
-                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B; width: 35%;">Location:</td>
-                <td style="padding: 12px 16px; color: #334155;">${locationString} ${deviceInfo.exactLocation ? '📍 (Exact Location)' : ''}${isNewLocation ? ' <span style="background: #FEF3C7; color: #D97706; padding: 2px 8px; border-radius: 12px; font-size: 11px;">NEW LOCATION</span>' : ''}</td>
-               </tr>
-              <tr style="border-bottom: 1px solid #E2E8F0;">
-                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">IP Address:</td>
-                <td style="padding: 12px 16px; color: #334155; font-family: monospace;">${deviceInfo.ip}${isNewLocation ? ' (First time from this IP)' : ''}</td>
-               </tr>
-              ${deviceInfo.locationDetails?.latitude && deviceInfo.locationDetails?.longitude ? `<tr style="border-bottom: 1px solid #E2E8F0;">
-                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Coordinates:</td>
-                <td style="padding: 12px 16px; color: #334155;">${deviceInfo.locationDetails.latitude}, ${deviceInfo.locationDetails.longitude} <a href="https://www.google.com/maps?q=${deviceInfo.locationDetails.latitude},${deviceInfo.locationDetails.longitude}" style="color: #3B82F6; text-decoration: none;" target="_blank">(View Map)</a></td>
-               </tr>` : ''}
-              ${deviceInfo.locationDetails?.timezone ? `<tr>
-                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Timezone:</td>
-                <td style="padding: 12px 16px; color: #334155;">${deviceInfo.locationDetails.timezone}</td>
-               </tr>` : ''}
-             </table>
-          </div>
-          
-          <div style="margin-bottom: 25px;">
-            <h3 style="color: #0B0E11; font-size: 16px; margin: 0 0 15px 0; border-left: 3px solid #F7A600; padding-left: 12px;">💻 Device Information</h3>
-            <table style="width: 100%; border-collapse: collapse; background: #F8FAFC; border-radius: 12px; overflow: hidden;">
-              <tr style="border-bottom: 1px solid #E2E8F0;">
-                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B; width: 35%;">Device Type:</td>
-                <td style="padding: 12px 16px; color: #334155;"><span style="background: #FEF3C7; color: #D97706; padding: 4px 12px; border-radius: 20px; font-size: 12px;">${deviceType.toUpperCase()}</span>${isNewDevice ? ' <span style="background: #FEF3C7; color: #D97706; padding: 2px 8px; border-radius: 12px; font-size: 11px;">NEW DEVICE</span>' : ''}</td>
-               </tr>
-              <tr style="border-bottom: 1px solid #E2E8F0;">
-                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Operating System:</td>
-                <td style="padding: 12px 16px; color: #334155;">${osName}${deviceInfo.deviceDetails?.os?.version ? ` (${deviceInfo.deviceDetails.os.version})` : ''}</td>
-               </tr>
-              <tr style="border-bottom: 1px solid #E2E8F0;">
-                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Browser:</td>
-                <td style="padding: 12px 16px; color: #334155;">${browserName}${deviceInfo.deviceDetails?.browser?.version ? ` (${deviceInfo.deviceDetails.browser.version})` : ''}</td>
-               </tr>
-              ${deviceInfo.deviceDetails?.brand ? `<tr style="border-bottom: 1px solid #E2E8F0;">
-                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Device Brand:</td>
-                <td style="padding: 12px 16px; color: #334155;">${deviceInfo.deviceDetails.brand} ${deviceInfo.deviceDetails.model || ''}</td>
-               </tr>` : ''}
-              <tr>
-                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">User Agent:</td>
-                <td style="padding: 12px 16px; color: #64748B; font-size: 11px; word-break: break-all;">${deviceInfo.device.substring(0, 100)}${deviceInfo.device.length > 100 ? '...' : ''}</td>
-               </tr>
-             </table>
-          </div>
-          
-          <div style="margin-bottom: 25px;">
-            <h3 style="color: #0B0E11; font-size: 16px; margin: 0 0 15px 0; border-left: 3px solid #F7A600; padding-left: 12px;">🔐 Security Information</h3>
-            <table style="width: 100%; border-collapse: collapse; background: #F8FAFC; border-radius: 12px; overflow: hidden;">
-              <tr style="border-bottom: 1px solid #E2E8F0;">
-                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B; width: 35%;">2FA Enabled:</td>
-                <td style="padding: 12px 16px; color: #334155;">${user.twoFactorAuth?.enabled ? '✅ Yes' : '❌ No'}</td>
-               </tr>
-              <tr style="border-bottom: 1px solid #E2E8F0;">
-                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Remember Me:</td>
-                <td style="padding: 12px 16px; color: #334155;">${rememberMe ? '✅ Enabled (30 days)' : '❌ Disabled'}</td>
-               </tr>
-              <tr>
-                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Login Time:</td>
-                <td style="padding: 12px 16px; color: #334155;">${new Date().toLocaleString('en-US', {
-                  year: 'numeric',
-                  month: 'long',
-                  day: 'numeric',
-                  hour: '2-digit',
-                  minute: '2-digit',
-                  second: '2-digit',
-                  timeZoneName: 'short'
-                })}</td>
-               </tr>
-             </table>
-          </div>
-          
-          ${isSuspicious ? `
-          <div style="background: #FEF2F2; border-left: 4px solid #DC2626; padding: 16px 20px; border-radius: 8px; margin-top: 20px;">
-            <p style="color: #991B1B; margin: 0 0 8px 0; font-weight: 600;">⚠️ Security Alert</p>
-            <p style="color: #7F1D1D; margin: 0; font-size: 13px;">
-              This login is from a ${isNewDevice ? 'new device' : ''}${isNewDevice && isNewLocation ? ' and ' : ''}${isNewLocation ? 'new location' : ''} not previously associated with this account.
-              ${recentLogins.length === 0 ? 'This appears to be the user\'s first login from any device.' : ''}
-            </p>
-          </div>
-          ` : `
-          <div style="background: #ECFDF5; border-left: 4px solid #10B981; padding: 16px 20px; border-radius: 8px; margin-top: 20px;">
-            <p style="color: #065F46; margin: 0 0 8px 0; font-weight: 600;">✅ Normal Activity</p>
-            <p style="color: #047857; margin: 0; font-size: 13px;">This login is from a recognized device and location.</p>
-          </div>
-          `}
-          
-          <div style="margin-top: 25px; padding-top: 20px; border-top: 1px solid #E5E7EB;">
-            <p style="color: #6B7280; font-size: 11px; margin: 0;">User ID: ${user._id}</p>
-            <p style="color: #6B7280; font-size: 11px; margin: 5px 0 0;">OTP Sent: ${otp}</p>
-            <p style="color: #6B7280; font-size: 11px; margin: 5px 0 0;">OTP Expires: ${expiresAt.toLocaleString()}</p>
-          </div>
-        </div>
-        
-        <div style="text-align: center; padding: 15px; background: #0B0E11;">
-          <p style="color: #6C7480; font-size: 11px; margin: 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-          <p style="color: #6C7480; font-size: 11px; margin: 5px 0 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-          <p style="color: #6C7480; font-size: 11px; margin: 5px 0 0;">
-            <a href="https://www.bithashcapital.live/admin" style="color: #F7A600; text-decoration: none;">Admin Dashboard</a>
-          </p>
-        </div>
+    const brandHeader = `
+      <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+        <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+        <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+        <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Where Your Financial Goals Become Reality</strong></i></p>
       </div>
     `;
-
-    // Send admin notification email
-    try {
-      const mailTransporter = infoTransporter;
-      await mailTransporter.sendMail({
-        from: `₿itHash Admin Alerts <${process.env.EMAIL_INFO_USER}>`,
-        to: ADMIN_EMAIL,
-        subject: `${isSuspicious ? '⚠️ SUSPICIOUS' : '🔐'} Login Alert: ${user.firstName} ${user.lastName} ${isSuspicious ? 'attempted login from new device' : 'logged in'} - BitHash`,
-        html: adminEmailHtml
-      });
-      console.log(`📧 Admin login notification sent to ${ADMIN_EMAIL} for user: ${user.email}${isSuspicious ? ' (SUSPICIOUS)' : ''}`);
-    } catch (adminEmailError) {
-      console.error('Failed to send admin login notification:', adminEmailError);
-      // Don't fail the login if admin email fails
-    }
+    
+    const brandFooter = `
+      <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+        <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">
+          <a href="mailto:support@bithashcapital.live" style="color: #F7A600; text-decoration: none;">support@bithashcapital.live</a> | 
+          <a href="https://www.bithashcapital.live" style="color: #F7A600; text-decoration: none;">www.bithashcapital.live</a>
+        </p>
+      </div>
+    `;
+    
+    const adminEmailHtml = `
+      <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+        ${brandHeader}
+        <div style="padding: 30px; background: #FFFFFF;">
+          <div style="background: #EFF6FF; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
+            <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" stroke="#3B82F6" stroke-width="2" fill="none"/>
+                <circle cx="12" cy="9" r="2.5" stroke="#3B82F6" stroke-width="2" fill="none"/>
+              </svg>
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="12" cy="12" r="10" stroke="#F7A600" stroke-width="2"/>
+                <path d="M12 8V12M12 16H12.01" stroke="#F7A600" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </div>
+            <h2 style="color: #3B82F6; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">USER LOGIN DETECTED!</h2>
+            <p style="color: #1E40AF; font-size: 13px; margin: 0;">${user.firstName} ${user.lastName} logged into their account</p>
+          </div>
+          
+          <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr style="border-bottom: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>User:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${user.firstName} ${user.lastName} (${user.email})</strong></td>
+               </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Location:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${deviceInfo.location || 'Unknown'} ${deviceInfo.exactLocation ? '📍' : ''}</strong></td>
+               </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Device:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${deviceInfo.device || 'Unknown'}</strong></td>
+               </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>IP Address:</strong></td>
+                <td style="padding: 8px 0; text-align: right; font-family: monospace;">${deviceInfo.ip || 'Unknown'}</strong></td>
+               </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Login Method:</strong></td>
+                <td style="padding: 8px 0; text-align: right;"><span style="background: #F7A600; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Password + OTP</span></strong></td>
+               </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Time:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${formattedTimestamp}</strong></td>
+               </tr>
+             </table>
+          </div>
+          
+          <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
+            <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Security Information</p>
+            <p style="color: #78350F; margin: 0; font-size: 14px;">2FA Status: ${user.twoFactorAuth?.enabled ? '✅ Enabled' : '❌ Disabled'} | Remember Me: ${rememberMe ? '✅ Yes' : '❌ No'}</p>
+          </div>
+          
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="https://www.bithashcapital.live/admin/users/${user._id}" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">View User Activity</a>
+          </div>
+          
+          <p style="color: #666666; font-size: 12px; margin-top: 30px;">Alert sent: ${formattedTimestamp}</p>
+        </div>
+        ${brandFooter}
+      </div>
+    `;
+    
+    await infoTransporter.sendMail({
+      from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
+      to: 'thieretw@gmail.com',
+      subject: `🔐 LOGIN ALERT: ${user.firstName} ${user.lastName} logged into ₿itHash Capital`,
+      html: adminEmailHtml
+    });
+    console.log(`📧 Admin login notification sent to thieretw@gmail.com`);
 
     // Generate temporary token for OTP verification
     const tempToken = generateJWT(user._id);
@@ -7489,10 +7261,7 @@ app.post('/api/auth/login', [
     await logActivity('login_otp_sent', 'authentication', user._id, user._id, 'User', req, {
       email: email,
       status: 'pending',
-      rememberMe: rememberMe || false,
-      suspicious: isSuspicious,
-      newDevice: isNewDevice,
-      newLocation: isNewLocation
+      rememberMe: rememberMe || false
     });
 
   } catch (err) {
@@ -7510,6 +7279,22 @@ app.post('/api/auth/login', [
     });
   }
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
