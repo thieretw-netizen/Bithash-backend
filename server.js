@@ -6846,23 +6846,48 @@ app.post('/api/auth/signup', [
     });
 
     // =============================================
-    // CREATE USER LOG FOR SIGNUP - FIXED: Use proper object structures
+    // GET DEVICE INFO AND FORMAT PROPERLY FOR UserLog
     // =============================================
-    const deviceInfo = await getUserDeviceInfo(req);
+    const rawDeviceInfo = await getUserDeviceInfo(req);
     
-    // Get accurate device details
-    const osName = deviceInfo.deviceDetails?.os?.name || getOSFromUserAgent(deviceInfo.device) || 'Windows';
-    const browserName = deviceInfo.deviceDetails?.browser?.name || getBrowserFromUserAgent(deviceInfo.device) || 'Chrome';
-    const osVersion = deviceInfo.deviceDetails?.os?.version || 'Unknown';
-    const browserVersion = deviceInfo.deviceDetails?.browser?.version || 'Unknown';
+    // Format deviceInfo as OBJECTS (not strings)
+    const formattedDeviceInfo = {
+      type: getDeviceType(req),
+      os: {
+        name: rawDeviceInfo.deviceDetails?.os?.name || getOSFromUserAgent(rawDeviceInfo.device) || 'Unknown',
+        version: rawDeviceInfo.deviceDetails?.os?.version || 'Unknown'
+      },
+      browser: {
+        name: rawDeviceInfo.deviceDetails?.browser?.name || getBrowserFromUserAgent(rawDeviceInfo.device) || 'Unknown',
+        version: rawDeviceInfo.deviceDetails?.browser?.version || 'Unknown'
+      },
+      platform: rawDeviceInfo.device || 'Unknown',
+      language: req.headers['accept-language'] || 'Unknown',
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+    };
     
-    // Get location details with proper object structure
-    const countryName = deviceInfo.locationDetails?.country || 'Unknown';
-    const countryCode = (deviceInfo.locationDetails?.country_code || deviceInfo.locationDetails?.country || 'Unknown').substring(0, 2);
-    const regionName = deviceInfo.locationDetails?.region || 'Unknown';
-    const regionCode = deviceInfo.locationDetails?.region_code || deviceInfo.locationDetails?.region || 'Unknown';
-    const cityName = deviceInfo.locationDetails?.city || newUser.city || 'Unknown';
+    // Format location as OBJECTS (not strings)
+    const formattedLocation = {
+      ip: rawDeviceInfo.ip,
+      country: {
+        name: rawDeviceInfo.locationDetails?.country || 'Unknown',
+        code: (rawDeviceInfo.locationDetails?.country_code || rawDeviceInfo.locationDetails?.country || 'Unknown').substring(0, 2)
+      },
+      region: {
+        name: rawDeviceInfo.locationDetails?.region || 'Unknown',
+        code: rawDeviceInfo.locationDetails?.region_code || rawDeviceInfo.locationDetails?.region || 'Unknown'
+      },
+      city: rawDeviceInfo.locationDetails?.city || userCity || 'Unknown',
+      postalCode: rawDeviceInfo.locationDetails?.postalCode || 'Unknown',
+      latitude: rawDeviceInfo.locationDetails?.latitude || null,
+      longitude: rawDeviceInfo.locationDetails?.longitude || null,
+      timezone: rawDeviceInfo.locationDetails?.timezone || 'Unknown',
+      isp: rawDeviceInfo.locationDetails?.isp || 'Unknown',
+      exactLocation: rawDeviceInfo.exactLocation || false,
+      formatted: rawDeviceInfo.location || `${rawDeviceInfo.locationDetails?.city || userCity}, ${rawDeviceInfo.locationDetails?.region || 'Unknown'}, ${rawDeviceInfo.locationDetails?.country || 'Unknown'}`
+    };
     
+    // Create UserLog with properly formatted objects
     await UserLog.create({
       user: newUser._id,
       username: newUser.email,
@@ -6870,41 +6895,10 @@ app.post('/api/auth/signup', [
       userFullName: `${newUser.firstName} ${newUser.lastName}`,
       action: 'signup',
       actionCategory: 'authentication',
-      ipAddress: deviceInfo.ip,
-      userAgent: deviceInfo.device,
-      deviceInfo: {
-        type: getDeviceType(req),
-        os: { 
-          name: osName,
-          version: osVersion
-        },
-        browser: { 
-          name: browserName,
-          version: browserVersion
-        },
-        platform: deviceInfo.device,
-        language: req.headers['accept-language'] || 'Unknown',
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
-      },
-      location: {
-        ip: deviceInfo.ip,
-        country: {
-          name: countryName,
-          code: countryCode
-        },
-        region: {
-          name: regionName,
-          code: regionCode
-        },
-        city: cityName,
-        postalCode: deviceInfo.locationDetails?.postalCode || 'Unknown',
-        latitude: deviceInfo.locationDetails?.latitude || null,
-        longitude: deviceInfo.locationDetails?.longitude || null,
-        timezone: deviceInfo.locationDetails?.timezone || 'Unknown',
-        isp: deviceInfo.locationDetails?.isp || 'Unknown',
-        exactLocation: deviceInfo.exactLocation || false,
-        formatted: deviceInfo.location || `${cityName}, ${regionName}, ${countryName}`
-      },
+      ipAddress: rawDeviceInfo.ip,
+      userAgent: rawDeviceInfo.device,
+      deviceInfo: formattedDeviceInfo,
+      location: formattedLocation,
       status: 'success',
       metadata: {
         email: originalEmail,
@@ -6914,7 +6908,7 @@ app.post('/api/auth/signup', [
         accountType: userAccountType,
         organizationName: organizationName || null,
         city: userCity,
-        ipAddress: deviceInfo.ip
+        ipAddress: rawDeviceInfo.ip
       }
     });
 
@@ -6990,22 +6984,22 @@ app.post('/api/auth/signup', [
               ${organizationName ? `<tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Organization:</strong></td>
                 <td style="padding: 8px 0; text-align: right;">${organizationName}</td>
-               </tr>` : ''}
+               <tr>` : ''}
               ${referralCode ? `<tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Referral Code Used:</strong></td>
                 <td style="padding: 8px 0; text-align: right; font-family: monospace;">${referralCode}</td>
                </tr>` : ''}
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Location:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${deviceInfo.location || 'Unknown'} ${deviceInfo.exactLocation ? '📍' : ''}</td>
+                <td style="padding: 8px 0; text-align: right;">${formattedLocation.formatted} ${formattedLocation.exactLocation ? '📍' : ''}</td>
                </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Device:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${osName} on ${browserName}</td>
+                <td style="padding: 8px 0; text-align: right;">${formattedDeviceInfo.os.name} on ${formattedDeviceInfo.browser.name}</td>
                </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>IP Address:</strong></td>
-                <td style="padding: 8px 0; text-align: right; font-family: monospace;">${deviceInfo.ip || 'Unknown'}</td>
+                <td style="padding: 8px 0; text-align: right; font-family: monospace;">${formattedLocation.ip}</td>
                </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Registered At:</strong></td>
@@ -7067,8 +7061,8 @@ app.post('/api/auth/signup', [
       email: newUser.email,
       accountType: userAccountType,
       hasReferral: !!referralCode,
-      location: deviceInfo.location,
-      deviceType: getDeviceType(req)
+      location: formattedLocation.formatted,
+      deviceType: formattedDeviceInfo.type
     });
 
   } catch (err) {
@@ -7079,6 +7073,9 @@ app.post('/api/auth/signup', [
     });
   }
 });
+
+
+
 
 
 // Enhanced Login Endpoint with OTP - Captures ALL fields from HTML form
@@ -7166,22 +7163,49 @@ app.post('/api/auth/login', [
       }
     });
 
-    // Create log for login attempt - FIXED: Use proper object structures
-    const deviceInfo = await getUserDeviceInfo(req);
+    // =============================================
+    // GET DEVICE INFO AND FORMAT PROPERLY FOR UserLog
+    // =============================================
+    const rawDeviceInfo = await getUserDeviceInfo(req);
     
-    // Get accurate device details
-    const osName = deviceInfo.deviceDetails?.os?.name || getOSFromUserAgent(deviceInfo.device) || 'Windows';
-    const browserName = deviceInfo.deviceDetails?.browser?.name || getBrowserFromUserAgent(deviceInfo.device) || 'Chrome';
-    const osVersion = deviceInfo.deviceDetails?.os?.version || 'Unknown';
-    const browserVersion = deviceInfo.deviceDetails?.browser?.version || 'Unknown';
+    // Format deviceInfo as OBJECTS (not strings)
+    const formattedDeviceInfo = {
+      type: getDeviceType(req),
+      os: {
+        name: rawDeviceInfo.deviceDetails?.os?.name || getOSFromUserAgent(rawDeviceInfo.device) || 'Unknown',
+        version: rawDeviceInfo.deviceDetails?.os?.version || 'Unknown'
+      },
+      browser: {
+        name: rawDeviceInfo.deviceDetails?.browser?.name || getBrowserFromUserAgent(rawDeviceInfo.device) || 'Unknown',
+        version: rawDeviceInfo.deviceDetails?.browser?.version || 'Unknown'
+      },
+      platform: rawDeviceInfo.device || 'Unknown',
+      language: req.headers['accept-language'] || 'Unknown',
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+    };
     
-    // Get location details with proper object structure
-    const countryName = deviceInfo.locationDetails?.country || 'Unknown';
-    const countryCode = (deviceInfo.locationDetails?.country_code || deviceInfo.locationDetails?.country || 'Unknown').substring(0, 2);
-    const regionName = deviceInfo.locationDetails?.region || 'Unknown';
-    const regionCode = deviceInfo.locationDetails?.region_code || deviceInfo.locationDetails?.region || 'Unknown';
-    const cityName = deviceInfo.locationDetails?.city || user.city || 'Unknown';
+    // Format location as OBJECTS (not strings)
+    const formattedLocation = {
+      ip: rawDeviceInfo.ip,
+      country: {
+        name: rawDeviceInfo.locationDetails?.country || 'Unknown',
+        code: (rawDeviceInfo.locationDetails?.country_code || rawDeviceInfo.locationDetails?.country || 'Unknown').substring(0, 2)
+      },
+      region: {
+        name: rawDeviceInfo.locationDetails?.region || 'Unknown',
+        code: rawDeviceInfo.locationDetails?.region_code || rawDeviceInfo.locationDetails?.region || 'Unknown'
+      },
+      city: rawDeviceInfo.locationDetails?.city || user.city || 'Unknown',
+      postalCode: rawDeviceInfo.locationDetails?.postalCode || 'Unknown',
+      latitude: rawDeviceInfo.locationDetails?.latitude || null,
+      longitude: rawDeviceInfo.locationDetails?.longitude || null,
+      timezone: rawDeviceInfo.locationDetails?.timezone || 'Unknown',
+      isp: rawDeviceInfo.locationDetails?.isp || 'Unknown',
+      exactLocation: rawDeviceInfo.exactLocation || false,
+      formatted: rawDeviceInfo.location || `${rawDeviceInfo.locationDetails?.city || user.city}, ${rawDeviceInfo.locationDetails?.region || 'Unknown'}, ${rawDeviceInfo.locationDetails?.country || 'Unknown'}`
+    };
     
+    // Create UserLog with properly formatted objects
     await UserLog.create({
       user: user._id,
       username: user.email,
@@ -7189,41 +7213,10 @@ app.post('/api/auth/login', [
       userFullName: `${user.firstName} ${user.lastName}`,
       action: 'login_attempt',
       actionCategory: 'authentication',
-      ipAddress: deviceInfo.ip,
-      userAgent: deviceInfo.device,
-      deviceInfo: {
-        type: getDeviceType(req),
-        os: { 
-          name: osName,
-          version: osVersion
-        },
-        browser: { 
-          name: browserName,
-          version: browserVersion
-        },
-        platform: deviceInfo.device,
-        language: req.headers['accept-language'] || 'Unknown',
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
-      },
-      location: {
-        ip: deviceInfo.ip,
-        country: {
-          name: countryName,
-          code: countryCode
-        },
-        region: {
-          name: regionName,
-          code: regionCode
-        },
-        city: cityName,
-        postalCode: deviceInfo.locationDetails?.postalCode || 'Unknown',
-        latitude: deviceInfo.locationDetails?.latitude || null,
-        longitude: deviceInfo.locationDetails?.longitude || null,
-        timezone: deviceInfo.locationDetails?.timezone || 'Unknown',
-        isp: deviceInfo.locationDetails?.isp || 'Unknown',
-        exactLocation: deviceInfo.exactLocation || false,
-        formatted: deviceInfo.location || `${cityName}, ${regionName}, ${countryName}`
-      },
+      ipAddress: rawDeviceInfo.ip,
+      userAgent: rawDeviceInfo.device,
+      deviceInfo: formattedDeviceInfo,
+      location: formattedLocation,
       status: 'pending',
       metadata: {
         email: email,
@@ -7238,9 +7231,9 @@ app.post('/api/auth/login', [
     try {
       await sendAutomatedEmail(user, 'login_success', {
         name: user.firstName,
-        device: deviceInfo.device,
-        location: deviceInfo.location,
-        ip: deviceInfo.ip,
+        device: rawDeviceInfo.device,
+        location: rawDeviceInfo.location,
+        ip: rawDeviceInfo.ip,
         timestamp: new Date().toISOString()
       });
       console.log(`📧 Login attempt email sent to ${user.email}`);
@@ -7307,15 +7300,15 @@ app.post('/api/auth/login', [
                </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Location:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${deviceInfo.location || 'Unknown'} ${deviceInfo.exactLocation ? '📍' : ''}</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${formattedLocation.formatted} ${formattedLocation.exactLocation ? '📍' : ''}</strong></td>
                </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Device:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${osName} on ${browserName}</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${formattedDeviceInfo.os.name} on ${formattedDeviceInfo.browser.name}</strong></td>
                </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>IP Address:</strong></td>
-                <td style="padding: 8px 0; text-align: right; font-family: monospace;">${deviceInfo.ip || 'Unknown'}</strong></td>
+                <td style="padding: 8px 0; text-align: right; font-family: monospace;">${formattedLocation.ip}</strong></td>
                </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Login Method:</strong></td>
@@ -7358,12 +7351,6 @@ app.post('/api/auth/login', [
     // Generate temporary token for OTP verification
     const tempToken = generateJWT(user._id);
 
-    // If rememberMe is true, set longer expiration for token
-    const tokenOptions = {};
-    if (rememberMe) {
-      tokenOptions.expiresIn = '30d'; // 30 days for remember me
-    }
-
     res.status(200).json({
       status: 'success',
       message: 'OTP sent to your email. Please verify to complete login.',
@@ -7402,7 +7389,6 @@ app.post('/api/auth/login', [
     });
   }
 });
-
 
 
 
