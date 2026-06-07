@@ -28176,7 +28176,7 @@ app.get('/api/investments/active', protect, async (req, res) => {
       status: 'active'
     });
     
-    // Calculate additional fields for each investment with REAL-TIME PROFIT
+    // Calculate additional fields for each investment
     const now = new Date();
     const enhancedInvestments = investments.map(investment => {
       const startDate = new Date(investment.startDate);
@@ -28197,48 +28197,28 @@ app.get('/api/investments/active', protect, async (req, res) => {
       const roiPercentage = investment.plan?.percentage || 0;
       
       // Calculate expected profit
-      const expectedProfitUSD = investment.amount * (roiPercentage / 100);
+      const expectedProfit = investment.amount * (roiPercentage / 100);
       
-      // Calculate current accumulated profit based on elapsed time (real-time)
-      const currentProfitUSD = expectedProfitUSD * (progressPercentage / 100);
+      // Calculate accumulated profit based on elapsed time
+      const accumulatedProfit = expectedProfit * (progressPercentage / 100);
       
-      // Get current BTC price for BTC value conversion
-      let currentBTCPrice = 0;
-      try {
-        currentBTCPrice = await getCryptoPrice('BTC');
-      } catch (err) {
-        console.warn(`Could not fetch BTC price for investment ${investment._id}`);
-        currentBTCPrice = investment.btcPriceAtInvestment || 43000;
-      }
-      
-      // Calculate BTC values
-      const expectedProfitBTC = expectedProfitUSD / currentBTCPrice;
-      const currentProfitBTC = currentProfitUSD / currentBTCPrice;
-      const amountBTC = investment.amountBTC || (investment.amount / currentBTCPrice);
-      
-      // Calculate if investment has matured
-      const isMatured = timeLeftMs <= 0;
+      // Calculate current value (principal + accumulated profit)
+      const currentValue = investment.amount + accumulatedProfit;
       
       return {
         id: investment._id,
         planName: investment.plan?.name || 'Unknown Plan',
         amount: investment.amount,
-        amountBTC: amountBTC,
-        profitPercentage: roiPercentage,
+        profitPercentage: roiPercentage, // This is what frontend expects as hourly ROI %
+        expectedProfit: expectedProfit,
+        accumulatedProfit: accumulatedProfit,
+        currentValue: currentValue,
         durationHours: investment.plan?.duration || 0,
         startDate: investment.startDate,
         endDate: investment.endDate,
         status: investment.status,
         timeLeftHours,
-        timeLeftMs,
         progressPercentage,
-        expectedProfit: expectedProfitUSD,
-        expectedProfitBTC: expectedProfitBTC,
-        currentProfit: currentProfitUSD,
-        currentProfitBTC: currentProfitBTC,
-        isMatured: isMatured,
-        btcPriceAtInvestment: investment.btcPriceAtInvestment || currentBTCPrice,
-        currentBTCPrice: currentBTCPrice,
         planDetails: {
           minAmount: investment.plan?.minAmount,
           maxAmount: investment.plan?.maxAmount,
@@ -28257,8 +28237,8 @@ app.get('/api/investments/active', protect, async (req, res) => {
       }
     };
     
-    // Cache for 30 seconds (shorter for real-time profit updates)
-    await redis.set(cacheKey, JSON.stringify(response), 'EX', 30);
+    // Cache for 1 minute (adjust based on your requirements)
+    await redis.set(cacheKey, JSON.stringify(response), 'EX', 60);
     
     res.json(response);
   } catch (err) {
@@ -28821,88 +28801,6 @@ async function calculateRealWalletBalances(user) {
 }
 
 // =============================================
-// REAL-TIME INVESTMENT PROFIT BROADCASTER - Every 3 seconds
-// =============================================
-let investmentProfitBroadcastInterval = null;
-
-const startRealTimeInvestmentProfitBroadcaster = () => {
-  if (investmentProfitBroadcastInterval) clearInterval(investmentProfitBroadcastInterval);
-  
-  investmentProfitBroadcastInterval = setInterval(async () => {
-    try {
-      // Get all users with active socket connections
-      const rooms = io.sockets.adapter.rooms;
-      const userRooms = [];
-      
-      for (const [roomName, room] of rooms.entries()) {
-        if (roomName.startsWith('user_')) {
-          const userId = roomName.replace('user_', '');
-          userRooms.push(userId);
-        }
-      }
-      
-      if (userRooms.length === 0) return;
-      
-      // Fetch updated investment profits for each connected user
-      for (const userId of userRooms) {
-        try {
-          const activeInvestments = await Investment.find({
-            user: userId,
-            status: 'active'
-          }).populate('plan', 'percentage');
-          
-          if (activeInvestments.length === 0) continue;
-          
-          const profitUpdates = [];
-          const now = new Date();
-          
-          for (const investment of activeInvestments) {
-            const startDate = new Date(investment.startDate);
-            const endDate = new Date(investment.endDate);
-            const totalDurationMs = endDate - startDate;
-            const elapsedMs = Math.min(totalDurationMs, Math.max(0, now - startDate));
-            const progressPercentage = totalDurationMs > 0 ? (elapsedMs / totalDurationMs) * 100 : 0;
-            
-            const roiPercentage = investment.plan?.percentage || 0;
-            const expectedProfitUSD = investment.amount * (roiPercentage / 100);
-            const currentProfitUSD = expectedProfitUSD * (progressPercentage / 100);
-            
-            // Get current BTC price for BTC conversion
-            let currentBTCPrice = await getCryptoPrice('BTC');
-            if (!currentBTCPrice || currentBTCPrice <= 0) {
-              currentBTCPrice = investment.btcPriceAtInvestment || 43000;
-            }
-            
-            const currentProfitBTC = currentProfitUSD / currentBTCPrice;
-            
-            profitUpdates.push({
-              investmentId: investment._id,
-              progressPercentage: progressPercentage,
-              currentProfitUSD: currentProfitUSD,
-              currentProfitBTC: currentProfitBTC,
-              timestamp: Date.now()
-            });
-          }
-          
-          if (profitUpdates.length > 0) {
-            io.to(`user_${userId}`).emit('investment_profit_update', profitUpdates);
-          }
-        } catch (userErr) {
-          console.error(`Error broadcasting investment profits for user ${userId}:`, userErr.message);
-        }
-      }
-      
-      if (userRooms.length > 0) {
-        console.log(`📊 Broadcasted real-time investment profits to ${userRooms.length} connected users`);
-      }
-      
-    } catch (err) {
-      console.error('Error in investment profit broadcaster:', err);
-    }
-  }, 3000); // Update every 3 seconds for smooth real-time profit accumulation
-};
-
-// =============================================
 // SOCKET.IO CONNECTION HANDLER - REAL DATA ONLY WITH PER-WALLET BREAKDOWN
 // =============================================
 io.on('connection', async (socket) => {
@@ -28955,57 +28853,6 @@ io.on('connection', async (socket) => {
           const assetData = await buildRealAssetData(user, userId);
           if (assetData.length > 0 || priceErrors.length === 0) {
             socket.emit('asset_balances_update', assetData);
-          }
-          
-          // Send initial investment data with REAL profit calculations
-          const activeInvestments = await Investment.find({
-            user: userId,
-            status: 'active'
-          }).populate('plan', 'percentage duration name');
-          
-          if (activeInvestments.length > 0) {
-            const now = new Date();
-            const investmentData = [];
-            
-            for (const investment of activeInvestments) {
-              const startDate = new Date(investment.startDate);
-              const endDate = new Date(investment.endDate);
-              const totalDurationMs = endDate - startDate;
-              const elapsedMs = Math.min(totalDurationMs, Math.max(0, now - startDate));
-              const progressPercentage = totalDurationMs > 0 ? (elapsedMs / totalDurationMs) * 100 : 0;
-              
-              const roiPercentage = investment.plan?.percentage || 0;
-              const expectedProfitUSD = investment.amount * (roiPercentage / 100);
-              const currentProfitUSD = expectedProfitUSD * (progressPercentage / 100);
-              
-              let currentBTCPrice = await getCryptoPrice('BTC');
-              if (!currentBTCPrice || currentBTCPrice <= 0) {
-                currentBTCPrice = investment.btcPriceAtInvestment || 43000;
-              }
-              
-              const expectedProfitBTC = expectedProfitUSD / currentBTCPrice;
-              const currentProfitBTC = currentProfitUSD / currentBTCPrice;
-              
-              investmentData.push({
-                id: investment._id,
-                planName: investment.plan?.name || 'Unknown Plan',
-                amount: investment.amount,
-                amountBTC: investment.amountBTC || (investment.amount / currentBTCPrice),
-                profitPercentage: roiPercentage,
-                durationHours: investment.plan?.duration || 0,
-                startDate: investment.startDate,
-                endDate: investment.endDate,
-                progressPercentage: progressPercentage,
-                expectedProfitUSD: expectedProfitUSD,
-                expectedProfitBTC: expectedProfitBTC,
-                currentProfitUSD: currentProfitUSD,
-                currentProfitBTC: currentProfitBTC,
-                timeLeftMs: Math.max(0, endDate - now),
-                btcPriceAtInvestment: investment.btcPriceAtInvestment || currentBTCPrice
-              });
-            }
-            
-            socket.emit('active_investments_update', investmentData);
           }
         }
         
@@ -29129,7 +28976,7 @@ async function getCryptoPriceWithChange(asset) {
 }
 
 // =============================================
-// REAL-TIME BALANCE BROADCASTER - Every 10 seconds (NO BLINKING)
+// REAL-TIME BALANCE BROADCASTER - Every 10 seconds
 // =============================================
 let balanceBroadcastInterval = null;
 
@@ -29151,7 +28998,7 @@ const startRealTimeBalanceBroadcaster = () => {
       
       if (userRooms.length === 0) return;
       
-      // Fetch and broadcast updated balances for each connected user (ONLY if changed)
+      // Fetch and broadcast updated balances for each connected user
       for (const userId of userRooms) {
         try {
           const user = await User.findById(userId).select('balances');
@@ -29160,40 +29007,21 @@ const startRealTimeBalanceBroadcaster = () => {
           const { mainUSD, activeUSD, maturedUSD, priceErrors, mainBreakdown, maturedBreakdown } = await calculateRealWalletBalances(user);
           
           if (priceErrors.length === 0) {
-            // Only emit if values actually changed to prevent unnecessary re-renders
-            const previousMain = userBalancesCache.get(userId)?.main;
-            const previousActive = userBalancesCache.get(userId)?.active;
-            const previousMatured = userBalancesCache.get(userId)?.matured;
+            io.to(`user_${userId}`).emit('balance_update', {
+              main: mainUSD,
+              active: activeUSD,
+              matured: maturedUSD,
+              breakdown: {
+                main: mainBreakdown,
+                matured: maturedBreakdown
+              },
+              timestamp: Date.now()
+            });
             
-            const mainChanged = previousMain !== undefined && Math.abs(previousMain - mainUSD) > 0.01;
-            const activeChanged = previousActive !== undefined && Math.abs(previousActive - activeUSD) > 0.01;
-            const maturedChanged = previousMatured !== undefined && Math.abs(previousMatured - maturedUSD) > 0.01;
-            
-            if (mainChanged || activeChanged || maturedChanged || !previousMain) {
-              io.to(`user_${userId}`).emit('balance_update', {
-                main: mainUSD,
-                active: activeUSD,
-                matured: maturedUSD,
-                breakdown: {
-                  main: mainBreakdown,
-                  matured: maturedBreakdown
-                },
-                timestamp: Date.now()
-              });
-              
-              // Update cache
-              userBalancesCache.set(userId, { main: mainUSD, active: activeUSD, matured: maturedUSD });
-            }
-            
-            // Also send asset balances update (only if changed)
+            // Also send asset balances update
             const assetData = await buildRealAssetData(user, userId);
             if (assetData.length > 0) {
-              const assetDataKey = JSON.stringify(assetData.map(a => ({ asset: a.symbol, balance: a.balance, price: a.currentPrice })));
-              const previousAssetData = assetDataCache.get(userId);
-              if (previousAssetData !== assetDataKey) {
-                io.to(`user_${userId}`).emit('asset_balances_update', assetData);
-                assetDataCache.set(userId, assetDataKey);
-              }
+              io.to(`user_${userId}`).emit('asset_balances_update', assetData);
             }
           }
         } catch (userErr) {
@@ -29201,9 +29029,7 @@ const startRealTimeBalanceBroadcaster = () => {
         }
       }
       
-      if (userRooms.length > 0) {
-        console.log(`📡 Broadcasted real-time balances to ${userRooms.length} connected users (only changed values)`);
-      }
+      console.log(`📡 Broadcasted real-time balances to ${userRooms.length} connected users`);
       
     } catch (err) {
       console.error('Error in balance broadcaster:', err);
@@ -29211,15 +29037,10 @@ const startRealTimeBalanceBroadcaster = () => {
   }, 10000);
 };
 
-// Cache for balance values to prevent unnecessary updates (NO BLINKING)
-const userBalancesCache = new Map();
-const assetDataCache = new Map();
-
 // =============================================
-// PRICE UPDATE BROADCASTER - Real-time price changes (NO BLINKING)
+// PRICE UPDATE BROADCASTER - Real-time price changes
 // =============================================
 let priceBroadcastInterval = null;
-let lastPriceCache = new Map();
 
 const startRealTimePriceBroadcaster = () => {
   if (priceBroadcastInterval) clearInterval(priceBroadcastInterval);
@@ -29228,30 +29049,23 @@ const startRealTimePriceBroadcaster = () => {
     try {
       const assets = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'ADA', 'SHIB', 'AVAX', 'DOT', 'TRX', 'LINK', 'MATIC', 'LTC'];
       const priceUpdates = {};
-      let hasChanges = false;
       
       const pricePromises = assets.map(async (asset) => {
         const price = await getCryptoPrice(asset);
         if (price && price > 0) {
-          const previousPrice = lastPriceCache.get(asset.toLowerCase())?.price || price;
-          // Only include if price changed significantly (>0.01%)
-          if (Math.abs(price - previousPrice) / previousPrice > 0.0001) {
-            priceUpdates[asset.toLowerCase()] = {
-              price: price,
-              change24h: 0,
-              timestamp: Date.now()
-            };
-            hasChanges = true;
-          }
-          lastPriceCache.set(asset.toLowerCase(), { price, timestamp: Date.now() });
+          priceUpdates[asset.toLowerCase()] = {
+            price: price,
+            change24h: 0,
+            timestamp: Date.now()
+          };
         }
       });
       
       await Promise.all(pricePromises);
       
-      if (hasChanges && Object.keys(priceUpdates).length > 0) {
+      if (Object.keys(priceUpdates).length > 0) {
         io.emit('price_update', priceUpdates);
-        console.log(`📊 Broadcasted real-time price updates for ${Object.keys(priceUpdates).length} assets (only changed)`);
+        console.log(`📊 Broadcasted real-time price updates for ${Object.keys(priceUpdates).length} assets`);
         
         // Store current prices globally
         for (const [asset, data] of Object.entries(priceUpdates)) {
@@ -29369,16 +29183,6 @@ const processMaturedInvestments = async () => {
           },
           timestamp: Date.now()
         });
-        
-        // Emit investment matured event
-        io.to(`user_${user._id}`).emit('investment_matured', {
-          investmentId: investment._id,
-          planName: investment.plan.name,
-          amount: investment.amount,
-          totalReturn: totalReturn,
-          profit: totalReturn - investment.amount,
-          maturedAt: now
-        });
 
         console.log(`✅ Completed investment ${investment._id} for ${user.email}: $${investment.amount} → $${totalReturn.toFixed(2)}`);
         
@@ -29402,14 +29206,11 @@ processMaturedInvestments();
 // Start investor growth job
 startInvestorGrowthJob();
 
-// Start real-time balance broadcaster (NO BLINKING - only updates when values change)
+// Start real-time balance broadcaster
 startRealTimeBalanceBroadcaster();
 
-// Start real-time price broadcaster (NO BLINKING - only updates when prices change significantly)
+// Start real-time price broadcaster
 startRealTimePriceBroadcaster();
-
-// Start real-time investment profit broadcaster (UPDATES EVERY 3 SECONDS for smooth profit accumulation)
-startRealTimeInvestmentProfitBroadcaster();
 
 startPnLCronJob(io);  // ✅ ADD THIS LINE
 
@@ -29420,7 +29221,6 @@ const gracefulShutdown = () => {
   console.log('Received shutdown signal. Cleaning up...');
   if (priceBroadcastInterval) clearInterval(priceBroadcastInterval);
   if (balanceBroadcastInterval) clearInterval(balanceBroadcastInterval);
-  if (investmentProfitBroadcastInterval) clearInterval(investmentProfitBroadcastInterval);
   stopInvestorGrowthJob();
   process.exit(0);
 };
@@ -29436,9 +29236,8 @@ httpServer.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`💰 Using REAL crypto prices from CoinGecko (NO fallbacks)`);
   console.log(`🔌 WebSocket endpoint: /ws/market`);
-  console.log(`📡 Real-time balance broadcaster: EVERY 10 SECONDS (NO BLINKING)`);
-  console.log(`📊 Real-time price broadcaster: EVERY 5 SECONDS (only when changed)`);
-  console.log(`💰 Real-time investment profit broadcaster: EVERY 3 SECONDS (smooth accumulation)`);
+  console.log(`📡 Real-time balance broadcaster: EVERY 10 SECONDS`);
+  console.log(`📊 Real-time price broadcaster: EVERY 5 SECONDS`);
   console.log(`📈 Investor growth job: ${INITIAL_INVESTOR_COUNT.toLocaleString()} base, +1-49 every 3-120s, max ${DAILY_GROWTH_LIMIT}/day`);
   console.log(`${'='.repeat(60)}\n`);
 });
