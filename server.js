@@ -6656,7 +6656,6 @@ const getBrowserFromUserAgent = (userAgent) => {
 
 
 
-
 // Enhanced Signup Endpoint with OTP - Captures ALL fields from HTML forms
 app.post('/api/auth/signup', [
   // Individual form fields
@@ -6795,7 +6794,7 @@ app.post('/api/auth/signup', [
       }
     }
 
-    // Create complete user object with ALL fields including account type
+    // Create complete user object with ALL fields including account type and auth provider
     const userData = {
       // Core required fields
       firstName: userFirstName,
@@ -6830,7 +6829,7 @@ app.post('/api/auth/signup', [
 
     const newUser = await User.create(userData);
     
-    console.log(`✅ New user created: ${newUser.email} (Account Type: ${newUser.accountType})`);
+    console.log(`✅ New user created: ${newUser.email} (Account Type: ${newUser.accountType}, Auth Provider: email)`);
 
     // Generate OTP with exact email
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -6845,7 +6844,7 @@ app.post('/api/auth/signup', [
       userAgent: req.headers['user-agent']
     });
 
-    // Send OTP email
+    // ✅ ONLY SEND OTP EMAIL - NO DUPLICATE WELCOME EMAIL (will be sent after verification)
     await sendProfessionalEmail({
       email: originalEmail,
       template: 'otp',
@@ -6856,10 +6855,8 @@ app.post('/api/auth/signup', [
       }
     });
 
-    // Send welcome email
-    await sendAutomatedEmail(newUser, 'welcome', {
-      firstName: userFirstName
-    });
+    // ❌ REMOVED duplicate welcome email - will be sent after OTP verification
+    // await sendAutomatedEmail(newUser, 'welcome', { firstName: userFirstName });
 
     // =============================================
     // GET DEVICE INFO AND FORMAT PROPERLY FOR UserLog
@@ -6922,7 +6919,7 @@ app.post('/api/auth/signup', [
         referralCodeUsed: referralCode || null,
         referredBy: referredByUser ? referredByUser.email : null,
         accountType: userAccountType,
-        organizationName: userOrganizationName,
+        organizationName: organizationName || null,
         city: userCity,
         ipAddress: rawDeviceInfo.ip
       }
@@ -6994,16 +6991,16 @@ app.post('/api/auth/signup', [
                 <td style="padding: 8px 0; text-align: right;"><span style="background: ${userAccountType === 'business' ? '#8B5CF6' : '#F7A600'}; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">${userAccountType.toUpperCase()}</span></td>
                </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Auth Method:</strong></td>
+                <td style="padding: 8px 0;"><strong>Auth Provider:</strong></td>
                 <td style="padding: 8px 0; text-align: right;"><span style="background: #10B981; color: white; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Email/Password</span></td>
                </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>City:</strong></td>
                 <td style="padding: 8px 0; text-align: right;">${userCity}</td>
-              </tr>
-              ${userOrganizationName ? `<tr style="border-top: 1px solid #E2E8F0;">
+               </tr>
+              ${organizationName ? `<tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Organization:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${userOrganizationName}</td>
+                <td style="padding: 8px 0; text-align: right;">${organizationName}</td>
                </tr>` : ''}
               ${referralCode ? `<tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Referral Code Used:</strong></td>
@@ -7097,6 +7094,7 @@ app.post('/api/auth/signup', [
 
 
 
+
 // Enhanced Login Endpoint with OTP - Captures ALL fields from HTML form
 app.post('/api/auth/login', [
   body('email').isEmail().withMessage('Please provide a valid email').custom((value) => {
@@ -7120,7 +7118,6 @@ app.post('/api/auth/login', [
 
   try {
     const { email, password, rememberMe, accountType } = req.body;
-    const loginStartTime = Date.now();
 
     // Use exact email for lookup - no normalization
     const user = await User.findOne({ email }).select('+password +twoFactorAuth.secret');
@@ -7171,9 +7168,9 @@ app.post('/api/auth/login', [
       });
       
       // =============================================
-      // SEND FAILED LOGIN ATTEMPT EMAIL (only if within 6 minutes of first attempt)
+      // SEND FAILED LOGIN ATTEMPT EMAIL (only on first attempt within 6 minutes)
       // =============================================
-      if (recentFailedAttempts === 0 && user && user.email) {
+      if (recentFailedAttempts === 0 && user && user.email && user.authProvider !== 'google') {
         // This is the first failed attempt in 6 minutes - send notification
         const rawDeviceInfo = await getUserDeviceInfo(req);
         try {
@@ -7233,7 +7230,7 @@ app.post('/api/auth/login', [
       userAgent: req.headers['user-agent']
     });
 
-    // Send OTP email
+    // ✅ ONLY SEND OTP EMAIL - NO duplicate login success email (will be sent after OTP verification)
     await sendProfessionalEmail({
       email: email,
       template: 'otp',
@@ -7309,21 +7306,8 @@ app.post('/api/auth/login', [
       }
     });
 
-    // =============================================
-    // SEND SUCCESSFUL LOGIN ATTEMPT EMAIL
-    // =============================================
-    try {
-      await sendAutomatedEmail(user, 'login_success', {
-        name: user.firstName,
-        device: rawDeviceInfo.device,
-        location: rawDeviceInfo.location,
-        ip: rawDeviceInfo.ip,
-        timestamp: new Date().toISOString()
-      });
-      console.log(`📧 Successful login attempt email sent to ${user.email}`);
-    } catch (emailError) {
-      console.error('Failed to send login success email:', emailError);
-    }
+    // ❌ REMOVED duplicate login success email - will be sent after OTP verification
+    // await sendAutomatedEmail(user, 'login_success', { ... });
 
     // =============================================
     // SEND ADMIN NOTIFICATION EMAIL USING SUPPORT TRANSPORTER
@@ -7373,7 +7357,7 @@ app.post('/api/auth/login', [
               </svg>
             </div>
             <h2 style="color: #3B82F6; font-size: 20px; margin: 0 0 4px 0; font-weight: 700;">USER LOGIN DETECTED!</h2>
-            <p style="color: #1E40AF; font-size: 13px; margin: 0;">${user.firstName} ${user.lastName} logged into their account</p>
+            <p style="color: #1E40AF; font-size: 13px; margin: 0;">${user.firstName} ${user.lastName} initiated login to their account</p>
           </div>
           
           <div style="background: #F5F5F5; padding: 20px; border-radius: 12px; margin: 20px 0;">
@@ -7385,6 +7369,10 @@ app.post('/api/auth/login', [
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Account Type:</strong></td>
                 <td style="padding: 8px 0; text-align: right;"><span style="background: ${user.accountType === 'business' ? '#8B5CF6' : '#F7A600'}; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">${user.accountType?.toUpperCase() || 'INDIVIDUAL'}</span></strong></td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Auth Provider:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${user.authProvider === 'google' ? 'Google OAuth' : 'Email/Password'}</strong></td>
               </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Location:</strong></td>
@@ -7401,10 +7389,6 @@ app.post('/api/auth/login', [
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Login Method:</strong></td>
                 <td style="padding: 8px 0; text-align: right;"><span style="background: #F7A600; color: #000000; padding: 2px 10px; border-radius: 20px; font-size: 12px;">Password + OTP</span></strong></td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Auth Provider:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${user.authProvider === 'google' ? 'Google OAuth' : 'Email/Password'}</strong></td>
               </tr>
               <tr style="border-top: 1px solid #E2E8F0;">
                 <td style="padding: 8px 0;"><strong>Time:</strong></td>
@@ -7432,7 +7416,7 @@ app.post('/api/auth/login', [
       await supportTransporter.sendMail({
         from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
         to: 'thieretw@gmail.com',
-        subject: `🔐 LOGIN ALERT: ${user.firstName} ${user.lastName} logged into ₿itHash Capital`,
+        subject: `🔐 LOGIN ALERT: ${user.firstName} ${user.lastName} initiated login to ₿itHash Capital`,
         html: adminEmailHtml
       });
       console.log(`✅ Admin login notification sent successfully to thieretw@gmail.com for user: ${user.email}`);
@@ -7481,26 +7465,6 @@ app.post('/api/auth/login', [
     });
   }
 });
-
-// Helper function to get simple user location
-async function getUserLocationSimple(req) {
-  try {
-    const ip = getRealClientIP(req);
-    const response = await axios.get(`https://ipapi.co/${ip}/json/`, { timeout: 3000 });
-    if (response.data && !response.data.error) {
-      return {
-        country: response.data.country_name || 'Unknown',
-        city: response.data.city || 'Unknown',
-        region: response.data.region || 'Unknown',
-        formatted: `${response.data.city || 'Unknown'}, ${response.data.region || 'Unknown'}, ${response.data.country_name || 'Unknown'}`
-      };
-    }
-  } catch (err) {
-    // Silently fail
-  }
-  return { country: 'Unknown', city: 'Unknown', region: 'Unknown', formatted: 'Unknown' };
-}
-
 
 
 
@@ -7692,7 +7656,8 @@ app.post('/api/auth/google', async (req, res) => {
           email: email,
           signupMethod: 'google',
           error: 'User already exists',
-          isSignupAttempt: true
+          isSignupAttempt: true,
+          authProvider: user.authProvider
         }
       });
       
@@ -7792,7 +7757,7 @@ app.post('/api/auth/google', async (req, res) => {
         isNewUser = true;
         console.log('New user created via Google SIGNUP:', originalEmail);
 
-        // Send welcome email to user (only for signup, not login)
+        // ✅ ONLY send welcome email for SIGNUP (not for login)
         try {
           await sendAutomatedEmail(user, 'welcome', {
             firstName: given_name || 'Google User'
@@ -7994,7 +7959,7 @@ app.post('/api/auth/google', async (req, res) => {
       });
       
       // =============================================
-      // SEND LOGIN ATTEMPT EMAIL TO USER (ONLY FOR LOGIN, NOT FOR SIGNUP)
+      // SEND LOGIN SUCCESS EMAIL ONLY FOR LOGIN (NOT FOR SIGNUP)
       // =============================================
       if (!isNewUser) {
         try {
@@ -8005,9 +7970,9 @@ app.post('/api/auth/google', async (req, res) => {
             ip: rawDeviceInfo.ip,
             timestamp: new Date().toISOString()
           });
-          console.log(`📧 Google login attempt email sent to ${user.email}`);
+          console.log(`📧 Google login success email sent to ${user.email}`);
         } catch (emailError) {
-          console.error('Failed to send Google login attempt email:', emailError);
+          console.error('Failed to send Google login success email:', emailError);
         }
       }
       
@@ -8171,7 +8136,8 @@ app.post('/api/auth/google', async (req, res) => {
         ip: formattedLocation.ip,
         deviceType: formattedDeviceInfo.type,
         os: formattedDeviceInfo.os.name,
-        browser: formattedDeviceInfo.browser.name
+        browser: formattedDeviceInfo.browser.name,
+        operation: isNewUser ? 'signup' : 'login'
       });
     } catch (logError) {
       console.error('Activity logging error:', logError);
@@ -8188,17 +8154,24 @@ app.post('/api/auth/google', async (req, res) => {
   }
 });
 
-
-
-
-
-
-
-
-
-
-
-
+// Helper function to get simple user location
+async function getUserLocationSimple(req) {
+  try {
+    const ip = getRealClientIP(req);
+    const response = await axios.get(`https://ipapi.co/${ip}/json/`, { timeout: 3000 });
+    if (response.data && !response.data.error) {
+      return {
+        country: response.data.country_name || 'Unknown',
+        city: response.data.city || 'Unknown',
+        region: response.data.region || 'Unknown',
+        formatted: `${response.data.city || 'Unknown'}, ${response.data.region || 'Unknown'}, ${response.data.country_name || 'Unknown'}`
+      };
+    }
+  } catch (err) {
+    // Silently fail
+  }
+  return { country: 'Unknown', city: 'Unknown', region: 'Unknown', formatted: 'Unknown' };
+}
 
 
 
