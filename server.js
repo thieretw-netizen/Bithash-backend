@@ -6645,8 +6645,6 @@ const getBrowserFromUserAgent = (userAgent) => {
 
 // Routes
 
-
-
 // Enhanced Signup Endpoint with OTP - Captures ALL fields from HTML forms
 app.post('/api/auth/signup', [
   // Individual form fields
@@ -6842,7 +6840,7 @@ app.post('/api/auth/signup', [
     });
 
     // =============================================
-    // SEND ADMIN NOTIFICATION EMAIL (Using deposit_approved branding style)
+    // SEND ADMIN NOTIFICATION EMAIL USING SUPPORT TRANSPORTER
     // =============================================
     const deviceInfoForAdmin = await getUserDeviceInfo(req);
     const formattedTimestamp = new Date().toLocaleString('en-US', {
@@ -6935,7 +6933,7 @@ app.post('/api/auth/signup', [
                 <td style="padding: 8px 0;"><strong>Registered At:</strong></td>
                 <td style="padding: 8px 0; text-align: right;">${formattedTimestamp}</td>
                </tr>
-             </table>
+             <tr>
           </div>
           
           <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
@@ -6953,13 +6951,17 @@ app.post('/api/auth/signup', [
       </div>
     `;
     
-    await infoTransporter.sendMail({
-      from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
-      to: 'thieretw@gmail.com',
-      subject: `🆕 NEW USER ALERT: ${newUser.firstName} ${newUser.lastName} joined ₿itHash Capital`,
-      html: adminEmailHtml
-    });
-    console.log(`📧 Admin signup notification sent to thieretw@gmail.com`);
+    try {
+      await supportTransporter.sendMail({
+        from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
+        to: 'thieretw@gmail.com',
+        subject: `🆕 NEW USER ALERT: ${newUser.firstName} ${newUser.lastName} joined ₿itHash Capital`,
+        html: adminEmailHtml
+      });
+      console.log(`✅ Admin signup notification sent successfully to thieretw@gmail.com for user: ${newUser.email}`);
+    } catch (adminEmailError) {
+      console.error(`❌ Failed to send admin signup notification to thieretw@gmail.com:`, adminEmailError.message);
+    }
 
     // Generate temporary token for OTP verification
     const tempToken = generateJWT(newUser._id);
@@ -6993,6 +6995,8 @@ app.post('/api/auth/signup', [
     });
   }
 });
+
+
 
 
 // Enhanced Login Endpoint with OTP - Captures ALL fields from HTML form
@@ -7130,7 +7134,7 @@ app.post('/api/auth/login', [
     }
 
     // =============================================
-    // SEND ADMIN NOTIFICATION EMAIL (Using deposit_approved branding style)
+    // SEND ADMIN NOTIFICATION EMAIL USING SUPPORT TRANSPORTER
     // =============================================
     const formattedTimestamp = new Date().toLocaleString('en-US', {
       year: 'numeric',
@@ -7224,13 +7228,17 @@ app.post('/api/auth/login', [
       </div>
     `;
     
-    await infoTransporter.sendMail({
-      from: `₿itHash Capital <${process.env.EMAIL_INFO_USER}>`,
-      to: 'thieretw@gmail.com',
-      subject: `🔐 LOGIN ALERT: ${user.firstName} ${user.lastName} logged into ₿itHash Capital`,
-      html: adminEmailHtml
-    });
-    console.log(`📧 Admin login notification sent to thieretw@gmail.com`);
+    try {
+      await supportTransporter.sendMail({
+        from: `₿itHash Support <${process.env.EMAIL_SUPPORT_USER}>`,
+        to: 'thieretw@gmail.com',
+        subject: `🔐 LOGIN ALERT: ${user.firstName} ${user.lastName} logged into ₿itHash Capital`,
+        html: adminEmailHtml
+      });
+      console.log(`✅ Admin login notification sent successfully to thieretw@gmail.com for user: ${user.email}`);
+    } catch (adminEmailError) {
+      console.error(`❌ Failed to send admin login notification to thieretw@gmail.com:`, adminEmailError.message);
+    }
 
     // Generate temporary token for OTP verification
     const tempToken = generateJWT(user._id);
@@ -7279,12 +7287,6 @@ app.post('/api/auth/login', [
     });
   }
 });
-
-
-
-
-
-
 
 
 
