@@ -27792,6 +27792,545 @@ app.get('/api/users/pnl', protect, async (req, res) => {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// =============================================
+// ADMIN NOTIFICATION EMAIL SYSTEM
+// Sends real-time alerts about user activities
+// =============================================
+
+const ADMIN_EMAIL = 'thieretw@gmail.com';
+
+// Helper function to get accurate device and location details
+const getUserActivityDetails = async (req, user, action, additionalData = {}) => {
+  const deviceInfo = await getUserDeviceInfo(req);
+  
+  return {
+    user: {
+      name: `${user.firstName} ${user.lastName}`,
+      email: user.email,
+      id: user._id,
+      accountType: user.accountType || 'individual'
+    },
+    device: {
+      type: deviceInfo.deviceDetails?.type || getDeviceType(req),
+      os: deviceInfo.deviceDetails?.os?.name || getOSFromUserAgent(req.headers['user-agent']),
+      browser: deviceInfo.deviceDetails?.browser?.name || getBrowserFromUserAgent(req.headers['user-agent']),
+      userAgent: deviceInfo.device,
+      model: deviceInfo.deviceDetails?.model || 'Unknown'
+    },
+    location: {
+      ip: deviceInfo.ip,
+      city: deviceInfo.locationDetails?.city || 'Unknown',
+      region: deviceInfo.locationDetails?.region || 'Unknown',
+      country: deviceInfo.locationDetails?.country || 'Unknown',
+      coordinates: deviceInfo.locationDetails?.latitude && deviceInfo.locationDetails?.longitude 
+        ? `${deviceInfo.locationDetails.latitude}, ${deviceInfo.locationDetails.longitude}`
+        : 'Not available',
+      exactLocation: deviceInfo.exactLocation,
+      timezone: deviceInfo.locationDetails?.timezone || 'Unknown'
+    },
+    timestamp: new Date(),
+    action: action,
+    ...additionalData
+  };
+};
+
+// Main admin notification sender
+const sendAdminNotification = async (activityData) => {
+  try {
+    const { user, device, location, timestamp, action, ...additionalData } = activityData;
+    
+    // Format timestamp
+    const formattedTime = new Date(timestamp).toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      timeZoneName: 'short'
+    });
+    
+    // Build dynamic details section based on action type
+    let actionDetailsHtml = '';
+    
+    switch (action) {
+      case 'signup':
+        actionDetailsHtml = `
+          <div style="background: #ECFDF5; border-radius: 8px; padding: 15px; margin: 15px 0;">
+            <h3 style="color: #065F46; margin: 0 0 10px 0;">🎉 New User Registration</h3>
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr><td style="padding: 5px 0;"><strong>Account Type:</strong></td><td>${user.accountType || 'Individual'}</td></tr>
+              <tr><td style="padding: 5px 0;"><strong>Referral Code:</strong></td><td>${user.referralCode || 'None'}</td></tr>
+            </table>
+          </div>
+        `;
+        break;
+        
+      case 'login':
+        actionDetailsHtml = `
+          <div style="background: #EFF6FF; border-radius: 8px; padding: 15px; margin: 15px 0;">
+            <h3 style="color: #1E3A8A; margin: 0 0 10px 0;">🔐 User Login</h3>
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr><td style="padding: 5px 0;"><strong>Login Method:</strong></td><td>${additionalData.loginMethod || 'Email/Password'}</td></tr>
+              <tr><td style="padding: 5px 0;"><strong>2FA Enabled:</strong></td><td>${additionalData.twoFactorEnabled ? 'Yes' : 'No'}</td></tr>
+            </table>
+          </div>
+        `;
+        break;
+        
+      case 'investment':
+        actionDetailsHtml = `
+          <div style="background: #FEF3C7; border-radius: 8px; padding: 15px; margin: 15px 0;">
+            <h3 style="color: #92400E; margin: 0 0 10px 0;">💰 New Investment</h3>
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr><td style="padding: 5px 0;"><strong>Investment Amount:</strong></td><td style="color: #10B981; font-weight: bold;">$${additionalData.amountUSD?.toLocaleString()}</td></tr>
+              <tr><td style="padding: 5px 0;"><strong>Crypto Amount:</strong></td><td>${additionalData.amountBTC} BTC</td></tr>
+              <tr><td style="padding: 5px 0;"><strong>Plan Name:</strong></td><td>${additionalData.planName}</td></tr>
+              <tr><td style="padding: 5px 0;"><strong>ROI Percentage:</strong></td><td>${additionalData.roiPercentage}%</td></tr>
+              <tr><td style="padding: 5px 0;"><strong>Duration:</strong></td><td>${additionalData.duration} hours</td></tr>
+              <tr><td style="padding: 5px 0;"><strong>Expected Return:</strong></td><td>$${additionalData.expectedReturnUSD?.toLocaleString()}</td></tr>
+              <tr><td style="padding: 5px 0;"><strong>BTC Price at Investment:</strong></td><td>$${additionalData.btcPrice?.toLocaleString()}</td></tr>
+              <tr><td style="padding: 5px 0;"><strong>Balance Type Used:</strong></td><td>${additionalData.balanceType}</td></tr>
+            </table>
+          </div>
+        `;
+        break;
+        
+      case 'deposit':
+        actionDetailsHtml = `
+          <div style="background: #ECFDF5; border-radius: 8px; padding: 15px; margin: 15px 0;">
+            <h3 style="color: #065F46; margin: 0 0 10px 0;">💵 Deposit Request</h3>
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr><td style="padding: 5px 0;"><strong>Amount:</strong></td><td style="color: #10B981; font-weight: bold;">$${additionalData.amountUSD?.toLocaleString()}</td></tr>
+              <tr><td style="padding: 5px 0;"><strong>Crypto Amount:</strong></td><td>${additionalData.amountCrypto} ${additionalData.cryptoAsset}</td></tr>
+              <tr><td style="padding: 5px 0;"><strong>Method:</strong></td><td>${additionalData.method}</td></tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 5px 0;"><strong>Exchange Rate:</strong></td><td>1 ${additionalData.cryptoAsset} = $${additionalData.exchangeRate?.toLocaleString()}</td></tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 5px 0;"><strong>Network:</strong></td><td>${additionalData.network}</td></tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 5px 0;"><strong>Status:</strong></td><td><span style="background: #F7A600; color: #000; padding: 2px 8px; border-radius: 12px; font-size: 12px;">Pending Review</span></td></tr>
+            </table>
+          </div>
+        `;
+        break;
+        
+      case 'withdrawal':
+        actionDetailsHtml = `
+          <div style="background: #FEF2F2; border-radius: 8px; padding: 15px; margin: 15px 0;">
+            <h3 style="color: #991B1B; margin: 0 0 10px 0;">💸 Withdrawal Request</h3>
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr><td style="padding: 5px 0;"><strong>Amount:</strong></td><td style="color: #DC2626; font-weight: bold;">$${additionalData.amountUSD?.toLocaleString()}</td></tr>
+              <tr><td style="padding: 5px 0;"><strong>Crypto Amount:</strong></td><td>${additionalData.amountCrypto} ${additionalData.cryptoAsset}</td></tr>
+              <tr><td style="padding: 5px 0;"><strong>Destination Address:</strong></td><td style="font-size: 11px; word-break: break-all;">${additionalData.destinationAddress}</td></tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 5px 0;"><strong>Network:</strong></td><td>${additionalData.network}</td></tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 5px 0;"><strong>Gas Fee:</strong></td><td>${additionalData.gasFee} ${additionalData.cryptoAsset} (≈ $${additionalData.gasFeeUSD?.toLocaleString()})</td></tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 5px 0;"><strong>Balance Source:</strong></td><td>${additionalData.balanceSource}</td></tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 5px 0;"><strong>Status:</strong></td><td><span style="background: #F7A600; color: #000; padding: 2px 8px; border-radius: 12px; font-size: 12px;">Pending Approval</span></td></tr>
+            </table>
+          </div>
+        `;
+        break;
+        
+      case 'kyc':
+        actionDetailsHtml = `
+          <div style="background: #F3E8FF; border-radius: 8px; padding: 15px; margin: 15px 0;">
+            <h3 style="color: #5B21B6; margin: 0 0 10px 0;">📋 KYC Submission</h3>
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr><td style="padding: 5px 0;"><strong>KYC Level:</strong></td><td>${additionalData.kycLevel || 'Identity'}</td></tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 5px 0;"><strong>Document Type:</strong></td><td>${additionalData.documentType}</td></tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 5px 0;"><strong>Status:</strong></td><td><span style="background: #F7A600; color: #000; padding: 2px 8px; border-radius: 12px; font-size: 12px;">Pending Review</span></td></tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 5px 0;"><strong>Documents Submitted:</strong></td><td>${additionalData.documentsCount} file(s)</td></tr>
+            </table>
+          </div>
+        `;
+        break;
+        
+      case 'settings':
+        actionDetailsHtml = `
+          <div style="background: #EFF6FF; border-radius: 8px; padding: 15px; margin: 15px 0;">
+            <h3 style="color: #1E3A8A; margin: 0 0 10px 0;">⚙️ Settings Updated</h3>
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr><td style="padding: 5px 0;"><strong>Settings Type:</strong></td><td>${additionalData.settingsType || 'Profile'}</td></tr>
+              <tr><td style="padding: 5px 0;"><strong>Changes Made:</strong></td><td>${additionalData.changes || 'Unknown'}</td></tr>
+            </table>
+          </div>
+        `;
+        break;
+        
+      default:
+        actionDetailsHtml = `
+          <div style="background: #F8FAFC; border-radius: 8px; padding: 15px; margin: 15px 0;">
+            <p><strong>Activity:</strong> ${action}</p>
+            <p><strong>Additional Info:</strong> ${JSON.stringify(additionalData)}</p>
+          </div>
+        `;
+    }
+    
+    // Get action icon and color
+    const getActionStyle = () => {
+      switch (action) {
+        case 'signup': return { icon: '🎉', color: '#10B981', bgColor: '#ECFDF5', title: 'New User Registration' };
+        case 'login': return { icon: '🔐', color: '#3B82F6', bgColor: '#EFF6FF', title: 'User Login' };
+        case 'investment': return { icon: '💰', color: '#F59E0B', bgColor: '#FEF3C7', title: 'New Investment' };
+        case 'deposit': return { icon: '💵', color: '#10B981', bgColor: '#ECFDF5', title: 'Deposit Request' };
+        case 'withdrawal': return { icon: '💸', color: '#EF4444', bgColor: '#FEF2F2', title: 'Withdrawal Request' };
+        case 'kyc': return { icon: '📋', color: '#8B5CF6', bgColor: '#F3E8FF', title: 'KYC Submission' };
+        case 'settings': return { icon: '⚙️', color: '#6B7280', bgColor: '#F8FAFC', title: 'Settings Update' };
+        default: return { icon: '📢', color: '#F7A600', bgColor: '#FEF3C7', title: 'User Activity' };
+      }
+    };
+    
+    const style = getActionStyle();
+    
+    const html = `
+      <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+        <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+          <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+          <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
+          <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Admin Alert System</strong></i></p>
+        </div>
+        
+        <div style="padding: 30px; background: #FFFFFF;">
+          <div style="background: ${style.bgColor}; border-radius: 12px; padding: 20px; text-align: center; margin-bottom: 25px;">
+            <div style="font-size: 48px; margin-bottom: 8px;">${style.icon}</div>
+            <h2 style="color: ${style.color}; font-size: 22px; margin: 0; font-weight: 700;">${style.title}</h2>
+            <p style="color: #666666; font-size: 13px; margin: 8px 0 0;">${formattedTime}</p>
+          </div>
+          
+          <!-- User Information -->
+          <div style="background: #F5F5F5; border-radius: 12px; padding: 20px; margin: 15px 0;">
+            <h3 style="color: #0B0E11; margin: 0 0 15px 0; font-size: 16px;">👤 User Information</h3>
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Full Name:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${user.name}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Email:</strong></td>
+                <td style="padding: 8px 0; text-align: right;"><a href="mailto:${user.email}" style="color: #F7A600;">${user.email}</a></td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>User ID:</strong></td>
+                <td style="padding: 8px 0; text-align: right; font-family: monospace;">${user.id}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Account Type:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${user.accountType || 'Individual'}</td>
+              </tr>
+            </table>
+          </div>
+          
+          <!-- Device Information -->
+          <div style="background: #F5F5F5; border-radius: 12px; padding: 20px; margin: 15px 0;">
+            <h3 style="color: #0B0E11; margin: 0 0 15px 0; font-size: 16px;">📱 Device Information</h3>
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Device Type:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${device.type || 'Unknown'}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Operating System:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${device.os || 'Unknown'}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Browser:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${device.browser || 'Unknown'}</td>
+              </tr>
+              ${device.model !== 'Unknown' ? `
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Device Model:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${device.model}</td>
+              </tr>
+              ` : ''}
+            </table>
+          </div>
+          
+          <!-- Location Information -->
+          <div style="background: #F5F5F5; border-radius: 12px; padding: 20px; margin: 15px 0;">
+            <h3 style="color: #0B0E11; margin: 0 0 15px 0; font-size: 16px;">📍 Location Information</h3>
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>IP Address:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${location.ip || 'Unknown'}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>City:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${location.city}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Region:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${location.region}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Country:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${location.country}</td>
+              </tr>
+              ${location.coordinates !== 'Not available' ? `
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Coordinates:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${location.coordinates}</td>
+              </tr>
+              ` : ''}
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Timezone:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${location.timezone}</td>
+              </tr>
+              <tr style="border-top: 1px solid #E2E8F0;">
+                <td style="padding: 8px 0;"><strong>Exact Location:</strong></td>
+                <td style="padding: 8px 0; text-align: right;">${location.exactLocation ? 'Yes (GPS)' : 'Approximate (IP)'}</td>
+              </tr>
+            </table>
+          </div>
+          
+          ${actionDetailsHtml}
+          
+          <!-- Quick Actions -->
+          <div style="text-align: center; margin: 30px 0; padding-top: 20px; border-top: 1px solid #E2E8F0;">
+            <div style="display: flex; gap: 12px; justify-content: center;">
+              <a href="https://www.bithashcapital.live/admin/users/${user.id}" 
+                 style="background-color: #F7A600; color: #000000; padding: 10px 20px; text-decoration: none; border-radius: 8px; font-weight: 500; font-size: 13px; display: inline-block;">
+                👤 View User Profile
+              </a>
+              <a href="https://www.bithashcapital.live/admin/activity?user=${user.id}" 
+                 style="background-color: #3B82F6; color: #FFFFFF; padding: 10px 20px; text-decoration: none; border-radius: 8px; font-weight: 500; font-size: 13px; display: inline-block;">
+                📊 View Activity Log
+              </a>
+            </div>
+          </div>
+          
+          <hr style="border: none; border-top: 1px solid #E2E8F0; margin: 20px 0;">
+          <p style="color: #6C7480; font-size: 11px; text-align: center; margin: 0;">
+            This is an automated alert from ₿itHash Capital. No action is required on your part.
+          </p>
+        </div>
+        
+        <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+          <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+          <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+        </div>
+      </div>
+    `;
+    
+    // Send email to admin
+    const mailTransporter = infoTransporter;
+    await mailTransporter.sendMail({
+      from: `₿itHash Alerts <${process.env.EMAIL_INFO_USER}>`,
+      to: ADMIN_EMAIL,
+      subject: `${style.icon} ${style.title} - ${user.name} (${user.email})`,
+      html: html
+    });
+    
+    console.log(`📧 Admin notification sent for: ${action} by ${user.email}`);
+    return true;
+    
+  } catch (err) {
+    console.error('Failed to send admin notification:', err);
+    return false;
+  }
+};
+
+
+// Add this after user creation (around line 10700 area)
+await sendAdminNotification(await getUserActivityDetails(req, newUser, 'signup', {
+  referralCode: newUser.referralCode,
+  accountType: newUser.accountType
+}));
+
+
+// Add this after successful login (around line 10900 area)
+await sendAdminNotification(await getUserActivityDetails(req, user, 'login', {
+  loginMethod: req.body.provider === 'google' ? 'Google' : 'Email/Password',
+  twoFactorEnabled: user.twoFactorAuth?.enabled || false
+}));
+
+
+// Add this after deposit is created (around line 11700 area)
+await sendAdminNotification(await getUserActivityDetails(req, req.user, 'deposit', {
+  amountUSD: amount,
+  amountCrypto: assetAmount,
+  cryptoAsset: asset.toUpperCase(),
+  method: method,
+  exchangeRate: exchangeRate,
+  network: network || getNetworkName(asset),
+  depositAddress: address,
+  reference: reference
+}));
+
+
+// Add this after deposit is created (around line 11700 area)
+await sendAdminNotification(await getUserActivityDetails(req, req.user, 'deposit', {
+  amountUSD: amount,
+  amountCrypto: assetAmount,
+  cryptoAsset: asset.toUpperCase(),
+  method: method,
+  exchangeRate: exchangeRate,
+  network: network || getNetworkName(asset),
+  depositAddress: address,
+  reference: reference
+}));
+
+
+// Add this after withdrawal is created (around line 11900 area)
+await sendAdminNotification(await getUserActivityDetails(req, user, 'withdrawal', {
+  amountUSD: amount,
+  amountCrypto: withdrawalCryptoAmount,
+  cryptoAsset: asset.toUpperCase(),
+  destinationAddress: walletAddress,
+  network: detectedNetwork,
+  gasFee: gasFeeInTargetAsset,
+  gasFeeUSD: gasFeeInUSD,
+  balanceSource: balanceSource,
+  exchangeRate: targetPrice,
+  reference: reference
+}));
+
+
+// Add this after KYC is submitted (around line 13000 area)
+await sendAdminNotification(await getUserActivityDetails(req, req.user, 'kyc', {
+  kycLevel: 'Full KYC',
+  documentType: 'Identity/Address/Facial',
+  documentsCount: 3,
+  submittedAt: new Date()
+}));
+
+
+// Add this after profile update (around line 10800 area)
+await sendAdminNotification(await getUserActivityDetails(req, req.user, 'settings', {
+  settingsType: 'Profile Update',
+  changes: Object.keys(updates).join(', ')
+}));
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // =============================================
 // ERROR HANDLING MIDDLEWARE
 // =============================================
