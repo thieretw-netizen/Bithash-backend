@@ -28140,13 +28140,18 @@ app.get('/api/users/pnl', protect, async (req, res) => {
 
 
 
+// =============================================
+// GET /api/investments/active - Enhanced with ROI & Profit Calculation
+// Returns active investments with real-time profit in BTC and USD
+// Uses getCryptoPrice() for current BTC value - NO hardcoded prices
+// =============================================
 app.get('/api/investments/active', protect, async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
     
-    // Cache key
+    // Cache key for Redis (60 seconds TTL)
     const cacheKey = `user:${req.user.id}:investments:${page}:${limit}`;
     
     // Check cache first unless refresh is requested
@@ -28169,78 +28174,164 @@ app.get('/api/investments/active', protect, async (req, res) => {
       path: 'plan',
       select: 'name percentage duration minAmount maxAmount referralBonus'
     })
-    .lean(); // Convert to plain JS objects
+    .lean();
     
     const total = await Investment.countDocuments({
       user: req.user.id,
       status: 'active'
     });
     
-    // Calculate additional fields for each investment
+    // Get current BTC price for profit calculation
+    let currentBTCPrice = null;
+    try {
+      currentBTCPrice = await getCryptoPrice('BTC');
+      if (!currentBTCPrice || currentBTCPrice <= 0) {
+        throw new Error('Invalid BTC price received');
+      }
+      console.log(`💰 Current BTC price for profit calc: $${currentBTCPrice.toLocaleString()}`);
+    } catch (priceError) {
+      console.error('Failed to get BTC price for profit calculation:', priceError.message);
+      // Return error instead of using fake fallback
+      return res.status(503).json({
+        status: 'error',
+        message: 'Unable to fetch current BTC price for profit calculation. Please try again.',
+        retryAfter: 5
+      });
+    }
+    
     const now = new Date();
+    
+    // Calculate enhanced fields for each investment
     const enhancedInvestments = investments.map(investment => {
       const startDate = new Date(investment.startDate);
       const endDate = new Date(investment.endDate);
       
-      // Calculate time remaining
-      const timeLeftMs = Math.max(0, endDate - now);
-      const timeLeftHours = Math.ceil(timeLeftMs / (1000 * 60 * 60));
-      
-      // Calculate progress percentage
+      // =============================================
+      // TIME CALCULATIONS
+      // =============================================
       const totalDurationMs = endDate - startDate;
-      const elapsedMs = now - startDate;
+      const elapsedMs = Math.max(0, now - startDate);
+      const timeLeftMs = Math.max(0, endDate - now);
+      
+      // Progress percentage (0-100)
       const progressPercentage = totalDurationMs > 0 
         ? Math.min(100, (elapsedMs / totalDurationMs) * 100)
         : 0;
       
-      // Get ROI percentage from the associated plan (this is the actual ROI percentage)
+      // Time remaining formatted
+      const timeLeftHours = Math.ceil(timeLeftMs / (1000 * 60 * 60));
+      const daysLeft = Math.floor(timeLeftHours / 24);
+      const remainingHours = timeLeftHours % 24;
+      const timeLeftDisplay = daysLeft > 0 ? `${daysLeft}d ${remainingHours}h` : `${timeLeftHours}h`;
+      
+      // =============================================
+      // ROI AND PROFIT CALCULATIONS
+      // =============================================
+      
+      // Get ROI percentage from the associated plan (actual ROI %)
       const roiPercentage = investment.plan?.percentage || 0;
       
-      // Calculate expected profit
-      const expectedProfit = investment.amount * (roiPercentage / 100);
+      // Calculate expected total profit in USD
+      const expectedProfitUSD = investment.amount * (roiPercentage / 100);
       
-      // Calculate accumulated profit based on elapsed time
-      const accumulatedProfit = expectedProfit * (progressPercentage / 100);
+      // Calculate current profit based on elapsed time (pro-rated)
+      const currentProfitUSD = expectedProfitUSD * (progressPercentage / 100);
       
-      // Calculate current value (principal + accumulated profit)
-      const currentValue = investment.amount + accumulatedProfit;
+      // Calculate profit in BTC using REAL current BTC price
+      const currentProfitBTC = currentProfitUSD / currentBTCPrice;
+      
+      // Calculate expected total return
+      const expectedReturnUSD = investment.amount + expectedProfitUSD;
+      
+      // Calculate current value (principal + earned profit so far)
+      const currentValueUSD = investment.amount + currentProfitUSD;
+      
+      // Calculate daily profit rate
+      const dailyProfitUSD = expectedProfitUSD / (investment.plan?.duration / 24 || 1);
+      const dailyProfitBTC = dailyProfitUSD / currentBTCPrice;
+      
+      // Determine if investment has matured
+      const isMatured = timeLeftMs <= 0;
       
       return {
         id: investment._id,
         planName: investment.plan?.name || 'Unknown Plan',
         amount: investment.amount,
-        profitPercentage: roiPercentage, // This is what frontend expects as hourly ROI %
-        expectedProfit: expectedProfit,
-        accumulatedProfit: accumulatedProfit,
-        currentValue: currentValue,
+        
+        // ROI Data
+        roiPercentage: roiPercentage,           // The ROI percentage for the full term
+        expectedProfitUSD: expectedProfitUSD,   // Expected total profit in USD
+        expectedProfitBTC: expectedProfitBTC,   // Expected total profit in BTC (using current price)
+        
+        // Current profit (accumulated so far)
+        currentProfitUSD: currentProfitUSD,     // Profit earned so far in USD
+        currentProfitBTC: currentProfitBTC,     // Profit earned so far in BTC
+        
+        // Value data
+        currentValueUSD: currentValueUSD,       // Principal + current profit
+        expectedReturnUSD: expectedReturnUSD,   // Principal + full expected profit
+        
+        // Daily profit
+        dailyProfitUSD: dailyProfitUSD,
+        dailyProfitBTC: dailyProfitBTC,
+        
+        // Duration data
         durationHours: investment.plan?.duration || 0,
+        durationDays: Math.floor((investment.plan?.duration || 0) / 24),
+        
+        // Dates
         startDate: investment.startDate,
         endDate: investment.endDate,
+        
+        // Time remaining
+        timeLeft: {
+          milliseconds: timeLeftMs,
+          hours: timeLeftHours,
+          days: daysLeft,
+          display: timeLeftDisplay,
+          isMatured: isMatured
+        },
+        
+        // Progress
+        progressPercentage: progressPercentage.toFixed(2),
+        
+        // Status
         status: investment.status,
-        timeLeftHours,
-        progressPercentage,
+        
+        // Additional plan details
         planDetails: {
           minAmount: investment.plan?.minAmount,
           maxAmount: investment.plan?.maxAmount,
-          referralBonus: investment.plan?.referralBonus
-        }
+          referralBonus: investment.plan?.referralBonus,
+          description: investment.plan?.description
+        },
+        
+        // BTC price used for calculations
+        btcPriceUsed: currentBTCPrice,
+        
+        // Timestamp for reference
+        calculatedAt: new Date().toISOString()
       };
     });
     
     // Format response
     const response = {
+      status: 'success',
       data: {
         investments: enhancedInvestments,
         totalPages: Math.ceil(total / limit),
         currentPage: page,
-        totalInvestments: total
+        totalInvestments: total,
+        btcPrice: currentBTCPrice,
+        timestamp: Date.now()
       }
     };
     
-    // Cache for 1 minute (adjust based on your requirements)
+    // Cache for 60 seconds
     await redis.set(cacheKey, JSON.stringify(response), 'EX', 60);
     
     res.json(response);
+    
   } catch (err) {
     console.error('Error fetching active investments:', err);
     res.status(500).json({
