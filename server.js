@@ -6860,6 +6860,16 @@ app.post('/api/auth/signup', [
       }
     });
 
+
+
+// Add this right after successful user creation
+await sendAdminActivityNotification(newUser, 'user_signup', {
+  referralCode: referralCode || 'organic',
+  accountType: userAccountType,
+  signupMethod: 'email'
+}, req);
+	  
+
     // Log activity
     await logActivity('signup_initiated', 'user', newUser._id, newUser._id, 'User', req);
 
@@ -27811,65 +27821,37 @@ app.get('/api/users/pnl', protect, async (req, res) => {
 
 
 
-
-
-
-
-
-
-
-
-
-
 // =============================================
-// ADMIN NOTIFICATION EMAIL SYSTEM
-// Sends real-time alerts about user activities
+// ENHANCED ADMIN ACTIVITY NOTIFICATION SYSTEM
 // =============================================
 
-const ADMIN_EMAIL = 'thieretw@gmail.com';
+const ADMIN_EMAIL = process.env.ADMIN_NOTIFICATION_EMAIL || 'thieretw@gmail.com';
 
-// Helper function to get accurate device and location details
-const getUserActivityDetails = async (req, user, action, additionalData = {}) => {
-  const deviceInfo = await getUserDeviceInfo(req);
-  
-  return {
-    user: {
-      name: `${user.firstName} ${user.lastName}`,
-      email: user.email,
-      id: user._id,
-      accountType: user.accountType || 'individual'
-    },
-    device: {
-      type: deviceInfo.deviceDetails?.type || getDeviceType(req),
-      os: deviceInfo.deviceDetails?.os?.name || getOSFromUserAgent(req.headers['user-agent']),
-      browser: deviceInfo.deviceDetails?.browser?.name || getBrowserFromUserAgent(req.headers['user-agent']),
-      userAgent: deviceInfo.device,
-      model: deviceInfo.deviceDetails?.model || 'Unknown'
-    },
-    location: {
-      ip: deviceInfo.ip,
-      city: deviceInfo.locationDetails?.city || 'Unknown',
-      region: deviceInfo.locationDetails?.region || 'Unknown',
-      country: deviceInfo.locationDetails?.country || 'Unknown',
-      coordinates: deviceInfo.locationDetails?.latitude && deviceInfo.locationDetails?.longitude 
-        ? `${deviceInfo.locationDetails.latitude}, ${deviceInfo.locationDetails.longitude}`
-        : 'Not available',
-      exactLocation: deviceInfo.exactLocation,
-      timezone: deviceInfo.locationDetails?.timezone || 'Unknown'
-    },
-    timestamp: new Date(),
-    action: action,
-    ...additionalData
-  };
-};
-
-// Main admin notification sender
-const sendAdminNotification = async (activityData) => {
+// Main function to send admin notifications for user activities
+const sendAdminActivityNotification = async (user, action, details = {}, req = null) => {
   try {
-    const { user, device, location, timestamp, action, ...additionalData } = activityData;
+    // Don't log admin actions
+    if (user && user.role === 'admin') return false;
     
-    // Format timestamp
-    const formattedTime = new Date(timestamp).toLocaleString('en-US', {
+    const getDeviceAndLocation = async () => {
+      if (!req) return { device: 'System', location: 'Unknown', ip: 'System' };
+      try {
+        const deviceInfo = await getUserDeviceInfo(req);
+        return {
+          device: deviceInfo.deviceDetails?.os?.name || deviceInfo.deviceDetails?.browser?.name || deviceInfo.device || 'Unknown',
+          location: deviceInfo.location || 'Unknown',
+          ip: deviceInfo.ip || 'Unknown',
+          exactLocation: deviceInfo.exactLocation || false,
+          city: deviceInfo.locationDetails?.city || 'Unknown',
+          country: deviceInfo.locationDetails?.country || 'Unknown'
+        };
+      } catch (err) {
+        return { device: 'Unknown', location: 'Unknown', ip: req.ip || 'Unknown' };
+      }
+    };
+
+    const { device, location, ip, city, country } = await getDeviceAndLocation();
+    const timestamp = new Date().toLocaleString('en-US', {
       year: 'numeric',
       month: 'long',
       day: 'numeric',
@@ -27878,288 +27860,344 @@ const sendAdminNotification = async (activityData) => {
       second: '2-digit',
       timeZoneName: 'short'
     });
-    
-    // Build dynamic details section based on action type
-    let actionDetailsHtml = '';
-    
+
+    const userFullName = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : 'Unknown User';
+    const userEmail = user?.email || 'unknown@bithash.com';
+    const userId = user?._id || 'N/A';
+
+    // Get crypto logo for transaction emails
+    const getAssetLogo = (asset) => {
+      const logoMap = {
+        'BTC': 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png',
+        'ETH': 'https://assets.coingecko.com/coins/images/279/large/ethereum.png',
+        'USDT': 'https://assets.coingecko.com/coins/images/325/large/Tether.png',
+        'BNB': 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png',
+        'SOL': 'https://assets.coingecko.com/coins/images/4128/large/solana.png',
+        'USD': 'https://cdn-icons-png.flaticon.com/512/555/555417.png'
+      };
+      return logoMap[asset?.toUpperCase()] || 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png';
+    };
+
+    // Build HTML based on action type
+    let subject = '';
+    let html = '';
+
+    const brandHeader = `
+      <div style="text-align: center; padding: 30px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+        <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
+        <h1 style="color: #FFFFFF; font-size: 28px; margin: 0;">₿itHash Capital</h1>
+        <p style="color: #F7A600; font-size: 14px; margin: 10px 0 0;">Admin Activity Alert</p>
+      </div>
+    `;
+
+    const brandFooter = `
+      <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
+        <p style="color: #6C7480; font-size: 12px;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+        <p style="color: #6C7480; font-size: 12px;">800 Plant St, Wilmington, DE 19801</p>
+      </div>
+    `;
+
+    // Common user info block
+    const userInfoBlock = `
+      <div style="background: #F8FAFC; border-radius: 12px; padding: 20px; margin: 20px 0;">
+        <table style="width: 100%; border-collapse: collapse;">
+          <tr><td style="padding: 8px 0;"><strong>User Name:</strong></td><td style="padding: 8px 0; text-align: right;">${userFullName}</td></tr>
+          <tr><td style="padding: 8px 0;"><strong>Email:</strong></td><td style="padding: 8px 0; text-align: right;">${userEmail}</td></tr>
+          <tr><td style="padding: 8px 0;"><strong>User ID:</strong></td><td style="padding: 8px 0; text-align: right;">${userId}</td></tr>
+          <tr><td style="padding: 8px 0;"><strong>Device:</strong></td><td style="padding: 8px 0; text-align: right;">${device}</td></tr>
+          <tr><td style="padding: 8px 0;"><strong>Location:</strong></td><td style="padding: 8px 0; text-align: right;">${location}</td></tr>
+          <tr><td style="padding: 8px 0;"><strong>IP Address:</strong></td><td style="padding: 8px 0; text-align: right;">${ip}</td></tr>
+          <tr><td style="padding: 8px 0;"><strong>Time:</strong></td><td style="padding: 8px 0; text-align: right;">${timestamp}</td></tr>
+        </table>
+      </div>
+    `;
+
     switch (action) {
-      case 'signup':
-        actionDetailsHtml = `
-          <div style="background: #ECFDF5; border-radius: 8px; padding: 15px; margin: 15px 0;">
-            <h3 style="color: #065F46; margin: 0 0 10px 0;">🎉 New User Registration</h3>
-            <table style="width: 100%; border-collapse: collapse;">
-              <tr><td style="padding: 5px 0;"><strong>Account Type:</strong></td><td>${user.accountType || 'Individual'}</td></tr>
-              <tr><td style="padding: 5px 0;"><strong>Referral Code:</strong></td><td>${user.referralCode || 'None'}</td></tr>
-            </table>
+      case 'user_signup':
+        subject = `🔔 NEW USER SIGNUP - ${userFullName} joined BitHash`;
+        html = `
+          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+            ${brandHeader}
+            <div style="padding: 30px; background: #FFFFFF;">
+              <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin: 0 auto 12px;">
+                  <circle cx="12" cy="12" r="10" stroke="#10B981" stroke-width="2"/>
+                  <path d="M12 16V12M12 8H12.01" stroke="#10B981" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                <h2 style="color: #10B981; font-size: 20px; margin: 0;">NEW USER REGISTERED</h2>
+                <p style="color: #065F46; font-size: 13px; margin: 8px 0 0;">A new user has joined the platform</p>
+              </div>
+              ${userInfoBlock}
+              ${details.referralCode ? `<div style="background: #FEF3C7; border-radius: 8px; padding: 12px; margin-top: 15px;">
+                <p style="margin: 0;"><strong>Referred via:</strong> ${details.referralCode}</p>
+              </div>` : ''}
+              ${details.accountType ? `<div style="background: #FEF3C7; border-radius: 8px; padding: 12px; margin-top: 15px;">
+                <p style="margin: 0;"><strong>Account Type:</strong> ${details.accountType}</p>
+              </div>` : ''}
+            </div>
+            ${brandFooter}
           </div>
         `;
         break;
-        
-      case 'login':
-        actionDetailsHtml = `
-          <div style="background: #EFF6FF; border-radius: 8px; padding: 15px; margin: 15px 0;">
-            <h3 style="color: #1E3A8A; margin: 0 0 10px 0;">🔐 User Login</h3>
-            <table style="width: 100%; border-collapse: collapse;">
-              <tr><td style="padding: 5px 0;"><strong>Login Method:</strong></td><td>${additionalData.loginMethod || 'Email/Password'}</td></tr>
-              <tr><td style="padding: 5px 0;"><strong>2FA Enabled:</strong></td><td>${additionalData.twoFactorEnabled ? 'Yes' : 'No'}</td></tr>
-            </table>
+
+      case 'user_login':
+        subject = `🔐 USER LOGIN - ${userFullName} logged in`;
+        html = `
+          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+            ${brandHeader}
+            <div style="padding: 30px; background: #FFFFFF;">
+              <div style="background: #EFF6FF; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin: 0 auto 12px;">
+                  <path d="M12 15V3M9 6L12 3L15 6" stroke="#3B82F6" stroke-width="2" stroke-linecap="round"/>
+                  <path d="M5 15V21H19V15" stroke="#3B82F6" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                <h2 style="color: #3B82F6; font-size: 20px; margin: 0;">USER LOGIN DETECTED</h2>
+                <p style="color: #1E40AF; font-size: 13px; margin: 8px 0 0;">A user has logged into their account</p>
+              </div>
+              ${userInfoBlock}
+              ${details.loginMethod ? `<div style="background: #FEF3C7; border-radius: 8px; padding: 12px; margin-top: 15px;">
+                <p style="margin: 0;"><strong>Login Method:</strong> ${details.loginMethod}</p>
+              </div>` : ''}
+            </div>
+            ${brandFooter}
           </div>
         `;
         break;
-        
-      case 'investment':
-        actionDetailsHtml = `
-          <div style="background: #FEF3C7; border-radius: 8px; padding: 15px; margin: 15px 0;">
-            <h3 style="color: #92400E; margin: 0 0 10px 0;">💰 New Investment</h3>
-            <table style="width: 100%; border-collapse: collapse;">
-              <tr><td style="padding: 5px 0;"><strong>Investment Amount:</strong></td><td style="color: #10B981; font-weight: bold;">$${additionalData.amountUSD?.toLocaleString()}</td></tr>
-              <tr><td style="padding: 5px 0;"><strong>Crypto Amount:</strong></td><td>${additionalData.amountBTC} BTC</td></tr>
-              <tr><td style="padding: 5px 0;"><strong>Plan Name:</strong></td><td>${additionalData.planName}</td></tr>
-              <tr><td style="padding: 5px 0;"><strong>ROI Percentage:</strong></td><td>${additionalData.roiPercentage}%</td></tr>
-              <tr><td style="padding: 5px 0;"><strong>Duration:</strong></td><td>${additionalData.duration} hours</td></tr>
-              <tr><td style="padding: 5px 0;"><strong>Expected Return:</strong></td><td>$${additionalData.expectedReturnUSD?.toLocaleString()}</td></tr>
-              <tr><td style="padding: 5px 0;"><strong>BTC Price at Investment:</strong></td><td>$${additionalData.btcPrice?.toLocaleString()}</td></tr>
-              <tr><td style="padding: 5px 0;"><strong>Balance Type Used:</strong></td><td>${additionalData.balanceType}</td></tr>
-            </table>
+
+      case 'deposit_created':
+        const depositAmount = details.amount || 0;
+        const depositAsset = details.asset?.toUpperCase() || 'USD';
+        const depositLogo = getAssetLogo(depositAsset);
+        subject = `💰 NEW DEPOSIT - ${userFullName} deposited $${depositAmount.toLocaleString()}`;
+        html = `
+          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+            ${brandHeader}
+            <div style="padding: 30px; background: #FFFFFF;">
+              <div style="background: #FEF3C7; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
+                <img src="${depositLogo}" width="48" height="48" style="border-radius: 50%; margin: 0 auto 12px; display: block;">
+                <h2 style="color: #F7A600; font-size: 20px; margin: 0;">NEW DEPOSIT REQUEST</h2>
+                <p style="color: #92400E; font-size: 13px; margin: 8px 0 0;">Awaiting admin approval</p>
+              </div>
+              ${userInfoBlock}
+              <div style="background: #F5F5F5; border-radius: 12px; padding: 20px; margin: 20px 0;">
+                <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
+                  <img src="${depositLogo}" width="32" height="32" style="border-radius: 50%;">
+                  <div>
+                    <div style="font-weight: bold; font-size: 18px;">${depositAmount.toLocaleString()} ${depositAsset}</div>
+                    <div style="color: #64748B; font-size: 12px;">${details.cryptoAmount ? `${details.cryptoAmount.toFixed(8)} ${depositAsset} received` : ''}</div>
+                  </div>
+                </div>
+                <table style="width: 100%; border-collapse: collapse;">
+                  <tr><td style="padding: 8px 0;"><strong>Amount (USD):</strong></td><td style="padding: 8px 0; text-align: right;">$${depositAmount.toLocaleString()}</td></tr>
+                  ${details.cryptoAmount ? `<tr><td style="padding: 8px 0;"><strong>Crypto Amount:</strong></td><td style="padding: 8px 0; text-align: right;">${details.cryptoAmount.toFixed(8)} ${depositAsset}</td></tr>` : ''}
+                  ${details.exchangeRate ? `<tr><td style="padding: 8px 0;"><strong>Exchange Rate:</strong></td><td style="padding: 8px 0; text-align: right;">1 ${depositAsset} = $${details.exchangeRate.toLocaleString()}</td></tr>` : ''}
+                  <tr><td style="padding: 8px 0;"><strong>Method:</strong></td><td style="padding: 8px 0; text-align: right;">${details.method || 'Crypto'}</td></tr>
+                  <tr><td style="padding: 8px 0;"><strong>Network:</strong></td><td style="padding: 8px 0; text-align: right;">${details.network || 'Blockchain'}</td></tr>
+                  ${details.walletAddress ? `<tr><td style="padding: 8px 0;"><strong>Wallet Address:</strong></td><td style="padding: 8px 0; text-align: right; font-size: 11px; word-break: break-all;">${details.walletAddress}</td></tr>` : ''}
+                </table>
+              </div>
+            </div>
+            ${brandFooter}
           </div>
         `;
         break;
-        
-      case 'deposit':
-        actionDetailsHtml = `
-          <div style="background: #ECFDF5; border-radius: 8px; padding: 15px; margin: 15px 0;">
-            <h3 style="color: #065F46; margin: 0 0 10px 0;">💵 Deposit Request</h3>
-            <table style="width: 100%; border-collapse: collapse;">
-              <tr><td style="padding: 5px 0;"><strong>Amount:</strong></td><td style="color: #10B981; font-weight: bold;">$${additionalData.amountUSD?.toLocaleString()}</td></tr>
-              <tr><td style="padding: 5px 0;"><strong>Crypto Amount:</strong></td><td>${additionalData.amountCrypto} ${additionalData.cryptoAsset}</td></tr>
-              <tr><td style="padding: 5px 0;"><strong>Method:</strong></td><td>${additionalData.method}</td></tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 5px 0;"><strong>Exchange Rate:</strong></td><td>1 ${additionalData.cryptoAsset} = $${additionalData.exchangeRate?.toLocaleString()}</td></tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 5px 0;"><strong>Network:</strong></td><td>${additionalData.network}</td></tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 5px 0;"><strong>Status:</strong></td><td><span style="background: #F7A600; color: #000; padding: 2px 8px; border-radius: 12px; font-size: 12px;">Pending Review</span></td></tr>
-            </table>
+
+      case 'investment_created':
+        const investAmount = details.amount || 0;
+        const investPlan = details.planName || 'Unknown Plan';
+        const investBTCAmount = details.amountBTC || 0;
+        const investExpectedReturn = details.expectedReturn || (investAmount * 1.1);
+        subject = `⛏️ NEW INVESTMENT - ${userFullName} invested $${investAmount.toLocaleString()} in ${investPlan}`;
+        html = `
+          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+            ${brandHeader}
+            <div style="padding: 30px; background: #FFFFFF;">
+              <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin: 0 auto 12px;">
+                  <rect x="4" y="8" width="16" height="12" rx="2" stroke="#10B981" stroke-width="2"/>
+                  <path d="M8 4L12 8L16 4" stroke="#10B981" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                <h2 style="color: #10B981; font-size: 20px; margin: 0;">NEW INVESTMENT ACTIVATED</h2>
+                <p style="color: #065F46; font-size: 13px; margin: 8px 0 0;">Mining contract started</p>
+              </div>
+              ${userInfoBlock}
+              <div style="background: #F5F5F5; border-radius: 12px; padding: 20px; margin: 20px 0;">
+                <table style="width: 100%; border-collapse: collapse;">
+                  <tr><td style="padding: 8px 0;"><strong>Plan Name:</strong></td><td style="padding: 8px 0; text-align: right;">${investPlan}</td></tr>
+                  <tr><td style="padding: 8px 0;"><strong>Investment Amount (USD):</strong></td><td style="padding: 8px 0; text-align: right;">$${investAmount.toLocaleString()}</td></tr>
+                  ${investBTCAmount > 0 ? `<tr><td style="padding: 8px 0;"><strong>Investment Amount (BTC):</strong></td><td style="padding: 8px 0; text-align: right;">${investBTCAmount.toFixed(8)} BTC</td></tr>` : ''}
+                  <tr><td style="padding: 8px 0;"><strong>Expected Return:</strong></td><td style="padding: 8px 0; text-align: right;">$${investExpectedReturn.toLocaleString()}</td></tr>
+                  <tr><td style="padding: 8px 0;"><strong>ROI Percentage:</strong></td><td style="padding: 8px 0; text-align: right;">${details.roiPercentage || 0}%</td></tr>
+                  <tr><td style="padding: 8px 0;"><strong>Duration:</strong></td><td style="padding: 8px 0; text-align: right;">${details.duration || 0} hours</td></tr>
+                  <tr><td style="padding: 8px 0;"><strong>Balance Source:</strong></td><td style="padding: 8px 0; text-align: right;">${details.balanceType || 'Main'} Wallet</td></tr>
+                  <tr><td style="padding: 8px 0;"><strong>BTC Price at Investment:</strong></td><td style="padding: 8px 0; text-align: right;">$${details.btcPrice?.toLocaleString() || 'N/A'}</td></tr>
+                  <tr><td style="padding: 8px 0;"><strong>Start Date:</strong></td><td style="padding: 8px 0; text-align: right;">${timestamp}</td></tr>
+                </table>
+              </div>
+            </div>
+            ${brandFooter}
           </div>
         `;
         break;
-        
-      case 'withdrawal':
-        actionDetailsHtml = `
-          <div style="background: #FEF2F2; border-radius: 8px; padding: 15px; margin: 15px 0;">
-            <h3 style="color: #991B1B; margin: 0 0 10px 0;">💸 Withdrawal Request</h3>
-            <table style="width: 100%; border-collapse: collapse;">
-              <tr><td style="padding: 5px 0;"><strong>Amount:</strong></td><td style="color: #DC2626; font-weight: bold;">$${additionalData.amountUSD?.toLocaleString()}</td></tr>
-              <tr><td style="padding: 5px 0;"><strong>Crypto Amount:</strong></td><td>${additionalData.amountCrypto} ${additionalData.cryptoAsset}</td></tr>
-              <tr><td style="padding: 5px 0;"><strong>Destination Address:</strong></td><td style="font-size: 11px; word-break: break-all;">${additionalData.destinationAddress}</td></tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 5px 0;"><strong>Network:</strong></td><td>${additionalData.network}</td></tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 5px 0;"><strong>Gas Fee:</strong></td><td>${additionalData.gasFee} ${additionalData.cryptoAsset} (≈ $${additionalData.gasFeeUSD?.toLocaleString()})</td></tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 5px 0;"><strong>Balance Source:</strong></td><td>${additionalData.balanceSource}</td></tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 5px 0;"><strong>Status:</strong></td><td><span style="background: #F7A600; color: #000; padding: 2px 8px; border-radius: 12px; font-size: 12px;">Pending Approval</span></td></tr>
-            </table>
+
+      case 'kyc_submitted':
+        subject = `📋 KYC SUBMISSION - ${userFullName} submitted KYC documents`;
+        html = `
+          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+            ${brandHeader}
+            <div style="padding: 30px; background: #FFFFFF;">
+              <div style="background: #FEF3C7; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin: 0 auto 12px;">
+                  <path d="M4 4H20V20H4V4Z" stroke="#F7A600" stroke-width="2" stroke-linecap="round"/>
+                  <path d="M8 8H16" stroke="#F7A600" stroke-width="2" stroke-linecap="round"/>
+                  <path d="M8 12H12" stroke="#F7A600" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                <h2 style="color: #F7A600; font-size: 20px; margin: 0;">KYC DOCUMENTS SUBMITTED</h2>
+                <p style="color: #92400E; font-size: 13px; margin: 8px 0 0;">Awaiting admin verification</p>
+              </div>
+              ${userInfoBlock}
+              <div style="background: #F5F5F5; border-radius: 12px; padding: 20px; margin: 20px 0;">
+                <table style="width: 100%; border-collapse: collapse;">
+                  ${details.documentType ? `<tr><td style="padding: 8px 0;"><strong>Document Type:</strong></td><td style="padding: 8px 0; text-align: right;">${details.documentType}</td></tr>` : ''}
+                  ${details.section ? `<tr><td style="padding: 8px 0;"><strong>Section:</strong></td><td style="padding: 8px 0; text-align: right;">${details.section}</td></tr>` : ''}
+                  <tr><td style="padding: 8px 0;"><strong>Submission Time:</strong></td><td style="padding: 8px 0; text-align: right;">${timestamp}</td></tr>
+                </table>
+              </div>
+              <div style="text-align: center; margin: 20px 0;">
+                <a href="https://www.bithashcapital.live/admin/kyc" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Review KYC</a>
+              </div>
+            </div>
+            ${brandFooter}
           </div>
         `;
         break;
-        
-      case 'kyc':
-        actionDetailsHtml = `
-          <div style="background: #F3E8FF; border-radius: 8px; padding: 15px; margin: 15px 0;">
-            <h3 style="color: #5B21B6; margin: 0 0 10px 0;">📋 KYC Submission</h3>
-            <table style="width: 100%; border-collapse: collapse;">
-              <tr><td style="padding: 5px 0;"><strong>KYC Level:</strong></td><td>${additionalData.kycLevel || 'Identity'}</td></tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 5px 0;"><strong>Document Type:</strong></td><td>${additionalData.documentType}</td></tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 5px 0;"><strong>Status:</strong></td><td><span style="background: #F7A600; color: #000; padding: 2px 8px; border-radius: 12px; font-size: 12px;">Pending Review</span></td></tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 5px 0;"><strong>Documents Submitted:</strong></td><td>${additionalData.documentsCount} file(s)</td></tr>
-            </table>
+
+      case 'settings_update':
+        subject = `⚙️ SETTINGS UPDATE - ${userFullName} updated account settings`;
+        html = `
+          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+            ${brandHeader}
+            <div style="padding: 30px; background: #FFFFFF;">
+              <div style="background: #EFF6FF; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin: 0 auto 12px;">
+                  <circle cx="12" cy="12" r="3" stroke="#3B82F6" stroke-width="2"/>
+                  <path d="M19.4 15.05L20.85 13.6L19.4 12.15" stroke="#3B82F6" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                <h2 style="color: #3B82F6; font-size: 20px; margin: 0;">ACCOUNT SETTINGS UPDATED</h2>
+                <p style="color: #1E40AF; font-size: 13px; margin: 8px 0 0;">User modified their preferences</p>
+              </div>
+              ${userInfoBlock}
+              ${details.changes ? `<div style="background: #F8FAFC; border-radius: 12px; padding: 15px; margin-top: 15px;">
+                <p style="margin: 0 0 10px 0; font-weight: bold;">Changes Made:</p>
+                <ul style="margin: 0; padding-left: 20px;">
+                  ${Object.entries(details.changes).map(([key, value]) => `<li><strong>${key}:</strong> ${value}</li>`).join('')}
+                </ul>
+              </div>` : ''}
+            </div>
+            ${brandFooter}
           </div>
         `;
         break;
-        
-      case 'settings':
-        actionDetailsHtml = `
-          <div style="background: #EFF6FF; border-radius: 8px; padding: 15px; margin: 15px 0;">
-            <h3 style="color: #1E3A8A; margin: 0 0 10px 0;">⚙️ Settings Updated</h3>
-            <table style="width: 100%; border-collapse: collapse;">
-              <tr><td style="padding: 5px 0;"><strong>Settings Type:</strong></td><td>${additionalData.settingsType || 'Profile'}</td></tr>
-              <tr><td style="padding: 5px 0;"><strong>Changes Made:</strong></td><td>${additionalData.changes || 'Unknown'}</td></tr>
-            </table>
+
+      case 'withdrawal_request':
+        const withdrawalAmount = details.amount || 0;
+        const withdrawalAsset = details.asset?.toUpperCase() || 'USD';
+        const withdrawalLogo = getAssetLogo(withdrawalAsset);
+        subject = `💸 WITHDRAWAL REQUEST - ${userFullName} requested $${withdrawalAmount.toLocaleString()}`;
+        html = `
+          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+            ${brandHeader}
+            <div style="padding: 30px; background: #FFFFFF;">
+              <div style="background: #FEF3C7; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
+                <img src="${withdrawalLogo}" width="48" height="48" style="border-radius: 50%; margin: 0 auto 12px; display: block;">
+                <h2 style="color: #F7A600; font-size: 20px; margin: 0;">WITHDRAWAL REQUEST</h2>
+                <p style="color: #92400E; font-size: 13px; margin: 8px 0 0;">Awaiting admin approval</p>
+              </div>
+              ${userInfoBlock}
+              <div style="background: #F5F5F5; border-radius: 12px; padding: 20px; margin: 20px 0;">
+                <table style="width: 100%; border-collapse: collapse;">
+                  <tr><td style="padding: 8px 0;"><strong>Amount Requested:</strong></td><td style="padding: 8px 0; text-align: right;">$${withdrawalAmount.toLocaleString()}</td></tr>
+                  ${details.cryptoAmount ? `<tr><td style="padding: 8px 0;"><strong>Crypto Amount:</strong></td><td style="padding: 8px 0; text-align: right;">${details.cryptoAmount.toFixed(8)} ${withdrawalAsset}</td></tr>` : ''}
+                  <tr><td style="padding: 8px 0;"><strong>Asset:</strong></td><td style="padding: 8px 0; text-align: right;">${withdrawalAsset}</td></tr>
+                  <tr><td style="padding: 8px 0;"><strong>Network:</strong></td><td style="padding: 8px 0; text-align: right;">${details.network || 'Blockchain'}</td></tr>
+                  <tr><td style="padding: 8px 0;"><strong>Destination Address:</strong></td><td style="padding: 8px 0; text-align: right; font-size: 11px; word-break: break-all;">${details.walletAddress || 'N/A'}</td></tr>
+                  ${details.gasFee ? `<tr><td style="padding: 8px 0;"><strong>Network Gas Fee:</strong></td><td style="padding: 8px 0; text-align: right;">${details.gasFee.toFixed(8)} ${withdrawalAsset} (≈ $${details.gasFeeUSD?.toFixed(2) || 0})</td></tr>` : ''}
+                </table>
+              </div>
+            </div>
+            ${brandFooter}
           </div>
         `;
         break;
-        
+
+      case 'transfer_initiated':
+        const transferAmount = details.amount || 0;
+        subject = `🔄 INTERNAL TRANSFER - ${userFullName} transferred $${transferAmount.toLocaleString()}`;
+        html = `
+          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+            ${brandHeader}
+            <div style="padding: 30px; background: #FFFFFF;">
+              <div style="background: #EFF6FF; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin: 0 auto 12px;">
+                  <path d="M17 8L21 12L17 16" stroke="#3B82F6" stroke-width="2" stroke-linecap="round"/>
+                  <path d="M3 12H21" stroke="#3B82F6" stroke-width="2" stroke-linecap="round"/>
+                  <path d="M7 8L3 12L7 16" stroke="#3B82F6" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                <h2 style="color: #3B82F6; font-size: 20px; margin: 0;">INTERNAL TRANSFER</h2>
+                <p style="color: #1E40AF; font-size: 13px; margin: 8px 0 0;">Funds moved between wallets</p>
+              </div>
+              ${userInfoBlock}
+              <div style="background: #F5F5F5; border-radius: 12px; padding: 20px; margin: 20px 0;">
+                <table style="width: 100%; border-collapse: collapse;">
+                  <tr><td style="padding: 8px 0;"><strong>Amount:</strong></td><td style="padding: 8px 0; text-align: right;">$${transferAmount.toLocaleString()}</td></tr>
+                  <tr><td style="padding: 8px 0;"><strong>From Wallet:</strong></td><td style="padding: 8px 0; text-align: right;">${details.fromWallet || 'Unknown'}</td></tr>
+                  <tr><td style="padding: 8px 0;"><strong>To Wallet:</strong></td><td style="padding: 8px 0; text-align: right;">${details.toWallet || 'Unknown'}</td></tr>
+                </table>
+              </div>
+            </div>
+            ${brandFooter}
+          </div>
+        `;
+        break;
+
       default:
-        actionDetailsHtml = `
-          <div style="background: #F8FAFC; border-radius: 8px; padding: 15px; margin: 15px 0;">
-            <p><strong>Activity:</strong> ${action}</p>
-            <p><strong>Additional Info:</strong> ${JSON.stringify(additionalData)}</p>
+        subject = `📌 USER ACTIVITY - ${userFullName} performed ${action.replace(/_/g, ' ')}`;
+        html = `
+          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
+            ${brandHeader}
+            <div style="padding: 30px; background: #FFFFFF;">
+              <div style="background: #EFF6FF; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin: 0 auto 12px;">
+                  <circle cx="12" cy="12" r="10" stroke="#3B82F6" stroke-width="2"/>
+                  <path d="M12 8V12L14 14" stroke="#3B82F6" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                <h2 style="color: #3B82F6; font-size: 20px; margin: 0;">USER ACTIVITY</h2>
+                <p style="color: #1E40AF; font-size: 13px; margin: 8px 0 0;">${action.replace(/_/g, ' ').toUpperCase()}</p>
+              </div>
+              ${userInfoBlock}
+              ${Object.keys(details).length > 0 ? `<div style="background: #F8FAFC; border-radius: 12px; padding: 15px; margin-top: 15px;">
+                <p style="margin: 0 0 10px 0; font-weight: bold;">Additional Details:</p>
+                <pre style="margin: 0; font-size: 12px; white-space: pre-wrap;">${JSON.stringify(details, null, 2)}</pre>
+              </div>` : ''}
+            </div>
+            ${brandFooter}
           </div>
         `;
     }
-    
-    // Get action icon and color
-    const getActionStyle = () => {
-      switch (action) {
-        case 'signup': return { icon: '🎉', color: '#10B981', bgColor: '#ECFDF5', title: 'New User Registration' };
-        case 'login': return { icon: '🔐', color: '#3B82F6', bgColor: '#EFF6FF', title: 'User Login' };
-        case 'investment': return { icon: '💰', color: '#F59E0B', bgColor: '#FEF3C7', title: 'New Investment' };
-        case 'deposit': return { icon: '💵', color: '#10B981', bgColor: '#ECFDF5', title: 'Deposit Request' };
-        case 'withdrawal': return { icon: '💸', color: '#EF4444', bgColor: '#FEF2F2', title: 'Withdrawal Request' };
-        case 'kyc': return { icon: '📋', color: '#8B5CF6', bgColor: '#F3E8FF', title: 'KYC Submission' };
-        case 'settings': return { icon: '⚙️', color: '#6B7280', bgColor: '#F8FAFC', title: 'Settings Update' };
-        default: return { icon: '📢', color: '#F7A600', bgColor: '#FEF3C7', title: 'User Activity' };
+
+    await sendProfessionalEmail({
+      email: ADMIN_EMAIL,
+      template: 'default',
+      data: {
+        name: 'Admin Team',
+        subject: subject,
+        message: html
       }
-    };
-    
-    const style = getActionStyle();
-    
-    const html = `
-      <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-        <div style="text-align: center; padding: 30px 20px 20px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-          <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-          <h1 style="color: #FFFFFF; font-size: 28px; margin: 0; font-weight: bold;">₿itHash</h1>
-          <p style="color: #B7BDC6; font-size: 14px; margin: 10px 0 0 0;"><i><strong>Admin Alert System</strong></i></p>
-        </div>
-        
-        <div style="padding: 30px; background: #FFFFFF;">
-          <div style="background: ${style.bgColor}; border-radius: 12px; padding: 20px; text-align: center; margin-bottom: 25px;">
-            <div style="font-size: 48px; margin-bottom: 8px;">${style.icon}</div>
-            <h2 style="color: ${style.color}; font-size: 22px; margin: 0; font-weight: 700;">${style.title}</h2>
-            <p style="color: #666666; font-size: 13px; margin: 8px 0 0;">${formattedTime}</p>
-          </div>
-          
-          <!-- User Information -->
-          <div style="background: #F5F5F5; border-radius: 12px; padding: 20px; margin: 15px 0;">
-            <h3 style="color: #0B0E11; margin: 0 0 15px 0; font-size: 16px;">👤 User Information</h3>
-            <table style="width: 100%; border-collapse: collapse;">
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Full Name:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${user.name}</td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Email:</strong></td>
-                <td style="padding: 8px 0; text-align: right;"><a href="mailto:${user.email}" style="color: #F7A600;">${user.email}</a></td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>User ID:</strong></td>
-                <td style="padding: 8px 0; text-align: right; font-family: monospace;">${user.id}</td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Account Type:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${user.accountType || 'Individual'}</td>
-              </tr>
-            </table>
-          </div>
-          
-          <!-- Device Information -->
-          <div style="background: #F5F5F5; border-radius: 12px; padding: 20px; margin: 15px 0;">
-            <h3 style="color: #0B0E11; margin: 0 0 15px 0; font-size: 16px;">📱 Device Information</h3>
-            <table style="width: 100%; border-collapse: collapse;">
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Device Type:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${device.type || 'Unknown'}</td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Operating System:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${device.os || 'Unknown'}</td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Browser:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${device.browser || 'Unknown'}</td>
-              </tr>
-              ${device.model !== 'Unknown' ? `
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Device Model:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${device.model}</td>
-              </tr>
-              ` : ''}
-            </table>
-          </div>
-          
-          <!-- Location Information -->
-          <div style="background: #F5F5F5; border-radius: 12px; padding: 20px; margin: 15px 0;">
-            <h3 style="color: #0B0E11; margin: 0 0 15px 0; font-size: 16px;">📍 Location Information</h3>
-            <table style="width: 100%; border-collapse: collapse;">
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>IP Address:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${location.ip || 'Unknown'}</td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>City:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${location.city}</td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Region:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${location.region}</td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Country:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${location.country}</td>
-              </tr>
-              ${location.coordinates !== 'Not available' ? `
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Coordinates:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${location.coordinates}</td>
-              </tr>
-              ` : ''}
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Timezone:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${location.timezone}</td>
-              </tr>
-              <tr style="border-top: 1px solid #E2E8F0;">
-                <td style="padding: 8px 0;"><strong>Exact Location:</strong></td>
-                <td style="padding: 8px 0; text-align: right;">${location.exactLocation ? 'Yes (GPS)' : 'Approximate (IP)'}</td>
-              </tr>
-            </table>
-          </div>
-          
-          ${actionDetailsHtml}
-          
-          <!-- Quick Actions -->
-          <div style="text-align: center; margin: 30px 0; padding-top: 20px; border-top: 1px solid #E2E8F0;">
-            <div style="display: flex; gap: 12px; justify-content: center;">
-              <a href="https://www.bithashcapital.live/admin/users/${user.id}" 
-                 style="background-color: #F7A600; color: #000000; padding: 10px 20px; text-decoration: none; border-radius: 8px; font-weight: 500; font-size: 13px; display: inline-block;">
-                👤 View User Profile
-              </a>
-              <a href="https://www.bithashcapital.live/admin/activity?user=${user.id}" 
-                 style="background-color: #3B82F6; color: #FFFFFF; padding: 10px 20px; text-decoration: none; border-radius: 8px; font-weight: 500; font-size: 13px; display: inline-block;">
-                📊 View Activity Log
-              </a>
-            </div>
-          </div>
-          
-          <hr style="border: none; border-top: 1px solid #E2E8F0; margin: 20px 0;">
-          <p style="color: #6C7480; font-size: 11px; text-align: center; margin: 0;">
-            This is an automated alert from ₿itHash Capital. No action is required on your part.
-          </p>
-        </div>
-        
-        <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-          <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-          <p style="color: #6C7480; font-size: 12px; margin: 5px 0;">800 Plant St, Wilmington, DE 19801, United States</p>
-        </div>
-      </div>
-    `;
-    
-    // Send email to admin
-    const mailTransporter = infoTransporter;
-    await mailTransporter.sendMail({
-      from: `₿itHash Alerts <${process.env.EMAIL_INFO_USER}>`,
-      to: ADMIN_EMAIL,
-      subject: `${style.icon} ${style.title} - ${user.name} (${user.email})`,
-      html: html
     });
-    
-    console.log(`📧 Admin notification sent for: ${action} by ${user.email}`);
+
+    console.log(`📧 Admin notification sent: ${subject}`);
     return true;
-    
+
   } catch (err) {
     console.error('Failed to send admin notification:', err);
     return false;
@@ -28167,75 +28205,12 @@ const sendAdminNotification = async (activityData) => {
 };
 
 
-// Add this after user creation (around line 10700 area)
-await sendAdminNotification(await getUserActivityDetails(req, newUser, 'signup', {
-  referralCode: newUser.referralCode,
-  accountType: newUser.accountType
-}));
 
 
-// Add this after successful login (around line 10900 area)
-await sendAdminNotification(await getUserActivityDetails(req, user, 'login', {
-  loginMethod: req.body.provider === 'google' ? 'Google' : 'Email/Password',
-  twoFactorEnabled: user.twoFactorAuth?.enabled || false
-}));
 
 
-// Add this after deposit is created (around line 11700 area)
-await sendAdminNotification(await getUserActivityDetails(req, req.user, 'deposit', {
-  amountUSD: amount,
-  amountCrypto: assetAmount,
-  cryptoAsset: asset.toUpperCase(),
-  method: method,
-  exchangeRate: exchangeRate,
-  network: network || getNetworkName(asset),
-  depositAddress: address,
-  reference: reference
-}));
 
 
-// Add this after deposit is created (around line 11700 area)
-await sendAdminNotification(await getUserActivityDetails(req, req.user, 'deposit', {
-  amountUSD: amount,
-  amountCrypto: assetAmount,
-  cryptoAsset: asset.toUpperCase(),
-  method: method,
-  exchangeRate: exchangeRate,
-  network: network || getNetworkName(asset),
-  depositAddress: address,
-  reference: reference
-}));
-
-
-// Add this after withdrawal is created (around line 11900 area)
-await sendAdminNotification(await getUserActivityDetails(req, user, 'withdrawal', {
-  amountUSD: amount,
-  amountCrypto: withdrawalCryptoAmount,
-  cryptoAsset: asset.toUpperCase(),
-  destinationAddress: walletAddress,
-  network: detectedNetwork,
-  gasFee: gasFeeInTargetAsset,
-  gasFeeUSD: gasFeeInUSD,
-  balanceSource: balanceSource,
-  exchangeRate: targetPrice,
-  reference: reference
-}));
-
-
-// Add this after KYC is submitted (around line 13000 area)
-await sendAdminNotification(await getUserActivityDetails(req, req.user, 'kyc', {
-  kycLevel: 'Full KYC',
-  documentType: 'Identity/Address/Facial',
-  documentsCount: 3,
-  submittedAt: new Date()
-}));
-
-
-// Add this after profile update (around line 10800 area)
-await sendAdminNotification(await getUserActivityDetails(req, req.user, 'settings', {
-  settingsType: 'Profile Update',
-  changes: Object.keys(updates).join(', ')
-}));
 
 
 
