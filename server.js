@@ -13927,7 +13927,7 @@ app.get('/api/investments/active', protect, async (req, res) => {
       path: 'plan',
       select: 'name percentage duration minAmount maxAmount referralBonus'
     })
-    .lean(); // Convert to plain JS objects
+    .lean();
     
     const total = await Investment.countDocuments({
       user: req.user.id,
@@ -13936,6 +13936,10 @@ app.get('/api/investments/active', protect, async (req, res) => {
     
     // Calculate additional fields for each investment
     const now = new Date();
+    
+    // Get current BTC price using getCryptoPrice for real-time USD values
+    const currentBTCPrice = await getCryptoPrice('BTC');
+    
     const enhancedInvestments = investments.map(investment => {
       const startDate = new Date(investment.startDate);
       const endDate = new Date(investment.endDate);
@@ -13954,32 +13958,33 @@ app.get('/api/investments/active', protect, async (req, res) => {
       // Get ROI percentage from the associated plan (this is the actual ROI percentage)
       const roiPercentage = investment.plan?.percentage || 0;
       
-      // Calculate expected profit in USD
+      // Calculate investment amount in BTC using stored amountBTC or current price
+      const investmentBTC = investment.amountBTC || (investment.amount / currentBTCPrice);
+      
+      // Calculate expected profit based on ROI percentage
       const expectedProfitUSD = investment.amount * (roiPercentage / 100);
+      const expectedProfitBTC = expectedProfitUSD / currentBTCPrice;
       
-      // Calculate BTC amount at the time of investment
-      // Use amountBTC from the investment record (stored when investment was created)
-      // This uses the BTC price at the exact time of investment
-      const investmentBTCAmount = investment.amountBTC || 0;
-      
-      // Calculate expected profit in BTC (based on investment BTC amount)
-      const expectedProfitBTC = investmentBTCAmount * (roiPercentage / 100);
+      // Calculate accumulated profit so far (pro-rated based on progress)
+      const accumulatedProfitUSD = expectedProfitUSD * (progressPercentage / 100);
+      const accumulatedProfitBTC = expectedProfitBTC * (progressPercentage / 100);
       
       return {
         id: investment._id,
         planName: investment.plan?.name || 'Unknown Plan',
         amount: investment.amount,
-        amountBTC: investmentBTCAmount,           // BTC amount at investment time
-        profitPercentage: roiPercentage,          // This is what frontend expects as hourly ROI %
+        amountBTC: investmentBTC,
+        profitPercentage: roiPercentage,
         durationHours: investment.plan?.duration || 0,
         startDate: investment.startDate,
         endDate: investment.endDate,
         status: investment.status,
         timeLeftHours,
         progressPercentage,
-        expectedProfit: expectedProfitUSD,        // Expected profit in USD
-        expectedProfitBTC: expectedProfitBTC,     // Expected profit in BTC (CRITICAL for real-time calculation)
-        btcPriceAtInvestment: investment.btcPriceAtInvestment || 0,
+        expectedProfitUSD: expectedProfitUSD,
+        expectedProfitBTC: expectedProfitBTC,
+        accumulatedProfitUSD: accumulatedProfitUSD,
+        accumulatedProfitBTC: accumulatedProfitBTC,
         planDetails: {
           minAmount: investment.plan?.minAmount,
           maxAmount: investment.plan?.maxAmount,
@@ -13994,12 +13999,13 @@ app.get('/api/investments/active', protect, async (req, res) => {
         investments: enhancedInvestments,
         totalPages: Math.ceil(total / limit),
         currentPage: page,
-        totalInvestments: total
+        totalInvestments: total,
+        currentBTCPrice: currentBTCPrice
       }
     };
     
-    // Cache for 1 minute (adjust based on your requirements)
-    await redis.set(cacheKey, JSON.stringify(response), 'EX', 60);
+    // Cache for 10 seconds to allow real-time updates
+    await redis.set(cacheKey, JSON.stringify(response), 'EX', 10);
     
     res.json(response);
   } catch (err) {
@@ -14011,7 +14017,6 @@ app.get('/api/investments/active', protect, async (req, res) => {
     });
   }
 });
-
 
 
 
