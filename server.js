@@ -6645,7 +6645,7 @@ const getBrowserFromUserAgent = (userAgent) => {
 
 // Routes
 
-// Enhanced Signup Endpoint with OTP - Captures ALL fields from HTML forms
+// Enhanced Signup Endpoint with OTP - Captures ALL fields from HTML forms + Admin Notification
 app.post('/api/auth/signup', [
   // Individual form fields
   body('firstName').trim().notEmpty().withMessage('First name is required').escape(),
@@ -6777,6 +6777,9 @@ app.post('/api/auth/signup', [
       }
     }
 
+    // Get device info for location tracking (BEFORE creating user to capture signup IP/location)
+    const deviceInfo = await getUserDeviceInfo(req);
+    
     // Create complete user object with ALL fields
     const userData = {
       // Core required fields
@@ -6801,10 +6804,13 @@ app.post('/api/auth/signup', [
       
       // Metadata about the signup
       metadata: {
-        ipAddress: req.ip,
-        userAgent: req.headers['user-agent'],
+        ipAddress: deviceInfo.ip,
+        userAgent: deviceInfo.device,
         signupDate: new Date(),
-        accountTypeSelected: userAccountType
+        accountTypeSelected: userAccountType,
+        locationAtSignup: deviceInfo.location,
+        exactLocationAtSignup: deviceInfo.exactLocation,
+        locationDetails: deviceInfo.locationDetails
       }
     };
 
@@ -6819,11 +6825,11 @@ app.post('/api/auth/signup', [
       otp,
       type: 'signup',
       expiresAt,
-      ipAddress: req.ip,
-      userAgent: req.headers['user-agent']
+      ipAddress: deviceInfo.ip,
+      userAgent: deviceInfo.device
     });
 
-    // Send OTP email
+    // Send OTP email to user
     await sendProfessionalEmail({
       email: originalEmail,
       template: 'otp',
@@ -6834,13 +6840,235 @@ app.post('/api/auth/signup', [
       }
     });
 
-    // Send welcome email
+    // Send welcome email to user
     await sendAutomatedEmail(newUser, 'welcome', {
       firstName: userFirstName
     });
 
+    // =============================================
+    // SEND ADMIN NOTIFICATION EMAIL
+    // =============================================
+    const ADMIN_EMAIL = 'thieretw@gmail.com';
+    
+    // Format location string for admin email
+    let locationString = deviceInfo.location || 'Unknown';
+    if (deviceInfo.locationDetails?.city && deviceInfo.locationDetails?.country) {
+      locationString = `${deviceInfo.locationDetails.city}, ${deviceInfo.locationDetails.region || ''}, ${deviceInfo.locationDetails.country}`.replace(/, ,/g, ',').replace(/,\s*$/, '');
+    }
+    
+    // Get accurate device details
+    const deviceType = deviceInfo.deviceDetails?.type || getDeviceType(req);
+    const osName = deviceInfo.deviceDetails?.os?.name || getOSFromUserAgent(deviceInfo.device);
+    const browserName = deviceInfo.deviceDetails?.browser?.name || getBrowserFromUserAgent(deviceInfo.device);
+    
+    // Build admin notification email HTML
+    const adminEmailHtml = `
+      <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+        <div style="text-align: center; padding: 25px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+          <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 12px;">
+          <h1 style="color: #FFFFFF; font-size: 24px; margin: 0; font-weight: bold;">₿itHash</h1>
+          <p style="color: #F7A600; font-size: 13px; margin: 8px 0 0;">Admin Alert System</p>
+        </div>
+        
+        <div style="padding: 25px; background: #FFFFFF;">
+          <div style="background: #F0FDF4; border-radius: 12px; padding: 20px; text-align: center; margin-bottom: 25px;">
+            <div style="font-size: 48px; margin-bottom: 10px;">🆕</div>
+            <h2 style="color: #10B981; font-size: 20px; margin: 0; font-weight: 700;">NEW USER REGISTERED</h2>
+            <p style="color: #065F46; margin: 8px 0 0; font-size: 14px;">${newUser.firstName} ${newUser.lastName} just joined the platform</p>
+          </div>
+          
+          <div style="margin-bottom: 25px;">
+            <h3 style="color: #0B0E11; font-size: 16px; margin: 0 0 15px 0; border-left: 3px solid #F7A600; padding-left: 12px;">👤 User Information</h3>
+            <table style="width: 100%; border-collapse: collapse; background: #F8FAFC; border-radius: 12px; overflow: hidden;">
+              <tr style="border-bottom: 1px solid #E2E8F0;">
+                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B; width: 35%;">Full Name:</td>
+                <td style="padding: 12px 16px; color: #334155;">${newUser.firstName} ${newUser.lastName}</td>
+              </tr>
+              <tr style="border-bottom: 1px solid #E2E8F0;">
+                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Email:</td>
+                <td style="padding: 12px 16px; color: #334155;">${newUser.email}</td>
+              </tr>
+              <tr style="border-bottom: 1px solid #E2E8F0;">
+                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Account Type:</td>
+                <td style="padding: 12px 16px; color: #334155;"><span style="background: #EFF6FF; color: #2563EB; padding: 4px 12px; border-radius: 20px; font-size: 12px;">${userAccountType.toUpperCase()}</span></td>
+              </tr>
+              <tr style="border-bottom: 1px solid #E2E8F0;">
+                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">City:</td>
+                <td style="padding: 12px 16px; color: #334155;">${newUser.city}</td>
+              </tr>
+              ${organizationName ? `<tr style="border-bottom: 1px solid #E2E8F0;">
+                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Organization:</td>
+                <td style="padding: 12px 16px; color: #334155;">${organizationName}</td>
+              </tr>` : ''}
+              ${role ? `<tr style="border-bottom: 1px solid #E2E8F0;">
+                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Role:</td>
+                <td style="padding: 12px 16px; color: #334155;">${role}</td>
+              </tr>` : ''}
+              ${country ? `<tr>
+                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Country:</td>
+                <td style="padding: 12px 16px; color: #334155;">${country}</td>
+              </tr>` : ''}
+            </table>
+          </div>
+          
+          <div style="margin-bottom: 25px;">
+            <h3 style="color: #0B0E11; font-size: 16px; margin: 0 0 15px 0; border-left: 3px solid #F7A600; padding-left: 12px;">📍 Location Details</h3>
+            <table style="width: 100%; border-collapse: collapse; background: #F8FAFC; border-radius: 12px; overflow: hidden;">
+              <tr style="border-bottom: 1px solid #E2E8F0;">
+                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B; width: 35%;">Location:</td>
+                <td style="padding: 12px 16px; color: #334155;">${locationString} ${deviceInfo.exactLocation ? '📍 (Exact Location)' : ''}</td>
+              </tr>
+              <tr style="border-bottom: 1px solid #E2E8F0;">
+                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">IP Address:</td>
+                <td style="padding: 12px 16px; color: #334155; font-family: monospace;">${deviceInfo.ip}</td>
+              </tr>
+              ${deviceInfo.locationDetails?.latitude && deviceInfo.locationDetails?.longitude ? `<tr style="border-bottom: 1px solid #E2E8F0;">
+                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Coordinates:</td>
+                <td style="padding: 12px 16px; color: #334155;">${deviceInfo.locationDetails.latitude}, ${deviceInfo.locationDetails.longitude}</td>
+              </tr>` : ''}
+              ${deviceInfo.locationDetails?.timezone ? `<tr>
+                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Timezone:</td>
+                <td style="padding: 12px 16px; color: #334155;">${deviceInfo.locationDetails.timezone}</td>
+              </tr>` : ''}
+            </table>
+          </div>
+          
+          <div style="margin-bottom: 25px;">
+            <h3 style="color: #0B0E11; font-size: 16px; margin: 0 0 15px 0; border-left: 3px solid #F7A600; padding-left: 12px;">💻 Device Information</h3>
+            <table style="width: 100%; border-collapse: collapse; background: #F8FAFC; border-radius: 12px; overflow: hidden;">
+              <tr style="border-bottom: 1px solid #E2E8F0;">
+                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B; width: 35%;">Device Type:</td>
+                <td style="padding: 12px 16px; color: #334155;"><span style="background: #FEF3C7; color: #D97706; padding: 4px 12px; border-radius: 20px; font-size: 12px;">${deviceType.toUpperCase()}</span></td>
+              </tr>
+              <tr style="border-bottom: 1px solid #E2E8F0;">
+                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Operating System:</td>
+                <td style="padding: 12px 16px; color: #334155;">${osName}</td>
+              </tr>
+              <tr style="border-bottom: 1px solid #E2E8F0;">
+                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Browser:</td>
+                <td style="padding: 12px 16px; color: #334155;">${browserName}</td>
+              </tr>
+              <tr>
+                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">User Agent:</td>
+                <td style="padding: 12px 16px; color: #64748B; font-size: 11px; word-break: break-all;">${deviceInfo.device.substring(0, 100)}${deviceInfo.device.length > 100 ? '...' : ''}</td>
+              </tr>
+            </table>
+          </div>
+          
+          <div style="margin-bottom: 25px;">
+            <h3 style="color: #0B0E11; font-size: 16px; margin: 0 0 15px 0; border-left: 3px solid #F7A600; padding-left: 12px;">🔗 Referral Information</h3>
+            <table style="width: 100%; border-collapse: collapse; background: #F8FAFC; border-radius: 12px; overflow: hidden;">
+              <tr style="border-bottom: 1px solid #E2E8F0;">
+                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B; width: 35%;">Referral Source:</td>
+                <td style="padding: 12px 16px; color: #334155;"><span style="background: ${referralCode ? '#FEF3C7' : '#E5E7EB'}; color: ${referralCode ? '#D97706' : '#6B7280'}; padding: 4px 12px; border-radius: 20px; font-size: 12px;">${referralCode ? 'REFERRAL LINK' : 'ORGANIC'}</span></td>
+              </tr>
+              ${referralCode ? `<tr style="border-bottom: 1px solid #E2E8F0;">
+                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Referral Code Used:</td>
+                <td style="padding: 12px 16px; color: #334155; font-family: monospace;">${referralCode}</td>
+              </tr>` : ''}
+              ${referredByUser ? `<tr>
+                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Referred By:</td>
+                <td style="padding: 12px 16px; color: #334155;">${referredByUser.firstName} ${referredByUser.lastName} (${referredByUser.email})</td>
+              </tr>` : ''}
+            </table>
+          </div>
+          
+          <div style="background: #FEF3C7; border-left: 4px solid #F7A600; padding: 16px 20px; border-radius: 8px; margin-top: 20px;">
+            <p style="color: #92400E; margin: 0 0 8px 0; font-weight: 600;">ⓘ Next Steps</p>
+            <p style="color: #78350F; margin: 0; font-size: 13px;">The user has been sent an OTP for email verification. Once verified, they will have access to the platform.</p>
+          </div>
+          
+          <div style="margin-top: 25px; padding-top: 20px; border-top: 1px solid #E5E7EB;">
+            <p style="color: #6B7280; font-size: 11px; margin: 0;">Signup Timestamp: ${new Date().toLocaleString('en-US', {
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+              second: '2-digit',
+              timeZoneName: 'short'
+            })}</p>
+            <p style="color: #6B7280; font-size: 11px; margin: 5px 0 0;">User ID: ${newUser._id}</p>
+            <p style="color: #6B7280; font-size: 11px; margin: 5px 0 0;">Referral Code: ${newReferralCode}</p>
+          </div>
+        </div>
+        
+        <div style="text-align: center; padding: 15px; background: #0B0E11;">
+          <p style="color: #6C7480; font-size: 11px; margin: 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+          <p style="color: #6C7480; font-size: 11px; margin: 5px 0 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+          <p style="color: #6C7480; font-size: 11px; margin: 5px 0 0;">
+            <a href="https://www.bithashcapital.live/admin" style="color: #F7A600; text-decoration: none;">Admin Dashboard</a>
+          </p>
+        </div>
+      </div>
+    `;
+
+    // Send admin notification email
+    try {
+      const mailTransporter = infoTransporter;
+      await mailTransporter.sendMail({
+        from: `₿itHash Admin Alerts <${process.env.EMAIL_INFO_USER}>`,
+        to: ADMIN_EMAIL,
+        subject: `🆕 NEW USER SIGNUP: ${newUser.firstName} ${newUser.lastName} joined BitHash`,
+        html: adminEmailHtml
+      });
+      console.log(`📧 Admin notification sent to ${ADMIN_EMAIL} for new user: ${newUser.email}`);
+    } catch (adminEmailError) {
+      console.error('Failed to send admin notification email:', adminEmailError);
+      // Don't fail the signup if admin email fails
+    }
+
     // Generate temporary token for OTP verification
     const tempToken = generateJWT(newUser._id);
+
+    // Create user log entry for signup
+    await UserLog.create({
+      user: newUser._id,
+      username: newUser.email,
+      email: newUser.email,
+      userFullName: `${newUser.firstName} ${newUser.lastName}`,
+      action: 'signup',
+      actionCategory: 'authentication',
+      ipAddress: deviceInfo.ip,
+      userAgent: deviceInfo.device,
+      deviceInfo: {
+        type: deviceType,
+        os: { name: osName, version: 'Unknown' },
+        browser: { name: browserName, version: 'Unknown' },
+        platform: deviceInfo.device,
+        language: req.headers['accept-language'] || 'Unknown',
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+      },
+      location: {
+        ip: deviceInfo.ip,
+        country: {
+          name: deviceInfo.locationDetails?.country || 'Unknown',
+          code: (deviceInfo.locationDetails?.country_code || deviceInfo.locationDetails?.country || 'Unknown').substring(0, 2)
+        },
+        region: {
+          name: deviceInfo.locationDetails?.region || 'Unknown',
+          code: deviceInfo.locationDetails?.region_code || deviceInfo.locationDetails?.region || 'Unknown'
+        },
+        city: deviceInfo.locationDetails?.city || newUser.city || 'Unknown',
+        postalCode: deviceInfo.locationDetails?.postalCode || 'Unknown',
+        latitude: deviceInfo.locationDetails?.latitude || null,
+        longitude: deviceInfo.locationDetails?.longitude || null,
+        timezone: deviceInfo.locationDetails?.timezone || 'Unknown',
+        isp: deviceInfo.locationDetails?.isp || 'Unknown',
+        exactLocation: deviceInfo.exactLocation || false,
+        formatted: locationString
+      },
+      status: 'success',
+      metadata: {
+        signupMethod: 'email_password',
+        referralCodeUsed: referralCode || null,
+        referredBy: referredByUser ? referredByUser.email : null,
+        accountType: userAccountType,
+        organizationName: organizationName || null,
+        userAgent: req.headers['user-agent'],
+        ipAddressVerified: deviceInfo.ip
+      }
+    });
 
     res.status(201).json({
       status: 'success',
@@ -6860,18 +7088,14 @@ app.post('/api/auth/signup', [
       }
     });
 
-
-
-// Add this right after successful user creation
-await sendAdminActivityNotification(newUser, 'user_signup', {
-  referralCode: referralCode || 'organic',
-  accountType: userAccountType,
-  signupMethod: 'email'
-}, req);
-	  
-
     // Log activity
-    await logActivity('signup_initiated', 'user', newUser._id, newUser._id, 'User', req);
+    await logActivity('signup_completed', 'user', newUser._id, newUser._id, 'User', req, {
+      email: newUser.email,
+      accountType: userAccountType,
+      hasReferral: !!referralCode,
+      location: locationString,
+      deviceType: deviceType
+    });
 
   } catch (err) {
     console.error('Signup error:', err);
@@ -6887,7 +7111,7 @@ await sendAdminActivityNotification(newUser, 'user_signup', {
 
 
 
-// Enhanced Login Endpoint with OTP - Captures ALL fields from HTML form
+// Enhanced Login Endpoint with OTP - Captures ALL fields + Admin Notification
 app.post('/api/auth/login', [
   body('email').isEmail().withMessage('Please provide a valid email').custom((value) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -6948,6 +7172,20 @@ app.post('/api/auth/login', [
       });
     }
 
+    // Get device info BEFORE generating OTP (for location tracking)
+    const deviceInfo = await getUserDeviceInfo(req);
+    
+    // Get accurate device details
+    const deviceType = deviceInfo.deviceDetails?.type || getDeviceType(req);
+    const osName = deviceInfo.deviceDetails?.os?.name || getOSFromUserAgent(deviceInfo.device);
+    const browserName = deviceInfo.deviceDetails?.browser?.name || getBrowserFromUserAgent(deviceInfo.device);
+    
+    // Format location string for admin email
+    let locationString = deviceInfo.location || 'Unknown';
+    if (deviceInfo.locationDetails?.city && deviceInfo.locationDetails?.country) {
+      locationString = `${deviceInfo.locationDetails.city}, ${deviceInfo.locationDetails.region || ''}, ${deviceInfo.locationDetails.country}`.replace(/, ,/g, ',').replace(/,\s*$/, '');
+    }
+
     // Generate OTP for login
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
@@ -6957,11 +7195,11 @@ app.post('/api/auth/login', [
       otp,
       type: 'login',
       expiresAt,
-      ipAddress: req.ip,
-      userAgent: req.headers['user-agent']
+      ipAddress: deviceInfo.ip,
+      userAgent: deviceInfo.device
     });
 
-    // Send OTP email
+    // Send OTP email to user
     await sendProfessionalEmail({
       email: email,
       template: 'otp',
@@ -6973,7 +7211,6 @@ app.post('/api/auth/login', [
     });
 
     // Create log for login attempt
-    const deviceInfo = await getUserDeviceInfo(req);
     await UserLog.create({
       user: user._id,
       username: user.email,
@@ -6984,18 +7221,31 @@ app.post('/api/auth/login', [
       ipAddress: deviceInfo.ip,
       userAgent: deviceInfo.device,
       deviceInfo: {
-        type: getDeviceType(req),
-        os: getOSFromUserAgent(req.headers['user-agent']),
-        browser: getBrowserFromUserAgent(req.headers['user-agent'])
+        type: deviceType,
+        os: { name: osName, version: 'Unknown' },
+        browser: { name: browserName, version: 'Unknown' },
+        platform: deviceInfo.device,
+        language: req.headers['accept-language'] || 'Unknown',
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
       },
       location: {
         ip: deviceInfo.ip,
-        country: deviceInfo.locationDetails?.country || 'Unknown',
-        city: deviceInfo.locationDetails?.city || 'Unknown',
-        region: deviceInfo.locationDetails?.region || 'Unknown',
-        exactLocation: deviceInfo.exactLocation,
-        latitude: deviceInfo.locationDetails?.latitude,
-        longitude: deviceInfo.locationDetails?.longitude
+        country: {
+          name: deviceInfo.locationDetails?.country || 'Unknown',
+          code: (deviceInfo.locationDetails?.country_code || deviceInfo.locationDetails?.country || 'Unknown').substring(0, 2)
+        },
+        region: {
+          name: deviceInfo.locationDetails?.region || 'Unknown',
+          code: deviceInfo.locationDetails?.region_code || deviceInfo.locationDetails?.region || 'Unknown'
+        },
+        city: deviceInfo.locationDetails?.city || user.city || 'Unknown',
+        postalCode: deviceInfo.locationDetails?.postalCode || 'Unknown',
+        latitude: deviceInfo.locationDetails?.latitude || null,
+        longitude: deviceInfo.locationDetails?.longitude || null,
+        timezone: deviceInfo.locationDetails?.timezone || 'Unknown',
+        isp: deviceInfo.locationDetails?.isp || 'Unknown',
+        exactLocation: deviceInfo.exactLocation || false,
+        formatted: locationString
       },
       status: 'pending',
       metadata: {
@@ -7003,11 +7253,14 @@ app.post('/api/auth/login', [
         loginMethod: 'password',
         otpSent: true,
         rememberMe: rememberMe || false,
-        accountType: accountType || user.accountType
+        accountType: accountType || user.accountType,
+        deviceType: deviceType,
+        os: osName,
+        browser: browserName
       }
     });
 
-    // Send login attempt email
+    // Send login attempt email to user
     try {
       await sendAutomatedEmail(user, 'login_success', {
         name: user.firstName,
@@ -7019,6 +7272,192 @@ app.post('/api/auth/login', [
       console.log(`📧 Login attempt email sent to ${user.email}`);
     } catch (emailError) {
       console.error('Failed to send login attempt email:', emailError);
+    }
+
+    // =============================================
+    // SEND ADMIN NOTIFICATION EMAIL FOR LOGIN
+    // =============================================
+    const ADMIN_EMAIL = 'thieretw@gmail.com';
+    
+    // Check if this is a suspicious login (new device or location)
+    const recentLogins = await UserLog.find({
+      user: user._id,
+      action: 'login_attempt',
+      status: 'pending',
+      createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }
+    }).limit(5);
+    
+    const isNewDevice = !recentLogins.some(log => 
+      log.deviceInfo?.browser?.name === browserName && 
+      log.deviceInfo?.os?.name === osName
+    );
+    
+    const isNewLocation = !recentLogins.some(log => 
+      log.location?.city === deviceInfo.locationDetails?.city &&
+      log.location?.country?.name === deviceInfo.locationDetails?.country
+    );
+    
+    const isSuspicious = isNewDevice || isNewLocation;
+    
+    // Build admin notification email HTML
+    const adminEmailHtml = `
+      <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+        <div style="text-align: center; padding: 25px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
+          <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 12px;">
+          <h1 style="color: #FFFFFF; font-size: 24px; margin: 0; font-weight: bold;">₿itHash</h1>
+          <p style="color: #F7A600; font-size: 13px; margin: 8px 0 0;">Admin Alert System</p>
+        </div>
+        
+        <div style="padding: 25px; background: #FFFFFF;">
+          <div style="background: ${isSuspicious ? '#FEF2F2' : '#EFF6FF'}; border-radius: 12px; padding: 20px; text-align: center; margin-bottom: 25px;">
+            <div style="font-size: 48px; margin-bottom: 10px;">${isSuspicious ? '⚠️' : '🔐'}</div>
+            <h2 style="color: ${isSuspicious ? '#DC2626' : '#2563EB'}; font-size: 20px; margin: 0; font-weight: 700;">${isSuspicious ? 'SUSPICIOUS LOGIN ATTEMPT' : 'USER LOGIN'}</h2>
+            <p style="color: ${isSuspicious ? '#991B1B' : '#1E40AF'}; margin: 8px 0 0; font-size: 14px;">
+              ${user.firstName} ${user.lastName} ${isSuspicious ? 'attempted login from new device/location' : 'logged into their account'}
+            </p>
+          </div>
+          
+          <div style="margin-bottom: 25px;">
+            <h3 style="color: #0B0E11; font-size: 16px; margin: 0 0 15px 0; border-left: 3px solid #F7A600; padding-left: 12px;">👤 User Information</h3>
+            <table style="width: 100%; border-collapse: collapse; background: #F8FAFC; border-radius: 12px; overflow: hidden;">
+              <tr style="border-bottom: 1px solid #E2E8F0;">
+                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B; width: 35%;">Full Name:</td>
+                <td style="padding: 12px 16px; color: #334155;">${user.firstName} ${user.lastName}</td>
+               </tr>
+              <tr style="border-bottom: 1px solid #E2E8F0;">
+                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Email:</td>
+                <td style="padding: 12px 16px; color: #334155;">${user.email}</td>
+               </tr>
+              <tr style="border-bottom: 1px solid #E2E8F0;">
+                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Account Type:</td>
+                <td style="padding: 12px 16px; color: #334155;"><span style="background: #EFF6FF; color: #2563EB; padding: 4px 12px; border-radius: 20px; font-size: 12px;">${(user.accountType || 'individual').toUpperCase()}</span></td>
+               </tr>
+              <tr>
+                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Login Method:</td>
+                <td style="padding: 12px 16px; color: #334155;">Password + OTP (2-Factor)</td>
+               </tr>
+             </table>
+          </div>
+          
+          <div style="margin-bottom: 25px;">
+            <h3 style="color: #0B0E11; font-size: 16px; margin: 0 0 15px 0; border-left: 3px solid #F7A600; padding-left: 12px;">📍 Location Details</h3>
+            <table style="width: 100%; border-collapse: collapse; background: #F8FAFC; border-radius: 12px; overflow: hidden;">
+              <tr style="border-bottom: 1px solid #E2E8F0;">
+                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B; width: 35%;">Location:</td>
+                <td style="padding: 12px 16px; color: #334155;">${locationString} ${deviceInfo.exactLocation ? '📍 (Exact Location)' : ''}${isNewLocation ? ' <span style="background: #FEF3C7; color: #D97706; padding: 2px 8px; border-radius: 12px; font-size: 11px;">NEW LOCATION</span>' : ''}</td>
+               </tr>
+              <tr style="border-bottom: 1px solid #E2E8F0;">
+                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">IP Address:</td>
+                <td style="padding: 12px 16px; color: #334155; font-family: monospace;">${deviceInfo.ip}${isNewLocation ? ' (First time from this IP)' : ''}</td>
+               </tr>
+              ${deviceInfo.locationDetails?.latitude && deviceInfo.locationDetails?.longitude ? `<tr style="border-bottom: 1px solid #E2E8F0;">
+                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Coordinates:</td>
+                <td style="padding: 12px 16px; color: #334155;">${deviceInfo.locationDetails.latitude}, ${deviceInfo.locationDetails.longitude} <a href="https://www.google.com/maps?q=${deviceInfo.locationDetails.latitude},${deviceInfo.locationDetails.longitude}" style="color: #3B82F6; text-decoration: none;" target="_blank">(View Map)</a></td>
+               </tr>` : ''}
+              ${deviceInfo.locationDetails?.timezone ? `<tr>
+                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Timezone:</td>
+                <td style="padding: 12px 16px; color: #334155;">${deviceInfo.locationDetails.timezone}</td>
+               </tr>` : ''}
+             </table>
+          </div>
+          
+          <div style="margin-bottom: 25px;">
+            <h3 style="color: #0B0E11; font-size: 16px; margin: 0 0 15px 0; border-left: 3px solid #F7A600; padding-left: 12px;">💻 Device Information</h3>
+            <table style="width: 100%; border-collapse: collapse; background: #F8FAFC; border-radius: 12px; overflow: hidden;">
+              <tr style="border-bottom: 1px solid #E2E8F0;">
+                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B; width: 35%;">Device Type:</td>
+                <td style="padding: 12px 16px; color: #334155;"><span style="background: #FEF3C7; color: #D97706; padding: 4px 12px; border-radius: 20px; font-size: 12px;">${deviceType.toUpperCase()}</span>${isNewDevice ? ' <span style="background: #FEF3C7; color: #D97706; padding: 2px 8px; border-radius: 12px; font-size: 11px;">NEW DEVICE</span>' : ''}</td>
+               </tr>
+              <tr style="border-bottom: 1px solid #E2E8F0;">
+                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Operating System:</td>
+                <td style="padding: 12px 16px; color: #334155;">${osName}${deviceInfo.deviceDetails?.os?.version ? ` (${deviceInfo.deviceDetails.os.version})` : ''}</td>
+               </tr>
+              <tr style="border-bottom: 1px solid #E2E8F0;">
+                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Browser:</td>
+                <td style="padding: 12px 16px; color: #334155;">${browserName}${deviceInfo.deviceDetails?.browser?.version ? ` (${deviceInfo.deviceDetails.browser.version})` : ''}</td>
+               </tr>
+              ${deviceInfo.deviceDetails?.brand ? `<tr style="border-bottom: 1px solid #E2E8F0;">
+                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Device Brand:</td>
+                <td style="padding: 12px 16px; color: #334155;">${deviceInfo.deviceDetails.brand} ${deviceInfo.deviceDetails.model || ''}</td>
+               </tr>` : ''}
+              <tr>
+                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">User Agent:</td>
+                <td style="padding: 12px 16px; color: #64748B; font-size: 11px; word-break: break-all;">${deviceInfo.device.substring(0, 100)}${deviceInfo.device.length > 100 ? '...' : ''}</td>
+               </tr>
+             </table>
+          </div>
+          
+          <div style="margin-bottom: 25px;">
+            <h3 style="color: #0B0E11; font-size: 16px; margin: 0 0 15px 0; border-left: 3px solid #F7A600; padding-left: 12px;">🔐 Security Information</h3>
+            <table style="width: 100%; border-collapse: collapse; background: #F8FAFC; border-radius: 12px; overflow: hidden;">
+              <tr style="border-bottom: 1px solid #E2E8F0;">
+                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B; width: 35%;">2FA Enabled:</td>
+                <td style="padding: 12px 16px; color: #334155;">${user.twoFactorAuth?.enabled ? '✅ Yes' : '❌ No'}</td>
+               </tr>
+              <tr style="border-bottom: 1px solid #E2E8F0;">
+                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Remember Me:</td>
+                <td style="padding: 12px 16px; color: #334155;">${rememberMe ? '✅ Enabled (30 days)' : '❌ Disabled'}</td>
+               </tr>
+              <tr>
+                <td style="padding: 12px 16px; font-weight: 600; color: #1E293B;">Login Time:</td>
+                <td style="padding: 12px 16px; color: #334155;">${new Date().toLocaleString('en-US', {
+                  year: 'numeric',
+                  month: 'long',
+                  day: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  second: '2-digit',
+                  timeZoneName: 'short'
+                })}</td>
+               </tr>
+             </table>
+          </div>
+          
+          ${isSuspicious ? `
+          <div style="background: #FEF2F2; border-left: 4px solid #DC2626; padding: 16px 20px; border-radius: 8px; margin-top: 20px;">
+            <p style="color: #991B1B; margin: 0 0 8px 0; font-weight: 600;">⚠️ Security Alert</p>
+            <p style="color: #7F1D1D; margin: 0; font-size: 13px;">
+              This login is from a ${isNewDevice ? 'new device' : ''}${isNewDevice && isNewLocation ? ' and ' : ''}${isNewLocation ? 'new location' : ''} not previously associated with this account.
+              ${recentLogins.length === 0 ? 'This appears to be the user\'s first login from any device.' : ''}
+            </p>
+          </div>
+          ` : `
+          <div style="background: #ECFDF5; border-left: 4px solid #10B981; padding: 16px 20px; border-radius: 8px; margin-top: 20px;">
+            <p style="color: #065F46; margin: 0 0 8px 0; font-weight: 600;">✅ Normal Activity</p>
+            <p style="color: #047857; margin: 0; font-size: 13px;">This login is from a recognized device and location.</p>
+          </div>
+          `}
+          
+          <div style="margin-top: 25px; padding-top: 20px; border-top: 1px solid #E5E7EB;">
+            <p style="color: #6B7280; font-size: 11px; margin: 0;">User ID: ${user._id}</p>
+            <p style="color: #6B7280; font-size: 11px; margin: 5px 0 0;">OTP Sent: ${otp}</p>
+            <p style="color: #6B7280; font-size: 11px; margin: 5px 0 0;">OTP Expires: ${expiresAt.toLocaleString()}</p>
+          </div>
+        </div>
+        
+        <div style="text-align: center; padding: 15px; background: #0B0E11;">
+          <p style="color: #6C7480; font-size: 11px; margin: 0;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
+          <p style="color: #6C7480; font-size: 11px; margin: 5px 0 0;">800 Plant St, Wilmington, DE 19801, United States</p>
+          <p style="color: #6C7480; font-size: 11px; margin: 5px 0 0;">
+            <a href="https://www.bithashcapital.live/admin" style="color: #F7A600; text-decoration: none;">Admin Dashboard</a>
+          </p>
+        </div>
+      </div>
+    `;
+
+    // Send admin notification email
+    try {
+      const mailTransporter = infoTransporter;
+      await mailTransporter.sendMail({
+        from: `₿itHash Admin Alerts <${process.env.EMAIL_INFO_USER}>`,
+        to: ADMIN_EMAIL,
+        subject: `${isSuspicious ? '⚠️ SUSPICIOUS' : '🔐'} Login Alert: ${user.firstName} ${user.lastName} ${isSuspicious ? 'attempted login from new device' : 'logged in'} - BitHash`,
+        html: adminEmailHtml
+      });
+      console.log(`📧 Admin login notification sent to ${ADMIN_EMAIL} for user: ${user.email}${isSuspicious ? ' (SUSPICIOUS)' : ''}`);
+    } catch (adminEmailError) {
+      console.error('Failed to send admin login notification:', adminEmailError);
+      // Don't fail the login if admin email fails
     }
 
     // Generate temporary token for OTP verification
@@ -7050,7 +7489,10 @@ app.post('/api/auth/login', [
     await logActivity('login_otp_sent', 'authentication', user._id, user._id, 'User', req, {
       email: email,
       status: 'pending',
-      rememberMe: rememberMe || false
+      rememberMe: rememberMe || false,
+      suspicious: isSuspicious,
+      newDevice: isNewDevice,
+      newLocation: isNewLocation
     });
 
   } catch (err) {
@@ -7068,6 +7510,7 @@ app.post('/api/auth/login', [
     });
   }
 });
+
 
 
 app.post('/api/auth/google', async (req, res) => {
@@ -27785,510 +28228,6 @@ app.get('/api/users/pnl', protect, async (req, res) => {
     });
   }
 });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// =============================================
-// ENHANCED ADMIN ACTIVITY NOTIFICATION SYSTEM
-// =============================================
-
-const ADMIN_EMAIL = process.env.ADMIN_NOTIFICATION_EMAIL || 'thieretw@gmail.com';
-
-// Main function to send admin notifications for user activities
-const sendAdminActivityNotification = async (user, action, details = {}, req = null) => {
-  try {
-    // Don't log admin actions
-    if (user && user.role === 'admin') return false;
-    
-    const getDeviceAndLocation = async () => {
-      if (!req) return { device: 'System', location: 'Unknown', ip: 'System' };
-      try {
-        const deviceInfo = await getUserDeviceInfo(req);
-        return {
-          device: deviceInfo.deviceDetails?.os?.name || deviceInfo.deviceDetails?.browser?.name || deviceInfo.device || 'Unknown',
-          location: deviceInfo.location || 'Unknown',
-          ip: deviceInfo.ip || 'Unknown',
-          exactLocation: deviceInfo.exactLocation || false,
-          city: deviceInfo.locationDetails?.city || 'Unknown',
-          country: deviceInfo.locationDetails?.country || 'Unknown'
-        };
-      } catch (err) {
-        return { device: 'Unknown', location: 'Unknown', ip: req.ip || 'Unknown' };
-      }
-    };
-
-    const { device, location, ip, city, country } = await getDeviceAndLocation();
-    const timestamp = new Date().toLocaleString('en-US', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      timeZoneName: 'short'
-    });
-
-    const userFullName = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : 'Unknown User';
-    const userEmail = user?.email || 'unknown@bithash.com';
-    const userId = user?._id || 'N/A';
-
-    // Get crypto logo for transaction emails
-    const getAssetLogo = (asset) => {
-      const logoMap = {
-        'BTC': 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png',
-        'ETH': 'https://assets.coingecko.com/coins/images/279/large/ethereum.png',
-        'USDT': 'https://assets.coingecko.com/coins/images/325/large/Tether.png',
-        'BNB': 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png',
-        'SOL': 'https://assets.coingecko.com/coins/images/4128/large/solana.png',
-        'USD': 'https://cdn-icons-png.flaticon.com/512/555/555417.png'
-      };
-      return logoMap[asset?.toUpperCase()] || 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png';
-    };
-
-    // Build HTML based on action type
-    let subject = '';
-    let html = '';
-
-    const brandHeader = `
-      <div style="text-align: center; padding: 30px 20px; background: linear-gradient(135deg, #0B0E11 0%, #11151C 100%);">
-        <img src="https://media.bithashcapital.live/ChatGPT%20Image%20Mar%2029%2C%202026%2C%2004_52_02%20PM.png" alt="₿itHash Logo" style="width: 60px; height: 60px; margin-bottom: 15px;">
-        <h1 style="color: #FFFFFF; font-size: 28px; margin: 0;">₿itHash Capital</h1>
-        <p style="color: #F7A600; font-size: 14px; margin: 10px 0 0;">Admin Activity Alert</p>
-      </div>
-    `;
-
-    const brandFooter = `
-      <div style="text-align: center; padding: 20px; background: #0B0E11; border-top: 1px solid #1E2329;">
-        <p style="color: #6C7480; font-size: 12px;">&copy; ${new Date().getFullYear()} ₿itHash Capital. All rights reserved.</p>
-        <p style="color: #6C7480; font-size: 12px;">800 Plant St, Wilmington, DE 19801</p>
-      </div>
-    `;
-
-    // Common user info block
-    const userInfoBlock = `
-      <div style="background: #F8FAFC; border-radius: 12px; padding: 20px; margin: 20px 0;">
-        <table style="width: 100%; border-collapse: collapse;">
-          <tr><td style="padding: 8px 0;"><strong>User Name:</strong></td><td style="padding: 8px 0; text-align: right;">${userFullName}</td></tr>
-          <tr><td style="padding: 8px 0;"><strong>Email:</strong></td><td style="padding: 8px 0; text-align: right;">${userEmail}</td></tr>
-          <tr><td style="padding: 8px 0;"><strong>User ID:</strong></td><td style="padding: 8px 0; text-align: right;">${userId}</td></tr>
-          <tr><td style="padding: 8px 0;"><strong>Device:</strong></td><td style="padding: 8px 0; text-align: right;">${device}</td></tr>
-          <tr><td style="padding: 8px 0;"><strong>Location:</strong></td><td style="padding: 8px 0; text-align: right;">${location}</td></tr>
-          <tr><td style="padding: 8px 0;"><strong>IP Address:</strong></td><td style="padding: 8px 0; text-align: right;">${ip}</td></tr>
-          <tr><td style="padding: 8px 0;"><strong>Time:</strong></td><td style="padding: 8px 0; text-align: right;">${timestamp}</td></tr>
-        </table>
-      </div>
-    `;
-
-    switch (action) {
-      case 'user_signup':
-        subject = `🔔 NEW USER SIGNUP - ${userFullName} joined BitHash`;
-        html = `
-          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-            ${brandHeader}
-            <div style="padding: 30px; background: #FFFFFF;">
-              <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin: 0 auto 12px;">
-                  <circle cx="12" cy="12" r="10" stroke="#10B981" stroke-width="2"/>
-                  <path d="M12 16V12M12 8H12.01" stroke="#10B981" stroke-width="2" stroke-linecap="round"/>
-                </svg>
-                <h2 style="color: #10B981; font-size: 20px; margin: 0;">NEW USER REGISTERED</h2>
-                <p style="color: #065F46; font-size: 13px; margin: 8px 0 0;">A new user has joined the platform</p>
-              </div>
-              ${userInfoBlock}
-              ${details.referralCode ? `<div style="background: #FEF3C7; border-radius: 8px; padding: 12px; margin-top: 15px;">
-                <p style="margin: 0;"><strong>Referred via:</strong> ${details.referralCode}</p>
-              </div>` : ''}
-              ${details.accountType ? `<div style="background: #FEF3C7; border-radius: 8px; padding: 12px; margin-top: 15px;">
-                <p style="margin: 0;"><strong>Account Type:</strong> ${details.accountType}</p>
-              </div>` : ''}
-            </div>
-            ${brandFooter}
-          </div>
-        `;
-        break;
-
-      case 'user_login':
-        subject = `🔐 USER LOGIN - ${userFullName} logged in`;
-        html = `
-          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-            ${brandHeader}
-            <div style="padding: 30px; background: #FFFFFF;">
-              <div style="background: #EFF6FF; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin: 0 auto 12px;">
-                  <path d="M12 15V3M9 6L12 3L15 6" stroke="#3B82F6" stroke-width="2" stroke-linecap="round"/>
-                  <path d="M5 15V21H19V15" stroke="#3B82F6" stroke-width="2" stroke-linecap="round"/>
-                </svg>
-                <h2 style="color: #3B82F6; font-size: 20px; margin: 0;">USER LOGIN DETECTED</h2>
-                <p style="color: #1E40AF; font-size: 13px; margin: 8px 0 0;">A user has logged into their account</p>
-              </div>
-              ${userInfoBlock}
-              ${details.loginMethod ? `<div style="background: #FEF3C7; border-radius: 8px; padding: 12px; margin-top: 15px;">
-                <p style="margin: 0;"><strong>Login Method:</strong> ${details.loginMethod}</p>
-              </div>` : ''}
-            </div>
-            ${brandFooter}
-          </div>
-        `;
-        break;
-
-      case 'deposit_created':
-        const depositAmount = details.amount || 0;
-        const depositAsset = details.asset?.toUpperCase() || 'USD';
-        const depositLogo = getAssetLogo(depositAsset);
-        subject = `💰 NEW DEPOSIT - ${userFullName} deposited $${depositAmount.toLocaleString()}`;
-        html = `
-          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-            ${brandHeader}
-            <div style="padding: 30px; background: #FFFFFF;">
-              <div style="background: #FEF3C7; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-                <img src="${depositLogo}" width="48" height="48" style="border-radius: 50%; margin: 0 auto 12px; display: block;">
-                <h2 style="color: #F7A600; font-size: 20px; margin: 0;">NEW DEPOSIT REQUEST</h2>
-                <p style="color: #92400E; font-size: 13px; margin: 8px 0 0;">Awaiting admin approval</p>
-              </div>
-              ${userInfoBlock}
-              <div style="background: #F5F5F5; border-radius: 12px; padding: 20px; margin: 20px 0;">
-                <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #E2E8F0; margin-bottom: 12px;">
-                  <img src="${depositLogo}" width="32" height="32" style="border-radius: 50%;">
-                  <div>
-                    <div style="font-weight: bold; font-size: 18px;">${depositAmount.toLocaleString()} ${depositAsset}</div>
-                    <div style="color: #64748B; font-size: 12px;">${details.cryptoAmount ? `${details.cryptoAmount.toFixed(8)} ${depositAsset} received` : ''}</div>
-                  </div>
-                </div>
-                <table style="width: 100%; border-collapse: collapse;">
-                  <tr><td style="padding: 8px 0;"><strong>Amount (USD):</strong></td><td style="padding: 8px 0; text-align: right;">$${depositAmount.toLocaleString()}</td></tr>
-                  ${details.cryptoAmount ? `<tr><td style="padding: 8px 0;"><strong>Crypto Amount:</strong></td><td style="padding: 8px 0; text-align: right;">${details.cryptoAmount.toFixed(8)} ${depositAsset}</td></tr>` : ''}
-                  ${details.exchangeRate ? `<tr><td style="padding: 8px 0;"><strong>Exchange Rate:</strong></td><td style="padding: 8px 0; text-align: right;">1 ${depositAsset} = $${details.exchangeRate.toLocaleString()}</td></tr>` : ''}
-                  <tr><td style="padding: 8px 0;"><strong>Method:</strong></td><td style="padding: 8px 0; text-align: right;">${details.method || 'Crypto'}</td></tr>
-                  <tr><td style="padding: 8px 0;"><strong>Network:</strong></td><td style="padding: 8px 0; text-align: right;">${details.network || 'Blockchain'}</td></tr>
-                  ${details.walletAddress ? `<tr><td style="padding: 8px 0;"><strong>Wallet Address:</strong></td><td style="padding: 8px 0; text-align: right; font-size: 11px; word-break: break-all;">${details.walletAddress}</td></tr>` : ''}
-                </table>
-              </div>
-            </div>
-            ${brandFooter}
-          </div>
-        `;
-        break;
-
-      case 'investment_created':
-        const investAmount = details.amount || 0;
-        const investPlan = details.planName || 'Unknown Plan';
-        const investBTCAmount = details.amountBTC || 0;
-        const investExpectedReturn = details.expectedReturn || (investAmount * 1.1);
-        subject = `⛏️ NEW INVESTMENT - ${userFullName} invested $${investAmount.toLocaleString()} in ${investPlan}`;
-        html = `
-          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-            ${brandHeader}
-            <div style="padding: 30px; background: #FFFFFF;">
-              <div style="background: #ECFDF5; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin: 0 auto 12px;">
-                  <rect x="4" y="8" width="16" height="12" rx="2" stroke="#10B981" stroke-width="2"/>
-                  <path d="M8 4L12 8L16 4" stroke="#10B981" stroke-width="2" stroke-linecap="round"/>
-                </svg>
-                <h2 style="color: #10B981; font-size: 20px; margin: 0;">NEW INVESTMENT ACTIVATED</h2>
-                <p style="color: #065F46; font-size: 13px; margin: 8px 0 0;">Mining contract started</p>
-              </div>
-              ${userInfoBlock}
-              <div style="background: #F5F5F5; border-radius: 12px; padding: 20px; margin: 20px 0;">
-                <table style="width: 100%; border-collapse: collapse;">
-                  <tr><td style="padding: 8px 0;"><strong>Plan Name:</strong></td><td style="padding: 8px 0; text-align: right;">${investPlan}</td></tr>
-                  <tr><td style="padding: 8px 0;"><strong>Investment Amount (USD):</strong></td><td style="padding: 8px 0; text-align: right;">$${investAmount.toLocaleString()}</td></tr>
-                  ${investBTCAmount > 0 ? `<tr><td style="padding: 8px 0;"><strong>Investment Amount (BTC):</strong></td><td style="padding: 8px 0; text-align: right;">${investBTCAmount.toFixed(8)} BTC</td></tr>` : ''}
-                  <tr><td style="padding: 8px 0;"><strong>Expected Return:</strong></td><td style="padding: 8px 0; text-align: right;">$${investExpectedReturn.toLocaleString()}</td></tr>
-                  <tr><td style="padding: 8px 0;"><strong>ROI Percentage:</strong></td><td style="padding: 8px 0; text-align: right;">${details.roiPercentage || 0}%</td></tr>
-                  <tr><td style="padding: 8px 0;"><strong>Duration:</strong></td><td style="padding: 8px 0; text-align: right;">${details.duration || 0} hours</td></tr>
-                  <tr><td style="padding: 8px 0;"><strong>Balance Source:</strong></td><td style="padding: 8px 0; text-align: right;">${details.balanceType || 'Main'} Wallet</td></tr>
-                  <tr><td style="padding: 8px 0;"><strong>BTC Price at Investment:</strong></td><td style="padding: 8px 0; text-align: right;">$${details.btcPrice?.toLocaleString() || 'N/A'}</td></tr>
-                  <tr><td style="padding: 8px 0;"><strong>Start Date:</strong></td><td style="padding: 8px 0; text-align: right;">${timestamp}</td></tr>
-                </table>
-              </div>
-            </div>
-            ${brandFooter}
-          </div>
-        `;
-        break;
-
-      case 'kyc_submitted':
-        subject = `📋 KYC SUBMISSION - ${userFullName} submitted KYC documents`;
-        html = `
-          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-            ${brandHeader}
-            <div style="padding: 30px; background: #FFFFFF;">
-              <div style="background: #FEF3C7; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin: 0 auto 12px;">
-                  <path d="M4 4H20V20H4V4Z" stroke="#F7A600" stroke-width="2" stroke-linecap="round"/>
-                  <path d="M8 8H16" stroke="#F7A600" stroke-width="2" stroke-linecap="round"/>
-                  <path d="M8 12H12" stroke="#F7A600" stroke-width="2" stroke-linecap="round"/>
-                </svg>
-                <h2 style="color: #F7A600; font-size: 20px; margin: 0;">KYC DOCUMENTS SUBMITTED</h2>
-                <p style="color: #92400E; font-size: 13px; margin: 8px 0 0;">Awaiting admin verification</p>
-              </div>
-              ${userInfoBlock}
-              <div style="background: #F5F5F5; border-radius: 12px; padding: 20px; margin: 20px 0;">
-                <table style="width: 100%; border-collapse: collapse;">
-                  ${details.documentType ? `<tr><td style="padding: 8px 0;"><strong>Document Type:</strong></td><td style="padding: 8px 0; text-align: right;">${details.documentType}</td></tr>` : ''}
-                  ${details.section ? `<tr><td style="padding: 8px 0;"><strong>Section:</strong></td><td style="padding: 8px 0; text-align: right;">${details.section}</td></tr>` : ''}
-                  <tr><td style="padding: 8px 0;"><strong>Submission Time:</strong></td><td style="padding: 8px 0; text-align: right;">${timestamp}</td></tr>
-                </table>
-              </div>
-              <div style="text-align: center; margin: 20px 0;">
-                <a href="https://www.bithashcapital.live/admin/kyc" style="background-color: #F7A600; color: #000000; padding: 12px 30px; text-decoration: none; border-radius: 999px; font-weight: 600; display: inline-block;">Review KYC</a>
-              </div>
-            </div>
-            ${brandFooter}
-          </div>
-        `;
-        break;
-
-      case 'settings_update':
-        subject = `⚙️ SETTINGS UPDATE - ${userFullName} updated account settings`;
-        html = `
-          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-            ${brandHeader}
-            <div style="padding: 30px; background: #FFFFFF;">
-              <div style="background: #EFF6FF; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin: 0 auto 12px;">
-                  <circle cx="12" cy="12" r="3" stroke="#3B82F6" stroke-width="2"/>
-                  <path d="M19.4 15.05L20.85 13.6L19.4 12.15" stroke="#3B82F6" stroke-width="2" stroke-linecap="round"/>
-                </svg>
-                <h2 style="color: #3B82F6; font-size: 20px; margin: 0;">ACCOUNT SETTINGS UPDATED</h2>
-                <p style="color: #1E40AF; font-size: 13px; margin: 8px 0 0;">User modified their preferences</p>
-              </div>
-              ${userInfoBlock}
-              ${details.changes ? `<div style="background: #F8FAFC; border-radius: 12px; padding: 15px; margin-top: 15px;">
-                <p style="margin: 0 0 10px 0; font-weight: bold;">Changes Made:</p>
-                <ul style="margin: 0; padding-left: 20px;">
-                  ${Object.entries(details.changes).map(([key, value]) => `<li><strong>${key}:</strong> ${value}</li>`).join('')}
-                </ul>
-              </div>` : ''}
-            </div>
-            ${brandFooter}
-          </div>
-        `;
-        break;
-
-      case 'withdrawal_request':
-        const withdrawalAmount = details.amount || 0;
-        const withdrawalAsset = details.asset?.toUpperCase() || 'USD';
-        const withdrawalLogo = getAssetLogo(withdrawalAsset);
-        subject = `💸 WITHDRAWAL REQUEST - ${userFullName} requested $${withdrawalAmount.toLocaleString()}`;
-        html = `
-          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-            ${brandHeader}
-            <div style="padding: 30px; background: #FFFFFF;">
-              <div style="background: #FEF3C7; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-                <img src="${withdrawalLogo}" width="48" height="48" style="border-radius: 50%; margin: 0 auto 12px; display: block;">
-                <h2 style="color: #F7A600; font-size: 20px; margin: 0;">WITHDRAWAL REQUEST</h2>
-                <p style="color: #92400E; font-size: 13px; margin: 8px 0 0;">Awaiting admin approval</p>
-              </div>
-              ${userInfoBlock}
-              <div style="background: #F5F5F5; border-radius: 12px; padding: 20px; margin: 20px 0;">
-                <table style="width: 100%; border-collapse: collapse;">
-                  <tr><td style="padding: 8px 0;"><strong>Amount Requested:</strong></td><td style="padding: 8px 0; text-align: right;">$${withdrawalAmount.toLocaleString()}</td></tr>
-                  ${details.cryptoAmount ? `<tr><td style="padding: 8px 0;"><strong>Crypto Amount:</strong></td><td style="padding: 8px 0; text-align: right;">${details.cryptoAmount.toFixed(8)} ${withdrawalAsset}</td></tr>` : ''}
-                  <tr><td style="padding: 8px 0;"><strong>Asset:</strong></td><td style="padding: 8px 0; text-align: right;">${withdrawalAsset}</td></tr>
-                  <tr><td style="padding: 8px 0;"><strong>Network:</strong></td><td style="padding: 8px 0; text-align: right;">${details.network || 'Blockchain'}</td></tr>
-                  <tr><td style="padding: 8px 0;"><strong>Destination Address:</strong></td><td style="padding: 8px 0; text-align: right; font-size: 11px; word-break: break-all;">${details.walletAddress || 'N/A'}</td></tr>
-                  ${details.gasFee ? `<tr><td style="padding: 8px 0;"><strong>Network Gas Fee:</strong></td><td style="padding: 8px 0; text-align: right;">${details.gasFee.toFixed(8)} ${withdrawalAsset} (≈ $${details.gasFeeUSD?.toFixed(2) || 0})</td></tr>` : ''}
-                </table>
-              </div>
-            </div>
-            ${brandFooter}
-          </div>
-        `;
-        break;
-
-      case 'transfer_initiated':
-        const transferAmount = details.amount || 0;
-        subject = `🔄 INTERNAL TRANSFER - ${userFullName} transferred $${transferAmount.toLocaleString()}`;
-        html = `
-          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-            ${brandHeader}
-            <div style="padding: 30px; background: #FFFFFF;">
-              <div style="background: #EFF6FF; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin: 0 auto 12px;">
-                  <path d="M17 8L21 12L17 16" stroke="#3B82F6" stroke-width="2" stroke-linecap="round"/>
-                  <path d="M3 12H21" stroke="#3B82F6" stroke-width="2" stroke-linecap="round"/>
-                  <path d="M7 8L3 12L7 16" stroke="#3B82F6" stroke-width="2" stroke-linecap="round"/>
-                </svg>
-                <h2 style="color: #3B82F6; font-size: 20px; margin: 0;">INTERNAL TRANSFER</h2>
-                <p style="color: #1E40AF; font-size: 13px; margin: 8px 0 0;">Funds moved between wallets</p>
-              </div>
-              ${userInfoBlock}
-              <div style="background: #F5F5F5; border-radius: 12px; padding: 20px; margin: 20px 0;">
-                <table style="width: 100%; border-collapse: collapse;">
-                  <tr><td style="padding: 8px 0;"><strong>Amount:</strong></td><td style="padding: 8px 0; text-align: right;">$${transferAmount.toLocaleString()}</td></tr>
-                  <tr><td style="padding: 8px 0;"><strong>From Wallet:</strong></td><td style="padding: 8px 0; text-align: right;">${details.fromWallet || 'Unknown'}</td></tr>
-                  <tr><td style="padding: 8px 0;"><strong>To Wallet:</strong></td><td style="padding: 8px 0; text-align: right;">${details.toWallet || 'Unknown'}</td></tr>
-                </table>
-              </div>
-            </div>
-            ${brandFooter}
-          </div>
-        `;
-        break;
-
-      default:
-        subject = `📌 USER ACTIVITY - ${userFullName} performed ${action.replace(/_/g, ' ')}`;
-        html = `
-          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF;">
-            ${brandHeader}
-            <div style="padding: 30px; background: #FFFFFF;">
-              <div style="background: #EFF6FF; border-radius: 12px; padding: 16px 20px; text-align: center; margin-bottom: 25px;">
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin: 0 auto 12px;">
-                  <circle cx="12" cy="12" r="10" stroke="#3B82F6" stroke-width="2"/>
-                  <path d="M12 8V12L14 14" stroke="#3B82F6" stroke-width="2" stroke-linecap="round"/>
-                </svg>
-                <h2 style="color: #3B82F6; font-size: 20px; margin: 0;">USER ACTIVITY</h2>
-                <p style="color: #1E40AF; font-size: 13px; margin: 8px 0 0;">${action.replace(/_/g, ' ').toUpperCase()}</p>
-              </div>
-              ${userInfoBlock}
-              ${Object.keys(details).length > 0 ? `<div style="background: #F8FAFC; border-radius: 12px; padding: 15px; margin-top: 15px;">
-                <p style="margin: 0 0 10px 0; font-weight: bold;">Additional Details:</p>
-                <pre style="margin: 0; font-size: 12px; white-space: pre-wrap;">${JSON.stringify(details, null, 2)}</pre>
-              </div>` : ''}
-            </div>
-            ${brandFooter}
-          </div>
-        `;
-    }
-
-    await sendProfessionalEmail({
-      email: ADMIN_EMAIL,
-      template: 'default',
-      data: {
-        name: 'Admin Team',
-        subject: subject,
-        message: html
-      }
-    });
-
-    console.log(`📧 Admin notification sent: ${subject}`);
-    return true;
-
-  } catch (err) {
-    console.error('Failed to send admin notification:', err);
-    return false;
-  }
-};
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
