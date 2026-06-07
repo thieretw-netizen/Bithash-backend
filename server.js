@@ -13934,21 +13934,9 @@ app.get('/api/investments/active', protect, async (req, res) => {
       status: 'active'
     });
     
-    // Get current BTC price for USD conversion
-    let currentBTCPrice = 0;
-    try {
-      currentBTCPrice = await getCryptoPrice('BTC');
-      if (!currentBTCPrice || currentBTCPrice <= 0) {
-        currentBTCPrice = 50000; // Fallback only if API fails
-      }
-    } catch (priceError) {
-      console.error('Error fetching BTC price:', priceError);
-      currentBTCPrice = 50000; // Fallback only if API fails
-    }
-    
     // Calculate additional fields for each investment
     const now = new Date();
-    const enhancedInvestments = investments.map(investment => {
+    const enhancedInvestments = await Promise.all(investments.map(async (investment) => {
       const startDate = new Date(investment.startDate);
       const endDate = new Date(investment.endDate);
       
@@ -13959,54 +13947,51 @@ app.get('/api/investments/active', protect, async (req, res) => {
       // Calculate progress percentage
       const totalDurationMs = endDate - startDate;
       const elapsedMs = now - startDate;
-      let progressPercentage = totalDurationMs > 0 
+      const progressPercentage = totalDurationMs > 0 
         ? Math.min(100, (elapsedMs / totalDurationMs) * 100)
         : 0;
       
-      // Get ROI percentage from the associated plan
+      // Get ROI percentage from the associated plan (this is the actual ROI percentage)
       const roiPercentage = investment.plan?.percentage || 0;
       
       // Calculate expected profit
       const expectedProfit = investment.amount * (roiPercentage / 100);
       
-      // =============================================
-      // NEW: Calculate accumulated profit so far in BTC and USD
-      // Using the progress percentage to determine how much of the expected profit has been earned
-      // =============================================
-      const accumulatedProfitPercentage = progressPercentage;
-      const accumulatedProfitUSD = (expectedProfit * accumulatedProfitPercentage) / 100;
+      // Calculate how much profit has been accumulated so far
+      // Based on percentage of time elapsed
+      const hoursElapsed = Math.min(investment.plan?.duration || 0, Math.max(0, Math.floor((now - startDate) / (1000 * 60 * 60))));
+      const profitPercentageElapsed = (hoursElapsed / (investment.plan?.duration || 1)) * (roiPercentage || 0);
+      const accumulatedProfitUSD = (investment.amount * profitPercentageElapsed) / 100;
       
-      // Get BTC amount from investment (amountBTC field from schema)
-      const amountBTC = investment.amountBTC || 0;
+      // Get BTC price for USD to BTC conversion
+      let currentBTCPrice = 0;
+      try {
+        // Try to get from global cache first
+        const priceResponse = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd');
+        const priceData = await priceResponse.json();
+        currentBTCPrice = priceData.bitcoin?.usd || 43000;
+      } catch (err) {
+        console.warn('Could not fetch BTC price, using fallback:', err.message);
+        currentBTCPrice = 43000;
+      }
       
-      // Calculate accumulated profit in BTC using the same proportion
-      // Since profit scales with the investment amount, we can calculate BTC profit similarly
-      const expectedProfitBTC = amountBTC * (roiPercentage / 100);
-      const accumulatedProfitBTC = (expectedProfitBTC * accumulatedProfitPercentage) / 100;
-      
-      // Alternative calculation using current BTC price for USD conversion
-      const accumulatedProfitBTCFromUSD = accumulatedProfitUSD / currentBTCPrice;
-      
-      // Use the BTC amount from the investment record if available, otherwise calculate from USD
-      const finalAccumulatedProfitBTC = accumulatedProfitBTC > 0 ? accumulatedProfitBTC : accumulatedProfitBTCFromUSD;
+      // Calculate profit in BTC
+      const accumulatedProfitBTC = accumulatedProfitUSD / currentBTCPrice;
       
       return {
         id: investment._id,
         planName: investment.plan?.name || 'Unknown Plan',
         amount: investment.amount,
-        amountBTC: amountBTC,
-        profitPercentage: roiPercentage,
+        profitPercentage: roiPercentage, // This is what frontend expects as hourly ROI %
         durationHours: investment.plan?.duration || 0,
         startDate: investment.startDate,
         endDate: investment.endDate,
         status: investment.status,
         timeLeftHours,
-        progressPercentage: progressPercentage.toFixed(2),
-        expectedProfit: expectedProfit,
-        expectedProfitBTC: expectedProfitBTC,
-        // NEW FIELDS: Accumulated profit so far
+        progressPercentage,
+        expectedProfit,
         accumulatedProfitUSD: accumulatedProfitUSD,
-        accumulatedProfitBTC: finalAccumulatedProfitBTC,
+        accumulatedProfitBTC: accumulatedProfitBTC,
         currentBTCPrice: currentBTCPrice,
         planDetails: {
           minAmount: investment.plan?.minAmount,
@@ -14014,7 +13999,7 @@ app.get('/api/investments/active', protect, async (req, res) => {
           referralBonus: investment.plan?.referralBonus
         }
       };
-    });
+    }));
     
     // Format response
     const response = {
