@@ -13936,7 +13936,7 @@ app.get('/api/investments/active', protect, async (req, res) => {
     
     // Calculate additional fields for each investment
     const now = new Date();
-    const enhancedInvestments = await Promise.all(investments.map(async (investment) => {
+    const enhancedInvestments = investments.map(investment => {
       const startDate = new Date(investment.startDate);
       const endDate = new Date(investment.endDate);
       
@@ -13954,52 +13954,39 @@ app.get('/api/investments/active', protect, async (req, res) => {
       // Get ROI percentage from the associated plan (this is the actual ROI percentage)
       const roiPercentage = investment.plan?.percentage || 0;
       
-      // Calculate expected profit
-      const expectedProfit = investment.amount * (roiPercentage / 100);
+      // Calculate expected profit in USD
+      const expectedProfitUSD = investment.amount * (roiPercentage / 100);
       
-      // Calculate how much profit has been accumulated so far
-      // Based on percentage of time elapsed
-      const hoursElapsed = Math.min(investment.plan?.duration || 0, Math.max(0, Math.floor((now - startDate) / (1000 * 60 * 60))));
-      const profitPercentageElapsed = (hoursElapsed / (investment.plan?.duration || 1)) * (roiPercentage || 0);
-      const accumulatedProfitUSD = (investment.amount * profitPercentageElapsed) / 100;
+      // Calculate BTC amount at the time of investment
+      // Use amountBTC from the investment record (stored when investment was created)
+      // This uses the BTC price at the exact time of investment
+      const investmentBTCAmount = investment.amountBTC || 0;
       
-      // Get BTC price for USD to BTC conversion
-      let currentBTCPrice = 0;
-      try {
-        // Try to get from global cache first
-        const priceResponse = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd');
-        const priceData = await priceResponse.json();
-        currentBTCPrice = priceData.bitcoin?.usd || 43000;
-      } catch (err) {
-        console.warn('Could not fetch BTC price, using fallback:', err.message);
-        currentBTCPrice = 43000;
-      }
-      
-      // Calculate profit in BTC
-      const accumulatedProfitBTC = accumulatedProfitUSD / currentBTCPrice;
+      // Calculate expected profit in BTC (based on investment BTC amount)
+      const expectedProfitBTC = investmentBTCAmount * (roiPercentage / 100);
       
       return {
         id: investment._id,
         planName: investment.plan?.name || 'Unknown Plan',
         amount: investment.amount,
-        profitPercentage: roiPercentage, // This is what frontend expects as hourly ROI %
+        amountBTC: investmentBTCAmount,           // BTC amount at investment time
+        profitPercentage: roiPercentage,          // This is what frontend expects as hourly ROI %
         durationHours: investment.plan?.duration || 0,
         startDate: investment.startDate,
         endDate: investment.endDate,
         status: investment.status,
         timeLeftHours,
         progressPercentage,
-        expectedProfit,
-        accumulatedProfitUSD: accumulatedProfitUSD,
-        accumulatedProfitBTC: accumulatedProfitBTC,
-        currentBTCPrice: currentBTCPrice,
+        expectedProfit: expectedProfitUSD,        // Expected profit in USD
+        expectedProfitBTC: expectedProfitBTC,     // Expected profit in BTC (CRITICAL for real-time calculation)
+        btcPriceAtInvestment: investment.btcPriceAtInvestment || 0,
         planDetails: {
           minAmount: investment.plan?.minAmount,
           maxAmount: investment.plan?.maxAmount,
           referralBonus: investment.plan?.referralBonus
         }
       };
-    }));
+    });
     
     // Format response
     const response = {
@@ -14024,8 +14011,6 @@ app.get('/api/investments/active', protect, async (req, res) => {
     });
   }
 });
-
-
 
 
 
