@@ -1,4 +1,3 @@
-// Snippet A - Top of server.js (unchanged)
 require('dotenv').config()
 const express = require('express');
 const mongoose = require('mongoose');
