@@ -2769,99 +2769,167 @@ PlatformRevenueSchema.index({ userId: 1 });
 
 const PlatformRevenue = mongoose.model('PlatformRevenue', PlatformRevenueSchema);
 
+
+
+
+
+
+
+
+
+// =============================================
+// COMPLETE SYSTEM LOG SCHEMA - FRESH IMPLEMENTATION
+// =============================================
+
 const SystemLogSchema = new mongoose.Schema({
+  // Core identification
   action: { 
     type: String, 
     required: [true, 'Action is required'],
-    index: true
+    index: true,
+    enum: [
+      // User actions
+      'user_signup', 'user_login', 'user_logout', 'user_profile_update', 'user_password_change',
+      'user_2fa_enable', 'user_2fa_disable', 'user_delete', 'user_suspend', 'user_verify',
+      // Financial actions
+      'deposit_create', 'deposit_approve', 'deposit_reject', 'deposit_confirm',
+      'withdrawal_create', 'withdrawal_approve', 'withdrawal_reject',
+      'investment_create', 'investment_complete', 'investment_cancel',
+      'transfer_create', 'transfer_complete',
+      'buy_execute', 'sell_execute', 'conversion_execute',
+      // Admin actions
+      'admin_login', 'admin_action', 'admin_user_modify', 'admin_balance_adjust',
+      'admin_settings_change', 'admin_logout',
+      // System actions
+      'system_start', 'system_stop', 'system_maintenance', 'system_backup', 'system_error',
+      'cron_execute',
+      // Security actions
+      'security_alert', 'suspicious_activity', 'rate_limit_exceeded', 'brute_force_detected',
+      'kyc_submit', 'kyc_approve', 'kyc_reject'
+    ]
   },
+  
+  // Entity being affected
   entity: { 
     type: String, 
     required: [true, 'Entity is required'],
     enum: [
-      'user', 'admin', 'transaction','FinancialStatement', 'investment', 'kyc', 'plan', 'loan',
+      'user', 'admin', 'transaction', 'investment', 'kyc', 'plan', 'loan',
       'withdrawal', 'deposit', 'referral', 'notification', 'system', 'security',
       'authentication', 'api', 'settings', 'support', 'audit', 'maintenance',
-      'card_payment', 'deposit_asset', 'buy', 'sell', 'conversion', 'transfer',
-      'balance', 'commission', 'downline', 'withdrawal_request', 'deposit_request',
-      'kyc_document', 'kyc_verification', 'two_factor', 'password_reset', 'email',
-      'websocket', 'cron_job', 'price_feed', 'market_data', 'order', 'trade',
-      'position', 'orderbook', 'ticker', 'candle', 'asset_info', 'pair_limit',
-      'user_preference', 'user_log', 'system_log', 'notification_preference',
-      'announcement', 'message', 'restriction', 'platform_revenue', 'commission_setting'
+      'card_payment', 'conversion', 'transfer', 'balance', 'commission', 'downline'
     ],
     index: true
   },
+  
+  // Entity ID reference
   entityId: { 
     type: mongoose.Schema.Types.ObjectId,
-    index: true
+    index: true,
+    refPath: 'entityModel'
   },
+  
+  // Model type for the entity
+  entityModel: {
+    type: String,
+    enum: ['User', 'Admin', 'Transaction', 'Investment', 'KYC', 'Plan', 'Loan']
+  },
+  
+  // Who performed the action
   performedBy: { 
     type: mongoose.Schema.Types.ObjectId, 
     refPath: 'performedByModel',
     index: true
   },
+  
   performedByModel: { 
     type: String, 
     enum: ['User', 'Admin', 'System', 'CronJob', 'Webhook', 'API'],
     default: 'System'
   },
+  
   performedByEmail: { type: String, index: true },
   performedByName: { type: String },
-  ip: { type: String, index: true },
-  ipType: { type: String, enum: ['public', 'private', 'localhost', 'unknown'], default: 'unknown' },
-  userAgent: { type: String },
-  device: { type: String },
-  deviceType: { type: String, enum: ['desktop', 'mobile', 'tablet', 'bot', 'unknown'], default: 'unknown' },
-  os: { type: String },
-  browser: { type: String },
-  location: { type: String, index: true },
-  countryCode: { type: String, index: true },
-  city: { type: String },
-  region: { type: String },
-  latitude: { type: Number },
-  longitude: { type: Number },
-  timezone: { type: String },
-  isp: { type: String },
-  requestMethod: { type: String, enum: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD'] },
-  requestUrl: { type: String },
-  requestPath: { type: String },
-  requestQuery: { type: mongoose.Schema.Types.Mixed },
-  requestBody: { type: mongoose.Schema.Types.Mixed },
-  requestHeaders: { 
-    type: Map,
-    of: String,
-    select: false
+  
+  // Network information
+  ipAddress: { 
+    type: String, 
+    required: true,
+    index: true 
   },
-  responseStatus: { type: Number, index: true },
-  responseTime: { type: Number },
-  responseSize: { type: Number },
+  
+  userAgent: { 
+    type: String,
+    required: true 
+  },
+  
+  // Location data
+  location: {
+    city: { type: String, default: 'Unknown' },
+    region: { type: String, default: 'Unknown' },
+    country: { type: String, default: 'Unknown' },
+    countryCode: { type: String, default: 'Unknown', index: true },
+    latitude: { type: Number, default: null },
+    longitude: { type: Number, default: null },
+    timezone: { type: String, default: 'Unknown' },
+    isp: { type: String, default: 'Unknown' },
+    formatted: { type: String, default: 'Unknown' },
+    exactLocation: { type: Boolean, default: false }
+  },
+  
+  // Device information
+  deviceInfo: {
+    type: { type: String, enum: ['desktop', 'mobile', 'tablet', 'unknown'], default: 'unknown' },
+    os: { name: String, version: String },
+    browser: { name: String, version: String },
+    platform: String
+  },
+  
+  // Request details
+  request: {
+    method: { type: String, enum: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'] },
+    url: { type: String },
+    path: { type: String },
+    query: { type: mongoose.Schema.Types.Mixed },
+    body: { type: mongoose.Schema.Types.Mixed, select: false },
+    responseTime: { type: Number },
+    responseStatus: { type: Number, index: true }
+  },
+  
+  // Status and result
   status: { 
     type: String, 
-    enum: ['success', 'failed', 'pending', 'processing', 'cancelled', 'blocked', 'retry'],
+    enum: ['success', 'failed', 'pending', 'processing', 'cancelled'],
     default: 'success',
     index: true
   },
-  errorCode: { type: String, index: true },
-  errorMessage: { type: String },
-  errorStack: { type: String, select: false },
+  
+  error: {
+    code: { type: String, index: true },
+    message: { type: String },
+    stack: { type: String, select: false }
+  },
+  
+  // Risk assessment
   riskLevel: { 
     type: String, 
     enum: ['low', 'medium', 'high', 'critical'],
     default: 'low',
     index: true
   },
+  
   riskScore: { type: Number, min: 0, max: 100 },
   riskFactors: [{ type: String }],
   isSuspicious: { type: Boolean, default: false, index: true },
   isAnomaly: { type: Boolean, default: false },
+  
+  // Financial data (if applicable)
   financial: {
     amount: { type: Number },
     amountUSD: { type: Number },
     cryptoAmount: { type: Number },
     cryptoAsset: { type: String },
     fee: { type: Number },
-    feeAsset: { type: String },
     exchangeRate: { type: Number },
     balanceBefore: { type: Number },
     balanceAfter: { type: Number },
@@ -2869,157 +2937,92 @@ const SystemLogSchema = new mongoose.Schema({
     transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
     reference: { type: String, index: true }
   },
+  
+  // Changes tracking
   changes: {
     before: { type: mongoose.Schema.Types.Mixed },
     after: { type: mongoose.Schema.Types.Mixed },
-    fields: [{ type: String }],
-    diff: { type: mongoose.Schema.Types.Mixed }
+    fields: [{ type: String }]
   },
-  relatedEntities: [{
-    entityType: { type: String },
-    entityId: { type: mongoose.Schema.Types.ObjectId },
-    entityModel: { type: String }
-  }],
+  
+  // Metadata and custom data
+  metadata: { type: mongoose.Schema.Types.Mixed, default: {} },
+  
+  // Session and request tracking
   sessionId: { type: String, index: true },
   requestId: { type: String, index: true },
   correlationId: { type: String, index: true },
-  performance: {
-    memoryUsage: { type: Number },
-    cpuUsage: { type: Number },
-    dbQueryTime: { type: Number },
-    externalApiTime: { type: Number }
-  },
-  metadata: { type: mongoose.Schema.Types.Mixed },
-  audit: {
-    requiresReview: { type: Boolean, default: false },
-    reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
-    reviewedAt: { type: Date },
-    reviewNotes: { type: String },
-    retentionPeriod: { type: Number, default: 90 }
-  },
+  
+  // Timestamps
   createdAt: { type: Date, default: Date.now, index: true },
   updatedAt: { type: Date, default: Date.now }
-}, { 
+}, {
   timestamps: true,
-  toJSON: { 
+  toJSON: {
     virtuals: true,
     transform: function(doc, ret) {
-      delete ret.requestHeaders;
-      delete ret.errorStack;
-      if (ret.requestBody) {
-        delete ret.requestBody.password;
-        delete ret.requestBody.cvv;
-        delete ret.requestBody.cardNumber;
-      }
-      return ret;
-    }
-  },
-  toObject: { 
-    virtuals: true,
-    transform: function(doc, ret) {
-      delete ret.requestHeaders;
-      delete ret.errorStack;
-      if (ret.requestBody) {
-        delete ret.requestBody.password;
-        delete ret.requestBody.cvv;
-        delete ret.requestBody.cardNumber;
-      }
+      delete ret.request?.body;
+      delete ret.error?.stack;
       return ret;
     }
   }
 });
 
+// =============================================
+// INDEXES
+// =============================================
+
+// Compound indexes for common queries
 SystemLogSchema.index({ createdAt: -1, action: 1 });
 SystemLogSchema.index({ performedBy: 1, createdAt: -1 });
 SystemLogSchema.index({ entity: 1, entityId: 1, createdAt: -1 });
 SystemLogSchema.index({ status: 1, createdAt: -1 });
 SystemLogSchema.index({ riskLevel: 1, createdAt: -1 });
 SystemLogSchema.index({ isSuspicious: 1, createdAt: -1 });
-SystemLogSchema.index({ countryCode: 1, createdAt: -1 });
+SystemLogSchema.index({ 'location.countryCode': 1, createdAt: -1 });
 SystemLogSchema.index({ 'financial.reference': 1 });
 SystemLogSchema.index({ sessionId: 1, createdAt: -1 });
 SystemLogSchema.index({ correlationId: 1 });
 
+// Text search index
 SystemLogSchema.index({
   action: 'text',
-  errorMessage: 'text',
   performedByEmail: 'text',
   performedByName: 'text',
-  location: 'text',
-  'metadata.description': 'text'
+  'error.message': 'text',
+  'location.formatted': 'text'
 });
 
+// TTL index (auto-delete after 90 days)
 SystemLogSchema.index({ createdAt: 1 }, { expireAfterSeconds: 90 * 24 * 60 * 60 });
 
-SystemLogSchema.pre('save', function(next) {
-  this.updatedAt = new Date();
-  
-  if (!this.riskScore && this.riskLevel !== 'low') {
-    const riskScores = { low: 10, medium: 40, high: 70, critical: 90 };
-    this.riskScore = riskScores[this.riskLevel] || 10;
-  }
-  
-  if (this.status === 'failed' && !this.isSuspicious) {
-    this.isSuspicious = true;
-    this.riskFactors = this.riskFactors || [];
-    this.riskFactors.push('failed_action');
-  }
-  
-  next();
-});
+// =============================================
+// VIRTUALS
+// =============================================
 
 SystemLogSchema.virtual('actionDescription').get(function() {
   const descriptions = {
     'user_signup': 'User registered new account',
     'user_login': 'User logged in',
     'user_logout': 'User logged out',
-    'user_profile_update': 'User updated profile',
     'user_password_change': 'User changed password',
-    'user_2fa_enable': 'User enabled 2FA',
-    'user_2fa_disable': 'User disabled 2FA',
-    'user_delete': 'User account deleted',
-    'user_suspend': 'User account suspended',
-    'user_verify': 'User email verified',
     'deposit_create': 'Deposit initiated',
     'deposit_approve': 'Deposit approved',
-    'deposit_reject': 'Deposit rejected',
     'withdrawal_create': 'Withdrawal requested',
     'withdrawal_approve': 'Withdrawal approved',
-    'withdrawal_reject': 'Withdrawal rejected',
     'investment_create': 'Investment created',
     'investment_complete': 'Investment completed',
-    'investment_cancel': 'Investment cancelled',
-    'transfer_create': 'Transfer initiated',
-    'transfer_complete': 'Transfer completed',
-    'buy_execute': 'Buy order executed',
-    'sell_execute': 'Sell order executed',
-    'conversion_execute': 'Currency conversion executed',
     'admin_login': 'Admin logged in',
-    'admin_action': 'Admin action performed',
-    'admin_user_modify': 'Admin modified user',
-    'admin_balance_adjust': 'Admin adjusted balance',
-    'admin_settings_change': 'Admin changed settings',
-    'system_start': 'System started',
-    'system_stop': 'System stopped',
-    'system_maintenance': 'Maintenance mode activated',
-    'system_backup': 'System backup completed',
-    'system_error': 'System error occurred',
-    'cron_execute': 'Scheduled task executed',
     'security_alert': 'Security alert triggered',
-    'suspicious_activity': 'Suspicious activity detected',
-    'rate_limit_exceeded': 'Rate limit exceeded',
-    'brute_force_detected': 'Brute force attempt detected'
+    'suspicious_activity': 'Suspicious activity detected'
   };
-  return descriptions[this.action] || `${this.action.replace(/_/g, ' ')} performed on ${this.entity}`;
+  return descriptions[this.action] || `${this.action.replace(/_/g, ' ')} on ${this.entity}`;
 });
 
 SystemLogSchema.virtual('isFinancial').get(function() {
   const financialActions = [
-    'deposit_create', 'deposit_approve', 'deposit_reject',
-    'withdrawal_create', 'withdrawal_approve', 'withdrawal_reject',
-    'investment_create', 'investment_complete', 'investment_cancel',
-    'transfer_create', 'transfer_complete', 'buy_execute',
-    'sell_execute', 'conversion_execute', 'admin_balance_adjust'
+    'deposit_create', 'deposit_approve', 'withdrawal_create', 'withdrawal_approve',
+    'investment_create', 'investment_complete', 'transfer_create', 'buy_execute', 'sell_execute'
   ];
   return financialActions.includes(this.action);
 });
@@ -3027,12 +3030,60 @@ SystemLogSchema.virtual('isFinancial').get(function() {
 SystemLogSchema.virtual('isSecurityRelated').get(function() {
   const securityActions = [
     'user_login', 'user_logout', 'user_password_change', 'user_2fa_enable',
-    'user_2fa_disable', 'admin_login', 'security_alert', 'suspicious_activity',
-    'rate_limit_exceeded', 'brute_force_detected'
+    'admin_login', 'security_alert', 'suspicious_activity', 'brute_force_detected'
   ];
   return securityActions.includes(this.action);
 });
 
+SystemLogSchema.virtual('locationDisplay').get(function() {
+  if (this.location.formatted && this.location.formatted !== 'Unknown') {
+    return this.location.formatted;
+  }
+  const parts = [];
+  if (this.location.city && this.location.city !== 'Unknown') parts.push(this.location.city);
+  if (this.location.region && this.location.region !== 'Unknown') parts.push(this.location.region);
+  if (this.location.country && this.location.country !== 'Unknown') parts.push(this.location.country);
+  return parts.length > 0 ? parts.join(', ') : 'Unknown';
+});
+
+// =============================================
+// PRE-SAVE MIDDLEWARE
+// =============================================
+
+SystemLogSchema.pre('save', function(next) {
+  this.updatedAt = new Date();
+  
+  // Auto-calculate risk score if not set
+  if (!this.riskScore && this.riskLevel !== 'low') {
+    const riskScores = { low: 10, medium: 40, high: 70, critical: 90 };
+    this.riskScore = riskScores[this.riskLevel] || 10;
+  }
+  
+  // Mark as suspicious if failed
+  if (this.status === 'failed' && !this.isSuspicious) {
+    this.isSuspicious = true;
+    this.riskFactors = this.riskFactors || [];
+    this.riskFactors.push('failed_action');
+    if (this.riskLevel === 'low') this.riskLevel = 'medium';
+  }
+  
+  // Format location display if missing
+  if (!this.location.formatted || this.location.formatted === 'Unknown') {
+    const parts = [];
+    if (this.location.city && this.location.city !== 'Unknown') parts.push(this.location.city);
+    if (this.location.region && this.location.region !== 'Unknown') parts.push(this.location.region);
+    if (this.location.country && this.location.country !== 'Unknown') parts.push(this.location.country);
+    this.location.formatted = parts.length > 0 ? parts.join(', ') : 'Unknown';
+  }
+  
+  next();
+});
+
+// =============================================
+// STATIC METHODS
+// =============================================
+
+// Find logs by user
 SystemLogSchema.statics.findByUser = function(userId, options = {}) {
   const { limit = 50, page = 1, action = null, startDate = null, endDate = null } = options;
   const skip = (page - 1) * limit;
@@ -3051,6 +3102,7 @@ SystemLogSchema.statics.findByUser = function(userId, options = {}) {
     .limit(limit);
 };
 
+// Find logs by admin
 SystemLogSchema.statics.findByAdmin = function(adminId, options = {}) {
   const { limit = 50, page = 1, action = null } = options;
   const skip = (page - 1) * limit;
@@ -3064,6 +3116,7 @@ SystemLogSchema.statics.findByAdmin = function(adminId, options = {}) {
     .limit(limit);
 };
 
+// Find logs by entity
 SystemLogSchema.statics.findByEntity = function(entityType, entityId, options = {}) {
   const { limit = 50, page = 1 } = options;
   const skip = (page - 1) * limit;
@@ -3074,7 +3127,8 @@ SystemLogSchema.statics.findByEntity = function(entityType, entityId, options = 
     .limit(limit);
 };
 
-SystemLogSchema.statics.findSuspicious = function(days = 7, options = {}) {
+// Find suspicious activities
+SystemLogSchema.statics.findSuspicious = function(days = 7, limit = 100) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
   
@@ -3083,9 +3137,10 @@ SystemLogSchema.statics.findSuspicious = function(days = 7, options = {}) {
     createdAt: { $gte: dateThreshold }
   })
   .sort({ createdAt: -1 })
-  .limit(options.limit || 100);
+  .limit(limit);
 };
 
+// Find by risk level
 SystemLogSchema.statics.findByRiskLevel = function(riskLevel, days = 7) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
@@ -3096,6 +3151,7 @@ SystemLogSchema.statics.findByRiskLevel = function(riskLevel, days = 7) {
   }).sort({ createdAt: -1 });
 };
 
+// Get user activity summary
 SystemLogSchema.statics.getUserActivitySummary = async function(userId, days = 30) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
@@ -3128,15 +3184,16 @@ SystemLogSchema.statics.getUserActivitySummary = async function(userId, days = 3
   return summary;
 };
 
-SystemLogSchema.statics.stats.getGeoDistribution = async function(days = 7) {
+// Get geo distribution
+SystemLogSchema.statics.getGeoDistribution = async function(days = 7) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
   
   return this.aggregate([
-    { $match: { createdAt: { $gte: dateThreshold }, countryCode: { $ne: null } } },
+    { $match: { createdAt: { $gte: dateThreshold }, 'location.countryCode': { $ne: 'Unknown' } } },
     {
       $group: {
-        _id: { country: '$countryCode', city: '$city' },
+        _id: { country: '$location.countryCode', city: '$location.city' },
         count: { $sum: 1 },
         uniqueUsers: { $addToSet: '$performedBy' }
       }
@@ -3153,7 +3210,8 @@ SystemLogSchema.statics.stats.getGeoDistribution = async function(days = 7) {
   ]);
 };
 
-SystemLogSchema.stats.stats.getHourlyPattern = async function(days = 7) {
+// Get hourly pattern
+SystemLogSchema.statics.getHourlyPattern = async function(days = 7) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
   
@@ -3178,7 +3236,8 @@ SystemLogSchema.stats.stats.getHourlyPattern = async function(days = 7) {
   ]);
 };
 
-SystemLogSchema.stats.stats.getByEntityType = async function(days = 30) {
+// Get distribution by entity type
+SystemLogSchema.statics.getByEntityType = async function(days = 30) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
   
@@ -3202,7 +3261,8 @@ SystemLogSchema.stats.stats.getByEntityType = async function(days = 30) {
   ]);
 };
 
-SystemLogSchema.stats.stats.getRiskDistribution = async function(days = 30) {
+// Get risk distribution
+SystemLogSchema.statics.getRiskDistribution = async function(days = 30) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
   
@@ -3211,22 +3271,27 @@ SystemLogSchema.stats.stats.getRiskDistribution = async function(days = 30) {
     {
       $group: {
         _id: '$riskLevel',
-        count: { $sum: 1 },
-        percentage: { $sum: 1 }
+        count: { $sum: 1 }
       }
     },
     {
       $project: {
         riskLevel: '$_id',
         count: 1,
-        percentage: { $multiply: [{ $divide: ['$percentage', { $sum: '$percentage' }] }, 100] }
+        percentage: {
+          $multiply: [
+            { $divide: ['$count', { $sum: '$count' }] },
+            100
+          ]
+        }
       }
     },
     { $sort: { count: -1 } }
   ]);
 };
 
-SystemLogSchema.stats.stats.getTopActiveUsers = async function(limit = 10, days = 30) {
+// Get top active users
+SystemLogSchema.statics.getTopActiveUsers = async function(limit = 10, days = 30) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
   
@@ -3263,17 +3328,11 @@ SystemLogSchema.stats.stats.getTopActiveUsers = async function(limit = 10, days 
   ]);
 };
 
-SystemLogSchema.methods.markAsReviewed = async function(adminId, notes) {
-  this.audit = {
-    requiresReview: false,
-    reviewedBy: adminId,
-    reviewedAt: new Date(),
-    reviewNotes: notes,
-    retentionPeriod: this.audit?.retentionPeriod || 90
-  };
-  return this.save();
-};
+// =============================================
+// INSTANCE METHODS
+// =============================================
 
+// Mark as suspicious
 SystemLogSchema.methods.markAsSuspicious = async function(reason, riskLevel = 'high') {
   this.isSuspicious = true;
   this.riskLevel = riskLevel;
@@ -3283,11 +3342,26 @@ SystemLogSchema.methods.markAsSuspicious = async function(reason, riskLevel = 'h
   return this.save();
 };
 
+// Mark as reviewed
+SystemLogSchema.methods.markAsReviewed = async function(adminId, notes) {
+  this.metadata = this.metadata || {};
+  this.metadata.reviewedBy = adminId;
+  this.metadata.reviewedAt = new Date();
+  this.metadata.reviewNotes = notes;
+  return this.save();
+};
+
+// Add related entity
 SystemLogSchema.methods.addRelatedEntity = function(entityType, entityId, entityModel) {
-  if (!this.relatedEntities) this.relatedEntities = [];
-  this.relatedEntities.push({ entityType, entityId, entityModel });
+  this.metadata = this.metadata || {};
+  this.metadata.relatedEntities = this.metadata.relatedEntities || [];
+  this.metadata.relatedEntities.push({ entityType, entityId, entityModel });
   return this;
 };
+
+// =============================================
+// QUERY HELPERS
+// =============================================
 
 SystemLogSchema.query.byDateRange = function(startDate, endDate) {
   return this.where('createdAt').gte(startDate).lte(endDate);
@@ -3309,13 +3383,27 @@ SystemLogSchema.query.byEntity = function(entity) {
   return this.where('entity', entity);
 };
 
-SystemLogSchema.query.byPerformedBy = function(performedBy, model = null) {
-  let query = this.where('performedBy', performedBy);
-  if (model) query = query.where('performedByModel', model);
-  return query;
+SystemLogSchema.query.byCountry = function(countryCode) {
+  return this.where('location.countryCode', countryCode.toUpperCase());
 };
 
+// =============================================
+// CREATE THE MODEL
+// =============================================
+
 const SystemLog = mongoose.model('SystemLog', SystemLogSchema);
+
+
+
+
+
+
+
+
+
+
+
+
 
 const KYCSchema = new mongoose.Schema({
   user: {
