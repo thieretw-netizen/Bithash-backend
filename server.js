@@ -2785,113 +2785,112 @@ const PlatformRevenue = mongoose.model('PlatformRevenue', PlatformRevenueSchema)
 
 
 // =============================================
-// COMPLETE SYSTEM LOG SCHEMA - READY TO USE
-// Place this AFTER all other schema definitions
+// SYSTEM LOG SCHEMA - ENTERPRISE ROBUST VERSION
+// Captures every activity in the system with extreme detail
 // =============================================
 
 const SystemLogSchema = new mongoose.Schema({
-  // =============================================
-  // CORE IDENTIFICATION
-  // =============================================
+  // Core identification
   action: { 
     type: String, 
-    required: true,
+    required: [true, 'Action is required'],
     index: true
   },
-  
-  actionCategory: {
-    type: String,
+  entity: { 
+    type: String, 
+    required: [true, 'Entity is required'],
     enum: [
-      'authentication', 'page_view', 'financial_deposit', 'financial_withdrawal', 
-      'financial_investment', 'financial_trading', 'financial_transfer', 
-      'security', 'profile', 'referral', 'kyc', 'notification', 'support', 
-      'admin', 'system', 'error'
+      'user', 'admin', 'transaction','FinancialStatement', 'investment', 'kyc', 'plan', 'loan',
+      'withdrawal', 'deposit', 'referral', 'notification', 'system', 'security',
+      'authentication', 'api', 'settings', 'support', 'audit', 'maintenance',
+      'card_payment', 'deposit_asset', 'buy', 'sell', 'conversion', 'transfer',
+      'balance', 'commission', 'downline', 'withdrawal_request', 'deposit_request',
+      'kyc_document', 'kyc_verification', 'two_factor', 'password_reset', 'email',
+      'websocket', 'cron_job', 'price_feed', 'market_data', 'order', 'trade',
+      'position', 'orderbook', 'ticker', 'candle', 'asset_info', 'pair_limit',
+      'user_preference', 'user_log', 'system_log', 'notification_preference',
+      'announcement', 'message', 'restriction', 'platform_revenue', 'commission_setting'
     ],
-    default: 'system',
+    index: true
+  },
+  entityId: { 
+    type: mongoose.Schema.Types.ObjectId,
     index: true
   },
   
-  // =============================================
-  // USER INFORMATION (Compatible with existing UserLog)
-  // =============================================
-  user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true },
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true },
-  userEmail: { type: String, index: true },
-  userName: { type: String },
-  userFullName: { type: String },
-  username: { type: String }, // For compatibility with UserLog
-  email: { type: String }, // For compatibility with UserLog
-  
-  // =============================================
-  // ADMIN INFORMATION
-  // =============================================
-  adminId: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
-  adminEmail: { type: String },
-  adminName: { type: String },
-  
-  // =============================================
-  // ENTITY INFORMATION (Compatible with existing code)
-  // =============================================
-  entity: { type: String, index: true },
-  entityId: { type: mongoose.Schema.Types.ObjectId, index: true },
-  entityModel: { type: String },
-  
-  // =============================================
-  // PERFORMED BY (Compatible with existing code)
-  // =============================================
-  performedBy: { type: mongoose.Schema.Types.ObjectId, refPath: 'performedByModel', index: true },
-  performedByModel: { type: String, enum: ['User', 'Admin', 'System', 'CronJob'], default: 'System' },
+  // Who performed the action
+  performedBy: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    refPath: 'performedByModel',
+    index: true
+  },
+  performedByModel: { 
+    type: String, 
+    enum: ['User', 'Admin', 'System', 'CronJob', 'Webhook', 'API'],
+    default: 'System'
+  },
   performedByEmail: { type: String, index: true },
   performedByName: { type: String },
   
-  // =============================================
-  // REQUEST DETAILS (For API calls and page views)
-  // =============================================
-  request: {
-    method: { type: String, enum: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'] },
-    url: { type: String },
-    path: { type: String, index: true },
-    query: mongoose.Schema.Types.Mixed,
-    body: { type: mongoose.Schema.Types.Mixed, select: false },
-    headers: { type: mongoose.Schema.Types.Mixed, select: false },
-    referrer: { type: String },
-    responseTime: { type: Number },
-    responseStatus: { type: Number },
-    responseSize: { type: Number }
+  // Network and location details (ENHANCED)
+  ip: { type: String, index: true },
+  ipType: { type: String, enum: ['public', 'private', 'localhost', 'unknown'], default: 'unknown' },
+  userAgent: { type: String },
+  device: { type: String },
+  deviceType: { type: String, enum: ['desktop', 'mobile', 'tablet', 'bot', 'unknown'], default: 'unknown' },
+  os: { type: String },
+  browser: { type: String },
+  location: { type: String, index: true },
+  countryCode: { type: String, index: true },
+  city: { type: String },
+  region: { type: String },
+  latitude: { type: Number },
+  longitude: { type: Number },
+  timezone: { type: String },
+  isp: { type: String },
+  
+  // Request details
+  requestMethod: { type: String, enum: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD'] },
+  requestUrl: { type: String },
+  requestPath: { type: String },
+  requestQuery: { type: mongoose.Schema.Types.Mixed },
+  requestBody: { type: mongoose.Schema.Types.Mixed, select: false },
+  requestHeaders: { 
+    type: Map,
+    of: String,
+    select: false
   },
   
-  // =============================================
-  // PAGE VIEW SPECIFIC DATA
-  // =============================================
-  pageView: {
-    pageName: { type: String, index: true },
-    pageTitle: { type: String },
-    timeSpent: { type: Number },
-    scrollDepth: { type: Number },
-    interactions: { type: Number },
-    referrer: { type: String },
-    previousPage: { type: String },
-    exitIntent: { type: Boolean }
-  },
+  // Response details
+  responseStatus: { type: Number, index: true },
+  responseTime: { type: Number },
+  responseSize: { type: Number },
   
-  // =============================================
-  // OTP SPECIFIC DATA
-  // =============================================
-  otpData: {
-    otpType: { type: String, enum: ['signup', 'login', 'password_reset', 'withdrawal', '2fa'] },
-    attempts: { type: Number, default: 0 },
-    maxAttempts: { type: Number, default: 5 },
-    successAt: { type: Date },
-    expiryAt: { type: Date },
-    deliveryMethod: { type: String, enum: ['email', 'sms', 'authenticator'] },
-    resentCount: { type: Number, default: 0 }
+  // Status and outcome
+  status: { 
+    type: String, 
+    enum: ['success', 'failed', 'pending', 'processing', 'cancelled', 'blocked', 'retry'],
+    default: 'success',
+    index: true
   },
+  errorCode: { type: String, index: true },
+  errorMessage: { type: String },
+  errorStack: { type: String, select: false },
   
-  // =============================================
-  // FINANCIAL DATA (Compatible with existing code)
-  // =============================================
+  // Security and risk assessment
+  riskLevel: { 
+    type: String, 
+    enum: ['low', 'medium', 'high', 'critical'],
+    default: 'low',
+    index: true
+  },
+  riskScore: { type: Number, min: 0, max: 100 },
+  riskFactors: [{ type: String }],
+  isSuspicious: { type: Boolean, default: false, index: true },
+  isAnomaly: { type: Boolean, default: false },
+  
+  // Financial details (when applicable)
   financial: {
-    type: { type: String, enum: ['deposit', 'withdrawal', 'investment', 'trade', 'transfer', 'conversion', 'loan'] },
     amount: { type: Number },
     amountUSD: { type: Number },
     cryptoAmount: { type: Number },
@@ -2899,323 +2898,134 @@ const SystemLogSchema = new mongoose.Schema({
     fee: { type: Number },
     feeAsset: { type: String },
     exchangeRate: { type: Number },
-    transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
-    reference: { type: String, index: true },
-    status: { type: String, enum: ['pending', 'processing', 'completed', 'failed', 'cancelled'] },
-    walletType: { type: String, enum: ['main', 'active', 'matured', 'savings', 'loan'] },
     balanceBefore: { type: Number },
     balanceAfter: { type: Number },
-    fromWallet: { type: String },
-    toWallet: { type: String },
-    destinationAddress: { type: String },
-    network: { type: String },
-    txHash: { type: String, index: true },
-    confirmations: { type: Number, default: 0 }
+    walletType: { type: String, enum: ['main', 'active', 'matured', 'savings', 'loan'] },
+    transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
+    reference: { type: String, index: true }
   },
   
-  // =============================================
-  // INVESTMENT SPECIFIC DATA
-  // =============================================
-  investment: {
-    planId: { type: mongoose.Schema.Types.ObjectId, ref: 'Plan' },
-    planName: { type: String },
-    principal: { type: Number },
-    principalBTC: { type: Number },
-    expectedReturn: { type: Number },
-    expectedReturnBTC: { type: Number },
-    duration: { type: Number },
-    roiPercentage: { type: Number },
-    startDate: { type: Date },
-    endDate: { type: Date },
-    completionDate: { type: Date },
-    balanceTypeUsed: { type: String },
-    investmentFee: { type: Number },
-    investmentFeeBTC: { type: Number }
+  // Changes tracking (for updates)
+  changes: {
+    before: { type: mongoose.Schema.Types.Mixed },
+    after: { type: mongoose.Schema.Types.Mixed },
+    fields: [{ type: String }],
+    diff: { type: mongoose.Schema.Types.Mixed }
   },
   
-  // =============================================
-  // TRADING SPECIFIC DATA
-  // =============================================
-  trading: {
-    orderId: { type: String },
-    tradeId: { type: String },
-    symbol: { type: String },
-    side: { type: String, enum: ['buy', 'sell'] },
-    orderType: { type: String, enum: ['limit', 'market'] },
-    price: { type: Number },
-    quantity: { type: Number },
-    quoteQuantity: { type: Number },
-    leverage: { type: Number, default: 1 }
-  },
+  // Related entities
+  relatedEntities: [{
+    entityType: { type: String },
+    entityId: { type: mongoose.Schema.Types.ObjectId },
+    entityModel: { type: String }
+  }],
   
-  // =============================================
-  // DEVICE AND LOCATION (Enhanced)
-  // =============================================
-  ipAddress: { type: String, index: true },
-  userAgent: { type: String },
-  
-  deviceInfo: {
-    type: { type: String, enum: ['desktop', 'mobile', 'tablet', 'bot', 'unknown'], default: 'unknown' },
-    brand: { type: String },
-    model: { type: String },
-    os: { 
-      name: { type: String }, 
-      version: { type: String },
-      platform: { type: String }
-    },
-    browser: { 
-      name: { type: String }, 
-      version: { type: String },
-      engine: { type: String }
-    },
-    screenResolution: { type: String },
-    language: { type: String },
-    timezone: { type: String },
-    isBot: { type: Boolean, default: false },
-    isMobile: { type: Boolean, default: false },
-    isTablet: { type: Boolean, default: false },
-    isTouch: { type: Boolean, default: false }
-  },
-  
-  location: {
-    ip: { type: String },
-    isPublic: { type: Boolean, default: true },
-    country: { type: String, index: true },
-    countryCode: { type: String, uppercase: true, index: true },
-    region: { type: String },
-    regionCode: { type: String },
-    city: { type: String, index: true },
-    postalCode: { type: String },
-    latitude: { type: Number },
-    longitude: { type: Number },
-    timezone: { type: String },
-    isp: { type: String },
-    asn: { type: String },
-    organization: { type: String },
-    isProxy: { type: Boolean, default: false },
-    isVpn: { type: Boolean, default: false },
-    isTor: { type: Boolean, default: false },
-    exactLocation: { type: Boolean, default: false },
-    formatted: { type: String }
-  },
-  
-  // =============================================
-  // SESSION TRACKING
-  // =============================================
-  session: {
-    id: { type: String, index: true },
-    startTime: { type: Date },
-    previousSessionId: { type: String },
-    sessionDuration: { type: Number },
-    pagesViewed: [{ type: String }],
-    pageCount: { type: Number, default: 0 },
-    deviceTrusted: { type: Boolean, default: false }
-  },
-  
+  // Session and request tracking
   sessionId: { type: String, index: true },
   requestId: { type: String, index: true },
   correlationId: { type: String, index: true },
   
-  // =============================================
-  // REFERRAL DATA
-  // =============================================
-  referral: {
-    code: { type: String, index: true },
-    referrerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-    referrerEmail: { type: String },
-    referrerName: { type: String },
-    source: { type: String },
-    medium: { type: String },
-    campaign: { type: String },
-    commissionAmount: { type: Number },
-    commissionPercentage: { type: Number },
-    level: { type: Number }
-  },
-  
-  // =============================================
-  // KYC DATA
-  // =============================================
-  kyc: {
-    documentType: { type: String, enum: ['passport', 'drivers_license', 'national_id', 'utility_bill', 'bank_statement'] },
-    documentNumber: { type: String, select: false },
-    submissionId: { type: String },
-    verificationMethod: { type: String },
-    rejectionReason: { type: String },
-    verificationScore: { type: Number, min: 0, max: 100 }
-  },
-  
-  // =============================================
-  // CHANGES TRACKING (Compatible with existing code)
-  // =============================================
-  changes: {
-    before: mongoose.Schema.Types.Mixed,
-    after: mongoose.Schema.Types.Mixed,
-    fields: [{ type: String }],
-    diff: mongoose.Schema.Types.Mixed
-  },
-  
-  // =============================================
-  // STATUS
-  // =============================================
-  status: { 
-    type: String, 
-    enum: ['success', 'failed', 'pending', 'processing', 'cancelled', 'blocked'],
-    default: 'success',
-    index: true
-  },
-  
-  statusCode: { type: Number },
-  
-  // =============================================
-  // ERROR DATA
-  // =============================================
-  error: {
-    code: { type: String, index: true },
-    message: { type: String },
-    stack: { type: String, select: false },
-    severity: { type: String, enum: ['low', 'medium', 'high', 'critical'] },
-    userFacingMessage: { type: String },
-    retryCount: { type: Number, default: 0 }
-  },
-  
-  // =============================================
-  // RISK ASSESSMENT
-  // =============================================
-  riskLevel: { 
-    type: String, 
-    enum: ['low', 'medium', 'high', 'critical'],
-    default: 'low',
-    index: true
-  },
-  
-  riskScore: { type: Number, min: 0, max: 100 },
-  riskFactors: [{ type: String }],
-  isSuspicious: { type: Boolean, default: false, index: true },
-  isAnomaly: { type: Boolean, default: false },
-  isAutomated: { type: Boolean, default: false },
-  
-  // =============================================
-  // PERFORMANCE METRICS
-  // =============================================
+  // Performance metrics
   performance: {
     memoryUsage: { type: Number },
     cpuUsage: { type: Number },
-    databaseQueryTime: { type: Number },
-    externalApiTime: { type: Number },
-    ttfb: { type: Number },
-    networkLatency: { type: Number }
+    dbQueryTime: { type: Number },
+    externalApiTime: { type: Number }
   },
   
-  // =============================================
-  // METADATA (Flexible for custom data)
-  // =============================================
-  metadata: { type: mongoose.Schema.Types.Mixed, default: {} },
+  // Metadata (flexible for any additional data)
+  metadata: { type: mongoose.Schema.Types.Mixed },
   
-  relatedEntity: { type: mongoose.Schema.Types.ObjectId, refPath: 'relatedEntityModel' },
-  relatedEntityModel: { type: String },
+  // Audit trail
+  audit: {
+    requiresReview: { type: Boolean, default: false },
+    reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
+    reviewedAt: { type: Date },
+    reviewNotes: { type: String },
+    retentionPeriod: { type: Number, default: 90 }
+  },
   
-  // =============================================
-  // TIMESTAMPS
-  // =============================================
+  // Timestamps
   createdAt: { type: Date, default: Date.now, index: true },
   updatedAt: { type: Date, default: Date.now }
-}, {
+}, { 
   timestamps: true,
-  toJSON: {
+  toJSON: { 
     virtuals: true,
     transform: function(doc, ret) {
-      delete ret.request?.body;
-      delete ret.request?.headers;
-      delete ret.error?.stack;
-      delete ret.kyc?.documentNumber;
+      delete ret.requestHeaders;
+      delete ret.errorStack;
+      if (ret.requestBody) {
+        delete ret.requestBody.password;
+        delete ret.requestBody.cvv;
+        delete ret.requestBody.cardNumber;
+      }
       return ret;
     }
   },
-  toObject: {
+  toObject: { 
     virtuals: true,
     transform: function(doc, ret) {
-      delete ret.request?.body;
-      delete ret.request?.headers;
-      delete ret.error?.stack;
-      delete ret.kyc?.documentNumber;
+      delete ret.requestHeaders;
+      delete ret.errorStack;
+      if (ret.requestBody) {
+        delete ret.requestBody.password;
+        delete ret.requestBody.cvv;
+        delete ret.requestBody.cardNumber;
+      }
       return ret;
     }
   }
 });
 
 // =============================================
-// COMPREHENSIVE INDEXES
+// INDEXES FOR PERFORMANCE
 // =============================================
 
-// User-based queries
-SystemLogSchema.index({ user: 1, createdAt: -1 });
-SystemLogSchema.index({ userId: 1, createdAt: -1 });
-SystemLogSchema.index({ userEmail: 1, createdAt: -1 });
-
-// Time-based queries
-SystemLogSchema.index({ createdAt: -1 });
-SystemLogSchema.index({ createdAt: 1, status: 1 });
-
-// Action-based queries
-SystemLogSchema.index({ action: 1, createdAt: -1 });
-SystemLogSchema.index({ actionCategory: 1, createdAt: -1 });
-
-// Location-based queries
-SystemLogSchema.index({ 'location.country': 1, createdAt: -1 });
-SystemLogSchema.index({ 'location.city': 1, createdAt: -1 });
-SystemLogSchema.index({ 'location.countryCode': 1, createdAt: -1 });
-SystemLogSchema.index({ ipAddress: 1, createdAt: -1 });
-
-// Financial queries
-SystemLogSchema.index({ 'financial.reference': 1 });
-SystemLogSchema.index({ 'financial.transactionId': 1 });
-SystemLogSchema.index({ 'financial.txHash': 1 });
-
-// Investment queries
-SystemLogSchema.index({ 'investment.planId': 1 });
-SystemLogSchema.index({ 'investment.planName': 1 });
-
-// Session tracking
-SystemLogSchema.index({ sessionId: 1, createdAt: -1 });
-SystemLogSchema.index({ 'session.id': 1, createdAt: -1 });
-
-// Request tracking
-SystemLogSchema.index({ requestId: 1 });
-SystemLogSchema.index({ correlationId: 1 });
-SystemLogSchema.index({ 'request.path': 1, createdAt: -1 });
-
-// Risk & security
-SystemLogSchema.index({ isSuspicious: 1, createdAt: -1 });
+SystemLogSchema.index({ createdAt: -1, action: 1 });
+SystemLogSchema.index({ performedBy: 1, createdAt: -1 });
+SystemLogSchema.index({ entity: 1, entityId: 1, createdAt: -1 });
+SystemLogSchema.index({ status: 1, createdAt: -1 });
 SystemLogSchema.index({ riskLevel: 1, createdAt: -1 });
-SystemLogSchema.index({ riskScore: 1 });
-
-// Device tracking
-SystemLogSchema.index({ 'deviceInfo.type': 1, createdAt: -1 });
-SystemLogSchema.index({ 'deviceInfo.isBot': 1, createdAt: -1 });
-
-// Page view tracking
-SystemLogSchema.index({ 'pageView.pageName': 1, createdAt: -1 });
-
-// Compound indexes for common combinations
-SystemLogSchema.index({ userId: 1, actionCategory: 1, createdAt: -1 });
-SystemLogSchema.index({ userId: 1, status: 1, createdAt: -1 });
-SystemLogSchema.index({ action: 1, status: 1, createdAt: -1 });
-SystemLogSchema.index({ actionCategory: 1, status: 1, createdAt: -1 });
-SystemLogSchema.index({ 'location.countryCode': 1, actionCategory: 1, createdAt: -1 });
+SystemLogSchema.index({ isSuspicious: 1, createdAt: -1 });
+SystemLogSchema.index({ countryCode: 1, createdAt: -1 });
+SystemLogSchema.index({ 'financial.reference': 1 });
+SystemLogSchema.index({ sessionId: 1, createdAt: -1 });
+SystemLogSchema.index({ correlationId: 1 });
 
 // Text search index
 SystemLogSchema.index({
-  userEmail: 'text',
-  userName: 'text',
-  userFullName: 'text',
-  'location.city': 'text',
-  'location.country': 'text',
   action: 'text',
-  'error.message': 'text'
+  errorMessage: 'text',
+  performedByEmail: 'text',
+  performedByName: 'text',
+  location: 'text',
+  'metadata.description': 'text'
 });
 
-// TTL index - auto-delete after 90 days
+// TTL index for automatic cleanup (90 days default)
 SystemLogSchema.index({ createdAt: 1 }, { expireAfterSeconds: 90 * 24 * 60 * 60 });
+
+// =============================================
+// PRE-SAVE HOOKS
+// =============================================
+
+SystemLogSchema.pre('save', function(next) {
+  this.updatedAt = new Date();
+  
+  if (!this.riskScore && this.riskLevel !== 'low') {
+    const riskScores = { low: 10, medium: 40, high: 70, critical: 90 };
+    this.riskScore = riskScores[this.riskLevel] || 10;
+  }
+  
+  if (this.status === 'failed' && !this.isSuspicious) {
+    this.isSuspicious = true;
+    this.riskFactors = this.riskFactors || [];
+    this.riskFactors.push('failed_action');
+  }
+  
+  next();
+});
 
 // =============================================
 // VIRTUALS
@@ -3223,444 +3033,82 @@ SystemLogSchema.index({ createdAt: 1 }, { expireAfterSeconds: 90 * 24 * 60 * 60 
 
 SystemLogSchema.virtual('actionDescription').get(function() {
   const descriptions = {
-    // Authentication actions
-    'signup': 'User signed up for an account',
-    'signup_attempt': 'User attempted to sign up',
-    'login': 'User logged in successfully',
-    'login_attempt': 'User attempted to log in',
-    'logout': 'User logged out',
-    'logout_all_devices': 'User logged out from all devices',
-    'otp_generated': 'One-time password generated',
-    'otp_verified': 'One-time password verified successfully',
-    'otp_failed': 'OTP verification failed',
-    'otp_resend': 'OTP resent to user',
-    'password_change': 'Password changed successfully',
-    'password_reset_request': 'Password reset requested',
-    'password_reset_complete': 'Password reset completed',
-    'password_reset_failed': 'Password reset failed',
-    'email_verification_request': 'Email verification requested',
-    'email_verified': 'Email verified successfully',
-    'session_start': 'New session started',
-    'session_end': 'Session ended',
-    'session_timeout': 'Session timed out',
-    
-    // 2FA actions
-    '2fa_enable': 'Two-factor authentication enabled',
-    '2fa_disable': 'Two-factor authentication disabled',
-    '2fa_verify': '2FA verification successful',
-    '2fa_failed': '2FA verification failed',
-    '2fa_backup_codes_generated': '2FA backup codes generated',
-    '2fa_backup_code_used': '2FA backup code used',
-    
-    // Page views
-    'page_view_home': 'Viewed home page',
-    'page_view_dashboard': 'Viewed dashboard',
-    'page_view_invest': 'Viewed investment page',
-    'page_view_withdraw': 'Viewed withdrawal page',
-    'page_view_deposit': 'Viewed deposit page',
-    'page_view_transactions': 'Viewed transactions page',
-    'page_view_profile': 'Viewed profile page',
-    'page_view_settings': 'Viewed settings page',
-    'page_view_security': 'Viewed security page',
-    'page_view_kyc': 'Viewed KYC page',
-    'page_view_referrals': 'Viewed referrals page',
-    'page_view_support': 'Viewed support page',
-    'page_view_loan': 'Viewed loan page',
-    'page_view_trading': 'Viewed trading page',
-    'page_view_market': 'Viewed market page',
-    'page_view_assets': 'Viewed assets page',
-    
-    // Deposit actions
-    'deposit_initiated': 'Deposit initiated',
-    'deposit_address_generated': 'Deposit address generated',
-    'deposit_confirmed': 'Deposit confirmed on blockchain',
-    'deposit_completed': 'Deposit completed successfully',
-    'deposit_failed': 'Deposit failed',
-    'deposit_cancelled': 'Deposit cancelled',
-    'deposit_approved_by_admin': 'Deposit approved by admin',
-    'deposit_rejected_by_admin': 'Deposit rejected by admin',
-    
-    // Withdrawal actions
-    'withdrawal_initiated': 'Withdrawal requested',
-    'withdrawal_address_verified': 'Withdrawal address verified',
-    'withdrawal_processing': 'Withdrawal processing',
-    'withdrawal_completed': 'Withdrawal completed',
-    'withdrawal_failed': 'Withdrawal failed',
-    'withdrawal_cancelled': 'Withdrawal cancelled',
-    'withdrawal_approved_by_admin': 'Withdrawal approved by admin',
-    'withdrawal_rejected_by_admin': 'Withdrawal rejected by admin',
-    
-    // Investment actions
-    'investment_created': 'Investment created',
-    'investment_active': 'Investment activated',
-    'investment_matured': 'Investment matured',
-    'investment_completed': 'Investment completed',
-    'investment_cancelled': 'Investment cancelled',
-    'investment_rolled_over': 'Investment rolled over',
-    'investment_early_closure': 'Investment closed early',
-    'investment_top_up': 'Investment topped up',
-    
-    // Trading actions
-    'buy_order_created': 'Buy order created',
-    'buy_order_executed': 'Buy order executed',
-    'buy_order_cancelled': 'Buy order cancelled',
-    'buy_order_failed': 'Buy order failed',
-    'sell_order_created': 'Sell order created',
-    'sell_order_executed': 'Sell order executed',
-    'sell_order_cancelled': 'Sell order cancelled',
-    'sell_order_failed': 'Sell order failed',
-    'limit_order_placed': 'Limit order placed',
-    'stop_loss_triggered': 'Stop loss triggered',
-    'take_profit_triggered': 'Take profit triggered',
-    
-    // Transfer actions
-    'transfer_initiated': 'Transfer initiated',
-    'transfer_completed': 'Transfer completed',
-    'transfer_failed': 'Transfer failed',
-    'transfer_cancelled': 'Transfer cancelled',
-    'internal_transfer_sent': 'Internal transfer sent',
-    'internal_transfer_received': 'Internal transfer received',
-    
-    // Conversion actions
-    'conversion_initiated': 'Conversion initiated',
-    'conversion_completed': 'Conversion completed',
-    'conversion_failed': 'Conversion failed',
-    'conversion_rate_locked': 'Conversion rate locked',
-    
-    // Loan actions
-    'loan_application_submitted': 'Loan application submitted',
-    'loan_approved': 'Loan approved',
-    'loan_rejected': 'Loan rejected',
-    'loan_disbursed': 'Loan disbursed',
-    'loan_repayment_made': 'Loan repayment made',
-    'loan_defaulted': 'Loan defaulted',
-    
-    // Referral actions
-    'referral_link_clicked': 'Referral link clicked',
-    'referral_code_used': 'Referral code used',
-    'referral_bonus_earned': 'Referral bonus earned',
-    'referral_commission_paid': 'Referral commission paid',
-    'referral_downline_added': 'Referral downline added',
-    'referral_tier_upgraded': 'Referral tier upgraded',
-    
-    // KYC actions
-    'kyc_started': 'KYC process started',
-    'kyc_document_uploaded': 'KYC document uploaded',
-    'kyc_document_deleted': 'KYC document deleted',
-    'kyc_submitted': 'KYC submitted for review',
-    'kyc_pending_review': 'KYC pending review',
-    'kyc_approved': 'KYC verification approved',
-    'kyc_rejected': 'KYC verification rejected',
-    'kyc_resubmitted': 'KYC resubmitted',
-    'kyc_identity_uploaded': 'Identity document uploaded',
-    'kyc_address_uploaded': 'Address document uploaded',
-    'kyc_facial_uploaded': 'Facial verification uploaded',
-    'kyc_manual_review': 'KYC sent for manual review',
-    
-    // Profile actions
-    'profile_updated': 'Profile updated',
-    'profile_picture_uploaded': 'Profile picture uploaded',
-    'profile_picture_deleted': 'Profile picture deleted',
-    'email_changed': 'Email address changed',
-    'phone_changed': 'Phone number changed',
-    'address_updated': 'Address updated',
-    'notification_preferences_updated': 'Notification preferences updated',
-    'theme_changed': 'Theme changed',
-    'language_changed': 'Language changed',
-    'currency_changed': 'Currency changed',
-    
-    // Security actions
-    'security_question_set': 'Security question set',
-    'security_question_answered': 'Security question answered',
-    'trusted_device_added': 'Trusted device added',
-    'trusted_device_removed': 'Trusted device removed',
-    'suspicious_login_detected': 'Suspicious login detected',
-    'unusual_activity_flagged': 'Unusual activity flagged',
-    'ip_whitelist_added': 'IP whitelist entry added',
-    'ip_whitelist_removed': 'IP whitelist entry removed',
-    'api_key_created': 'API key created',
-    'api_key_revoked': 'API key revoked',
-    'api_key_used': 'API key used',
-    'session_hijack_attempt': 'Session hijack attempt detected',
-    
-    // Notification actions
-    'notification_sent': 'Notification sent',
-    'notification_read': 'Notification marked as read',
-    'notification_clicked': 'Notification clicked',
-    'notification_dismissed': 'Notification dismissed',
-    
-    // Support actions
-    'support_ticket_created': 'Support ticket created',
-    'support_ticket_updated': 'Support ticket updated',
-    'support_ticket_closed': 'Support ticket closed',
-    'support_ticket_escalated': 'Support ticket escalated',
-    'live_chat_started': 'Live chat started',
-    'live_chat_ended': 'Live chat ended',
-    
-    // Admin actions
+    'user_signup': 'User registered new account',
+    'user_login': 'User logged in',
+    'user_logout': 'User logged out',
+    'user_profile_update': 'User updated profile',
+    'user_password_change': 'User changed password',
+    'user_2fa_enable': 'User enabled 2FA',
+    'user_2fa_disable': 'User disabled 2FA',
+    'user_delete': 'User account deleted',
+    'user_suspend': 'User account suspended',
+    'user_verify': 'User email verified',
+    'deposit_create': 'Deposit initiated',
+    'deposit_approve': 'Deposit approved',
+    'deposit_reject': 'Deposit rejected',
+    'withdrawal_create': 'Withdrawal requested',
+    'withdrawal_approve': 'Withdrawal approved',
+    'withdrawal_reject': 'Withdrawal rejected',
+    'investment_create': 'Investment created',
+    'investment_complete': 'Investment completed',
+    'investment_cancel': 'Investment cancelled',
+    'transfer_create': 'Transfer initiated',
+    'transfer_complete': 'Transfer completed',
+    'buy_execute': 'Buy order executed',
+    'sell_execute': 'Sell order executed',
+    'conversion_execute': 'Currency conversion executed',
     'admin_login': 'Admin logged in',
-    'admin_logout': 'Admin logged out',
-    'admin_user_viewed': 'Admin viewed user',
-    'admin_user_modified': 'Admin modified user',
-    'admin_balance_adjusted': 'Admin adjusted user balance',
-    'admin_investment_cancelled': 'Admin cancelled investment',
-    'admin_withdrawal_approved': 'Admin approved withdrawal',
-    'admin_deposit_approved': 'Admin approved deposit',
-    'admin_kyc_processed': 'Admin processed KYC',
-    'admin_settings_changed': 'Admin changed settings',
-    'admin_announcement_sent': 'Admin sent announcement',
-    'admin_email_broadcast': 'Admin broadcast email',
-    'admin_system_maintenance': 'Admin triggered maintenance',
-    'admin_plan_created': 'Admin created investment plan',
-    'admin_plan_modified': 'Admin modified investment plan',
-    'admin_plan_deleted': 'Admin deleted investment plan',
-    
-    // System actions
-    'system_startup': 'System started',
-    'system_shutdown': 'System shut down',
+    'admin_action': 'Admin action performed',
+    'admin_user_modify': 'Admin modified user',
+    'admin_balance_adjust': 'Admin adjusted balance',
+    'admin_settings_change': 'Admin changed settings',
+    'system_start': 'System started',
+    'system_stop': 'System stopped',
     'system_maintenance': 'Maintenance mode activated',
     'system_backup': 'System backup completed',
     'system_error': 'System error occurred',
-    'cron_investment_maturity': 'Cron: Investment maturity check',
-    'cron_interest_payout': 'Cron: Interest payout',
-    'cron_statement_generation': 'Cron: Statement generation',
-    'cron_price_update': 'Cron: Price update',
-    'cron_balance_recalculation': 'Cron: Balance recalculation',
-    'database_backup_completed': 'Database backup completed',
-    
-    // Error & Security
-    'error_occurred': 'Error occurred',
-    'api_rate_limit_exceeded': 'API rate limit exceeded',
-    'brute_force_attempt_blocked': 'Brute force attempt blocked',
-    'invalid_token_detected': 'Invalid token detected',
-    'csrf_violation': 'CSRF violation detected',
-    'sql_injection_attempt_blocked': 'SQL injection attempt blocked',
+    'cron_execute': 'Scheduled task executed',
     'security_alert': 'Security alert triggered',
-    'suspicious_activity': 'Suspicious activity detected'
+    'suspicious_activity': 'Suspicious activity detected',
+    'rate_limit_exceeded': 'Rate limit exceeded',
+    'brute_force_detected': 'Brute force attempt detected'
   };
-  
-  return descriptions[this.action] || this.action?.replace(/_/g, ' ') || 'Activity logged';
+  return descriptions[this.action] || `${this.action.replace(/_/g, ' ')} performed on ${this.entity}`;
 });
 
-SystemLogSchema.virtual('isFinancialAction').get(function() {
-  const financialCategories = [
-    'financial_deposit', 'financial_withdrawal', 'financial_investment',
-    'financial_trading', 'financial_transfer', 'financial_conversion'
+SystemLogSchema.virtual('isFinancial').get(function() {
+  const financialActions = [
+    'deposit_create', 'deposit_approve', 'deposit_reject',
+    'withdrawal_create', 'withdrawal_approve', 'withdrawal_reject',
+    'investment_create', 'investment_complete', 'investment_cancel',
+    'transfer_create', 'transfer_complete', 'buy_execute',
+    'sell_execute', 'conversion_execute', 'admin_balance_adjust'
   ];
-  return financialCategories.includes(this.actionCategory);
+  return financialActions.includes(this.action);
 });
 
-SystemLogSchema.virtual('isAuthenticationAction').get(function() {
-  return this.actionCategory === 'authentication';
-});
-
-SystemLogSchema.virtual('isPageView').get(function() {
-  return this.action?.startsWith('page_view_');
-});
-
-SystemLogSchema.virtual('isSecurityAction').get(function() {
+SystemLogSchema.virtual('isSecurityRelated').get(function() {
   const securityActions = [
-    'login', 'logout', 'password_change', '2fa_enable', '2fa_disable',
-    'security_alert', 'suspicious_activity', 'brute_force_attempt_blocked'
+    'user_login', 'user_logout', 'user_password_change', 'user_2fa_enable',
+    'user_2fa_disable', 'admin_login', 'security_alert', 'suspicious_activity',
+    'rate_limit_exceeded', 'brute_force_detected'
   ];
   return securityActions.includes(this.action);
-});
-
-SystemLogSchema.virtual('locationDisplay').get(function() {
-  if (this.location?.formatted && this.location.formatted !== 'Unknown') {
-    return this.location.formatted;
-  }
-  const parts = [];
-  if (this.location?.city && this.location.city !== 'Unknown') parts.push(this.location.city);
-  if (this.location?.region && this.location.region !== 'Unknown') parts.push(this.location.region);
-  if (this.location?.country && this.location.country !== 'Unknown') parts.push(this.location.country);
-  return parts.length > 0 ? parts.join(', ') : 'Unknown';
-});
-
-SystemLogSchema.virtual('hasExactCoordinates').get(function() {
-  return !!(this.location?.latitude && this.location?.longitude && this.location?.exactLocation === true);
-});
-
-// =============================================
-// PRE-SAVE MIDDLEWARE
-// =============================================
-
-SystemLogSchema.pre('save', function(next) {
-  this.updatedAt = new Date();
-  
-  // Auto-assign action category based on action name
-  if (!this.actionCategory) {
-    if (this.action?.startsWith('page_view_')) {
-      this.actionCategory = 'page_view';
-    } else if (this.action?.includes('login') || this.action?.includes('signup') || 
-               this.action?.includes('otp') || this.action?.includes('2fa') ||
-               this.action?.includes('password') || this.action?.includes('session')) {
-      this.actionCategory = 'authentication';
-    } else if (this.action?.includes('deposit')) {
-      this.actionCategory = 'financial_deposit';
-    } else if (this.action?.includes('withdrawal')) {
-      this.actionCategory = 'financial_withdrawal';
-    } else if (this.action?.includes('investment')) {
-      this.actionCategory = 'financial_investment';
-    } else if (this.action?.includes('buy') || this.action?.includes('sell') || 
-               this.action?.includes('trade') || this.action?.includes('order')) {
-      this.actionCategory = 'financial_trading';
-    } else if (this.action?.includes('transfer')) {
-      this.actionCategory = 'financial_transfer';
-    } else if (this.action?.includes('conversion')) {
-      this.actionCategory = 'financial_conversion';
-    } else if (this.action?.includes('loan')) {
-      this.actionCategory = 'financial_loan';
-    } else if (this.action?.includes('kyc')) {
-      this.actionCategory = 'kyc';
-    } else if (this.action?.includes('referral')) {
-      this.actionCategory = 'referral';
-    } else if (this.action?.includes('profile') || this.action?.includes('email') || 
-               this.action?.includes('phone') || this.action?.includes('address') ||
-               this.action?.includes('preferences') || this.action?.includes('theme') ||
-               this.action?.includes('language') || this.action?.includes('currency')) {
-      this.actionCategory = 'profile';
-    } else if (this.action?.includes('security') || this.action?.includes('2fa') ||
-               this.action?.includes('api_key') || this.action?.includes('trusted_device')) {
-      this.actionCategory = 'security';
-    } else if (this.action?.includes('notification')) {
-      this.actionCategory = 'notification';
-    } else if (this.action?.includes('support') || this.action?.includes('ticket') || 
-               this.action?.includes('chat')) {
-      this.actionCategory = 'support';
-    } else if (this.action?.startsWith('admin_')) {
-      this.actionCategory = 'admin';
-    } else if (this.action?.startsWith('cron_') || this.action?.startsWith('system_')) {
-      this.actionCategory = 'system';
-    } else if (this.action?.includes('error') || this.action?.includes('alert')) {
-      this.actionCategory = 'error';
-    }
-  }
-  
-  // Calculate risk level based on action and status
-  if (!this.riskLevel) {
-    // High risk actions
-    const highRiskActions = [
-      'login_attempt_failed', 'withdrawal_initiated', 'password_reset_request',
-      'suspicious_activity', 'security_alert', '2fa_failed', 'otp_failed',
-      'brute_force_attempt_blocked', 'sql_injection_attempt_blocked',
-      'session_hijack_attempt', 'invalid_token_detected', 'csrf_violation'
-    ];
-    
-    // Medium risk actions
-    const mediumRiskActions = [
-      'login', 'signup', 'profile_updated', 'email_changed', 'phone_changed',
-      'investment_created', 'deposit_initiated', 'withdrawal_created',
-      'api_key_created', 'password_change', 'kyc_submitted'
-    ];
-    
-    if (highRiskActions.some(a => this.action?.includes(a))) {
-      this.riskLevel = 'high';
-      this.riskScore = 70;
-    } else if (mediumRiskActions.some(a => this.action?.includes(a))) {
-      this.riskLevel = 'medium';
-      this.riskScore = 40;
-    } else if (this.status === 'failed') {
-      this.riskLevel = 'medium';
-      this.riskScore = 40;
-    } else {
-      this.riskLevel = 'low';
-      this.riskScore = 10;
-    }
-  }
-  
-  // Mark as suspicious for suspicious patterns
-  if (!this.isSuspicious) {
-    // Multiple failed OTP attempts
-    if (this.action === 'otp_failed' && this.otpData?.attempts >= 3) {
-      this.isSuspicious = true;
-      this.riskFactors = this.riskFactors || [];
-      this.riskFactors.push('multiple_otp_failures');
-      if (this.riskLevel === 'low') this.riskLevel = 'medium';
-    }
-    
-    // Failed login attempts
-    if (this.action === 'login_attempt' && this.status === 'failed') {
-      // Will be checked by separate job for multiple failures
-      this.riskFactors = this.riskFactors || [];
-      this.riskFactors.push('failed_login');
-    }
-    
-    // Unusual location (will be flagged by separate job)
-    if (this.action === 'login' && this.location?.country) {
-      // Flagged by separate process
-    }
-  }
-  
-  // Format location display
-  if (this.location && (!this.location.formatted || this.location.formatted === 'Unknown')) {
-    const parts = [];
-    if (this.location.city && this.location.city !== 'Unknown') parts.push(this.location.city);
-    if (this.location.region && this.location.region !== 'Unknown') parts.push(this.location.region);
-    if (this.location.country && this.location.country !== 'Unknown') parts.push(this.location.country);
-    this.location.formatted = parts.length > 0 ? parts.join(', ') : 'Unknown';
-  }
-  
-  // Sync user and userId fields
-  if (this.user && !this.userId) this.userId = this.user;
-  if (this.userId && !this.user) this.user = this.userId;
-  
-  // Build userFullName if not provided
-  if (!this.userFullName && this.userName) {
-    this.userFullName = this.userName;
-  }
-  
-  // Sync performedBy fields
-  if (this.performedBy && !this.performedByEmail && this.userEmail) {
-    this.performedByEmail = this.userEmail;
-  }
-  if (this.performedBy && !this.performedByName && this.userName) {
-    this.performedByName = this.userName;
-  }
-  
-  next();
-});
-
-// =============================================
-// POST-SAVE MIDDLEWARE
-// =============================================
-
-SystemLogSchema.post('save', function(doc) {
-  // Emit real-time notification for suspicious activities
-  if (doc.isSuspicious && global.io) {
-    global.io.emit('suspicious_activity', {
-      id: doc._id,
-      action: doc.action,
- userId: doc.userId,
-      userEmail: doc.userEmail,
-      riskLevel: doc.riskLevel,
-      location: doc.locationDisplay,
-      timestamp: doc.createdAt
-    });
-  }
-  
-  // Emit real-time notification for financial transactions
-  if (doc.isFinancialAction && global.io && doc.userId) {
-    global.io.to(`user_${doc.userId}`).emit('transaction_logged', {
-      action: doc.action,
-      amount: doc.financial?.amount,
-      asset: doc.financial?.cryptoAsset,
-      status: doc.status,
-      timestamp: doc.createdAt
-    });
-  }
 });
 
 // =============================================
 // STATIC METHODS
 // =============================================
 
-// Find logs by user (compatible with existing code)
+// Initialize stats object
+SystemLogSchema.statics.stats = {};
+
+// Get logs by user
 SystemLogSchema.statics.findByUser = function(userId, options = {}) {
   const { limit = 50, page = 1, action = null, startDate = null, endDate = null } = options;
   const skip = (page - 1) * limit;
   
-  let query = { $or: [{ user: userId }, { userId: userId }] };
+  let query = { performedBy: userId, performedByModel: 'User' };
   if (action) query.action = action;
   if (startDate || endDate) {
     query.createdAt = {};
@@ -3674,12 +3122,12 @@ SystemLogSchema.statics.findByUser = function(userId, options = {}) {
     .limit(limit);
 };
 
-// Find logs by admin
+// Get logs by admin
 SystemLogSchema.statics.findByAdmin = function(adminId, options = {}) {
   const { limit = 50, page = 1, action = null } = options;
   const skip = (page - 1) * limit;
   
-  let query = { adminId: adminId };
+  let query = { performedBy: adminId, performedByModel: 'Admin' };
   if (action) query.action = action;
   
   return this.find(query)
@@ -3688,19 +3136,19 @@ SystemLogSchema.statics.findByAdmin = function(adminId, options = {}) {
     .limit(limit);
 };
 
-// Find logs by entity
+// Get logs by entity
 SystemLogSchema.statics.findByEntity = function(entityType, entityId, options = {}) {
   const { limit = 50, page = 1 } = options;
   const skip = (page - 1) * limit;
   
-  return this.find({ entity: entityType, entityId: entityId })
+  return this.find({ entity: entityType, entityId })
     .sort({ createdAt: -1 })
     .skip(skip)
     .limit(limit);
 };
 
-// Find suspicious activities
-SystemLogSchema.statics.findSuspicious = function(days = 7, limit = 100) {
+// Get suspicious activities
+SystemLogSchema.statics.findSuspicious = function(days = 7, options = {}) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
   
@@ -3709,10 +3157,10 @@ SystemLogSchema.statics.findSuspicious = function(days = 7, limit = 100) {
     createdAt: { $gte: dateThreshold }
   })
   .sort({ createdAt: -1 })
-  .limit(limit);
+  .limit(options.limit || 100);
 };
 
-// Find by risk level
+// Get activities by risk level
 SystemLogSchema.statics.findByRiskLevel = function(riskLevel, days = 7) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
@@ -3729,39 +3177,49 @@ SystemLogSchema.statics.getUserActivitySummary = async function(userId, days = 3
   dateThreshold.setDate(dateThreshold.getDate() - days);
   
   const summary = await this.aggregate([
-    { $match: { 
-        $or: [{ user: mongoose.Types.ObjectId(userId) }, { userId: mongoose.Types.ObjectId(userId) }], 
-        createdAt: { $gte: dateThreshold } 
-      } 
+    { $match: { performedBy: userId, performedByModel: 'User', createdAt: { $gte: dateThreshold } } },
+    {
+      $group: {
+        _id: { action: '$action', status: '$status' },
+        count: { $sum: 1 },
+        lastOccurrence: { $max: '$createdAt' }
+      }
     },
     {
       $group: {
-        _id: '$actionCategory',
-        totalActions: { $sum: 1 },
-        lastActivity: { $max: '$createdAt' },
-        failedActions: {
-          $sum: { $cond: [{ $eq: ['$status', 'failed'] }, 1, 0] }
-        }
+        _id: '$_id.action',
+        totalCount: { $sum: '$count' },
+        successCount: {
+          $sum: { $cond: [{ $eq: ['$_id.status', 'success'] }, '$count', 0] }
+        },
+        failedCount: {
+          $sum: { $cond: [{ $eq: ['$_id.status', 'failed'] }, '$count', 0] }
+        },
+        lastOccurrence: { $max: '$lastOccurrence' }
       }
     },
-    { $sort: { totalActions: -1 } }
+    { $sort: { totalCount: -1 } }
   ]);
   
   return summary;
 };
 
-// Get geo distribution
-SystemLogSchema.statics.getGeoDistribution = async function(days = 7) {
+// =============================================
+// STATS METHODS (attached to the stats object)
+// =============================================
+
+// Get geographical distribution
+SystemLogSchema.statics.stats.getGeoDistribution = async function(days = 7) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
   
   return this.aggregate([
-    { $match: { createdAt: { $gte: dateThreshold }, 'location.country': { $ne: null, $ne: 'Unknown' } } },
+    { $match: { createdAt: { $gte: dateThreshold }, countryCode: { $ne: null } } },
     {
       $group: {
-        _id: { country: '$location.country', city: '$location.city' },
+        _id: { country: '$countryCode', city: '$city' },
         count: { $sum: 1 },
-        uniqueUsers: { $addToSet: '$userId' }
+        uniqueUsers: { $addToSet: '$performedBy' }
       }
     },
     {
@@ -3776,70 +3234,8 @@ SystemLogSchema.statics.getGeoDistribution = async function(days = 7) {
   ]);
 };
 
-// Get page view statistics
-SystemLogSchema.statics.getPageViewStats = async function(days = 7) {
-  const dateThreshold = new Date();
-  dateThreshold.setDate(dateThreshold.getDate() - days);
-  
-  return this.aggregate([
-    { $match: { actionCategory: 'page_view', createdAt: { $gte: dateThreshold } } },
-    {
-      $group: {
-        _id: '$pageView.pageName',
-        views: { $sum: 1 },
-        uniqueUsers: { $addToSet: '$userId' },
-        avgTimeSpent: { $avg: '$pageView.timeSpent' }
-      }
-    },
-    {
-      $project: {
-        pageName: '$_id',
-        views: 1,
-        uniqueVisitors: { $size: '$uniqueUsers' },
-        averageTimeSpent: { $round: ['$avgTimeSpent', 0] }
-      }
-    },
-    { $sort: { views: -1 } }
-  ]);
-};
-
-// Get financial summary
-SystemLogSchema.statics.getFinancialSummary = async function(days = 30) {
-  const dateThreshold = new Date();
-  dateThreshold.setDate(dateThreshold.getDate() - days);
-  
-  const summary = await this.aggregate([
-    { $match: { 
-        actionCategory: { $in: ['financial_deposit', 'financial_withdrawal', 'financial_investment'] },
-        status: 'success',
-        createdAt: { $gte: dateThreshold }
-      } 
-    },
-    {
-      $group: {
-        _id: '$actionCategory',
-        totalAmount: { $sum: '$financial.amount' },
-        totalCryptoAmount: { $sum: '$financial.cryptoAmount' },
-        transactionCount: { $sum: 1 },
-        uniqueUsers: { $addToSet: '$userId' }
-      }
-    },
-    {
-      $project: {
-        category: '$_id',
-        totalAmount: 1,
-        totalCryptoAmount: 1,
-        transactionCount: 1,
-        uniqueUsersCount: { $size: '$uniqueUsers' }
-      }
-    }
-  ]);
-  
-  return summary;
-};
-
 // Get hourly activity pattern
-SystemLogSchema.statics.getHourlyPattern = async function(days = 7) {
+SystemLogSchema.statics.stats.getHourlyPattern = async function(days = 7) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
   
@@ -3847,15 +3243,15 @@ SystemLogSchema.statics.getHourlyPattern = async function(days = 7) {
     { $match: { createdAt: { $gte: dateThreshold } } },
     {
       $group: {
-        _id: { hour: { $hour: '$createdAt' }, actionCategory: '$actionCategory' },
+        _id: { hour: { $hour: '$createdAt' }, action: '$action' },
         count: { $sum: 1 }
       }
     },
     {
       $group: {
         _id: '$_id.hour',
-        categories: {
-          $push: { category: '$_id.actionCategory', count: '$count' }
+        actions: {
+          $push: { action: '$_id.action', count: '$count' }
         },
         totalCount: { $sum: '$count' }
       }
@@ -3864,78 +3260,33 @@ SystemLogSchema.statics.getHourlyPattern = async function(days = 7) {
   ]);
 };
 
-// Get top active users
-SystemLogSchema.statics.getTopActiveUsers = async function(limit = 10, days = 30) {
+// Get activity by entity type
+SystemLogSchema.statics.stats.getByEntityType = async function(days = 30) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
   
   return this.aggregate([
-    { $match: { userId: { $ne: null }, createdAt: { $gte: dateThreshold } } },
+    { $match: { createdAt: { $gte: dateThreshold } } },
     {
       $group: {
-        _id: '$userId',
-        activityCount: { $sum: 1 },
-        lastActive: { $max: '$createdAt' },
-        actionTypes: { $addToSet: '$actionCategory' }
-      }
-    },
-    { $sort: { activityCount: -1 } },
-    { $limit: limit },
-    {
-      $lookup: {
-        from: 'users',
-        localField: '_id',
-        foreignField: '_id',
-        as: 'userInfo'
+        _id: '$entity',
+        count: { $sum: 1 },
+        uniqueUsers: { $addToSet: '$performedBy' }
       }
     },
     {
       $project: {
-        userId: '$_id',
-        activityCount: 1,
-        lastActive: 1,
-        actionCategories: { $size: '$actionTypes' },
-        userName: { $arrayElemAt: ['$userInfo.firstName', 0] },
-        userEmail: { $arrayElemAt: ['$userInfo.email', 0] }
-      }
-    }
-  ]);
-};
-
-// Get today's activity summary
-SystemLogSchema.statics.getTodaySummary = async function() {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  
-  const summary = await this.aggregate([
-    { $match: { createdAt: { $gte: today } } },
-    {
-      $group: {
-        _id: '$actionCategory',
-        count: { $sum: 1 }
+        entity: '$_id',
+        count: 1,
+        uniqueUsersCount: { $size: '$uniqueUsers' }
       }
     },
     { $sort: { count: -1 } }
   ]);
-  
-  return summary;
 };
 
-// Get active users (users with activity in last N minutes)
-SystemLogSchema.statics.getActiveUsers = async function(minutes = 15) {
-  const cutoff = new Date();
-  cutoff.setMinutes(cutoff.getMinutes() - minutes);
-  
-  const activeUsers = await this.distinct('userId', {
-    createdAt: { $gte: cutoff },
-    userId: { $ne: null }
-  });
-  
-  return activeUsers;
-};
-
-// Get risk distribution
-SystemLogSchema.statics.getRiskDistribution = async function(days = 30) {
+// Get risk level distribution
+SystemLogSchema.statics.stats.getRiskDistribution = async function(days = 30) {
   const dateThreshold = new Date();
   dateThreshold.setDate(dateThreshold.getDate() - days);
   
@@ -3959,153 +3310,59 @@ SystemLogSchema.statics.getRiskDistribution = async function(days = 30) {
   ]);
 };
 
-// Get user login history
-SystemLogSchema.statics.getUserLoginHistory = async function(userId, limit = 50) {
-  return this.find({
-    userId: userId,
-    action: { $in: ['login', 'login_attempt', 'logout', 'otp_verified', 'otp_failed'] }
-  })
-  .sort({ createdAt: -1 })
-  .limit(limit);
-};
-
-// Log page view (convenience method)
-SystemLogSchema.statics.logPageView = async function(userId, userEmail, pageName, req, additionalData = {}) {
-  const action = `page_view_${pageName.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+// Get top users by activity
+SystemLogSchema.statics.stats.getTopActiveUsers = async function(limit = 10, days = 30) {
+  const dateThreshold = new Date();
+  dateThreshold.setDate(dateThreshold.getDate() - days);
   
-  return this.create({
-    action: action,
-    actionCategory: 'page_view',
-    userId: userId,
-    userEmail: userEmail,
-    userName: additionalData.userName,
-    userFullName: additionalData.userName,
-    pageView: {
-      pageName: pageName,
-      pageTitle: additionalData.pageTitle,
-      referrer: req?.headers?.referer,
-      previousPage: additionalData.previousPage,
-      timeSpent: additionalData.timeSpent,
-      scrollDepth: additionalData.scrollDepth,
-      interactions: additionalData.interactions
+  return this.aggregate([
+    { $match: { performedBy: { $ne: null }, performedByModel: 'User', createdAt: { $gte: dateThreshold } } },
+    {
+      $group: {
+        _id: '$performedBy',
+        activityCount: { $sum: 1 },
+        lastActive: { $max: '$createdAt' },
+        actions: { $addToSet: '$action' }
+      }
     },
-    request: {
-      method: req?.method,
-      url: req?.originalUrl,
-      path: req?.path,
-      referrer: req?.headers?.referer,
-      responseTime: additionalData.responseTime
+    { $sort: { activityCount: -1 } },
+    { $limit: limit },
+    {
+      $lookup: {
+        from: 'users',
+        localField: '_id',
+        foreignField: '_id',
+        as: 'userInfo'
+      }
     },
-    ipAddress: req ? getRealClientIP(req) : null,
-    userAgent: req?.headers?.['user-agent'],
-    deviceInfo: additionalData.deviceInfo,
-    location: additionalData.location,
-    session: { id: additionalData.sessionId, pageCount: additionalData.pageCount },
-    metadata: additionalData.metadata || {},
-    status: 'success',
-    createdAt: new Date()
-  });
-};
-
-// Log OTP activity (convenience method)
-SystemLogSchema.statics.logOTP = async function(userId, userEmail, otpType, success, req, additionalData = {}) {
-  const action = success ? 'otp_verified' : 'otp_failed';
-  
-  return this.create({
-    action: action,
-    actionCategory: 'authentication',
-    userId: userId,
-    userEmail: userEmail,
-    userName: additionalData.userName,
-    otpData: {
-      otpType: otpType,
-      attempts: additionalData.attempts || 1,
-      successAt: success ? new Date() : null,
-      expiryAt: additionalData.expiryAt,
-      deliveryMethod: additionalData.deliveryMethod,
-      resentCount: additionalData.resentCount
-    },
-    request: {
-      method: req?.method,
-      url: req?.originalUrl,
-      path: req?.path
-    },
-    ipAddress: req ? getRealClientIP(req) : null,
-    userAgent: req?.headers?.['user-agent'],
-    deviceInfo: additionalData.deviceInfo,
-    location: additionalData.location,
-    status: success ? 'success' : 'failed',
-    riskLevel: success ? 'low' : 'medium',
-    metadata: additionalData.metadata || {},
-    createdAt: new Date()
-  });
-};
-
-// Log financial transaction (convenience method)
-SystemLogSchema.statics.logFinancialTransaction = async function(userId, userEmail, transactionType, financialData, req, additionalData = {}) {
-  const status = financialData.status || 'pending';
-  const actionMap = {
-    'deposit': { pending: 'deposit_initiated', completed: 'deposit_completed', failed: 'deposit_failed' },
-    'withdrawal': { pending: 'withdrawal_initiated', completed: 'withdrawal_completed', failed: 'withdrawal_failed' },
-    'investment': { pending: 'investment_created', completed: 'investment_completed', failed: 'investment_failed' },
-    'transfer': { pending: 'transfer_initiated', completed: 'transfer_completed', failed: 'transfer_failed' },
-    'conversion': { pending: 'conversion_initiated', completed: 'conversion_completed', failed: 'conversion_failed' }
-  };
-  
-  const action = actionMap[transactionType]?.[status] || `${transactionType}_${status}`;
-  const categoryMap = {
-    'deposit': 'financial_deposit',
-    'withdrawal': 'financial_withdrawal',
-    'investment': 'financial_investment',
-    'transfer': 'financial_transfer',
-    'conversion': 'financial_conversion'
-  };
-  
-  return this.create({
-    action: action,
-    actionCategory: categoryMap[transactionType] || 'financial',
-    userId: userId,
-    userEmail: userEmail,
-    userName: additionalData.userName,
-    financial: {
-      type: transactionType,
-      amount: financialData.amount,
-      amountUSD: financialData.amountUSD,
-      cryptoAmount: financialData.cryptoAmount,
-      cryptoAsset: financialData.cryptoAsset,
-      fee: financialData.fee,
-      exchangeRate: financialData.exchangeRate,
-      transactionId: financialData.transactionId,
-      reference: financialData.reference,
-      status: status,
-      walletType: financialData.walletType,
-      balanceBefore: financialData.balanceBefore,
-      balanceAfter: financialData.balanceAfter,
-      destinationAddress: financialData.destinationAddress,
-      network: financialData.network,
-      txHash: financialData.txHash,
-      confirmations: financialData.confirmations
-    },
-    investment: financialData.investment,
-    request: {
-      method: req?.method,
-      url: req?.originalUrl,
-      path: req?.path
-    },
-    ipAddress: req ? getRealClientIP(req) : null,
-    userAgent: req?.headers?.['user-agent'],
-    deviceInfo: additionalData.deviceInfo,
-    location: additionalData.location,
-    status: status === 'completed' ? 'success' : status === 'failed' ? 'failed' : 'pending',
-    riskLevel: transactionType === 'withdrawal' ? 'medium' : 'low',
-    metadata: additionalData.metadata || {},
-    createdAt: new Date()
-  });
+    {
+      $project: {
+        userId: '$_id',
+        activityCount: 1,
+        lastActive: 1,
+        actionTypes: { $size: '$actions' },
+        userName: { $arrayElemAt: ['$userInfo.firstName', 0] },
+        userEmail: { $arrayElemAt: ['$userInfo.email', 0] }
+      }
+    }
+  ]);
 };
 
 // =============================================
 // INSTANCE METHODS
 // =============================================
+
+// Mark as reviewed
+SystemLogSchema.methods.markAsReviewed = async function(adminId, notes) {
+  this.audit = {
+    requiresReview: false,
+    reviewedBy: adminId,
+    reviewedAt: new Date(),
+    reviewNotes: notes,
+    retentionPeriod: this.audit?.retentionPeriod || 90
+  };
+  return this.save();
+};
 
 // Mark as suspicious with reason
 SystemLogSchema.methods.markAsSuspicious = async function(reason, riskLevel = 'high') {
@@ -4117,56 +3374,11 @@ SystemLogSchema.methods.markAsSuspicious = async function(reason, riskLevel = 'h
   return this.save();
 };
 
-// Mark as reviewed by admin
-SystemLogSchema.methods.markAsReviewed = async function(adminId, notes) {
-  this.metadata = this.metadata || {};
-  this.metadata.reviewedBy = adminId;
-  this.metadata.reviewedAt = new Date();
-  this.metadata.reviewNotes = notes;
-  return this.save();
-};
-
-// Update location data
-SystemLogSchema.methods.updateLocation = function(locationData) {
-  this.location = { ...this.location, ...locationData };
-  return this.save();
-};
-
-// Update page view duration
-SystemLogSchema.methods.updatePageViewDuration = async function(durationSeconds) {
-  if (this.actionCategory === 'page_view') {
-    this.pageView.timeSpent = durationSeconds;
-    return this.save();
-  }
-  return this;
-};
-
 // Add related entity
 SystemLogSchema.methods.addRelatedEntity = function(entityType, entityId, entityModel) {
-  this.metadata = this.metadata || {};
-  this.metadata.relatedEntities = this.metadata.relatedEntities || [];
-  this.metadata.relatedEntities.push({ entityType, entityId, entityModel });
-  return this.save();
-};
-
-// Get full details with populated references
-SystemLogSchema.methods.getFullDetails = async function() {
-  let populated = this;
-  
-  if (this.userId) {
-    populated = await this.populate('userId', 'firstName lastName email');
-  }
-  if (this.adminId) {
-    populated = await this.populate('adminId', 'name email');
-  }
-  if (this.financial?.transactionId) {
-    populated = await this.populate('financial.transactionId');
-  }
-  if (this.investment?.planId) {
-    populated = await this.populate('investment.planId', 'name percentage');
-  }
-  
-  return populated;
+  if (!this.relatedEntities) this.relatedEntities = [];
+  this.relatedEntities.push({ entityType, entityId, entityModel });
+  return this;
 };
 
 // =============================================
@@ -4181,10 +3393,6 @@ SystemLogSchema.query.byAction = function(action) {
   return this.where('action', action);
 };
 
-SystemLogSchema.query.byCategory = function(category) {
-  return this.where('actionCategory', category);
-};
-
 SystemLogSchema.query.byStatus = function(status) {
   return this.where('status', status);
 };
@@ -4193,216 +3401,21 @@ SystemLogSchema.query.byRiskLevel = function(riskLevel) {
   return this.where('riskLevel', riskLevel);
 };
 
-SystemLogSchema.query.byCountry = function(countryCode) {
-  return this.where('location.countryCode', countryCode.toUpperCase());
+SystemLogSchema.query.byEntity = function(entity) {
+  return this.where('entity', entity);
 };
 
-SystemLogSchema.query.suspicious = function() {
-  return this.where('isSuspicious', true);
-};
-
-SystemLogSchema.query.successful = function() {
-  return this.where('status', 'success');
-};
-
-SystemLogSchema.query.failed = function() {
-  return this.where('status', 'failed');
-};
-
-SystemLogSchema.query.today = function() {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return this.where('createdAt').gte(today);
-};
-
-SystemLogSchema.query.thisWeek = function() {
-  const weekAgo = new Date();
-  weekAgo.setDate(weekAgo.getDate() - 7);
-  return this.where('createdAt').gte(weekAgo);
-};
-
-SystemLogSchema.query.thisMonth = function() {
-  const monthAgo = new Date();
-  monthAgo.setMonth(monthAgo.getMonth() - 1);
-  return this.where('createdAt').gte(monthAgo);
+SystemLogSchema.query.byPerformedBy = function(performedBy, model = null) {
+  let query = this.where('performedBy', performedBy);
+  if (model) query = query.where('performedByModel', model);
+  return query;
 };
 
 // =============================================
-// CREATE THE MODEL (only if not exists to prevent overwriting)
+// COMPILE SYSTEM LOG MODEL
 // =============================================
 
-const SystemLog = mongoose.models.SystemLog || mongoose.model('SystemLog', SystemLogSchema);
-
-// =============================================
-// ENHANCED LOG ACTIVITY FUNCTION
-// This works WITH your existing codebase
-// =============================================
-
-// Store reference to original logActivity if it exists
-const originalLogActivity = typeof logActivity !== 'undefined' ? logActivity : null;
-
-// Create enhanced version that calls both
-const createEnhancedLogActivity = () => {
-  return async function(action, entity, entityId, performedBy, performedByModel, req, changes = {}) {
-    try {
-      // Extract user info
-      let userId = null;
-      let userEmail = null;
-      let userName = null;
-      let userFullName = null;
-      
-      if (performedBy && performedByModel === 'User') {
-        const user = await User.findById(performedBy).select('firstName lastName email');
-        if (user) {
-          userId = performedBy;
-          userEmail = user.email;
-          userName = `${user.firstName} ${user.lastName}`;
-          userFullName = userName;
-        }
-      } else if (performedBy && performedByModel === 'Admin') {
-        const admin = await Admin.findById(performedBy).select('name email');
-        if (admin) {
-          userEmail = admin.email;
-          userName = admin.name;
-          adminId = performedBy;
-          adminEmail = admin.email;
-          adminName = admin.name;
-        }
-      }
-      
-      // Get device and location info from request
-      let deviceInfo = { type: 'unknown' };
-      let location = {};
-      let ipAddress = null;
-      let userAgent = null;
-      
-      if (req) {
-        ipAddress = getRealClientIP(req);
-        userAgent = req.headers['user-agent'];
-        
-        try {
-          const deviceData = await getUserDeviceInfo(req);
-          deviceInfo = {
-            type: deviceData.deviceDetails?.type || 'unknown',
-            brand: deviceData.deviceDetails?.brand,
-            model: deviceData.deviceDetails?.model,
-            os: deviceData.deviceDetails?.os || { name: 'Unknown' },
-            browser: deviceData.deviceDetails?.browser || { name: 'Unknown' },
-            platform: deviceData.deviceDetails?.platform,
-            isMobile: deviceData.deviceDetails?.characteristics?.isMobile || false,
-            isTablet: deviceData.deviceDetails?.characteristics?.isTablet || false,
-            isBot: deviceData.deviceDetails?.isBot || false
-          };
-          
-          location = {
-            ip: deviceData.ip,
-            country: deviceData.locationDetails?.country,
-            countryCode: deviceData.locationDetails?.country_code,
-            city: deviceData.locationDetails?.city,
-            region: deviceData.locationDetails?.region,
-            latitude: deviceData.locationDetails?.latitude,
-            longitude: deviceData.locationDetails?.longitude,
-            isp: deviceData.locationDetails?.isp,
-            exactLocation: deviceData.exactLocation || false,
-            formatted: deviceData.location
-          };
-        } catch (err) {
-          // Silent fail
-        }
-      }
-      
-      // Determine action category
-      let actionCategory = 'system';
-      if (action.includes('login') || action.includes('signup') || action.includes('otp') || 
-          action.includes('2fa') || action.includes('password')) {
-        actionCategory = 'authentication';
-      } else if (action.includes('deposit')) {
-        actionCategory = 'financial_deposit';
-      } else if (action.includes('withdrawal')) {
-        actionCategory = 'financial_withdrawal';
-      } else if (action.includes('investment')) {
-        actionCategory = 'financial_investment';
-      } else if (action.includes('buy') || action.includes('sell') || action.includes('trade')) {
-        actionCategory = 'financial_trading';
-      } else if (action.includes('transfer')) {
-        actionCategory = 'financial_transfer';
-      } else if (action.includes('kyc')) {
-        actionCategory = 'kyc';
-      } else if (action.includes('referral')) {
-        actionCategory = 'referral';
-      } else if (action.includes('profile') || action.includes('email') || action.includes('phone')) {
-        actionCategory = 'profile';
-      } else if (action.startsWith('admin_')) {
-        actionCategory = 'admin';
-      } else if (action.startsWith('cron_')) {
-        actionCategory = 'system';
-      } else if (action.includes('error') || action.includes('alert')) {
-        actionCategory = 'error';
-      }
-      
-      // Create enhanced log entry
-      const logEntry = new SystemLog({
-        action: action,
-        actionCategory: actionCategory,
-        user: userId,
-        userId: userId,
-        userEmail: userEmail,
-        userName: userName,
-        userFullName: userFullName,
-        username: userEmail,
-        email: userEmail,
-        entity: entity,
-        entityId: entityId,
-        performedBy: performedBy,
-        performedByModel: performedByModel,
-        performedByEmail: userEmail,
-        performedByName: userName,
-        ipAddress: ipAddress,
-        userAgent: userAgent,
-        deviceInfo: deviceInfo,
-        location: location,
-        changes: changes,
-        metadata: changes,
-        status: 'success',
-        createdAt: new Date()
-      });
-      
-      await logEntry.save();
-      
-      // Call original logActivity if it exists (for backward compatibility)
-      if (originalLogActivity) {
-        return await originalLogActivity(action, entity, entityId, performedBy, performedByModel, req, changes);
-      }
-      
-      return logEntry;
-      
-    } catch (err) {
-      console.error('Enhanced logActivity error:', err);
-      // Fall back to original if available
-      if (originalLogActivity) {
-        return originalLogActivity(action, entity, entityId, performedBy, performedByModel, req, changes);
-      }
-      return null;
-    }
-  };
-};
-
-// Create the enhanced logActivity and assign to global
-// This will REPLACE the existing logActivity function
-const enhancedLogActivity = createEnhancedLogActivity();
-
-// Override the global logActivity
-global.logActivity = enhancedLogActivity;
-
-// Export for use in other files
-module.exports.SystemLog = SystemLog;
-module.exports.enhancedLogActivity = enhancedLogActivity;
-
-// Log that system is ready
-console.log('✅ SystemLog schema loaded with comprehensive logging capabilities');
-console.log('📊 Logging: Page views | OTPs | Logins | Deposits | Withdrawals | Investments | Trades | KYC | Referrals');
-
-
+const SystemLog = mongoose.model('SystemLog', SystemLogSchema);
 
 
 
